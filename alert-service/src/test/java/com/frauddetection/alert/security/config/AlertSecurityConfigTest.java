@@ -48,6 +48,9 @@ import com.frauddetection.alert.controller.AlertController;
 import com.frauddetection.alert.controller.FraudCaseController;
 import com.frauddetection.alert.controller.ScoredTransactionController;
 import com.frauddetection.alert.domain.FraudCaseStatus;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadController;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryController;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryAnalyticsResponse;
@@ -127,6 +130,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -141,6 +145,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         AlertController.class,
         FraudCaseController.class,
         ScoredTransactionController.class,
+        EngineIntelligenceReadController.class,
         AuditEventController.class,
         AuditIntegrityController.class,
         ExternalAuditIntegrityController.class,
@@ -192,6 +197,9 @@ class AlertSecurityConfigTest {
 
     @MockBean
     private TransactionMonitoringUseCase transactionMonitoringUseCase;
+
+    @MockBean
+    private EngineIntelligenceReadService engineIntelligenceReadService;
 
     @MockBean
     private AlertServiceMetrics alertServiceMetrics;
@@ -422,6 +430,27 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/transactions/scored").with(demoUser("READ_ONLY_ANALYST")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray());
+    }
+
+    @Test
+    void shouldUseScoredTransactionAuthorityForEngineIntelligenceRead() throws Exception {
+        when(engineIntelligenceReadService.read("txn-old"))
+                .thenReturn(EngineIntelligenceReadModel.notProjected("txn-old"));
+
+        mockMvc.perform(get("/api/v1/transactions/scored/txn-old/engine-intelligence")
+                        .with(authorities(AnalystAuthority.TRANSACTION_MONITOR_READ)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.available").value(false))
+                .andExpect(jsonPath("$.reason").value("NOT_PROJECTED"));
+
+        mockMvc.perform(get("/api/v1/transactions/scored/txn-old/engine-intelligence")
+                        .with(authorities(AnalystAuthority.FRAUD_CASE_READ)))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/v1/transactions/scored/txn-old/engine-intelligence"))
+                .andExpect(status().isUnauthorized());
+
+        verify(engineIntelligenceReadService, times(1)).read("txn-old");
     }
 
     @Test

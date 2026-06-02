@@ -21,10 +21,6 @@ class EngineIntelligenceProjectionArchitectureGuardTest {
             "endpoint", "token", "secret", "stacktrace", "exceptionmessage", "internalaggregation",
             "fraudengineaggregationresult", "normalizedfraudengineresult", "scoringcontext", "rawmlresponse"
     );
-    private static final List<String> FORBIDDEN_PUBLIC_EXPOSURE = List.of(
-            "engineintelligenceprojection", "engineintelligence", "diagnosticsignals", "agreementstatus",
-            "riskmismatchstatus", "scoredeltabucket", "engineresults"
-    );
     private static final List<String> FORBIDDEN_DECISION_STORAGE = List.of(
             "alertseverity", "alertpriority", "fraudcasestatus", "approve", "decline", "block",
             "paymentauthorization", "recommendedaction", "finaldecision"
@@ -52,19 +48,6 @@ class EngineIntelligenceProjectionArchitectureGuardTest {
         assertThat(compact(serialized)).doesNotContain(FORBIDDEN_RAW_STORAGE.toArray(String[]::new));
         assertThat(declaredFields).doesNotContain(FORBIDDEN_DECISION_STORAGE.toArray(String[]::new));
         assertThat(compact(serialized)).doesNotContain(FORBIDDEN_DECISION_STORAGE.toArray(String[]::new));
-    }
-
-    @Test
-    void engineIntelligenceProjectionIsNotExposedThroughApiOrUi() throws Exception {
-        String exposureSources = sources(
-                "alert-service/src/main/java/com/frauddetection/alert/api",
-                "alert-service/src/main/java/com/frauddetection/alert/controller",
-                "alert-service/src/main/java/com/frauddetection/alert/feedback",
-                "analyst-console-ui/src",
-                "docs/openapi"
-        );
-
-        assertThat(compact(exposureSources)).doesNotContain(FORBIDDEN_PUBLIC_EXPOSURE.toArray(String[]::new));
     }
 
     @Test

@@ -38,6 +38,8 @@ final class SecurityRouteOwnershipRegistry {
         fraudCaseRoutes(routes, "/api/v1/fraud-cases");
         route(routes, "GET", "/api/v1/fraud-cases/work-queue/summary", "FraudCaseAuthorizationRules");
         route(routes, "GET", "/api/v1/transactions/scored", "TransactionAuthorizationRules");
+        route(routes, "GET", "/api/v1/transactions/scored/{transactionId}/engine-intelligence",
+                "TransactionAuthorizationRules");
         route(routes, "GET", "/internal/suspicious-transactions", "SuspiciousTransactionAuthorizationRules");
         route(routes, "GET", "/internal/suspicious-transactions/summary", "SuspiciousTransactionAuthorizationRules");
         route(routes, "GET", "/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert",
