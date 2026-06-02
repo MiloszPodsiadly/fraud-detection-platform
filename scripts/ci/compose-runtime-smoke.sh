@@ -89,7 +89,11 @@ if grep -Fxq -e ollama -e ollama-model-init <<<"$configured_services"; then
   exit 1
 fi
 
-"${compose[@]}" up --build -d "${services[@]}"
+# Hosted runners can terminate npm or Maven build steps when Compose builds every image concurrently.
+# Keep runtime smoke deterministic by default while allowing an explicit faster local override.
+compose_parallel_limit="${COMPOSE_PARALLEL_LIMIT:-1}"
+echo "Using Docker Compose parallel limit for runtime smoke: $compose_parallel_limit"
+"${compose[@]}" --parallel "$compose_parallel_limit" up --build -d "${services[@]}"
 
 for service in "${health_services[@]}"; do
   healthy=false

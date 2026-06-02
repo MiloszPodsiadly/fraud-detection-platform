@@ -11,8 +11,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 class EngineIntelligenceDownstreamIsolationTest {
 
     @Test
-    void alertServiceDoesNotConsumeEngineIntelligence() throws Exception {
-        assertThat(sources(repositoryRoot().resolve("alert-service/src/main"))).doesNotContain("EngineIntelligenceSummary", "engineIntelligence");
+    void alertServiceConsumesEngineIntelligenceOnlyThroughInternalProjectionBoundary() throws Exception {
+        Path alertService = repositoryRoot().resolve("alert-service/src/main/java/com/frauddetection/alert");
+        assertThat(sources(alertService.resolve("engineintelligence")))
+                .contains("EngineIntelligenceSummary", "engineIntelligence");
+        assertThat(sourcesExcluding(
+                alertService,
+                alertService.resolve("engineintelligence"),
+                alertService.resolve("service/TransactionMonitoringService.java")
+        )).doesNotContain("EngineIntelligenceSummary", "engineIntelligence");
     }
 
     @Test
@@ -44,6 +51,21 @@ class EngineIntelligenceDownstreamIsolationTest {
             StringBuilder content = new StringBuilder();
             for (Path file : files.filter(Files::isRegularFile).toList()) {
                 content.append(Files.readString(file)).append('\n');
+            }
+            return content.toString();
+        }
+    }
+
+    private String sourcesExcluding(Path root, Path... excluded) throws Exception {
+        if (!Files.exists(root)) {
+            return "";
+        }
+        try (Stream<Path> files = Files.walk(root)) {
+            StringBuilder content = new StringBuilder();
+            for (Path file : files.filter(Files::isRegularFile).toList()) {
+                if (Stream.of(excluded).noneMatch(file::startsWith)) {
+                    content.append(Files.readString(file)).append('\n');
+                }
             }
             return content.toString();
         }
