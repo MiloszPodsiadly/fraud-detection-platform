@@ -1,6 +1,9 @@
 package com.frauddetection.alert.engineintelligence.api;
 
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration;
@@ -45,19 +48,51 @@ class EngineIntelligenceReadControllerTest {
                 "txn-1",
                 1,
                 Instant.parse("2026-06-02T13:00:00Z"),
-                new EngineIntelligenceComparisonReadModel(null, null, null),
+                new EngineIntelligenceComparisonReadModel(
+                        EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
+                        EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
+                        EngineIntelligenceScoreDeltaBucket.UNAVAILABLE),
                 List.of(),
                 List.of(),
                 List.of()
         ));
 
-        mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence"))
+        String response = mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.transactionId").value("txn-1"))
                 .andExpect(jsonPath("$.available").value(true))
+                .andExpect(jsonPath("$.comparison.agreementStatus").value("INSUFFICIENT_DATA"))
+                .andExpect(jsonPath("$.comparison.riskMismatchStatus").value("NOT_COMPARABLE"))
+                .andExpect(jsonPath("$.comparison.scoreDeltaBucket").value("UNAVAILABLE"))
                 .andExpect(jsonPath("$.engineCount").value(0))
                 .andExpect(jsonPath("$.diagnosticSignalCount").value(0))
-                .andExpect(jsonPath("$.warningCount").value(0));
+                .andExpect(jsonPath("$.warningCount").value(0))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(response).doesNotContain(
+                "_id",
+                "rawEvidence",
+                "rawContribution",
+                "featureSnapshot",
+                "featureVector",
+                "rawPayload",
+                "payload",
+                "endpoint",
+                "token",
+                "secret",
+                "stacktrace",
+                "exceptionMessage",
+                "internalAggregation",
+                "finalDecision",
+                "recommendedAction",
+                "approve",
+                "decline",
+                "block",
+                "winningEngine",
+                "platformRiskScore",
+                "paymentAuthorization");
     }
 
     @Test
