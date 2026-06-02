@@ -25,6 +25,10 @@ class EngineIntelligenceProjectionArchitectureGuardTest {
             "engineintelligenceprojection", "engineintelligence", "diagnosticsignals", "agreementstatus",
             "riskmismatchstatus", "scoredeltabucket", "engineresults"
     );
+    private static final List<String> FORBIDDEN_DECISION_STORAGE = List.of(
+            "alertseverity", "alertpriority", "fraudcasestatus", "approve", "decline", "block",
+            "paymentauthorization", "recommendedaction", "finaldecision"
+    );
 
     @Test
     void engineIntelligenceProjectionDoesNotStoreRawOrInternalData() throws Exception {
@@ -46,6 +50,8 @@ class EngineIntelligenceProjectionArchitectureGuardTest {
 
         assertThat(declaredFields).doesNotContain(FORBIDDEN_RAW_STORAGE.toArray(String[]::new));
         assertThat(compact(serialized)).doesNotContain(FORBIDDEN_RAW_STORAGE.toArray(String[]::new));
+        assertThat(declaredFields).doesNotContain(FORBIDDEN_DECISION_STORAGE.toArray(String[]::new));
+        assertThat(compact(serialized)).doesNotContain(FORBIDDEN_DECISION_STORAGE.toArray(String[]::new));
     }
 
     @Test

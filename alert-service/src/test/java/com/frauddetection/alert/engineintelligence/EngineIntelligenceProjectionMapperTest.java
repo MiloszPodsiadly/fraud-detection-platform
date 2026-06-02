@@ -41,6 +41,14 @@ class EngineIntelligenceProjectionMapperTest {
     }
 
     @Test
+    void forbiddenRawTransactionIdIsOmittedBoundedly() {
+        assertOmitted(
+                mapper.map("txn-token-secret", EngineIntelligenceProjectionTestFixtures.minimalSummary(), null),
+                EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE
+        );
+    }
+
+    @Test
     void minimalEngineIntelligenceMapsToProjection() {
         EngineIntelligenceProjection projection = mapped(EngineIntelligenceProjectionTestFixtures.minimalSummary());
 
@@ -96,6 +104,24 @@ class EngineIntelligenceProjectionMapperTest {
         assertOmitted(
                 mapper.map("txn-1", summary, null),
                 EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED
+        );
+    }
+
+    @Test
+    void rawForbiddenReasonNeverReachesNestedProjection() {
+        EngineIntelligenceSummary summary = summaryMock();
+        EngineIntelligenceEngineResult engine = mock(EngineIntelligenceEngineResult.class);
+        when(engine.engineId()).thenReturn("rules.primary");
+        when(engine.engineType()).thenReturn(FraudEngineType.RULES);
+        when(engine.status()).thenReturn(FraudEngineStatus.AVAILABLE);
+        when(engine.riskLevel()).thenReturn(RiskLevel.HIGH);
+        when(engine.scoreBucket()).thenReturn(EngineIntelligenceScoreBucket.HIGH);
+        when(engine.reasonCodes()).thenReturn(List.of("rawPayload"));
+        when(summary.engines()).thenReturn(List.of(engine));
+
+        assertOmitted(
+                mapper.map("txn-1", summary, null),
+                EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE
         );
     }
 

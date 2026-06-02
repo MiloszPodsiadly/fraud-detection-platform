@@ -1,6 +1,10 @@
 package com.frauddetection.alert.engineintelligence;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
@@ -8,6 +12,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -21,6 +26,7 @@ import static org.mockito.Mockito.when;
 class EngineIntelligenceProjectionServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-06-02T08:00:00Z");
+    private static final Instant LATER = Instant.parse("2026-06-02T08:05:00Z");
 
     private final EngineIntelligenceProjectionRepository repository = mock(EngineIntelligenceProjectionRepository.class);
     private final EngineIntelligenceProjectionMapper mapper = new EngineIntelligenceProjectionMapper(
@@ -28,6 +34,17 @@ class EngineIntelligenceProjectionServiceTest {
             Clock.fixed(NOW, ZoneOffset.UTC)
     );
     private final EngineIntelligenceProjectionService service = new EngineIntelligenceProjectionService(repository, mapper);
+
+    @Test
+    void nullEventReturnsInvalidShape() {
+        EngineIntelligenceProjectionResult result = service.project(null);
+
+        assertThat(result.projection()).isEmpty();
+        assertThat(result.omissionReason()).contains(
+                EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE
+        );
+        verify(repository, never()).save(any());
+    }
 
     @Test
     void oldEventWithoutEngineIntelligenceKeepsProjectionUnchanged() {
@@ -38,6 +55,22 @@ class EngineIntelligenceProjectionServiceTest {
                 EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_ABSENT
         );
         verify(repository, never()).save(any());
+    }
+
+    @Test
+    void absentEngineIntelligenceDoesNotLogWarning() {
+        Logger logger = (Logger) LoggerFactory.getLogger(EngineIntelligenceProjectionService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+
+        try {
+            service.project(EngineIntelligenceProjectionTestFixtures.oldEvent());
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        assertThat(appender.list).isEmpty();
     }
 
     @Test
@@ -89,6 +122,30 @@ class EngineIntelligenceProjectionServiceTest {
     }
 
     @Test
+    void replayPreservesCreatedAtAndRefreshesUpdatedAt() {
+        AtomicReference<EngineIntelligenceProjection> state = new AtomicReference<>();
+        when(repository.findById("txn-fdp95-001")).thenAnswer(invocation -> Optional.ofNullable(state.get()));
+        when(repository.save(any(EngineIntelligenceProjection.class))).thenAnswer(invocation -> {
+            EngineIntelligenceProjection projection = invocation.getArgument(0);
+            state.set(projection);
+            return projection;
+        });
+        EngineIntelligenceProjectionService first = serviceAt(NOW);
+        EngineIntelligenceProjectionService second = serviceAt(LATER);
+        var event = EngineIntelligenceProjectionTestFixtures.event(EngineIntelligenceProjectionTestFixtures.fullSummary());
+
+        first.project(event);
+        second.project(event);
+
+        assertThat(state.get()).isNotNull();
+        assertThat(state.get().getCreatedAt()).isEqualTo(NOW);
+        assertThat(state.get().getUpdatedAt()).isEqualTo(LATER);
+        assertThat(state.get().getEngines()).hasSize(2);
+        assertThat(state.get().getDiagnosticSignals()).hasSize(2);
+        assertThat(state.get().getWarnings()).hasSize(2);
+    }
+
+    @Test
     void engineIntelligenceProjectionDoesNotChangeAlertDecisioning() {
         when(repository.findById("txn-fdp95-001")).thenReturn(Optional.empty());
         var event = EngineIntelligenceProjectionTestFixtures.event(
@@ -132,5 +189,49 @@ class EngineIntelligenceProjectionServiceTest {
         assertThat(result.omissionReason()).contains(
                 EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_PROJECTION_FAILED
         );
+    }
+
+    @Test
+    void repositoryFailureDoesNotLogRawExceptionMessage() {
+        when(repository.findById("txn-fdp95-001")).thenReturn(Optional.empty());
+        when(repository.save(any(EngineIntelligenceProjection.class)))
+                .thenThrow(new IllegalStateException("raw-secret-stacktrace-token-endpoint-payload"));
+        Logger logger = (Logger) LoggerFactory.getLogger(EngineIntelligenceProjectionService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+
+        EngineIntelligenceProjectionResult result;
+        try {
+            result = service.project(EngineIntelligenceProjectionTestFixtures.event(
+                    EngineIntelligenceProjectionTestFixtures.minimalSummary()
+            ));
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        assertThat(result.omissionReason()).contains(
+                EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_PROJECTION_FAILED
+        );
+        assertThat(logText(appender.list))
+                .contains("Engine intelligence internal projection omitted.")
+                .contains("ENGINE_INTELLIGENCE_PROJECTION_FAILED")
+                .doesNotContain("raw-secret", "stacktrace", "token", "endpoint", "payload");
+    }
+
+    private EngineIntelligenceProjectionService serviceAt(Instant instant) {
+        return new EngineIntelligenceProjectionService(
+                repository,
+                new EngineIntelligenceProjectionMapper(
+                        new EngineIntelligenceProjectionPolicy(),
+                        Clock.fixed(instant, ZoneOffset.UTC)
+                )
+        );
+    }
+
+    private String logText(List<ILoggingEvent> events) {
+        return events.stream()
+                .map(event -> event.getFormattedMessage() + " " + event.getKeyValuePairs())
+                .reduce("", (left, right) -> left + "\n" + right);
     }
 }
