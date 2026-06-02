@@ -32,20 +32,42 @@ queries the optional projection.
 
 ## Authorization Model
 
-FDP-96 uses the same authority boundary as scored transaction read: TRANSACTION_MONITOR_READ.
-The endpoint is intentionally transaction-monitor scoped because the underlying FDP-95 projection is keyed by transactionId.
-The read service verifies the scored transaction exists before projection lookup.
-If future tenant/case/ownership-level authorization is introduced for scored transaction reads, this endpoint must inherit the same
-resource-level checks before projection lookup.
-Projection repository must not be queried before the scored transaction access/existence boundary is checked.
+FDP-96 intentionally inherits the current scored-transaction global read authority: `TRANSACTION_MONITOR_READ`.
+Under the current model, any user with `TRANSACTION_MONITOR_READ` may read engine intelligence for an existing scored transaction ID.
+This is acceptable only because it matches the current scored transaction read boundary.
+If the product introduces tenant, case, ownership, or row-level authorization for scored transaction reads, this endpoint must inherit the same resource-level checks before projection lookup.
+Projection repository lookup must remain after scored transaction access/existence validation.
+FDP-96 does not claim that tenant, case, ownership, or row-level authorization exists today.
 
 ## Missing Projection Behavior
 
 Missing projection is normal for old transactions and disabled producer periods. For an existing authorized scored
 transaction, the endpoint returns `200` with `available=false` and `reason=NOT_PROJECTED`.
 
-Projection store failure is not equivalent to a missing projection. The endpoint returns `503` with the stable
-`ENGINE_INTELLIGENCE_PROJECTION_STORE_UNAVAILABLE` reason when the optional projection cannot be read or safely mapped.
+## Projection Read Failures
+
+FDP-96 returns `503` when the projection store cannot be read.
+FDP-96 also returns `503` when an existing projection document cannot be safely mapped because it is corrupted, stale, or violates bounded API policy.
+The public API intentionally does not expose raw corruption details.
+Corrupted projection is not treated as `NOT_PROJECTED` because a projection exists but cannot be safely read.
+Future observability should distinguish low-cardinality internal reasons: `PROJECTION_STORE_UNAVAILABLE` and `PROJECTION_INVALID_SHAPE`.
+Future metrics and logging must not include transactionId, customerId, accountId, merchantId, raw exception, endpoint, payload, token, or raw corrupted value.
+
+## Read-Model Validation Rationale
+
+API read model does not blindly trust stored Mongo projection.
+FDP-96 revalidates stored projection before response mapping.
+This is intentional defense-in-depth against stale or corrupted documents.
+The validation reuses FDP-92/FDP-95 public/projection contracts to avoid a separate API allowlist source of truth.
+Read path remains single-transaction and does not call scoring, ML, rules, orchestrator, Kafka, or producer code.
+
+## Architecture Guard Evidence
+
+Source-scan guards remain architecture tripwires.
+FDP-96 relies on behavior-level controller/API serialization tests for API safety.
+Source scans are supplementary and can false-positive on comments or renames.
+Future FDP-97 UI must add behavior-level UI tests, not only source scans.
+Future feedback workflow must add behavior-level workflow tests.
 
 ## Operational Status Semantics
 
@@ -79,4 +101,4 @@ FDP-97 may consume the bounded read-only API after a separate UI review.
 
 Case-level aggregation requires a separate design and authorization review. It is not part of FDP-96.
 
-Read service must not call scoring, ML, rules, orchestrator, or Kafka.
+Read service must not call scoring, ML, rules, orchestrator, Kafka, or producer code.

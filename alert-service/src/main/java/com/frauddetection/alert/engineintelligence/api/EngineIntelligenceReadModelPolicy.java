@@ -30,6 +30,9 @@ final class EngineIntelligenceReadModelPolicy {
     }
 
     void validate(EngineIntelligenceProjection projection) {
+        // FDP-96 revalidates stored FDP-95 projections before API exposure as defense-in-depth against stale
+        // or corrupted Mongo documents. Reusing the FDP-92/FDP-95 public/projection path avoids a third enum
+        // and reason-code source of truth.
         EngineIntelligenceProjection source = Objects.requireNonNull(projection, "projection is required");
         String transactionId = projectionPolicy.validatedTransactionId(source.getTransactionId());
         if (!TRANSACTION_ID_PATTERN.matcher(transactionId).matches()) {
