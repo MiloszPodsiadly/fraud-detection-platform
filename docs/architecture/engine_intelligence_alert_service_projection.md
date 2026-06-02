@@ -70,12 +70,20 @@ based on query and retention needs.
 ## Operational storage hardening
 
 FDP-95 uses transactionId as Mongo `_id` for idempotent replacement.
+Mongo `_id` uniqueness is the idempotency boundary.
 FDP-95 does not add query-optimized secondary indexes.
-FDP-95 does not add a TTL/retention policy.
+FDP-95 does not add TTL or retention policy.
 Projection growth is expected to be roughly one document per scored transaction with engineIntelligence.
-Before the FDP-96 API read model or broader producer rollout, define a retention policy, a TTL or archival strategy
-if needed, secondary indexes based on read/query patterns, and storage growth monitoring. Storage monitoring must
-not add high-cardinality metric labels such as transactionId, customerId, accountId, or merchantId.
+Before the FDP-96 API read model or broader producer rollout, define:
+- a retention policy;
+- a TTL or archival strategy;
+- whether retention matches scored transactions;
+- whether projection is cleaned up with scored transaction;
+- secondary indexes based on read/query patterns;
+- storage growth monitoring.
+
+Storage monitoring must not use high-cardinality labels such as transactionId, customerId, accountId, merchantId,
+raw exception, endpoint, or payload.
 
 ## No Raw/Internal Storage
 
@@ -101,23 +109,29 @@ the base scored-transaction projection.
 
 ## Future Operational Hardening
 
-Projection omitted/success/failure metrics are future operational hardening. Metrics must remain low-cardinality.
-Labels must not include transactionId, customerId, accountId, merchantId, raw exception, endpoint, or payload.
-The base projection must never depend on metrics.
+Projection metrics are future operational hardening. FDP-95 does not add production metrics backend.
+Before broad rollout, add low-cardinality metrics:
 
-Future metrics should include:
 - `engine_intelligence_projection_attempt_total`
 - `engine_intelligence_projection_success_total`
 - `engine_intelligence_projection_omitted_total{reason=bounded_reason}`
 - `engine_intelligence_projection_latency_seconds`
 
 Allowed labels are bounded `result`, `omission_reason`, and `projection_version`. Forbidden labels include
-transactionId, customerId, accountId, cardId, merchantId, raw exception, endpoint, payload, and unbounded reasonCode.
+transactionId, customerId, accountId, cardId, merchantId, endpoint, payload, raw exception, and raw reason code if
+unbounded. Metrics must never affect base projection.
 
 ## Future FDP-96 API Read Model
 
-Any bounded API read model requires separate FDP-96 review. UI rendering remains separate FDP-97 scope.
-FDP-95 source-scan guards are a tripwire proving no API/UI exposure in this branch.
-FDP-96 must add behavior-level API tests before exposing any engine intelligence read model. Those tests must prove
-a bounded response DTO, no raw/internal storage leakage, no decisioning fields, compatibility for old cases without
-projection, authorization boundaries, and no high-cardinality or raw values.
+Any bounded API read model requires separate FDP-96 review. UI rendering remains FDP-97 scope.
+FDP-95 source-scan guards are architecture tripwires only.
+FDP-95 does not expose engine intelligence through API/UI.
+FDP-96 API read model must add behavior-level controller/API tests before exposing engine intelligence.
+FDP-96 tests must prove:
+- a bounded response DTO;
+- no raw/internal projection leakage;
+- no final decisioning fields;
+- old cases without projection remain compatible;
+- authorization boundaries;
+- no high-cardinality/raw values;
+- timeout/unavailable/degraded status semantics remain safe.

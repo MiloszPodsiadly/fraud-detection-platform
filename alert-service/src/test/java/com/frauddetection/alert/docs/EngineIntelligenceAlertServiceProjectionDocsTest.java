@@ -43,18 +43,20 @@ class EngineIntelligenceAlertServiceProjectionDocsTest {
                 "No separate migration is required for this document-style projection unless deployment",
                 "Future hardening may add secondary indexes or retention/TTL",
                 "FDP-95 does not add query-optimized secondary indexes.",
-                "FDP-95 does not add a TTL/retention policy.",
+                "FDP-95 does not add TTL or retention policy.",
                 "Projection growth is expected to be roughly one document per scored transaction with engineIntelligence.",
-                "Before the FDP-96 API read model or broader producer rollout, define a retention policy",
+                "Before the FDP-96 API read model or broader producer rollout, define:",
+                "whether retention matches scored transactions;",
+                "whether projection is cleaned up with scored transaction;",
                 "Only bounded public event contract fields may be stored.",
                 "Alert-service revalidates reason codes by reconstructing FDP-92 public DTOs rather than maintaining a second",
                 "does not maintain a divergent second source of truth for public enum allowlists.",
                 "Storage-specific limits are",
                 "`EngineIntelligenceProjectionService` owns normal projection failure isolation",
                 "`TransactionMonitoringService` retains last-resort containment",
-                "Projection omitted/success/failure metrics are future operational hardening.",
-                "Metrics must remain low-cardinality.",
-                "The base projection must never depend on metrics.",
+                "Projection metrics are future operational hardening.",
+                "FDP-95 does not add production metrics backend.",
+                "Metrics must never affect base projection.",
                 "Raw evidence, raw contributions, feature vectors,",
                 "endpoints, tokens, secrets, stack traces, exception messages, and internal aggregation objects must not be stored.",
                 "API/UI exposure is future FDP-96/FDP-97 scope.",
@@ -71,17 +73,26 @@ class EngineIntelligenceAlertServiceProjectionDocsTest {
                 "`engine_intelligence_projection_latency_seconds`",
                 "Allowed labels are bounded `result`, `omission_reason`, and `projection_version`.",
                 "Forbidden labels include",
-                "The base projection must never depend on metrics."
+                "raw reason code if",
+                "unbounded. Metrics must never affect base projection."
         );
     }
 
     @Test
     void fdp96BehaviorLevelApiTestsRequiredBeforeExposure() throws Exception {
         assertThat(readDocs()).contains(
-                "FDP-95 source-scan guards are a tripwire proving no API/UI exposure in this branch.",
-                "FDP-96 must add behavior-level API tests before exposing any engine intelligence read model.",
-                "a bounded response DTO, no raw/internal storage leakage, no decisioning fields, compatibility for old cases without",
-                "projection, authorization boundaries, and no high-cardinality or raw values."
+                "FDP-95 source-scan guards are architecture tripwires only.",
+                "FDP-95 does not expose engine intelligence through API/UI.",
+                "FDP-96 API read model must add behavior-level controller/API tests before exposing engine intelligence.",
+                "FDP-96 tests must prove:",
+                "a bounded response DTO;",
+                "no raw/internal projection leakage;",
+                "no final decisioning fields;",
+                "old cases without projection remain compatible;",
+                "authorization boundaries;",
+                "no high-cardinality/raw values;",
+                "timeout/unavailable/degraded status semantics remain safe.",
+                "UI rendering remains FDP-97 scope."
         );
     }
 
