@@ -84,6 +84,21 @@ class EngineIntelligenceProjectionArchitectureGuardTest {
         );
     }
 
+    @Test
+    void projectionMapperDoesNotUseStringMessageClassification() throws Exception {
+        String validationSources = sources(
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/EngineIntelligenceProjectionMapper.java",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/EngineIntelligenceProjectionPolicy.java"
+        );
+
+        assertThat(validationSources).doesNotContain(
+                "classify(",
+                "getMessage()",
+                "exception.getMessage()",
+                "contains(\"ENGINE_INTELLIGENCE"
+        );
+    }
+
     private String sources(String... relativePaths) throws IOException {
         StringBuilder sources = new StringBuilder();
         for (String relativePath : relativePaths) {

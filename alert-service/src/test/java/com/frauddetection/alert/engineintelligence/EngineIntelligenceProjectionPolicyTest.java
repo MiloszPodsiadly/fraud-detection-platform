@@ -251,7 +251,7 @@ class EngineIntelligenceProjectionPolicyTest {
     }
 
     @Test
-    void typedExceptionMessageDoesNotContainRawValue() {
+    void typedValidationExceptionMessageContainsOnlyBoundedReason() {
         assertThatThrownBy(() -> policy.validatedTransactionId("txn-secret-rawPayload"))
                 .isInstanceOf(EngineIntelligenceProjectionValidationException.class)
                 .hasMessage(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE.name())

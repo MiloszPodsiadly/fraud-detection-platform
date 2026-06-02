@@ -17,6 +17,7 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -192,14 +193,18 @@ class EngineIntelligenceProjectionServiceTest {
     }
 
     @Test
-    void repositoryFailureDoesNotLogRawExceptionMessage() {
+    void rawPayloadDoesNotAppearInExceptionMessageOrLogs() {
         when(repository.findById("txn-fdp95-001")).thenReturn(Optional.empty());
         when(repository.save(any(EngineIntelligenceProjection.class)))
-                .thenThrow(new IllegalStateException("raw-secret-stacktrace-token-endpoint-payload"));
+                .thenThrow(new IllegalStateException("rawPayload-secret-stacktrace-token-endpoint-payload"));
         Logger logger = (Logger) LoggerFactory.getLogger(EngineIntelligenceProjectionService.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
         logger.addAppender(appender);
+        EngineIntelligenceProjectionValidationException validationException = catchThrowableOfType(
+                () -> new EngineIntelligenceProjectionPolicy().validatedTransactionId("txn-rawPayload-secret"),
+                EngineIntelligenceProjectionValidationException.class
+        );
 
         EngineIntelligenceProjectionResult result;
         try {
@@ -213,10 +218,14 @@ class EngineIntelligenceProjectionServiceTest {
         assertThat(result.omissionReason()).contains(
                 EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_PROJECTION_FAILED
         );
+        assertThat(validationException)
+                .hasMessage(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE.name())
+                .hasMessageNotContaining("rawPayload")
+                .hasMessageNotContaining("secret");
         assertThat(logText(appender.list))
                 .contains("Engine intelligence internal projection omitted.")
                 .contains("ENGINE_INTELLIGENCE_PROJECTION_FAILED")
-                .doesNotContain("raw-secret", "stacktrace", "token", "endpoint", "payload");
+                .doesNotContain("rawPayload", "secret", "stacktrace", "token", "endpoint", "payload");
     }
 
     private EngineIntelligenceProjectionService serviceAt(Instant instant) {
