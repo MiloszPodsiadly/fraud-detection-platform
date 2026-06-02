@@ -12,6 +12,7 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
 
     private static final List<String> REVIEWED_PRODUCTION_REFERENCES = List.of(
             "alert-service/src/main/java/com/frauddetection/alert/config/AlertKafkaConfig.java",
+            "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/EngineIntelligenceProjectionService.java",
             "alert-service/src/main/java/com/frauddetection/alert/evidence/AlertEvidenceSnapshotProjectionService.java",
             "alert-service/src/main/java/com/frauddetection/alert/evidence/EvidenceProjectionService.java",
             "alert-service/src/main/java/com/frauddetection/alert/mapper/ScoredTransactionDocumentMapper.java",
