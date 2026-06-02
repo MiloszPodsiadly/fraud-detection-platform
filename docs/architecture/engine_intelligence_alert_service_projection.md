@@ -34,6 +34,11 @@ before persistence. It enforces at most 2 engines, 5 diagnostic signals, 10 warn
 128 characters per bounded string. Only allowlisted engine IDs, statuses, score buckets, warning codes, and public
 reason codes are persisted.
 
+Alert-service revalidates reason codes by reconstructing FDP-92 public DTOs rather than maintaining a second
+source-of-truth allowlist. Alert-service projection revalidates public contract values before persistence. FDP-95
+does not maintain a divergent second source of truth for public enum allowlists. Storage-specific limits are
+enforced by `EngineIntelligenceProjectionPolicy`.
+
 ## Old Event Compatibility
 
 Old events without engineIntelligence remain compatible. They create no engine-intelligence projection document.
@@ -53,6 +58,15 @@ payloads and exception messages are not logged.
 Projection must be idempotent under replay. A stable transaction ID replaces the existing Mongo document instead of
 appending engines, diagnostic signals, or warnings.
 
+## Mongo projection identity and idempotency
+
+Engine-intelligence projection uses transactionId as Mongo `_id`.
+Mongo `_id` uniqueness is the idempotency boundary for FDP-95.
+Reprocessing the same transaction replaces the projection state instead of appending duplicate
+engines/signals/warnings. No separate migration is required for this document-style projection unless deployment
+policy requires explicit collection/index creation. Future hardening may add secondary indexes or retention/TTL
+based on query and retention needs.
+
 ## No Raw/Internal Storage
 
 Only bounded public event contract fields may be stored. Raw evidence, raw contributions, feature vectors,
@@ -68,6 +82,18 @@ analyst-console component.
 Projected disagreement, unavailable engines, warnings, and diagnostic risk levels remain internal diagnostics.
 They do not change alert severity, priority, recommendation, fraud-case status, assignment, escalation, or payment
 authorization.
+
+## Failure Isolation Ownership
+
+`EngineIntelligenceProjectionService` owns normal projection failure isolation and returns bounded omission results.
+`TransactionMonitoringService` retains last-resort containment so unexpected projection wiring failures cannot break
+the base scored-transaction projection.
+
+## Future Operational Hardening
+
+Projection omitted/success/failure metrics are future operational hardening. Metrics must remain low-cardinality.
+Labels must not include transactionId, customerId, accountId, merchantId, raw exception, endpoint, or payload.
+The base projection must never depend on metrics.
 
 ## Future FDP-96 API Read Model
 
