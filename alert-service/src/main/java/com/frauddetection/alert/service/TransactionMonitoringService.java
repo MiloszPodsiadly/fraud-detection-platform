@@ -1,10 +1,14 @@
 package com.frauddetection.alert.service;
 
 import com.frauddetection.alert.domain.ScoredTransaction;
+import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionOmissionReason;
+import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionService;
 import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -20,26 +24,38 @@ import java.util.regex.Pattern;
 @Service
 public class TransactionMonitoringService implements TransactionMonitoringUseCase {
 
+    private static final Logger log = LoggerFactory.getLogger(TransactionMonitoringService.class);
+
     private final ScoredTransactionRepository repository;
     private final ScoredTransactionDocumentMapper mapper;
     private final MongoTemplate mongoTemplate;
     private final ScoredTransactionSearchPolicy searchPolicy;
+    private final EngineIntelligenceProjectionService engineIntelligenceProjectionService;
 
     public TransactionMonitoringService(
             ScoredTransactionRepository repository,
             ScoredTransactionDocumentMapper mapper,
             MongoTemplate mongoTemplate,
-            ScoredTransactionSearchPolicy searchPolicy
+            ScoredTransactionSearchPolicy searchPolicy,
+            EngineIntelligenceProjectionService engineIntelligenceProjectionService
     ) {
         this.repository = repository;
         this.mapper = mapper;
         this.mongoTemplate = mongoTemplate;
         this.searchPolicy = searchPolicy;
+        this.engineIntelligenceProjectionService = engineIntelligenceProjectionService;
     }
 
     @Override
     public void recordScoredTransaction(TransactionScoredEvent event) {
         repository.save(mapper.toDocument(event));
+        try {
+            engineIntelligenceProjectionService.project(event);
+        } catch (RuntimeException exception) {
+            log.atWarn()
+                    .addKeyValue("reason", EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_PROJECTION_FAILED)
+                    .log("Engine intelligence internal projection omitted.");
+        }
     }
 
     @Override
