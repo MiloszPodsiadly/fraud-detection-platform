@@ -47,12 +47,12 @@ public class EngineIntelligenceProjection {
         this.comparisonStatus = comparisonStatus;
         this.riskMismatchStatus = riskMismatchStatus;
         this.scoreDeltaBucket = scoreDeltaBucket;
-        this.engines = List.copyOf(engines);
-        this.diagnosticSignals = List.copyOf(diagnosticSignals);
-        this.warnings = List.copyOf(warnings);
-        this.engineCount = engines.size();
-        this.diagnosticSignalCount = diagnosticSignals.size();
-        this.warningCount = warnings.size();
+        this.engines = engines == null ? List.of() : List.copyOf(engines);
+        this.diagnosticSignals = diagnosticSignals == null ? List.of() : List.copyOf(diagnosticSignals);
+        this.warnings = warnings == null ? List.of() : List.copyOf(warnings);
+        this.engineCount = this.engines.size();
+        this.diagnosticSignalCount = this.diagnosticSignals.size();
+        this.warningCount = this.warnings.size();
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
     }

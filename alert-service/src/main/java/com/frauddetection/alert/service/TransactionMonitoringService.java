@@ -52,6 +52,8 @@ public class TransactionMonitoringService implements TransactionMonitoringUseCas
         try {
             engineIntelligenceProjectionService.project(event);
         } catch (RuntimeException exception) {
+            // EngineIntelligenceProjectionService owns normal failure isolation. This catch is last-resort
+            // containment so unexpected projection wiring failures cannot break the base transaction projection.
             log.atWarn()
                     .addKeyValue("reason", EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_PROJECTION_FAILED)
                     .log("Engine intelligence internal projection omitted.");

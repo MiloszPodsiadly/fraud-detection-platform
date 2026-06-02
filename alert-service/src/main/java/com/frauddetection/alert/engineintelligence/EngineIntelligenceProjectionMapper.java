@@ -33,17 +33,13 @@ public class EngineIntelligenceProjectionMapper {
                     EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_ABSENT
             );
         }
-        if (transactionId == null || transactionId.isBlank() || transactionId.length() > EngineIntelligenceProjectionPolicy.MAX_STRING_LENGTH) {
-            return EngineIntelligenceProjectionResult.omitted(
-                    EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE
-            );
-        }
 
         try {
+            String safeTransactionId = policy.validatedTransactionId(transactionId);
             EngineIntelligenceSummary safe = policy.validatedCopy(engineIntelligence);
             Instant now = clock.instant();
             return EngineIntelligenceProjectionResult.projected(new EngineIntelligenceProjection(
-                    transactionId,
+                    safeTransactionId,
                     safe.contractVersion(),
                     safe.generatedAt(),
                     safe.comparison().agreementStatus(),

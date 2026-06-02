@@ -24,8 +24,17 @@ public class EngineIntelligenceProjectionService {
     }
 
     public EngineIntelligenceProjectionResult project(TransactionScoredEvent event) {
-        if (event == null || event.engineIntelligence() == null) {
-            return mapper.map(event == null ? null : event.transactionId(), null, null);
+        if (event == null) {
+            EngineIntelligenceProjectionResult result = EngineIntelligenceProjectionResult.omitted(
+                    EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE
+            );
+            logOmission(result);
+            return result;
+        }
+        if (event.engineIntelligence() == null) {
+            return EngineIntelligenceProjectionResult.omitted(
+                    EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_ABSENT
+            );
         }
 
         try {
