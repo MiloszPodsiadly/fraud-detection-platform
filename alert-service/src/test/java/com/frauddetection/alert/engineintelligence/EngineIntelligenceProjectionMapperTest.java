@@ -11,7 +11,10 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDelt
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.lang.reflect.Field;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -41,7 +44,7 @@ class EngineIntelligenceProjectionMapperTest {
     }
 
     @Test
-    void forbiddenRawTransactionIdIsOmittedBoundedly() {
+    void invalidShapeUsesTypedOmissionReason() {
         assertOmitted(
                 mapper.map("txn-token-secret", EngineIntelligenceProjectionTestFixtures.minimalSummary(), null),
                 EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE
@@ -68,7 +71,7 @@ class EngineIntelligenceProjectionMapperTest {
     }
 
     @Test
-    void unsupportedContractVersionIsOmittedBoundedly() {
+    void unsupportedContractVersionUsesTypedOmissionReason() {
         EngineIntelligenceSummary summary = summaryMock();
         when(summary.contractVersion()).thenReturn(2);
 
@@ -79,7 +82,7 @@ class EngineIntelligenceProjectionMapperTest {
     }
 
     @Test
-    void oversizedPayloadIsOmittedBoundedly() {
+    void oversizedPayloadUsesTypedOmissionReason() {
         EngineIntelligenceSummary summary = summaryMock();
         when(summary.engines()).thenReturn(Collections.nCopies(3, EngineIntelligenceProjectionTestFixtures.timeoutMl()));
 
@@ -90,7 +93,7 @@ class EngineIntelligenceProjectionMapperTest {
     }
 
     @Test
-    void unsupportedReasonCodeIsDroppedOrOmittedBoundedly() {
+    void unsupportedReasonCodeUsesTypedOmissionReason() {
         EngineIntelligenceSummary summary = summaryMock();
         EngineIntelligenceEngineResult engine = mock(EngineIntelligenceEngineResult.class);
         when(engine.engineId()).thenReturn("rules.primary");
@@ -108,7 +111,7 @@ class EngineIntelligenceProjectionMapperTest {
     }
 
     @Test
-    void rawForbiddenReasonNeverReachesNestedProjection() {
+    void rawTokenRejectedWithoutMessageClassification() {
         EngineIntelligenceSummary summary = summaryMock();
         EngineIntelligenceEngineResult engine = mock(EngineIntelligenceEngineResult.class);
         when(engine.engineId()).thenReturn("rules.primary");
@@ -170,6 +173,12 @@ class EngineIntelligenceProjectionMapperTest {
         assertProjectionModelDoesNotDeclare("finalDecision", "recommendedAction", "alertSeverity");
     }
 
+    @Test
+    void mapperDoesNotInspectExceptionMessageForKnownValidationFailures() throws Exception {
+        assertThat(readMapperSource())
+                .doesNotContain("getMessage()", "classify(");
+    }
+
     private EngineIntelligenceProjection mapped(EngineIntelligenceSummary summary) {
         return mapper.map("txn-1", summary, null).projection().orElseThrow();
     }
@@ -200,5 +209,18 @@ class EngineIntelligenceProjectionMapperTest {
     private void assertProjectionModelDoesNotDeclare(String... forbiddenFields) {
         assertThat(Arrays.stream(EngineIntelligenceProjection.class.getDeclaredFields()).map(Field::getName))
                 .doesNotContain(forbiddenFields);
+    }
+
+    private String readMapperSource() throws IOException {
+        Path current = Path.of(".").toAbsolutePath().normalize();
+        for (Path candidate = current; candidate != null; candidate = candidate.getParent()) {
+            Path source = candidate.resolve(
+                    "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/EngineIntelligenceProjectionMapper.java"
+            );
+            if (Files.isRegularFile(source)) {
+                return Files.readString(source);
+            }
+        }
+        throw new IllegalStateException("FDP95_MAPPER_SOURCE_MISSING");
     }
 }

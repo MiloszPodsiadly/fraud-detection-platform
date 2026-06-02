@@ -31,11 +31,11 @@ class EngineIntelligenceProjectionPolicyTest {
     }
 
     @Test
-    void rejectsTooManyEngines() {
+    void alertServiceStorageLimitsStillApplyAfterPublicContractValidation() {
         EngineIntelligenceSummary source = summaryMock();
         when(source.engines()).thenReturn(Collections.nCopies(3, EngineIntelligenceProjectionTestFixtures.timeoutMl()));
 
-        assertLimitExceeded(source, "ENGINES");
+        assertOversized(source);
     }
 
     @Test
@@ -46,7 +46,7 @@ class EngineIntelligenceProjectionPolicyTest {
                 EngineIntelligenceProjectionTestFixtures.operationalMlSignal()
         ));
 
-        assertLimitExceeded(source, "DIAGNOSTIC_SIGNALS");
+        assertOversized(source);
     }
 
     @Test
@@ -54,7 +54,7 @@ class EngineIntelligenceProjectionPolicyTest {
         EngineIntelligenceSummary source = summaryMock();
         when(source.warnings()).thenReturn(Collections.nCopies(11, mock(EngineIntelligenceWarningSummary.class)));
 
-        assertLimitExceeded(source, "WARNINGS");
+        assertOversized(source);
     }
 
     @Test
@@ -63,7 +63,7 @@ class EngineIntelligenceProjectionPolicyTest {
         EngineIntelligenceEngineResult engine = engineMock("rules.primary", List.of("A", "B", "C", "D", "E", "F"));
         when(source.engines()).thenReturn(List.of(engine));
 
-        assertLimitExceeded(source, "REASON_CODES");
+        assertOversized(source);
     }
 
     @Test
@@ -72,9 +72,7 @@ class EngineIntelligenceProjectionPolicyTest {
         EngineIntelligenceEngineResult engine = engineMock("x".repeat(129), List.of("HIGH_VELOCITY"));
         when(source.engines()).thenReturn(List.of(engine));
 
-        assertThatThrownBy(() -> policy.validatedCopy(source))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("ENGINE_INTELLIGENCE_ENGINE_ID_INVALID");
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_OVERSIZED);
     }
 
     @Test
@@ -83,9 +81,7 @@ class EngineIntelligenceProjectionPolicyTest {
         EngineIntelligenceEngineResult engine = engineMock("rules.primary", List.of("x".repeat(129)));
         when(source.engines()).thenReturn(List.of(engine));
 
-        assertThatThrownBy(() -> policy.validatedCopy(source))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("ENGINE_INTELLIGENCE_REASON_CODE_INVALID");
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_OVERSIZED);
     }
 
     @Test
@@ -94,13 +90,11 @@ class EngineIntelligenceProjectionPolicyTest {
         EngineIntelligenceWarningSummary warning = warningMock("x".repeat(129));
         when(source.warnings()).thenReturn(List.of(warning));
 
-        assertThatThrownBy(() -> policy.validatedCopy(source))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("ENGINE_INTELLIGENCE_WARNING_CODE_INVALID");
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_OVERSIZED);
     }
 
     @Test
-    void supportedReasonCodeIsAccepted() {
+    void supportedPublicReasonCodeProjects() {
         EngineIntelligenceSummary source = summaryMock();
         EngineIntelligenceEngineResult engine = engineMock("rules.primary", List.of("HIGH_VELOCITY"));
         when(source.engines()).thenReturn(List.of(engine));
@@ -110,14 +104,12 @@ class EngineIntelligenceProjectionPolicyTest {
     }
 
     @Test
-    void unsupportedReasonCodeIsRejectedWithReasonCodeNotAllowed() {
+    void unsupportedReasonCodeRejectedByPublicContract() {
         EngineIntelligenceSummary source = summaryMock();
         EngineIntelligenceEngineResult engine = engineMock("rules.primary", List.of("NOT_ALLOWLISTED"));
         when(source.engines()).thenReturn(List.of(engine));
 
-        assertThatThrownBy(() -> policy.validatedCopy(source))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED");
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED);
     }
 
     @Test
@@ -126,20 +118,16 @@ class EngineIntelligenceProjectionPolicyTest {
         EngineIntelligenceEngineResult engine = engineMock("rawEvidence.primary", List.of("HIGH_VELOCITY"));
         when(source.engines()).thenReturn(List.of(engine));
 
-        assertThatThrownBy(() -> policy.validatedCopy(source))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("ENGINE_INTELLIGENCE_ENGINE_ID_INVALID");
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
     }
 
     @Test
-    void rejectsForbiddenRawReasonCode() {
+    void rawTokenRejectedByAlertServiceStoragePolicy() {
         EngineIntelligenceSummary source = summaryMock();
         EngineIntelligenceEngineResult engine = engineMock("rules.primary", List.of("raw_payload"));
         when(source.engines()).thenReturn(List.of(engine));
 
-        assertThatThrownBy(() -> policy.validatedCopy(source))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("ENGINE_INTELLIGENCE_REASON_CODE_INVALID");
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
     }
 
     @Test
@@ -148,9 +136,7 @@ class EngineIntelligenceProjectionPolicyTest {
         EngineIntelligenceWarningSummary warning = warningMock("rawContribution");
         when(source.warnings()).thenReturn(List.of(warning));
 
-        assertThatThrownBy(() -> policy.validatedCopy(source))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("ENGINE_INTELLIGENCE_WARNING_CODE_INVALID");
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
     }
 
     @Test
@@ -160,10 +146,7 @@ class EngineIntelligenceProjectionPolicyTest {
             EngineIntelligenceEngineResult engine = engineMock("rules.primary", List.of(value));
             when(source.engines()).thenReturn(List.of(engine));
 
-            assertThatThrownBy(() -> policy.validatedCopy(source))
-                    .as(value)
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("ENGINE_INTELLIGENCE_REASON_CODE_INVALID");
+            assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
         }
     }
 
@@ -173,9 +156,7 @@ class EngineIntelligenceProjectionPolicyTest {
         EngineIntelligenceEngineResult engine = engineMock("rules.secondary", List.of("HIGH_VELOCITY"));
         when(source.engines()).thenReturn(List.of(engine));
 
-        assertThatThrownBy(() -> policy.validatedCopy(source))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("ENGINE_INTELLIGENCE_ENGINE_ID_INVALID");
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
     }
 
     @Test
@@ -196,9 +177,7 @@ class EngineIntelligenceProjectionPolicyTest {
         EngineIntelligenceWarningSummary warning = warningMock("UNKNOWN_WARNING");
         when(source.warnings()).thenReturn(List.of(warning));
 
-        assertThatThrownBy(() -> policy.validatedCopy(source))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("ENGINE_INTELLIGENCE_WARNING_CODE_INVALID");
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
     }
 
     @Test
@@ -210,9 +189,7 @@ class EngineIntelligenceProjectionPolicyTest {
         when(engine.status()).thenReturn(status);
         when(source.engines()).thenReturn(List.of(engine));
 
-        assertThatThrownBy(() -> policy.validatedCopy(source))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("ENGINE_INTELLIGENCE_ENGINE_STATUS_INVALID");
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
     }
 
     @Test
@@ -221,9 +198,7 @@ class EngineIntelligenceProjectionPolicyTest {
         EngineIntelligenceDiagnosticSignal signal = diagnosticSignalMock("NOT_ALLOWLISTED");
         when(source.diagnosticSignals()).thenReturn(List.of(signal));
 
-        assertThatThrownBy(() -> policy.validatedCopy(source))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED");
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED);
     }
 
     @Test
@@ -243,14 +218,12 @@ class EngineIntelligenceProjectionPolicyTest {
     }
 
     @Test
-    void timeoutEngineDoesNotStoreRiskLevel() {
+    void operationalStatusWithRiskLevelRejectedByPublicContract() {
         EngineIntelligenceSummary source = summaryMock();
         EngineIntelligenceEngineResult engine = operationalEngineMock(FraudEngineStatus.TIMEOUT);
         when(source.engines()).thenReturn(List.of(engine));
 
-        assertThatThrownBy(() -> policy.validatedCopy(source))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("ENGINE_INTELLIGENCE_OPERATIONAL_STATUS_RISK_LEVEL_INVALID");
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
     }
 
     @Test
@@ -259,9 +232,7 @@ class EngineIntelligenceProjectionPolicyTest {
         EngineIntelligenceEngineResult engine = operationalEngineMock(FraudEngineStatus.UNAVAILABLE);
         when(source.engines()).thenReturn(List.of(engine));
 
-        assertThatThrownBy(() -> policy.validatedCopy(source))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("ENGINE_INTELLIGENCE_OPERATIONAL_STATUS_RISK_LEVEL_INVALID");
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
     }
 
     @Test
@@ -276,9 +247,16 @@ class EngineIntelligenceProjectionPolicyTest {
         when(signal.scoreBucket()).thenReturn(EngineIntelligenceScoreBucket.UNAVAILABLE);
         when(source.diagnosticSignals()).thenReturn(List.of(signal));
 
-        assertThatThrownBy(() -> policy.validatedCopy(source))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("ENGINE_INTELLIGENCE_OPERATIONAL_SIGNAL_RISK_LEVEL_INVALID");
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
+    }
+
+    @Test
+    void typedExceptionMessageDoesNotContainRawValue() {
+        assertThatThrownBy(() -> policy.validatedTransactionId("txn-secret-rawPayload"))
+                .isInstanceOf(EngineIntelligenceProjectionValidationException.class)
+                .hasMessage(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE.name())
+                .hasMessageNotContaining("secret")
+                .hasMessageNotContaining("rawPayload");
     }
 
     private EngineIntelligenceSummary summaryMock() {
@@ -339,9 +317,16 @@ class EngineIntelligenceProjectionPolicyTest {
         return warning;
     }
 
-    private void assertLimitExceeded(EngineIntelligenceSummary source, String fieldName) {
+    private void assertOversized(EngineIntelligenceSummary source) {
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_OVERSIZED);
+    }
+
+    private void assertValidation(
+            EngineIntelligenceSummary source,
+            EngineIntelligenceProjectionOmissionReason reason
+    ) {
         assertThatThrownBy(() -> policy.validatedCopy(source))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("ENGINE_INTELLIGENCE_" + fieldName + "_LIMIT_EXCEEDED");
+                .isInstanceOf(EngineIntelligenceProjectionValidationException.class)
+                .hasMessage(reason.name());
     }
 }
