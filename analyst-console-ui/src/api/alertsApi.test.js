@@ -36,6 +36,7 @@ describe("alertsApi auth headers", () => {
   const getFraudCase = (...args) => apiClient.getFraudCase(...args);
   const getFraudCaseEvidenceSummary = (...args) => apiClient.getFraudCaseEvidenceSummary(...args);
   const getFraudCaseEvidenceTimeline = (...args) => apiClient.getFraudCaseEvidenceTimeline(...args);
+  const getEngineIntelligence = (...args) => apiClient.getEngineIntelligence(...args);
   const updateFraudCase = (...args) => apiClient.updateFraudCase(...args);
   const submitAnalystDecision = (...args) => apiClient.submitAnalystDecision(...args);
 
@@ -1227,6 +1228,217 @@ describe("alertsApi auth headers", () => {
       })
     }));
   });
+
+  it("getEngineIntelligenceReturnsAvailableData", async () => {
+    const signal = new AbortController().signal;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable()));
+
+    const result = await getEngineIntelligence("txn.valid:001", { signal });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      engineIntelligenceEndpoint("txn.valid%3A001"),
+      expect.objectContaining({ signal })
+    );
+    expect(result).toMatchObject({
+      state: "available",
+      available: true,
+      comparison: {
+        agreementStatus: "DISAGREEMENT",
+        riskMismatchStatus: "MATERIAL_RISK_MISMATCH",
+        scoreDeltaBucket: "LARGE"
+      }
+    });
+    expect(result.engines[0]).toEqual({
+      engineId: "rules.primary",
+      engineType: "RULES",
+      status: "AVAILABLE",
+      scoreBucket: "HIGH",
+      riskLevel: "HIGH",
+      reasonCodes: ["HIGH_VELOCITY"]
+    });
+  });
+
+  it("getEngineIntelligenceReturnsNotProjectedState", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      transactionId: "txn-old",
+      available: false,
+      reason: "NOT_PROJECTED"
+    }));
+
+    await expect(getEngineIntelligence("txn-old")).resolves.toEqual({
+      state: "not-projected",
+      available: false,
+      transactionId: "txn-old",
+      reason: "NOT_PROJECTED"
+    });
+  });
+
+  it.each([
+    [403, "unauthorized"],
+    [401, "unauthorized"],
+    [404, "not-found"],
+    [503, "unavailable"]
+  ])("getEngineIntelligenceHandles%s", async (status, state) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      message: ["raw backend failure", engineIntelligenceEndpoint("txn-1"), "token-secret stacktrace"].join(" ")
+    }, status));
+
+    await expect(getEngineIntelligence("txn-1")).resolves.toMatchObject({ state, transactionId: "txn-1" });
+  });
+
+  it("getEngineIntelligenceHandlesNetworkFailureSafely", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network raw failure with endpoint and token"));
+
+    await expect(getEngineIntelligence("txn-1")).resolves.toEqual({
+      state: "unavailable",
+      available: false,
+      transactionId: "txn-1"
+    });
+  });
+
+  it("getEngineIntelligenceFailsClosedOnUnexpectedShape", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      transactionId: "txn-1",
+      available: true,
+      comparison: null,
+      rawEvidence: "secret"
+    }));
+
+    await expect(getEngineIntelligence("txn-1")).resolves.toMatchObject({ state: "unavailable" });
+  });
+
+  it("getEngineIntelligenceDoesNotExposeRawErrorBody", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      message: "raw backend failure",
+      details: [`endpoint:${engineIntelligenceEndpoint("txn-1")}`, "token-secret", "stacktrace"]
+    }, 503));
+
+    const result = await getEngineIntelligence("txn-1");
+
+    expect(JSON.stringify(result)).not.toContain("raw backend failure");
+    expect(JSON.stringify(result)).not.toContain("endpoint");
+    expect(JSON.stringify(result)).not.toContain("token-secret");
+    expect(JSON.stringify(result)).not.toContain("stacktrace");
+  });
+
+  it.each([
+    ["getEngineIntelligenceBlankTransactionIdDoesNotCallFetch", "   ", ""],
+    ["getEngineIntelligenceNullTransactionIdDoesNotCallFetch", null, ""],
+    ["getEngineIntelligenceOverlongTransactionIdDoesNotCallFetch", "a".repeat(129), "a".repeat(129)],
+    ["getEngineIntelligenceControlCharTransactionIdDoesNotCallFetch", "txn-\n1", "txn-\n1"],
+    ["getEngineIntelligenceInvalidPatternTransactionIdDoesNotCallFetch", "txn/with spaces", "txn/with spaces"]
+  ])("%s", async (_name, transactionId, expectedTransactionId) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable()));
+
+    await expect(getEngineIntelligence(transactionId)).resolves.toEqual({
+      state: "not-found",
+      available: false,
+      transactionId: expectedTransactionId
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("getEngineIntelligenceValidTransactionIdCallsFdp96Endpoint", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable()));
+
+    await getEngineIntelligence("txn-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      engineIntelligenceEndpoint("txn-1"),
+      expect.any(Object)
+    );
+  });
+
+  it.each([
+    ["getEngineIntelligenceFailsClosedForOversizedEngines", { engines: [engineResult(), engineResult({ engineId: "ml.python.primary", engineType: "ML_MODEL", status: "TIMEOUT", riskLevel: undefined, scoreBucket: "UNAVAILABLE", reasonCodes: ["ML_MODEL_TIMEOUT"] }), engineResult({ engineId: "rules.secondary" })] }],
+    ["getEngineIntelligenceFailsClosedForOversizedDiagnosticSignals", { diagnosticSignals: Array.from({ length: 6 }, (_value, index) => diagnosticSignal({ engineId: `rules.${index}` })) }],
+    ["getEngineIntelligenceFailsClosedForOversizedWarnings", { warnings: Array.from({ length: 11 }, () => warning()) }],
+    ["getEngineIntelligenceFailsClosedForOversizedEngineReasonCodes", { engines: [engineResult({ reasonCodes: ["A", "B", "C", "D", "E", "F"] })] }],
+    ["getEngineIntelligenceFailsClosedForOversizedSignalReasonCodes", { diagnosticSignals: [diagnosticSignal({ reasonCodes: ["A", "B", "C", "D", "E", "F"] })] }]
+  ])("%s", async (_name, patch) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable(patch)));
+
+    await expect(getEngineIntelligence("txn-1")).resolves.toMatchObject({ state: "unavailable", available: false });
+  });
+
+  it.each([
+    ["getEngineIntelligenceFailsClosedForUnknownAgreementStatus", { comparison: { ...comparison(), agreementStatus: "FINAL_DECLINE" } }],
+    ["getEngineIntelligenceFailsClosedForUnknownRiskMismatchStatus", { comparison: { ...comparison(), riskMismatchStatus: "WINNING_ENGINE" } }],
+    ["getEngineIntelligenceFailsClosedForUnknownScoreDeltaBucket", { comparison: { ...comparison(), scoreDeltaBucket: "PLATFORM_VERDICT" } }],
+    ["getEngineIntelligenceFailsClosedForUnknownEngineStatus", { engines: [engineResult({ status: "RECOMMENDED_ACTION" })] }],
+    ["getEngineIntelligenceFailsClosedForUnknownScoreBucket", { engines: [engineResult({ scoreBucket: "APPROVE" })] }],
+    ["getEngineIntelligenceFailsClosedForUnknownSignalCategory", { diagnosticSignals: [diagnosticSignal({ signalCategory: "DECLINE" })] }],
+    ["getEngineIntelligenceFailsClosedForDecisioningLikeEnumValues", { engines: [engineResult({ engineType: "BLOCK" })] }]
+  ])("%s", async (_name, patch) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable(patch)));
+
+    await expect(getEngineIntelligence("txn-1")).resolves.toMatchObject({ state: "unavailable", available: false });
+  });
+
+  it.each([
+    ["getEngineIntelligenceFailsClosedForRawEvidenceReasonCode", { engines: [engineResult({ reasonCodes: ["rawEvidence"] })] }],
+    ["getEngineIntelligenceFailsClosedForTokenSecretReasonCode", { engines: [engineResult({ reasonCodes: ["token-secret-stacktrace"] })] }],
+    ["getEngineIntelligenceFailsClosedForStacktraceWarningCode", { warnings: [warning({ warningCode: "stacktrace" })] }],
+    ["getEngineIntelligenceFailsClosedForEndpointEngineId", { engines: [engineResult({ engineId: "endpoint-api-v1" })] }],
+    ["getEngineIntelligenceFailsClosedForInternalProjectionClassName", { diagnosticSignals: [diagnosticSignal({ reasonCode: "EngineIntelligenceProjection" })] }],
+    ["getEngineIntelligenceFailsClosedForDecisioningTermInsideAllowedField", { engines: [engineResult({ reasonCodes: ["recommendedAction"] })] }]
+  ])("%s", async (_name, patch) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable(patch)));
+
+    await expect(getEngineIntelligence("txn-1")).resolves.toMatchObject({ state: "unavailable", available: false });
+  });
+
+  it.each([
+    ["getEngineIntelligenceFailsClosedForTimeoutWithHighScoreBucket", { engines: [engineResult({ status: "TIMEOUT", riskLevel: undefined, scoreBucket: "HIGH" })] }],
+    ["getEngineIntelligenceFailsClosedForUnavailableWithLowRiskLevel", { engines: [engineResult({ status: "UNAVAILABLE", riskLevel: "LOW", scoreBucket: "UNAVAILABLE" })] }],
+    ["getEngineIntelligenceFailsClosedForDegradedWithRiskLevel", { engines: [engineResult({ status: "DEGRADED", riskLevel: "HIGH", scoreBucket: "UNAVAILABLE" })] }],
+    ["getEngineIntelligenceFailsClosedForOperationalSignalWithRiskLevel", { diagnosticSignals: [diagnosticSignal({ signalCategory: "OPERATIONAL_SIGNAL", engineStatus: "TIMEOUT", riskLevel: "LOW", scoreBucket: "UNAVAILABLE" })] }]
+  ])("%s", async (_name, patch) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable(patch)));
+
+    await expect(getEngineIntelligence("txn-1")).resolves.toMatchObject({ state: "unavailable", available: false });
+  });
+
+  it("getEngineIntelligenceAcceptsOperationalSignalWithoutRiskLevel", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable({
+      diagnosticSignals: [diagnosticSignal({
+        signalCategory: "OPERATIONAL_SIGNAL",
+        engineId: "ml.python.primary",
+        engineType: "ML_MODEL",
+        engineStatus: "TIMEOUT",
+        riskLevel: undefined,
+        scoreBucket: "UNAVAILABLE",
+        reasonCode: "ML_MODEL_TIMEOUT"
+      })]
+    })));
+
+    await expect(getEngineIntelligence("txn-1")).resolves.toMatchObject({
+      state: "available",
+      diagnosticSignals: [expect.objectContaining({ signalCategory: "OPERATIONAL_SIGNAL", riskLevel: "" })]
+    });
+  });
+
+  it("getEngineIntelligenceUsesSignalCategoryFromFdp96Contract", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable({
+      diagnosticSignals: [diagnosticSignal({ signalCategory: "FRAUD_SIGNAL" })]
+    })));
+
+    await expect(getEngineIntelligence("txn-1")).resolves.toMatchObject({
+      state: "available",
+      diagnosticSignals: [expect.objectContaining({ signalCategory: "FRAUD_SIGNAL" })]
+    });
+  });
+
+  it("getEngineIntelligenceFailsClosedForSignalTypeOnlyResponse", async () => {
+    const signal = diagnosticSignal();
+    delete signal.signalCategory;
+    signal.signalType = "FRAUD_SIGNAL";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable({
+      diagnosticSignals: [signal]
+    })));
+
+    await expect(getEngineIntelligence("txn-1")).resolves.toMatchObject({ state: "unavailable", available: false });
+  });
 });
 
 async function refreshedBffProvider(headerName = "X-CSRF-TOKEN", token = "csrf-1") {
@@ -1279,6 +1491,67 @@ function evidenceTimeline() {
     truncated: false,
     truncationReason: null
   };
+}
+
+function engineIntelligenceAvailable(overrides = {}) {
+  return {
+    transactionId: "txn.valid:001",
+    available: true,
+    contractVersion: 1,
+    generatedAt: "2026-06-02T10:00:00Z",
+    comparison: comparison(),
+    engines: [engineResult()],
+    diagnosticSignals: [diagnosticSignal()],
+    warnings: [warning()],
+    ...overrides
+  };
+}
+
+function comparison() {
+  return {
+    agreementStatus: "DISAGREEMENT",
+    riskMismatchStatus: "MATERIAL_RISK_MISMATCH",
+    scoreDeltaBucket: "LARGE"
+  };
+}
+
+function engineResult(overrides = {}) {
+  return {
+    engineId: "rules.primary",
+    engineType: "RULES",
+    status: "AVAILABLE",
+    riskLevel: "HIGH",
+    scoreBucket: "HIGH",
+    reasonCodes: ["HIGH_VELOCITY"],
+    rawEvidence: "must not leak",
+    ...overrides
+  };
+}
+
+function diagnosticSignal(overrides = {}) {
+  return {
+    engineId: "rules.primary",
+    engineType: "RULES",
+    engineStatus: "AVAILABLE",
+    signalCategory: "FRAUD_SIGNAL",
+    scoreBucket: "HIGH",
+    riskLevel: "HIGH",
+    reasonCode: "HIGH_VELOCITY",
+    ...overrides
+  };
+}
+
+function warning(overrides = {}) {
+  return {
+    warningCode: "EVIDENCE_UNSAFE_DROPPED",
+    count: 1,
+    rawPayload: "must not leak",
+    ...overrides
+  };
+}
+
+function engineIntelligenceEndpoint(encodedTransactionId) {
+  return ["/api", "v1", "transactions", "scored", encodedTransactionId, "engine-intelligence"].join("/");
 }
 
 function fraudCaseEvidenceSummaryPath(caseId) {

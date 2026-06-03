@@ -1376,6 +1376,144 @@ code {
   font-weight: 800;
 }
 
+.engineIntelligencePanel {
+  margin-top: 0.85rem;
+  border-color: rgba(37, 99, 235, 0.18);
+  background: rgba(248, 250, 252, 0.88);
+}
+
+.engineIntelligenceBody {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.engineIntelligenceBlock {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.engineIntelligenceBlock h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.engineIntelligenceFields,
+.engineIntelligenceCard dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.engineIntelligenceFields dt,
+.engineIntelligenceCard dt,
+.engineIntelligenceReasons span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.engineIntelligenceFields dd,
+.engineIntelligenceCard dd {
+  margin: 0.2rem 0 0;
+  overflow-wrap: anywhere;
+  font-weight: 800;
+}
+
+.engineIntelligenceCards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.engineIntelligenceCard {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.88);
+  padding: 0.8rem;
+}
+
+.engineIntelligenceCardHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.65rem;
+  align-items: flex-start;
+}
+
+.engineIntelligenceCardHeader strong,
+.engineIntelligenceCardHeader span {
+  overflow-wrap: anywhere;
+}
+
+.engineIntelligenceCardHeader span {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.engineIntelligenceReasons {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.engineIntelligenceReasons p,
+.engineIntelligenceReasons ul {
+  margin: 0;
+}
+
+.engineIntelligenceReasons ul,
+.engineIntelligenceWarningList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0;
+  list-style: none;
+}
+
+.engineIntelligenceReasons li,
+.engineIntelligenceWarningList li,
+.engineIntelligenceNotice {
+  border: 1px solid rgba(37, 99, 235, 0.12);
+  border-radius: 0.55rem;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.engineIntelligenceReasons li {
+  padding: 0.25rem 0.5rem;
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.engineIntelligenceWarningList li {
+  display: inline-flex;
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0.45rem 0.65rem;
+}
+
+.engineIntelligenceWarningList span {
+  font-weight: 800;
+}
+
+.engineIntelligenceNotice {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.85rem;
+}
+
+.engineIntelligenceNotice p {
+  margin: 0;
+  font-weight: 850;
+}
+
+.engineIntelligenceNotice span {
+  color: var(--muted);
+}
+
 .fraudCaseRisk {
   display: flex;
   flex-shrink: 0;

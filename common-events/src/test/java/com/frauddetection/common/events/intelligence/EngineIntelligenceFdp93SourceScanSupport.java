@@ -3,10 +3,23 @@ package com.frauddetection.common.events.intelligence;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.List;
 import java.util.stream.Stream;
 
 final class EngineIntelligenceFdp93SourceScanSupport {
+
+    static final List<String> FDP97_ANALYST_CONSOLE_ENGINE_INTELLIGENCE_ALLOWED_FILES = List.of(
+            "analyst-console-ui/src/api/alertsApi.js",
+            "analyst-console-ui/src/api/alertsApi.test.js",
+            "analyst-console-ui/src/components/EngineIntelligenceAnalystUiDisplayDocsTest.test.js",
+            "analyst-console-ui/src/components/EngineIntelligencePanel.jsx",
+            "analyst-console-ui/src/components/EngineIntelligencePanel.test.jsx",
+            "analyst-console-ui/src/components/EngineIntelligencePanelScopeGuard.test.js",
+            "analyst-console-ui/src/pages/FraudCaseDetailsPage.jsx",
+            "analyst-console-ui/src/pages/FraudCaseDetailsPage.test.jsx",
+            "analyst-console-ui/src/styles.css"
+    );
 
     private EngineIntelligenceFdp93SourceScanSupport() {
     }
@@ -40,6 +53,23 @@ final class EngineIntelligenceFdp93SourceScanSupport {
                     .filter(path -> !normalize(root.relativize(path)).contains("/generated/"))
                     .filter(path -> fileContains(path, needle))
                     .map(root::relativize)
+                    .map(EngineIntelligenceFdp93SourceScanSupport::normalize)
+                    .sorted()
+                    .toList();
+        }
+    }
+
+    static List<String> filesContainingAny(String relativeRoot, Collection<String> needles) throws IOException {
+        Path repositoryRoot = repositoryRoot();
+        Path scanRoot = repositoryRoot.resolve(relativeRoot);
+        if (!Files.exists(scanRoot)) {
+            return List.of();
+        }
+        try (Stream<Path> paths = Files.walk(scanRoot)) {
+            return paths
+                    .filter(Files::isRegularFile)
+                    .filter(path -> needles.stream().anyMatch(needle -> fileContains(path, needle)))
+                    .map(repositoryRoot::relativize)
                     .map(EngineIntelligenceFdp93SourceScanSupport::normalize)
                     .sorted()
                     .toList();

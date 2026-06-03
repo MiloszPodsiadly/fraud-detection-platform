@@ -9,11 +9,24 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class EngineIntelligenceApiArchitectureGuardTest {
+
+    private static final List<String> FDP97_ANALYST_CONSOLE_ENGINE_INTELLIGENCE_ALLOWED_FILES = List.of(
+            "analyst-console-ui/src/api/alertsApi.js",
+            "analyst-console-ui/src/api/alertsApi.test.js",
+            "analyst-console-ui/src/components/EngineIntelligenceAnalystUiDisplayDocsTest.test.js",
+            "analyst-console-ui/src/components/EngineIntelligencePanel.jsx",
+            "analyst-console-ui/src/components/EngineIntelligencePanel.test.jsx",
+            "analyst-console-ui/src/components/EngineIntelligencePanelScopeGuard.test.js",
+            "analyst-console-ui/src/pages/FraudCaseDetailsPage.jsx",
+            "analyst-console-ui/src/pages/FraudCaseDetailsPage.test.jsx",
+            "analyst-console-ui/src/styles.css"
+    );
 
     @Test
     void onlyBoundedReadModelPackageMayExposeEngineIntelligence() throws Exception {
@@ -40,8 +53,9 @@ class EngineIntelligenceApiArchitectureGuardTest {
     }
 
     @Test
-    void uiStillDoesNotReferenceEngineIntelligence() throws Exception {
-        assertThat(sources("analyst-console-ui/src")).doesNotContainIgnoringCase("engineIntelligence");
+    void uiExposesEngineIntelligenceOnlyThroughFdp97ReadOnlyDisplay() throws Exception {
+        assertThat(filesContainingIgnoringCase("analyst-console-ui/src", "engineIntelligence"))
+                .isSubsetOf(FDP97_ANALYST_CONSOLE_ENGINE_INTELLIGENCE_ALLOWED_FILES);
     }
 
     @Test
@@ -111,6 +125,36 @@ class EngineIntelligenceApiArchitectureGuardTest {
             }
         }
         return sources.toString();
+    }
+
+    private List<String> filesContainingIgnoringCase(String relativeRoot, String needle) throws IOException {
+        Path repositoryRoot = repositoryRoot();
+        Path scanRoot = repositoryRoot.resolve(relativeRoot);
+        if (!Files.exists(scanRoot)) {
+            return List.of();
+        }
+        String normalizedNeedle = needle.toLowerCase(Locale.ROOT);
+        try (Stream<Path> files = Files.walk(scanRoot)) {
+            return files
+                    .filter(Files::isRegularFile)
+                    .filter(file -> containsIgnoringCase(file, normalizedNeedle))
+                    .map(repositoryRoot::relativize)
+                    .map(EngineIntelligenceApiArchitectureGuardTest::normalize)
+                    .sorted()
+                    .toList();
+        }
+    }
+
+    private static boolean containsIgnoringCase(Path path, String normalizedNeedle) {
+        try {
+            return Files.readString(path).toLowerCase(Locale.ROOT).contains(normalizedNeedle);
+        } catch (IOException exception) {
+            throw new IllegalStateException("ENGINE_INTELLIGENCE_UI_SOURCE_SCAN_FAILED", exception);
+        }
+    }
+
+    private static String normalize(Path path) {
+        return path.toString().replace('\\', '/');
     }
 
     private Path repositoryRoot() {

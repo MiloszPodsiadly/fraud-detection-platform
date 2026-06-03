@@ -2,6 +2,8 @@ package com.frauddetection.common.events.intelligence;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class EngineIntelligenceNoApiUiExposureTest {
@@ -23,11 +25,13 @@ class EngineIntelligenceNoApiUiExposureTest {
     }
 
     @Test
-    void analystConsoleDoesNotExposeEngineIntelligence() throws Exception {
-        assertThat(EngineIntelligenceFdp93SourceScanSupport.sources("analyst-console-ui/src"))
-                .doesNotContain(
-                        "engineIntelligence", "diagnosticSignals", "agreementStatus",
-                        "riskMismatchStatus", "scoreDeltaBucket"
-                );
+    void analystConsoleExposesEngineIntelligenceOnlyThroughFdp97ReadOnlyDisplay() throws Exception {
+        assertThat(EngineIntelligenceFdp93SourceScanSupport.filesContainingAny(
+                "analyst-console-ui/src",
+                List.of("engineIntelligence", "diagnosticSignals", "agreementStatus",
+                        "riskMismatchStatus", "scoreDeltaBucket")
+        )).isSubsetOf(
+                EngineIntelligenceFdp93SourceScanSupport.FDP97_ANALYST_CONSOLE_ENGINE_INTELLIGENCE_ALLOWED_FILES
+        );
     }
 }

@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -27,7 +28,12 @@ class EngineIntelligenceDownstreamIsolationTest {
         Path root = repositoryRoot();
         assertThat(sources(root.resolve("alert-service/src/main/java/com/frauddetection/alert/controller")))
                 .doesNotContain("EngineIntelligenceSummary", "engineIntelligence");
-        assertThat(sources(root.resolve("analyst-console-ui/src"))).doesNotContain("engineIntelligence");
+        assertThat(EngineIntelligenceFdp93SourceScanSupport.filesContainingAny(
+                "analyst-console-ui/src",
+                List.of("engineIntelligence")
+        )).isSubsetOf(
+                EngineIntelligenceFdp93SourceScanSupport.FDP97_ANALYST_CONSOLE_ENGINE_INTELLIGENCE_ALLOWED_FILES
+        );
     }
 
     @Test

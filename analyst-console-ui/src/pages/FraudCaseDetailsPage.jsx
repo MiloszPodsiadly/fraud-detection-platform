@@ -4,6 +4,7 @@ import { AUTHORITIES, hasAuthority } from "../auth/session.js";
 import { DetailHeader } from "../components/DetailHeader.jsx";
 import { DetailStateBanner } from "../components/DetailStateBanner.jsx";
 import { ErrorState } from "../components/ErrorState.jsx";
+import { EngineIntelligencePanel } from "../components/EngineIntelligencePanel.jsx";
 import { FraudCaseEvidenceSummarySection } from "../components/FraudCaseEvidenceSummarySection.jsx";
 import { FraudCaseEvidenceTimelineSection } from "../components/FraudCaseEvidenceTimelineSection.jsx";
 import { FraudCaseReadSurfaceLayout } from "../components/FraudCaseReadSurfaceLayout.jsx";
@@ -382,6 +383,10 @@ export function FraudCaseDetailsPage({
                                   <dd>{formatDateTime(transaction.transactionTimestamp)}</dd>
                                 </div>
                               </dl>
+                              <EngineIntelligencePanel
+                                transactionId={transaction.transactionId}
+                                getEngineIntelligence={apiClient.getEngineIntelligence}
+                              />
                             </td>
                           </tr>
                         )}
