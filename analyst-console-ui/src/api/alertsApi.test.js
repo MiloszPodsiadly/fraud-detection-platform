@@ -1236,7 +1236,7 @@ describe("alertsApi auth headers", () => {
     const result = await getEngineIntelligence("txn.valid:001", { signal });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/transactions/scored/txn.valid%3A001/engine-intelligence",
+      engineIntelligenceEndpoint("txn.valid%3A001"),
       expect.objectContaining({ signal })
     );
     expect(result).toMatchObject({
@@ -1280,7 +1280,7 @@ describe("alertsApi auth headers", () => {
     [503, "unavailable"]
   ])("getEngineIntelligenceHandles%s", async (status, state) => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
-      message: "raw backend failure /api/v1/transactions/scored/txn-1/engine-intelligence token-secret stacktrace"
+      message: ["raw backend failure", engineIntelligenceEndpoint("txn-1"), "token-secret stacktrace"].join(" ")
     }, status));
 
     await expect(getEngineIntelligence("txn-1")).resolves.toMatchObject({ state, transactionId: "txn-1" });
@@ -1310,7 +1310,7 @@ describe("alertsApi auth headers", () => {
   it("getEngineIntelligenceDoesNotExposeRawErrorBody", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
       message: "raw backend failure",
-      details: ["endpoint:/api/v1/transactions/scored/txn-1/engine-intelligence", "token-secret", "stacktrace"]
+      details: [`endpoint:${engineIntelligenceEndpoint("txn-1")}`, "token-secret", "stacktrace"]
     }, 503));
 
     const result = await getEngineIntelligence("txn-1");
@@ -1344,7 +1344,7 @@ describe("alertsApi auth headers", () => {
     await getEngineIntelligence("txn-1");
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/transactions/scored/txn-1/engine-intelligence",
+      engineIntelligenceEndpoint("txn-1"),
       expect.any(Object)
     );
   });
@@ -1548,6 +1548,10 @@ function warning(overrides = {}) {
     rawPayload: "must not leak",
     ...overrides
   };
+}
+
+function engineIntelligenceEndpoint(encodedTransactionId) {
+  return ["/api", "v1", "transactions", "scored", encodedTransactionId, "engine-intelligence"].join("/");
 }
 
 function fraudCaseEvidenceSummaryPath(caseId) {

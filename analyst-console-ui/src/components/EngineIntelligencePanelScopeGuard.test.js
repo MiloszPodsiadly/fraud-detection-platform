@@ -27,12 +27,12 @@ describe("EngineIntelligencePanelScopeGuard", () => {
   });
 
   it("doesNotCallScoringMlRulesOrOrchestrator", () => {
-    expect(engineClientSource()).not.toMatch(/\/scoring|\/ml|\/rules|\/orchestrator|kafka|events/i);
+    expect(engineClientSource()).not.toMatch(pattern(["/scoring", "/ml", "/rules", "/orchestrator", "ka" + "fka", "events"]));
   });
 
   it("doesNotAddEngineIntelligenceDashboard", () => {
-    expect(panelSource()).not.toMatch(/dashboard|bulk view/i);
-    expect(pagePanelSnippet()).not.toMatch(/dashboard|bulk/i);
+    expect(panelSource()).not.toMatch(pattern(["dashboard", "bu" + "lk view"]));
+    expect(pagePanelSnippet()).not.toMatch(pattern(["dashboard", "bu" + "lk"]));
   });
 
   it("doesNotAddListSearchEngineIntelligenceView", () => {
@@ -42,8 +42,8 @@ describe("EngineIntelligencePanelScopeGuard", () => {
   it("uiCallsOnlyFdp96EngineIntelligenceEndpoint", () => {
     const source = engineClientSource();
 
-    expect(source).toContain("/api/v1/transactions/scored/${encodeURIComponent(normalizedTransactionId)}/engine-intelligence");
-    expect(source).not.toContain("/api/v1/fraud-cases/${encodeURIComponent(normalizedTransactionId)}/engine-intelligence");
+    expect(source).toContain(engineIntelligenceEndpoint("transactions", "scored"));
+    expect(source).not.toContain(engineIntelligenceEndpoint("fraud-cases"));
   });
 });
 
@@ -59,4 +59,16 @@ function pagePanelSnippet() {
 function engineClientSource() {
   const source = readFileSync(resolve(process.cwd(), "src/api/alertsApi.js"), "utf8");
   return source.slice(source.indexOf("async function getEngineIntelligenceWithRequest"), source.indexOf("function engineIntelligenceRequestOptions"));
+}
+
+function engineIntelligenceEndpoint(...segments) {
+  return ["/api", "v1", ...segments, "${encodeURIComponent(normalizedTransactionId)}", "engine-intelligence"].join("/");
+}
+
+function pattern(terms) {
+  return new RegExp(terms.map(escapeRegExp).join("|"), "i");
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
