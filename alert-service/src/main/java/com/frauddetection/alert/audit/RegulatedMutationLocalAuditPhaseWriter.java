@@ -94,6 +94,11 @@ public class RegulatedMutationLocalAuditPhaseWriter {
         try {
             lockRepository.acquire(AuditEventDocument.PARTITION_KEY, lockOwner);
             lockAcquired = true;
+            AuditEventDocument existingPhaseEvent = auditEventRepository.findByRequestId(phaseKey).orElse(null);
+            if (existingPhaseEvent != null) {
+                recordAppend("DUPLICATE_PHASE", startedAt);
+                return existingPhaseEvent.auditId();
+            }
             AuditEventDocument previous = auditEventRepository.findLatestByPartitionKey(AuditEventDocument.PARTITION_KEY)
                     .orElse(null);
             String previousHash = previous == null ? null : previous.eventHash();
