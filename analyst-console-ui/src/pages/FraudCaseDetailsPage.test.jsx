@@ -582,6 +582,80 @@ describe("FraudCaseDetailsPage", () => {
     expect(screen.queryByText("timeline raw failure")).not.toBeInTheDocument();
     expect(within(screen.getByTestId("fraud-case-read-surface-layout")).queryByRole("button", { name: "Save case decision" })).not.toBeInTheDocument();
   });
+
+  it("FraudCaseDetailsPageRendersEngineIntelligencePanelForExpandedTransactionTest", async () => {
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCaseWithTransaction("case-1", "Open case", "txn-1")),
+      getEngineIntelligence: vi.fn().mockResolvedValue(availableEngineIntelligence()),
+      updateFraudCase: vi.fn()
+    };
+
+    render(page({ caseId: "case-1", apiClient }));
+
+    expect(await screen.findByText("Open case")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+
+    expect(await screen.findByRole("heading", { name: "Engine intelligence" })).toBeInTheDocument();
+    await waitFor(() => expect(apiClient.getEngineIntelligence).toHaveBeenCalledWith("txn-1", expect.objectContaining({ signal: expect.any(AbortSignal) })));
+  });
+
+  it("FraudCaseDetailsPageEngineIntelligenceFailureDoesNotBreakCaseDetailTest", async () => {
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCaseWithTransaction("case-1", "Open case", "txn-1")),
+      getEngineIntelligence: vi.fn().mockRejectedValue(new Error("raw engine token stacktrace")),
+      updateFraudCase: vi.fn()
+    };
+
+    render(page({ caseId: "case-1", apiClient }));
+
+    expect(await screen.findByText("Open case")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+
+    expect(await screen.findByText("Engine intelligence is temporarily unavailable.")).toBeInTheDocument();
+    expect(screen.queryByText(/raw engine|token|stacktrace/i)).not.toBeInTheDocument();
+  });
+
+  it("FraudCaseDetailsPageEngineIntelligenceReceivesNarrowFetchFunctionOnlyTest", async () => {
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCaseWithTransaction("case-1", "Open case", "txn-1")),
+      getEngineIntelligence: vi.fn().mockResolvedValue(availableEngineIntelligence()),
+      updateFraudCase: vi.fn(),
+      submitAnalystDecision: vi.fn(),
+      getAlert: vi.fn()
+    };
+
+    render(page({ caseId: "case-1", apiClient }));
+
+    expect(await screen.findByText("Open case")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(await screen.findByRole("heading", { name: "Engine intelligence" })).toBeInTheDocument();
+    await waitFor(() => expect(apiClient.getEngineIntelligence).toHaveBeenCalledTimes(1));
+
+    expect(apiClient.getEngineIntelligence.mock.calls[0][1]).not.toHaveProperty("apiClient");
+    expect(apiClient.getEngineIntelligence.mock.calls[0][1]).not.toHaveProperty("updateFraudCase");
+    expect(apiClient.getEngineIntelligence.mock.calls[0][1]).not.toHaveProperty("submitAnalystDecision");
+    expect(apiClient.updateFraudCase).not.toHaveBeenCalled();
+    expect(apiClient.submitAnalystDecision).not.toHaveBeenCalled();
+    expect(apiClient.getAlert).not.toHaveBeenCalled();
+  });
+
+  it("FraudCaseDetailsPageEngineIntelligenceDoesNotAddWorkflowControlsTest", async () => {
+    const apiClient = {
+      getFraudCase: vi.fn().mockResolvedValue(fraudCaseWithTransaction("case-1", "Open case", "txn-1")),
+      getEngineIntelligence: vi.fn().mockResolvedValue(availableEngineIntelligence()),
+      updateFraudCase: vi.fn()
+    };
+
+    render(page({ caseId: "case-1", apiClient }));
+
+    expect(await screen.findByText("Open case")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    const panel = await screen.findByTestId("engine-intelligence-panel");
+
+    expect(within(panel).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(panel).queryByRole("form")).not.toBeInTheDocument();
+    expect(within(panel).queryByText(/approve|decline|block|feedback|recommended action|winning engine|platform verdict/i)).not.toBeInTheDocument();
+  });
 });
 
 function page({ caseId, apiClient, onCaseUpdated = vi.fn(), canReadFraudCase = true }) {
@@ -623,6 +697,37 @@ function fraudCase(caseId, reason) {
     thresholdPln: 500,
     decisionReason: "",
     decisionTags: ["rapid-transfer"]
+  };
+}
+
+function fraudCaseWithTransaction(caseId, reason, transactionId) {
+  return {
+    ...fraudCase(caseId, reason),
+    transactions: [{
+      transactionId,
+      correlationId: "corr-1",
+      riskLevel: "HIGH",
+      transactionAmount: 100,
+      amountPln: 100,
+      transactionTimestamp: "2026-06-02T10:00:00Z",
+      fraudScore: 0.91
+    }]
+  };
+}
+
+function availableEngineIntelligence() {
+  return {
+    state: "available",
+    available: true,
+    transactionId: "txn-1",
+    comparison: {
+      agreementStatus: "AGREEMENT",
+      riskMismatchStatus: "MATCH",
+      scoreDeltaBucket: "NARROW"
+    },
+    engines: [],
+    diagnosticSignals: [],
+    warnings: []
   };
 }
 
