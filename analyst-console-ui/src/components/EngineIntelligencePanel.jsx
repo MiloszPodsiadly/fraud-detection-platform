@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { isAbortError } from "../api/apiErrors.js";
+import { EngineIntelligenceFeedbackPanel } from "./EngineIntelligenceFeedbackPanel.jsx";
 import { LoadingPanel } from "./LoadingPanel.jsx";
 
 const TEMPORARILY_UNAVAILABLE = "Engine intelligence is temporarily unavailable.";
@@ -11,6 +12,9 @@ const NON_AVAILABLE_STATES = new Set(["not-projected", "unauthorized", "not-foun
 export function EngineIntelligencePanel({
   transactionId,
   getEngineIntelligence,
+  submitEngineIntelligenceFeedback,
+  fraudCaseId,
+  canSubmitFeedback = false,
   className = ""
 }) {
   const [state, setState] = useState({
@@ -66,8 +70,22 @@ export function EngineIntelligencePanel({
       {state.isLoading && <LoadingPanel label="Loading engine intelligence..." />}
       {!state.isLoading && state.error && <EngineIntelligenceNotice message={TEMPORARILY_UNAVAILABLE} />}
       {!state.isLoading && !state.error && <EngineIntelligenceContent result={state.result} />}
+      {!state.isLoading && !state.error && typeof submitEngineIntelligenceFeedback === "function" && shouldRenderFeedback(state.result) && (
+        <EngineIntelligenceFeedbackPanel
+          transactionId={transactionId}
+          fraudCaseId={fraudCaseId}
+          engineIntelligenceAvailable={state.result?.state === "available"}
+          submitEngineIntelligenceFeedback={submitEngineIntelligenceFeedback}
+          canSubmitFeedback={canSubmitFeedback}
+          disabled={state.result?.state === "unauthorized" || state.result?.state === "not-found"}
+        />
+      )}
     </section>
   );
+}
+
+function shouldRenderFeedback(result) {
+  return ["available", "not-projected", "unavailable"].includes(result?.state);
 }
 
 function EngineIntelligenceContent({ result }) {

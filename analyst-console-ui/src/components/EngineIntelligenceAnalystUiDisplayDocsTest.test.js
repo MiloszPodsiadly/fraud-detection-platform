@@ -15,13 +15,14 @@ describe("EngineIntelligenceAnalystUiDisplayDocsTest", () => {
     expect(docs).toContain("## Operational Wording");
     expect(docs).toContain("## No Decisioning Wording");
     expect(docs).toContain("## No Raw/Internal Rendering");
-    expect(docs).toContain("## No Feedback Workflow");
+    expect(docs).toContain("## FDP-98 Feedback Workflow");
     expect(docs).toContain("## No Case-Level Aggregation");
     expect(docs).toContain("## Accessibility");
-    expect(docs).toContain("## Future FDP-98 Feedback Workflow");
+    expect(docs).toContain("## Current FDP-98 Feedback Workflow");
     expect(docs).toContain("FDP-97 displays bounded transaction-level engine intelligence from the FDP-96 API.");
     expect(docs).toContain("FDP-97 is read-only diagnostic UI.");
     expect(docs).toContain("FDP-97 does not add feedback workflow.");
+    expect(docs).toContain("FDP-97 did not add feedback workflow, feedback submit, analyst action submit, or mutation buttons.");
     expect(docs).toContain("FDP-97 does not add analyst actions.");
     expect(docs).toContain("FDP-97 does not add approve/decline/block.");
     expect(docs).toContain("FDP-97 does not add final decisioning.");
@@ -34,6 +35,6 @@ describe("EngineIntelligenceAnalystUiDisplayDocsTest", () => {
     expect(docs).toContain("UI wording must avoid final/recommended/winning/safe/approve/decline/block.");
     expect(docs).toContain("Diagnostic only. Operational statuses and disagreement are investigation context.");
     expect(docs).toContain("malformed available results fail closed");
-    expect(docs).toContain("FDP-98 is the future feedback workflow branch.");
+    expect(docs).toContain("FDP-98 is the bounded analyst feedback workflow branch.");
   });
 });

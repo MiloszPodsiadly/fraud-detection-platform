@@ -56,6 +56,23 @@ describe("EngineIntelligencePanel", () => {
     expect(screen.getAllByText("HIGH_VELOCITY").length).toBeGreaterThan(0);
   });
 
+  it("rendersFeedbackControlsBelowEngineIntelligencePanelWhenSubmitClientIsProvided", async () => {
+    render(
+      <EngineIntelligencePanel
+        transactionId="txn-1"
+        fraudCaseId="case-1"
+        getEngineIntelligence={vi.fn().mockResolvedValue(availableResult())}
+        submitEngineIntelligenceFeedback={vi.fn().mockResolvedValue({ state: "saved" })}
+        canSubmitFeedback
+      />
+    );
+
+    const panel = await screen.findByTestId("engine-intelligence-panel");
+    expect(within(panel).getByRole("heading", { name: "Engine intelligence" })).toBeInTheDocument();
+    expect(within(panel).getByRole("heading", { name: "Was this engine intelligence useful?" })).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: "Submit feedback" })).toBeDisabled();
+  });
+
   it("rendersDiagnosticOnlyDisclaimer", async () => {
     renderPanel(availableResult());
 
