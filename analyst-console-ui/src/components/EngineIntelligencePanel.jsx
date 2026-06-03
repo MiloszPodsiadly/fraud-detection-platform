@@ -6,6 +6,7 @@ const TEMPORARILY_UNAVAILABLE = "Engine intelligence is temporarily unavailable.
 const NOT_PROJECTED = "Engine intelligence is not available for this transaction.";
 const NOT_PROJECTED_HELPER = "This may happen for older transactions or periods when diagnostic emission was disabled.";
 const OPERATIONAL_STATUSES = new Set(["TIMEOUT", "UNAVAILABLE", "DEGRADED"]);
+const NON_AVAILABLE_STATES = new Set(["not-projected", "unauthorized", "not-found", "unavailable"]);
 
 export function EngineIntelligencePanel({
   transactionId,
@@ -58,6 +59,7 @@ export function EngineIntelligencePanel({
           <p className="eyebrow">Engine diagnostics</p>
           <h2 id={headingId}>Engine intelligence</h2>
           <p className="sectionCopy">Diagnostic engine output for this transaction.</p>
+          <p className="sectionCopy">Diagnostic only. Operational statuses and disagreement are investigation context.</p>
         </div>
       </div>
 
@@ -145,15 +147,15 @@ function DiagnosticSignalList({ signals }) {
       {signals.length === 0 ? <p className="muted">No diagnostic signals</p> : (
         <div className="engineIntelligenceCards">
           {signals.map((signal, index) => (
-            <article className="engineIntelligenceCard" key={`${signal.signalType}-${signal.reasonCodes.join("-")}-${index}`}>
+            <article className="engineIntelligenceCard" key={`${signal.signalCategory}-${signal.reasonCodes.join("-")}-${index}`}>
               <div className="engineIntelligenceCardHeader">
-                <strong>{signal.signalType}</strong>
+                <strong>{signal.signalCategory}</strong>
                 {signal.engineType && <span>{signal.engineType}</span>}
               </div>
               <dl>
                 {signal.engineStatus && <Field label="Status" value={engineStatusLabel(signal.engineStatus)} />}
                 <Field label="Score bucket" value={signal.scoreBucket} />
-                {signal.riskLevel && signal.signalType !== "OPERATIONAL_SIGNAL" && <Field label="Risk level" value={signal.riskLevel} />}
+                {signal.riskLevel && signal.signalCategory !== "OPERATIONAL_SIGNAL" && <Field label="Risk level" value={signal.riskLevel} />}
               </dl>
               <ReasonCodes reasonCodes={signal.reasonCodes} />
             </article>
@@ -217,7 +219,26 @@ function normalizePanelResult(result) {
   if (!result || typeof result !== "object") {
     return { state: "unavailable" };
   }
+  if (result.state !== "available") {
+    return NON_AVAILABLE_STATES.has(result.state) ? result : { state: "unavailable" };
+  }
+  if (!isValidAvailablePanelResult(result)) {
+    return { state: "unavailable" };
+  }
   return result;
+}
+
+function isValidAvailablePanelResult(result) {
+  return Boolean(
+    result.comparison
+      && typeof result.comparison === "object"
+      && result.comparison.agreementStatus
+      && result.comparison.riskMismatchStatus
+      && result.comparison.scoreDeltaBucket
+      && Array.isArray(result.engines)
+      && Array.isArray(result.diagnosticSignals)
+      && Array.isArray(result.warnings)
+  );
 }
 
 function engineStatusLabel(status) {

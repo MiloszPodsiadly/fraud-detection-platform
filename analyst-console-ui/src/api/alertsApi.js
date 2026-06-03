@@ -211,8 +211,82 @@ function evidenceTimelineRequestOptions({ signal } = {}) {
   };
 }
 
+const ENGINE_INTELLIGENCE_TRANSACTION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+const MAX_ENGINE_INTELLIGENCE_ENGINES = 2;
+const MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS = 5;
+const MAX_ENGINE_INTELLIGENCE_WARNINGS = 10;
+const MAX_ENGINE_INTELLIGENCE_REASON_CODES = 5;
+const AGREEMENT_STATUSES = new Set([
+  "AGREEMENT",
+  "ADJACENT_RISK_VARIANCE",
+  "DISAGREEMENT",
+  "PARTIAL",
+  "INSUFFICIENT_DATA",
+  "REQUIRED_ENGINE_NOT_COMPARABLE"
+]);
+const RISK_MISMATCH_STATUSES = new Set([
+  "SAME_RISK_LEVEL",
+  "ADJACENT_RISK_LEVEL",
+  "MATERIAL_RISK_MISMATCH",
+  "NOT_COMPARABLE"
+]);
+const SCORE_DELTA_BUCKETS = new Set(["NONE", "SMALL", "MEDIUM", "LARGE", "UNAVAILABLE"]);
+const ENGINE_STATUSES = new Set(["AVAILABLE", "UNAVAILABLE", "DEGRADED", "TIMEOUT", "FALLBACK_USED", "SKIPPED"]);
+const SCORE_BUCKETS = new Set(["NONE", "LOW", "MEDIUM", "HIGH", "VERY_HIGH", "UNAVAILABLE"]);
+const SIGNAL_CATEGORIES = new Set(["FRAUD_SIGNAL", "OPERATIONAL_SIGNAL"]);
+const ENGINE_TYPES = new Set(["RULES", "ML_MODEL"]);
+const RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
+const WARNING_CODES = new Set([
+  "ENGINE_RESULT_LIMIT_APPLIED",
+  "REASON_CODE_NULL_DROPPED",
+  "REASON_CODE_BLANK_DROPPED",
+  "REASON_CODE_UNSUPPORTED_DROPPED",
+  "REASON_CODE_LIMIT_APPLIED",
+  "EVIDENCE_LIMIT_APPLIED",
+  "EVIDENCE_TEXT_TRUNCATED",
+  "EVIDENCE_UNSAFE_DROPPED",
+  "EVIDENCE_UNSUPPORTED_REASON_CODE_DROPPED",
+  "CONTRIBUTION_LIMIT_APPLIED",
+  "CONTRIBUTION_TEXT_TRUNCATED",
+  "CONTRIBUTION_UNSAFE_DROPPED",
+  "CONTRIBUTION_VALUE_DROPPED"
+]);
+const FORBIDDEN_ENGINE_INTELLIGENCE_TERMS = [
+  "rawEvidence",
+  "rawContribution",
+  "featureSnapshot",
+  "featureVector",
+  "rawPayload",
+  "payload",
+  "endpoint",
+  "token",
+  "secret",
+  "stacktrace",
+  "exceptionMessage",
+  "internalAggregation",
+  "EngineIntelligenceProjection",
+  "FraudEngine" + "AggregationResult",
+  "NormalizedFraudEngine" + "Result",
+  "Scoring" + "Context",
+  "rawMlResponse",
+  "platformVerdict",
+  "finalDecision",
+  "recommendedAction",
+  "winningEngine",
+  "paymentAuthorization"
+];
+const FORBIDDEN_COMPACT_ENGINE_INTELLIGENCE_TERMS = FORBIDDEN_ENGINE_INTELLIGENCE_TERMS
+  .map((term) => compactEngineIntelligenceText(term));
+
 async function getEngineIntelligenceWithRequest(request, transactionId, requestOptions = {}) {
-  const normalizedTransactionId = String(transactionId || "").trim();
+  const normalizedTransactionId = normalizeEngineIntelligenceTransactionId(transactionId);
+  if (!isValidEngineIntelligenceTransactionId(normalizedTransactionId)) {
+    return Object.freeze({
+      state: "not-found",
+      available: false,
+      transactionId: normalizedTransactionId
+    });
+  }
   try {
     const response = await request(
       `/api/v1/transactions/scored/${encodeURIComponent(normalizedTransactionId)}/engine-intelligence`,
@@ -238,7 +312,10 @@ function normalizeEngineIntelligenceResponse(response, fallbackTransactionId) {
     return unavailableEngineIntelligence(fallbackTransactionId);
   }
 
-  const transactionId = safeString(response.transactionId) || fallbackTransactionId;
+  const transactionId = safeRenderableString(response.transactionId) || fallbackTransactionId;
+  if (!isValidEngineIntelligenceTransactionId(transactionId)) {
+    return unavailableEngineIntelligence(fallbackTransactionId);
+  }
   if (response.available === false && response.reason === "NOT_PROJECTED") {
     return Object.freeze({
       state: "not-projected",
@@ -266,9 +343,9 @@ function normalizeEngineIntelligenceResponse(response, fallbackTransactionId) {
     contractVersion: Number.isFinite(Number(response.contractVersion)) ? Number(response.contractVersion) : null,
     generatedAt: safeString(response.generatedAt),
     comparison: Object.freeze({
-      agreementStatus: response.comparison.agreementStatus,
-      riskMismatchStatus: response.comparison.riskMismatchStatus,
-      scoreDeltaBucket: response.comparison.scoreDeltaBucket
+      agreementStatus: normalizedAllowedValue(response.comparison.agreementStatus, AGREEMENT_STATUSES),
+      riskMismatchStatus: normalizedAllowedValue(response.comparison.riskMismatchStatus, RISK_MISMATCH_STATUSES),
+      scoreDeltaBucket: normalizedAllowedValue(response.comparison.scoreDeltaBucket, SCORE_DELTA_BUCKETS)
     }),
     engineCount: engines.length,
     diagnosticSignalCount: diagnosticSignals.length,
@@ -301,13 +378,24 @@ function normalizeEngineResults(values) {
   if (!Array.isArray(values)) {
     return null;
   }
+  if (values.length > MAX_ENGINE_INTELLIGENCE_ENGINES) {
+    return null;
+  }
   const normalized = [];
-  for (const value of values.slice(0, 2)) {
-    const engineId = safeString(value?.engineId);
-    const engineType = safeString(value?.engineType);
-    const status = safeString(value?.status);
-    const scoreBucket = safeString(value?.scoreBucket);
+  for (const value of values) {
+    const engineId = safeRenderableString(value?.engineId);
+    const engineType = normalizedAllowedValue(value?.engineType, ENGINE_TYPES);
+    const status = normalizedAllowedValue(value?.status, ENGINE_STATUSES);
+    const scoreBucket = normalizedAllowedValue(value?.scoreBucket, SCORE_BUCKETS);
     if (!engineId || !engineType || !status || !scoreBucket) {
+      return null;
+    }
+    const riskLevel = normalizedOptionalAllowedValue(value?.riskLevel, RISK_LEVELS);
+    if (riskLevel === null) {
+      return null;
+    }
+    const reasonCodes = normalizeReasonCodes(value?.reasonCodes);
+    if (!reasonCodes || !isEngineResultOperationallyConsistent(status, scoreBucket, riskLevel)) {
       return null;
     }
     normalized.push(Object.freeze({
@@ -315,8 +403,8 @@ function normalizeEngineResults(values) {
       engineType,
       status,
       scoreBucket,
-      riskLevel: safeString(value?.riskLevel),
-      reasonCodes: Object.freeze(safeStringArray(value?.reasonCodes).slice(0, 5))
+      riskLevel,
+      reasonCodes: Object.freeze(reasonCodes)
     }));
   }
   return normalized;
@@ -326,24 +414,41 @@ function normalizeDiagnosticSignals(values) {
   if (!Array.isArray(values)) {
     return null;
   }
+  if (values.length > MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS) {
+    return null;
+  }
   const normalized = [];
-  for (const value of values.slice(0, 5)) {
-    const signalType = safeString(value?.signalType) || safeString(value?.signalCategory);
-    const scoreBucket = safeString(value?.scoreBucket);
-    if (!signalType || !scoreBucket) {
+  for (const value of values) {
+    const signalCategory = normalizedAllowedValue(value?.signalCategory, SIGNAL_CATEGORIES);
+    const engineId = safeRenderableString(value?.engineId);
+    const engineType = normalizedAllowedValue(value?.engineType, ENGINE_TYPES);
+    const engineStatus = normalizedAllowedValue(value?.engineStatus, ENGINE_STATUSES);
+    const scoreBucket = normalizedAllowedValue(value?.scoreBucket, SCORE_BUCKETS);
+    if (!signalCategory || !engineId || !engineType || !engineStatus || !scoreBucket) {
+      return null;
+    }
+    const riskLevel = normalizedOptionalAllowedValue(value?.riskLevel, RISK_LEVELS);
+    if (riskLevel === null) {
+      return null;
+    }
+    if (value?.reasonCodes !== undefined && !Array.isArray(value.reasonCodes)) {
+      return null;
+    }
+    const reasonCodes = normalizeReasonCodes([
+      ...safeStringArray(value?.reasonCodes),
+      safeString(value?.reasonCode)
+    ].filter(Boolean));
+    if (!reasonCodes || !isDiagnosticSignalOperationallyConsistent(signalCategory, engineStatus, scoreBucket, riskLevel)) {
       return null;
     }
     normalized.push(Object.freeze({
-      signalType,
-      engineId: safeString(value?.engineId),
-      engineType: safeString(value?.engineType),
-      engineStatus: safeString(value?.engineStatus),
+      signalCategory,
+      engineId,
+      engineType,
+      engineStatus,
       scoreBucket,
-      riskLevel: safeString(value?.riskLevel),
-      reasonCodes: Object.freeze([
-        ...safeStringArray(value?.reasonCodes),
-        safeString(value?.reasonCode)
-      ].filter(Boolean).slice(0, 5))
+      riskLevel,
+      reasonCodes: Object.freeze(reasonCodes)
     }));
   }
   return normalized;
@@ -353,9 +458,12 @@ function normalizeEngineWarnings(values) {
   if (!Array.isArray(values)) {
     return null;
   }
+  if (values.length > MAX_ENGINE_INTELLIGENCE_WARNINGS) {
+    return null;
+  }
   const normalized = [];
-  for (const value of values.slice(0, 10)) {
-    const warningCode = safeString(value?.warningCode);
+  for (const value of values) {
+    const warningCode = normalizedAllowedValue(value?.warningCode, WARNING_CODES);
     if (!warningCode || !Number.isFinite(Number(value?.count))) {
       return null;
     }
@@ -368,13 +476,75 @@ function normalizeEngineWarnings(values) {
 }
 
 function isValidComparison(value) {
+  const agreementStatus = normalizedAllowedValue(value?.agreementStatus, AGREEMENT_STATUSES);
+  const riskMismatchStatus = normalizedAllowedValue(value?.riskMismatchStatus, RISK_MISMATCH_STATUSES);
+  const scoreDeltaBucket = normalizedAllowedValue(value?.scoreDeltaBucket, SCORE_DELTA_BUCKETS);
   return Boolean(
     value
       && typeof value === "object"
-      && safeString(value.agreementStatus)
-      && safeString(value.riskMismatchStatus)
-      && safeString(value.scoreDeltaBucket)
+      && agreementStatus
+      && riskMismatchStatus
+      && scoreDeltaBucket
   );
+}
+
+function normalizeEngineIntelligenceTransactionId(transactionId) {
+  return transactionId === null || transactionId === undefined ? "" : String(transactionId).trim();
+}
+
+function isValidEngineIntelligenceTransactionId(transactionId) {
+  return ENGINE_INTELLIGENCE_TRANSACTION_ID_PATTERN.test(transactionId)
+    && !containsForbiddenEngineIntelligenceTerm(transactionId);
+}
+
+function normalizedAllowedValue(value, allowedValues) {
+  const normalized = safeRenderableString(value);
+  return normalized && allowedValues.has(normalized) ? normalized : "";
+}
+
+function normalizedOptionalAllowedValue(value, allowedValues) {
+  const normalized = safeString(value);
+  if (!normalized) {
+    return "";
+  }
+  if (containsForbiddenEngineIntelligenceTerm(normalized) || !allowedValues.has(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
+function normalizeReasonCodes(values) {
+  if (!Array.isArray(values) || values.length > MAX_ENGINE_INTELLIGENCE_REASON_CODES) {
+    return null;
+  }
+  const normalized = [];
+  for (const value of values) {
+    const reasonCode = safeRenderableString(value);
+    if (!reasonCode) {
+      return null;
+    }
+    normalized.push(reasonCode);
+  }
+  return normalized;
+}
+
+function isEngineResultOperationallyConsistent(status, scoreBucket, riskLevel) {
+  if (status === "AVAILABLE") {
+    return true;
+  }
+  return scoreBucket === "UNAVAILABLE" && !riskLevel;
+}
+
+function isDiagnosticSignalOperationallyConsistent(signalCategory, engineStatus, scoreBucket, riskLevel) {
+  if (engineStatus !== "AVAILABLE" || signalCategory === "OPERATIONAL_SIGNAL") {
+    return scoreBucket === "UNAVAILABLE" && !riskLevel;
+  }
+  return true;
+}
+
+function safeRenderableString(value) {
+  const normalized = safeString(value);
+  return normalized && !containsForbiddenEngineIntelligenceTerm(normalized) ? normalized : "";
 }
 
 function safeString(value) {
@@ -383,6 +553,15 @@ function safeString(value) {
 
 function safeStringArray(values) {
   return Array.isArray(values) ? values.map(safeString).filter(Boolean) : [];
+}
+
+function containsForbiddenEngineIntelligenceTerm(value) {
+  const compact = compactEngineIntelligenceText(value);
+  return FORBIDDEN_COMPACT_ENGINE_INTELLIGENCE_TERMS.some((term) => compact.includes(term));
+}
+
+function compactEngineIntelligenceText(value) {
+  return String(value || "").replace(/[^A-Za-z0-9]/g, "").toLowerCase();
 }
 
 function listGovernanceAdvisoriesWithRequest(request, { severity = "ALL", modelVersion = "", lifecycleStatus = "ALL", limit = 25 } = {}, { signal } = {}) {

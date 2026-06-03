@@ -32,6 +32,8 @@ describe("EngineIntelligenceAnalystUiDisplayDocsTest", () => {
     expect(docs).toContain("TIMEOUT/UNAVAILABLE/DEGRADED are operational statuses, not LOW risk.");
     expect(docs).toContain("UI must not render raw error bodies or internal fields.");
     expect(docs).toContain("UI wording must avoid final/recommended/winning/safe/approve/decline/block.");
+    expect(docs).toContain("Diagnostic only. Operational statuses and disagreement are investigation context.");
+    expect(docs).toContain("malformed available results fail closed");
     expect(docs).toContain("FDP-98 is the future feedback workflow branch.");
   });
 });

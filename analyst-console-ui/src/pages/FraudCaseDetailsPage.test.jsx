@@ -722,8 +722,8 @@ function availableEngineIntelligence() {
     transactionId: "txn-1",
     comparison: {
       agreementStatus: "AGREEMENT",
-      riskMismatchStatus: "MATCH",
-      scoreDeltaBucket: "NARROW"
+      riskMismatchStatus: "SAME_RISK_LEVEL",
+      scoreDeltaBucket: "SMALL"
     },
     engines: [],
     diagnosticSignals: [],

@@ -51,8 +51,22 @@ describe("EngineIntelligencePanel", () => {
 
     expect(await screen.findByRole("heading", { name: "Engine intelligence" })).toBeInTheDocument();
     expect(screen.getByText("Diagnostic engine output for this transaction.")).toBeInTheDocument();
-    expect(screen.getByText("rules-engine")).toBeInTheDocument();
-    expect(screen.getAllByText("VELOCITY_SPIKE").length).toBeGreaterThan(0);
+    expect(screen.getByText("Diagnostic only. Operational statuses and disagreement are investigation context.")).toBeInTheDocument();
+    expect(screen.getByText("rules.primary")).toBeInTheDocument();
+    expect(screen.getAllByText("HIGH_VELOCITY").length).toBeGreaterThan(0);
+  });
+
+  it("rendersDiagnosticOnlyDisclaimer", async () => {
+    renderPanel(availableResult());
+
+    expect(await screen.findByText("Diagnostic only. Operational statuses and disagreement are investigation context.")).toBeInTheDocument();
+  });
+
+  it("disclaimerDoesNotUseDecisioningActionLanguage", async () => {
+    renderPanel(availableResult());
+
+    expect(await screen.findByRole("heading", { name: "Engine intelligence" })).toBeInTheDocument();
+    expect(panelText()).not.toMatch(/recommended action|final result|decision source|approve|decline|block/i);
   });
 
   it("rendersComparisonSection", async () => {
@@ -63,9 +77,9 @@ describe("EngineIntelligencePanel", () => {
     expect(within(section).getByText("Engine agreement")).toBeInTheDocument();
     expect(within(section).getByText("DISAGREEMENT")).toBeInTheDocument();
     expect(within(section).getByText("Risk mismatch")).toBeInTheDocument();
-    expect(within(section).getByText("MISMATCH")).toBeInTheDocument();
+    expect(within(section).getByText("MATERIAL_RISK_MISMATCH")).toBeInTheDocument();
     expect(within(section).getByText("Score delta")).toBeInTheDocument();
-    expect(within(section).getByText("WIDE")).toBeInTheDocument();
+    expect(within(section).getByText("LARGE")).toBeInTheDocument();
   });
 
   it("rendersEngineResultsBoundedly", async () => {
@@ -73,7 +87,7 @@ describe("EngineIntelligencePanel", () => {
 
     expect(await screen.findByRole("heading", { name: "Engine results" })).toBeInTheDocument();
     expect(screen.getByText("RULES")).toBeInTheDocument();
-    expect(screen.getAllByText("COMPLETED").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("AVAILABLE").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Score bucket").length).toBeGreaterThan(0);
     expect(screen.getAllByText("HIGH").length).toBeGreaterThan(0);
   });
@@ -82,41 +96,41 @@ describe("EngineIntelligencePanel", () => {
     renderPanel(availableResult());
 
     expect(await screen.findByRole("heading", { name: "Diagnostic signals" })).toBeInTheDocument();
-    expect(screen.getByText("RULE_SIGNAL")).toBeInTheDocument();
-    expect(screen.getByText("MODEL_SIGNAL")).toBeInTheDocument();
+    expect(screen.getByText("FRAUD_SIGNAL")).toBeInTheDocument();
+    expect(screen.getByText("OPERATIONAL_SIGNAL")).toBeInTheDocument();
   });
 
   it("rendersWarningsBoundedly", async () => {
     renderPanel(availableResult());
 
     expect(await screen.findByRole("heading", { name: "Warnings" })).toBeInTheDocument();
-    expect(screen.getByText("PARTIAL_ENGINE_OUTPUT")).toBeInTheDocument();
+    expect(screen.getByText("EVIDENCE_UNSAFE_DROPPED")).toBeInTheDocument();
     expect(screen.getByText("1")).toBeInTheDocument();
   });
 
   it("rendersTimeoutAsOperationalStatus", async () => {
-    renderPanel(availableResult({ engineStatus: "TIMEOUT" }));
+    renderPanel(availableResult({ engineStatus: "TIMEOUT", engineRiskLevel: "", engineScoreBucket: "UNAVAILABLE" }));
 
     expect(await screen.findByText("Engine timed out")).toBeInTheDocument();
   });
 
   it("rendersUnavailableAsOperationalStatus", async () => {
-    renderPanel(availableResult({ engineStatus: "UNAVAILABLE" }));
+    renderPanel(availableResult({ engineStatus: "UNAVAILABLE", engineRiskLevel: "", engineScoreBucket: "UNAVAILABLE" }));
 
     expect((await screen.findAllByText("Engine unavailable")).length).toBeGreaterThan(0);
   });
 
   it("rendersDegradedAsOperationalStatus", async () => {
-    renderPanel(availableResult({ engineStatus: "DEGRADED" }));
+    renderPanel(availableResult({ engineStatus: "DEGRADED", engineRiskLevel: "", engineScoreBucket: "UNAVAILABLE" }));
 
     expect(await screen.findByText("Engine response degraded")).toBeInTheDocument();
   });
 
   it("doesNotRenderSafeTransactionForOperationalFailure", async () => {
-    renderPanel(availableResult({ engineStatus: "UNAVAILABLE", engineRiskLevel: "LOW" }));
+    renderPanel(availableResult({ engineStatus: "UNAVAILABLE", engineRiskLevel: "", engineScoreBucket: "UNAVAILABLE" }));
 
     expect((await screen.findAllByText("Engine unavailable")).length).toBeGreaterThan(0);
-    expect(panelText()).not.toMatch(/LOW risk|safe|no fraud|less severe|not suspicious|low risk because ML unavailable/i);
+    expect(panelText()).not.toMatch(/LOW risk|\bsafe\b|no fraud|less severe|not suspicious|low risk because ML unavailable/i);
   });
 
   it("rendersDiagnosticDisagreementAsDiagnosticOnly", async () => {
@@ -133,6 +147,13 @@ describe("EngineIntelligencePanel", () => {
     const card = operationalSignal.closest("article");
     expect(within(card).getByText("Engine unavailable")).toBeInTheDocument();
     expect(within(card).queryByText("Risk level")).not.toBeInTheDocument();
+  });
+
+  it("operationalSignalUsesSignalCategory", async () => {
+    renderPanel(availableResult());
+
+    const operationalSignal = await screen.findByText("OPERATIONAL_SIGNAL");
+    expect(operationalSignal.closest("article")).toHaveTextContent("Engine unavailable");
   });
 
   it.each([
@@ -197,7 +218,26 @@ describe("EngineIntelligencePanel", () => {
     renderPanel(availableResult());
 
     expect((await screen.findAllByText("Status")).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("COMPLETED").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("AVAILABLE").length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    ["availableStateWithoutComparisonRendersUnavailable", { ...availableResult(), comparison: null }],
+    ["availableStateWithMissingEnginesArrayRendersUnavailable", omitAvailableField("engines")],
+    ["availableStateWithMissingDiagnosticSignalsArrayRendersUnavailable", omitAvailableField("diagnosticSignals")],
+    ["availableStateWithMissingWarningsArrayRendersUnavailable", omitAvailableField("warnings")],
+    ["unknownPanelStateRendersUnavailable", { state: "unexpected" }]
+  ])("%s", async (_name, result) => {
+    renderPanel(result);
+
+    expect(await screen.findByText("Engine intelligence is temporarily unavailable.")).toBeInTheDocument();
+    expect(panelText()).not.toContain("rawEvidence");
+  });
+
+  it("malformedAvailableStateDoesNotThrowRuntimeException", async () => {
+    renderPanel({ state: "available", comparison: {}, rawEvidence: "rawEvidence" });
+
+    expect(await screen.findByText("Engine intelligence is temporarily unavailable.")).toBeInTheDocument();
   });
 
   it("loadingStateIsAccessible", () => {
@@ -232,49 +272,49 @@ function renderPanel(result) {
   return render(<EngineIntelligencePanel transactionId="txn-1" getEngineIntelligence={getEngineIntelligence} />);
 }
 
-function availableResult({ engineStatus = "COMPLETED", engineRiskLevel = "HIGH" } = {}) {
+function availableResult({ engineStatus = "AVAILABLE", engineRiskLevel = "HIGH", engineScoreBucket = "HIGH" } = {}) {
   return {
     state: "available",
     available: true,
     transactionId: "txn-1",
     comparison: {
       agreementStatus: "DISAGREEMENT",
-      riskMismatchStatus: "MISMATCH",
-      scoreDeltaBucket: "WIDE"
+      riskMismatchStatus: "MATERIAL_RISK_MISMATCH",
+      scoreDeltaBucket: "LARGE"
     },
     engines: [{
-      engineId: "rules-engine",
+      engineId: "rules.primary",
       engineType: "RULES",
       status: engineStatus,
-      scoreBucket: "HIGH",
+      scoreBucket: engineScoreBucket,
       riskLevel: engineRiskLevel,
-      reasonCodes: ["VELOCITY_SPIKE"],
+      reasonCodes: ["HIGH_VELOCITY"],
       rawEvidence: "rawEvidence"
     }],
     diagnosticSignals: [{
-      signalType: "RULE_SIGNAL",
-      engineStatus: "COMPLETED",
+      signalCategory: "FRAUD_SIGNAL",
+      engineStatus: "AVAILABLE",
       scoreBucket: "HIGH",
       riskLevel: "HIGH",
-      reasonCodes: ["VELOCITY_SPIKE"]
+      reasonCodes: ["HIGH_VELOCITY"]
     }, {
-      signalType: "MODEL_SIGNAL",
-      engineStatus: "COMPLETED",
-      scoreBucket: "MEDIUM",
-      reasonCodes: ["MODEL_DRIFT"]
-    }, {
-      signalType: "OPERATIONAL_SIGNAL",
+      signalCategory: "OPERATIONAL_SIGNAL",
       engineStatus: "UNAVAILABLE",
       scoreBucket: "UNAVAILABLE",
-      riskLevel: "LOW",
       reasonCodes: ["MODEL_TIMEOUT"]
     }],
     warnings: [{
-      warningCode: "PARTIAL_ENGINE_OUTPUT",
+      warningCode: "EVIDENCE_UNSAFE_DROPPED",
       count: 1,
       rawPayload: "rawPayload"
     }]
   };
+}
+
+function omitAvailableField(fieldName) {
+  const result = availableResult();
+  delete result[fieldName];
+  return result;
 }
 
 function panelText() {

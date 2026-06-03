@@ -37,6 +37,7 @@ Loading is non-blocking and does not block the fraud case page.
 `403` renders access denied without raw backend details.
 `404` renders transaction not found without raw backend details.
 `503`, network failure, server failure, and unexpected response shape render the same temporary unavailable state.
+Oversized arrays, unknown enum values, invalid transaction IDs, raw/internal terms in renderable fields, and malformed available results fail closed to the temporary unavailable or not-found state instead of rendering partial engine intelligence.
 
 ## Operational Wording
 
@@ -47,6 +48,7 @@ Operational status wording must not imply safe, no fraud, less severe, not suspi
 ## No Decisioning Wording
 
 UI wording must avoid final/recommended/winning/safe/approve/decline/block.
+The panel displays this diagnostic-only disclaimer: "Diagnostic only. Operational statuses and disagreement are investigation context."
 Diagnostic comparison is displayed as diagnostic only and must not become a recommendation, action, platform verdict, or decision source.
 
 ## No Raw/Internal Rendering
