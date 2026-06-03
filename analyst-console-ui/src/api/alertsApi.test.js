@@ -36,6 +36,7 @@ describe("alertsApi auth headers", () => {
   const getFraudCase = (...args) => apiClient.getFraudCase(...args);
   const getFraudCaseEvidenceSummary = (...args) => apiClient.getFraudCaseEvidenceSummary(...args);
   const getFraudCaseEvidenceTimeline = (...args) => apiClient.getFraudCaseEvidenceTimeline(...args);
+  const getEngineIntelligence = (...args) => apiClient.getEngineIntelligence(...args);
   const updateFraudCase = (...args) => apiClient.updateFraudCase(...args);
   const submitAnalystDecision = (...args) => apiClient.submitAnalystDecision(...args);
 
@@ -1227,6 +1228,98 @@ describe("alertsApi auth headers", () => {
       })
     }));
   });
+
+  it("getEngineIntelligenceReturnsAvailableData", async () => {
+    const signal = new AbortController().signal;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable()));
+
+    const result = await getEngineIntelligence("txn/with spaces", { signal });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/transactions/scored/txn%2Fwith%20spaces/engine-intelligence",
+      expect.objectContaining({ signal })
+    );
+    expect(result).toMatchObject({
+      state: "available",
+      available: true,
+      comparison: {
+        agreementStatus: "DISAGREEMENT",
+        riskMismatchStatus: "MISMATCH",
+        scoreDeltaBucket: "WIDE"
+      }
+    });
+    expect(result.engines[0]).toEqual({
+      engineId: "rules-engine",
+      engineType: "RULES",
+      status: "COMPLETED",
+      scoreBucket: "HIGH",
+      riskLevel: "HIGH",
+      reasonCodes: ["VELOCITY_SPIKE"]
+    });
+  });
+
+  it("getEngineIntelligenceReturnsNotProjectedState", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      transactionId: "txn-old",
+      available: false,
+      reason: "NOT_PROJECTED"
+    }));
+
+    await expect(getEngineIntelligence("txn-old")).resolves.toEqual({
+      state: "not-projected",
+      available: false,
+      transactionId: "txn-old",
+      reason: "NOT_PROJECTED"
+    });
+  });
+
+  it.each([
+    [403, "unauthorized"],
+    [401, "unauthorized"],
+    [404, "not-found"],
+    [503, "unavailable"]
+  ])("getEngineIntelligenceHandles%s", async (status, state) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      message: "raw backend failure /api/v1/transactions/scored/txn-1/engine-intelligence token-secret stacktrace"
+    }, status));
+
+    await expect(getEngineIntelligence("txn-1")).resolves.toMatchObject({ state, transactionId: "txn-1" });
+  });
+
+  it("getEngineIntelligenceHandlesNetworkFailureSafely", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network raw failure with endpoint and token"));
+
+    await expect(getEngineIntelligence("txn-1")).resolves.toEqual({
+      state: "unavailable",
+      available: false,
+      transactionId: "txn-1"
+    });
+  });
+
+  it("getEngineIntelligenceFailsClosedOnUnexpectedShape", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      transactionId: "txn-1",
+      available: true,
+      comparison: null,
+      rawEvidence: "secret"
+    }));
+
+    await expect(getEngineIntelligence("txn-1")).resolves.toMatchObject({ state: "unavailable" });
+  });
+
+  it("getEngineIntelligenceDoesNotExposeRawErrorBody", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      message: "raw backend failure",
+      details: ["endpoint:/api/v1/transactions/scored/txn-1/engine-intelligence", "token-secret", "stacktrace"]
+    }, 503));
+
+    const result = await getEngineIntelligence("txn-1");
+
+    expect(JSON.stringify(result)).not.toContain("raw backend failure");
+    expect(JSON.stringify(result)).not.toContain("endpoint");
+    expect(JSON.stringify(result)).not.toContain("token-secret");
+    expect(JSON.stringify(result)).not.toContain("stacktrace");
+  });
 });
 
 async function refreshedBffProvider(headerName = "X-CSRF-TOKEN", token = "csrf-1") {
@@ -1278,6 +1371,40 @@ function evidenceTimeline() {
     legacy: false,
     truncated: false,
     truncationReason: null
+  };
+}
+
+function engineIntelligenceAvailable() {
+  return {
+    transactionId: "txn/with spaces",
+    available: true,
+    contractVersion: 1,
+    generatedAt: "2026-06-02T10:00:00Z",
+    comparison: {
+      agreementStatus: "DISAGREEMENT",
+      riskMismatchStatus: "MISMATCH",
+      scoreDeltaBucket: "WIDE"
+    },
+    engines: [{
+      engineId: "rules-engine",
+      engineType: "RULES",
+      status: "COMPLETED",
+      riskLevel: "HIGH",
+      scoreBucket: "HIGH",
+      reasonCodes: ["VELOCITY_SPIKE"],
+      rawEvidence: "must not leak"
+    }],
+    diagnosticSignals: [{
+      signalCategory: "RULE_SIGNAL",
+      scoreBucket: "HIGH",
+      riskLevel: "HIGH",
+      reasonCode: "VELOCITY_SPIKE"
+    }],
+    warnings: [{
+      warningCode: "PARTIAL_ENGINE_OUTPUT",
+      count: 1,
+      rawPayload: "must not leak"
+    }]
   };
 }
 

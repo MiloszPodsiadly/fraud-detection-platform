@@ -1,4 +1,5 @@
 import { ApiError } from "./apiError.js";
+import { isAbortError } from "./apiErrors.js";
 import { authHeadersForSession } from "../auth/authHeaders.js";
 import { getConfiguredAuthProvider } from "../auth/authProvider.js";
 
@@ -48,6 +49,7 @@ export function createAlertsApiClient({
       `/api/v1/fraud-cases/${encodeURIComponent(caseId)}/evidence-timeline`,
       evidenceTimelineRequestOptions(requestOptions)
     ),
+    getEngineIntelligence: (transactionId, requestOptions) => getEngineIntelligenceWithRequest(request, transactionId, requestOptions),
     updateFraudCase: (caseId, decision, { idempotencyKey, signal } = {}) => request(`/api/v1/fraud-cases/${encodeURIComponent(caseId)}`, {
       method: "PATCH",
       signal,
@@ -207,6 +209,180 @@ function evidenceTimelineRequestOptions({ signal } = {}) {
   return {
     ...(signal ? { signal } : {})
   };
+}
+
+async function getEngineIntelligenceWithRequest(request, transactionId, requestOptions = {}) {
+  const normalizedTransactionId = String(transactionId || "").trim();
+  try {
+    const response = await request(
+      `/api/v1/transactions/scored/${encodeURIComponent(normalizedTransactionId)}/engine-intelligence`,
+      engineIntelligenceRequestOptions(requestOptions)
+    );
+    return normalizeEngineIntelligenceResponse(response, normalizedTransactionId);
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
+    return engineIntelligenceFailureState(error, normalizedTransactionId);
+  }
+}
+
+function engineIntelligenceRequestOptions({ signal } = {}) {
+  return {
+    ...(signal ? { signal } : {})
+  };
+}
+
+function normalizeEngineIntelligenceResponse(response, fallbackTransactionId) {
+  if (!response || typeof response !== "object") {
+    return unavailableEngineIntelligence(fallbackTransactionId);
+  }
+
+  const transactionId = safeString(response.transactionId) || fallbackTransactionId;
+  if (response.available === false && response.reason === "NOT_PROJECTED") {
+    return Object.freeze({
+      state: "not-projected",
+      available: false,
+      transactionId,
+      reason: "NOT_PROJECTED"
+    });
+  }
+
+  if (response.available !== true || !isValidComparison(response.comparison)) {
+    return unavailableEngineIntelligence(transactionId);
+  }
+
+  const engines = normalizeEngineResults(response.engines);
+  const diagnosticSignals = normalizeDiagnosticSignals(response.diagnosticSignals);
+  const warnings = normalizeEngineWarnings(response.warnings);
+  if (!engines || !diagnosticSignals || !warnings) {
+    return unavailableEngineIntelligence(transactionId);
+  }
+
+  return Object.freeze({
+    state: "available",
+    available: true,
+    transactionId,
+    contractVersion: Number.isFinite(Number(response.contractVersion)) ? Number(response.contractVersion) : null,
+    generatedAt: safeString(response.generatedAt),
+    comparison: Object.freeze({
+      agreementStatus: response.comparison.agreementStatus,
+      riskMismatchStatus: response.comparison.riskMismatchStatus,
+      scoreDeltaBucket: response.comparison.scoreDeltaBucket
+    }),
+    engineCount: engines.length,
+    diagnosticSignalCount: diagnosticSignals.length,
+    warningCount: warnings.length,
+    engines: Object.freeze(engines),
+    diagnosticSignals: Object.freeze(diagnosticSignals),
+    warnings: Object.freeze(warnings)
+  });
+}
+
+function engineIntelligenceFailureState(error, transactionId) {
+  if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+    return Object.freeze({ state: "unauthorized", available: false, transactionId });
+  }
+  if (error instanceof ApiError && error.status === 404) {
+    return Object.freeze({ state: "not-found", available: false, transactionId });
+  }
+  return unavailableEngineIntelligence(transactionId);
+}
+
+function unavailableEngineIntelligence(transactionId) {
+  return Object.freeze({
+    state: "unavailable",
+    available: false,
+    transactionId
+  });
+}
+
+function normalizeEngineResults(values) {
+  if (!Array.isArray(values)) {
+    return null;
+  }
+  const normalized = [];
+  for (const value of values.slice(0, 2)) {
+    const engineId = safeString(value?.engineId);
+    const engineType = safeString(value?.engineType);
+    const status = safeString(value?.status);
+    const scoreBucket = safeString(value?.scoreBucket);
+    if (!engineId || !engineType || !status || !scoreBucket) {
+      return null;
+    }
+    normalized.push(Object.freeze({
+      engineId,
+      engineType,
+      status,
+      scoreBucket,
+      riskLevel: safeString(value?.riskLevel),
+      reasonCodes: Object.freeze(safeStringArray(value?.reasonCodes).slice(0, 5))
+    }));
+  }
+  return normalized;
+}
+
+function normalizeDiagnosticSignals(values) {
+  if (!Array.isArray(values)) {
+    return null;
+  }
+  const normalized = [];
+  for (const value of values.slice(0, 5)) {
+    const signalType = safeString(value?.signalType) || safeString(value?.signalCategory);
+    const scoreBucket = safeString(value?.scoreBucket);
+    if (!signalType || !scoreBucket) {
+      return null;
+    }
+    normalized.push(Object.freeze({
+      signalType,
+      engineId: safeString(value?.engineId),
+      engineType: safeString(value?.engineType),
+      engineStatus: safeString(value?.engineStatus),
+      scoreBucket,
+      riskLevel: safeString(value?.riskLevel),
+      reasonCodes: Object.freeze([
+        ...safeStringArray(value?.reasonCodes),
+        safeString(value?.reasonCode)
+      ].filter(Boolean).slice(0, 5))
+    }));
+  }
+  return normalized;
+}
+
+function normalizeEngineWarnings(values) {
+  if (!Array.isArray(values)) {
+    return null;
+  }
+  const normalized = [];
+  for (const value of values.slice(0, 10)) {
+    const warningCode = safeString(value?.warningCode);
+    if (!warningCode || !Number.isFinite(Number(value?.count))) {
+      return null;
+    }
+    normalized.push(Object.freeze({
+      warningCode,
+      count: Number(value.count)
+    }));
+  }
+  return normalized;
+}
+
+function isValidComparison(value) {
+  return Boolean(
+    value
+      && typeof value === "object"
+      && safeString(value.agreementStatus)
+      && safeString(value.riskMismatchStatus)
+      && safeString(value.scoreDeltaBucket)
+  );
+}
+
+function safeString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function safeStringArray(values) {
+  return Array.isArray(values) ? values.map(safeString).filter(Boolean) : [];
 }
 
 function listGovernanceAdvisoriesWithRequest(request, { severity = "ALL", modelVersion = "", lifecycleStatus = "ALL", limit = 25 } = {}, { signal } = {}) {
