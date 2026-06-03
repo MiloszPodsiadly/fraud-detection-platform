@@ -58,7 +58,9 @@ for (const file of changedFiles) {
     if (!allowedEndpointFiles.has(normalized) && !normalized.startsWith(".github/workflows/") && /["']\/(?:api|governance|system|bff)\//.test(sourceLine)) {
       violations.push(`${normalized}: endpoint strings must stay behind the API client boundary.`);
     }
-    if (!isAllowedNarrativeFile(normalized) && introducesForbiddenScope(sourceLine)) {
+    if (!isAllowedNarrativeFile(normalized)
+        && introducesForbiddenScope(sourceLine)
+        && !isAllowedFdp98FeedbackApiClientScope(normalized, sourceLine)) {
       violations.push(`${normalized}: FDP-53 must not introduce product workflow, idempotency, Kafka/outbox/finality, auth mode, or speculative prefetch semantics.`);
     }
     if (isWorkspaceRuntimeFile(normalized) && defaultWrapperPattern.test(sourceLine)) {
@@ -128,6 +130,11 @@ function introducesForbiddenScope(sourceLine) {
     || /\b(onExport|handleExport|export[A-Z][A-Za-z]*)\b/.test(sourceLine)
     || prefetchPattern.test(sourceLine)
     || newAuthModePattern.test(sourceLine);
+}
+
+function isAllowedFdp98FeedbackApiClientScope(file, sourceLine) {
+  return file === "analyst-console-ui/src/api/alertsApi.js"
+    && /submitEngineIntelligenceFeedback|engine-intelligence\/feedback|idempotencyKey|X-Idempotency-Key/.test(sourceLine);
 }
 
 function isCheckedTextFile(file) {
