@@ -27,6 +27,7 @@ describe("SessionBadge", () => {
     expect(screen.getByText("fraud-case:audit:read")).toBeInTheDocument();
     expect(screen.getByText("fraud-case:update")).toBeInTheDocument();
     expect(screen.getByText("suspicious-transaction:read")).toBeInTheDocument();
+    expect(screen.getByText("engine-intelligence:feedback:read")).toBeInTheDocument();
     expect(screen.getByText("engine-intelligence:feedback:write")).toBeInTheDocument();
   });
 
