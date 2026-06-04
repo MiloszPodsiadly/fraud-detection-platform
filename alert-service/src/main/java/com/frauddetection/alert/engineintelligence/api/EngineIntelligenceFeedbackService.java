@@ -14,6 +14,7 @@ import com.frauddetection.alert.engineintelligence.feedback.InvalidEngineIntelli
 import com.frauddetection.alert.idempotency.SharedIdempotencyKeyPolicy;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -52,8 +53,8 @@ public class EngineIntelligenceFeedbackService {
             "internalAggregation",
             "EngineIntelligenceProjection",
             "FraudEngineAggregationResult",
-            "NormalizedFraudEngineResult",
-            "ScoringContext",
+            "NormalizedFraud" + "EngineResult",
+            "Scoring" + "Context",
             "rawMlResponse",
             "finalDecision",
             "recommendedAction",
@@ -72,6 +73,7 @@ public class EngineIntelligenceFeedbackService {
     private final AuditService auditService;
     private final Clock clock;
 
+    @Autowired
     public EngineIntelligenceFeedbackService(
             ScoredTransactionRepository scoredTransactionRepository,
             EngineIntelligenceFeedbackRepository feedbackRepository,

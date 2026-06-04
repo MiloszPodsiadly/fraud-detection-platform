@@ -136,6 +136,7 @@ The FDP-49 route ownership docs represent these Spring MVC controllers:
 - `OutboxRecoveryController`
 - `RegulatedMutationRecoveryController`
 - `ScoredTransactionController`
+- `EngineIntelligenceFeedbackController`
 - `EngineIntelligenceReadController`
 - `SuspiciousTransactionReadController`
 - `SystemTrustLevelController`
