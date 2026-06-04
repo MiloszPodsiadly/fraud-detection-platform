@@ -18,7 +18,7 @@ describe("EngineIntelligenceFeedbackPanel", () => {
 
   it.each([
     ["submitsHelpfulFeedback", "Helpful", "HELPFUL", "ENGINE_INTELLIGENCE_USEFULNESS"],
-    ["submitsNotHelpfulFeedback", "Not helpful", "NOT_HELPFUL", "ENGINE_DISAGREEMENT_REVIEW"],
+    ["submitsNotHelpfulFeedback", "Not helpful", "NOT_HELPFUL", "ENGINE_INTELLIGENCE_USEFULNESS"],
     ["submitsNotSureFeedback", "Not sure", "NOT_SURE", "ENGINE_INTELLIGENCE_USEFULNESS"]
   ])("%s", async (_name, label, usefulness, feedbackType) => {
     const submit = vi.fn().mockResolvedValue({ state: "saved", operationStatus: "CREATED" });
@@ -40,7 +40,53 @@ describe("EngineIntelligenceFeedbackPanel", () => {
     expect(await screen.findByText("Feedback saved.")).toBeInTheDocument();
   });
 
-  it("selectedReasonCodesIsEmptyWhenNoReasonCodeSelectorExists", async () => {
+  it("notHelpfulDoesNotAutomaticallyMeanDisagreement", async () => {
+    const submit = vi.fn().mockResolvedValue({ state: "saved", operationStatus: "CREATED" });
+    renderFeedbackPanel({ submitEngineIntelligenceFeedback: submit });
+
+    fireEvent.click(screen.getByLabelText("Not helpful"));
+    fireEvent.click(screen.getByLabelText("Signals looked incorrect"));
+    fireEvent.click(screen.getByRole("button", { name: "Submit feedback" }));
+
+    await waitFor(() => expect(submit).toHaveBeenCalled());
+    expect(submit.mock.calls[0][1]).toMatchObject({
+      feedbackType: "ENGINE_INTELLIGENCE_USEFULNESS",
+      usefulness: "NOT_HELPFUL",
+      accuracyAssessment: "SIGNALS_LOOK_INCORRECT"
+    });
+  });
+
+  it("operationalIssueMapsToOperationalStatusReview", async () => {
+    const submit = vi.fn().mockResolvedValue({ state: "saved", operationStatus: "CREATED" });
+    renderFeedbackPanel({ submitEngineIntelligenceFeedback: submit });
+
+    fireEvent.click(screen.getByLabelText("Helpful"));
+    fireEvent.click(screen.getByLabelText("Operational issue affected review"));
+    fireEvent.click(screen.getByRole("button", { name: "Submit feedback" }));
+
+    await waitFor(() => expect(submit).toHaveBeenCalled());
+    expect(submit.mock.calls[0][1]).toMatchObject({
+      feedbackType: "OPERATIONAL_STATUS_REVIEW",
+      accuracyAssessment: "OPERATIONAL_ISSUE_AFFECTED_REVIEW"
+    });
+  });
+
+  it("notProjectedMapsToMissingIntelligenceReview", async () => {
+    const submit = vi.fn().mockResolvedValue({ state: "saved", operationStatus: "CREATED" });
+    renderFeedbackPanel({ submitEngineIntelligenceFeedback: submit, engineIntelligenceAvailable: false });
+
+    fireEvent.click(screen.getByLabelText("Not sure"));
+    fireEvent.click(screen.getByLabelText("Operational issue affected review"));
+    fireEvent.click(screen.getByRole("button", { name: "Submit feedback" }));
+
+    await waitFor(() => expect(submit).toHaveBeenCalled());
+    expect(submit.mock.calls[0][1]).toMatchObject({
+      feedbackType: "MISSING_INTELLIGENCE_REVIEW",
+      engineIntelligenceAvailable: false
+    });
+  });
+
+  it("uiV1DoesNotSubmitSelectedReasonCodesWithoutExplicitReasonCodeSelector", async () => {
     const submit = vi.fn().mockResolvedValue({ state: "saved", operationStatus: "CREATED" });
     renderFeedbackPanel({ submitEngineIntelligenceFeedback: submit });
 

@@ -142,9 +142,6 @@ function feedbackTypeFor({ engineIntelligenceAvailable, usefulness, accuracyAsse
   if (accuracyAssessment === "OPERATIONAL_ISSUE_AFFECTED_REVIEW") {
     return "OPERATIONAL_STATUS_REVIEW";
   }
-  if (usefulness === "NOT_HELPFUL") {
-    return "ENGINE_DISAGREEMENT_REVIEW";
-  }
   return "ENGINE_INTELLIGENCE_USEFULNESS";
 }
 
