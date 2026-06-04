@@ -10,7 +10,7 @@ The feedback surface is transaction-scoped and uses `POST /api/v1/transactions/s
 
 ## Non-goals
 
-FDP-98 does not automatically change scoring, alert severity, fraud case status, approval, decline, blocking, payment authorization, rules, or model training. Feedback is not a training label, ground truth, or model correction.
+FDP-98 does not automatically change scoring, alert severity, fraud case status, approval, decline, blocking, payment authorization, rules, or model training. Feedback is not a training label, ground truth, model correction, feedback analytics surface, or export workflow.
 
 ## Endpoint
 
@@ -28,7 +28,9 @@ FDP-98 v1 is transaction-scoped. The feedback request does not accept client-sup
 
 ## Structured-Only V1
 
-FDP-98 v1 has no free-text feedback. The client and server use bounded enums and bounded reason codes only. The current UI has no reason-code selector, so it submits `selectedReasonCodes` as an empty list and does not reuse `accuracyAssessment` enum values as reason codes.
+FDP-98 v1 has no free-text feedback. The client and server use bounded enums and bounded reason codes only. The current UI has no reason-code selector, so it submits `selectedReasonCodes` as an empty list and does not reuse `accuracyAssessment` enum values as reason codes. The backend accepts bounded `selectedReasonCodes` for future compatibility, but future UI support must submit only reason codes selected from bounded engine-intelligence data or a public allowlist.
+
+`NOT_HELPFUL` is usefulness feedback, not automatically a disagreement review. `ENGINE_DISAGREEMENT_REVIEW` requires explicit disagreement context or a future dedicated UI control.
 
 ## Append-Only Persistence
 
@@ -43,7 +45,7 @@ Idempotency prevents duplicate submissions. The same actor, transaction, idempot
 
 Successful feedback creates an audit entry. The audit entry includes bounded feedback metadata and must not include raw request bodies, raw payloads, tokens, secrets, endpoint strings, stacktraces, internal projection objects, client-supplied case context, or raw engine intelligence responses.
 
-A feedback submission is not reported as `CREATED` unless the feedback record and success audit both complete. In local non-transactional compatibility mode, a fresh feedback record is compensated if the success audit fails after the save.
+A feedback submission is not reported as `CREATED` unless the feedback record and success audit both complete. In regulated transaction mode, save and audit rely on the regulated mutation transaction boundary. In local transaction mode `OFF`, the service compensates a fresh saved feedback record if audit fails after the save. This `OFF`-mode compensation is a local compatibility fallback, not a replacement for regulated transactional behavior.
 
 ## UI Behavior
 
