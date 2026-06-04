@@ -60,7 +60,6 @@ describe("EngineIntelligencePanel", () => {
     render(
       <EngineIntelligencePanel
         transactionId="txn-1"
-        fraudCaseId="case-1"
         getEngineIntelligence={vi.fn().mockResolvedValue(availableResult())}
         submitEngineIntelligenceFeedback={vi.fn().mockResolvedValue({ state: "saved" })}
         canSubmitFeedback
@@ -71,6 +70,40 @@ describe("EngineIntelligencePanel", () => {
     expect(within(panel).getByRole("heading", { name: "Engine intelligence" })).toBeInTheDocument();
     expect(within(panel).getByRole("heading", { name: "Was this engine intelligence useful?" })).toBeInTheDocument();
     expect(within(panel).getByRole("button", { name: "Submit feedback" })).toBeDisabled();
+  });
+
+  it("rendersFeedbackControlsForNotProjectedStateWhenSubmitClientIsProvided", async () => {
+    render(
+      <EngineIntelligencePanel
+        transactionId="txn-1"
+        getEngineIntelligence={vi.fn().mockResolvedValue({ state: "not-projected", available: false, reason: "NOT_PROJECTED" })}
+        submitEngineIntelligenceFeedback={vi.fn().mockResolvedValue({ state: "saved" })}
+        canSubmitFeedback
+      />
+    );
+
+    const panel = await screen.findByTestId("engine-intelligence-panel");
+    expect(within(panel).getByText("Engine intelligence is not available for this transaction.")).toBeInTheDocument();
+    expect(within(panel).getByRole("heading", { name: "Was this engine intelligence useful?" })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["unavailable", { state: "unavailable" }],
+    ["unauthorized", { state: "unauthorized" }],
+    ["not-found", { state: "not-found" }]
+  ])("doesNotRenderFeedbackControlsFor%sState", async (_state, result) => {
+    render(
+      <EngineIntelligencePanel
+        transactionId="txn-1"
+        getEngineIntelligence={vi.fn().mockResolvedValue(result)}
+        submitEngineIntelligenceFeedback={vi.fn().mockResolvedValue({ state: "saved" })}
+        canSubmitFeedback
+      />
+    );
+
+    const panel = await screen.findByTestId("engine-intelligence-panel");
+    expect(within(panel).queryByRole("heading", { name: "Was this engine intelligence useful?" })).not.toBeInTheDocument();
+    expect(within(panel).queryByRole("button", { name: "Submit feedback" })).not.toBeInTheDocument();
   });
 
   it("rendersDiagnosticOnlyDisclaimer", async () => {

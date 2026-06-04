@@ -20,7 +20,6 @@ const SECURE_REQUEST_ID_ERROR = "Feedback could not be saved. Please try again."
 
 export function EngineIntelligenceFeedbackPanel({
   transactionId,
-  fraudCaseId,
   engineIntelligenceAvailable,
   submitEngineIntelligenceFeedback,
   canSubmitFeedback = false,
@@ -69,8 +68,7 @@ export function EngineIntelligenceFeedbackPanel({
       usefulness,
       accuracyAssessment,
       engineIntelligenceAvailable: engineIntelligenceAvailable === true,
-      selectedReasonCodes: [accuracyAssessment],
-      ...(fraudCaseId ? { fraudCaseId } : {})
+      selectedReasonCodes: []
     }, { idempotencyKey: nextIdempotencyKey });
 
     if (result?.state === "saved") {

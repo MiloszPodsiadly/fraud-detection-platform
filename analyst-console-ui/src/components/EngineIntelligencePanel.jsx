@@ -13,7 +13,6 @@ export function EngineIntelligencePanel({
   transactionId,
   getEngineIntelligence,
   submitEngineIntelligenceFeedback,
-  fraudCaseId,
   canSubmitFeedback = false,
   className = ""
 }) {
@@ -73,7 +72,6 @@ export function EngineIntelligencePanel({
       {!state.isLoading && !state.error && typeof submitEngineIntelligenceFeedback === "function" && shouldRenderFeedback(state.result) && (
         <EngineIntelligenceFeedbackPanel
           transactionId={transactionId}
-          fraudCaseId={fraudCaseId}
           engineIntelligenceAvailable={state.result?.state === "available"}
           submitEngineIntelligenceFeedback={submitEngineIntelligenceFeedback}
           canSubmitFeedback={canSubmitFeedback}
@@ -85,7 +83,7 @@ export function EngineIntelligencePanel({
 }
 
 function shouldRenderFeedback(result) {
-  return ["available", "not-projected", "unavailable"].includes(result?.state);
+  return ["available", "not-projected"].includes(result?.state);
 }
 
 function EngineIntelligenceContent({ result }) {

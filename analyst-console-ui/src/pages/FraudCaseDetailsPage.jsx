@@ -388,7 +388,6 @@ export function FraudCaseDetailsPage({
                                 transactionId={transaction.transactionId}
                                 getEngineIntelligence={apiClient.getEngineIntelligence}
                                 submitEngineIntelligenceFeedback={apiClient.submitEngineIntelligenceFeedback}
-                                fraudCaseId={fraudCase.caseId || caseId}
                                 canSubmitFeedback={canSubmitEngineIntelligenceFeedback}
                               />
                             </td>

@@ -369,17 +369,12 @@ function normalizeEngineIntelligenceFeedbackPayload(feedback) {
   if (!selectedReasonCodes) {
     return null;
   }
-  const fraudCaseId = normalizeOptionalBoundedIdentifier(feedback.fraudCaseId);
-  if (fraudCaseId === null) {
-    return null;
-  }
   return Object.freeze({
     feedbackType,
     usefulness,
     accuracyAssessment,
     engineIntelligenceAvailable: feedback.engineIntelligenceAvailable,
-    selectedReasonCodes,
-    ...(fraudCaseId ? { fraudCaseId } : {})
+    selectedReasonCodes
   });
 }
 
@@ -392,7 +387,6 @@ function normalizeEngineIntelligenceFeedbackResponse(response) {
       state: "saved",
       operationStatus: response.operationStatus,
       feedbackId: safeString(response.feedbackId),
-      correlationId: safeString(response.correlationId),
       transactionId: safeString(response.transactionId)
     });
   }
@@ -410,7 +404,7 @@ function engineIntelligenceFeedbackFailureState(error) {
     return Object.freeze({ state: "not-found" });
   }
   if (error instanceof ApiError && error.status === 409) {
-    return Object.freeze({ state: "saved", operationStatus: "EXISTING" });
+    return Object.freeze({ state: "validation-error" });
   }
   return Object.freeze({ state: "unavailable" });
 }
@@ -625,14 +619,6 @@ function normalizedOptionalAllowedValue(value, allowedValues) {
     return null;
   }
   return normalized;
-}
-
-function normalizeOptionalBoundedIdentifier(value) {
-  if (value === undefined || value === null || String(value).trim() === "") {
-    return "";
-  }
-  const normalized = safeRenderableString(value);
-  return ENGINE_INTELLIGENCE_TRANSACTION_ID_PATTERN.test(normalized) ? normalized : null;
 }
 
 function normalizeReasonCodes(values) {

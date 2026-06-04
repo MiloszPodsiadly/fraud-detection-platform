@@ -1380,9 +1380,9 @@ describe("alertsApi auth headers", () => {
       usefulness: "HELPFUL",
       accuracyAssessment: "SIGNALS_LOOK_CORRECT",
       engineIntelligenceAvailable: true,
-      selectedReasonCodes: ["HIGH_VELOCITY"],
-      fraudCaseId: "case-1"
+      selectedReasonCodes: ["HIGH_VELOCITY"]
     });
+    expect(payload).not.toHaveProperty("fraudCaseId");
     expect(JSON.stringify(payload)).not.toContain("submittedBy");
     expect(JSON.stringify(payload)).not.toContain("submittedAt");
     expect(JSON.stringify(payload)).not.toContain("rawEngineIntelligence");
@@ -1409,7 +1409,7 @@ describe("alertsApi auth headers", () => {
     [401, "unauthorized"],
     [403, "unauthorized"],
     [404, "not-found"],
-    [409, "saved"],
+    [409, "validation-error"],
     [503, "unavailable"]
   ])("submitFeedbackMaps%sSafely", async (status, state) => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
@@ -1632,16 +1632,12 @@ function engineIntelligenceFeedbackResponse(overrides = {}) {
   return {
     feedbackId: "feedback-1",
     transactionId: "txn-1",
-    fraudCaseId: "case-1",
     engineIntelligenceAvailable: true,
     feedbackType: "ENGINE_INTELLIGENCE_USEFULNESS",
     usefulness: "HELPFUL",
     accuracyAssessment: "SIGNALS_LOOK_CORRECT",
     selectedReasonCodes: ["HIGH_VELOCITY"],
-    submittedBy: "analyst-1",
     submittedAt: "2026-06-03T10:00:00Z",
-    correlationId: "corr-1",
-    createdAt: "2026-06-03T10:00:00Z",
     operationStatus: "CREATED",
     ...overrides
   };

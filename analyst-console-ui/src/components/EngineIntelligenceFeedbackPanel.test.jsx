@@ -34,10 +34,23 @@ describe("EngineIntelligenceFeedbackPanel", () => {
       usefulness,
       accuracyAssessment: "SIGNALS_LOOK_CORRECT",
       engineIntelligenceAvailable: true,
-      selectedReasonCodes: ["SIGNALS_LOOK_CORRECT"],
-      fraudCaseId: "case-1"
+      selectedReasonCodes: []
     }), expect.objectContaining({ idempotencyKey: expect.stringMatching(/^engine-intelligence-feedback-/) }));
+    expect(submit.mock.calls[0][1]).not.toHaveProperty("fraudCaseId");
     expect(await screen.findByText("Feedback saved.")).toBeInTheDocument();
+  });
+
+  it("selectedReasonCodesIsEmptyWhenNoReasonCodeSelectorExists", async () => {
+    const submit = vi.fn().mockResolvedValue({ state: "saved", operationStatus: "CREATED" });
+    renderFeedbackPanel({ submitEngineIntelligenceFeedback: submit });
+
+    fireEvent.click(screen.getByLabelText("Helpful"));
+    fireEvent.click(screen.getByLabelText("Signals looked correct"));
+    fireEvent.click(screen.getByRole("button", { name: "Submit feedback" }));
+
+    await waitFor(() => expect(submit).toHaveBeenCalled());
+    expect(submit.mock.calls[0][1].selectedReasonCodes).toEqual([]);
+    expect(submit.mock.calls[0][1].selectedReasonCodes).not.toContain("SIGNALS_LOOK_CORRECT");
   });
 
   it("disablesSubmitWhilePending", async () => {
@@ -77,7 +90,6 @@ function renderFeedbackPanel(overrides = {}) {
   return render(
     <EngineIntelligenceFeedbackPanel
       transactionId="txn-1"
-      fraudCaseId="case-1"
       engineIntelligenceAvailable
       canSubmitFeedback
       submitEngineIntelligenceFeedback={vi.fn().mockResolvedValue({ state: "saved" })}
