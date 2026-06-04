@@ -22,7 +22,7 @@ public class EngineIntelligenceFeedbackController {
     @PostMapping("/{transactionId}/engine-intelligence/feedback")
     public ResponseEntity<EngineIntelligenceFeedbackResponse> submit(
             @PathVariable String transactionId,
-            @RequestHeader("X-Idempotency-Key") String idempotencyKey,
+            @RequestHeader(value = "X-Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody EngineIntelligenceFeedbackRequest request
     ) {
         EngineIntelligenceFeedbackResponse response = service.submit(transactionId, request, idempotencyKey);

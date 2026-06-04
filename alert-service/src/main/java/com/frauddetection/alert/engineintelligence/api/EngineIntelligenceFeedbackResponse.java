@@ -11,16 +11,12 @@ import java.util.List;
 public record EngineIntelligenceFeedbackResponse(
         String feedbackId,
         String transactionId,
-        String fraudCaseId,
         boolean engineIntelligenceAvailable,
         EngineIntelligenceFeedbackType feedbackType,
         EngineIntelligenceFeedbackUsefulness usefulness,
         EngineIntelligenceFeedbackAccuracyAssessment accuracyAssessment,
         List<String> selectedReasonCodes,
-        String submittedBy,
         Instant submittedAt,
-        String correlationId,
-        Instant createdAt,
         String operationStatus
 ) {
     public EngineIntelligenceFeedbackResponse {
@@ -39,16 +35,12 @@ public record EngineIntelligenceFeedbackResponse(
         return new EngineIntelligenceFeedbackResponse(
                 document.getFeedbackId(),
                 document.getTransactionId(),
-                document.getFraudCaseId(),
                 document.isEngineIntelligenceAvailable(),
                 document.getFeedbackType(),
                 document.getUsefulness(),
                 document.getAccuracyAssessment(),
                 document.getSelectedReasonCodes(),
-                document.getSubmittedBy(),
                 document.getSubmittedAt(),
-                document.getCorrelationId(),
-                document.getCreatedAt(),
                 operationStatus
         );
     }

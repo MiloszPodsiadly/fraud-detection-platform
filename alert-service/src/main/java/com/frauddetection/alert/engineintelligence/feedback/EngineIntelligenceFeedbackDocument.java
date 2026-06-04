@@ -25,7 +25,6 @@ public class EngineIntelligenceFeedbackDocument {
     @Id
     private final String feedbackId;
     private final String transactionId;
-    private final String fraudCaseId;
     private final boolean engineIntelligenceAvailable;
     private final EngineIntelligenceFeedbackType feedbackType;
     private final EngineIntelligenceFeedbackUsefulness usefulness;
@@ -35,12 +34,12 @@ public class EngineIntelligenceFeedbackDocument {
     private final Instant submittedAt;
     private final String correlationId;
     private final String idempotencyKeyHash;
+    private final String requestPayloadHash;
     private final Instant createdAt;
 
     public EngineIntelligenceFeedbackDocument(
             String feedbackId,
             String transactionId,
-            String fraudCaseId,
             boolean engineIntelligenceAvailable,
             EngineIntelligenceFeedbackType feedbackType,
             EngineIntelligenceFeedbackUsefulness usefulness,
@@ -50,11 +49,11 @@ public class EngineIntelligenceFeedbackDocument {
             Instant submittedAt,
             String correlationId,
             String idempotencyKeyHash,
+            String requestPayloadHash,
             Instant createdAt
     ) {
         this.feedbackId = feedbackId;
         this.transactionId = transactionId;
-        this.fraudCaseId = fraudCaseId;
         this.engineIntelligenceAvailable = engineIntelligenceAvailable;
         this.feedbackType = feedbackType;
         this.usefulness = usefulness;
@@ -64,6 +63,7 @@ public class EngineIntelligenceFeedbackDocument {
         this.submittedAt = submittedAt;
         this.correlationId = correlationId;
         this.idempotencyKeyHash = idempotencyKeyHash;
+        this.requestPayloadHash = requestPayloadHash;
         this.createdAt = createdAt;
     }
 
@@ -73,10 +73,6 @@ public class EngineIntelligenceFeedbackDocument {
 
     public String getTransactionId() {
         return transactionId;
-    }
-
-    public String getFraudCaseId() {
-        return fraudCaseId;
     }
 
     public boolean isEngineIntelligenceAvailable() {
@@ -113,6 +109,10 @@ public class EngineIntelligenceFeedbackDocument {
 
     public String getIdempotencyKeyHash() {
         return idempotencyKeyHash;
+    }
+
+    public String getRequestPayloadHash() {
+        return requestPayloadHash;
     }
 
     public Instant getCreatedAt() {

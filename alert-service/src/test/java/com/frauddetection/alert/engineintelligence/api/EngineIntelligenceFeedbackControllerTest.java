@@ -5,6 +5,9 @@ import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFe
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackUsefulness;
 import com.frauddetection.alert.engineintelligence.feedback.InvalidEngineIntelligenceFeedbackRequestException;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
+import com.frauddetection.alert.idempotency.SharedInvalidIdempotencyKeyException;
+import com.frauddetection.alert.idempotency.SharedMissingIdempotencyKeyException;
+import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration;
@@ -58,7 +61,9 @@ class EngineIntelligenceFeedbackControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.feedbackId").value("feedback-1"))
                 .andExpect(jsonPath("$.transactionId").value("txn-1"))
-                .andExpect(jsonPath("$.submittedBy").value("analyst-1"))
+                .andExpect(jsonPath("$.submittedBy").doesNotExist())
+                .andExpect(jsonPath("$.correlationId").doesNotExist())
+                .andExpect(jsonPath("$.createdAt").doesNotExist())
                 .andExpect(jsonPath("$.operationStatus").value("CREATED"));
     }
 
@@ -95,6 +100,62 @@ class EngineIntelligenceFeedbackControllerTest {
     }
 
     @Test
+    void reusedIdempotencyKeyWithDifferentPayloadReturnsConflict() throws Exception {
+        when(service.submit(eq("txn-1"), any(EngineIntelligenceFeedbackRequest.class), eq("feedback-key-1")))
+                .thenThrow(new ConflictingIdempotencyKeyException());
+
+        mockMvc.perform(post("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
+                        .header("X-Idempotency-Key", "feedback-key-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.details[0]").value("reason:IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD"));
+    }
+
+    @Test
+    void missingIdempotencyKeyReturnsBoundedBadRequest() throws Exception {
+        when(service.submit(eq("txn-1"), any(EngineIntelligenceFeedbackRequest.class), eq(null)))
+                .thenThrow(new SharedMissingIdempotencyKeyException());
+
+        mockMvc.perform(post("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0]").value("reason:IDEMPOTENCY_KEY_REQUIRED"));
+    }
+
+    @Test
+    void blankIdempotencyKeyReturnsBoundedBadRequest() throws Exception {
+        when(service.submit(eq("txn-1"), any(EngineIntelligenceFeedbackRequest.class), eq("   ")))
+                .thenThrow(new SharedMissingIdempotencyKeyException());
+
+        mockMvc.perform(post("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
+                        .header("X-Idempotency-Key", "   ")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0]").value("reason:IDEMPOTENCY_KEY_REQUIRED"));
+    }
+
+    @Test
+    void invalidIdempotencyKeyReturnsBoundedBadRequest() throws Exception {
+        when(service.submit(eq("txn-1"), any(EngineIntelligenceFeedbackRequest.class), eq("bad-key-token/secret")))
+                .thenThrow(new SharedInvalidIdempotencyKeyException());
+
+        String response = mockMvc.perform(post("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
+                        .header("X-Idempotency-Key", "bad-key-token/secret")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0]").value("reason:IDEMPOTENCY_KEY_INVALID"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(response).doesNotContain("bad-key-token", "secret");
+    }
+
+    @Test
     void missingTransactionReturnsNotFound() throws Exception {
         when(service.submit(eq("txn-missing"), any(EngineIntelligenceFeedbackRequest.class), eq("feedback-key-1")))
                 .thenThrow(new EngineIntelligenceScoredTransactionNotFoundException());
@@ -114,8 +175,7 @@ class EngineIntelligenceFeedbackControllerTest {
                   "usefulness": "HELPFUL",
                   "accuracyAssessment": "SIGNALS_LOOK_CORRECT",
                   "engineIntelligenceAvailable": true,
-                  "selectedReasonCodes": ["HIGH_VELOCITY"],
-                  "fraudCaseId": "case-1"
+                  "selectedReasonCodes": ["HIGH_VELOCITY"]
                 }
                 """;
     }
@@ -124,15 +184,11 @@ class EngineIntelligenceFeedbackControllerTest {
         return new EngineIntelligenceFeedbackResponse(
                 "feedback-1",
                 "txn-1",
-                "case-1",
                 true,
                 EngineIntelligenceFeedbackType.ENGINE_INTELLIGENCE_USEFULNESS,
                 EngineIntelligenceFeedbackUsefulness.HELPFUL,
                 EngineIntelligenceFeedbackAccuracyAssessment.SIGNALS_LOOK_CORRECT,
                 List.of("HIGH_VELOCITY"),
-                "analyst-1",
-                Instant.parse("2026-06-03T10:15:30Z"),
-                "corr-1",
                 Instant.parse("2026-06-03T10:15:30Z"),
                 operationStatus
         );

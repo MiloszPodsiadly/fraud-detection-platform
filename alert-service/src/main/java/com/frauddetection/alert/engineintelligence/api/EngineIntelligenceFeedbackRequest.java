@@ -14,7 +14,6 @@ public class EngineIntelligenceFeedbackRequest {
     private final String accuracyAssessment;
     private final Boolean engineIntelligenceAvailable;
     private final List<String> selectedReasonCodes;
-    private final String fraudCaseId;
     private final List<String> unknownFields = new ArrayList<>();
 
     @JsonCreator
@@ -23,15 +22,13 @@ public class EngineIntelligenceFeedbackRequest {
             @JsonProperty("usefulness") String usefulness,
             @JsonProperty("accuracyAssessment") String accuracyAssessment,
             @JsonProperty("engineIntelligenceAvailable") Boolean engineIntelligenceAvailable,
-            @JsonProperty("selectedReasonCodes") List<String> selectedReasonCodes,
-            @JsonProperty("fraudCaseId") String fraudCaseId
+            @JsonProperty("selectedReasonCodes") List<String> selectedReasonCodes
     ) {
         this.feedbackType = feedbackType;
         this.usefulness = usefulness;
         this.accuracyAssessment = accuracyAssessment;
         this.engineIntelligenceAvailable = engineIntelligenceAvailable;
         this.selectedReasonCodes = selectedReasonCodes == null ? List.of() : new ArrayList<>(selectedReasonCodes);
-        this.fraudCaseId = fraudCaseId;
     }
 
     @JsonAnySetter
@@ -57,10 +54,6 @@ public class EngineIntelligenceFeedbackRequest {
 
     public List<String> selectedReasonCodes() {
         return selectedReasonCodes;
-    }
-
-    public String fraudCaseId() {
-        return fraudCaseId;
     }
 
     public List<String> unknownFields() {

@@ -11,9 +11,13 @@ import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFe
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackType;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackUsefulness;
 import com.frauddetection.alert.engineintelligence.feedback.InvalidEngineIntelligenceFeedbackRequestException;
+import com.frauddetection.alert.idempotency.IdempotencyCanonicalHasher;
 import com.frauddetection.alert.idempotency.SharedIdempotencyKeyPolicy;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
+import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
+import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
+import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -22,11 +26,15 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import static org.springframework.http.HttpStatus.UNAUTHORIZED;
 
@@ -37,7 +45,9 @@ public class EngineIntelligenceFeedbackService {
     private static final int MAX_REASON_CODES = 5;
     private static final int MAX_ACCEPTED_STRING_LENGTH = 128;
     private static final Pattern TRANSACTION_ID_PATTERN = Pattern.compile("^[A-Za-z0-9._:-]+$");
-    private static final Pattern BOUNDED_IDENTIFIER_PATTERN = Pattern.compile("^[A-Za-z0-9._:-]{1,128}$");
+    private static final Set<String> ACCURACY_ASSESSMENT_NAMES = Arrays.stream(EngineIntelligenceFeedbackAccuracyAssessment.values())
+            .map(Enum::name)
+            .collect(Collectors.toUnmodifiableSet());
     private static final List<String> FORBIDDEN_TERMS = List.of(
             "rawEvidence",
             "rawContribution",
@@ -71,6 +81,7 @@ public class EngineIntelligenceFeedbackService {
     private final SharedIdempotencyKeyPolicy idempotencyKeyPolicy;
     private final CurrentAnalystUser currentAnalystUser;
     private final AuditService auditService;
+    private final RegulatedMutationTransactionRunner transactionRunner;
     private final Clock clock;
 
     @Autowired
@@ -79,7 +90,8 @@ public class EngineIntelligenceFeedbackService {
             EngineIntelligenceFeedbackRepository feedbackRepository,
             SharedIdempotencyKeyPolicy idempotencyKeyPolicy,
             CurrentAnalystUser currentAnalystUser,
-            AuditService auditService
+            AuditService auditService,
+            RegulatedMutationTransactionRunner transactionRunner
     ) {
         this(
                 scoredTransactionRepository,
@@ -87,6 +99,7 @@ public class EngineIntelligenceFeedbackService {
                 idempotencyKeyPolicy,
                 currentAnalystUser,
                 auditService,
+                transactionRunner,
                 Clock.systemUTC()
         );
     }
@@ -97,6 +110,7 @@ public class EngineIntelligenceFeedbackService {
             SharedIdempotencyKeyPolicy idempotencyKeyPolicy,
             CurrentAnalystUser currentAnalystUser,
             AuditService auditService,
+            RegulatedMutationTransactionRunner transactionRunner,
             Clock clock
     ) {
         this.scoredTransactionRepository = Objects.requireNonNull(scoredTransactionRepository, "scoredTransactionRepository is required");
@@ -104,6 +118,7 @@ public class EngineIntelligenceFeedbackService {
         this.idempotencyKeyPolicy = Objects.requireNonNull(idempotencyKeyPolicy, "idempotencyKeyPolicy is required");
         this.currentAnalystUser = Objects.requireNonNull(currentAnalystUser, "currentAnalystUser is required");
         this.auditService = Objects.requireNonNull(auditService, "auditService is required");
+        this.transactionRunner = Objects.requireNonNull(transactionRunner, "transactionRunner is required");
         this.clock = Objects.requireNonNull(clock, "clock is required");
     }
 
@@ -123,21 +138,37 @@ public class EngineIntelligenceFeedbackService {
                 .orElseThrow(() -> new ResponseStatusException(UNAUTHORIZED, "Authentication is required."));
 
         String keyHash = idempotencyKeyPolicy.hashKey(idempotencyKey);
+        ValidatedFeedback validated = validate(request);
+        String requestPayloadHash = requestPayloadHash(validated);
         var existing = feedbackRepository.findBySubmittedByAndTransactionIdAndIdempotencyKeyHash(
                 submittedBy,
                 boundedTransactionId,
                 keyHash
         );
         if (existing.isPresent()) {
-            return EngineIntelligenceFeedbackResponse.existing(existing.get());
+            return existingFeedbackResponse(existing.get(), requestPayloadHash);
         }
 
-        ValidatedFeedback validated = validate(request);
+        return transactionRunner.runLocalCommit(() -> createFeedback(
+                boundedTransactionId,
+                submittedBy,
+                keyHash,
+                requestPayloadHash,
+                validated
+        ));
+    }
+
+    private EngineIntelligenceFeedbackResponse createFeedback(
+            String boundedTransactionId,
+            String submittedBy,
+            String keyHash,
+            String requestPayloadHash,
+            ValidatedFeedback validated
+    ) {
         Instant now = Instant.now(clock);
         EngineIntelligenceFeedbackDocument document = new EngineIntelligenceFeedbackDocument(
                 UUID.randomUUID().toString(),
                 boundedTransactionId,
-                validated.fraudCaseId(),
                 validated.engineIntelligenceAvailable(),
                 validated.feedbackType(),
                 validated.usefulness(),
@@ -147,14 +178,20 @@ public class EngineIntelligenceFeedbackService {
                 now,
                 UUID.randomUUID().toString(),
                 keyHash,
+                requestPayloadHash,
                 now
         );
 
         PersistedFeedback persisted = saveIdempotently(document);
         if (!persisted.created()) {
-            return EngineIntelligenceFeedbackResponse.existing(persisted.document());
+            return existingFeedbackResponse(persisted.document(), requestPayloadHash);
         }
-        auditFeedback(persisted.document());
+        try {
+            auditFeedback(persisted.document());
+        } catch (RuntimeException exception) {
+            compensateUnauditedFeedback(persisted.document(), exception);
+            throw exception;
+        }
         return EngineIntelligenceFeedbackResponse.created(persisted.document());
     }
 
@@ -169,6 +206,27 @@ public class EngineIntelligenceFeedbackService {
                     )
                     .map(existing -> new PersistedFeedback(existing, false))
                     .orElseThrow(() -> exception);
+        }
+    }
+
+    private EngineIntelligenceFeedbackResponse existingFeedbackResponse(
+            EngineIntelligenceFeedbackDocument existing,
+            String requestPayloadHash
+    ) {
+        if (!Objects.equals(existing.getRequestPayloadHash(), requestPayloadHash)) {
+            throw new ConflictingIdempotencyKeyException();
+        }
+        return EngineIntelligenceFeedbackResponse.existing(existing);
+    }
+
+    private void compensateUnauditedFeedback(EngineIntelligenceFeedbackDocument document, RuntimeException exception) {
+        if (transactionRunner.mode() != RegulatedMutationTransactionMode.OFF) {
+            return;
+        }
+        try {
+            feedbackRepository.deleteById(document.getFeedbackId());
+        } catch (RuntimeException cleanupException) {
+            exception.addSuppressed(cleanupException);
         }
     }
 
@@ -196,17 +254,12 @@ public class EngineIntelligenceFeedbackService {
                 null,
                 "ENGINE_INTELLIGENCE_FEEDBACK_SUBMIT",
                 "transaction_id=" + document.getTransactionId()
-                        + ";fraud_case_id=" + optional(document.getFraudCaseId())
                         + ";feedback_type=" + document.getFeedbackType()
                         + ";usefulness=" + document.getUsefulness()
                         + ";accuracy=" + document.getAccuracyAssessment()
                         + ";submitted_at=" + document.getSubmittedAt(),
                 1
         );
-    }
-
-    private String optional(String value) {
-        return value == null || value.isBlank() ? "absent" : value;
     }
 
     private String normalizedTransactionId(String transactionId) {
@@ -227,9 +280,9 @@ public class EngineIntelligenceFeedbackService {
         if (request == null) {
             throw new InvalidEngineIntelligenceFeedbackRequestException(List.of("body: required"));
         }
-        request.unknownFields().stream()
-                .sorted()
-                .forEach(field -> errors.add(field + ": unknown field"));
+        if (!request.unknownFields().isEmpty()) {
+            errors.add("request: contains unknown fields");
+        }
 
         EngineIntelligenceFeedbackType feedbackType = enumValue(
                 EngineIntelligenceFeedbackType.class,
@@ -253,7 +306,6 @@ public class EngineIntelligenceFeedbackService {
             errors.add("engineIntelligenceAvailable: required");
         }
 
-        String fraudCaseId = normalizeOptionalIdentifier(request.fraudCaseId(), "fraudCaseId", errors);
         List<String> reasonCodes = normalizeReasonCodes(request.selectedReasonCodes(), errors);
 
         if (!errors.isEmpty()) {
@@ -264,8 +316,7 @@ public class EngineIntelligenceFeedbackService {
                 usefulness,
                 accuracyAssessment,
                 request.engineIntelligenceAvailable(),
-                reasonCodes,
-                fraudCaseId
+                reasonCodes
         );
     }
 
@@ -293,21 +344,14 @@ public class EngineIntelligenceFeedbackService {
         for (int index = 0; index < rawReasonCodes.size(); index++) {
             String value = normalizeAcceptedString(rawReasonCodes.get(index), "selectedReasonCodes[" + index + "]", errors);
             if (value != null) {
-                normalized.add(value);
+                if (ACCURACY_ASSESSMENT_NAMES.contains(value)) {
+                    errors.add("selectedReasonCodes[" + index + "]: invalid reason code");
+                } else {
+                    normalized.add(value);
+                }
             }
         }
         return List.copyOf(normalized);
-    }
-
-    private String normalizeOptionalIdentifier(String value, String field, List<String> errors) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        String normalized = normalizeAcceptedString(value, field, errors);
-        if (normalized != null && !BOUNDED_IDENTIFIER_PATTERN.matcher(normalized).matches()) {
-            errors.add(field + ": invalid value");
-        }
-        return normalized;
     }
 
     private String normalizeAcceptedString(String value, String field, List<String> errors) {
@@ -334,13 +378,22 @@ public class EngineIntelligenceFeedbackService {
                 .anyMatch(compact::contains);
     }
 
+    private String requestPayloadHash(ValidatedFeedback validated) {
+        return IdempotencyCanonicalHasher.hash(Map.of(
+                "feedbackType", validated.feedbackType().name(),
+                "usefulness", validated.usefulness().name(),
+                "accuracyAssessment", validated.accuracyAssessment().name(),
+                "engineIntelligenceAvailable", validated.engineIntelligenceAvailable(),
+                "selectedReasonCodes", validated.selectedReasonCodes()
+        ));
+    }
+
     private record ValidatedFeedback(
             EngineIntelligenceFeedbackType feedbackType,
             EngineIntelligenceFeedbackUsefulness usefulness,
             EngineIntelligenceFeedbackAccuracyAssessment accuracyAssessment,
             boolean engineIntelligenceAvailable,
-            List<String> selectedReasonCodes,
-            String fraudCaseId
+            List<String> selectedReasonCodes
     ) {
         private ValidatedFeedback {
             selectedReasonCodes = selectedReasonCodes == null ? List.of() : List.copyOf(selectedReasonCodes);
