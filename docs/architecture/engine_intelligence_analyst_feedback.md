@@ -22,11 +22,13 @@ Feedback requires write/review authority, not read-only permission. `TRANSACTION
 
 ## Feedback Model
 
-The feedback model stores `feedbackType`, `usefulness`, `accuracyAssessment`, `engineIntelligenceAvailable`, optional bounded `selectedReasonCodes`, and optional bounded `fraudCaseId`. Server-generated fields are `feedbackId`, `transactionId`, `submittedBy`, `submittedAt`, `correlationId`, and `createdAt`.
+The feedback model stores `feedbackType`, `usefulness`, `accuracyAssessment`, `engineIntelligenceAvailable`, optional bounded `selectedReasonCodes`, the canonical request payload hash used for idempotency, and server-owned audit metadata. Public submit responses expose only `feedbackId`, `transactionId`, `engineIntelligenceAvailable`, `feedbackType`, `usefulness`, `accuracyAssessment`, `selectedReasonCodes`, `submittedAt`, and `operationStatus`.
+
+FDP-98 v1 is transaction-scoped. The feedback request does not accept client-supplied `fraudCaseId`, does not persist it, and does not audit it. Future case context requires backend verification of the transaction-to-case relationship before any case-level field can be accepted or derived.
 
 ## Structured-Only V1
 
-FDP-98 v1 has no free-text feedback. The client and server use bounded enums and bounded reason codes only.
+FDP-98 v1 has no free-text feedback. The client and server use bounded enums and bounded reason codes only. The current UI has no reason-code selector, so it submits `selectedReasonCodes` as an empty list and does not reuse `accuracyAssessment` enum values as reason codes.
 
 ## Append-Only Persistence
 
@@ -35,11 +37,13 @@ Feedback is stored append-only in `engine_intelligence_feedback`. Submitting fee
 
 ## Idempotency
 
-Idempotency prevents duplicate submissions. The same actor, transaction, and idempotency key returns the existing feedback result instead of appending another record.
+Idempotency prevents duplicate submissions. The same actor, transaction, idempotency key, and canonical request payload hash returns the existing feedback result instead of appending another record. Reusing the same idempotency key with a different canonical request payload returns conflict.
 
 ## Audit Trail
 
-Successful feedback creates an audit entry. The audit entry includes bounded feedback metadata and must not include raw request bodies, raw payloads, tokens, secrets, endpoint strings, stacktraces, internal projection objects, or raw engine intelligence responses.
+Successful feedback creates an audit entry. The audit entry includes bounded feedback metadata and must not include raw request bodies, raw payloads, tokens, secrets, endpoint strings, stacktraces, internal projection objects, client-supplied case context, or raw engine intelligence responses.
+
+A feedback submission is not reported as `CREATED` unless the feedback record and success audit both complete. In local non-transactional compatibility mode, a fresh feedback record is compensated if the success audit fails after the save.
 
 ## UI Behavior
 

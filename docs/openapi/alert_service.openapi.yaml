@@ -1271,7 +1271,7 @@ paths:
   /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback:
     post:
       summary: Submit structured analyst feedback for transaction-scoped engine intelligence
-      description: Captures structured analyst feedback about engine intelligence usefulness and perceived accuracy. Feedback is captured and audited, not executed. The endpoint requires write/review authority, stores append-only feedback, uses idempotency to prevent duplicate submissions, and does not change scoring, alert severity, fraud case status, approval, decline, blocking, payment authorization, rules, or model training.
+      description: Captures structured transaction-scoped analyst feedback about engine intelligence usefulness and perceived accuracy. Feedback is captured and audited, not executed. The endpoint requires write/review authority, stores append-only feedback, rejects client-supplied fraud case context, uses idempotency to prevent duplicate submissions, and does not change scoring, alert severity, fraud case status, approval, decline, blocking, payment authorization, rules, or model training.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1306,7 +1306,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/EngineIntelligenceFeedbackResponse"
         "200":
-          description: Existing feedback was returned for the same actor, transaction, and idempotency key.
+          description: Existing feedback was returned for the same actor, transaction, idempotency key, and canonical request payload hash.
           content:
             application/json:
               schema:
@@ -1319,6 +1319,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
   /governance/advisories:
@@ -4135,13 +4137,9 @@ components:
             type: string
             minLength: 1
             maxLength: 128
-        fraudCaseId:
-          type: string
-          minLength: 1
-          maxLength: 128
-          pattern: "^[A-Za-z0-9._:-]+$"
       not:
         anyOf:
+          - required: [fraudCaseId]
           - required: [submittedBy]
           - required: [submittedAt]
           - required: [feedbackId]
@@ -4163,10 +4161,7 @@ components:
         - usefulness
         - accuracyAssessment
         - selectedReasonCodes
-        - submittedBy
         - submittedAt
-        - correlationId
-        - createdAt
         - operationStatus
       properties:
         feedbackId:
@@ -4174,9 +4169,6 @@ components:
         transactionId:
           type: string
           minLength: 1
-          maxLength: 128
-        fraudCaseId:
-          type: string
           maxLength: 128
         engineIntelligenceAvailable:
           type: boolean
@@ -4195,14 +4187,7 @@ components:
           items:
             type: string
             maxLength: 128
-        submittedBy:
-          type: string
         submittedAt:
-          type: string
-          format: date-time
-        correlationId:
-          type: string
-        createdAt:
           type: string
           format: date-time
         operationStatus:
