@@ -37,6 +37,7 @@ describe("alertsApi auth headers", () => {
   const getFraudCaseEvidenceSummary = (...args) => apiClient.getFraudCaseEvidenceSummary(...args);
   const getFraudCaseEvidenceTimeline = (...args) => apiClient.getFraudCaseEvidenceTimeline(...args);
   const getEngineIntelligence = (...args) => apiClient.getEngineIntelligence(...args);
+  const submitEngineIntelligenceFeedback = (...args) => apiClient.submitEngineIntelligenceFeedback(...args);
   const updateFraudCase = (...args) => apiClient.updateFraudCase(...args);
   const submitAnalystDecision = (...args) => apiClient.submitAnalystDecision(...args);
 
@@ -1349,6 +1350,83 @@ describe("alertsApi auth headers", () => {
     );
   });
 
+  it("submitFeedbackSendsStructuredPayloadOnlyWithIdempotencyKey", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceFeedbackResponse()));
+
+    const result = await submitEngineIntelligenceFeedback("txn-1", {
+      feedbackType: "ENGINE_INTELLIGENCE_USEFULNESS",
+      usefulness: "HELPFUL",
+      accuracyAssessment: "SIGNALS_LOOK_CORRECT",
+      engineIntelligenceAvailable: true,
+      selectedReasonCodes: ["HIGH_VELOCITY"],
+      fraudCaseId: "case-1",
+      submittedBy: "payload-user",
+      submittedAt: "2026-01-01T00:00:00Z",
+      rawEngineIntelligence: engineIntelligenceAvailable(),
+      comment: "free text"
+    }, { idempotencyKey: "feedback-key-1" });
+
+    expect(result).toMatchObject({ state: "saved", operationStatus: "CREATED", feedbackId: "feedback-1" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      engineIntelligenceFeedbackEndpoint("txn-1"),
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ "X-Idempotency-Key": "feedback-key-1" })
+      })
+    );
+    const payload = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(payload).toEqual({
+      feedbackType: "ENGINE_INTELLIGENCE_USEFULNESS",
+      usefulness: "HELPFUL",
+      accuracyAssessment: "SIGNALS_LOOK_CORRECT",
+      engineIntelligenceAvailable: true,
+      selectedReasonCodes: ["HIGH_VELOCITY"]
+    });
+    expect(payload).not.toHaveProperty("fraudCaseId");
+    expect(JSON.stringify(payload)).not.toContain("submittedBy");
+    expect(JSON.stringify(payload)).not.toContain("submittedAt");
+    expect(JSON.stringify(payload)).not.toContain("rawEngineIntelligence");
+    expect(JSON.stringify(payload)).not.toContain("comment");
+  });
+
+  it("submitFeedbackRejectsInvalidStructuredValuesWithoutCallingFetch", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceFeedbackResponse()));
+
+    const result = await submitEngineIntelligenceFeedback("txn-1", {
+      feedbackType: "finalDecision",
+      usefulness: "HELPFUL",
+      accuracyAssessment: "SIGNALS_LOOK_CORRECT",
+      engineIntelligenceAvailable: true
+    }, { idempotencyKey: "feedback-key-1" });
+
+    expect(result).toEqual({ state: "validation-error" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [400, "validation-error"],
+    [422, "validation-error"],
+    [401, "unauthorized"],
+    [403, "unauthorized"],
+    [404, "not-found"],
+    [409, "validation-error"],
+    [503, "unavailable"]
+  ])("submitFeedbackMaps%sSafely", async (status, state) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      message: "raw payload token stacktrace endpoint must not be shown"
+    }, status));
+
+    const result = await submitEngineIntelligenceFeedback("txn-1", {
+      feedbackType: "ENGINE_INTELLIGENCE_USEFULNESS",
+      usefulness: "HELPFUL",
+      accuracyAssessment: "SIGNALS_LOOK_CORRECT",
+      engineIntelligenceAvailable: true
+    }, { idempotencyKey: "feedback-key-1" });
+
+    expect(result).toMatchObject({ state });
+    expect(JSON.stringify(result)).not.toMatch(/payload|token|stacktrace|endpoint/i);
+  });
+
   it.each([
     ["getEngineIntelligenceFailsClosedForOversizedEngines", { engines: [engineResult(), engineResult({ engineId: "ml.python.primary", engineType: "ML_MODEL", status: "TIMEOUT", riskLevel: undefined, scoreBucket: "UNAVAILABLE", reasonCodes: ["ML_MODEL_TIMEOUT"] }), engineResult({ engineId: "rules.secondary" })] }],
     ["getEngineIntelligenceFailsClosedForOversizedDiagnosticSignals", { diagnosticSignals: Array.from({ length: 6 }, (_value, index) => diagnosticSignal({ engineId: `rules.${index}` })) }],
@@ -1550,8 +1628,27 @@ function warning(overrides = {}) {
   };
 }
 
+function engineIntelligenceFeedbackResponse(overrides = {}) {
+  return {
+    feedbackId: "feedback-1",
+    transactionId: "txn-1",
+    engineIntelligenceAvailable: true,
+    feedbackType: "ENGINE_INTELLIGENCE_USEFULNESS",
+    usefulness: "HELPFUL",
+    accuracyAssessment: "SIGNALS_LOOK_CORRECT",
+    selectedReasonCodes: ["HIGH_VELOCITY"],
+    submittedAt: "2026-06-03T10:00:00Z",
+    operationStatus: "CREATED",
+    ...overrides
+  };
+}
+
 function engineIntelligenceEndpoint(encodedTransactionId) {
   return ["/api", "v1", "transactions", "scored", encodedTransactionId, "engine-intelligence"].join("/");
+}
+
+function engineIntelligenceFeedbackEndpoint(encodedTransactionId) {
+  return [...engineIntelligenceEndpoint(encodedTransactionId).split("/"), "feedback"].join("/");
 }
 
 function fraudCaseEvidenceSummaryPath(caseId) {

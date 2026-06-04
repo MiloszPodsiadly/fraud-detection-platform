@@ -8,6 +8,7 @@ import com.frauddetection.alert.audit.external.AuditEvidenceExportRejectedExcept
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorPublicationRequiredException;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceScoredTransactionNotFoundException;
+import com.frauddetection.alert.engineintelligence.feedback.InvalidEngineIntelligenceFeedbackRequestException;
 import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
 import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueQueryException;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryLookupUnavailableException;
@@ -17,6 +18,8 @@ import com.frauddetection.alert.governance.audit.GovernanceAuditDecision;
 import com.frauddetection.alert.governance.audit.GovernanceAuditPersistenceUnavailableException;
 import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditRequestException;
 import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditDecisionException;
+import com.frauddetection.alert.idempotency.SharedInvalidIdempotencyKeyException;
+import com.frauddetection.alert.idempotency.SharedMissingIdempotencyKeyException;
 import com.frauddetection.alert.regulated.MissingIdempotencyKeyException;
 import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
 import com.frauddetection.alert.service.ScoredTransactionSearchValidationException;
@@ -246,6 +249,47 @@ public class AlertServiceExceptionHandler {
                         "Service Unavailable",
                         "Engine intelligence projection is temporarily unavailable.",
                         List.of("reason:ENGINE_INTELLIGENCE_PROJECTION_STORE_UNAVAILABLE")
+                )
+        );
+    }
+
+    @ExceptionHandler(InvalidEngineIntelligenceFeedbackRequestException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidEngineIntelligenceFeedbackRequest(
+            InvalidEngineIntelligenceFeedbackRequestException exception
+    ) {
+        return ResponseEntity.badRequest().body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        400,
+                        "Bad Request",
+                        "Invalid engine intelligence feedback request.",
+                        exception.details()
+                )
+        );
+    }
+
+    @ExceptionHandler(SharedMissingIdempotencyKeyException.class)
+    public ResponseEntity<ApiErrorResponse> handleSharedMissingIdempotencyKey(SharedMissingIdempotencyKeyException exception) {
+        return ResponseEntity.badRequest().body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        400,
+                        "Bad Request",
+                        "X-Idempotency-Key is required for engine intelligence feedback.",
+                        List.of("reason:IDEMPOTENCY_KEY_REQUIRED")
+                )
+        );
+    }
+
+    @ExceptionHandler(SharedInvalidIdempotencyKeyException.class)
+    public ResponseEntity<ApiErrorResponse> handleSharedInvalidIdempotencyKey(SharedInvalidIdempotencyKeyException exception) {
+        return ResponseEntity.badRequest().body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        400,
+                        "Bad Request",
+                        "X-Idempotency-Key is invalid.",
+                        List.of("reason:IDEMPOTENCY_KEY_INVALID")
                 )
         );
     }

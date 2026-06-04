@@ -2,6 +2,7 @@ package com.frauddetection.alert.audit;
 
 public enum AuditResourceType {
     ALERT,
+    ENGINE_INTELLIGENCE_FEEDBACK,
     FRAUD_CASE,
     AUDIT_EVENT,
     AUDIT_INTEGRITY,

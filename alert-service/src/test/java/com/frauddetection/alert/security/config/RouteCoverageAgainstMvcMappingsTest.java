@@ -27,6 +27,8 @@ import com.frauddetection.alert.controller.FraudCaseEvidenceTimelineController;
 import com.frauddetection.alert.controller.FraudCaseWorkQueueSummaryController;
 import com.frauddetection.alert.controller.ScoredTransactionController;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackController;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackService;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadController;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryController;
@@ -94,6 +96,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         FraudCaseEvidenceTimelineController.class,
         FraudCaseWorkQueueSummaryController.class,
         ScoredTransactionController.class,
+        EngineIntelligenceFeedbackController.class,
         EngineIntelligenceReadController.class,
         AuditEventController.class,
         AuditIntegrityController.class,
@@ -148,6 +151,9 @@ class RouteCoverageAgainstMvcMappingsTest {
 
     @MockBean
     private EngineIntelligenceReadService engineIntelligenceReadService;
+
+    @MockBean
+    private EngineIntelligenceFeedbackService engineIntelligenceFeedbackService;
 
     @MockBean
     private AlertServiceMetrics alertServiceMetrics;
@@ -263,6 +269,7 @@ class RouteCoverageAgainstMvcMappingsTest {
                         "GET /api/v1/alerts/{alertId}/assistant-summary",
                         "POST /api/v1/alerts/{alertId}/decision",
                         "GET /api/v1/transactions/scored",
+                        "POST /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback",
                         "GET /internal/suspicious-transactions",
                         "GET /internal/suspicious-transactions/summary",
                         "GET /internal/suspicious-transactions/{suspiciousTransactionId}",

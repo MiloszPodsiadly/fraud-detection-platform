@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { normalizeSession } from "../auth/session.js";
+import { normalizeSession, ROLE_AUTHORITIES } from "../auth/session.js";
 import { SESSION_STATES } from "../auth/sessionState.js";
 import { SessionBadge } from "./SessionBadge.jsx";
 import { createOidcAuthProvider } from "../auth/authProvider.js";
@@ -19,7 +19,7 @@ describe("SessionBadge", () => {
 
     expect(screen.getAllByText("reviewer-1")).toHaveLength(2);
     expect(screen.getByText("Authenticated")).toBeInTheDocument();
-    expect(screen.getByText("reviewer access active via local demo session. 9 authorities available.")).toBeInTheDocument();
+    expect(screen.getByText(`reviewer access active via local demo session. ${ROLE_AUTHORITIES.REVIEWER.length} authorities available.`)).toBeInTheDocument();
     expect(screen.getByText("local/dev only")).toBeInTheDocument();
     expect(screen.getByText("Demo auth mode")).toBeInTheDocument();
     expect(screen.getByLabelText("Role")).toHaveValue("REVIEWER");
@@ -27,6 +27,7 @@ describe("SessionBadge", () => {
     expect(screen.getByText("fraud-case:audit:read")).toBeInTheDocument();
     expect(screen.getByText("fraud-case:update")).toBeInTheDocument();
     expect(screen.getByText("suspicious-transaction:read")).toBeInTheDocument();
+    expect(screen.getByText("engine-intelligence:feedback:write")).toBeInTheDocument();
   });
 
   it("renders an unauthenticated session state", () => {

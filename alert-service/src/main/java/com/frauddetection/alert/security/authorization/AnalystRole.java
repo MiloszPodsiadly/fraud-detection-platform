@@ -15,6 +15,7 @@ public enum AnalystRole {
             AnalystAuthority.ALERT_DECISION_SUBMIT,
             AnalystAuthority.FRAUD_CASE_READ,
             AnalystAuthority.TRANSACTION_MONITOR_READ,
+            AnalystAuthority.ENGINE_INTELLIGENCE_FEEDBACK_WRITE,
             AnalystAuthority.SUSPICIOUS_TRANSACTION_READ,
             AnalystAuthority.GOVERNANCE_ADVISORY_AUDIT_WRITE
     )),
@@ -26,6 +27,7 @@ public enum AnalystRole {
             AnalystAuthority.FRAUD_CASE_AUDIT_READ,
             AnalystAuthority.FRAUD_CASE_UPDATE,
             AnalystAuthority.TRANSACTION_MONITOR_READ,
+            AnalystAuthority.ENGINE_INTELLIGENCE_FEEDBACK_WRITE,
             AnalystAuthority.SUSPICIOUS_TRANSACTION_READ,
             AnalystAuthority.GOVERNANCE_ADVISORY_AUDIT_WRITE
     )),

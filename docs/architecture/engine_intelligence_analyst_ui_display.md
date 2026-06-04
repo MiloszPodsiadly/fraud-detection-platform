@@ -21,7 +21,7 @@ FDP-97 does not add case-level aggregation.
 ## API Dependency
 
 UI consumes only `GET /api/v1/transactions/scored/{transactionId}/engine-intelligence`.
-The UI does not call Mongo, scoring, ML, rules, orchestrator, Kafka, feedback, alert mutation, fraud case mutation, severity mutation, or status mutation APIs for this display.
+The read-only display does not call Mongo, scoring, ML, rules, orchestrator, Kafka, alert mutation, fraud case mutation, severity mutation, or status mutation APIs.
 
 ## UI Placement
 
@@ -57,9 +57,10 @@ UI must not render raw error bodies or internal fields.
 The panel renders only allowlisted FDP-96 fields and does not dump whole JSON.
 It must not render rawEvidence, rawContribution, featureSnapshot, featureVector, rawPayload, endpoint, token, secret, stacktrace, exceptionMessage, Mongo metadata, internal projection class names, FraudEngineAggregationResult, NormalizedFraudEngineResult, or ScoringContext.
 
-## No Feedback Workflow
+## FDP-98 Feedback Workflow
 
-FDP-97 does not add feedback workflow, feedback submit, analyst action submit, or mutation buttons.
+FDP-97 did not add feedback workflow, feedback submit, analyst action submit, or mutation buttons.
+FDP-98 adds a separate structured-only feedback panel documented in `engine_intelligence_analyst_feedback.md`.
 
 ## No Case-Level Aggregation
 
@@ -72,6 +73,6 @@ Loading, empty, access denied, not found, unavailable, and available states use 
 No information is conveyed by color only.
 Keyboard navigation remains the same as the existing expanded transaction detail flow.
 
-## Future FDP-98 Feedback Workflow
+## Current FDP-98 Feedback Workflow
 
-FDP-98 is the future feedback workflow branch.
+FDP-98 is the bounded analyst feedback workflow branch.

@@ -3,9 +3,10 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("EngineIntelligencePanelScopeGuard", () => {
-  it("doesNotCallFeedbackWorkflow", () => {
-    expect(panelSource()).not.toMatch(/feedback|submitFeedback|recordFeedback/i);
-    expect(engineClientSource()).not.toMatch(/feedback|submitFeedback|recordFeedback/i);
+  it("feedbackWorkflowIsDedicatedAndStructuredOnly", () => {
+    expect(panelSource()).toContain("EngineIntelligenceFeedbackPanel");
+    expect(feedbackPanelSource()).toContain("type=\"radio\"");
+    expect(feedbackPanelSource()).not.toMatch(/textarea|comment|freeText|finalDecision|recommendedAction/i);
   });
 
   it("doesNotSubmitAnalystAction", () => {
@@ -28,6 +29,7 @@ describe("EngineIntelligencePanelScopeGuard", () => {
 
   it("doesNotCallScoringMlRulesOrOrchestrator", () => {
     expect(engineClientSource()).not.toMatch(pattern(["/scoring", "/ml", "/rules", "/orchestrator", "ka" + "fka", "events"]));
+    expect(feedbackClientSource()).not.toMatch(pattern(["/scoring", "/ml", "/rules", "/orchestrator", "ka" + "fka", "events"]));
   });
 
   it("doesNotAddEngineIntelligenceDashboard", () => {
@@ -39,16 +41,37 @@ describe("EngineIntelligencePanelScopeGuard", () => {
     expect(engineClientSource()).not.toMatch(/engine-intelligence\?|\/engine-intelligence\/search|listEngineIntelligence/i);
   });
 
-  it("uiCallsOnlyFdp96EngineIntelligenceEndpoint", () => {
+  it("uiCallsOnlyTransactionScopedEngineIntelligenceEndpoints", () => {
     const source = engineClientSource();
 
     expect(source).toContain(engineIntelligenceEndpoint("transactions", "scored"));
     expect(source).not.toContain(engineIntelligenceEndpoint("fraud-cases"));
+    expect(feedbackClientSource()).toContain(engineIntelligenceFeedbackEndpoint("transactions", "scored"));
+    expect(feedbackClientSource()).not.toContain(engineIntelligenceFeedbackEndpoint("fraud-cases"));
+    expect(feedbackClientSource()).not.toMatch(/engine-intelligence\/search|listEngineIntelligence/i);
+  });
+
+  it("feedbackUiDoesNotRenderDecisioningActionsOrFreeTextInput", () => {
+    expect(feedbackPanelSource()).not.toMatch(pattern([
+      "approve",
+      "decline",
+      "block",
+      "final decision",
+      "recommended action",
+      "model training",
+      "retrain",
+      "update rule",
+      "textarea"
+    ]));
   });
 });
 
 function panelSource() {
   return readFileSync(resolve(process.cwd(), "src/components/EngineIntelligencePanel.jsx"), "utf8");
+}
+
+function feedbackPanelSource() {
+  return readFileSync(resolve(process.cwd(), "src/components/EngineIntelligenceFeedbackPanel.jsx"), "utf8");
 }
 
 function pagePanelSnippet() {
@@ -61,8 +84,20 @@ function engineClientSource() {
   return source.slice(source.indexOf("async function getEngineIntelligenceWithRequest"), source.indexOf("function engineIntelligenceRequestOptions"));
 }
 
+function feedbackClientSource() {
+  const source = readFileSync(resolve(process.cwd(), "src/api/alertsApi.js"), "utf8");
+  return source.slice(
+    source.indexOf("async function submitEngineIntelligenceFeedbackWithRequest"),
+    source.indexOf("function normalizeEngineIntelligenceFeedbackPayload")
+  );
+}
+
 function engineIntelligenceEndpoint(...segments) {
   return ["/api", "v1", ...segments, "${encodeURIComponent(normalizedTransactionId)}", "engine-intelligence"].join("/");
+}
+
+function engineIntelligenceFeedbackEndpoint(...segments) {
+  return [...engineIntelligenceEndpoint(...segments).split("/"), "feedback"].join("/");
 }
 
 function pattern(terms) {

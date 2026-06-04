@@ -11,6 +11,8 @@ class TransactionAuthorizationRules implements EndpointAuthorizationRuleGroup {
         authorize
                 .requestMatchers(HttpMethod.GET, "/api/v1/transactions/scored").hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
                 .requestMatchers(HttpMethod.GET, "/api/v1/transactions/scored/{transactionId}/engine-intelligence")
-                .hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ);
+                .hasAuthority(AnalystAuthority.TRANSACTION_MONITOR_READ)
+                .requestMatchers(HttpMethod.POST, "/api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback")
+                .hasAuthority(AnalystAuthority.ENGINE_INTELLIGENCE_FEEDBACK_WRITE);
     }
 }

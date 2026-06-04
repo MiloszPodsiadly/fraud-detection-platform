@@ -1268,6 +1268,61 @@ paths:
           $ref: "#/components/responses/NotFound"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback:
+    post:
+      summary: Submit structured analyst feedback for transaction-scoped engine intelligence
+      description: Captures structured transaction-scoped analyst feedback about engine intelligence usefulness and perceived accuracy. Feedback is captured and audited, not executed. The endpoint requires write/review authority, stores append-only feedback, rejects client-supplied fraud case context, uses idempotency to prevent duplicate submissions, and does not change scoring, alert severity, fraud case status, approval, decline, blocking, payment authorization, rules, or model training.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._:-]+$"
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._:-]+$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EngineIntelligenceFeedbackRequest"
+      responses:
+        "201":
+          description: Feedback was appended and audited.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EngineIntelligenceFeedbackResponse"
+        "200":
+          description: Existing feedback was returned for the same actor, transaction, idempotency key, and canonical request payload hash.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EngineIntelligenceFeedbackResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /governance/advisories:
     get:
       summary: List governance advisories with derived lifecycle status
@@ -4042,6 +4097,102 @@ components:
           type: array
           items:
             type: string
+    EngineIntelligenceFeedbackRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - feedbackType
+        - usefulness
+        - accuracyAssessment
+        - engineIntelligenceAvailable
+      properties:
+        feedbackType:
+          type: string
+          enum:
+            - ENGINE_INTELLIGENCE_USEFULNESS
+            - ENGINE_DISAGREEMENT_REVIEW
+            - OPERATIONAL_STATUS_REVIEW
+            - MISSING_INTELLIGENCE_REVIEW
+        usefulness:
+          type: string
+          enum:
+            - HELPFUL
+            - SOMEWHAT_HELPFUL
+            - NOT_HELPFUL
+            - NOT_SURE
+        accuracyAssessment:
+          type: string
+          enum:
+            - SIGNALS_LOOK_CORRECT
+            - SIGNALS_LOOK_PARTIALLY_CORRECT
+            - SIGNALS_LOOK_INCORRECT
+            - NOT_ENOUGH_INFORMATION
+            - OPERATIONAL_ISSUE_AFFECTED_REVIEW
+        engineIntelligenceAvailable:
+          type: boolean
+        selectedReasonCodes:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+      not:
+        anyOf:
+          - required: [fraudCaseId]
+          - required: [submittedBy]
+          - required: [submittedAt]
+          - required: [feedbackId]
+          - required: [finalDecision]
+          - required: [recommendedAction]
+          - required: [approve]
+          - required: [decline]
+          - required: [block]
+          - required: [modelTrainingLabel]
+          - required: [ruleUpdateRequest]
+    EngineIntelligenceFeedbackResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - feedbackId
+        - transactionId
+        - engineIntelligenceAvailable
+        - feedbackType
+        - usefulness
+        - accuracyAssessment
+        - selectedReasonCodes
+        - submittedAt
+        - operationStatus
+      properties:
+        feedbackId:
+          type: string
+        transactionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        engineIntelligenceAvailable:
+          type: boolean
+        feedbackType:
+          type: string
+          enum: [ENGINE_INTELLIGENCE_USEFULNESS, ENGINE_DISAGREEMENT_REVIEW, OPERATIONAL_STATUS_REVIEW, MISSING_INTELLIGENCE_REVIEW]
+        usefulness:
+          type: string
+          enum: [HELPFUL, SOMEWHAT_HELPFUL, NOT_HELPFUL, NOT_SURE]
+        accuracyAssessment:
+          type: string
+          enum: [SIGNALS_LOOK_CORRECT, SIGNALS_LOOK_PARTIALLY_CORRECT, SIGNALS_LOOK_INCORRECT, NOT_ENOUGH_INFORMATION, OPERATIONAL_ISSUE_AFFECTED_REVIEW]
+        selectedReasonCodes:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            maxLength: 128
+        submittedAt:
+          type: string
+          format: date-time
+        operationStatus:
+          type: string
+          enum: [CREATED, EXISTING]
     EngineIntelligenceReadModel:
       type: object
       additionalProperties: false

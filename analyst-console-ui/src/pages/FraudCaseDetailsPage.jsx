@@ -168,6 +168,7 @@ export function FraudCaseDetailsPage({
   }
 
   const canUpdateCase = hasAuthority(session, AUTHORITIES.FRAUD_CASE_UPDATE);
+  const canSubmitEngineIntelligenceFeedback = hasAuthority(session, AUTHORITIES.ENGINE_INTELLIGENCE_FEEDBACK_WRITE);
   const actionDisabled = submitState.isSubmitting || !canUpdateCase || detailState === "stale";
   const actionState = fraudCaseActionState({ canUpdateCase, detailState });
 
@@ -386,6 +387,8 @@ export function FraudCaseDetailsPage({
                               <EngineIntelligencePanel
                                 transactionId={transaction.transactionId}
                                 getEngineIntelligence={apiClient.getEngineIntelligence}
+                                submitEngineIntelligenceFeedback={apiClient.submitEngineIntelligenceFeedback}
+                                canSubmitFeedback={canSubmitEngineIntelligenceFeedback}
                               />
                             </td>
                           </tr>

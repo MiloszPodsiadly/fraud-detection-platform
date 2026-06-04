@@ -50,6 +50,8 @@ export function createAlertsApiClient({
       evidenceTimelineRequestOptions(requestOptions)
     ),
     getEngineIntelligence: (transactionId, requestOptions) => getEngineIntelligenceWithRequest(request, transactionId, requestOptions),
+    submitEngineIntelligenceFeedback: (transactionId, feedback, requestOptions) =>
+      submitEngineIntelligenceFeedbackWithRequest(request, transactionId, feedback, requestOptions),
     updateFraudCase: (caseId, decision, { idempotencyKey, signal } = {}) => request(`/api/v1/fraud-cases/${encodeURIComponent(caseId)}`, {
       method: "PATCH",
       signal,
@@ -236,6 +238,25 @@ const SCORE_BUCKETS = new Set(["NONE", "LOW", "MEDIUM", "HIGH", "VERY_HIGH", "UN
 const SIGNAL_CATEGORIES = new Set(["FRAUD_SIGNAL", "OPERATIONAL_SIGNAL"]);
 const ENGINE_TYPES = new Set(["RULES", "ML_MODEL"]);
 const RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
+const ENGINE_INTELLIGENCE_FEEDBACK_TYPES = new Set([
+  "ENGINE_INTELLIGENCE_USEFULNESS",
+  "ENGINE_DISAGREEMENT_REVIEW",
+  "OPERATIONAL_STATUS_REVIEW",
+  "MISSING_INTELLIGENCE_REVIEW"
+]);
+const ENGINE_INTELLIGENCE_FEEDBACK_USEFULNESS = new Set([
+  "HELPFUL",
+  "SOMEWHAT_HELPFUL",
+  "NOT_HELPFUL",
+  "NOT_SURE"
+]);
+const ENGINE_INTELLIGENCE_FEEDBACK_ACCURACY = new Set([
+  "SIGNALS_LOOK_CORRECT",
+  "SIGNALS_LOOK_PARTIALLY_CORRECT",
+  "SIGNALS_LOOK_INCORRECT",
+  "NOT_ENOUGH_INFORMATION",
+  "OPERATIONAL_ISSUE_AFFECTED_REVIEW"
+]);
 const WARNING_CODES = new Set([
   "ENGINE_RESULT_LIMIT_APPLIED",
   "REASON_CODE_NULL_DROPPED",
@@ -272,8 +293,14 @@ const FORBIDDEN_ENGINE_INTELLIGENCE_TERMS = [
   "platformVerdict",
   "finalDecision",
   "recommendedAction",
+  "approve",
+  "decline",
+  "block",
   "winningEngine",
-  "paymentAuthorization"
+  "paymentAuthorization",
+  "modelTrainingLabel",
+  "groundTruth",
+  "ruleUpdate"
 ];
 const FORBIDDEN_COMPACT_ENGINE_INTELLIGENCE_TERMS = FORBIDDEN_ENGINE_INTELLIGENCE_TERMS
   .map((term) => compactEngineIntelligenceText(term));
@@ -299,6 +326,87 @@ async function getEngineIntelligenceWithRequest(request, transactionId, requestO
     }
     return engineIntelligenceFailureState(error, normalizedTransactionId);
   }
+}
+
+async function submitEngineIntelligenceFeedbackWithRequest(request, transactionId, feedback, { idempotencyKey, signal } = {}) {
+  const normalizedTransactionId = normalizeEngineIntelligenceTransactionId(transactionId);
+  const payload = normalizeEngineIntelligenceFeedbackPayload(feedback);
+  if (!isValidEngineIntelligenceTransactionId(normalizedTransactionId) || !payload || !safeString(idempotencyKey)) {
+    return Object.freeze({ state: "validation-error" });
+  }
+  try {
+    const response = await request(
+      `/api/v1/transactions/scored/${encodeURIComponent(normalizedTransactionId)}/engine-intelligence/feedback`,
+      {
+        method: "POST",
+        signal,
+        headers: { "X-Idempotency-Key": idempotencyKey },
+        body: JSON.stringify(payload)
+      }
+    );
+    return normalizeEngineIntelligenceFeedbackResponse(response);
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
+    return engineIntelligenceFeedbackFailureState(error);
+  }
+}
+
+function normalizeEngineIntelligenceFeedbackPayload(feedback) {
+  if (!feedback || typeof feedback !== "object") {
+    return null;
+  }
+  const feedbackType = normalizedAllowedValue(feedback.feedbackType, ENGINE_INTELLIGENCE_FEEDBACK_TYPES);
+  const usefulness = normalizedAllowedValue(feedback.usefulness, ENGINE_INTELLIGENCE_FEEDBACK_USEFULNESS);
+  const accuracyAssessment = normalizedAllowedValue(feedback.accuracyAssessment, ENGINE_INTELLIGENCE_FEEDBACK_ACCURACY);
+  if (!feedbackType || !usefulness || !accuracyAssessment || typeof feedback.engineIntelligenceAvailable !== "boolean") {
+    return null;
+  }
+  const selectedReasonCodes = feedback.selectedReasonCodes === undefined
+    ? []
+    : normalizeReasonCodes(feedback.selectedReasonCodes);
+  if (!selectedReasonCodes) {
+    return null;
+  }
+  return Object.freeze({
+    feedbackType,
+    usefulness,
+    accuracyAssessment,
+    engineIntelligenceAvailable: feedback.engineIntelligenceAvailable,
+    selectedReasonCodes
+  });
+}
+
+function normalizeEngineIntelligenceFeedbackResponse(response) {
+  if (!response || typeof response !== "object") {
+    return Object.freeze({ state: "unavailable" });
+  }
+  if (response.operationStatus === "CREATED" || response.operationStatus === "EXISTING") {
+    return Object.freeze({
+      state: "saved",
+      operationStatus: response.operationStatus,
+      feedbackId: safeString(response.feedbackId),
+      transactionId: safeString(response.transactionId)
+    });
+  }
+  return Object.freeze({ state: "unavailable" });
+}
+
+function engineIntelligenceFeedbackFailureState(error) {
+  if (error instanceof ApiError && (error.status === 400 || error.status === 422)) {
+    return Object.freeze({ state: "validation-error" });
+  }
+  if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+    return Object.freeze({ state: "unauthorized" });
+  }
+  if (error instanceof ApiError && error.status === 404) {
+    return Object.freeze({ state: "not-found" });
+  }
+  if (error instanceof ApiError && error.status === 409) {
+    return Object.freeze({ state: "validation-error" });
+  }
+  return Object.freeze({ state: "unavailable" });
 }
 
 function engineIntelligenceRequestOptions({ signal } = {}) {

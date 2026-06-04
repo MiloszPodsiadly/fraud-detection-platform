@@ -20,6 +20,8 @@ class EngineIntelligenceApiArchitectureGuardTest {
             "analyst-console-ui/src/api/alertsApi.js",
             "analyst-console-ui/src/api/alertsApi.test.js",
             "analyst-console-ui/src/components/EngineIntelligenceAnalystUiDisplayDocsTest.test.js",
+            "analyst-console-ui/src/components/EngineIntelligenceFeedbackPanel.jsx",
+            "analyst-console-ui/src/components/EngineIntelligenceFeedbackPanel.test.jsx",
             "analyst-console-ui/src/components/EngineIntelligencePanel.jsx",
             "analyst-console-ui/src/components/EngineIntelligencePanel.test.jsx",
             "analyst-console-ui/src/components/EngineIntelligencePanelScopeGuard.test.js",
@@ -53,15 +55,51 @@ class EngineIntelligenceApiArchitectureGuardTest {
     }
 
     @Test
-    void uiExposesEngineIntelligenceOnlyThroughFdp97ReadOnlyDisplay() throws Exception {
+    void uiExposesEngineIntelligenceOnlyThroughBoundedReadAndFeedbackSurfaces() throws Exception {
         assertThat(filesContainingIgnoringCase("analyst-console-ui/src", "engineIntelligence"))
                 .isSubsetOf(FDP97_ANALYST_CONSOLE_ENGINE_INTELLIGENCE_ALLOWED_FILES);
     }
 
     @Test
-    void feedbackStillDoesNotReferenceEngineIntelligence() throws Exception {
-        assertThat(sources("alert-service/src/main/java/com/frauddetection/alert/feedback"))
-                .doesNotContain("EngineIntelligence");
+    void feedbackWorkflowDoesNotImportScoringMlRulesOrPaymentAuthorization() throws Exception {
+        String feedbackSources = sources(
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/feedback",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackController.java",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackService.java",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackRequest.java",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackResponse.java"
+        ).toLowerCase(java.util.Locale.ROOT);
+
+        assertThat(feedbackSources).doesNotContain(
+                "import com.frauddetection.alert.scoring",
+                "import com.frauddetection.alert.ml",
+                "import com.frauddetection.alert.rules",
+                "orchestratorclient",
+                "paymentauthorizationclient",
+                "transactionscoredeventpublisher",
+                "modeltrainingservice",
+                "trainingdatasetexport"
+        );
+    }
+
+    @Test
+    void feedbackModelDoesNotContainDecisioningFields() throws Exception {
+        String feedbackSources = sources(
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/feedback",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackRequest.java",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackResponse.java"
+        );
+
+        assertThat(feedbackSources).doesNotContain(
+                "finalDecision",
+                "recommendedAction",
+                "alertSeverity",
+                "fraudCaseStatus",
+                "paymentAuthorization",
+                "modelTrainingLabel",
+                "groundTruth",
+                "ruleUpdateRequest"
+        );
     }
 
     @Test
@@ -98,11 +136,12 @@ class EngineIntelligenceApiArchitectureGuardTest {
     }
 
     @Test
-    void openApiStillExposesOnlyOneTransactionScopedEngineIntelligenceEndpoint() throws Exception {
+    void openApiExposesOnlyTransactionScopedEngineIntelligenceReadAndFeedbackEndpoints() throws Exception {
         String openApi = sources("docs/openapi/alert_service.openapi.yaml");
 
-        assertThat(openApi.split("/engine-intelligence", -1)).hasSize(2);
+        assertThat(openApi.split("/engine-intelligence", -1)).hasSize(3);
         assertThat(openApi).contains("/api/v1/transactions/scored/{transactionId}/engine-intelligence:");
+        assertThat(openApi).contains("/api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback:");
         assertThat(openApi).doesNotContain(
                 "/api/v1/engine-intelligence:",
                 "/api/v1/engine-intelligence/search:",
