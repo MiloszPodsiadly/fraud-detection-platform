@@ -28,6 +28,8 @@ import com.frauddetection.alert.controller.FraudCaseWorkQueueSummaryController;
 import com.frauddetection.alert.controller.ScoredTransactionController;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackController;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackReadController;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackReadService;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackService;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadController;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
@@ -97,6 +99,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         FraudCaseWorkQueueSummaryController.class,
         ScoredTransactionController.class,
         EngineIntelligenceFeedbackController.class,
+        EngineIntelligenceFeedbackReadController.class,
         EngineIntelligenceReadController.class,
         AuditEventController.class,
         AuditIntegrityController.class,
@@ -151,6 +154,9 @@ class RouteCoverageAgainstMvcMappingsTest {
 
     @MockBean
     private EngineIntelligenceReadService engineIntelligenceReadService;
+
+    @MockBean
+    private EngineIntelligenceFeedbackReadService engineIntelligenceFeedbackReadService;
 
     @MockBean
     private EngineIntelligenceFeedbackService engineIntelligenceFeedbackService;
@@ -269,6 +275,7 @@ class RouteCoverageAgainstMvcMappingsTest {
                         "GET /api/v1/alerts/{alertId}/assistant-summary",
                         "POST /api/v1/alerts/{alertId}/decision",
                         "GET /api/v1/transactions/scored",
+                        "GET /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback",
                         "POST /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback",
                         "GET /internal/suspicious-transactions",
                         "GET /internal/suspicious-transactions/summary",

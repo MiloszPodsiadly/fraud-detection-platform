@@ -54,10 +54,18 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
                 .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)));
         expectSecurityLayerDoesNotReject(get("/api/v1/transactions/scored/txn-1/engine-intelligence")
                 .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)));
+        expectSecurityLayerDoesNotReject(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
+                .with(userWith(AnalystAuthority.ENGINE_INTELLIGENCE_FEEDBACK_READ)));
         expectSecurityLayerDoesNotReject(post("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
                 .with(userWith(AnalystAuthority.ENGINE_INTELLIGENCE_FEEDBACK_WRITE)).with(csrf()));
         expectDenied(get("/api/v1/transactions/scored").with(userWith(AnalystAuthority.FRAUD_CASE_READ)));
         expectDenied(get("/api/v1/transactions/scored/txn-1/engine-intelligence")
+                .with(userWith(AnalystAuthority.FRAUD_CASE_READ)));
+        expectDenied(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
+                .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)));
+        expectDenied(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
+                .with(userWith(AnalystAuthority.ENGINE_INTELLIGENCE_FEEDBACK_WRITE)));
+        expectDenied(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
                 .with(userWith(AnalystAuthority.FRAUD_CASE_READ)));
         expectDenied(post("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
                 .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)).with(csrf()));
@@ -65,7 +73,10 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
                 .with(userWith(AnalystAuthority.FRAUD_CASE_READ)).with(csrf()));
         expectDenied(get("/api/v1/transactions/scored"));
         expectDenied(get("/api/v1/transactions/scored/txn-1/engine-intelligence"));
+        expectDenied(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback"));
         expectDenied(post("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback").with(csrf()));
+        expectDenied(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback/not-real")
+                .with(userWith(AnalystAuthority.ENGINE_INTELLIGENCE_FEEDBACK_READ)));
         expectDenied(get("/api/v1/transactions/not-real")
                 .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)));
         expectDenied(post("/api/v1/transactions/scored")

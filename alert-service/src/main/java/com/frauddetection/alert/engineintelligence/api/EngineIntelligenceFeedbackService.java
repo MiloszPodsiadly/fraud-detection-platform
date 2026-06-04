@@ -33,7 +33,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.springframework.http.HttpStatus.UNAUTHORIZED;
@@ -41,10 +40,8 @@ import static org.springframework.http.HttpStatus.UNAUTHORIZED;
 @Service
 public class EngineIntelligenceFeedbackService {
 
-    private static final int MAX_TRANSACTION_ID_LENGTH = 128;
     private static final int MAX_REASON_CODES = 5;
     private static final int MAX_ACCEPTED_STRING_LENGTH = 128;
-    private static final Pattern TRANSACTION_ID_PATTERN = Pattern.compile("^[A-Za-z0-9._:-]+$");
     private static final Set<String> ACCURACY_ASSESSMENT_NAMES = Arrays.stream(EngineIntelligenceFeedbackAccuracyAssessment.values())
             .map(Enum::name)
             .collect(Collectors.toUnmodifiableSet());
@@ -127,7 +124,7 @@ public class EngineIntelligenceFeedbackService {
             EngineIntelligenceFeedbackRequest request,
             String idempotencyKey
     ) {
-        String boundedTransactionId = normalizedTransactionId(transactionId);
+        String boundedTransactionId = EngineIntelligenceTransactionIdPolicy.normalize(transactionId);
         if (!scoredTransactionRepository.existsById(boundedTransactionId)) {
             throw new EngineIntelligenceScoredTransactionNotFoundException();
         }
@@ -260,19 +257,6 @@ public class EngineIntelligenceFeedbackService {
                         + ";submitted_at=" + document.getSubmittedAt(),
                 1
         );
-    }
-
-    private String normalizedTransactionId(String transactionId) {
-        if (transactionId == null || transactionId.isBlank()) {
-            throw new EngineIntelligenceScoredTransactionNotFoundException();
-        }
-        String normalized = transactionId.trim();
-        if (normalized.length() > MAX_TRANSACTION_ID_LENGTH
-                || transactionId.chars().anyMatch(Character::isISOControl)
-                || !TRANSACTION_ID_PATTERN.matcher(normalized).matches()) {
-            throw new EngineIntelligenceScoredTransactionNotFoundException();
-        }
-        return normalized;
     }
 
     private ValidatedFeedback validate(EngineIntelligenceFeedbackRequest request) {
