@@ -4,6 +4,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
@@ -52,6 +53,15 @@ class EngineIntelligenceProjectionServiceTest {
     }
 
     @Test
+    void nullEventRecordsProjectionLatencyExactlyOnce() {
+        service.project(null);
+
+        assertProjectionMetricShape(1.0d, 1L, 0.0d, 1.0d, 0.0d);
+        assertThat(counter("engine_intelligence_projection_omitted_total", "INVALID_PROJECTION_SHAPE"))
+                .isEqualTo(1.0d);
+    }
+
+    @Test
     void oldEventWithoutEngineIntelligenceKeepsProjectionUnchanged() {
         EngineIntelligenceProjectionResult result = service.project(EngineIntelligenceProjectionTestFixtures.oldEvent());
 
@@ -60,6 +70,15 @@ class EngineIntelligenceProjectionServiceTest {
                 EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_ABSENT
         );
         verify(repository, never()).save(any());
+    }
+
+    @Test
+    void absentEngineIntelligenceRecordsProjectionLatencyExactlyOnce() {
+        service.project(EngineIntelligenceProjectionTestFixtures.oldEvent());
+
+        assertProjectionMetricShape(1.0d, 1L, 0.0d, 1.0d, 0.0d);
+        assertThat(counter("engine_intelligence_projection_omitted_total", "ENGINE_INTELLIGENCE_ABSENT"))
+                .isEqualTo(1.0d);
     }
 
     @Test
@@ -89,9 +108,18 @@ class EngineIntelligenceProjectionServiceTest {
 
         assertThat(result.projection()).isPresent();
         verify(repository).save(any(EngineIntelligenceProjection.class));
-        assertThat(meterRegistry.get("engine_intelligence_projection_attempt_total").counter().count()).isEqualTo(1.0d);
-        assertThat(meterRegistry.get("engine_intelligence_projection_success_total").counter().count()).isEqualTo(1.0d);
-        assertThat(meterRegistry.get("engine_intelligence_projection_latency_seconds").timer().count()).isEqualTo(1L);
+        assertProjectionMetricShape(1.0d, 1L, 1.0d, 0.0d, 0.0d);
+    }
+
+    @Test
+    void successfulProjectionRecordsLatencyExactlyOnce() {
+        when(repository.findById("txn-fdp95-001")).thenReturn(Optional.empty());
+
+        service.project(EngineIntelligenceProjectionTestFixtures.event(
+                EngineIntelligenceProjectionTestFixtures.minimalSummary()
+        ));
+
+        assertProjectionMetricShape(1.0d, 1L, 1.0d, 0.0d, 0.0d);
     }
 
     @Test
@@ -188,6 +216,19 @@ class EngineIntelligenceProjectionServiceTest {
     }
 
     @Test
+    void invalidProjectionShapeRecordsProjectionLatencyExactlyOnce() {
+        EngineIntelligenceSummary summary = mock(EngineIntelligenceSummary.class);
+        when(summary.contractVersion()).thenReturn(2);
+        when(repository.findById("txn-fdp95-001")).thenReturn(Optional.empty());
+
+        service.project(EngineIntelligenceProjectionTestFixtures.event(summary));
+
+        assertProjectionMetricShape(1.0d, 1L, 0.0d, 1.0d, 0.0d);
+        assertThat(counter("engine_intelligence_projection_omitted_total", "INVALID_PROJECTION_SHAPE"))
+                .isEqualTo(1.0d);
+    }
+
+    @Test
     void repositoryFailureIsOmittedBoundedly() {
         when(repository.findById("txn-fdp95-001")).thenReturn(Optional.empty());
         when(repository.save(any(EngineIntelligenceProjection.class)))
@@ -205,6 +246,21 @@ class EngineIntelligenceProjectionServiceTest {
                 .tag("reason", "STORE_UNAVAILABLE")
                 .counter()
                 .count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void storeUnavailableRecordsProjectionLatencyExactlyOnce() {
+        when(repository.findById("txn-fdp95-001")).thenReturn(Optional.empty());
+        when(repository.save(any(EngineIntelligenceProjection.class)))
+                .thenThrow(new IllegalStateException("raw-secret-stacktrace"));
+
+        service.project(EngineIntelligenceProjectionTestFixtures.event(
+                EngineIntelligenceProjectionTestFixtures.minimalSummary()
+        ));
+
+        assertProjectionMetricShape(1.0d, 1L, 0.0d, 0.0d, 1.0d);
+        assertThat(counter("engine_intelligence_projection_failure_total", "STORE_UNAVAILABLE"))
+                .isEqualTo(1.0d);
     }
 
     @Test
@@ -252,6 +308,36 @@ class EngineIntelligenceProjectionServiceTest {
                 ),
                 metrics
         );
+    }
+
+    private void assertProjectionMetricShape(
+            double expectedAttemptCount,
+            long expectedLatencyCount,
+            double expectedSuccessCount,
+            double expectedOmittedCount,
+            double expectedFailureCount
+    ) {
+        assertThat(counter("engine_intelligence_projection_attempt_total")).isEqualTo(expectedAttemptCount);
+        assertThat(timerCount("engine_intelligence_projection_latency_seconds")).isEqualTo(expectedLatencyCount);
+        assertThat(counter("engine_intelligence_projection_success_total")).isEqualTo(expectedSuccessCount);
+        assertThat(counter("engine_intelligence_projection_omitted_total")).isEqualTo(expectedOmittedCount);
+        assertThat(counter("engine_intelligence_projection_failure_total")).isEqualTo(expectedFailureCount);
+    }
+
+    private double counter(String name) {
+        return meterRegistry.find(name).counters().stream()
+                .mapToDouble(Counter::count)
+                .sum();
+    }
+
+    private double counter(String name, String reason) {
+        Counter counter = meterRegistry.find(name).tag("reason", reason).counter();
+        return counter == null ? 0.0d : counter.count();
+    }
+
+    private long timerCount(String name) {
+        var timer = meterRegistry.find(name).timer();
+        return timer == null ? 0L : timer.count();
     }
 
     private String logText(List<ILoggingEvent> events) {

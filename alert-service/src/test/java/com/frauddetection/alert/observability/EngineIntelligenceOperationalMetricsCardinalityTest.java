@@ -80,8 +80,20 @@ class EngineIntelligenceOperationalMetricsCardinalityTest {
     }
 
     @Test
+    void metricsDoNotAcceptRawQueryAsLabel() {
+        assertNoForbiddenMetricText("query", "limit=abc&cursor=token-secret-stacktrace");
+    }
+
+    @Test
     void metricsDoNotAcceptRawExceptionAsLabel() {
         assertNoForbiddenMetricText("exception", "IllegalStateException raw token secret stacktrace");
+    }
+
+    @Test
+    void metricsDoNotAcceptTokenSecretOrStacktraceAsLabel() {
+        assertNoForbiddenMetricText("token", "raw-token-value");
+        assertNoForbiddenMetricText("secret", "raw-secret-value");
+        assertNoForbiddenMetricText("stacktrace", "raw-stacktrace-value");
     }
 
     @Test

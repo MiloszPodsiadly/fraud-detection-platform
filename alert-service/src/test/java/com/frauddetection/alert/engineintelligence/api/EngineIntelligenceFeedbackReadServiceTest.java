@@ -5,9 +5,7 @@ import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFe
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackRepository;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackType;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackUsefulness;
-import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.Pageable;
@@ -33,14 +31,11 @@ class EngineIntelligenceFeedbackReadServiceTest {
     private final EngineIntelligenceFeedbackRepository feedbackRepository = mock(EngineIntelligenceFeedbackRepository.class);
     private final EngineIntelligenceFeedbackReadModelMapper mapper = new EngineIntelligenceFeedbackReadModelMapper();
     private final EngineIntelligenceFeedbackReadPolicy readPolicy = new EngineIntelligenceFeedbackReadPolicy();
-    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
-    private final AlertServiceMetrics metrics = new AlertServiceMetrics(meterRegistry);
     private final EngineIntelligenceFeedbackReadService service = new EngineIntelligenceFeedbackReadService(
             scoredTransactionRepository,
             feedbackRepository,
             mapper,
-            readPolicy,
-            metrics
+            readPolicy
     );
 
     @Test
@@ -55,8 +50,6 @@ class EngineIntelligenceFeedbackReadServiceTest {
         assertThat(response.feedback()).singleElement()
                 .satisfies(entry -> assertThat(entry.feedbackId()).isEqualTo("feedback-1"));
         assertThat(response.page()).isEqualTo(new EngineIntelligenceFeedbackPage(25, false));
-        assertThat(meterRegistry.get("engine_intelligence_feedback_read_attempt_total").counter().count()).isEqualTo(1.0d);
-        assertThat(meterRegistry.get("engine_intelligence_feedback_read_latency_seconds").timer().count()).isEqualTo(1L);
     }
 
     @Test
@@ -79,7 +72,6 @@ class EngineIntelligenceFeedbackReadServiceTest {
                 .isInstanceOf(EngineIntelligenceScoredTransactionNotFoundException.class);
 
         verify(feedbackRepository, never()).findByTransactionId(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
-        assertThat(meterRegistry.get("engine_intelligence_feedback_read_validation_failure_total").counter().count()).isEqualTo(1.0d);
     }
 
     @Test
@@ -147,10 +139,6 @@ class EngineIntelligenceFeedbackReadServiceTest {
                 .hasMessageNotContaining("endpoint")
                 .hasMessageNotContaining("token")
                 .hasMessageNotContaining("secret");
-        assertThat(meterRegistry.get("engine_intelligence_feedback_read_unavailable_total")
-                .tag("reason", "STORE_UNAVAILABLE")
-                .counter()
-                .count()).isEqualTo(1.0d);
     }
 
     @Test
@@ -272,10 +260,6 @@ class EngineIntelligenceFeedbackReadServiceTest {
                 .hasMessageNotContaining("token")
                 .hasMessageNotContaining("secret")
                 .hasMessageNotContaining("stacktrace");
-        assertThat(meterRegistry.get("engine_intelligence_feedback_read_unavailable_total")
-                .tag("reason", "CORRUPTED_STORED_FEEDBACK")
-                .counter()
-                .count()).isEqualTo(1.0d);
     }
 
     private Pageable capturedPageable() {

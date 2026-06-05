@@ -89,6 +89,46 @@ class EngineIntelligenceOperationalHardeningArchitectureGuardTest {
     }
 
     @Test
+    void docsStateFeedbackReadAttemptIsEndpointLevel() throws Exception {
+        assertThat(operationalDocs())
+                .contains("feedback_read_attempt_total` is endpoint-level")
+                .contains("includes invalid query requests rejected before `service.read(...)`");
+    }
+
+    @Test
+    void docsStateFeedbackReadLatencyIsEndpointLevel() throws Exception {
+        assertThat(operationalDocs())
+                .contains("feedback_read_latency_seconds` is endpoint-level")
+                .contains("includes query validation, service read, sensitive read audit")
+                .contains("bounded failure handling");
+    }
+
+    @Test
+    void docsStateReadSuccessRequiresAuditSuccess() throws Exception {
+        assertThat(operationalDocs())
+                .contains("feedback_read_success_total` is recorded only after the read succeeds, sensitive read")
+                .contains("feedback_read_empty_total` is recorded only after the read")
+                .contains("feedback_read_audit_failure_total")
+                .contains("is recorded when sensitive read audit")
+                .contains("prevents a successful response");
+    }
+
+    @Test
+    void docsStateProjectionLatencyIsOncePerAttempt() throws Exception {
+        assertThat(operationalDocs())
+                .contains("projection_latency_seconds` records exactly one sample per projection attempt")
+                .contains("regardless of success, omission, or")
+                .contains("failure");
+    }
+
+    @Test
+    void docsStateSubmitValidationFailureMeaning() throws Exception {
+        assertThat(operationalDocs())
+                .contains("feedback_submit_validation_failure_total` represents bounded pre-persistence request rejection")
+                .contains("malformed input, invalid idempotency, not-found request boundary, or missing authenticated analyst");
+    }
+
+    @Test
     void runbookDocumentsRolloutStages() throws Exception {
         assertThat(runbook())
                 .contains("Stage 0: default disabled / no user impact")
@@ -333,6 +373,10 @@ class EngineIntelligenceOperationalHardeningArchitectureGuardTest {
 
     private String runbook() throws IOException {
         return source("docs/runbooks/engine_intelligence_operational_runbook.md");
+    }
+
+    private String operationalDocs() throws IOException {
+        return architectureDoc() + "\n" + runbook();
     }
 
     private String source(String... relativePaths) throws IOException {

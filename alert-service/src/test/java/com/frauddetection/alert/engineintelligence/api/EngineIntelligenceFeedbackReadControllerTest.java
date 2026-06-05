@@ -24,12 +24,15 @@ import org.springframework.http.HttpStatus;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -90,6 +93,7 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 request.capture()
         );
         verify(metrics).recordEngineIntelligenceFeedbackReadSuccess();
+        verifyEndpointAttemptAndLatency();
         verifyNoMoreInteractions(sensitiveReadAuditService);
     }
 
@@ -113,6 +117,7 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 org.mockito.ArgumentMatchers.any(HttpServletRequest.class)
         );
         verify(metrics).recordEngineIntelligenceFeedbackReadEmpty();
+        verifyEndpointAttemptAndLatency();
         verifyNoMoreInteractions(sensitiveReadAuditService);
     }
 
@@ -125,6 +130,9 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 .andExpect(jsonPath("$.details[0]").value("reason:SCORED_TRANSACTION_NOT_FOUND"));
 
         verifyNoInteractions(sensitiveReadAuditService);
+        verify(metrics).recordEngineIntelligenceFeedbackReadValidationFailure();
+        verifyEndpointAttemptAndLatency();
+        verifyNoSuccessfulReadTerminalMetrics();
     }
 
     @Test
@@ -146,6 +154,10 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 .andExpect(jsonPath("$.message").value("Invalid engine intelligence feedback request."))
                 .andExpect(jsonPath("$.details[0]").value("limit: must be between 1 and 50"));
         verify(metrics).recordEngineIntelligenceFeedbackReadValidationFailure();
+        verifyEndpointAttemptAndLatency();
+        verifyNoInteractions(service, sensitiveReadAuditService);
+        verifyNoSuccessfulReadTerminalMetrics();
+        verify(metrics, never()).recordEngineIntelligenceFeedbackReadUnavailable(any(EngineIntelligenceFeedbackReadMetricReason.class));
     }
 
     @Test
@@ -178,6 +190,10 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 .doesNotContain("NumberFormatException")
                 .doesNotContain("MethodArgumentTypeMismatch")
                 .doesNotContain("stacktrace");
+        verify(metrics).recordEngineIntelligenceFeedbackReadValidationFailure();
+        verifyEndpointAttemptAndLatency();
+        verifyNoInteractions(service, sensitiveReadAuditService);
+        verifyNoSuccessfulReadTerminalMetrics();
     }
 
     @Test
@@ -186,6 +202,10 @@ class EngineIntelligenceFeedbackReadControllerTest {
                         .param("limit", "25", "50"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.details[0]").value("query: invalid parameters"));
+        verify(metrics).recordEngineIntelligenceFeedbackReadValidationFailure();
+        verifyEndpointAttemptAndLatency();
+        verifyNoInteractions(service, sensitiveReadAuditService);
+        verifyNoSuccessfulReadTerminalMetrics();
     }
 
     @Test
@@ -195,6 +215,10 @@ class EngineIntelligenceFeedbackReadControllerTest {
                         .param("cursor", "token-secret-stacktrace"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.details[0]").value("query: invalid parameters"));
+        verify(metrics).recordEngineIntelligenceFeedbackReadValidationFailure();
+        verifyEndpointAttemptAndLatency();
+        verifyNoInteractions(service, sensitiveReadAuditService);
+        verifyNoSuccessfulReadTerminalMetrics();
     }
 
     @Test
@@ -210,6 +234,27 @@ class EngineIntelligenceFeedbackReadControllerTest {
 
         assertThat(response).doesNotContain("payload", "token", "secret", "stacktrace", "endpoint");
         verifyNoInteractions(sensitiveReadAuditService);
+        verify(metrics).recordEngineIntelligenceFeedbackReadUnavailable(EngineIntelligenceFeedbackReadMetricReason.STORE_UNAVAILABLE);
+        verifyEndpointAttemptAndLatency();
+        verifyNoSuccessfulReadTerminalMetrics();
+    }
+
+    @Test
+    void corruptedStoredFeedbackRecordsAttemptUnavailableAndLatencyOnce() throws Exception {
+        when(service.read("txn-1", 25)).thenThrow(new EngineIntelligenceFeedbackReadUnavailableException(
+                EngineIntelligenceFeedbackReadMetricReason.CORRUPTED_STORED_FEEDBACK
+        ));
+
+        mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.details[0]").value("reason:ENGINE_INTELLIGENCE_FEEDBACK_STORE_UNAVAILABLE"));
+
+        verifyNoInteractions(sensitiveReadAuditService);
+        verify(metrics).recordEngineIntelligenceFeedbackReadUnavailable(
+                EngineIntelligenceFeedbackReadMetricReason.CORRUPTED_STORED_FEEDBACK
+        );
+        verifyEndpointAttemptAndLatency();
+        verifyNoSuccessfulReadTerminalMetrics();
     }
 
     @Test
@@ -235,6 +280,8 @@ class EngineIntelligenceFeedbackReadControllerTest {
         assertThat(response).doesNotContain("audit unavailable token secret stacktrace");
         verify(metrics).recordEngineIntelligenceFeedbackReadAuditFailure();
         verify(metrics).recordEngineIntelligenceFeedbackReadUnavailable(EngineIntelligenceFeedbackReadMetricReason.AUDIT_FAILURE);
+        verifyEndpointAttemptAndLatency();
+        verifyNoSuccessfulReadTerminalMetrics();
     }
 
     @Test
@@ -243,6 +290,16 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 .andExpect(status().isNotFound());
 
         verifyNoInteractions(service, sensitiveReadAuditService);
+    }
+
+    private void verifyEndpointAttemptAndLatency() {
+        verify(metrics).recordEngineIntelligenceFeedbackReadAttempt();
+        verify(metrics).recordEngineIntelligenceFeedbackReadLatency(any(Duration.class));
+    }
+
+    private void verifyNoSuccessfulReadTerminalMetrics() {
+        verify(metrics, never()).recordEngineIntelligenceFeedbackReadSuccess();
+        verify(metrics, never()).recordEngineIntelligenceFeedbackReadEmpty();
     }
 
     private EngineIntelligenceFeedbackReadModel response(
