@@ -13,6 +13,10 @@ for current operator procedures and [observability](../observability/index.md) f
 | --- | --- |
 | [FDP-35 regulated mutation rollback plan](fdp_35_regulated_mutation_rollback_plan.md) | Rollback review template and validation checklist for FDP-35 modeled restart/recovery proof. |
 
+Current engine-intelligence operator procedure lives in
+[engine intelligence operational runbook](../runbooks/engine_intelligence_operational_runbook.md), not in this
+branch-evidence folder.
+
 ## Interpretation Rules
 
 - Operations evidence does not approve production enablement.
