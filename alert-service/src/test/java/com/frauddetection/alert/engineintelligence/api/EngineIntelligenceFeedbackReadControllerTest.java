@@ -30,6 +30,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -58,7 +59,7 @@ class EngineIntelligenceFeedbackReadControllerTest {
     private SensitiveReadAuditService sensitiveReadAuditService;
 
     @Test
-    void returnsFeedbackForTransactionAndCreatesBoundedReadAudit() throws Exception {
+    void feedbackReadAuditsExactlyOnce() throws Exception {
         when(service.read("txn-1", 25)).thenReturn(response("txn-1", 25, false, entry("feedback-1")));
 
         mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
@@ -87,7 +88,7 @@ class EngineIntelligenceFeedbackReadControllerTest {
     }
 
     @Test
-    void returnsEmptyListWhenNoFeedbackExists() throws Exception {
+    void emptyFeedbackReadAuditsExactlyOnceWithZeroResultCount() throws Exception {
         when(service.read("txn-1", 25)).thenReturn(response("txn-1", 25, false));
 
         mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback"))
@@ -97,23 +98,61 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 .andExpect(jsonPath("$.feedback").isEmpty())
                 .andExpect(jsonPath("$.page.limit").value(25))
                 .andExpect(jsonPath("$.page.hasMore").value(false));
+
+        verify(sensitiveReadAuditService, times(1)).audit(
+                eq(ReadAccessEndpointCategory.ENGINE_INTELLIGENCE_FEEDBACK_READ),
+                eq(ReadAccessResourceType.ENGINE_INTELLIGENCE_FEEDBACK),
+                eq("txn-1"),
+                eq(0),
+                org.mockito.ArgumentMatchers.any(HttpServletRequest.class)
+        );
+        verifyNoMoreInteractions(sensitiveReadAuditService);
     }
 
     @Test
-    void missingTransactionReturnsNotFound() throws Exception {
+    void missingTransactionDoesNotAuditSuccess() throws Exception {
         when(service.read("txn-missing", 25)).thenThrow(new EngineIntelligenceScoredTransactionNotFoundException());
 
         mockMvc.perform(get("/api/v1/transactions/scored/txn-missing/engine-intelligence/feedback"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.details[0]").value("reason:SCORED_TRANSACTION_NOT_FOUND"));
+
+        verifyNoInteractions(sensitiveReadAuditService);
     }
 
     @Test
-    void invalidLimitReturnsBoundedBadRequest() throws Exception {
+    void defaultLimitIsTwentyFive() throws Exception {
+        when(service.read("txn-1", 25)).thenReturn(response("txn-1", 25, false));
+
+        mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page.limit").value(25));
+
+        verify(service).read("txn-1", 25);
+    }
+
+    @Test
+    void limitAboveMaximumReturnsBoundedBadRequest() throws Exception {
         mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
                         .param("limit", "51"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Invalid engine intelligence feedback request."))
+                .andExpect(jsonPath("$.details[0]").value("limit: must be between 1 and 50"));
+    }
+
+    @Test
+    void zeroLimitReturnsBoundedBadRequest() throws Exception {
+        mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
+                        .param("limit", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0]").value("limit: must be between 1 and 50"));
+    }
+
+    @Test
+    void negativeLimitReturnsBoundedBadRequest() throws Exception {
+        mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
+                        .param("limit", "-1"))
+                .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.details[0]").value("limit: must be between 1 and 50"));
     }
 
@@ -142,7 +181,16 @@ class EngineIntelligenceFeedbackReadControllerTest {
     }
 
     @Test
-    void repositoryFailureReturnsServiceUnavailableWithoutRawDetails() throws Exception {
+    void unknownQueryParamReturnsBoundedBadRequest() throws Exception {
+        mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
+                        .param("limit", "25")
+                        .param("cursor", "token-secret-stacktrace"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0]").value("query: invalid parameters"));
+    }
+
+    @Test
+    void feedbackRepositoryFailureDoesNotAuditSuccess() throws Exception {
         when(service.read("txn-1", 25)).thenThrow(new EngineIntelligenceFeedbackReadUnavailableException());
 
         String response = mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback"))
@@ -153,10 +201,11 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 .getContentAsString();
 
         assertThat(response).doesNotContain("payload", "token", "secret", "stacktrace", "endpoint");
+        verifyNoInteractions(sensitiveReadAuditService);
     }
 
     @Test
-    void auditFailureReturnsBoundedServiceUnavailableWithoutRawAuditError() throws Exception {
+    void feedbackReadAuditFailureReturnsBoundedServiceUnavailable() throws Exception {
         when(service.read("txn-1", 25)).thenReturn(response("txn-1", 25, false, entry("feedback-1")));
         doThrow(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Sensitive read audit unavailable."))
                 .when(sensitiveReadAuditService)
@@ -176,6 +225,14 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 .getContentAsString();
 
         assertThat(response).doesNotContain("audit unavailable token secret stacktrace");
+    }
+
+    @Test
+    void unknownSiblingRouteDoesNotAuditFeedbackRead() throws Exception {
+        mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback/not-real"))
+                .andExpect(status().isNotFound());
+
+        verifyNoInteractions(service, sensitiveReadAuditService);
     }
 
     private EngineIntelligenceFeedbackReadModel response(
