@@ -187,6 +187,9 @@ class EngineIntelligenceApiArchitectureGuardTest {
                 .contains("EngineIntelligenceFeedbackReadModel")
                 .contains("EngineIntelligenceFeedbackEntryReadModel")
                 .contains("EngineIntelligenceFeedbackPage")
+                .contains("FDP-99 returns the first bounded page of latest feedback.")
+                .contains("Cursor-based continuation is future scope.")
+                .contains("page.hasMore indicates additional feedback exists, not that FDP-99 provides navigation.")
                 .contains("default: 25")
                 .contains("maximum: 50")
                 .contains("engine-intelligence:feedback:read");
@@ -209,8 +212,29 @@ class EngineIntelligenceApiArchitectureGuardTest {
                 .contains("submittedBy is omitted by default in FDP-99 v1.")
                 .contains("Any future submittedBy exposure requires stronger explicit permission and separate review.")
                 .contains("Feedback is analyst perception/review input, not ground truth, training label, model correction, scoring override, or final decision.")
-                .contains("Reads are paginated/bounded.")
+                .contains("FDP-99 returns the first bounded page of latest feedback.")
+                .contains("Cursor-based continuation is future scope.")
+                .contains("hasMore indicates additional feedback exists, not navigation state.")
                 .contains("No unbounded findAll/read-all endpoint is allowed.");
+    }
+
+    @Test
+    void governanceIndexesDocumentFeedbackReadEndpointAndBoundary() throws Exception {
+        String architectureIndex = sources("docs/architecture/index.md");
+        String apiSurface = sources("docs/api/api_surface_v1.md");
+
+        assertThat(architectureIndex)
+                .contains("engine_intelligence_feedback_read_model.md")
+                .contains("Engine intelligence feedback read model")
+                .contains("FDP-99");
+        assertThat(apiSurface)
+                .contains("GET /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback")
+                .contains("ENGINE_INTELLIGENCE_FEEDBACK_READ")
+                .contains("Bounded first page")
+                .contains("default 25")
+                .contains("max 50")
+                .contains("no submittedBy")
+                .contains("No execution, decisioning, retraining, or rule updates");
     }
 
     private String sources(String... relativePaths) throws IOException {

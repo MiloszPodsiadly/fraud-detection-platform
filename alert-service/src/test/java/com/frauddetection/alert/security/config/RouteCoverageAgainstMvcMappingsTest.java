@@ -29,6 +29,7 @@ import com.frauddetection.alert.controller.ScoredTransactionController;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackController;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackReadController;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackReadQueryPolicy;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackReadService;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackService;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadController;
@@ -123,6 +124,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         FraudCaseResponseMapper.class,
         ScoredTransactionResponseMapper.class,
         ScoredTransactionSearchPolicy.class,
+        EngineIntelligenceFeedbackReadQueryPolicy.class,
         AlertServiceExceptionHandler.class
 })
 @ActiveProfiles("test")

@@ -6,7 +6,6 @@ import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackAccuracyAssessment;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackType;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackUsefulness;
-import com.frauddetection.alert.engineintelligence.feedback.InvalidEngineIntelligenceFeedbackRequestException;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
@@ -19,14 +18,19 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpStatus;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -41,7 +45,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         }
 )
 @AutoConfigureMockMvc(addFilters = false)
-@Import(AlertServiceExceptionHandler.class)
+@Import({AlertServiceExceptionHandler.class, EngineIntelligenceFeedbackReadQueryPolicy.class})
 class EngineIntelligenceFeedbackReadControllerTest {
 
     @Autowired
@@ -72,18 +76,19 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 .andExpect(jsonPath("$.feedback[0].createdAt").doesNotExist());
 
         ArgumentCaptor<HttpServletRequest> request = ArgumentCaptor.forClass(HttpServletRequest.class);
-        verify(sensitiveReadAuditService).audit(
+        verify(sensitiveReadAuditService, times(1)).audit(
                 eq(ReadAccessEndpointCategory.ENGINE_INTELLIGENCE_FEEDBACK_READ),
                 eq(ReadAccessResourceType.ENGINE_INTELLIGENCE_FEEDBACK),
                 eq("txn-1"),
                 eq(1),
                 request.capture()
         );
+        verifyNoMoreInteractions(sensitiveReadAuditService);
     }
 
     @Test
     void returnsEmptyListWhenNoFeedbackExists() throws Exception {
-        when(service.read("txn-1", null)).thenReturn(response("txn-1", 25, false));
+        when(service.read("txn-1", 25)).thenReturn(response("txn-1", 25, false));
 
         mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback"))
                 .andExpect(status().isOk())
@@ -96,7 +101,7 @@ class EngineIntelligenceFeedbackReadControllerTest {
 
     @Test
     void missingTransactionReturnsNotFound() throws Exception {
-        when(service.read("txn-missing", null)).thenThrow(new EngineIntelligenceScoredTransactionNotFoundException());
+        when(service.read("txn-missing", 25)).thenThrow(new EngineIntelligenceScoredTransactionNotFoundException());
 
         mockMvc.perform(get("/api/v1/transactions/scored/txn-missing/engine-intelligence/feedback"))
                 .andExpect(status().isNotFound())
@@ -105,9 +110,6 @@ class EngineIntelligenceFeedbackReadControllerTest {
 
     @Test
     void invalidLimitReturnsBoundedBadRequest() throws Exception {
-        when(service.read("txn-1", 51))
-                .thenThrow(new InvalidEngineIntelligenceFeedbackRequestException(List.of("limit: must be between 1 and 50")));
-
         mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
                         .param("limit", "51"))
                 .andExpect(status().isBadRequest())
@@ -116,8 +118,32 @@ class EngineIntelligenceFeedbackReadControllerTest {
     }
 
     @Test
+    void nonIntegerLimitReturnsBoundedBadRequestWithoutRawServletDetails() throws Exception {
+        String response = mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
+                        .param("limit", "abc"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0]").value("limit: must be between 1 and 50"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(response)
+                .doesNotContain("NumberFormatException")
+                .doesNotContain("MethodArgumentTypeMismatch")
+                .doesNotContain("stacktrace");
+    }
+
+    @Test
+    void duplicateLimitParamsReturnBoundedBadRequest() throws Exception {
+        mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
+                        .param("limit", "25", "50"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details[0]").value("query: invalid parameters"));
+    }
+
+    @Test
     void repositoryFailureReturnsServiceUnavailableWithoutRawDetails() throws Exception {
-        when(service.read("txn-1", null)).thenThrow(new EngineIntelligenceFeedbackReadUnavailableException());
+        when(service.read("txn-1", 25)).thenThrow(new EngineIntelligenceFeedbackReadUnavailableException());
 
         String response = mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback"))
                 .andExpect(status().isServiceUnavailable())
@@ -127,6 +153,29 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 .getContentAsString();
 
         assertThat(response).doesNotContain("payload", "token", "secret", "stacktrace", "endpoint");
+    }
+
+    @Test
+    void auditFailureReturnsBoundedServiceUnavailableWithoutRawAuditError() throws Exception {
+        when(service.read("txn-1", 25)).thenReturn(response("txn-1", 25, false, entry("feedback-1")));
+        doThrow(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Sensitive read audit unavailable."))
+                .when(sensitiveReadAuditService)
+                .audit(
+                        eq(ReadAccessEndpointCategory.ENGINE_INTELLIGENCE_FEEDBACK_READ),
+                        eq(ReadAccessResourceType.ENGINE_INTELLIGENCE_FEEDBACK),
+                        eq("txn-1"),
+                        eq(1),
+                        org.mockito.ArgumentMatchers.any(HttpServletRequest.class)
+                );
+
+        String response = mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.message").value("Sensitive read audit unavailable."))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(response).doesNotContain("audit unavailable token secret stacktrace");
     }
 
     private EngineIntelligenceFeedbackReadModel response(

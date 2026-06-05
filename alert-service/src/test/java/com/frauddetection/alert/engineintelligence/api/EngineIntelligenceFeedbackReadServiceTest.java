@@ -5,7 +5,6 @@ import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFe
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackRepository;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackType;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackUsefulness;
-import com.frauddetection.alert.engineintelligence.feedback.InvalidEngineIntelligenceFeedbackRequestException;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -31,10 +30,12 @@ class EngineIntelligenceFeedbackReadServiceTest {
     private final ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
     private final EngineIntelligenceFeedbackRepository feedbackRepository = mock(EngineIntelligenceFeedbackRepository.class);
     private final EngineIntelligenceFeedbackReadModelMapper mapper = new EngineIntelligenceFeedbackReadModelMapper();
+    private final EngineIntelligenceFeedbackReadPolicy readPolicy = new EngineIntelligenceFeedbackReadPolicy();
     private final EngineIntelligenceFeedbackReadService service = new EngineIntelligenceFeedbackReadService(
             scoredTransactionRepository,
             feedbackRepository,
-            mapper
+            mapper,
+            readPolicy
     );
 
     @Test
@@ -57,7 +58,7 @@ class EngineIntelligenceFeedbackReadServiceTest {
         when(feedbackRepository.findByTransactionId(eq("txn-1"), org.mockito.ArgumentMatchers.any(Pageable.class)))
                 .thenReturn(List.of());
 
-        EngineIntelligenceFeedbackReadModel response = service.read("txn-1", null);
+        EngineIntelligenceFeedbackReadModel response = service.read("txn-1", 25);
 
         assertThat(response.feedback()).isEmpty();
         assertThat(response.page()).isEqualTo(new EngineIntelligenceFeedbackPage(25, false));
@@ -84,31 +85,15 @@ class EngineIntelligenceFeedbackReadServiceTest {
     }
 
     @Test
-    void enforcesDefaultPaginationLimitAndRequestsOneExtra() {
+    void requestsOneExtraForHasMore() {
         when(scoredTransactionRepository.existsById("txn-1")).thenReturn(true);
         when(feedbackRepository.findByTransactionId(eq("txn-1"), org.mockito.ArgumentMatchers.any(Pageable.class)))
                 .thenReturn(List.of());
 
-        service.read("txn-1", null);
+        service.read("txn-1", 25);
 
         Pageable pageable = capturedPageable();
         assertThat(pageable.getPageSize()).isEqualTo(26);
-    }
-
-    @Test
-    void rejectsLimitAboveMaximum() {
-        assertThatThrownBy(() -> service.read("txn-1", 51))
-                .isInstanceOf(InvalidEngineIntelligenceFeedbackRequestException.class);
-        verifyNoInteractions(scoredTransactionRepository, feedbackRepository);
-    }
-
-    @Test
-    void rejectsNegativeOrZeroLimit() {
-        assertThatThrownBy(() -> service.read("txn-1", 0))
-                .isInstanceOf(InvalidEngineIntelligenceFeedbackRequestException.class);
-        assertThatThrownBy(() -> service.read("txn-1", -1))
-                .isInstanceOf(InvalidEngineIntelligenceFeedbackRequestException.class);
-        verifyNoInteractions(scoredTransactionRepository, feedbackRepository);
     }
 
     @Test
@@ -156,6 +141,127 @@ class EngineIntelligenceFeedbackReadServiceTest {
                 .hasMessageNotContaining("secret");
     }
 
+    @Test
+    void corruptedFeedbackWithRawEvidenceReasonCodeReturns503WithoutLeak() {
+        assertCorruptedDocumentFailsClosed(document("feedback-1", NOW, List.of("rawEvidence")));
+    }
+
+    @Test
+    void corruptedFeedbackWithTokenSecretStacktraceReasonCodeReturns503WithoutLeak() {
+        assertCorruptedDocumentFailsClosed(document("feedback-1", NOW, List.of("token-secret-stacktrace")));
+    }
+
+    @Test
+    void corruptedFeedbackWithNullSubmittedAtReturns503() {
+        assertCorruptedDocumentFailsClosed(document("feedback-1", null));
+    }
+
+    @Test
+    void corruptedFeedbackWithBlankFeedbackIdReturns503() {
+        assertCorruptedDocumentFailsClosed(document("   ", NOW));
+    }
+
+    @Test
+    void corruptedFeedbackWithNullFeedbackTypeReturns503() {
+        assertCorruptedDocumentFailsClosed(new EngineIntelligenceFeedbackDocument(
+                "feedback-1",
+                "txn-1",
+                true,
+                null,
+                EngineIntelligenceFeedbackUsefulness.HELPFUL,
+                EngineIntelligenceFeedbackAccuracyAssessment.SIGNALS_LOOK_CORRECT,
+                List.of("HIGH_VELOCITY"),
+                "analyst-1",
+                NOW,
+                "correlation-1",
+                "idempotency-hash-1",
+                "payload-hash-1",
+                NOW
+        ));
+    }
+
+    @Test
+    void corruptedFeedbackWithNullUsefulnessReturns503() {
+        assertCorruptedDocumentFailsClosed(new EngineIntelligenceFeedbackDocument(
+                "feedback-1",
+                "txn-1",
+                true,
+                EngineIntelligenceFeedbackType.ENGINE_INTELLIGENCE_USEFULNESS,
+                null,
+                EngineIntelligenceFeedbackAccuracyAssessment.SIGNALS_LOOK_CORRECT,
+                List.of("HIGH_VELOCITY"),
+                "analyst-1",
+                NOW,
+                "correlation-1",
+                "idempotency-hash-1",
+                "payload-hash-1",
+                NOW
+        ));
+    }
+
+    @Test
+    void corruptedFeedbackWithNullAccuracyAssessmentReturns503() {
+        assertCorruptedDocumentFailsClosed(new EngineIntelligenceFeedbackDocument(
+                "feedback-1",
+                "txn-1",
+                true,
+                EngineIntelligenceFeedbackType.ENGINE_INTELLIGENCE_USEFULNESS,
+                EngineIntelligenceFeedbackUsefulness.HELPFUL,
+                null,
+                List.of("HIGH_VELOCITY"),
+                "analyst-1",
+                NOW,
+                "correlation-1",
+                "idempotency-hash-1",
+                "payload-hash-1",
+                NOW
+        ));
+    }
+
+    @Test
+    void corruptedFeedbackWithOverLimitSelectedReasonCodesReturns503() {
+        assertCorruptedDocumentFailsClosed(document(
+                "feedback-1",
+                NOW,
+                List.of("A", "B", "C", "D", "E", "F")
+        ));
+    }
+
+    @Test
+    void corruptedFeedbackWithAccuracyAssessmentAsReasonCodeReturns503() {
+        assertCorruptedDocumentFailsClosed(document(
+                "feedback-1",
+                NOW,
+                List.of("SIGNALS_LOOK_CORRECT")
+        ));
+    }
+
+    @Test
+    void corruptedFeedbackDoesNotReturnPartialResponse() {
+        when(scoredTransactionRepository.existsById("txn-1")).thenReturn(true);
+        when(feedbackRepository.findByTransactionId(eq("txn-1"), org.mockito.ArgumentMatchers.any(Pageable.class)))
+                .thenReturn(List.of(
+                        document("feedback-valid", NOW),
+                        document("feedback-corrupt", NOW.minusSeconds(1), List.of("rawEvidence"))
+                ));
+
+        assertThatThrownBy(() -> service.read("txn-1", 25))
+                .isInstanceOf(EngineIntelligenceFeedbackReadUnavailableException.class);
+    }
+
+    private void assertCorruptedDocumentFailsClosed(EngineIntelligenceFeedbackDocument document) {
+        when(scoredTransactionRepository.existsById("txn-1")).thenReturn(true);
+        when(feedbackRepository.findByTransactionId(eq("txn-1"), org.mockito.ArgumentMatchers.any(Pageable.class)))
+                .thenReturn(List.of(document));
+
+        assertThatThrownBy(() -> service.read("txn-1", 25))
+                .isInstanceOf(EngineIntelligenceFeedbackReadUnavailableException.class)
+                .hasMessageNotContaining("rawEvidence")
+                .hasMessageNotContaining("token")
+                .hasMessageNotContaining("secret")
+                .hasMessageNotContaining("stacktrace");
+    }
+
     private Pageable capturedPageable() {
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
         verify(feedbackRepository).findByTransactionId(eq("txn-1"), pageable.capture());
@@ -163,6 +269,10 @@ class EngineIntelligenceFeedbackReadServiceTest {
     }
 
     private EngineIntelligenceFeedbackDocument document(String feedbackId, Instant submittedAt) {
+        return document(feedbackId, submittedAt, List.of("HIGH_VELOCITY"));
+    }
+
+    private EngineIntelligenceFeedbackDocument document(String feedbackId, Instant submittedAt, List<String> reasonCodes) {
         return new EngineIntelligenceFeedbackDocument(
                 feedbackId,
                 "txn-1",
@@ -170,7 +280,7 @@ class EngineIntelligenceFeedbackReadServiceTest {
                 EngineIntelligenceFeedbackType.ENGINE_INTELLIGENCE_USEFULNESS,
                 EngineIntelligenceFeedbackUsefulness.HELPFUL,
                 EngineIntelligenceFeedbackAccuracyAssessment.SIGNALS_LOOK_CORRECT,
-                List.of("HIGH_VELOCITY"),
+                reasonCodes,
                 "analyst-1",
                 submittedAt,
                 "correlation-1",
