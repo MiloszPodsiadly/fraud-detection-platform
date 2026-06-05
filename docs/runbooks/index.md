@@ -6,6 +6,7 @@ Status: current runbook standard.
 
 | Runbook | Use when |
 | --- | --- |
+| [Engine intelligence operational runbook](engine_intelligence_operational_runbook.md) | Engine-intelligence projection, feedback submit/read, audit dependency, rollout, rollback, retention, index, and storage-growth triage. |
 | [Alert service operations](alert_service_operations.md) | Runtime operations, trust incidents, outbox ambiguity, audit degradation, and startup closure. |
 | [Regulated mutation recovery](regulated_mutation_recovery.md) | Lease renewal failures, checkpoint renewal failures, finalize recovery, and local audit-chain contention. |
 | [Regulated mutation drills](regulated_mutation_drills.md) | Modeled recovery drills and real alert-service kill-restart drill evidence. |

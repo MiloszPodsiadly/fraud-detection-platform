@@ -3,6 +3,8 @@ package com.frauddetection.alert.engineintelligence.api;
 import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
+import com.frauddetection.alert.engineintelligence.observability.EngineIntelligenceFeedbackReadMetricReason;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackAccuracyAssessment;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackType;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackUsefulness;
@@ -20,14 +22,20 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -58,6 +66,33 @@ class EngineIntelligenceFeedbackReadControllerTest {
     @MockBean
     private SensitiveReadAuditService sensitiveReadAuditService;
 
+    @MockBean
+    private AlertServiceMetrics metrics;
+
+    @Test
+    void feedbackReadUsesInjectedClockForDeterministicLatency() {
+        EngineIntelligenceFeedbackReadService localService = org.mockito.Mockito.mock(EngineIntelligenceFeedbackReadService.class);
+        SensitiveReadAuditService localAuditService = org.mockito.Mockito.mock(SensitiveReadAuditService.class);
+        AlertServiceMetrics localMetrics = org.mockito.Mockito.mock(AlertServiceMetrics.class);
+        EngineIntelligenceFeedbackReadController controller = new EngineIntelligenceFeedbackReadController(
+                localService,
+                localAuditService,
+                new EngineIntelligenceFeedbackReadQueryPolicy(),
+                localMetrics,
+                new TwoTickClock(
+                        Instant.parse("2026-06-05T10:00:00Z"),
+                        Instant.parse("2026-06-05T10:00:00.250Z")
+                )
+        );
+        when(localService.read("txn-1", 25)).thenReturn(response("txn-1", 25, false, entry("feedback-1")));
+
+        controller.read("txn-1", new LinkedMultiValueMap<>(), org.mockito.Mockito.mock(HttpServletRequest.class));
+
+        verify(localMetrics, times(1)).recordEngineIntelligenceFeedbackReadAttempt();
+        verify(localMetrics, times(1)).recordEngineIntelligenceFeedbackReadSuccess();
+        verify(localMetrics, times(1)).recordEngineIntelligenceFeedbackReadLatency(Duration.ofMillis(250));
+    }
+
     @Test
     void feedbackReadAuditsExactlyOnce() throws Exception {
         when(service.read("txn-1", 25)).thenReturn(response("txn-1", 25, false, entry("feedback-1")));
@@ -84,6 +119,8 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 eq(1),
                 request.capture()
         );
+        verify(metrics).recordEngineIntelligenceFeedbackReadSuccess();
+        verifyEndpointAttemptAndLatency();
         verifyNoMoreInteractions(sensitiveReadAuditService);
     }
 
@@ -106,6 +143,8 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 eq(0),
                 org.mockito.ArgumentMatchers.any(HttpServletRequest.class)
         );
+        verify(metrics).recordEngineIntelligenceFeedbackReadEmpty();
+        verifyEndpointAttemptAndLatency();
         verifyNoMoreInteractions(sensitiveReadAuditService);
     }
 
@@ -118,6 +157,9 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 .andExpect(jsonPath("$.details[0]").value("reason:SCORED_TRANSACTION_NOT_FOUND"));
 
         verifyNoInteractions(sensitiveReadAuditService);
+        verify(metrics).recordEngineIntelligenceFeedbackReadValidationFailure();
+        verifyEndpointAttemptAndLatency();
+        verifyNoSuccessfulReadTerminalMetrics();
     }
 
     @Test
@@ -138,6 +180,11 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Invalid engine intelligence feedback request."))
                 .andExpect(jsonPath("$.details[0]").value("limit: must be between 1 and 50"));
+        verify(metrics).recordEngineIntelligenceFeedbackReadValidationFailure();
+        verifyEndpointAttemptAndLatency();
+        verifyNoInteractions(service, sensitiveReadAuditService);
+        verifyNoSuccessfulReadTerminalMetrics();
+        verify(metrics, never()).recordEngineIntelligenceFeedbackReadUnavailable(any(EngineIntelligenceFeedbackReadMetricReason.class));
     }
 
     @Test
@@ -170,6 +217,10 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 .doesNotContain("NumberFormatException")
                 .doesNotContain("MethodArgumentTypeMismatch")
                 .doesNotContain("stacktrace");
+        verify(metrics).recordEngineIntelligenceFeedbackReadValidationFailure();
+        verifyEndpointAttemptAndLatency();
+        verifyNoInteractions(service, sensitiveReadAuditService);
+        verifyNoSuccessfulReadTerminalMetrics();
     }
 
     @Test
@@ -178,6 +229,10 @@ class EngineIntelligenceFeedbackReadControllerTest {
                         .param("limit", "25", "50"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.details[0]").value("query: invalid parameters"));
+        verify(metrics).recordEngineIntelligenceFeedbackReadValidationFailure();
+        verifyEndpointAttemptAndLatency();
+        verifyNoInteractions(service, sensitiveReadAuditService);
+        verifyNoSuccessfulReadTerminalMetrics();
     }
 
     @Test
@@ -187,6 +242,10 @@ class EngineIntelligenceFeedbackReadControllerTest {
                         .param("cursor", "token-secret-stacktrace"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.details[0]").value("query: invalid parameters"));
+        verify(metrics).recordEngineIntelligenceFeedbackReadValidationFailure();
+        verifyEndpointAttemptAndLatency();
+        verifyNoInteractions(service, sensitiveReadAuditService);
+        verifyNoSuccessfulReadTerminalMetrics();
     }
 
     @Test
@@ -202,6 +261,27 @@ class EngineIntelligenceFeedbackReadControllerTest {
 
         assertThat(response).doesNotContain("payload", "token", "secret", "stacktrace", "endpoint");
         verifyNoInteractions(sensitiveReadAuditService);
+        verify(metrics).recordEngineIntelligenceFeedbackReadUnavailable(EngineIntelligenceFeedbackReadMetricReason.STORE_UNAVAILABLE);
+        verifyEndpointAttemptAndLatency();
+        verifyNoSuccessfulReadTerminalMetrics();
+    }
+
+    @Test
+    void corruptedStoredFeedbackRecordsAttemptUnavailableAndLatencyOnce() throws Exception {
+        when(service.read("txn-1", 25)).thenThrow(new EngineIntelligenceFeedbackReadUnavailableException(
+                EngineIntelligenceFeedbackReadMetricReason.CORRUPTED_STORED_FEEDBACK
+        ));
+
+        mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.details[0]").value("reason:ENGINE_INTELLIGENCE_FEEDBACK_STORE_UNAVAILABLE"));
+
+        verifyNoInteractions(sensitiveReadAuditService);
+        verify(metrics).recordEngineIntelligenceFeedbackReadUnavailable(
+                EngineIntelligenceFeedbackReadMetricReason.CORRUPTED_STORED_FEEDBACK
+        );
+        verifyEndpointAttemptAndLatency();
+        verifyNoSuccessfulReadTerminalMetrics();
     }
 
     @Test
@@ -225,6 +305,10 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 .getContentAsString();
 
         assertThat(response).doesNotContain("audit unavailable token secret stacktrace");
+        verify(metrics).recordEngineIntelligenceFeedbackReadAuditFailure();
+        verify(metrics).recordEngineIntelligenceFeedbackReadUnavailable(EngineIntelligenceFeedbackReadMetricReason.AUDIT_FAILURE);
+        verifyEndpointAttemptAndLatency();
+        verifyNoSuccessfulReadTerminalMetrics();
     }
 
     @Test
@@ -233,6 +317,16 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 .andExpect(status().isNotFound());
 
         verifyNoInteractions(service, sensitiveReadAuditService);
+    }
+
+    private void verifyEndpointAttemptAndLatency() {
+        verify(metrics, times(1)).recordEngineIntelligenceFeedbackReadAttempt();
+        verify(metrics, times(1)).recordEngineIntelligenceFeedbackReadLatency(any(Duration.class));
+    }
+
+    private void verifyNoSuccessfulReadTerminalMetrics() {
+        verify(metrics, never()).recordEngineIntelligenceFeedbackReadSuccess();
+        verify(metrics, never()).recordEngineIntelligenceFeedbackReadEmpty();
     }
 
     private EngineIntelligenceFeedbackReadModel response(
@@ -258,5 +352,32 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 List.of("HIGH_VELOCITY"),
                 Instant.parse("2026-06-04T10:15:30Z")
         );
+    }
+
+    private static final class TwoTickClock extends Clock {
+
+        private final Instant first;
+        private final Instant second;
+        private int calls;
+
+        private TwoTickClock(Instant first, Instant second) {
+            this.first = first;
+            this.second = second;
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneId.of("UTC");
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return calls++ == 0 ? first : second;
+        }
     }
 }

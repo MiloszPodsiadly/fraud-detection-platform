@@ -14,6 +14,7 @@ import com.frauddetection.alert.idempotency.IdempotencyCanonicalHasher;
 import com.frauddetection.alert.idempotency.SharedIdempotencyKeyPolicy;
 import com.frauddetection.alert.idempotency.SharedInvalidIdempotencyKeyException;
 import com.frauddetection.alert.idempotency.SharedMissingIdempotencyKeyException;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
@@ -21,6 +22,7 @@ import com.frauddetection.alert.security.authorization.AnalystRole;
 import com.frauddetection.alert.security.principal.AnalystPrincipal;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -56,6 +58,8 @@ class EngineIntelligenceFeedbackServiceTest {
     private final CurrentAnalystUser currentAnalystUser = mock(CurrentAnalystUser.class);
     private final AuditService auditService = mock(AuditService.class);
     private final RegulatedMutationTransactionRunner transactionRunner = mock(RegulatedMutationTransactionRunner.class);
+    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+    private final AlertServiceMetrics metrics = new AlertServiceMetrics(meterRegistry);
     private final EngineIntelligenceFeedbackService service = new EngineIntelligenceFeedbackService(
             scoredTransactionRepository,
             feedbackRepository,
@@ -63,6 +67,7 @@ class EngineIntelligenceFeedbackServiceTest {
             currentAnalystUser,
             auditService,
             transactionRunner,
+            metrics,
             Clock.fixed(NOW, ZoneOffset.UTC)
     );
 
@@ -110,6 +115,9 @@ class EngineIntelligenceFeedbackServiceTest {
                 .contains("transaction_id=txn-1")
                 .contains("feedback_type=ENGINE_INTELLIGENCE_USEFULNESS")
                 .doesNotContain("fraud_case_id", "case-1", "payload", "token", "stacktrace", "endpoint");
+        assertThat(meterRegistry.get("engine_intelligence_feedback_submit_attempt_total").counter().count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("engine_intelligence_feedback_submit_success_total").counter().count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("engine_intelligence_feedback_submit_latency_seconds").timer().count()).isEqualTo(1L);
     }
 
     @Test
@@ -125,6 +133,11 @@ class EngineIntelligenceFeedbackServiceTest {
         assertThatThrownBy(() -> service.submit("txn-1", validRequest(), "feedback-key-1"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("audit unavailable");
+        assertThat(meterRegistry.get("engine_intelligence_feedback_submit_audit_failure_total").counter().count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("engine_intelligence_feedback_submit_unavailable_total")
+                .tag("reason", "AUDIT_FAILURE")
+                .counter()
+                .count()).isEqualTo(1.0d);
     }
 
     @Test
@@ -159,6 +172,10 @@ class EngineIntelligenceFeedbackServiceTest {
 
         verify(auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any(), any());
         verify(feedbackRepository, never()).deleteById(any());
+        assertThat(meterRegistry.get("engine_intelligence_feedback_submit_unavailable_total")
+                .tag("reason", "STORE_UNAVAILABLE")
+                .counter()
+                .count()).isEqualTo(1.0d);
     }
 
     @Test
@@ -174,6 +191,8 @@ class EngineIntelligenceFeedbackServiceTest {
         assertThat(response.feedbackId()).isEqualTo("feedback-existing");
         verify(feedbackRepository, never()).save(any());
         verify(auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any(), any());
+        assertThat(meterRegistry.get("engine_intelligence_feedback_submit_idempotency_replay_total").counter().count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("engine_intelligence_feedback_submit_success_total").counter().count()).isEqualTo(1.0d);
     }
 
     @Test
@@ -187,6 +206,7 @@ class EngineIntelligenceFeedbackServiceTest {
 
         verify(feedbackRepository, never()).save(any());
         verify(auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any(), any());
+        assertThat(meterRegistry.get("engine_intelligence_feedback_submit_idempotency_conflict_total").counter().count()).isEqualTo(1.0d);
     }
 
     @Test
@@ -225,6 +245,7 @@ class EngineIntelligenceFeedbackServiceTest {
                 .isInstanceOf(SharedMissingIdempotencyKeyException.class);
 
         verify(feedbackRepository, never()).save(any());
+        assertThat(meterRegistry.get("engine_intelligence_feedback_submit_validation_failure_total").counter().count()).isEqualTo(1.0d);
     }
 
     @Test

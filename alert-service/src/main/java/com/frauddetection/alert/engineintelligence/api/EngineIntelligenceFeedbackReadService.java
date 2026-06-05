@@ -2,7 +2,9 @@ package com.frauddetection.alert.engineintelligence.api;
 
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackDocument;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackRepository;
+import com.frauddetection.alert.engineintelligence.observability.EngineIntelligenceFeedbackReadMetricReason;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -18,6 +20,7 @@ public class EngineIntelligenceFeedbackReadService {
     private final EngineIntelligenceFeedbackReadModelMapper mapper;
     private final EngineIntelligenceFeedbackReadPolicy readPolicy;
 
+    @Autowired
     public EngineIntelligenceFeedbackReadService(
             ScoredTransactionRepository scoredTransactionRepository,
             EngineIntelligenceFeedbackRepository feedbackRepository,
@@ -32,7 +35,7 @@ public class EngineIntelligenceFeedbackReadService {
 
     public EngineIntelligenceFeedbackReadModel read(String transactionId, int limit) {
         String boundedTransactionId = EngineIntelligenceTransactionIdPolicy.normalize(transactionId);
-        if (!scoredTransactionRepository.existsById(boundedTransactionId)) {
+        if (!scoredTransactionExists(boundedTransactionId)) {
             throw new EngineIntelligenceScoredTransactionNotFoundException();
         }
         List<EngineIntelligenceFeedbackDocument> documents;
@@ -49,7 +52,9 @@ public class EngineIntelligenceFeedbackReadService {
                     )
             );
         } catch (RuntimeException exception) {
-            throw new EngineIntelligenceFeedbackReadUnavailableException();
+            throw new EngineIntelligenceFeedbackReadUnavailableException(
+                    EngineIntelligenceFeedbackReadMetricReason.STORE_UNAVAILABLE
+            );
         }
         documents = readPolicy.validate(documents);
         boolean hasMore = documents.size() > limit;
@@ -57,5 +62,15 @@ public class EngineIntelligenceFeedbackReadService {
                 ? documents.subList(0, limit)
                 : documents;
         return mapper.map(boundedTransactionId, bounded, limit, hasMore);
+    }
+
+    private boolean scoredTransactionExists(String boundedTransactionId) {
+        try {
+            return scoredTransactionRepository.existsById(boundedTransactionId);
+        } catch (RuntimeException exception) {
+            throw new EngineIntelligenceFeedbackReadUnavailableException(
+                    EngineIntelligenceFeedbackReadMetricReason.STORE_UNAVAILABLE
+            );
+        }
     }
 }
