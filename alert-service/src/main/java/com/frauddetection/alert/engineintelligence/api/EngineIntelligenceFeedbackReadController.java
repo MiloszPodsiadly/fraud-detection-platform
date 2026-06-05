@@ -16,6 +16,8 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Objects;
 
 @RestController
@@ -46,42 +48,51 @@ public class EngineIntelligenceFeedbackReadController {
             @RequestParam MultiValueMap<String, String> rawParams,
             HttpServletRequest request
     ) {
-        int limit;
+        Instant startedAt = Instant.now();
+        metrics.recordEngineIntelligenceFeedbackReadAttempt();
         try {
-            limit = queryPolicy.limit(rawParams);
-        } catch (InvalidEngineIntelligenceFeedbackRequestException exception) {
-            metrics.recordEngineIntelligenceFeedbackReadValidationFailure();
-            throw exception;
-        }
-        EngineIntelligenceFeedbackReadModel response = service.read(transactionId, limit);
-        try {
-            sensitiveReadAuditService.audit(
-                    ReadAccessEndpointCategory.ENGINE_INTELLIGENCE_FEEDBACK_READ,
-                    ReadAccessResourceType.ENGINE_INTELLIGENCE_FEEDBACK,
-                    response.transactionId(),
-                    response.feedback().size(),
-                    request
-            );
-        } catch (ResponseStatusException exception) {
-            if (exception.getStatusCode().value() == 503) {
+            int limit = queryPolicy.limit(rawParams);
+            EngineIntelligenceFeedbackReadModel response = service.read(transactionId, limit);
+            try {
+                sensitiveReadAuditService.audit(
+                        ReadAccessEndpointCategory.ENGINE_INTELLIGENCE_FEEDBACK_READ,
+                        ReadAccessResourceType.ENGINE_INTELLIGENCE_FEEDBACK,
+                        response.transactionId(),
+                        response.feedback().size(),
+                        request
+                );
+            } catch (ResponseStatusException exception) {
+                if (exception.getStatusCode().value() == 503) {
+                    metrics.recordEngineIntelligenceFeedbackReadAuditFailure();
+                    metrics.recordEngineIntelligenceFeedbackReadUnavailable(
+                            EngineIntelligenceFeedbackReadMetricReason.AUDIT_FAILURE
+                    );
+                }
+                throw exception;
+            } catch (RuntimeException exception) {
                 metrics.recordEngineIntelligenceFeedbackReadAuditFailure();
                 metrics.recordEngineIntelligenceFeedbackReadUnavailable(
                         EngineIntelligenceFeedbackReadMetricReason.AUDIT_FAILURE
                 );
+                throw exception;
             }
+            if (response.feedback().isEmpty()) {
+                metrics.recordEngineIntelligenceFeedbackReadEmpty();
+            } else {
+                metrics.recordEngineIntelligenceFeedbackReadSuccess();
+            }
+            return response;
+        } catch (InvalidEngineIntelligenceFeedbackRequestException exception) {
+            metrics.recordEngineIntelligenceFeedbackReadValidationFailure();
             throw exception;
-        } catch (RuntimeException exception) {
-            metrics.recordEngineIntelligenceFeedbackReadAuditFailure();
-            metrics.recordEngineIntelligenceFeedbackReadUnavailable(
-                    EngineIntelligenceFeedbackReadMetricReason.AUDIT_FAILURE
-            );
+        } catch (EngineIntelligenceScoredTransactionNotFoundException exception) {
+            metrics.recordEngineIntelligenceFeedbackReadValidationFailure();
             throw exception;
+        } catch (EngineIntelligenceFeedbackReadUnavailableException exception) {
+            metrics.recordEngineIntelligenceFeedbackReadUnavailable(exception.metricReason());
+            throw exception;
+        } finally {
+            metrics.recordEngineIntelligenceFeedbackReadLatency(Duration.between(startedAt, Instant.now()));
         }
-        if (response.feedback().isEmpty()) {
-            metrics.recordEngineIntelligenceFeedbackReadEmpty();
-        } else {
-            metrics.recordEngineIntelligenceFeedbackReadSuccess();
-        }
-        return response;
     }
 }

@@ -47,25 +47,23 @@ public class EngineIntelligenceProjectionService {
     public EngineIntelligenceProjectionResult project(TransactionScoredEvent event) {
         Instant startedAt = clock.instant();
         metrics.recordEngineIntelligenceProjectionAttempt();
-        if (event == null) {
-            EngineIntelligenceProjectionResult result = EngineIntelligenceProjectionResult.omitted(
-                    EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE
-            );
-            metrics.recordEngineIntelligenceProjectionOmitted(EngineIntelligenceProjectionMetricReason.INVALID_PROJECTION_SHAPE);
-            metrics.recordEngineIntelligenceProjectionLatency(Duration.between(startedAt, clock.instant()));
-            logOmission(result);
-            return result;
-        }
-        if (event.engineIntelligence() == null) {
-            EngineIntelligenceProjectionResult result = EngineIntelligenceProjectionResult.omitted(
-                    EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_ABSENT
-            );
-            metrics.recordEngineIntelligenceProjectionOmitted(EngineIntelligenceProjectionMetricReason.ENGINE_INTELLIGENCE_ABSENT);
-            metrics.recordEngineIntelligenceProjectionLatency(Duration.between(startedAt, clock.instant()));
-            return result;
-        }
-
         try {
+            if (event == null) {
+                EngineIntelligenceProjectionResult result = EngineIntelligenceProjectionResult.omitted(
+                        EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE
+                );
+                metrics.recordEngineIntelligenceProjectionOmitted(EngineIntelligenceProjectionMetricReason.INVALID_PROJECTION_SHAPE);
+                logOmission(result);
+                return result;
+            }
+            if (event.engineIntelligence() == null) {
+                EngineIntelligenceProjectionResult result = EngineIntelligenceProjectionResult.omitted(
+                        EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_ABSENT
+                );
+                metrics.recordEngineIntelligenceProjectionOmitted(EngineIntelligenceProjectionMetricReason.ENGINE_INTELLIGENCE_ABSENT);
+                return result;
+            }
+
             Instant createdAt = existingCreatedAt(event.transactionId());
             EngineIntelligenceProjectionResult result = mapper.map(
                     event.transactionId(),

@@ -2,6 +2,7 @@ package com.frauddetection.alert.engineintelligence.api;
 
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackAccuracyAssessment;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackDocument;
+import com.frauddetection.alert.engineintelligence.observability.EngineIntelligenceFeedbackReadMetricReason;
 import org.springframework.stereotype.Component;
 
 import java.util.Arrays;
@@ -62,7 +63,9 @@ public class EngineIntelligenceFeedbackReadPolicy {
             }
             return List.copyOf(documents);
         } catch (RuntimeException exception) {
-            throw new EngineIntelligenceFeedbackReadUnavailableException();
+            throw new EngineIntelligenceFeedbackReadUnavailableException(
+                    EngineIntelligenceFeedbackReadMetricReason.CORRUPTED_STORED_FEEDBACK
+            );
         }
     }
 
