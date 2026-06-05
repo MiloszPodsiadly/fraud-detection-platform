@@ -26,6 +26,20 @@ Metric labels must not include transaction IDs, feedback IDs, submittedBy, custo
 correlation IDs, idempotency keys or hashes, request payload hashes, raw endpoint paths, raw query strings, raw
 exception messages, tokens, secrets, or stack traces.
 
+`feedback_read_attempt_total` is endpoint-level and includes invalid query requests rejected before `service.read(...)`.
+`feedback_read_latency_seconds` is endpoint-level and includes query validation, service read, sensitive read audit,
+and bounded failure handling. `feedback_read_success_total` is recorded only after the read succeeds, sensitive read
+audit succeeds, and a non-empty response is returned. `feedback_read_empty_total` is recorded only after the read
+succeeds, sensitive read audit succeeds, and zero feedback entries are returned. `feedback_read_audit_failure_total`
+is recorded when sensitive read audit prevents a successful response.
+
+`feedback_submit_validation_failure_total` represents bounded pre-persistence request rejection. It may include
+malformed input, invalid idempotency, not-found request boundary, or missing authenticated analyst depending on the
+current service boundary.
+
+`projection_latency_seconds` records exactly one sample per projection attempt, regardless of success, omission, or
+failure.
+
 ## Bounded Reasons
 
 Projection reasons are bounded to `ENGINE_INTELLIGENCE_ABSENT`, `INVALID_PROJECTION_SHAPE`, `STORE_UNAVAILABLE`,
