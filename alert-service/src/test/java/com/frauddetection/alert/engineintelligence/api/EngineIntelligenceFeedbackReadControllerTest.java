@@ -22,10 +22,13 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -65,6 +68,30 @@ class EngineIntelligenceFeedbackReadControllerTest {
 
     @MockBean
     private AlertServiceMetrics metrics;
+
+    @Test
+    void feedbackReadUsesInjectedClockForDeterministicLatency() {
+        EngineIntelligenceFeedbackReadService localService = org.mockito.Mockito.mock(EngineIntelligenceFeedbackReadService.class);
+        SensitiveReadAuditService localAuditService = org.mockito.Mockito.mock(SensitiveReadAuditService.class);
+        AlertServiceMetrics localMetrics = org.mockito.Mockito.mock(AlertServiceMetrics.class);
+        EngineIntelligenceFeedbackReadController controller = new EngineIntelligenceFeedbackReadController(
+                localService,
+                localAuditService,
+                new EngineIntelligenceFeedbackReadQueryPolicy(),
+                localMetrics,
+                new TwoTickClock(
+                        Instant.parse("2026-06-05T10:00:00Z"),
+                        Instant.parse("2026-06-05T10:00:00.250Z")
+                )
+        );
+        when(localService.read("txn-1", 25)).thenReturn(response("txn-1", 25, false, entry("feedback-1")));
+
+        controller.read("txn-1", new LinkedMultiValueMap<>(), org.mockito.Mockito.mock(HttpServletRequest.class));
+
+        verify(localMetrics, times(1)).recordEngineIntelligenceFeedbackReadAttempt();
+        verify(localMetrics, times(1)).recordEngineIntelligenceFeedbackReadSuccess();
+        verify(localMetrics, times(1)).recordEngineIntelligenceFeedbackReadLatency(Duration.ofMillis(250));
+    }
 
     @Test
     void feedbackReadAuditsExactlyOnce() throws Exception {
@@ -293,8 +320,8 @@ class EngineIntelligenceFeedbackReadControllerTest {
     }
 
     private void verifyEndpointAttemptAndLatency() {
-        verify(metrics).recordEngineIntelligenceFeedbackReadAttempt();
-        verify(metrics).recordEngineIntelligenceFeedbackReadLatency(any(Duration.class));
+        verify(metrics, times(1)).recordEngineIntelligenceFeedbackReadAttempt();
+        verify(metrics, times(1)).recordEngineIntelligenceFeedbackReadLatency(any(Duration.class));
     }
 
     private void verifyNoSuccessfulReadTerminalMetrics() {
@@ -325,5 +352,32 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 List.of("HIGH_VELOCITY"),
                 Instant.parse("2026-06-04T10:15:30Z")
         );
+    }
+
+    private static final class TwoTickClock extends Clock {
+
+        private final Instant first;
+        private final Instant second;
+        private int calls;
+
+        private TwoTickClock(Instant first, Instant second) {
+            this.first = first;
+            this.second = second;
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneId.of("UTC");
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return calls++ == 0 ? first : second;
+        }
     }
 }
