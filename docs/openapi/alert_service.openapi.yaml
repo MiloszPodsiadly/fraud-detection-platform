@@ -1269,6 +1269,46 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
   /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback:
+    get:
+      summary: Read captured engine intelligence feedback for one scored transaction
+      description: Returns captured feedback through a bounded, authorized, transaction-scoped read model. FDP-99 returns the first bounded page of latest feedback. Cursor-based continuation is future scope. page.hasMore indicates additional feedback exists, not that FDP-99 provides navigation. Feedback can be reviewed, not executed. The read path requires engine-intelligence:feedback:read, validates the scored transaction before feedback lookup, returns an empty bounded page when no feedback exists, uses platform sensitive-read audit, and does not invoke scoring, ML, rules, orchestration, Kafka, payment authorization, model training, decisioning, analytics, global search, export, or case-level aggregation.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._:-]+$"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 25
+      responses:
+        "200":
+          description: Latest bounded first page of feedback returned. Existing transactions without feedback return an empty feedback list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EngineIntelligenceFeedbackReadModel"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
     post:
       summary: Submit structured analyst feedback for transaction-scoped engine intelligence
       description: Captures structured transaction-scoped analyst feedback about engine intelligence usefulness and perceived accuracy. Feedback is captured and audited, not executed. The endpoint requires write/review authority, stores append-only feedback, rejects client-supplied fraud case context, uses idempotency to prevent duplicate submissions, and does not change scoring, alert severity, fraud case status, approval, decline, blocking, payment authorization, rules, or model training.
@@ -4193,6 +4233,73 @@ components:
         operationStatus:
           type: string
           enum: [CREATED, EXISTING]
+    EngineIntelligenceFeedbackReadModel:
+      type: object
+      additionalProperties: false
+      required:
+        - transactionId
+        - feedback
+        - page
+      properties:
+        transactionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        feedback:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/EngineIntelligenceFeedbackEntryReadModel"
+        page:
+          $ref: "#/components/schemas/EngineIntelligenceFeedbackPage"
+    EngineIntelligenceFeedbackEntryReadModel:
+      type: object
+      additionalProperties: false
+      required:
+        - feedbackId
+        - engineIntelligenceAvailable
+        - feedbackType
+        - usefulness
+        - accuracyAssessment
+        - selectedReasonCodes
+        - submittedAt
+      properties:
+        feedbackId:
+          type: string
+        engineIntelligenceAvailable:
+          type: boolean
+        feedbackType:
+          type: string
+          enum: [ENGINE_INTELLIGENCE_USEFULNESS, ENGINE_DISAGREEMENT_REVIEW, OPERATIONAL_STATUS_REVIEW, MISSING_INTELLIGENCE_REVIEW]
+        usefulness:
+          type: string
+          enum: [HELPFUL, SOMEWHAT_HELPFUL, NOT_HELPFUL, NOT_SURE]
+        accuracyAssessment:
+          type: string
+          enum: [SIGNALS_LOOK_CORRECT, SIGNALS_LOOK_PARTIALLY_CORRECT, SIGNALS_LOOK_INCORRECT, NOT_ENOUGH_INFORMATION, OPERATIONAL_ISSUE_AFFECTED_REVIEW]
+        selectedReasonCodes:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            maxLength: 128
+        submittedAt:
+          type: string
+          format: date-time
+    EngineIntelligenceFeedbackPage:
+      type: object
+      additionalProperties: false
+      required:
+        - limit
+        - hasMore
+      properties:
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 25
+        hasMore:
+          type: boolean
     EngineIntelligenceReadModel:
       type: object
       additionalProperties: false

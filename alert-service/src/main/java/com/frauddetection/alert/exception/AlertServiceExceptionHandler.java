@@ -7,6 +7,7 @@ import com.frauddetection.alert.audit.PostCommitEvidenceIncompleteException;
 import com.frauddetection.alert.audit.external.AuditEvidenceExportRejectedException;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorPublicationRequiredException;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackReadUnavailableException;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceScoredTransactionNotFoundException;
 import com.frauddetection.alert.engineintelligence.feedback.InvalidEngineIntelligenceFeedbackRequestException;
 import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
@@ -249,6 +250,21 @@ public class AlertServiceExceptionHandler {
                         "Service Unavailable",
                         "Engine intelligence projection is temporarily unavailable.",
                         List.of("reason:ENGINE_INTELLIGENCE_PROJECTION_STORE_UNAVAILABLE")
+                )
+        );
+    }
+
+    @ExceptionHandler(EngineIntelligenceFeedbackReadUnavailableException.class)
+    public ResponseEntity<ApiErrorResponse> handleEngineIntelligenceFeedbackReadUnavailable(
+            EngineIntelligenceFeedbackReadUnavailableException exception
+    ) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        503,
+                        "Service Unavailable",
+                        "Engine intelligence feedback is temporarily unavailable.",
+                        List.of("reason:ENGINE_INTELLIGENCE_FEEDBACK_STORE_UNAVAILABLE")
                 )
         );
     }

@@ -65,9 +65,14 @@ class EngineIntelligenceApiArchitectureGuardTest {
         String feedbackSources = sources(
                 "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/feedback",
                 "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackController.java",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackReadController.java",
                 "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackService.java",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackReadService.java",
                 "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackRequest.java",
-                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackResponse.java"
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackResponse.java",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackReadModel.java",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackEntryReadModel.java",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackPage.java"
         ).toLowerCase(java.util.Locale.ROOT);
 
         assertThat(feedbackSources).doesNotContain(
@@ -78,7 +83,8 @@ class EngineIntelligenceApiArchitectureGuardTest {
                 "paymentauthorizationclient",
                 "transactionscoredeventpublisher",
                 "modeltrainingservice",
-                "trainingdatasetexport"
+                "trainingdatasetexport",
+                "transactionaloutbox"
         );
     }
 
@@ -87,7 +93,10 @@ class EngineIntelligenceApiArchitectureGuardTest {
         String feedbackSources = sources(
                 "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/feedback",
                 "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackRequest.java",
-                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackResponse.java"
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackResponse.java",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackReadModel.java",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackEntryReadModel.java",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackPage.java"
         );
 
         assertThat(feedbackSources).doesNotContain(
@@ -122,7 +131,8 @@ class EngineIntelligenceApiArchitectureGuardTest {
     @Test
     void readServiceDoesNotCallScoringMlRulesOrOrchestratorOrKafka() throws Exception {
         String readService = sources(
-                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceReadService.java"
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceReadService.java",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackReadService.java"
         ).toLowerCase(java.util.Locale.ROOT);
 
         assertThat(readService).doesNotContain(
@@ -131,7 +141,38 @@ class EngineIntelligenceApiArchitectureGuardTest {
                 "rules",
                 "orchestrator",
                 "kafka",
-                "transactionscoredevent"
+                "transactionscoredevent",
+                "outbox",
+                "paymentauthorization",
+                "training"
+        );
+    }
+
+    @Test
+    void feedbackReadResponseAndOpenApiDoNotExposeRawInternalFields() throws Exception {
+        String readDtoSources = sources(
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackReadModel.java",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackEntryReadModel.java",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackPage.java"
+        );
+        String openApi = sources("docs/openapi/alert_service.openapi.yaml");
+        String feedbackReadSchemas = openApi.substring(
+                openApi.indexOf("EngineIntelligenceFeedbackReadModel:"),
+                openApi.indexOf("EngineIntelligenceReadModel:")
+        );
+        String combined = readDtoSources + feedbackReadSchemas;
+
+        assertThat(combined).contains("EngineIntelligenceFeedbackReadModel");
+        assertThat(combined).doesNotContain(
+                "EngineIntelligenceFeedbackDocument",
+                "submittedBy:",
+                "idempotencyKeyHash",
+                "requestPayloadHash",
+                "correlationId:",
+                "createdAt:",
+                "modelTrainingLabel:",
+                "groundTruth",
+                "ruleUpdateRequest:"
         );
     }
 
@@ -142,11 +183,58 @@ class EngineIntelligenceApiArchitectureGuardTest {
         assertThat(openApi.split("/engine-intelligence", -1)).hasSize(3);
         assertThat(openApi).contains("/api/v1/transactions/scored/{transactionId}/engine-intelligence:");
         assertThat(openApi).contains("/api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback:");
+        assertThat(openApi)
+                .contains("EngineIntelligenceFeedbackReadModel")
+                .contains("EngineIntelligenceFeedbackEntryReadModel")
+                .contains("EngineIntelligenceFeedbackPage")
+                .contains("FDP-99 returns the first bounded page of latest feedback.")
+                .contains("Cursor-based continuation is future scope.")
+                .contains("page.hasMore indicates additional feedback exists, not that FDP-99 provides navigation.")
+                .contains("default: 25")
+                .contains("maximum: 50")
+                .contains("engine-intelligence:feedback:read");
         assertThat(openApi).doesNotContain(
                 "/api/v1/engine-intelligence:",
                 "/api/v1/engine-intelligence/search:",
                 "/api/v1/fraud-cases/{caseId}/engine-intelligence:"
         );
+    }
+
+    @Test
+    void feedbackReadArchitectureDocsStateReviewOnlyBoundaries() throws Exception {
+        String docs = sources("docs/architecture/engine_intelligence_feedback_read_model.md");
+
+        assertThat(docs)
+                .contains("Feedback can be reviewed, not executed.")
+                .contains("FDP-99 exposes captured feedback through a bounded, authorized, transaction-scoped read model.")
+                .contains("FDP-99 is governance/review only.")
+                .contains("FDP-99 does not add analytics dashboards, global search, case aggregation, training export, model retraining, rule updates, approve/decline/block, alert severity changes, or fraud case status changes.")
+                .contains("submittedBy is omitted by default in FDP-99 v1.")
+                .contains("Any future submittedBy exposure requires stronger explicit permission and separate review.")
+                .contains("Feedback is analyst perception/review input, not ground truth, training label, model correction, scoring override, or final decision.")
+                .contains("FDP-99 returns the first bounded page of latest feedback.")
+                .contains("Cursor-based continuation is future scope.")
+                .contains("hasMore indicates additional feedback exists, not navigation state.")
+                .contains("No unbounded findAll/read-all endpoint is allowed.");
+    }
+
+    @Test
+    void governanceIndexesDocumentFeedbackReadEndpointAndBoundary() throws Exception {
+        String architectureIndex = sources("docs/architecture/index.md");
+        String apiSurface = sources("docs/api/api_surface_v1.md");
+
+        assertThat(architectureIndex)
+                .contains("engine_intelligence_feedback_read_model.md")
+                .contains("Engine intelligence feedback read model")
+                .contains("FDP-99");
+        assertThat(apiSurface)
+                .contains("GET /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback")
+                .contains("ENGINE_INTELLIGENCE_FEEDBACK_READ")
+                .contains("Bounded first page")
+                .contains("default 25")
+                .contains("max 50")
+                .contains("no submittedBy")
+                .contains("No execution, decisioning, retraining, or rule updates");
     }
 
     private String sources(String... relativePaths) throws IOException {

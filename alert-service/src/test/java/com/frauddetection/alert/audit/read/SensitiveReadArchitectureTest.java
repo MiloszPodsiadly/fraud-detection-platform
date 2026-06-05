@@ -20,7 +20,9 @@ class SensitiveReadArchitectureTest {
                 source("src/main/java/com/frauddetection/alert/audit/external/ExternalAuditIntegrityController.java", "/api/v1/audit/integrity/external"),
                 source("src/main/java/com/frauddetection/alert/regulated/RegulatedMutationRecoveryController.java", "/api/v1/regulated-mutations"),
                 source("src/main/java/com/frauddetection/alert/outbox/OutboxRecoveryController.java", "/api/v1/outbox"),
-                source("src/main/java/com/frauddetection/alert/audit/AuditDegradationController.java", "/api/v1/audit/degradations")
+                source("src/main/java/com/frauddetection/alert/audit/AuditDegradationController.java", "/api/v1/audit/degradations"),
+                source("src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackReadController.java",
+                        "/api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback")
         );
 
         for (EndpointSource endpoint : endpoints) {

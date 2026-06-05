@@ -54,6 +54,58 @@ class ReadAccessAuditClassifierTest {
     }
 
     @Test
+    void classifiesEngineIntelligenceFeedbackReadEndpoint() {
+        ReadAccessAuditTarget target = classifier.classify(feedbackReadRequest("txn-1", "25")).orElseThrow();
+
+        assertThat(target.endpointCategory()).isEqualTo(ReadAccessEndpointCategory.ENGINE_INTELLIGENCE_FEEDBACK_READ);
+        assertThat(target.resourceType()).isEqualTo(ReadAccessResourceType.ENGINE_INTELLIGENCE_FEEDBACK);
+    }
+
+    @Test
+    void feedbackReadClassifierUsesTransactionIdAsResourceId() {
+        ReadAccessAuditTarget target = classifier.classify(feedbackReadRequest("txn-1", "25")).orElseThrow();
+
+        assertThat(target.resourceId()).isEqualTo("txn-1");
+    }
+
+    @Test
+    void feedbackReadClassifierCapturesBoundedQueryShapeForLimit() {
+        String limit25Hash = classifier.classify(feedbackReadRequest("txn-1", "25")).orElseThrow().queryHash();
+        String repeatedLimit25Hash = classifier.classify(feedbackReadRequest("txn-1", "25")).orElseThrow().queryHash();
+        String limit50Hash = classifier.classify(feedbackReadRequest("txn-1", "50")).orElseThrow().queryHash();
+
+        assertThat(limit25Hash).hasSize(32);
+        assertThat(limit25Hash).isEqualTo(repeatedLimit25Hash);
+        assertThat(limit25Hash).isNotEqualTo(limit50Hash);
+    }
+
+    @Test
+    void feedbackReadClassifierDoesNotStoreRawQueryValues() {
+        ReadAccessAuditTarget target = classifier.classify(feedbackReadRequest("txn-1", "token-secret-stacktrace")).orElseThrow();
+
+        assertThat(target.toString())
+                .doesNotContain("limit", "token", "secret", "stacktrace", "engine-intelligence/feedback");
+    }
+
+    @Test
+    void feedbackReadClassifierDoesNotClassifyUnknownSiblingRoute() {
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "GET",
+                "/api/v1/transactions/scored/txn-1/engine-intelligence/feedback/not-real"
+        );
+        request.setAttribute(
+                HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE,
+                "/api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback/{sibling}"
+        );
+        request.setAttribute(HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE, Map.of(
+                "transactionId", "txn-1",
+                "sibling", "not-real"
+        ));
+
+        assertThat(classifier.classify(request)).isEmpty();
+    }
+
+    @Test
     void shouldClassifyGovernanceAuditHistoryRead() {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/governance/advisories/advisory-1/audit");
         request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/governance/advisories/{eventId}/audit");
@@ -160,5 +212,19 @@ class ReadAccessAuditClassifierTest {
 
         assertThat(classifier.classify(first).orElseThrow().queryHash())
                 .isEqualTo(classifier.classify(second).orElseThrow().queryHash());
+    }
+
+    private MockHttpServletRequest feedbackReadRequest(String transactionId, String limit) {
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "GET",
+                "/api/v1/transactions/scored/" + transactionId + "/engine-intelligence/feedback"
+        );
+        request.setParameter("limit", limit);
+        request.setAttribute(
+                HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE,
+                "/api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback"
+        );
+        request.setAttribute(HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE, Map.of("transactionId", transactionId));
+        return request;
     }
 }

@@ -48,6 +48,11 @@ import com.frauddetection.alert.controller.AlertController;
 import com.frauddetection.alert.controller.FraudCaseController;
 import com.frauddetection.alert.controller.ScoredTransactionController;
 import com.frauddetection.alert.domain.FraudCaseStatus;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackPage;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackReadController;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackReadModel;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackReadQueryPolicy;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackReadService;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadController;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
@@ -146,6 +151,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         AlertController.class,
         FraudCaseController.class,
         ScoredTransactionController.class,
+        EngineIntelligenceFeedbackReadController.class,
         EngineIntelligenceReadController.class,
         AuditEventController.class,
         AuditIntegrityController.class,
@@ -175,6 +181,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         FraudCaseResponseMapper.class,
         ScoredTransactionResponseMapper.class,
         ScoredTransactionSearchPolicy.class,
+        EngineIntelligenceFeedbackReadQueryPolicy.class,
         AlertServiceExceptionHandler.class
 })
 @ActiveProfiles("test")
@@ -201,6 +208,9 @@ class AlertSecurityConfigTest {
 
     @MockBean
     private EngineIntelligenceReadService engineIntelligenceReadService;
+
+    @MockBean
+    private EngineIntelligenceFeedbackReadService engineIntelligenceFeedbackReadService;
 
     @MockBean
     private AlertServiceMetrics alertServiceMetrics;
@@ -454,6 +464,65 @@ class AlertSecurityConfigTest {
                 .andExpect(status().isForbidden());
 
         verifyNoInteractions(engineIntelligenceReadService);
+    }
+
+    @Test
+    void feedbackReadAuthorityCanReadFeedback() throws Exception {
+        when(engineIntelligenceFeedbackReadService.read("txn-1", 25))
+                .thenReturn(new EngineIntelligenceFeedbackReadModel(
+                        "txn-1",
+                        List.of(),
+                        new EngineIntelligenceFeedbackPage(25, false)
+                ));
+
+        mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
+                        .with(authorities(AnalystAuthority.ENGINE_INTELLIGENCE_FEEDBACK_READ)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.transactionId").value("txn-1"));
+    }
+
+    @Test
+    void transactionMonitorReadAloneCannotReadFeedback() throws Exception {
+        mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
+                        .with(authorities(AnalystAuthority.TRANSACTION_MONITOR_READ)))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(engineIntelligenceFeedbackReadService);
+    }
+
+    @Test
+    void feedbackWriteAloneCannotReadFeedback() throws Exception {
+        mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
+                        .with(authorities(AnalystAuthority.ENGINE_INTELLIGENCE_FEEDBACK_WRITE)))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(engineIntelligenceFeedbackReadService);
+    }
+
+    @Test
+    void fraudCaseReadAloneCannotReadFeedback() throws Exception {
+        mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
+                        .with(authorities(AnalystAuthority.FRAUD_CASE_READ)))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(engineIntelligenceFeedbackReadService);
+    }
+
+    @Test
+    void anonymousUserCannotReadFeedback() throws Exception {
+        mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback"))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(engineIntelligenceFeedbackReadService);
+    }
+
+    @Test
+    void unknownFeedbackReadSiblingRouteIsDenied() throws Exception {
+        mockMvc.perform(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback/not-real")
+                        .with(authorities(AnalystAuthority.ENGINE_INTELLIGENCE_FEEDBACK_READ)))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(engineIntelligenceFeedbackReadService);
     }
 
     @Test
