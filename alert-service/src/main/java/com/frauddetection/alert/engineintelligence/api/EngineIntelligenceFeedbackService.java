@@ -11,8 +11,12 @@ import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFe
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackType;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackUsefulness;
 import com.frauddetection.alert.engineintelligence.feedback.InvalidEngineIntelligenceFeedbackRequestException;
+import com.frauddetection.alert.engineintelligence.observability.EngineIntelligenceFeedbackSubmitMetricReason;
 import com.frauddetection.alert.idempotency.IdempotencyCanonicalHasher;
 import com.frauddetection.alert.idempotency.SharedIdempotencyKeyPolicy;
+import com.frauddetection.alert.idempotency.SharedInvalidIdempotencyKeyException;
+import com.frauddetection.alert.idempotency.SharedMissingIdempotencyKeyException;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
@@ -24,6 +28,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -79,6 +84,7 @@ public class EngineIntelligenceFeedbackService {
     private final CurrentAnalystUser currentAnalystUser;
     private final AuditService auditService;
     private final RegulatedMutationTransactionRunner transactionRunner;
+    private final AlertServiceMetrics metrics;
     private final Clock clock;
 
     @Autowired
@@ -88,7 +94,8 @@ public class EngineIntelligenceFeedbackService {
             SharedIdempotencyKeyPolicy idempotencyKeyPolicy,
             CurrentAnalystUser currentAnalystUser,
             AuditService auditService,
-            RegulatedMutationTransactionRunner transactionRunner
+            RegulatedMutationTransactionRunner transactionRunner,
+            AlertServiceMetrics metrics
     ) {
         this(
                 scoredTransactionRepository,
@@ -97,6 +104,7 @@ public class EngineIntelligenceFeedbackService {
                 currentAnalystUser,
                 auditService,
                 transactionRunner,
+                metrics,
                 Clock.systemUTC()
         );
     }
@@ -108,6 +116,7 @@ public class EngineIntelligenceFeedbackService {
             CurrentAnalystUser currentAnalystUser,
             AuditService auditService,
             RegulatedMutationTransactionRunner transactionRunner,
+            AlertServiceMetrics metrics,
             Clock clock
     ) {
         this.scoredTransactionRepository = Objects.requireNonNull(scoredTransactionRepository, "scoredTransactionRepository is required");
@@ -116,6 +125,7 @@ public class EngineIntelligenceFeedbackService {
         this.currentAnalystUser = Objects.requireNonNull(currentAnalystUser, "currentAnalystUser is required");
         this.auditService = Objects.requireNonNull(auditService, "auditService is required");
         this.transactionRunner = Objects.requireNonNull(transactionRunner, "transactionRunner is required");
+        this.metrics = Objects.requireNonNull(metrics, "metrics is required");
         this.clock = Objects.requireNonNull(clock, "clock is required");
     }
 
@@ -124,35 +134,86 @@ public class EngineIntelligenceFeedbackService {
             EngineIntelligenceFeedbackRequest request,
             String idempotencyKey
     ) {
-        String boundedTransactionId = EngineIntelligenceTransactionIdPolicy.normalize(transactionId);
-        if (!scoredTransactionRepository.existsById(boundedTransactionId)) {
-            throw new EngineIntelligenceScoredTransactionNotFoundException();
+        Instant startedAt = clock.instant();
+        metrics.recordEngineIntelligenceFeedbackSubmitAttempt();
+        MetricFailureState failureState = new MetricFailureState();
+        try {
+            String boundedTransactionId = EngineIntelligenceTransactionIdPolicy.normalize(transactionId);
+            if (!scoredTransactionExists(boundedTransactionId, failureState)) {
+                throw new EngineIntelligenceScoredTransactionNotFoundException();
+            }
+
+            String submittedBy = currentAnalystUser.get()
+                    .map(principal -> principal.userId() == null ? "" : principal.userId().trim())
+                    .filter(userId -> !userId.isBlank())
+                    .orElseThrow(() -> new ResponseStatusException(UNAUTHORIZED, "Authentication is required."));
+
+            String keyHash = idempotencyKeyPolicy.hashKey(idempotencyKey);
+            ValidatedFeedback validated = validate(request);
+            String requestPayloadHash = requestPayloadHash(validated);
+            var existing = findExistingFeedback(submittedBy, boundedTransactionId, keyHash, failureState);
+            if (existing.isPresent()) {
+                EngineIntelligenceFeedbackResponse response = existingFeedbackResponse(existing.get(), requestPayloadHash);
+                metrics.recordEngineIntelligenceFeedbackSubmitIdempotencyReplay();
+                metrics.recordEngineIntelligenceFeedbackSubmitSuccess();
+                return response;
+            }
+
+            EngineIntelligenceFeedbackResponse response = transactionRunner.runLocalCommit(() -> createFeedback(
+                    boundedTransactionId,
+                    submittedBy,
+                    keyHash,
+                    requestPayloadHash,
+                    validated,
+                    failureState
+            ));
+            metrics.recordEngineIntelligenceFeedbackSubmitSuccess();
+            return response;
+        } catch (EngineIntelligenceScoredTransactionNotFoundException
+                 | InvalidEngineIntelligenceFeedbackRequestException
+                 | SharedMissingIdempotencyKeyException
+                 | SharedInvalidIdempotencyKeyException
+                 | ResponseStatusException exception) {
+            metrics.recordEngineIntelligenceFeedbackSubmitValidationFailure();
+            throw exception;
+        } catch (ConflictingIdempotencyKeyException exception) {
+            metrics.recordEngineIntelligenceFeedbackSubmitIdempotencyConflict();
+            throw exception;
+        } catch (RuntimeException exception) {
+            if (!failureState.recorded()) {
+                recordSubmitUnavailable(EngineIntelligenceFeedbackSubmitMetricReason.UNKNOWN_FAILURE, failureState);
+            }
+            throw exception;
+        } finally {
+            metrics.recordEngineIntelligenceFeedbackSubmitLatency(Duration.between(startedAt, clock.instant()));
         }
+    }
 
-        String submittedBy = currentAnalystUser.get()
-                .map(principal -> principal.userId() == null ? "" : principal.userId().trim())
-                .filter(userId -> !userId.isBlank())
-                .orElseThrow(() -> new ResponseStatusException(UNAUTHORIZED, "Authentication is required."));
-
-        String keyHash = idempotencyKeyPolicy.hashKey(idempotencyKey);
-        ValidatedFeedback validated = validate(request);
-        String requestPayloadHash = requestPayloadHash(validated);
-        var existing = feedbackRepository.findBySubmittedByAndTransactionIdAndIdempotencyKeyHash(
-                submittedBy,
-                boundedTransactionId,
-                keyHash
-        );
-        if (existing.isPresent()) {
-            return existingFeedbackResponse(existing.get(), requestPayloadHash);
+    private boolean scoredTransactionExists(String boundedTransactionId, MetricFailureState failureState) {
+        try {
+            return scoredTransactionRepository.existsById(boundedTransactionId);
+        } catch (RuntimeException exception) {
+            recordSubmitUnavailable(EngineIntelligenceFeedbackSubmitMetricReason.STORE_UNAVAILABLE, failureState);
+            throw exception;
         }
+    }
 
-        return transactionRunner.runLocalCommit(() -> createFeedback(
-                boundedTransactionId,
-                submittedBy,
-                keyHash,
-                requestPayloadHash,
-                validated
-        ));
+    private java.util.Optional<EngineIntelligenceFeedbackDocument> findExistingFeedback(
+            String submittedBy,
+            String boundedTransactionId,
+            String keyHash,
+            MetricFailureState failureState
+    ) {
+        try {
+            return feedbackRepository.findBySubmittedByAndTransactionIdAndIdempotencyKeyHash(
+                    submittedBy,
+                    boundedTransactionId,
+                    keyHash
+            );
+        } catch (RuntimeException exception) {
+            recordSubmitUnavailable(EngineIntelligenceFeedbackSubmitMetricReason.STORE_UNAVAILABLE, failureState);
+            throw exception;
+        }
     }
 
     private EngineIntelligenceFeedbackResponse createFeedback(
@@ -160,7 +221,8 @@ public class EngineIntelligenceFeedbackService {
             String submittedBy,
             String keyHash,
             String requestPayloadHash,
-            ValidatedFeedback validated
+            ValidatedFeedback validated,
+            MetricFailureState failureState
     ) {
         Instant now = Instant.now(clock);
         EngineIntelligenceFeedbackDocument document = new EngineIntelligenceFeedbackDocument(
@@ -179,30 +241,41 @@ public class EngineIntelligenceFeedbackService {
                 now
         );
 
-        PersistedFeedback persisted = saveIdempotently(document);
+        PersistedFeedback persisted = saveIdempotently(document, failureState);
         if (!persisted.created()) {
-            return existingFeedbackResponse(persisted.document(), requestPayloadHash);
+            EngineIntelligenceFeedbackResponse response = existingFeedbackResponse(persisted.document(), requestPayloadHash);
+            metrics.recordEngineIntelligenceFeedbackSubmitIdempotencyReplay();
+            return response;
         }
         try {
             auditFeedback(persisted.document());
         } catch (RuntimeException exception) {
+            metrics.recordEngineIntelligenceFeedbackSubmitAuditFailure();
+            recordSubmitUnavailable(EngineIntelligenceFeedbackSubmitMetricReason.AUDIT_FAILURE, failureState);
             compensateUnauditedFeedback(persisted.document(), exception);
             throw exception;
         }
         return EngineIntelligenceFeedbackResponse.created(persisted.document());
     }
 
-    private PersistedFeedback saveIdempotently(EngineIntelligenceFeedbackDocument document) {
+    private PersistedFeedback saveIdempotently(EngineIntelligenceFeedbackDocument document, MetricFailureState failureState) {
         try {
             return new PersistedFeedback(feedbackRepository.save(document), true);
         } catch (DuplicateKeyException exception) {
-            return feedbackRepository.findBySubmittedByAndTransactionIdAndIdempotencyKeyHash(
-                            document.getSubmittedBy(),
-                            document.getTransactionId(),
-                            document.getIdempotencyKeyHash()
-                    )
+            return findExistingFeedback(
+                    document.getSubmittedBy(),
+                    document.getTransactionId(),
+                    document.getIdempotencyKeyHash(),
+                    failureState
+            )
                     .map(existing -> new PersistedFeedback(existing, false))
-                    .orElseThrow(() -> exception);
+                    .orElseThrow(() -> {
+                        recordSubmitUnavailable(EngineIntelligenceFeedbackSubmitMetricReason.STORE_UNAVAILABLE, failureState);
+                        return exception;
+                    });
+        } catch (RuntimeException exception) {
+            recordSubmitUnavailable(EngineIntelligenceFeedbackSubmitMetricReason.STORE_UNAVAILABLE, failureState);
+            throw exception;
         }
     }
 
@@ -372,6 +445,14 @@ public class EngineIntelligenceFeedbackService {
         ));
     }
 
+    private void recordSubmitUnavailable(
+            EngineIntelligenceFeedbackSubmitMetricReason reason,
+            MetricFailureState failureState
+    ) {
+        metrics.recordEngineIntelligenceFeedbackSubmitUnavailable(reason);
+        failureState.record();
+    }
+
     private record ValidatedFeedback(
             EngineIntelligenceFeedbackType feedbackType,
             EngineIntelligenceFeedbackUsefulness usefulness,
@@ -385,5 +466,18 @@ public class EngineIntelligenceFeedbackService {
     }
 
     private record PersistedFeedback(EngineIntelligenceFeedbackDocument document, boolean created) {
+    }
+
+    private static final class MetricFailureState {
+
+        private boolean recorded;
+
+        private void record() {
+            recorded = true;
+        }
+
+        private boolean recorded() {
+            return recorded;
+        }
     }
 }

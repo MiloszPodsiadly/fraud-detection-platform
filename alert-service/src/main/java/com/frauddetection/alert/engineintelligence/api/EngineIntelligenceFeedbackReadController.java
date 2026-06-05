@@ -4,6 +4,9 @@ import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
 import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
+import com.frauddetection.alert.engineintelligence.feedback.InvalidEngineIntelligenceFeedbackRequestException;
+import com.frauddetection.alert.engineintelligence.observability.EngineIntelligenceFeedbackReadMetricReason;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -11,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Objects;
 
@@ -21,15 +25,18 @@ public class EngineIntelligenceFeedbackReadController {
     private final EngineIntelligenceFeedbackReadService service;
     private final SensitiveReadAuditService sensitiveReadAuditService;
     private final EngineIntelligenceFeedbackReadQueryPolicy queryPolicy;
+    private final AlertServiceMetrics metrics;
 
     public EngineIntelligenceFeedbackReadController(
             EngineIntelligenceFeedbackReadService service,
             SensitiveReadAuditService sensitiveReadAuditService,
-            EngineIntelligenceFeedbackReadQueryPolicy queryPolicy
+            EngineIntelligenceFeedbackReadQueryPolicy queryPolicy,
+            AlertServiceMetrics metrics
     ) {
         this.service = Objects.requireNonNull(service, "service is required");
         this.sensitiveReadAuditService = Objects.requireNonNull(sensitiveReadAuditService, "sensitiveReadAuditService is required");
         this.queryPolicy = Objects.requireNonNull(queryPolicy, "queryPolicy is required");
+        this.metrics = Objects.requireNonNull(metrics, "metrics is required");
     }
 
     @GetMapping("/{transactionId}/engine-intelligence/feedback")
@@ -39,15 +46,42 @@ public class EngineIntelligenceFeedbackReadController {
             @RequestParam MultiValueMap<String, String> rawParams,
             HttpServletRequest request
     ) {
-        int limit = queryPolicy.limit(rawParams);
+        int limit;
+        try {
+            limit = queryPolicy.limit(rawParams);
+        } catch (InvalidEngineIntelligenceFeedbackRequestException exception) {
+            metrics.recordEngineIntelligenceFeedbackReadValidationFailure();
+            throw exception;
+        }
         EngineIntelligenceFeedbackReadModel response = service.read(transactionId, limit);
-        sensitiveReadAuditService.audit(
-                ReadAccessEndpointCategory.ENGINE_INTELLIGENCE_FEEDBACK_READ,
-                ReadAccessResourceType.ENGINE_INTELLIGENCE_FEEDBACK,
-                response.transactionId(),
-                response.feedback().size(),
-                request
-        );
+        try {
+            sensitiveReadAuditService.audit(
+                    ReadAccessEndpointCategory.ENGINE_INTELLIGENCE_FEEDBACK_READ,
+                    ReadAccessResourceType.ENGINE_INTELLIGENCE_FEEDBACK,
+                    response.transactionId(),
+                    response.feedback().size(),
+                    request
+            );
+        } catch (ResponseStatusException exception) {
+            if (exception.getStatusCode().value() == 503) {
+                metrics.recordEngineIntelligenceFeedbackReadAuditFailure();
+                metrics.recordEngineIntelligenceFeedbackReadUnavailable(
+                        EngineIntelligenceFeedbackReadMetricReason.AUDIT_FAILURE
+                );
+            }
+            throw exception;
+        } catch (RuntimeException exception) {
+            metrics.recordEngineIntelligenceFeedbackReadAuditFailure();
+            metrics.recordEngineIntelligenceFeedbackReadUnavailable(
+                    EngineIntelligenceFeedbackReadMetricReason.AUDIT_FAILURE
+            );
+            throw exception;
+        }
+        if (response.feedback().isEmpty()) {
+            metrics.recordEngineIntelligenceFeedbackReadEmpty();
+        } else {
+            metrics.recordEngineIntelligenceFeedbackReadSuccess();
+        }
         return response;
     }
 }

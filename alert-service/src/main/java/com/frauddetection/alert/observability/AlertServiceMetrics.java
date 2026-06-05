@@ -5,6 +5,9 @@ import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.read.ReadAccessAuditOutcome;
 import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.evidence.EvidenceProjectionState;
+import com.frauddetection.alert.engineintelligence.observability.EngineIntelligenceFeedbackReadMetricReason;
+import com.frauddetection.alert.engineintelligence.observability.EngineIntelligenceFeedbackSubmitMetricReason;
+import com.frauddetection.alert.engineintelligence.observability.EngineIntelligenceProjectionMetricReason;
 import com.frauddetection.alert.outbox.OutboxBacklogResponse;
 import com.frauddetection.alert.security.error.SecurityFailureClassifier;
 import com.frauddetection.alert.suspicious.SuspiciousTransactionStatus;
@@ -950,6 +953,104 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
                 .record(latency);
     }
 
+    public void recordEngineIntelligenceProjectionAttempt() {
+        counter("engine_intelligence_projection_attempt_total").increment();
+    }
+
+    public void recordEngineIntelligenceProjectionSuccess() {
+        counter("engine_intelligence_projection_success_total").increment();
+    }
+
+    public void recordEngineIntelligenceProjectionOmitted(EngineIntelligenceProjectionMetricReason reason) {
+        counter(
+                "engine_intelligence_projection_omitted_total",
+                "reason", normalizeEngineIntelligenceProjectionReason(reason)
+        ).increment();
+    }
+
+    public void recordEngineIntelligenceProjectionFailure(EngineIntelligenceProjectionMetricReason reason) {
+        counter(
+                "engine_intelligence_projection_failure_total",
+                "reason", normalizeEngineIntelligenceProjectionReason(reason)
+        ).increment();
+    }
+
+    public void recordEngineIntelligenceProjectionLatency(Duration latency) {
+        Timer.builder("engine_intelligence_projection_latency_seconds")
+                .register(meterRegistry)
+                .record(nonNegativeDuration(latency));
+    }
+
+    public void recordEngineIntelligenceFeedbackSubmitAttempt() {
+        counter("engine_intelligence_feedback_submit_attempt_total").increment();
+    }
+
+    public void recordEngineIntelligenceFeedbackSubmitSuccess() {
+        counter("engine_intelligence_feedback_submit_success_total").increment();
+    }
+
+    public void recordEngineIntelligenceFeedbackSubmitValidationFailure() {
+        counter("engine_intelligence_feedback_submit_validation_failure_total").increment();
+    }
+
+    public void recordEngineIntelligenceFeedbackSubmitIdempotencyReplay() {
+        counter("engine_intelligence_feedback_submit_idempotency_replay_total").increment();
+    }
+
+    public void recordEngineIntelligenceFeedbackSubmitIdempotencyConflict() {
+        counter("engine_intelligence_feedback_submit_idempotency_conflict_total").increment();
+    }
+
+    public void recordEngineIntelligenceFeedbackSubmitAuditFailure() {
+        counter("engine_intelligence_feedback_submit_audit_failure_total").increment();
+    }
+
+    public void recordEngineIntelligenceFeedbackSubmitUnavailable(EngineIntelligenceFeedbackSubmitMetricReason reason) {
+        counter(
+                "engine_intelligence_feedback_submit_unavailable_total",
+                "reason", normalizeEngineIntelligenceFeedbackSubmitReason(reason)
+        ).increment();
+    }
+
+    public void recordEngineIntelligenceFeedbackSubmitLatency(Duration latency) {
+        Timer.builder("engine_intelligence_feedback_submit_latency_seconds")
+                .register(meterRegistry)
+                .record(nonNegativeDuration(latency));
+    }
+
+    public void recordEngineIntelligenceFeedbackReadAttempt() {
+        counter("engine_intelligence_feedback_read_attempt_total").increment();
+    }
+
+    public void recordEngineIntelligenceFeedbackReadSuccess() {
+        counter("engine_intelligence_feedback_read_success_total").increment();
+    }
+
+    public void recordEngineIntelligenceFeedbackReadEmpty() {
+        counter("engine_intelligence_feedback_read_empty_total").increment();
+    }
+
+    public void recordEngineIntelligenceFeedbackReadUnavailable(EngineIntelligenceFeedbackReadMetricReason reason) {
+        counter(
+                "engine_intelligence_feedback_read_unavailable_total",
+                "reason", normalizeEngineIntelligenceFeedbackReadReason(reason)
+        ).increment();
+    }
+
+    public void recordEngineIntelligenceFeedbackReadValidationFailure() {
+        counter("engine_intelligence_feedback_read_validation_failure_total").increment();
+    }
+
+    public void recordEngineIntelligenceFeedbackReadAuditFailure() {
+        counter("engine_intelligence_feedback_read_audit_failure_total").increment();
+    }
+
+    public void recordEngineIntelligenceFeedbackReadLatency(Duration latency) {
+        Timer.builder("engine_intelligence_feedback_read_latency_seconds")
+                .register(meterRegistry)
+                .record(nonNegativeDuration(latency));
+    }
+
     private Counter counter(String name, String... tags) {
         return Counter.builder(name)
                 .tags(tags)
@@ -1091,6 +1192,22 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
             return reason;
         }
         return "AUDIT_UNAVAILABLE";
+    }
+
+    private String normalizeEngineIntelligenceProjectionReason(EngineIntelligenceProjectionMetricReason reason) {
+        return reason == null ? EngineIntelligenceProjectionMetricReason.UNKNOWN_FAILURE.name() : reason.name();
+    }
+
+    private String normalizeEngineIntelligenceFeedbackSubmitReason(EngineIntelligenceFeedbackSubmitMetricReason reason) {
+        return reason == null ? EngineIntelligenceFeedbackSubmitMetricReason.UNKNOWN_FAILURE.name() : reason.name();
+    }
+
+    private String normalizeEngineIntelligenceFeedbackReadReason(EngineIntelligenceFeedbackReadMetricReason reason) {
+        return reason == null ? EngineIntelligenceFeedbackReadMetricReason.UNKNOWN_FAILURE.name() : reason.name();
+    }
+
+    private Duration nonNegativeDuration(Duration latency) {
+        return latency == null || latency.isNegative() ? Duration.ZERO : latency;
     }
 
     private String normalizePostCommitOperation(String operation) {
