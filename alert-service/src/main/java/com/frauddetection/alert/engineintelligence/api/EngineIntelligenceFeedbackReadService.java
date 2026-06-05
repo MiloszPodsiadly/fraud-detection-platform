@@ -2,7 +2,6 @@ package com.frauddetection.alert.engineintelligence.api;
 
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackDocument;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackRepository;
-import com.frauddetection.alert.engineintelligence.feedback.InvalidEngineIntelligenceFeedbackRequestException;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -14,26 +13,25 @@ import java.util.Objects;
 @Service
 public class EngineIntelligenceFeedbackReadService {
 
-    static final int DEFAULT_LIMIT = 25;
-    static final int MAX_LIMIT = 50;
-
     private final ScoredTransactionRepository scoredTransactionRepository;
     private final EngineIntelligenceFeedbackRepository feedbackRepository;
     private final EngineIntelligenceFeedbackReadModelMapper mapper;
+    private final EngineIntelligenceFeedbackReadPolicy readPolicy;
 
     public EngineIntelligenceFeedbackReadService(
             ScoredTransactionRepository scoredTransactionRepository,
             EngineIntelligenceFeedbackRepository feedbackRepository,
-            EngineIntelligenceFeedbackReadModelMapper mapper
+            EngineIntelligenceFeedbackReadModelMapper mapper,
+            EngineIntelligenceFeedbackReadPolicy readPolicy
     ) {
         this.scoredTransactionRepository = Objects.requireNonNull(scoredTransactionRepository, "scoredTransactionRepository is required");
         this.feedbackRepository = Objects.requireNonNull(feedbackRepository, "feedbackRepository is required");
         this.mapper = Objects.requireNonNull(mapper, "mapper is required");
+        this.readPolicy = Objects.requireNonNull(readPolicy, "readPolicy is required");
     }
 
-    public EngineIntelligenceFeedbackReadModel read(String transactionId, Integer requestedLimit) {
+    public EngineIntelligenceFeedbackReadModel read(String transactionId, int limit) {
         String boundedTransactionId = EngineIntelligenceTransactionIdPolicy.normalize(transactionId);
-        int limit = limit(requestedLimit);
         if (!scoredTransactionRepository.existsById(boundedTransactionId)) {
             throw new EngineIntelligenceScoredTransactionNotFoundException();
         }
@@ -53,20 +51,11 @@ public class EngineIntelligenceFeedbackReadService {
         } catch (RuntimeException exception) {
             throw new EngineIntelligenceFeedbackReadUnavailableException();
         }
+        documents = readPolicy.validate(documents);
         boolean hasMore = documents.size() > limit;
         List<EngineIntelligenceFeedbackDocument> bounded = hasMore
                 ? documents.subList(0, limit)
                 : documents;
         return mapper.map(boundedTransactionId, bounded, limit, hasMore);
-    }
-
-    private int limit(Integer requestedLimit) {
-        if (requestedLimit == null) {
-            return DEFAULT_LIMIT;
-        }
-        if (requestedLimit < 1 || requestedLimit > MAX_LIMIT) {
-            throw new InvalidEngineIntelligenceFeedbackRequestException(List.of("limit: must be between 1 and 50"));
-        }
-        return requestedLimit;
     }
 }
