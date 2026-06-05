@@ -1271,7 +1271,7 @@ paths:
   /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback:
     get:
       summary: Read captured engine intelligence feedback for one scored transaction
-      description: Returns captured feedback through a bounded, authorized, transaction-scoped read model. Feedback can be reviewed, not executed. The read path requires engine-intelligence:feedback:read, validates the scored transaction before feedback lookup, returns an empty bounded page when no feedback exists, uses platform sensitive-read audit, and does not invoke scoring, ML, rules, orchestration, Kafka, payment authorization, model training, decisioning, analytics, global search, export, or case-level aggregation.
+      description: Returns captured feedback through a bounded, authorized, transaction-scoped read model. FDP-99 returns the first bounded page of latest feedback. Cursor-based continuation is future scope. page.hasMore indicates additional feedback exists, not that FDP-99 provides navigation. Feedback can be reviewed, not executed. The read path requires engine-intelligence:feedback:read, validates the scored transaction before feedback lookup, returns an empty bounded page when no feedback exists, uses platform sensitive-read audit, and does not invoke scoring, ML, rules, orchestration, Kafka, payment authorization, model training, decisioning, analytics, global search, export, or case-level aggregation.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1294,7 +1294,7 @@ paths:
             default: 25
       responses:
         "200":
-          description: Bounded feedback read model returned. Existing transactions without feedback return an empty feedback list.
+          description: Latest bounded first page of feedback returned. Existing transactions without feedback return an empty feedback list.
           content:
             application/json:
               schema:

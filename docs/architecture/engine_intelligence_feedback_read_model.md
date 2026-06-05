@@ -24,9 +24,9 @@ The read contract uses `EngineIntelligenceFeedbackReadModel`, `EngineIntelligenc
 
 Feedback reads require `ENGINE_INTELLIGENCE_FEEDBACK_READ`. `TRANSACTION_MONITOR_READ` can read the engine intelligence display, and `ENGINE_INTELLIGENCE_FEEDBACK_WRITE` can submit feedback, but neither authority alone reads captured feedback.
 
-## Pagination
+## Bounded First Page
 
-Reads are paginated/bounded. The default limit is 25, the maximum limit is 50, and the service requests one extra row internally to compute `page.hasMore`. No unbounded findAll/read-all endpoint is allowed.
+Reads are bounded first-page reads. FDP-99 returns the first bounded page of latest feedback. The default limit is 25, the maximum limit is 50, and the service requests one extra row internally to compute `page.hasMore`. `hasMore` indicates additional feedback exists, not that FDP-99 provides navigation. hasMore indicates additional feedback exists, not navigation state. Cursor-based continuation is future scope. No unbounded findAll/read-all endpoint is allowed.
 
 ## Missing Feedback Behavior
 
@@ -38,7 +38,7 @@ submittedBy is omitted by default in FDP-99 v1. Any future submittedBy exposure 
 
 ## Read Audit Policy
 
-FDP-99 follows existing read audit policy for sensitive analyst feedback. Feedback read audit is bounded and does not include raw/internal data.
+FDP-99 follows existing read audit policy for sensitive analyst feedback. In fail-closed audit modes, read audit failure returns a bounded 503. Feedback read audit is bounded and does not include raw/internal data.
 
 ## No Raw/Internal Leakage
 
