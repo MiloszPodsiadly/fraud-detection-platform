@@ -10,10 +10,12 @@ import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionR
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionResult;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionService;
 import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -67,7 +69,8 @@ class TransactionMonitoringServiceEngineIntelligenceProjectionTest {
                 new ScoredTransactionSearchPolicy(),
                 new EngineIntelligenceProjectionService(
                         projectionRepository,
-                        new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy())
+                        new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy()),
+                        new AlertServiceMetrics(new SimpleMeterRegistry())
                 )
         );
         TransactionScoredEvent event = mock(TransactionScoredEvent.class);

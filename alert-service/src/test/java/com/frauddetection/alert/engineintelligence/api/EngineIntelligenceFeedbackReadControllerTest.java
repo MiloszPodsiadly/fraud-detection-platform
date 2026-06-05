@@ -3,6 +3,8 @@ package com.frauddetection.alert.engineintelligence.api;
 import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
+import com.frauddetection.alert.engineintelligence.observability.EngineIntelligenceFeedbackReadMetricReason;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackAccuracyAssessment;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackType;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackUsefulness;
@@ -58,6 +60,9 @@ class EngineIntelligenceFeedbackReadControllerTest {
     @MockBean
     private SensitiveReadAuditService sensitiveReadAuditService;
 
+    @MockBean
+    private AlertServiceMetrics metrics;
+
     @Test
     void feedbackReadAuditsExactlyOnce() throws Exception {
         when(service.read("txn-1", 25)).thenReturn(response("txn-1", 25, false, entry("feedback-1")));
@@ -84,6 +89,7 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 eq(1),
                 request.capture()
         );
+        verify(metrics).recordEngineIntelligenceFeedbackReadSuccess();
         verifyNoMoreInteractions(sensitiveReadAuditService);
     }
 
@@ -106,6 +112,7 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 eq(0),
                 org.mockito.ArgumentMatchers.any(HttpServletRequest.class)
         );
+        verify(metrics).recordEngineIntelligenceFeedbackReadEmpty();
         verifyNoMoreInteractions(sensitiveReadAuditService);
     }
 
@@ -138,6 +145,7 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Invalid engine intelligence feedback request."))
                 .andExpect(jsonPath("$.details[0]").value("limit: must be between 1 and 50"));
+        verify(metrics).recordEngineIntelligenceFeedbackReadValidationFailure();
     }
 
     @Test
@@ -225,6 +233,8 @@ class EngineIntelligenceFeedbackReadControllerTest {
                 .getContentAsString();
 
         assertThat(response).doesNotContain("audit unavailable token secret stacktrace");
+        verify(metrics).recordEngineIntelligenceFeedbackReadAuditFailure();
+        verify(metrics).recordEngineIntelligenceFeedbackReadUnavailable(EngineIntelligenceFeedbackReadMetricReason.AUDIT_FAILURE);
     }
 
     @Test

@@ -2,6 +2,8 @@ package com.frauddetection.alert.engineintelligence;
 
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -79,7 +81,8 @@ class EngineIntelligenceProjectionMongoIntegrationTest {
                 new EngineIntelligenceProjectionMapper(
                         new EngineIntelligenceProjectionPolicy(),
                         Clock.fixed(instant, ZoneOffset.UTC)
-                )
+                ),
+                new AlertServiceMetrics(new SimpleMeterRegistry())
         );
     }
 }

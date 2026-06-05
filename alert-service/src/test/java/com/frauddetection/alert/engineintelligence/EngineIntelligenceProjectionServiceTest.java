@@ -3,6 +3,8 @@ package com.frauddetection.alert.engineintelligence;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.frauddetection.alert.observability.AlertServiceMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
@@ -34,7 +36,9 @@ class EngineIntelligenceProjectionServiceTest {
             new EngineIntelligenceProjectionPolicy(),
             Clock.fixed(NOW, ZoneOffset.UTC)
     );
-    private final EngineIntelligenceProjectionService service = new EngineIntelligenceProjectionService(repository, mapper);
+    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+    private final AlertServiceMetrics metrics = new AlertServiceMetrics(meterRegistry);
+    private final EngineIntelligenceProjectionService service = new EngineIntelligenceProjectionService(repository, mapper, metrics);
 
     @Test
     void nullEventReturnsInvalidShape() {
@@ -85,6 +89,9 @@ class EngineIntelligenceProjectionServiceTest {
 
         assertThat(result.projection()).isPresent();
         verify(repository).save(any(EngineIntelligenceProjection.class));
+        assertThat(meterRegistry.get("engine_intelligence_projection_attempt_total").counter().count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("engine_intelligence_projection_success_total").counter().count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("engine_intelligence_projection_latency_seconds").timer().count()).isEqualTo(1L);
     }
 
     @Test
@@ -174,6 +181,10 @@ class EngineIntelligenceProjectionServiceTest {
                 EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_UNSUPPORTED_CONTRACT_VERSION
         );
         verify(repository, never()).save(any());
+        assertThat(meterRegistry.get("engine_intelligence_projection_omitted_total")
+                .tag("reason", "INVALID_PROJECTION_SHAPE")
+                .counter()
+                .count()).isEqualTo(1.0d);
     }
 
     @Test
@@ -190,6 +201,10 @@ class EngineIntelligenceProjectionServiceTest {
         assertThat(result.omissionReason()).contains(
                 EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_PROJECTION_FAILED
         );
+        assertThat(meterRegistry.get("engine_intelligence_projection_failure_total")
+                .tag("reason", "STORE_UNAVAILABLE")
+                .counter()
+                .count()).isEqualTo(1.0d);
     }
 
     @Test
@@ -234,7 +249,8 @@ class EngineIntelligenceProjectionServiceTest {
                 new EngineIntelligenceProjectionMapper(
                         new EngineIntelligenceProjectionPolicy(),
                         Clock.fixed(instant, ZoneOffset.UTC)
-                )
+                ),
+                metrics
         );
     }
 
