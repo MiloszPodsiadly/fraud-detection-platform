@@ -23,7 +23,6 @@ class FraudEngineEnumSerializationTest {
                 .isEqualTo("\"INCREASES_RISK\"");
         assertThat(objectMapper.writeValueAsString(FraudEngineEvidenceType.MODEL_EXPLANATION))
                 .isEqualTo("\"MODEL_EXPLANATION\"");
-        assertThat(objectMapper.writeValueAsString(FraudEngineEvidenceStatus.PARTIAL))
-                .isEqualTo("\"PARTIAL\"");
+        assertThat(objectMapper.writeValueAsString(FraudEngineEvidenceStatus.AVAILABLE)).isEqualTo("\"AVAILABLE\"");
     }
 }

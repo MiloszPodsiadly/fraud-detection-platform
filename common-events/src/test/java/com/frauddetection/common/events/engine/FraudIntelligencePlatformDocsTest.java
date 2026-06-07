@@ -15,6 +15,7 @@ class FraudIntelligencePlatformDocsTest {
             "product/fraud_intelligence_platform.md",
             "product/fraud_intelligence_non_goals.md",
             "product/fraud_intelligence_glossary.md",
+            "events/fraud_engine_result_contract.md",
             "architecture/multi_engine_scoring_architecture.md"
     );
 
@@ -48,27 +49,79 @@ class FraudIntelligencePlatformDocsTest {
         String product = Files.readString(docsRoot().resolve("product/fraud_intelligence_platform.md"));
         String architecture = Files.readString(docsRoot().resolve("architecture/multi_engine_scoring_architecture.md"));
         String nonGoals = Files.readString(docsRoot().resolve("product/fraud_intelligence_non_goals.md"));
+        String contract = Files.readString(docsRoot().resolve("events/fraud_engine_result_contract.md"));
+        String glossary = Files.readString(docsRoot().resolve("product/fraud_intelligence_glossary.md"));
         String normalizedArchitecture = architecture.replaceAll("\\s+", " ");
+        String normalizedDocs = (architecture + "\n" + contract + "\n" + glossary).replaceAll("\\s+", " ");
+        String docsLower = normalizedDocs.toLowerCase(Locale.ROOT);
 
         assertThat(product)
                 .contains("no runtime scoring behavior changes")
                 .contains("does not")
                 .doesNotContain("guaranteed fraud proof");
         assertThat(architecture)
-                .contains("adds only a shared engine-result contract")
+                .contains("tightens and maintains the pre-exposure shared `FraudEngineResult` contract")
                 .contains("does not add `engineResults[]` to `TransactionScoredEvent`")
                 .contains("Consumers tolerate unknown additive fields")
                 .contains("Breaking semantic changes require versioning")
-                .contains("Maximum items")
-                .contains("safe bounded summaries only");
+                .contains("Maximum items");
         assertThat(normalizedArchitecture)
                 .contains("They do not replace, extend, or project the existing `ScoringEvidenceItem`")
                 .contains("they are not silently promoted into the existing platform `ReasonCode` taxonomy")
                 .contains("`FraudEngineEvidence.source` is a bounded uppercase machine-readable origin code")
                 .contains("Only `FALLBACK_USED` declares that an actual fallback occurred")
                 .contains("Validation in this contract blocks obvious unsafe content only. It is not DLP")
+                .contains("safe bounded summaries only")
                 .contains("sanitize explanation summaries before constructing `FraudEngineResult`")
                 .contains("a `statusReason` mapping table");
+        assertThat(normalizedDocs)
+                .contains("diagnostic only")
+                .contains("not platform aggregation")
+                .contains("calibrated platform probability")
+                .contains("decision signal")
+                .contains("The Java contract retains `Double` for compatibility")
+                .contains("JSON producers must emit finite bounded values")
+                .contains("not a decimal-precision financial amount")
+                .contains("`BigDecimal` may be considered in a future breaking contract cleanup if needed")
+                .contains("`statusReason` is the canonical serialized JSON field")
+                .contains("`fallbackReason` is accepted only as a JSON input alias")
+                .contains("is not serialized as output")
+                .contains("`AVAILABLE`")
+                .contains("`LOW`, `MEDIUM`, or `HIGH` required")
+                .contains("Contribution `direction` is the semantic source of truth")
+                .contains("Evidence `title` and `description` are bounded display summaries only")
+                .contains("Legacy reason codes may contain the word `METADATA` only as explicitly allowlisted")
+                .contains("This does not allow metadata bags, arbitrary metadata maps, raw metadata payloads")
+                .contains("not raw evidence channels")
+                .contains("ML explanation dump")
+                .contains("debug")
+                .contains("payload channels")
+                .contains("Future richer explainability requires a separate scoped contract")
+                .contains("It is not DLP")
+                .contains("FDP-101 tightens and maintains the pre-exposure shared `FraudEngineResult` contract")
+                .contains("Existing `TransactionScoredEvent` shape remains unchanged")
+                .contains("This branch is `common-events` contract/docs/tests only")
+                .contains("Later exposure requires a separate scoped PR with compatibility and rollout gates")
+                .contains("does not introduce `ScoringContext`, `FraudSignalEngine`")
+                .contains("model retraining")
+                .contains("rule updates");
+        assertThat(docsLower)
+                .contains("not a final banking decision")
+                .contains("not automatic blocking")
+                .contains("not core banking authorization")
+                .contains("pre-exposure")
+                .contains("tightens")
+                .contains("does not add kafka")
+                .contains("does not add api")
+                .contains("does not add ui")
+                .contains("does not add new `scoringcontext`")
+                .contains("api")
+                .contains("ui")
+                .contains("dataset export")
+                .contains("feedback dataset")
+                .contains("payment authorization")
+                .contains("analyst recommendation")
+                .doesNotContain("fdp-82");
         assertThat(nonGoals)
                 .contains("no bank-certified production decision claim")
                 .doesNotContain("auto-decline production");

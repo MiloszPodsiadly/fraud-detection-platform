@@ -1,0 +1,23 @@
+{
+  "engineId": "ml.python.primary",
+  "engineType": "ML_MODEL",
+  "engineLanguage": "python",
+  "status": "TIMEOUT",
+  "confidence": "UNKNOWN",
+  "reasonCodes": ["ML_MODEL_TIMEOUT"],
+  "evidence": [
+    {
+      "evidenceType": "OPERATIONAL_STATUS",
+      "reasonCode": "ML_MODEL_TIMEOUT",
+      "title": "ML status",
+      "description": "Bounded ML adapter signal.",
+      "source": "ML_MODEL",
+      "status": "UNAVAILABLE"
+    }
+  ],
+  "latencyMs": 300000,
+  "modelName": "python-fraud-model",
+  "modelVersion": "v1",
+  "statusReason": "ML_MODEL_TIMEOUT",
+  "generatedAt": "2026-06-01T10:15:30Z"
+}

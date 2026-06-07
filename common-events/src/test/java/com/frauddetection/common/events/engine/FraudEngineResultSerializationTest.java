@@ -1,8 +1,8 @@
 package com.frauddetection.common.events.engine;
 
-import com.frauddetection.common.events.enums.RiskLevel;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -13,78 +13,163 @@ import static org.assertj.core.api.Assertions.assertThat;
 class FraudEngineResultSerializationTest {
 
     @Test
-    void serializesRulesEngineResult() throws Exception {
-        FraudEngineResult result = new FraudEngineResult(
-                "rules-v1",
+    void serializesFullFraudEngineResultWithCompatibleFieldNames() throws Exception {
+        String json = objectMapper().writeValueAsString(fullAvailableResult());
+
+        assertThat(json)
+                .contains("\"engineId\":\"rules.primary\"")
+                .contains("\"engineType\":\"RULES\"")
+                .contains("\"engineLanguage\":\"java\"")
+                .contains("\"status\":\"AVAILABLE\"")
+                .contains("\"score\":0.64")
+                .contains("\"riskLevel\":\"MEDIUM\"")
+                .contains("\"confidence\":\"HIGH\"")
+                .contains("\"reasonCodes\":[\"HIGH_VELOCITY\"]")
+                .contains("\"feature\":\"TRANSFER_COUNT\"")
+                .contains("\"reasonCode\":\"HIGH_VELOCITY\"")
+                .contains("\"statusReason\":null")
+                .doesNotContain("\"fallbackReason\"")
+                .contains("\"generatedAt\":");
+    }
+
+    @Test
+    void deserializesFullFraudEngineResult() throws Exception {
+        FraudEngineResult result = objectMapper().readValue(objectMapper().writeValueAsString(fullAvailableResult()),
+                FraudEngineResult.class);
+
+        assertThat(result.score()).isEqualTo(0.64d);
+        assertThat(result.contributions()).hasSize(1);
+        assertThat(result.contributions().getFirst().featureCode()).isEqualTo("TRANSFER_COUNT");
+        assertThat(result.evidence()).hasSize(1);
+        assertThat(result.evidence().getFirst().evidenceCode()).isEqualTo("HIGH_VELOCITY");
+    }
+
+    @Test
+    void fallbackReasonAliasDeserializesToStatusReason() throws Exception {
+        FraudEngineResult result = objectMapper().readValue("""
+                {
+                  "engineId": "rules.primary",
+                  "engineType": "RULES",
+                  "engineLanguage": "java",
+                  "status": "FALLBACK_USED",
+                  "score": 0.5000,
+                  "riskLevel": "MEDIUM",
+                  "confidence": "UNKNOWN",
+                  "reasonCodes": ["FALLBACK_PATH_USED"],
+                  "fallbackReason": "RULE_ENGINE_FALLBACK",
+                  "generatedAt": "2026-06-01T10:15:30Z"
+                }
+                """, FraudEngineResult.class);
+
+        assertThat(result.statusReason()).isEqualTo("RULE_ENGINE_FALLBACK");
+        assertThat(result.fallbackReason()).isEqualTo("RULE_ENGINE_FALLBACK");
+    }
+
+    @Test
+    void deserializesOperationalUnavailableResultWithoutScoreRisk() throws Exception {
+        FraudEngineResult result = objectMapper().readValue("""
+                {
+                  "engineId": "ml.python.primary",
+                  "engineType": "ML_MODEL",
+                  "engineLanguage": "python",
+                  "status": "UNAVAILABLE",
+                  "confidence": "UNKNOWN",
+                  "reasonCodes": ["MODEL_RUNTIME_UNAVAILABLE"],
+                  "statusReason": "MODEL_RUNTIME_UNAVAILABLE",
+                  "generatedAt": "2026-06-01T10:15:30Z"
+                }
+                """, FraudEngineResult.class);
+
+        assertThat(result.score()).isNull();
+        assertThat(result.riskLevel()).isNull();
+        assertThat(result.confidence()).isEqualTo(FraudEngineConfidence.UNKNOWN);
+    }
+
+    @Test
+    void unknownOptionalFieldsDoNotBreakDeserialization() throws Exception {
+        FraudEngineResult result = objectMapper().readValue("""
+                {
+                  "engineId": "rules.primary",
+                  "engineType": "RULES",
+                  "engineLanguage": "java",
+                  "status": "AVAILABLE",
+                  "score": 0.7000,
+                  "riskLevel": "HIGH",
+                  "confidence": "MEDIUM",
+                  "generatedAt": "2026-06-01T10:15:30Z",
+                  "futureField": "ignored",
+                  "contributions": [
+                    {
+                      "feature": "TRANSFER_COUNT",
+                      "direction": "INCREASES_RISK",
+                      "futureNestedField": true
+                    }
+                  ]
+                }
+                """, FraudEngineResult.class);
+
+        assertThat(result.engineId()).isEqualTo("rules.primary");
+        assertThat(result.contributions()).hasSize(1);
+    }
+
+    @Test
+    void missingOptionalFieldsAreAllowedAndListsBecomeEmpty() throws Exception {
+        FraudEngineResult result = objectMapper().readValue("""
+                {
+                  "engineId": "rules.primary",
+                  "engineType": "RULES",
+                  "engineLanguage": "java",
+                  "status": "AVAILABLE",
+                  "score": 0.7000,
+                  "riskLevel": "HIGH",
+                  "confidence": "MEDIUM",
+                  "generatedAt": "2026-06-01T10:15:30Z"
+                }
+                """, FraudEngineResult.class);
+
+        assertThat(result.confidence()).isEqualTo(FraudEngineConfidence.MEDIUM);
+        assertThat(result.reasonCodes()).isEmpty();
+        assertThat(result.contributions()).isEmpty();
+        assertThat(result.evidence()).isEmpty();
+    }
+
+    static FraudEngineResult fullAvailableResult() {
+        return new FraudEngineResult(
+                "rules.primary",
                 FraudEngineType.RULES,
                 "java",
                 FraudEngineStatus.AVAILABLE,
-                0.64d,
+                0.6400d,
                 RiskLevel.MEDIUM,
                 FraudEngineConfidence.HIGH,
-                List.of("RAPID_TRANSFER_BURST"),
+                List.of("HIGH_VELOCITY"),
                 List.of(new FraudEngineContribution(
-                        "transferCountWindow",
-                        "elevated",
-                        0.31d,
+                        "TRANSFER_COUNT",
+                        "HIGH",
+                        0.3100d,
                         FraudEngineContributionDirection.INCREASES_RISK
                 )),
-                List.of(),
+                List.of(new FraudEngineEvidence(
+                        FraudEngineEvidenceType.RULE_MATCH,
+                        "HIGH_VELOCITY",
+                        "High velocity",
+                        "Bounded rule scoring signal.",
+                        "RULES",
+                        FraudEngineEvidenceStatus.AVAILABLE
+                )),
                 4L,
                 null,
                 null,
                 null,
-                Instant.parse("2026-05-25T09:00:00Z")
+                generatedAt()
         );
-
-        String json = objectMapper().writeValueAsString(result);
-
-        assertThat(json)
-                .contains("\"engineId\":\"rules-v1\"")
-                .contains("\"engineType\":\"RULES\"")
-                .contains("\"status\":\"AVAILABLE\"")
-                .contains("\"score\":0.64")
-                .contains("\"riskLevel\":\"MEDIUM\"")
-                .contains("\"reasonCodes\":[\"RAPID_TRANSFER_BURST\"]")
-                .contains("\"generatedAt\":");
-        assertThat(objectMapper().readValue(json, FraudEngineResult.class).generatedAt())
-                .isEqualTo(Instant.parse("2026-05-25T09:00:00Z"));
     }
 
-    @Test
-    void optionalFieldsUseNullForAbsence() throws Exception {
-        FraudEngineResult result = new FraudEngineResult(
-                "velocity-v1",
-                FraudEngineType.VELOCITY,
-                "java",
-                FraudEngineStatus.AVAILABLE,
-                0.42d,
-                RiskLevel.LOW,
-                FraudEngineConfidence.LOW,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                Instant.parse("2026-05-25T09:00:00Z")
-        );
-
-        FraudEngineResult restored = objectMapper().readValue(
-                objectMapper().writeValueAsString(result),
-                FraudEngineResult.class
-        );
-
-        assertThat(restored.reasonCodes()).isEmpty();
-        assertThat(restored.contributions()).isEmpty();
-        assertThat(restored.evidence()).isEmpty();
-        assertThat(restored.modelName()).isNull();
-        assertThat(restored.modelVersion()).isNull();
-        assertThat(restored.statusReason()).isNull();
+    static Instant generatedAt() {
+        return Instant.parse("2026-06-01T10:15:30Z");
     }
 
-    private ObjectMapper objectMapper() {
+    static ObjectMapper objectMapper() {
         return new ObjectMapper().registerModule(new JavaTimeModule());
     }
 }

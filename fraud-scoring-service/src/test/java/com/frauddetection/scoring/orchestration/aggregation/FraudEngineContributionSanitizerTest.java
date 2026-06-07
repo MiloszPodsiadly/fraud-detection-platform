@@ -43,9 +43,9 @@ class FraudEngineContributionSanitizerTest {
                 "rules.primary",
                 List.of(
                         contribution("SAFE_SIGNAL", "0.987654"),
-                        contribution("customerId.raw", null),
-                        contribution("accountId.raw", null),
-                        contribution("token.endpoint.secret", null)
+                        malformedContribution("customerId.raw", null, FraudEngineContributionDirection.INCREASES_RISK),
+                        malformedContribution("accountId.raw", null, FraudEngineContributionDirection.INCREASES_RISK),
+                        malformedContribution("token.endpoint.secret", null, FraudEngineContributionDirection.INCREASES_RISK)
                 ),
                 FraudEngineAggregationPolicy.defaultInternalPolicy(),
                 warnings

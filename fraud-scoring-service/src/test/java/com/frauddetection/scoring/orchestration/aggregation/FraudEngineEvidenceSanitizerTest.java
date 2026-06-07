@@ -51,7 +51,14 @@ class FraudEngineEvidenceSanitizerTest {
                 "rawFeatureVector.raw"
         );
         List<FraudEngineEvidence> source = forbidden.stream()
-                .map(reason -> evidence(reason, "Safe title", "Safe description"))
+                .map(reason -> malformedEvidence(
+                        FraudEngineEvidenceType.MODEL_EXPLANATION,
+                        reason,
+                        "Safe title",
+                        "Safe description",
+                        "ML_MODEL",
+                        FraudEngineEvidenceStatus.AVAILABLE
+                ))
                 .toList();
         List<FraudEngineAggregationWarning> warnings = new ArrayList<>();
 

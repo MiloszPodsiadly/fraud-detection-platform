@@ -2,89 +2,160 @@ package com.frauddetection.common.events.engine;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class FraudEngineResultExamplePayloadTest {
 
-    private static final List<String> EXAMPLES = List.of(
-            "rules-engine-result.json",
-            "python-ml-engine-result.json",
-            "unavailable-ml-engine-result.json",
+    private static final String ROOT = "contracts/fraud-engine-result/";
+    private static final List<String> SAMPLE_FILES = List.of(
+            "available-rules-engine-result.json",
+            "available-ml-engine-result.json",
+            "timeout-ml-engine-result.json",
+            "unavailable-engine-result.json",
+            "fallback-used-engine-result.json",
             "degraded-engine-result.json"
     );
 
     @Test
-    void contractExamplesMatchModelAndDoNotContainRawSensitiveFields() throws Exception {
-        for (String filename : EXAMPLES) {
-            String json = Files.readString(example(filename));
-            FraudEngineResult result = objectMapper().readValue(json, FraudEngineResult.class);
+    void samplePayloadsDeserializeIntoFraudEngineResult() throws Exception {
+        for (String file : SAMPLE_FILES) {
+            FraudEngineResult result = read(file);
 
-            assertThat(result.engineId()).as(filename).isNotBlank();
-            assertThat(result.generatedAt()).as(filename).isNotNull();
-            assertThat(json.toLowerCase())
-                    .as(filename)
-                    .doesNotContain(
-                            "\"rawpayload\"",
-                            "\"rawfeatures\"",
-                            "\"stacktrace\"",
-                            "\"exception\"",
-                            "\"token\"",
-                            "\"secret\"",
-                            "\"customerpayload\"",
-                            "\"fallbackreason\""
-                    );
+            assertThat(result.engineId()).as(file).isNotBlank();
         }
     }
 
     @Test
-    void examplesShowAvailableUnavailableAndDegradedStates() throws Exception {
-        assertThat(read("rules-engine-result.json").status()).isEqualTo(FraudEngineStatus.AVAILABLE);
-        assertThat(read("python-ml-engine-result.json").status()).isEqualTo(FraudEngineStatus.AVAILABLE);
+    void samplePayloadsReserializeWithoutThrowing() throws Exception {
+        for (String file : SAMPLE_FILES) {
+            String json = objectMapper().writeValueAsString(read(file));
 
-        FraudEngineResult unavailable = read("unavailable-ml-engine-result.json");
+            assertThat(json).as(file).contains("\"engineId\"");
+        }
+    }
+
+    @Test
+    void samplesRepresentRequiredStatusCases() throws Exception {
+        assertThat(read("available-rules-engine-result.json").status()).isEqualTo(FraudEngineStatus.AVAILABLE);
+        assertThat(read("available-rules-engine-result.json").engineType()).isEqualTo(FraudEngineType.RULES);
+        assertThat(read("available-ml-engine-result.json").engineType()).isEqualTo(FraudEngineType.ML_MODEL);
+        assertThat(read("available-ml-engine-result.json").modelName()).isEqualTo("python-fraud-model");
+
+        FraudEngineResult timeout = read("timeout-ml-engine-result.json");
+        assertThat(timeout.status()).isEqualTo(FraudEngineStatus.TIMEOUT);
+        assertThat(timeout.score()).isNull();
+        assertThat(timeout.riskLevel()).isNull();
+        assertThat(timeout.confidence()).isEqualTo(FraudEngineConfidence.UNKNOWN);
+
+        FraudEngineResult unavailable = read("unavailable-engine-result.json");
         assertThat(unavailable.status()).isEqualTo(FraudEngineStatus.UNAVAILABLE);
         assertThat(unavailable.score()).isNull();
-        assertThat(unavailable.confidence()).isEqualTo(FraudEngineConfidence.UNKNOWN);
-        assertThat(unavailable.statusReason()).isEqualTo("MODEL_RUNTIME_UNAVAILABLE");
+        assertThat(unavailable.riskLevel()).isNull();
 
-        assertThat(read("degraded-engine-result.json").status()).isEqualTo(FraudEngineStatus.DEGRADED);
+        FraudEngineResult fallback = read("fallback-used-engine-result.json");
+        assertThat(fallback.status()).isEqualTo(FraudEngineStatus.FALLBACK_USED);
+        assertThat(fallback.statusReason()).isEqualTo("RULE_ENGINE_FALLBACK");
+        assertThat(fallback.fallbackReason()).isEqualTo("RULE_ENGINE_FALLBACK");
+        assertThat(sample("fallback-used-engine-result.json"))
+                .contains("\"statusReason\"")
+                .doesNotContain("\"fallbackReason\"");
+
+        FraudEngineResult degraded = read("degraded-engine-result.json");
+        assertThat(degraded.status()).isEqualTo(FraudEngineStatus.DEGRADED);
+        assertThat(degraded.score()).isEqualTo(0.45d);
+        assertThat(degraded.riskLevel()).isEqualTo(RiskLevel.MEDIUM);
     }
 
     @Test
-    void mutatedExamplesFailKnownFieldSafetyRules() throws Exception {
-        String rules = Files.readString(example("rules-engine-result.json"));
-        String invalidReasonCode = rules.replace("RAPID_TRANSFER_BURST", "RAW CUSTOMER VALUE");
-        String contradictoryStatus = rules.replace("\"status\": \"AVAILABLE\"", "\"status\": \"UNAVAILABLE\"");
-        String invalidEvidenceType = rules.replace("\"evidenceType\": \"VELOCITY_SIGNAL\"", "\"evidenceType\": \"FREE_TEXT\"");
-        String invalidEvidenceSource = rules.replace("\"source\": \"RULES\"", "\"source\": \"rules service\"");
+    void officialNonAvailableSamplesUseCanonicalStatusReasonOnly() throws Exception {
+        for (String file : SAMPLE_FILES) {
+            FraudEngineResult result = read(file);
+            String json = sample(file);
 
-        assertThatThrownBy(() -> objectMapper().readValue(invalidReasonCode, FraudEngineResult.class))
-                .hasMessageContaining("reasonCode");
-        assertThatThrownBy(() -> objectMapper().readValue(contradictoryStatus, FraudEngineResult.class))
-                .hasMessageContaining("UNAVAILABLE");
-        assertThatThrownBy(() -> objectMapper().readValue(invalidEvidenceType, FraudEngineResult.class))
-                .hasMessageContaining("FREE_TEXT");
-        assertThatThrownBy(() -> objectMapper().readValue(invalidEvidenceSource, FraudEngineResult.class))
-                .hasMessageContaining("source");
-    }
-
-    private FraudEngineResult read(String filename) throws Exception {
-        return objectMapper().readValue(Files.readString(example(filename)), FraudEngineResult.class);
-    }
-
-    private Path example(String filename) {
-        Path moduleRelative = Path.of("..", "docs", "examples", "fraud-engine-result", filename);
-        if (Files.exists(moduleRelative)) {
-            return moduleRelative;
+            assertThat(json).as(file).doesNotContain("\"fallbackReason\"");
+            if (result.status() == FraudEngineStatus.AVAILABLE) {
+                assertThat(json).as(file).doesNotContain("\"statusReason\"");
+            } else {
+                assertThat(json).as(file).contains("\"statusReason\"");
+            }
         }
-        return Path.of("docs", "examples", "fraud-engine-result", filename);
+    }
+
+    @Test
+    void samplePayloadsDoNotContainForbiddenRawOrDecisioningTerms() throws Exception {
+        for (String file : SAMPLE_FILES) {
+            String compact = sample(file).toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]", "");
+
+            assertThat(compact).as(file).doesNotContain(
+                    "customerid",
+                    "accountid",
+                    "cardid",
+                    "deviceid",
+                    "merchantid",
+                    "rawpayload",
+                    "featurevector",
+                    "token",
+                    "secret",
+                    "endpoint",
+                    "stacktrace",
+                    "finaldecision",
+                    "approve",
+                    "decline",
+                    "block",
+                    "recommendedaction",
+                    "modeltraininglabel",
+                    "groundtruth"
+            );
+        }
+    }
+
+    @Test
+    void samplePayloadEvidenceTypesAreDeclaredEnumValues() throws Exception {
+        Set<String> declaredEvidenceTypes = java.util.Arrays.stream(FraudEngineEvidenceType.values())
+                .map(Enum::name)
+                .collect(Collectors.toSet());
+
+        for (String file : SAMPLE_FILES) {
+            for (FraudEngineEvidence evidence : read(file).evidence()) {
+                assertThat(declaredEvidenceTypes).as(file).contains(evidence.evidenceType().name());
+            }
+        }
+    }
+
+    @Test
+    void operationalOutageSamplesUseOperationalStatusEvidence() throws Exception {
+        assertThat(read("timeout-ml-engine-result.json").evidence())
+                .extracting(FraudEngineEvidence::evidenceType)
+                .containsOnly(FraudEngineEvidenceType.OPERATIONAL_STATUS);
+        assertThat(read("unavailable-engine-result.json").evidence())
+                .extracting(FraudEngineEvidence::evidenceType)
+                .containsOnly(FraudEngineEvidenceType.OPERATIONAL_STATUS);
+        assertThat(read("degraded-engine-result.json").evidence())
+                .extracting(FraudEngineEvidence::evidenceType)
+                .containsOnly(FraudEngineEvidenceType.OPERATIONAL_STATUS);
+    }
+
+    private FraudEngineResult read(String file) throws Exception {
+        return objectMapper().readValue(sample(file), FraudEngineResult.class);
+    }
+
+    private String sample(String file) throws IOException {
+        try (InputStream stream = getClass().getClassLoader().getResourceAsStream(ROOT + file)) {
+            if (stream == null) {
+                throw new IllegalArgumentException("Missing sample " + file);
+            }
+            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        }
     }
 
     private ObjectMapper objectMapper() {

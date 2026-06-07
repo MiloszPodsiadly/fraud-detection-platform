@@ -1,34 +1,35 @@
 # Fraud Intelligence Glossary
 
-Status: terminology for the FDP-82 contract foundation.
+Status: terminology for the FDP-101 bounded contract foundation.
 
 ## Scope
 
 These definitions describe shared vocabulary for multi-engine, analyst-assisted investigation. They do not claim
-runtime integration in this branch.
+runtime integration in this branch. FDP-101 tightens and maintains the pre-exposure shared `FraudEngineResult`
+contract before runtime, Kafka, API, UI, projection, orchestration, or dataset-export integration.
 
 | Term | Definition |
 | --- | --- |
 | Engine | A bounded source of fraud-risk context that can produce an engine result. |
-| Engine result | A typed `FraudEngineResult` describing one engine's status, score context, reasons, and bounded evidence; it is not a final banking decision. |
+| Engine result | A typed `FraudEngineResult` describing one engine's diagnostic status, score context, reasons, and bounded evidence; it is not platform aggregation, a final banking decision, payment authorization, approve/decline/block behavior, analyst recommendation, model training label, ground truth record, feedback dataset record, or probability claim. |
 | Engine type | The stable category of an engine, such as rules, ML model, velocity, device risk, merchant risk, or graph risk. |
 | Engine status | A controlled availability state: `AVAILABLE`, `UNAVAILABLE`, `DEGRADED`, `TIMEOUT`, `FALLBACK_USED`, or `SKIPPED`; each state constrains score, risk level, confidence, and status reason. |
 | Engine confidence | Bounded context about an engine result: `LOW`, `MEDIUM`, `HIGH`, or `UNKNOWN`; it is not a payment verdict. |
-| Status reason | A bounded machine-readable identifier explaining a non-available or altered engine status; only `FALLBACK_USED` implies actual fallback behavior. |
-| Reason code | A bounded machine-readable identifier for investigation context; it is not human prose and producers must not put customer identifiers, payloads, exception text, account/card data, or secrets into it. |
-| Contribution | A bounded explanation entry with controlled direction (`INCREASES_RISK`, `DECREASES_RISK`, `NEUTRAL`, or `UNKNOWN`) and a safe summary value. |
-| Evidence | A bounded supporting entry with controlled type and status; its source is an uppercase machine-readable origin code and its description is a safe summary, not a raw payload or diagnostic channel. |
+| Status reason | The canonical serialized `statusReason` machine code explaining a non-available or altered engine status; `fallbackReason` is accepted only as a JSON input alias for the same bounded value, and only `FALLBACK_USED` implies actual fallback behavior. |
+| Reason code | A bounded machine-readable identifier for investigation context; it is not human prose and producers must not put customer identifiers, payloads, exception text, account/card data, or secrets into it. Legacy reason codes may contain `METADATA` only as explicitly allowlisted bounded machine-readable reason codes, not as metadata bags, arbitrary metadata maps, raw metadata payloads, metadata fields, or unbounded metadata values. |
+| Contribution | A bounded explanation entry whose UPPER_SNAKE feature code and controlled direction (`INCREASES_RISK`, `DECREASES_RISK`, `NEUTRAL`, or `UNKNOWN`) define the semantic meaning; optional weight is diagnostic contribution magnitude, not calibrated probability, and must be consistent with direction. Its `value` is a bounded bucket/summary only, not a raw evidence, ML explanation dump, debug, exception, or payload channel. |
+| Evidence | A bounded supporting entry with controlled type and status; its source is an uppercase machine-readable origin code and its title or description is a bounded display summary, not a raw payload, endpoint, exception, feature-vector, identifier, decisioning, training, ground-truth, feedback, raw evidence, ML explanation dump, debug, exception, or payload channel. |
 | Rule engine | A Java-based engine that evaluates explicit rules and reason codes. |
-| Python ML engine | A Python model-serving engine that supplies ML scoring context; ML is not final decision source in this phase. |
-| Velocity engine | An engine category for rate, frequency, and burst-style transaction patterns; it is not wired by FDP-82. |
-| Platform risk score | A platform-level risk concept; FDP-82 does not calculate or orchestrate it. |
+| Python ML engine | A Python model-serving engine that supplies ML scoring context; ML is not a final decision source in this phase. |
+| Velocity engine | An engine category for rate, frequency, and burst-style transaction patterns; it is not wired by FDP-101. |
+| Platform risk score | A platform-level risk concept; FDP-101 does not calculate or orchestrate it. |
 | Platform risk level | A platform-level risk classification concept distinct from an individual engine result. |
-| Primary source | A source selected by explicit orchestration policy; no such policy is added by FDP-82. |
+| Primary source | A source selected by explicit orchestration policy; no such policy is added by FDP-101. |
 | Final decision source | A system authorized to make a final decision; this platform and its engine result contract are not that source. |
-| Analyst recommendation | Context that may help an analyst review a case; not implemented by FDP-82. |
+| Analyst recommendation | Context that may help an analyst review a case; not implemented by FDP-101 and not produced by `FraudEngineResult`. |
 | Analyst decision | A human investigation action within an authorized workflow; it is not generated by this contract. |
-| Feedback label | A bounded analyst-review label concept for rule or model evaluation; not implemented by FDP-82. |
-| Shadow mode | A mode concept that observes an engine without making it the primary scoring source; not implemented by FDP-82. |
-| Compare mode | A mode concept for agreement and disagreement among engines; not implemented by FDP-82. |
+| Feedback label | A bounded analyst-review label concept for rule or model evaluation; not implemented by FDP-101. |
+| Shadow mode | A mode concept that observes an engine without making it the primary scoring source; not implemented by FDP-101. |
+| Compare mode | A mode concept for agreement and disagreement among engines; not implemented by FDP-101. |
 | Fallback | A declared substitution path identified only by the `FALLBACK_USED` status. |
 | Unavailable engine | An engine reporting `UNAVAILABLE` without a usable score; its reason remains bounded and non-sensitive. |

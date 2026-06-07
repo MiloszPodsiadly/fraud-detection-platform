@@ -1,0 +1,30 @@
+{
+  "engineId": "rules.primary",
+  "engineType": "RULES",
+  "engineLanguage": "java",
+  "status": "AVAILABLE",
+  "score": 0.8200,
+  "riskLevel": "HIGH",
+  "confidence": "HIGH",
+  "reasonCodes": ["HIGH_VELOCITY", "RECENT_AMOUNT_ACCUMULATION"],
+  "contributions": [
+    {
+      "feature": "TRANSFER_COUNT",
+      "value": "HIGH",
+      "weight": 0.4100,
+      "direction": "INCREASES_RISK"
+    }
+  ],
+  "evidence": [
+    {
+      "evidenceType": "RULE_MATCH",
+      "reasonCode": "HIGH_VELOCITY",
+      "title": "High velocity",
+      "description": "Bounded rule scoring signal.",
+      "source": "RULES",
+      "status": "AVAILABLE"
+    }
+  ],
+  "latencyMs": 4,
+  "generatedAt": "2026-06-01T10:15:30Z"
+}
