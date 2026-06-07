@@ -77,6 +77,21 @@ class FraudEngineResultExamplePayloadTest {
     }
 
     @Test
+    void officialNonAvailableSamplesUseCanonicalStatusReasonOnly() throws Exception {
+        for (String file : SAMPLE_FILES) {
+            FraudEngineResult result = read(file);
+            String json = sample(file);
+
+            assertThat(json).as(file).doesNotContain("\"fallbackReason\"");
+            if (result.status() == FraudEngineStatus.AVAILABLE) {
+                assertThat(json).as(file).doesNotContain("\"statusReason\"");
+            } else {
+                assertThat(json).as(file).contains("\"statusReason\"");
+            }
+        }
+    }
+
+    @Test
     void samplePayloadsDoNotContainForbiddenRawOrDecisioningTerms() throws Exception {
         for (String file : SAMPLE_FILES) {
             String compact = sample(file).toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]", "");

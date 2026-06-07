@@ -80,6 +80,14 @@ class Fdp101ScopeGuardTest {
                 .noneMatch(type -> type.getSimpleName().equals("JsonNode"));
     }
 
+    @Test
+    void fraudEngineEvidenceDoesNotExposeMisleadingDescriptionCodeHelper() {
+        assertThat(Arrays.stream(FraudEngineEvidence.class.getDeclaredMethods())
+                .map(method -> method.getName())
+                .toList())
+                .doesNotContain("descriptionCode");
+    }
+
     private List<String> recordComponentNames(Class<?> type) {
         return Arrays.stream(type.getRecordComponents())
                 .map(RecordComponent::getName)

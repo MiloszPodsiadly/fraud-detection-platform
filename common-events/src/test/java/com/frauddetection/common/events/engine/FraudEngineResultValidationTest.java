@@ -49,6 +49,12 @@ class FraudEngineResultValidationTest {
 
     @Test
     void scoreRangeScaleAndMissingScoreAreValidated() {
+        assertThatThrownBy(() -> result(FraudEngineStatus.AVAILABLE, Double.NaN, RiskLevel.MEDIUM))
+                .hasMessageContaining("score must be finite");
+        assertThatThrownBy(() -> result(FraudEngineStatus.AVAILABLE, Double.POSITIVE_INFINITY, RiskLevel.MEDIUM))
+                .hasMessageContaining("score must be finite");
+        assertThatThrownBy(() -> result(FraudEngineStatus.AVAILABLE, Double.NEGATIVE_INFINITY, RiskLevel.MEDIUM))
+                .hasMessageContaining("score must be finite");
         assertThatThrownBy(() -> result(FraudEngineStatus.AVAILABLE, -0.0001d, RiskLevel.MEDIUM))
                 .hasMessageContaining("score");
         assertThatThrownBy(() -> result(FraudEngineStatus.AVAILABLE, 1.0001d, RiskLevel.MEDIUM))
@@ -59,6 +65,10 @@ class FraudEngineResultValidationTest {
                 .hasMessageContaining("requires score");
         assertThatThrownBy(() -> result(FraudEngineStatus.AVAILABLE, 0.4000d, null))
                 .hasMessageContaining("requires riskLevel");
+
+        FraudEngineResult unavailable = operational(FraudEngineStatus.UNAVAILABLE, null);
+        assertThat(unavailable.score()).isNull();
+        assertThat(unavailable.riskLevel()).isNull();
     }
 
     @Test
@@ -80,6 +90,15 @@ class FraudEngineResultValidationTest {
 
             assertThat(result.confidence()).isEqualTo(confidence);
         }
+    }
+
+    @Test
+    void availableRejectsStatusReason() {
+        assertThatThrownBy(() -> new FraudEngineResult("rules.primary", FraudEngineType.RULES, "java",
+                FraudEngineStatus.AVAILABLE, 0.4000d, RiskLevel.MEDIUM, FraudEngineConfidence.MEDIUM,
+                List.of("HIGH_VELOCITY"), List.of(), List.of(), 3L, null, null,
+                "ENGINE_STATUS", now()))
+                .hasMessageContaining("must not declare statusReason");
     }
 
     @Test
@@ -188,6 +207,12 @@ class FraudEngineResultValidationTest {
                 .hasMessageContaining("direction");
         assertThatThrownBy(() -> new FraudEngineContribution("transfer_count", null, null,
                 FraudEngineContributionDirection.NEUTRAL)).hasMessageContaining("UPPER_SNAKE");
+        assertThatThrownBy(() -> new FraudEngineContribution("TRANSFER_COUNT", null, Double.NaN,
+                FraudEngineContributionDirection.INCREASES_RISK)).hasMessageContaining("weight must be finite");
+        assertThatThrownBy(() -> new FraudEngineContribution("TRANSFER_COUNT", null, Double.POSITIVE_INFINITY,
+                FraudEngineContributionDirection.INCREASES_RISK)).hasMessageContaining("weight must be finite");
+        assertThatThrownBy(() -> new FraudEngineContribution("TRANSFER_COUNT", null, Double.NEGATIVE_INFINITY,
+                FraudEngineContributionDirection.DECREASES_RISK)).hasMessageContaining("weight must be finite");
         assertThatThrownBy(() -> new FraudEngineContribution("TRANSFER_COUNT", null, -1.0001d,
                 FraudEngineContributionDirection.INCREASES_RISK)).hasMessageContaining("weight");
         assertThatThrownBy(() -> new FraudEngineContribution("TRANSFER_COUNT", null, 1.0001d,
@@ -223,7 +248,8 @@ class FraudEngineResultValidationTest {
 
         assertThat(evidence.reasonCode()).isEqualTo("HIGH_VELOCITY");
         assertThat(evidence.evidenceCode()).isEqualTo("HIGH_VELOCITY");
-        assertThat(evidence.descriptionCode()).isEqualTo("High velocity");
+        assertThat(evidence.title()).isEqualTo("High velocity");
+        assertThat(evidence.description()).isEqualTo("Bounded rule scoring signal.");
         assertThatThrownBy(() -> new FraudEngineEvidence(null, "HIGH_VELOCITY", "High velocity",
                 null, "RULES", FraudEngineEvidenceStatus.AVAILABLE)).hasMessageContaining("evidenceType");
         assertThat(new FraudEngineEvidence(FraudEngineEvidenceType.RULE_MATCH, null,
@@ -253,6 +279,23 @@ class FraudEngineResultValidationTest {
     }
 
     @Test
+    void contributionValueRejectsUnsafeTextChannelsAndAcceptsSafeBuckets() {
+        for (String unsafe : unsafeTextTerms()) {
+            assertThatThrownBy(() -> new FraudEngineContribution("TRANSFER_COUNT", unsafe, null,
+                    FraudEngineContributionDirection.NEUTRAL))
+                    .as(unsafe)
+                    .hasMessageContaining("forbidden");
+        }
+
+        for (String bucket : List.of("HIGH", "MEDIUM", "LOW", "ELEVATED", "UNKNOWN")) {
+            assertThat(new FraudEngineContribution("TRANSFER_COUNT", bucket, null,
+                    FraudEngineContributionDirection.NEUTRAL).value())
+                    .as(bucket)
+                    .isEqualTo(bucket);
+        }
+    }
+
+    @Test
     void evidenceReasonCodeRejectsForbiddenTermsAtConstruction() {
         for (String unsafe : List.of("RAW_EVIDENCE", "STACK_TRACE", "TOKEN", "SECRET", "ENDPOINT")) {
             assertThatThrownBy(() -> new FraudEngineEvidence(FraudEngineEvidenceType.RULE_MATCH, unsafe,
@@ -264,10 +307,7 @@ class FraudEngineResultValidationTest {
 
     @Test
     void evidenceTitleAndDescriptionRejectUnsafeTerms() {
-        for (String unsafe : List.of("raw payload", "raw response", "feature vector", "exception message",
-                "stack trace", "token", "secret", "endpoint", "customer id", "account id", "card id",
-                "device id", "merchant id", "final decision", "recommended action", "payment authorization",
-                "ground truth", "training label")) {
+        for (String unsafe : unsafeTextTerms()) {
             assertThatThrownBy(() -> new FraudEngineEvidence(FraudEngineEvidenceType.RULE_MATCH, "HIGH_VELOCITY",
                     unsafe, null, "RULES", FraudEngineEvidenceStatus.AVAILABLE))
                     .as("title " + unsafe)
@@ -277,10 +317,69 @@ class FraudEngineResultValidationTest {
                     .as("description " + unsafe)
                     .hasMessageContaining("forbidden");
         }
+
+        FraudEngineEvidence evidence = new FraudEngineEvidence(
+                FraudEngineEvidenceType.RULE_MATCH,
+                "HIGH_VELOCITY",
+                "High velocity summary",
+                "Bounded display summary",
+                "RULES",
+                FraudEngineEvidenceStatus.AVAILABLE
+        );
+        assertThat(evidence.title()).isEqualTo("High velocity summary");
+        assertThat(evidence.description()).isEqualTo("Bounded display summary");
+    }
+
+    @Test
+    void legacyMetadataReasonCodesAreNarrowMachineCodeExceptions() {
+        for (String reasonCode : List.of(
+                "ML_AVAILABILITY_METADATA_MISSING",
+                "ML_AVAILABILITY_METADATA_INVALID",
+                "ML_MODEL_METADATA_MISSING"
+        )) {
+            assertThat(resultWithLists(List.of(reasonCode), List.of(), List.of()).reasonCodes())
+                    .as(reasonCode)
+                    .containsExactly(reasonCode);
+            assertThat(new FraudEngineEvidence(FraudEngineEvidenceType.MODEL_EXPLANATION, reasonCode,
+                    "Model availability", "Bounded display summary", "ML_MODEL",
+                    FraudEngineEvidenceStatus.AVAILABLE).reasonCode())
+                    .as(reasonCode)
+                    .isEqualTo(reasonCode);
+            assertThat(fallbackWithStatusReason(reasonCode).statusReason())
+                    .as(reasonCode)
+                    .isEqualTo(reasonCode);
+        }
+
+        for (String unsafe : List.of(
+                "RAW_METADATA",
+                "CUSTOMER_METADATA",
+                "METADATA_PAYLOAD",
+                "ARBITRARY_METADATA",
+                "MODEL_METADATA_DUMP"
+        )) {
+            assertThatThrownBy(() -> resultWithLists(List.of(unsafe), List.of(), List.of()))
+                    .as("reasonCodes " + unsafe)
+                    .hasMessageContaining("forbidden");
+            assertThatThrownBy(() -> new FraudEngineEvidence(FraudEngineEvidenceType.MODEL_EXPLANATION, unsafe,
+                    "Model availability", "Bounded display summary", "ML_MODEL",
+                    FraudEngineEvidenceStatus.AVAILABLE))
+                    .as("evidence reasonCode " + unsafe)
+                    .hasMessageContaining("forbidden");
+            assertThatThrownBy(() -> fallbackWithStatusReason(unsafe))
+                    .as("statusReason " + unsafe)
+                    .hasMessageContaining("forbidden");
+        }
     }
 
     @Test
     void noUnboundedContractTypesAreIntroduced() {
+        List<String> componentNames = List.of(FraudEngineResult.class, FraudEngineContribution.class,
+                        FraudEngineEvidence.class).stream()
+                .flatMap(type -> Arrays.stream(type.getRecordComponents()))
+                .map(RecordComponent::getName)
+                .toList();
+
+        assertThat(componentNames).doesNotContain("metadata");
         assertThat(contractFieldTypes()).doesNotContain(Map.class, Object.class);
         assertThat(contractFieldTypes())
                 .noneMatch(type -> type.getName().equals("com.fasterxml.jackson.databind.JsonNode"));
@@ -358,6 +457,14 @@ class FraudEngineResultValidationTest {
     }
 
     private FraudEngineResult fallback(Double score, RiskLevel riskLevel) {
+        return fallbackWithStatusReason(score, riskLevel, "RULE_ENGINE_FALLBACK");
+    }
+
+    private FraudEngineResult fallbackWithStatusReason(String statusReason) {
+        return fallbackWithStatusReason(0.5000d, RiskLevel.MEDIUM, statusReason);
+    }
+
+    private FraudEngineResult fallbackWithStatusReason(Double score, RiskLevel riskLevel, String statusReason) {
         return new FraudEngineResult(
                 "rules.primary",
                 FraudEngineType.RULES,
@@ -372,7 +479,7 @@ class FraudEngineResultValidationTest {
                 3L,
                 null,
                 null,
-                "RULE_ENGINE_FALLBACK",
+                statusReason,
                 now()
         );
     }
@@ -478,6 +585,29 @@ class FraudEngineResultValidationTest {
                 "Bounded rule scoring signal.",
                 "RULES",
                 FraudEngineEvidenceStatus.AVAILABLE
+        );
+    }
+
+    private List<String> unsafeTextTerms() {
+        return List.of(
+                "raw payload",
+                "raw response",
+                "feature vector",
+                "exception message",
+                "stack trace",
+                "token",
+                "secret",
+                "endpoint",
+                "customer id",
+                "account id",
+                "card id",
+                "device id",
+                "merchant id",
+                "final decision",
+                "recommended action",
+                "payment authorization",
+                "ground truth",
+                "training label"
         );
     }
 
