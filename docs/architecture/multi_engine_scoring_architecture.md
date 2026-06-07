@@ -1,6 +1,6 @@
 # Multi-Engine Scoring Contract Boundary
 
-Status: FDP-101 bounded contract maintenance on top of the current platform.
+Status: FDP-101 bounded contract maintenance with FDP-102 internal feedback dataset-export foundation.
 
 ## Scope
 
@@ -11,12 +11,13 @@ transaction -> features -> multiple engines -> risk intelligence -> alert/case -
             -> feedback -> model/rules evaluation
 ```
 
-FDP-101 tightens and maintains the pre-exposure shared `FraudEngineResult` contract before runtime, Kafka, API, UI,
-projection, orchestration, or dataset-export integration. It does not alter the current event flow, current scoring
-selection, current alert projections, Kafka payloads, API/OpenAPI surface, feedback datasets, or any analyst UI.
-`FraudEngineResult` is not emitted in Kafka, exposed through API/OpenAPI, rendered in UI, or projected by alert-service
-in this branch. Existing `TransactionScoredEvent` shape remains unchanged. Later exposure requires a separate scoped
-PR with compatibility and rollout gates.
+FDP-101 tightens and maintains the pre-exposure shared `FraudEngineResult` contract. FDP-102 adds an internal
+alert-service feedback dataset-export foundation for offline evaluation input only. These changes do not alter the
+current event flow, current scoring selection, Kafka payloads, API/OpenAPI surface, analyst UI, model retraining,
+thresholds, automatic decisioning, recommendations, payment authorization, alert severity, or fraud-case status.
+Existing `TransactionScoredEvent` shape remains unchanged. Later exposure requires a separate scoped PR with
+compatibility and rollout gates. Later public/operator-triggered export also requires authorization, sensitive-read
+audit, rate limits, privacy review, and retention policy.
 
 ## Declared Engine Categories
 
@@ -105,8 +106,11 @@ mapping and compatibility policy before those concepts can cross the existing sc
 
 This foundation does not add `engineResults[]` to `TransactionScoredEvent` or any other Kafka event.
 FDP-101 does not add new `ScoringContext`, `FraudSignalEngine`, scoring orchestration, alert projection, API,
-OpenAPI, UI, feedback dataset, dataset export, model retraining, rule update, or export integration. Existing
-internal engine-intelligence wiring remains outside this contract-maintenance change.
+OpenAPI, UI, feedback dataset, dataset export, model retraining, rule update, or export integration. FDP-102 adds only
+an internal alert-service dataset export foundation. It does not expose a public API, OpenAPI path, UI, scheduled job,
+CLI job, Python runner, Kafka event field, scoring behavior change, model evaluation runner, retraining, promotion, or
+threshold switch. Existing optional `TransactionScoredEvent.engineIntelligence` shape remains unchanged and no
+`engineResults[]` event field is added.
 
 Producers remain strict and emit only documented fields. Consumers tolerate unknown additive fields in the engine
 result, contribution, and evidence records while still validating all known fields. Unknown fields are ignored,
@@ -126,6 +130,19 @@ A producer must:
 - emit documented fields only;
 - treat unknown fields received by tolerant consumers as ignored extensions, never risk signals;
 - define and test any mapping from engine `reasonCodes` to the existing platform `ReasonCode` taxonomy.
+
+## FDP-102 Feedback Dataset Export Boundary
+
+The FDP-102 dataset export uses `EngineIntelligenceFeedbackDatasetExportResult` as an internal wrapper. It declares
+`FEEDBACK_SUBMITTED_AT` as the single time basis, filters `fromInclusive <= submittedAt <= toInclusive`, sorts by
+`submittedAt DESC, feedbackId ASC`, caps date range at 31 days, caps `maxRecords` from 1 through 500, and deduplicates
+by pseudonymous `transactionReference` with the newest submitted feedback winning.
+
+The JSONL representation starts with an `EXPORT_METADATA` line containing truncation, count, time-basis,
+deduplication, and failure metadata; each subsequent line is one `DATASET_RECORD`. Analyst feedback is not ground
+truth and not a model training label. `CONFIRMED_FRAUD` maps to `POSITIVE`, `MARKED_LEGITIMATE` maps to `NEGATIVE`,
+and inconclusive, needs-more-info, missing, or unknown decisions map to `NON_TRAINING`. Missing ML/rules scores are
+not zero, missing risks are not `LOW`, and missing projection is explicit rather than no-fraud evidence.
 
 ## Integration Preconditions
 
