@@ -21,10 +21,10 @@ analyst UI.
 | --- | --- |
 | Java rules engine | Produces explainable rule-driven risk context. |
 | Python ML engine | Produces model risk context and bounded explanations; it is not a final decision source. |
-| Velocity engine | Declared transaction-rate and burst-pattern category; not integrated by FDP-82. |
-| Device risk engine | Declared device-context risk category; not integrated by FDP-82. |
-| Merchant risk engine | Declared merchant-context risk category; not integrated by FDP-82. |
-| Graph risk engine | Declared relationship-context risk category; not integrated by FDP-82. |
+| Velocity engine | Declared transaction-rate and burst-pattern category; not integrated by FDP-101. |
+| Device risk engine | Declared device-context risk category; not integrated by FDP-101. |
+| Merchant risk engine | Declared merchant-context risk category; not integrated by FDP-101. |
+| Graph risk engine | Declared relationship-context risk category; not integrated by FDP-101. |
 
 ## Shared Contract Boundary
 
@@ -44,10 +44,16 @@ Reason codes are stable machine-readable identifiers, not descriptions. Producer
 identifiers, raw payloads, exception text, account or card data, or secrets in them. `statusReason` uses an even
 narrower uppercase reason-code form.
 
-`FraudEngineEvidence.description` and `FraudEngineContribution.value` are safe bounded summaries only. Producers
-must not put raw feature vectors, raw request or response payloads, customer, account, or card identifiers,
-exception text, stack traces, tokens, secrets, or internal hostnames in them. Validation rejects basic unsafe
-content; it is not a full data-loss-prevention control.
+`FraudEngineContribution.feature` is a required UPPER_SNAKE machine code. Contribution `direction` is the semantic
+source of truth; `weight` is diagnostic only, finite, bounded from `-1.0000` through `1.0000`, and consistent with
+direction. Positive weights increase risk, negative weights decrease risk, zero is neutral, and `UNKNOWN` direction
+does not carry a weight.
+
+`FraudEngineEvidence.title`, `FraudEngineEvidence.description`, and `FraudEngineContribution.value` are safe bounded
+summaries only for display. Producers must not put raw feature vectors, raw request or response payloads, customer,
+account, card, device, or merchant identifiers, exception text, stack traces, tokens, secrets, endpoints, internal
+hostnames, decisioning instructions, training labels, ground truth, or feedback dataset values in them. Validation
+rejects basic unsafe content; it is not a full data-loss-prevention control.
 
 `FraudEngineEvidence.source` is a bounded uppercase machine-readable origin code, such as `RULES` or `ML_MODEL`,
 not a description, hostname, service name, endpoint, or channel for operational details.
@@ -69,8 +75,13 @@ An engine result is not a final banking decision, not automatic blocking, and no
 fallback-used status. Only `FALLBACK_USED` declares that an actual fallback occurred; `UNAVAILABLE`, `TIMEOUT`,
 `SKIPPED`, and `DEGRADED` do not imply fallback behavior.
 
+`statusReason` is the canonical serialized JSON field. `fallbackReason` is accepted only as a JSON input alias for
+backward compatibility and is not serialized as output.
+
 `engineLanguage` is canonical lowercase, including `java`, `python`, or `other`.
 Contribution direction and evidence type/status are closed contract enums rather than free-form labels.
+`score` and `weight` remain `Double` in Java for compatibility, but JSON producers must emit finite bounded values
+with at most four decimal places. Neither value is a platform probability or decision signal.
 
 ## Existing Scoring Evidence Boundary
 
@@ -84,8 +95,9 @@ mapping and compatibility policy before those concepts can cross the existing sc
 ## Compatibility Policy
 
 This foundation does not add `engineResults[]` to `TransactionScoredEvent` or any other Kafka event.
-FDP-101 does not add new scoring orchestration, alert projection, API, OpenAPI, UI, feedback dataset, or export
-integration. Existing internal engine-intelligence wiring remains outside this contract-maintenance change.
+FDP-101 does not add new `ScoringContext`, `FraudSignalEngine`, scoring orchestration, alert projection, API,
+OpenAPI, UI, feedback dataset, dataset export, model retraining, rule update, or export integration. Existing
+internal engine-intelligence wiring remains outside this contract-maintenance change.
 
 Producers remain strict and emit only documented fields. Consumers tolerate unknown additive fields in the engine
 result, contribution, and evidence records while still validating all known fields. Unknown fields are ignored,
@@ -120,4 +132,6 @@ Before any later integration branch emits or projects `FraudEngineResult`, it mu
 ## Out Of Scope
 
 FDP-101 does not add scoring context, engine wrappers, orchestration, comparison behavior, event integration,
-projections, API surface, UI, feedback evaluation, dataset export, or automatic decisioning.
+projections, API surface, UI, feedback evaluation, dataset export, model retraining, rule updates, platform
+aggregation, analyst recommendation, payment authorization, approve/decline/block behavior, or automatic
+decisioning.

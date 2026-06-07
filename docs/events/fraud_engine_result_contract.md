@@ -22,9 +22,11 @@ orchestration, alert-service behavior, feedback export, or dataset export.
 | `status` | Required controlled enum. |
 | `generatedAt` | Required generation timestamp. |
 
-`score` is optional and must not be interpreted as zero when missing. When present, it is a finite value from `0.0000`
-through `1.0000` with at most four decimal places. `riskLevel` must be present with `score` whenever status semantics
-require or allow scored output.
+`score` is optional and must not be interpreted as zero when missing. It is diagnostic engine output, not a probability,
+platform aggregation, final decision, payment authorization, approve, decline, block, analyst recommendation, model
+label, ground truth, or feedback dataset value. The Java contract retains `Double` for compatibility; JSON producers
+must emit finite values from `0.0000` through `1.0000` with at most four decimal places. `riskLevel` must be present
+with `score` whenever status semantics require or allow scored output.
 
 ## Bounds
 
@@ -36,21 +38,29 @@ require or allow scored output.
 | `latencyMs` | 0 through 300000 |
 | `modelName` | max 64 characters |
 | `modelVersion` | max 64 characters |
-| `statusReason` / `fallbackReason` alias | UPPER_SNAKE, max 128 characters |
+| `statusReason` | UPPER_SNAKE, max 128 characters |
 
-Contribution `feature` is a bounded machine code and contribution `value` is a safe bounded summary. Evidence
-`reasonCode` is an optional bounded machine-readable identifier and evidence `source` is a bounded machine code.
-Evidence `title` and `description` are safe bounded summaries, not raw payload channels.
+`statusReason` is the canonical serialized JSON field. `fallbackReason` is accepted only as an input alias for
+backward-compatible deserialization and is not emitted by serializers.
+
+Contribution `feature` is a required UPPER_SNAKE machine code and contribution `value` is a safe bounded summary.
+Contribution `direction` is the semantic source of truth. `weight` is diagnostic only: `INCREASES_RISK` allows null
+or non-negative weight, `DECREASES_RISK` allows null or non-positive weight, `NEUTRAL` allows null or zero, and
+`UNKNOWN` requires null.
+
+Evidence `reasonCode` is an optional UPPER_SNAKE machine code and evidence `source` is a bounded machine code.
+Evidence `title` and `description` are bounded display summaries only, not raw payload, response, exception,
+feature-vector, endpoint, identifier, decisioning, training, ground-truth, or feedback channels.
 
 ## Status Semantics
 
 | Status | Score and risk level | Confidence | Reason |
 | --- | --- | --- | --- |
-| `AVAILABLE` | Both required | Known confidence | No `statusReason` |
-| `UNAVAILABLE` | Both absent | `UNKNOWN` | Optional bounded status reason |
-| `TIMEOUT` | Both absent | `UNKNOWN` | Optional bounded status reason |
-| `SKIPPED` | Both absent | `UNKNOWN` | Optional bounded status reason |
-| `DEGRADED` | Both absent or both present | Not `HIGH` | Optional bounded status reason |
+| `AVAILABLE` | Both required | `LOW`, `MEDIUM`, or `HIGH` required | No `statusReason` |
+| `UNAVAILABLE` | Both absent | `UNKNOWN` | Required bounded status reason |
+| `TIMEOUT` | Both absent | `UNKNOWN` | Required bounded status reason |
+| `SKIPPED` | Both absent | `UNKNOWN` | Required bounded status reason |
+| `DEGRADED` | Both absent or both present | Not `HIGH` | Required bounded status reason |
 | `FALLBACK_USED` | Both absent or both present | Not `HIGH` | Required bounded status reason |
 
 Only `FALLBACK_USED` declares that fallback occurred. `UNAVAILABLE`, `TIMEOUT`, `SKIPPED`, and `DEGRADED` do not imply
@@ -63,3 +73,9 @@ vectors, stack traces, exception messages, tokens, secrets, endpoints, metadata 
 merchant identifiers, PAN/IBAN/email/phone values, submitted-by identities, correlation or idempotency keys, payload
 hashes, ground truth, training labels, final decisions, recommended actions, approve/decline/block instructions,
 payment authorization, or rule-update semantics.
+
+Contract validation blocks obvious unsafe content in bounded strings only. It is not DLP and must not be represented
+as data-loss-prevention coverage.
+
+FDP-101 also does not introduce `ScoringContext`, `FraudSignalEngine`, runtime model retraining, or runtime rule
+updates.
