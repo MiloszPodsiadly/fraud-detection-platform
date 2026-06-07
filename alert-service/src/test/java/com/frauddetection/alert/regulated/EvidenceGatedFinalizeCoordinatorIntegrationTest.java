@@ -40,6 +40,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIf;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.domain.Sort;
@@ -51,7 +52,6 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.data.mongodb.repository.support.MongoRepositoryFactory;
-import org.springframework.test.context.junit.jupiter.EnabledIf;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Duration;
@@ -75,7 +75,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
-@EnabledIf(value = "#{T(org.testcontainers.DockerClientFactory).instance().isDockerAvailable()}", loadContext = false)
+@EnabledIf("dockerAvailable")
 @Tag("integration")
 @Tag("invariant-proof")
 @Tag("evidence-gated-finalize")
@@ -90,6 +90,10 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
     private LocalMongoAuditPublisher auditPublisher;
     private RegulatedMutationLocalAuditPhaseWriter localAuditPhaseWriter;
     private MongoRegulatedMutationCoordinator coordinator;
+
+    static boolean dockerAvailable() {
+        return org.testcontainers.DockerClientFactory.instance().isDockerAvailable();
+    }
 
     @BeforeEach
     void setUp() {
