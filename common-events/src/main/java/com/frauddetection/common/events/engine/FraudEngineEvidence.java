@@ -41,8 +41,4 @@ public record FraudEngineEvidence(
     public String evidenceCode() {
         return reasonCode;
     }
-
-    public String descriptionCode() {
-        return title;
-    }
 }
