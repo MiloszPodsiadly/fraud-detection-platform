@@ -8,6 +8,8 @@ The engine-intelligence feedback dataset export is an internal alert-service fou
 It creates bounded evaluation records from analyst feedback, current alert analyst decision state, and projected engine
 intelligence. It does not evaluate models, train models, promote models, change thresholds, change scoring behavior,
 produce recommendations, authorize payments, or mutate alerts, fraud cases, Kafka events, OpenAPI, or UI.
+FDP-102 introduces an internal service foundation only. It is not an approved export surface. The presence of a Spring
+service does not authorize public, operator-triggered, scheduled, CLI, or external export.
 
 ## Labels
 
@@ -69,6 +71,10 @@ visible. `rawRowsRead` is the number of raw rows returned by the bounded query b
 imply the full time window is exhausted. `truncated = true` means more raw feedback rows exist beyond the bounded read.
 This is a bounded sample export, not an exhaustive dataset export.
 
+FDP-102 performs bounded per-row alert/projection lookups within the `maxRecords + 1` raw feedback window. This is
+acceptable for internal foundation scope. Any future public/operator/scheduled export must revisit this with
+performance review and likely batch lookup.
+
 ## Safety
 
 The export uses pseudonymous identifiers:
@@ -118,6 +124,7 @@ FDP-102 adds no public API, OpenAPI path, UI, scheduled job, CLI job, Python eva
 `TransactionScoredEvent` change, model retraining, model promotion, threshold switching, automatic decisioning,
 recommendation service, payment authorization, alert severity mutation, or fraud-case status mutation.
 
-Public or operator-triggered export is a separate future scope and requires authorization, sensitive-read audit,
-rate limits, privacy review, and retention policy. The Python ML Evaluation Suite is also separate future scope after
-this internal dataset-export foundation is merged.
+Any future public/operator/scheduled/external export requires a separate scoped PR with authorization, sensitive-read
+audit, rate limits, privacy review, retention policy, access controls, operational monitoring, and an approved
+privacy-reviewed identifier strategy. Public or operator-triggered export is a separate future scope. The Python ML
+Evaluation Suite is also separate future scope after this internal dataset-export foundation is merged.

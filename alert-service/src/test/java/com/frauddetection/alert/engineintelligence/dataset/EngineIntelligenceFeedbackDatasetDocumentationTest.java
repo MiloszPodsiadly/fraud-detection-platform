@@ -25,7 +25,7 @@ class EngineIntelligenceFeedbackDatasetDocumentationTest {
 
     @Test
     void docsStateInternalOnlyBoundaryAndFutureAuditScope() throws IOException {
-        String doc = Files.readString(DOC);
+        String doc = normalizedDoc();
 
         assertThat(doc)
                 .contains("internal service foundation")
@@ -33,6 +33,33 @@ class EngineIntelligenceFeedbackDatasetDocumentationTest {
                 .contains("sensitive-read audit")
                 .contains("privacy review")
                 .contains("retention policy");
+    }
+
+    @Test
+    void docsStateSpringServiceIsNotApprovedExportSurface() throws IOException {
+        String doc = normalizedDoc();
+
+        assertThat(doc)
+                .contains("internal service foundation only")
+                .contains("not an approved export surface")
+                .contains("presence of a Spring service")
+                .contains("does not authorize public, operator-triggered, scheduled, CLI, or external export");
+    }
+
+    @Test
+    void docsStateFutureExportNeedsSeparateScopedPrControls() throws IOException {
+        String doc = normalizedDoc();
+
+        assertThat(doc)
+                .contains("separate scoped PR")
+                .contains("authorization")
+                .contains("sensitive-read audit")
+                .contains("rate limits")
+                .contains("privacy review")
+                .contains("retention policy")
+                .contains("access controls")
+                .contains("operational monitoring")
+                .contains("privacy-reviewed identifier strategy");
     }
 
     @Test
@@ -116,6 +143,25 @@ class EngineIntelligenceFeedbackDatasetDocumentationTest {
         assertThat(doc)
                 .contains("recordsReturned < maxRecords")
                 .contains("imply the full time window is exhausted");
+    }
+
+    @Test
+    void docsMentionBoundedPerRowLookupSemantics() throws IOException {
+        String doc = normalizedDoc();
+
+        assertThat(doc)
+                .contains("bounded per-row alert/projection lookups")
+                .contains("maxRecords + 1 raw feedback window")
+                .contains("acceptable for internal foundation scope")
+                .contains("future public/operator/scheduled export")
+                .contains("performance review")
+                .contains("batch lookup");
+    }
+
+    private static String normalizedDoc() throws IOException {
+        return Files.readString(DOC)
+                .replace("`", "")
+                .replaceAll("\\s+", " ");
     }
 
     private static Path repositoryRoot() {
