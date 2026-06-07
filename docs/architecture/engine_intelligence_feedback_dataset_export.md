@@ -11,11 +11,14 @@ produce recommendations, authorize payments, or mutate alerts, fraud cases, Kafk
 
 ## Labels
 
-The exported label field is `evaluationLabel`. Analyst feedback and alert decisions are evaluation signals, not
-ground truth and not model training labels. `CONFIRMED_FRAUD` maps to `POSITIVE`; `MARKED_LEGITIMATE` maps to
-`NEGATIVE`; inconclusive, needs-more-info, missing decision, and unknown decision values map to `NON_TRAINING`.
-`NON_TRAINING` records are excluded from model-quality metrics by downstream evaluation tooling. Inconclusive and
-missing decisions must never be treated as negative examples.
+The exported label field is `evaluationLabel`. Analyst feedback and alert decisions are analyst-decision evaluation
+categories, not ground truth, not model training labels, not final decisions, not payment decisions, and not automatic
+decisioning signals. `CONFIRMED_FRAUD` maps to `ANALYST_CONFIRMED_FRAUD`; `MARKED_LEGITIMATE` maps to
+`ANALYST_MARKED_LEGITIMATE`; inconclusive, needs-more-info, missing decision, and unknown decision values map to
+`NOT_EVALUATION_ELIGIBLE`. `NOT_EVALUATION_ELIGIBLE` records are excluded from model-quality metrics by downstream
+evaluation tooling. Inconclusive and missing decisions must never be treated as negative examples. Raw workflow
+decision fields such as `alertAnalystDecision`, submitted-by values, analyst IDs, or other actor identity fields are
+not exported.
 
 ## Sources And Missing Data
 
@@ -25,10 +28,13 @@ Records are assembled from:
 - the current alert analyst decision state;
 - the engine-intelligence projection for comparison, engine status, score buckets, risk levels, and diagnostic codes.
 
-Labels are not derived from model output, risk level, alert severity, or projection agreement. Missing ML score does
-not mean zero. Missing ML risk does not mean `LOW`. Missing rules score does not mean zero. Missing rules risk does
-not mean `LOW`. Missing projection is exported explicitly as `projectionStatus = MISSING`; it does not mean no fraud.
-Old transactions without engine intelligence do not crash the export.
+Labels are not derived from model output, risk level, alert severity, or projection agreement. Feedback, alert, and
+projection transaction IDs must match before any dataset record is emitted. FDP-102 exports only supported projection
+contract version `1`; unsupported projection versions fail closed as `CORRUPTED_PROJECTION`. Unsupported projection
+does not mean no fraud or low risk. Missing ML score does not mean zero. Missing ML risk does not mean `LOW`. Missing
+rules score does not mean zero. Missing rules risk does not mean `LOW`. Missing projection is exported explicitly as
+`projectionStatus = MISSING`; it does not mean no fraud. Old transactions without engine intelligence do not crash the
+export.
 
 Corrupted feedback, alert, or projection data fails closed by default. Store failures return bounded failure reasons
 such as `FEEDBACK_STORE_UNAVAILABLE`, `ALERT_STORE_UNAVAILABLE`, or `PROJECTION_STORE_UNAVAILABLE`; raw exception text
@@ -54,10 +60,14 @@ The date range is capped at 31 days. `maxRecords` is capped from 1 through 500. 
 does not scan the full collection. The feedback collection has a `submittedAt DESC, feedbackId ASC` index for this
 export foundation.
 
-Deduplication uses `transactionReference` as the key. Because rows are already ordered by newest submitted feedback,
-the first row for a transaction reference wins; `feedbackId ASC` is the stable tie-breaker. The export result exposes
-`rawRowsRead`, `recordsReturned`, `truncated`, `timeBasis`, and `deduplicationPolicy` so bounded sampling and partial
-exports are visible.
+The repository fetches `maxRecords + 1` raw feedback rows internally so truncation can be detected. Deduplication uses
+`transactionReference` as the key. Because rows are already ordered by newest submitted feedback, the first row for a
+transaction reference wins; `feedbackId ASC` is the stable tie-breaker. The export result exposes `rawRowsRead`,
+`recordsReturned`, `truncated`, `timeBasis`, and `deduplicationPolicy` so bounded sampling and partial exports are
+visible. `rawRowsRead` is the number of raw rows returned by the bounded query before deduplication.
+`recordsReturned` is the number of unique dataset records after deduplication. `recordsReturned < maxRecords` does not
+imply the full time window is exhausted. `truncated = true` means more raw feedback rows exist beyond the bounded read.
+This is a bounded sample export, not an exhaustive dataset export.
 
 ## Safety
 
@@ -65,6 +75,14 @@ The export uses pseudonymous identifiers:
 
 - `evaluationRecordId`
 - `transactionReference`
+
+`evaluationRecordId` and `transactionReference` are deterministic internal pseudonymous references derived from source
+identifiers. They are not raw payment/core banking IDs, but they are also not anonymized identifiers and not a
+cryptographic privacy boundary. Because the references are deterministic, they may be linkable across exports and may
+be vulnerable to dictionary matching by parties that know candidate source identifiers. FDP-102 accepts this only
+because the branch is internal-only and adds no public API, operator-triggered endpoint, scheduled job, external
+export, or runtime trigger. Future public/operator/external export must use a privacy-reviewed identifier strategy
+such as keyed HMAC, tokenization, rotation, or another approved approach.
 
 It must not expose raw payment/core transaction identifiers, customer, account, card, device, or merchant identifiers,
 PAN, IBAN, email, phone, analyst identifiers, `submittedBy`, correlation IDs, idempotency keys, request hashes, raw
@@ -88,8 +106,11 @@ mappers and producers remain responsible for sanitizing data before export.
 ```
 
 The first line carries truncation, time-basis, deduplication, count, and failure metadata. Subsequent lines contain
-one dataset record per line. Empty exports still emit the metadata line. Failed exports emit metadata with a bounded
-`failureReason` and no partial successful-looking record stream.
+one dataset record per line. Empty exports still emit the metadata line. `failureReason != null` means the export
+failed. Failed exports emit metadata with a bounded `failureReason` and no partial successful-looking record stream.
+Failed exports must not contain dataset records. Consumers must treat `failureReason != null` as a hard export
+failure. A failed export metadata line is not a successful empty dataset. Consumers must abort processing and must not
+count the file as an evaluation input.
 
 ## Scope
 

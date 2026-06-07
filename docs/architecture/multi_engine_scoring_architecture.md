@@ -140,9 +140,11 @@ by pseudonymous `transactionReference` with the newest submitted feedback winnin
 
 The JSONL representation starts with an `EXPORT_METADATA` line containing truncation, count, time-basis,
 deduplication, and failure metadata; each subsequent line is one `DATASET_RECORD`. Analyst feedback is not ground
-truth and not a model training label. `CONFIRMED_FRAUD` maps to `POSITIVE`, `MARKED_LEGITIMATE` maps to `NEGATIVE`,
-and inconclusive, needs-more-info, missing, or unknown decisions map to `NON_TRAINING`. Missing ML/rules scores are
-not zero, missing risks are not `LOW`, and missing projection is explicit rather than no-fraud evidence.
+truth and not a model training label. `CONFIRMED_FRAUD` maps to `ANALYST_CONFIRMED_FRAUD`, `MARKED_LEGITIMATE` maps to
+`ANALYST_MARKED_LEGITIMATE`, and inconclusive, needs-more-info, missing, or unknown decisions map to
+`NOT_EVALUATION_ELIGIBLE`. Missing ML/rules scores are not zero, missing risks are not `LOW`, and missing projection
+is explicit rather than no-fraud evidence. Failed export JSONL with `failureReason != null` is a hard failure, not a
+successful empty dataset.
 
 ## Integration Preconditions
 
