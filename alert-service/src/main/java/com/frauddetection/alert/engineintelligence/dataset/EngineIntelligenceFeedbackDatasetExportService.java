@@ -82,6 +82,7 @@ public class EngineIntelligenceFeedbackDatasetExportService {
             } catch (EngineIntelligenceFeedbackDatasetRecordMapper.CorruptedDatasetSourceException exception) {
                 return EngineIntelligenceFeedbackDatasetExportResult.failed(request, exportedAt, exception.reason());
             }
+            // Repository order is authoritative: submittedAt DESC, feedbackId ASC. The first row per transaction wins.
             deduplicated.putIfAbsent(record.transactionReference(), record);
         }
         List<EngineIntelligenceFeedbackDatasetRecord> records = new ArrayList<>();

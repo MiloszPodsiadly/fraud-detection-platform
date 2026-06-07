@@ -20,6 +20,10 @@ class EngineIntelligenceFeedbackDatasetQueryRepository {
         this.mongoTemplate = Objects.requireNonNull(mongoTemplate, "mongoTemplate is required");
     }
 
+    /**
+     * Fetches at most {@code maxRecords + 1} raw feedback rows so callers can detect truncation without scanning the
+     * full window.
+     */
     List<EngineIntelligenceFeedbackDocument> findBoundedBySubmittedAt(
             Instant fromInclusive,
             Instant toInclusive,

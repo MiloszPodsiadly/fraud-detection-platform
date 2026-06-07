@@ -30,6 +30,8 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class EngineIntelligenceFeedbackDatasetExportServiceTest {
@@ -132,6 +134,14 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
     }
 
     @Test
+    void metadataReportsRawRowsReadAndRecordsReturned() {
+        EngineIntelligenceFeedbackDatasetExportResult result = exportWithOneRecord();
+
+        assertThat(result.rawRowsRead()).isEqualTo(1);
+        assertThat(result.recordsReturned()).isEqualTo(1);
+    }
+
+    @Test
     void exportResultIncludesTruncatedFlag() {
         EngineIntelligenceFeedbackDatasetQueryRepository feedbacks = mock(EngineIntelligenceFeedbackDatasetQueryRepository.class);
         when(feedbacks.findBoundedBySubmittedAt(FROM, TO, 1)).thenReturn(List.of(
@@ -142,6 +152,33 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
         EngineIntelligenceFeedbackDatasetExportResult result = service(feedbacks).export(request(1));
 
         assertThat(result.truncated()).isTrue();
+    }
+
+    @Test
+    void truncatedTrueWhenMoreRawRowsExistThanMaxRecords() {
+        EngineIntelligenceFeedbackDatasetQueryRepository feedbacks = mock(EngineIntelligenceFeedbackDatasetQueryRepository.class);
+        when(feedbacks.findBoundedBySubmittedAt(FROM, TO, 1)).thenReturn(List.of(
+                feedback("feedback-1", "txn-a", FROM.plusSeconds(20)),
+                feedback("feedback-2", "txn-b", FROM.plusSeconds(10))
+        ));
+
+        EngineIntelligenceFeedbackDatasetExportResult result = service(feedbacks).export(request(1));
+
+        assertThat(result.truncated()).isTrue();
+    }
+
+    @Test
+    void truncatedFalseWhenRawRowsEqualMaxRecords() {
+        EngineIntelligenceFeedbackDatasetQueryRepository feedbacks = mock(EngineIntelligenceFeedbackDatasetQueryRepository.class);
+        when(feedbacks.findBoundedBySubmittedAt(FROM, TO, 2)).thenReturn(List.of(
+                feedback("feedback-1", "txn-a", FROM.plusSeconds(20)),
+                feedback("feedback-2", "txn-b", FROM.plusSeconds(10))
+        ));
+
+        EngineIntelligenceFeedbackDatasetExportResult result = service(feedbacks).export(request(2));
+
+        assertThat(result.truncated()).isFalse();
+        assertThat(result.rawRowsRead()).isEqualTo(2);
     }
 
     @Test
@@ -208,6 +245,21 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
     }
 
     @Test
+    void newestSubmittedAtFeedbackWinsForSameTransactionReference() {
+        EngineIntelligenceFeedbackDatasetQueryRepository feedbacks = mock(EngineIntelligenceFeedbackDatasetQueryRepository.class);
+        when(feedbacks.findBoundedBySubmittedAt(FROM, TO, 10)).thenReturn(List.of(
+                feedback("feedback-new", "txn-same", FROM.plusSeconds(20)),
+                feedback("feedback-old", "txn-same", FROM.plusSeconds(10))
+        ));
+
+        EngineIntelligenceFeedbackDatasetExportResult result = service(feedbacks).export(request(10));
+
+        assertThat(result.records()).singleElement()
+                .extracting(EngineIntelligenceFeedbackDatasetRecord::evaluationRecordId)
+                .isEqualTo(EngineIntelligenceFeedbackDatasetSafety.evaluationRecordId("feedback-new"));
+    }
+
+    @Test
     void feedbackIdTieBreakIsStable() {
         EngineIntelligenceFeedbackDatasetQueryRepository feedbacks = mock(EngineIntelligenceFeedbackDatasetQueryRepository.class);
         when(feedbacks.findBoundedBySubmittedAt(FROM, TO, 10)).thenReturn(List.of(
@@ -220,6 +272,29 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
         assertThat(result.records()).singleElement()
                 .extracting(EngineIntelligenceFeedbackDatasetRecord::evaluationRecordId)
                 .isEqualTo(EngineIntelligenceFeedbackDatasetSafety.evaluationRecordId("feedback-a"));
+    }
+
+    @Test
+    void feedbackIdAscIsTieBreakerForSameSubmittedAt() {
+        EngineIntelligenceFeedbackDatasetQueryRepository feedbacks = mock(EngineIntelligenceFeedbackDatasetQueryRepository.class);
+        when(feedbacks.findBoundedBySubmittedAt(FROM, TO, 10)).thenReturn(List.of(
+                feedback("feedback-a", "txn-same", FROM.plusSeconds(20)),
+                feedback("feedback-b", "txn-same", FROM.plusSeconds(20))
+        ));
+
+        EngineIntelligenceFeedbackDatasetExportResult result = service(feedbacks).export(request(10));
+
+        assertThat(result.records()).singleElement()
+                .extracting(EngineIntelligenceFeedbackDatasetRecord::evaluationRecordId)
+                .isEqualTo(EngineIntelligenceFeedbackDatasetSafety.evaluationRecordId("feedback-a"));
+    }
+
+    @Test
+    void deduplicationPolicyMatchesRepositorySort() {
+        EngineIntelligenceFeedbackDatasetExportResult result = exportWithOneRecord();
+
+        assertThat(result.deduplicationPolicy())
+                .isEqualTo(EngineIntelligenceFeedbackDatasetDeduplicationPolicy.TRANSACTION_REFERENCE_NEWEST_SUBMITTED_AT_FEEDBACK_ID_ASC);
     }
 
     @Test
@@ -521,8 +596,52 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
         assertThat(result.rawRowsRead()).isEqualTo(2);
     }
 
+    @Test
+    void serviceDoesNotLookupMoreThanRawRowsReadAlerts() {
+        LookupFixture fixture = lookupFixture();
+
+        EngineIntelligenceFeedbackDatasetExportResult result =
+                service(fixture.feedbacks(), fixture.alerts(), fixture.projections()).export(request(10));
+
+        assertThat(result.rawRowsRead()).isEqualTo(3);
+        verify(fixture.alerts(), times(1)).findByTransactionId("txn-a");
+        verify(fixture.alerts(), times(1)).findByTransactionId("txn-b");
+        verify(fixture.alerts(), times(1)).findByTransactionId("txn-c");
+    }
+
+    @Test
+    void serviceDoesNotLookupMoreThanRawRowsReadProjections() {
+        LookupFixture fixture = lookupFixture();
+
+        EngineIntelligenceFeedbackDatasetExportResult result =
+                service(fixture.feedbacks(), fixture.alerts(), fixture.projections()).export(request(10));
+
+        assertThat(result.rawRowsRead()).isEqualTo(3);
+        verify(fixture.projections(), times(1)).findById("txn-a");
+        verify(fixture.projections(), times(1)).findById("txn-b");
+        verify(fixture.projections(), times(1)).findById("txn-c");
+    }
+
     private EngineIntelligenceFeedbackDatasetExportResult exportWithOneRecord() {
         return service(defaultFeedbacks()).export(request(10));
+    }
+
+    private LookupFixture lookupFixture() {
+        EngineIntelligenceFeedbackDatasetQueryRepository feedbacks = mock(EngineIntelligenceFeedbackDatasetQueryRepository.class);
+        when(feedbacks.findBoundedBySubmittedAt(FROM, TO, 10)).thenReturn(List.of(
+                feedback("feedback-a", "txn-a", FROM.plusSeconds(30)),
+                feedback("feedback-b", "txn-b", FROM.plusSeconds(20)),
+                feedback("feedback-c", "txn-c", FROM.plusSeconds(10))
+        ));
+        AlertRepository alerts = mock(AlertRepository.class);
+        when(alerts.findByTransactionId("txn-a")).thenReturn(Optional.of(alert("txn-a", AnalystDecision.CONFIRMED_FRAUD)));
+        when(alerts.findByTransactionId("txn-b")).thenReturn(Optional.of(alert("txn-b", AnalystDecision.MARKED_LEGITIMATE)));
+        when(alerts.findByTransactionId("txn-c")).thenReturn(Optional.of(alert("txn-c", AnalystDecision.CONFIRMED_FRAUD)));
+        EngineIntelligenceProjectionRepository projections = mock(EngineIntelligenceProjectionRepository.class);
+        when(projections.findById("txn-a")).thenReturn(Optional.empty());
+        when(projections.findById("txn-b")).thenReturn(Optional.empty());
+        when(projections.findById("txn-c")).thenReturn(Optional.empty());
+        return new LookupFixture(feedbacks, alerts, projections);
     }
 
     private EngineIntelligenceFeedbackDatasetExportResult exportWithDecision(AnalystDecision decision) {
@@ -747,5 +866,12 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
                 EngineIntelligenceScoreBucket.HIGH,
                 reasonCodes
         );
+    }
+
+    private record LookupFixture(
+            EngineIntelligenceFeedbackDatasetQueryRepository feedbacks,
+            AlertRepository alerts,
+            EngineIntelligenceProjectionRepository projections
+    ) {
     }
 }

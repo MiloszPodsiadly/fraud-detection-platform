@@ -105,11 +105,143 @@ class EngineIntelligenceFeedbackDatasetJsonlExporterTest {
                         "rawFeatureVector",
                         "rawEvidence",
                         "rawContribution",
+                        "rawMlRequest",
+                        "rawMlResponse",
+                        "stacktrace",
+                        "endpoint",
+                        "token",
+                        "secret",
                         "groundTruth",
                         "modelTrainingLabel",
                         "finalDecision",
                         "paymentAuthorization"
                 );
+    }
+
+    @Test
+    void jsonlDoesNotContainSubmittedBy() {
+        assertJsonlDoesNotContain("submittedBy");
+    }
+
+    @Test
+    void jsonlDoesNotContainAnalystId() {
+        assertJsonlDoesNotContain("analystId");
+    }
+
+    @Test
+    void jsonlDoesNotContainCorrelationId() {
+        assertJsonlDoesNotContain("correlationId");
+    }
+
+    @Test
+    void jsonlDoesNotContainIdempotencyKey() {
+        assertJsonlDoesNotContain("idempotencyKey");
+    }
+
+    @Test
+    void jsonlDoesNotContainRequestPayloadHash() {
+        assertJsonlDoesNotContain("requestPayloadHash");
+    }
+
+    @Test
+    void jsonlDoesNotContainCustomerId() {
+        assertJsonlDoesNotContain("customerId");
+    }
+
+    @Test
+    void jsonlDoesNotContainAccountId() {
+        assertJsonlDoesNotContain("accountId");
+    }
+
+    @Test
+    void jsonlDoesNotContainCardId() {
+        assertJsonlDoesNotContain("cardId");
+    }
+
+    @Test
+    void jsonlDoesNotContainDeviceId() {
+        assertJsonlDoesNotContain("deviceId");
+    }
+
+    @Test
+    void jsonlDoesNotContainMerchantId() {
+        assertJsonlDoesNotContain("merchantId");
+    }
+
+    @Test
+    void jsonlDoesNotContainRawPayload() {
+        assertJsonlDoesNotContain("rawPayload");
+    }
+
+    @Test
+    void jsonlDoesNotContainRawFeatureVector() {
+        assertJsonlDoesNotContain("rawFeatureVector");
+    }
+
+    @Test
+    void jsonlDoesNotContainRawEvidence() {
+        assertJsonlDoesNotContain("rawEvidence");
+    }
+
+    @Test
+    void jsonlDoesNotContainRawContribution() {
+        assertJsonlDoesNotContain("rawContribution");
+    }
+
+    @Test
+    void jsonlDoesNotContainRawMlRequest() {
+        assertJsonlDoesNotContain("rawMlRequest");
+    }
+
+    @Test
+    void jsonlDoesNotContainRawMlResponse() {
+        assertJsonlDoesNotContain("rawMlResponse");
+    }
+
+    @Test
+    void jsonlDoesNotContainStacktrace() {
+        assertJsonlDoesNotContain("stacktrace");
+    }
+
+    @Test
+    void jsonlDoesNotContainEndpoint() {
+        assertJsonlDoesNotContain("endpoint");
+    }
+
+    @Test
+    void jsonlDoesNotContainToken() {
+        assertJsonlDoesNotContain("token");
+    }
+
+    @Test
+    void jsonlDoesNotContainSecret() {
+        assertJsonlDoesNotContain("secret");
+    }
+
+    @Test
+    void jsonlDoesNotContainGroundTruth() {
+        assertJsonlDoesNotContain("groundTruth");
+    }
+
+    @Test
+    void jsonlDoesNotContainModelTrainingLabel() {
+        assertJsonlDoesNotContain("modelTrainingLabel");
+    }
+
+    @Test
+    void jsonlDoesNotContainFinalDecision() {
+        assertJsonlDoesNotContain("finalDecision");
+    }
+
+    @Test
+    void jsonlDoesNotContainPaymentAuthorization() {
+        assertJsonlDoesNotContain("paymentAuthorization");
+    }
+
+    private void assertJsonlDoesNotContain(String forbiddenText) {
+        String jsonl = new EngineIntelligenceFeedbackDatasetJsonlExporter().exportJsonl(result(false, List.of(record())));
+
+        assertThat(jsonl).doesNotContain(forbiddenText);
     }
 
     private EngineIntelligenceFeedbackDatasetExportResult result(

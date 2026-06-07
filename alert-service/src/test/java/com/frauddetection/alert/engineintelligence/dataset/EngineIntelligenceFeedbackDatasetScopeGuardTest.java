@@ -34,6 +34,12 @@ class EngineIntelligenceFeedbackDatasetScopeGuardTest {
     }
 
     @Test
+    void doesNotAddCliOrJobExportTrigger() throws IOException {
+        assertThat(datasetProductionText())
+                .doesNotContain("CommandLineRunner", "ApplicationRunner", "JobLauncher", "@ShellComponent");
+    }
+
+    @Test
     void doesNotAddPythonEvaluationRunner() throws IOException {
         assertThat(allText(ROOT.resolve("ml-inference-service"))).doesNotContain("feedback_dataset_export", "FDP-102");
     }

@@ -31,6 +31,18 @@ class EngineIntelligenceFeedbackDatasetSafetyTest {
     }
 
     @Test
+    void rawIdPatternsRejectedInReasonCodesAndDiagnosticSignals() {
+        assertThatThrownBy(() -> EngineIntelligenceFeedbackDatasetSafety.requireMachineCode(
+                "CUSTOMER_123_FLAGGED",
+                "reasonCodes"
+        )).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> EngineIntelligenceFeedbackDatasetSafety.requireMachineCode(
+                "DEVICE_ID_ABC123",
+                "diagnosticSignals"
+        )).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void modelNameRejectsUrlPathTokenSecret() {
         assertThatThrownBy(() -> EngineIntelligenceFeedbackDatasetSafety.optionalSafeIdentifier(
                 "https://registry.internal/model",
