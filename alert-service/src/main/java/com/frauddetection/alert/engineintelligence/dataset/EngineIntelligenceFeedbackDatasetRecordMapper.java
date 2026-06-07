@@ -5,6 +5,7 @@ import com.frauddetection.alert.engineintelligence.EngineIntelligenceEngineProje
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjection;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackDocument;
 import com.frauddetection.alert.persistence.AlertDocument;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.engine.FraudEngineType;
 
 import java.util.ArrayList;
@@ -13,23 +14,24 @@ import java.util.Objects;
 
 class EngineIntelligenceFeedbackDatasetRecordMapper {
 
+    private static final int SUPPORTED_PROJECTION_CONTRACT_VERSION = EngineIntelligenceSummary.CONTRACT_VERSION;
+
     EngineIntelligenceFeedbackDatasetRecord map(
             EngineIntelligenceFeedbackDocument feedback,
             AlertDocument alert,
             EngineIntelligenceProjection projection
     ) {
         validateFeedback(feedback);
-        validateAlert(alert);
+        validateAlert(feedback, alert);
         EngineIntelligenceFeedbackDatasetLabelMapper.MappedLabel label =
                 EngineIntelligenceFeedbackDatasetLabelMapper.map(alert.getAnalystDecision());
-        EngineSignals signals = projection == null ? EngineSignals.missing() : signalsFrom(projection);
+        EngineSignals signals = projection == null ? EngineSignals.missing() : signalsFrom(feedback, projection);
         return new EngineIntelligenceFeedbackDatasetRecord(
                 EngineIntelligenceFeedbackDatasetSafety.evaluationRecordId(feedback.getFeedbackId()),
                 EngineIntelligenceFeedbackDatasetSafety.transactionReference(feedback.getTransactionId()),
                 feedback.getSubmittedAt(),
                 label.evaluationLabel(),
                 label.labelSource(),
-                alert.getAnalystDecision(),
                 feedback.getFeedbackType(),
                 feedback.getUsefulness(),
                 feedback.getAccuracyAssessment(),
@@ -60,24 +62,32 @@ class EngineIntelligenceFeedbackDatasetRecordMapper {
                     EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_FEEDBACK
             );
         }
-        EngineIntelligenceFeedbackDatasetSafety.copyMachineCodes(
-                feedback.getSelectedReasonCodes(),
-                "selectedReasonCodes",
-                5
-        );
+        try {
+            EngineIntelligenceFeedbackDatasetSafety.copyMachineCodes(
+                    feedback.getSelectedReasonCodes(),
+                    "selectedReasonCodes",
+                    5
+            );
+        } catch (IllegalArgumentException exception) {
+            throw new CorruptedDatasetSourceException(
+                    EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_FEEDBACK
+            );
+        }
     }
 
-    private void validateAlert(AlertDocument alert) {
+    private void validateAlert(EngineIntelligenceFeedbackDocument feedback, AlertDocument alert) {
         Objects.requireNonNull(alert, "alert is required");
-        if (alert.getTransactionId() == null) {
+        if (alert.getTransactionId() == null || !feedback.getTransactionId().equals(alert.getTransactionId())) {
             throw new CorruptedDatasetSourceException(
                     EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_ALERT_DATA
             );
         }
     }
 
-    private EngineSignals signalsFrom(EngineIntelligenceProjection projection) {
+    private EngineSignals signalsFrom(EngineIntelligenceFeedbackDocument feedback, EngineIntelligenceProjection projection) {
         if (projection.getTransactionId() == null
+                || !feedback.getTransactionId().equals(projection.getTransactionId())
+                || projection.getContractVersion() != SUPPORTED_PROJECTION_CONTRACT_VERSION
                 || projection.getGeneratedAt() == null
                 || projection.getEngines() == null
                 || projection.getDiagnosticSignals() == null) {
@@ -129,7 +139,13 @@ class EngineIntelligenceFeedbackDatasetRecordMapper {
                     EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION
             );
         }
-        EngineIntelligenceFeedbackDatasetSafety.copyMachineCodes(engine.reasonCodes(), "reasonCodes", 5);
+        try {
+            EngineIntelligenceFeedbackDatasetSafety.copyMachineCodes(engine.reasonCodes(), "reasonCodes", 5);
+        } catch (IllegalArgumentException exception) {
+            throw new CorruptedDatasetSourceException(
+                    EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION
+            );
+        }
     }
 
     private void validateSignal(EngineIntelligenceDiagnosticSignalProjection signal) {
@@ -138,7 +154,13 @@ class EngineIntelligenceFeedbackDatasetRecordMapper {
                     EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION
             );
         }
-        EngineIntelligenceFeedbackDatasetSafety.requireMachineCode(signal.reasonCode(), "diagnosticSignals");
+        try {
+            EngineIntelligenceFeedbackDatasetSafety.requireMachineCode(signal.reasonCode(), "diagnosticSignals");
+        } catch (IllegalArgumentException exception) {
+            throw new CorruptedDatasetSourceException(
+                    EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_PROJECTION
+            );
+        }
     }
 
     private record EngineValues(

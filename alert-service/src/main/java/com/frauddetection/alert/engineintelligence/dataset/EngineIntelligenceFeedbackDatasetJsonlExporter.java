@@ -25,6 +25,9 @@ public class EngineIntelligenceFeedbackDatasetJsonlExporter {
         Objects.requireNonNull(exportResult, "exportResult is required");
         StringBuilder jsonl = new StringBuilder();
         appendLine(jsonl, metadata(exportResult));
+        if (exportResult.failed()) {
+            return jsonl.toString();
+        }
         for (EngineIntelligenceFeedbackDatasetRecord record : exportResult.records()) {
             appendLine(jsonl, recordLine(record));
         }

@@ -56,6 +56,7 @@ public class EngineIntelligenceFeedbackDatasetExportService {
     }
 
     public EngineIntelligenceFeedbackDatasetExportResult export(EngineIntelligenceFeedbackDatasetExportRequest request) {
+        request = Objects.requireNonNull(request, "request is required");
         Instant exportedAt = Instant.now(clock);
         List<EngineIntelligenceFeedbackDocument> rawRows;
         try {
@@ -107,10 +108,6 @@ public class EngineIntelligenceFeedbackDatasetExportService {
             return mapper.map(feedback, alert, projection);
         } catch (EngineIntelligenceFeedbackDatasetRecordMapper.CorruptedDatasetSourceException exception) {
             throw exception;
-        } catch (RuntimeException exception) {
-            throw new EngineIntelligenceFeedbackDatasetRecordMapper.CorruptedDatasetSourceException(
-                    EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_FEEDBACK
-            );
         }
     }
 

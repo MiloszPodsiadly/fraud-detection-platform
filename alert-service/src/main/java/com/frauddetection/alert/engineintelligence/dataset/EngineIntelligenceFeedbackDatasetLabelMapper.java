@@ -12,21 +12,21 @@ final class EngineIntelligenceFeedbackDatasetLabelMapper {
     static MappedLabel map(AnalystDecision decision) {
         if (decision == null) {
             return new MappedLabel(
-                    EngineIntelligenceFeedbackDatasetLabel.NON_TRAINING,
+                    EngineIntelligenceFeedbackDatasetLabel.NOT_EVALUATION_ELIGIBLE,
                     EngineIntelligenceFeedbackDatasetLabelSource.MISSING_ALERT_DECISION
             );
         }
         return switch (decision) {
             case CONFIRMED_FRAUD -> new MappedLabel(
-                    EngineIntelligenceFeedbackDatasetLabel.POSITIVE,
+                    EngineIntelligenceFeedbackDatasetLabel.ANALYST_CONFIRMED_FRAUD,
                     EngineIntelligenceFeedbackDatasetLabelSource.ALERT_ANALYST_DECISION
             );
             case MARKED_LEGITIMATE -> new MappedLabel(
-                    EngineIntelligenceFeedbackDatasetLabel.NEGATIVE,
+                    EngineIntelligenceFeedbackDatasetLabel.ANALYST_MARKED_LEGITIMATE,
                     EngineIntelligenceFeedbackDatasetLabelSource.ALERT_ANALYST_DECISION
             );
             case REQUIRE_MORE_EVIDENCE, ESCALATED -> new MappedLabel(
-                    EngineIntelligenceFeedbackDatasetLabel.NON_TRAINING,
+                    EngineIntelligenceFeedbackDatasetLabel.NOT_EVALUATION_ELIGIBLE,
                     EngineIntelligenceFeedbackDatasetLabelSource.ALERT_ANALYST_DECISION
             );
         };
@@ -39,7 +39,7 @@ final class EngineIntelligenceFeedbackDatasetLabelMapper {
         String normalized = decision.trim().toUpperCase(Locale.ROOT);
         if ("INCONCLUSIVE".equals(normalized) || "NEEDS_MORE_INFO".equals(normalized)) {
             return new MappedLabel(
-                    EngineIntelligenceFeedbackDatasetLabel.NON_TRAINING,
+                    EngineIntelligenceFeedbackDatasetLabel.NOT_EVALUATION_ELIGIBLE,
                     EngineIntelligenceFeedbackDatasetLabelSource.ALERT_ANALYST_DECISION
             );
         }
@@ -47,7 +47,7 @@ final class EngineIntelligenceFeedbackDatasetLabelMapper {
             return map(AnalystDecision.valueOf(normalized));
         } catch (IllegalArgumentException exception) {
             return new MappedLabel(
-                    EngineIntelligenceFeedbackDatasetLabel.NON_TRAINING,
+                    EngineIntelligenceFeedbackDatasetLabel.NOT_EVALUATION_ELIGIBLE,
                     EngineIntelligenceFeedbackDatasetLabelSource.UNKNOWN_ALERT_DECISION
             );
         }

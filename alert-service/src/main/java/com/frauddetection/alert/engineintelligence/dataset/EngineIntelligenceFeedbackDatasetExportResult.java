@@ -32,6 +32,20 @@ public record EngineIntelligenceFeedbackDatasetExportResult(
             throw new IllegalArgumentException("record counts must not be negative");
         }
         records = records == null ? List.of() : List.copyOf(records);
+        if (failureReason != null) {
+            if (!records.isEmpty()) {
+                throw new IllegalArgumentException("failed export must not contain records");
+            }
+            if (recordsReturned != 0) {
+                throw new IllegalArgumentException("failed export must not return records");
+            }
+            if (truncated) {
+                throw new IllegalArgumentException("failed export must not be marked truncated");
+            }
+            if (rawRowsRead != 0) {
+                throw new IllegalArgumentException("failed export must not report successful raw rows");
+            }
+        }
         if (recordsReturned != records.size()) {
             throw new IllegalArgumentException("recordsReturned must match records size");
         }

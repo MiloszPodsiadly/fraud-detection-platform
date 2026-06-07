@@ -4,7 +4,6 @@ import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFe
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackType;
 import com.frauddetection.alert.engineintelligence.feedback.EngineIntelligenceFeedbackUsefulness;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
-import com.frauddetection.common.events.enums.AnalystDecision;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
@@ -21,7 +20,6 @@ public record EngineIntelligenceFeedbackDatasetRecord(
         Instant feedbackSubmittedAt,
         EngineIntelligenceFeedbackDatasetLabel evaluationLabel,
         EngineIntelligenceFeedbackDatasetLabelSource labelSource,
-        AnalystDecision alertAnalystDecision,
         EngineIntelligenceFeedbackType feedbackType,
         EngineIntelligenceFeedbackUsefulness usefulness,
         EngineIntelligenceFeedbackAccuracyAssessment accuracyAssessment,
