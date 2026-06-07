@@ -35,6 +35,89 @@ class EngineIntelligenceFeedbackDatasetDocumentationTest {
                 .contains("retention policy");
     }
 
+    @Test
+    void docsMentionSupportedProjectionContractVersion() throws IOException {
+        String doc = Files.readString(DOC);
+
+        assertThat(doc)
+                .contains("FDP-102 exports only supported projection")
+                .contains("contract version `1`")
+                .contains("unsupported projection versions fail closed")
+                .contains("Unsupported projection")
+                .contains("does not mean no fraud or low risk");
+    }
+
+    @Test
+    void docsMentionFailedExportConsumerAbortSemantics() throws IOException {
+        String doc = Files.readString(DOC);
+
+        assertThat(doc)
+                .contains("failureReason != null")
+                .contains("hard export")
+                .contains("failure")
+                .contains("not a successful empty dataset")
+                .contains("Consumers must abort processing")
+                .contains("must not")
+                .contains("count the file as an evaluation input")
+                .contains("Failed exports must not contain dataset records");
+    }
+
+    @Test
+    void docsMentionPseudonymousNotAnonymous() throws IOException {
+        String doc = Files.readString(DOC);
+
+        assertThat(doc)
+                .contains("pseudonymous references")
+                .contains("not anonymized");
+    }
+
+    @Test
+    void docsMentionNotCryptographicPrivacyBoundary() throws IOException {
+        String doc = Files.readString(DOC);
+
+        assertThat(doc)
+                .contains("cryptographic privacy boundary")
+                .contains("not a");
+    }
+
+    @Test
+    void docsMentionDeterministicReferencesAreLinkable() throws IOException {
+        String doc = Files.readString(DOC);
+
+        assertThat(doc)
+                .contains("deterministic")
+                .contains("linkable across exports")
+                .contains("dictionary matching");
+    }
+
+    @Test
+    void docsMentionFutureExternalExportNeedsPrivacyReviewedIdentifierStrategy() throws IOException {
+        String doc = Files.readString(DOC);
+
+        assertThat(doc)
+                .contains("Future public/operator/external export")
+                .contains("privacy-reviewed identifier strategy")
+                .contains("keyed HMAC")
+                .contains("tokenization")
+                .contains("rotation");
+    }
+
+    @Test
+    void docsMentionBoundedSampleNotCompleteDataset() throws IOException {
+        String doc = Files.readString(DOC);
+
+        assertThat(doc).contains("bounded sample export, not an exhaustive dataset export");
+    }
+
+    @Test
+    void docsMentionRecordsReturnedLessThanMaxDoesNotImplyCompleteWindow() throws IOException {
+        String doc = Files.readString(DOC);
+
+        assertThat(doc)
+                .contains("recordsReturned < maxRecords")
+                .contains("imply the full time window is exhausted");
+    }
+
     private static Path repositoryRoot() {
         Path current = Path.of("").toAbsolutePath();
         if (current.endsWith("alert-service")) {

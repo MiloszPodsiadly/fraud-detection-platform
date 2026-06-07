@@ -35,7 +35,7 @@ class EngineIntelligenceFeedbackDatasetJsonlExporterTest {
         assertThat(jsonl.lines()).hasSize(2);
         assertThat(jsonl.lines().skip(1).findFirst().orElseThrow())
                 .contains("\"type\":\"DATASET_RECORD\"")
-                .contains("\"evaluationLabel\":\"POSITIVE\"");
+                .contains("\"evaluationLabel\":\"ANALYST_CONFIRMED_FRAUD\"");
     }
 
     @Test
@@ -52,6 +52,37 @@ class EngineIntelligenceFeedbackDatasetJsonlExporterTest {
 
         assertThat(jsonl.lines()).hasSize(1);
         assertThat(jsonl).contains("\"recordsReturned\":0");
+    }
+
+    @Test
+    void jsonlExporterDoesNotEmitRecordsForFailedExport() {
+        String jsonl = new EngineIntelligenceFeedbackDatasetJsonlExporter().exportJsonl(failedResult());
+
+        assertThat(jsonl).doesNotContain("\"type\":\"DATASET_RECORD\"");
+    }
+
+    @Test
+    void failedJsonlContainsOnlyMetadataLine() {
+        String jsonl = new EngineIntelligenceFeedbackDatasetJsonlExporter().exportJsonl(failedResult());
+
+        assertThat(jsonl.lines()).hasSize(1);
+        assertThat(jsonl.lines().findFirst().orElseThrow()).contains("\"type\":\"EXPORT_METADATA\"");
+    }
+
+    @Test
+    void failedJsonlContainsFailureReason() {
+        String jsonl = new EngineIntelligenceFeedbackDatasetJsonlExporter().exportJsonl(failedResult());
+
+        assertThat(jsonl).contains("\"failureReason\":\"CORRUPTED_FEEDBACK\"");
+    }
+
+    @Test
+    void failedExportMustNotBeConsumedAsSuccessfulEmptyDataset() {
+        String jsonl = new EngineIntelligenceFeedbackDatasetJsonlExporter().exportJsonl(failedResult());
+
+        assertThat(jsonl)
+                .contains("\"recordsReturned\":0")
+                .contains("\"failureReason\":\"CORRUPTED_FEEDBACK\"");
     }
 
     @Test
@@ -100,14 +131,29 @@ class EngineIntelligenceFeedbackDatasetJsonlExporterTest {
         );
     }
 
+    private EngineIntelligenceFeedbackDatasetExportResult failedResult() {
+        return new EngineIntelligenceFeedbackDatasetExportResult(
+                FROM,
+                TO,
+                EXPORTED_AT,
+                10,
+                0,
+                0,
+                false,
+                EngineIntelligenceFeedbackDatasetTimeBasis.FEEDBACK_SUBMITTED_AT,
+                EngineIntelligenceFeedbackDatasetDeduplicationPolicy.TRANSACTION_REFERENCE_NEWEST_SUBMITTED_AT_FEEDBACK_ID_ASC,
+                EngineIntelligenceFeedbackDatasetExportFailureReason.CORRUPTED_FEEDBACK,
+                List.of()
+        );
+    }
+
     private EngineIntelligenceFeedbackDatasetRecord record() {
         return new EngineIntelligenceFeedbackDatasetRecord(
                 "eval-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 "txnref-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                 FROM,
-                EngineIntelligenceFeedbackDatasetLabel.POSITIVE,
+                EngineIntelligenceFeedbackDatasetLabel.ANALYST_CONFIRMED_FRAUD,
                 EngineIntelligenceFeedbackDatasetLabelSource.ALERT_ANALYST_DECISION,
-                com.frauddetection.common.events.enums.AnalystDecision.CONFIRMED_FRAUD,
                 EngineIntelligenceFeedbackType.ENGINE_INTELLIGENCE_USEFULNESS,
                 EngineIntelligenceFeedbackUsefulness.HELPFUL,
                 EngineIntelligenceFeedbackAccuracyAssessment.SIGNALS_LOOK_CORRECT,

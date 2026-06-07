@@ -15,50 +15,50 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class EngineIntelligenceFeedbackDatasetContractTest {
 
     @Test
-    void confirmedFraudMapsToPositive() {
+    void confirmedFraudMapsToAnalystConfirmedFraud() {
         assertThat(EngineIntelligenceFeedbackDatasetLabelMapper.map(AnalystDecision.CONFIRMED_FRAUD).evaluationLabel())
-                .isEqualTo(EngineIntelligenceFeedbackDatasetLabel.POSITIVE);
+                .isEqualTo(EngineIntelligenceFeedbackDatasetLabel.ANALYST_CONFIRMED_FRAUD);
     }
 
     @Test
-    void markedLegitimateMapsToNegative() {
+    void markedLegitimateMapsToAnalystMarkedLegitimate() {
         assertThat(EngineIntelligenceFeedbackDatasetLabelMapper.map(AnalystDecision.MARKED_LEGITIMATE).evaluationLabel())
-                .isEqualTo(EngineIntelligenceFeedbackDatasetLabel.NEGATIVE);
+                .isEqualTo(EngineIntelligenceFeedbackDatasetLabel.ANALYST_MARKED_LEGITIMATE);
     }
 
     @Test
-    void inconclusiveMapsToNonTraining() {
+    void inconclusiveMapsToNotEvaluationEligible() {
         assertThat(EngineIntelligenceFeedbackDatasetLabelMapper.mapWireValue("INCONCLUSIVE").evaluationLabel())
-                .isEqualTo(EngineIntelligenceFeedbackDatasetLabel.NON_TRAINING);
+                .isEqualTo(EngineIntelligenceFeedbackDatasetLabel.NOT_EVALUATION_ELIGIBLE);
     }
 
     @Test
-    void needsMoreInfoMapsToNonTraining() {
+    void needsMoreInfoMapsToNotEvaluationEligible() {
         assertThat(EngineIntelligenceFeedbackDatasetLabelMapper.mapWireValue("NEEDS_MORE_INFO").evaluationLabel())
-                .isEqualTo(EngineIntelligenceFeedbackDatasetLabel.NON_TRAINING);
+                .isEqualTo(EngineIntelligenceFeedbackDatasetLabel.NOT_EVALUATION_ELIGIBLE);
     }
 
     @Test
-    void missingDecisionMapsToNonTraining() {
+    void missingDecisionMapsToNotEvaluationEligible() {
         assertThat(EngineIntelligenceFeedbackDatasetLabelMapper.map(null).evaluationLabel())
-                .isEqualTo(EngineIntelligenceFeedbackDatasetLabel.NON_TRAINING);
+                .isEqualTo(EngineIntelligenceFeedbackDatasetLabel.NOT_EVALUATION_ELIGIBLE);
     }
 
     @Test
-    void unknownDecisionMapsToNonTraining() {
+    void unknownDecisionMapsToNotEvaluationEligible() {
         EngineIntelligenceFeedbackDatasetLabelMapper.MappedLabel label =
                 EngineIntelligenceFeedbackDatasetLabelMapper.mapWireValue("SOMETHING_ELSE");
 
-        assertThat(label.evaluationLabel()).isEqualTo(EngineIntelligenceFeedbackDatasetLabel.NON_TRAINING);
+        assertThat(label.evaluationLabel()).isEqualTo(EngineIntelligenceFeedbackDatasetLabel.NOT_EVALUATION_ELIGIBLE);
         assertThat(label.labelSource()).isEqualTo(EngineIntelligenceFeedbackDatasetLabelSource.UNKNOWN_ALERT_DECISION);
     }
 
     @Test
-    void nonTrainingIsNeverNegative() {
+    void notEvaluationEligibleIsNeverNegative() {
         assertThat(EngineIntelligenceFeedbackDatasetLabelMapper.mapWireValue("INCONCLUSIVE").evaluationLabel())
-                .isNotEqualTo(EngineIntelligenceFeedbackDatasetLabel.NEGATIVE);
+                .isNotEqualTo(EngineIntelligenceFeedbackDatasetLabel.ANALYST_MARKED_LEGITIMATE);
         assertThat(EngineIntelligenceFeedbackDatasetLabelMapper.map(null).evaluationLabel())
-                .isNotEqualTo(EngineIntelligenceFeedbackDatasetLabel.NEGATIVE);
+                .isNotEqualTo(EngineIntelligenceFeedbackDatasetLabel.ANALYST_MARKED_LEGITIMATE);
     }
 
     @Test
@@ -77,6 +77,34 @@ class EngineIntelligenceFeedbackDatasetContractTest {
     }
 
     @Test
+    void labelNamesDoNotExposeGroundTruth() {
+        assertThat(EngineIntelligenceFeedbackDatasetLabel.class.getEnumConstants())
+                .extracting(Enum::name)
+                .allSatisfy(name -> assertThat(name).doesNotContain("GROUND", "TRUTH"));
+    }
+
+    @Test
+    void labelNamesDoNotExposeTrainingLabel() {
+        assertThat(EngineIntelligenceFeedbackDatasetLabel.class.getEnumConstants())
+                .extracting(Enum::name)
+                .allSatisfy(name -> assertThat(name).doesNotContain("TRAINING", "LABEL"));
+    }
+
+    @Test
+    void labelNamesDoNotExposeFinalDecision() {
+        assertThat(EngineIntelligenceFeedbackDatasetLabel.class.getEnumConstants())
+                .extracting(Enum::name)
+                .allSatisfy(name -> assertThat(name).doesNotContain("FINAL", "DECISION"));
+    }
+
+    @Test
+    void rawAlertAnalystDecisionIsNotExported() {
+        assertThat(EngineIntelligenceFeedbackDatasetRecord.class.getRecordComponents())
+                .extracting(java.lang.reflect.RecordComponent::getName)
+                .doesNotContain("alertAnalystDecision", "analystDecision");
+    }
+
+    @Test
     void transactionReferenceIsBounded() {
         String reference = EngineIntelligenceFeedbackDatasetSafety.transactionReference("internal-txn-1");
 
@@ -89,9 +117,8 @@ class EngineIntelligenceFeedbackDatasetContractTest {
                 "eval-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 "payment-txn-raw-123",
                 Instant.parse("2026-06-01T00:00:00Z"),
-                EngineIntelligenceFeedbackDatasetLabel.NON_TRAINING,
+                EngineIntelligenceFeedbackDatasetLabel.NOT_EVALUATION_ELIGIBLE,
                 EngineIntelligenceFeedbackDatasetLabelSource.MISSING_ALERT_DECISION,
-                null,
                 EngineIntelligenceFeedbackType.ENGINE_INTELLIGENCE_USEFULNESS,
                 EngineIntelligenceFeedbackUsefulness.HELPFUL,
                 EngineIntelligenceFeedbackAccuracyAssessment.SIGNALS_LOOK_CORRECT,

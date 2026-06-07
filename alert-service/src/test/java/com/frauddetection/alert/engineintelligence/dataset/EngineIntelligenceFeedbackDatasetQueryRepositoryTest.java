@@ -18,7 +18,7 @@ import static org.mockito.Mockito.when;
 class EngineIntelligenceFeedbackDatasetQueryRepositoryTest {
 
     @Test
-    void repositoryQueryIsBounded() {
+    void repositoryFetchesMaxRecordsPlusOneForTruncationDetection() {
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         when(mongoTemplate.find(org.mockito.ArgumentMatchers.any(Query.class), eq(EngineIntelligenceFeedbackDocument.class)))
                 .thenReturn(List.of());
