@@ -1,6 +1,6 @@
 # Multi-Engine Scoring Contract Boundary
 
-Status: FDP-82 contract-only addition to the current platform.
+Status: FDP-101 bounded contract maintenance on top of the current platform.
 
 ## Scope
 
@@ -11,8 +11,9 @@ transaction -> features -> multiple engines -> risk intelligence -> alert/case -
             -> feedback -> model/rules evaluation
 ```
 
-FDP-82 adds only a shared engine-result contract and documentation. It does not alter the current event flow,
-current scoring selection, current alert projections, or any analyst UI.
+FDP-101 maintains only the shared engine-result contract and documentation. It does not alter the current event flow,
+current scoring selection, current alert projections, Kafka payloads, API/OpenAPI surface, feedback datasets, or any
+analyst UI.
 
 ## Declared Engine Categories
 
@@ -35,9 +36,9 @@ The contract is bounded by both string length and collection size:
 
 | Field | Maximum items |
 | --- | ---: |
-| `reasonCodes` | 32 |
-| `contributions` | 32 |
-| `evidence` | 16 |
+| `reasonCodes` | 10 |
+| `contributions` | 10 |
+| `evidence` | 10 |
 
 Reason codes are stable machine-readable identifiers, not descriptions. Producers must not put customer
 identifiers, raw payloads, exception text, account or card data, or secrets in them. `statusReason` uses an even
@@ -68,7 +69,7 @@ An engine result is not a final banking decision, not automatic blocking, and no
 fallback-used status. Only `FALLBACK_USED` declares that an actual fallback occurred; `UNAVAILABLE`, `TIMEOUT`,
 `SKIPPED`, and `DEGRADED` do not imply fallback behavior.
 
-`engineLanguage` is canonical lowercase: `java`, `python`, `go`, `kotlin`, `scala`, `javascript`, or `other`.
+`engineLanguage` is canonical lowercase, including `java`, `python`, or `other`.
 Contribution direction and evidence type/status are closed contract enums rather than free-form labels.
 
 ## Existing Scoring Evidence Boundary
@@ -83,7 +84,8 @@ mapping and compatibility policy before those concepts can cross the existing sc
 ## Compatibility Policy
 
 This foundation does not add `engineResults[]` to `TransactionScoredEvent` or any other Kafka event.
-`FraudEngineResult` is not referenced by the current scoring service, alert projection, API, or UI.
+FDP-101 does not add new scoring orchestration, alert projection, API, OpenAPI, UI, feedback dataset, or export
+integration. Existing internal engine-intelligence wiring remains outside this contract-maintenance change.
 
 Producers remain strict and emit only documented fields. Consumers tolerate unknown additive fields in the engine
 result, contribution, and evidence records while still validating all known fields. Unknown fields are ignored,
@@ -117,5 +119,5 @@ Before any later integration branch emits or projects `FraudEngineResult`, it mu
 
 ## Out Of Scope
 
-FDP-82 does not add scoring context, engine wrappers, orchestration, comparison behavior, event integration,
-projections, API surface, UI, feedback evaluation, or automatic decisioning.
+FDP-101 does not add scoring context, engine wrappers, orchestration, comparison behavior, event integration,
+projections, API surface, UI, feedback evaluation, dataset export, or automatic decisioning.

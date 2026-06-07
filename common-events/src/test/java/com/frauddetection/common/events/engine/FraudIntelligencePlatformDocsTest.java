@@ -15,6 +15,7 @@ class FraudIntelligencePlatformDocsTest {
             "product/fraud_intelligence_platform.md",
             "product/fraud_intelligence_non_goals.md",
             "product/fraud_intelligence_glossary.md",
+            "events/fraud_engine_result_contract.md",
             "architecture/multi_engine_scoring_architecture.md"
     );
 
@@ -55,7 +56,7 @@ class FraudIntelligencePlatformDocsTest {
                 .contains("does not")
                 .doesNotContain("guaranteed fraud proof");
         assertThat(architecture)
-                .contains("adds only a shared engine-result contract")
+                .contains("maintains only the shared engine-result contract")
                 .contains("does not add `engineResults[]` to `TransactionScoredEvent`")
                 .contains("Consumers tolerate unknown additive fields")
                 .contains("Breaking semantic changes require versioning")
