@@ -7,7 +7,7 @@
   "riskLevel": "MEDIUM",
   "confidence": "LOW",
   "reasonCodes": ["FALLBACK_PATH_USED"],
-  "fallbackReason": "RULE_ENGINE_FALLBACK",
+  "statusReason": "RULE_ENGINE_FALLBACK",
   "latencyMs": 8,
   "generatedAt": "2026-06-01T10:15:30Z"
 }

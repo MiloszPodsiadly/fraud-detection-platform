@@ -62,6 +62,27 @@ class FraudEngineResultValidationTest {
     }
 
     @Test
+    void availableRequiresKnownConfidence() {
+        assertThatThrownBy(() -> new FraudEngineResult("rules.primary", FraudEngineType.RULES, "java",
+                FraudEngineStatus.AVAILABLE, 0.4000d, RiskLevel.MEDIUM, null, List.of(), List.of(), List.of(),
+                3L, null, null, null, now()))
+                .hasMessageContaining("requires confidence");
+        assertThatThrownBy(() -> new FraudEngineResult("rules.primary", FraudEngineType.RULES, "java",
+                FraudEngineStatus.AVAILABLE, 0.4000d, RiskLevel.MEDIUM, FraudEngineConfidence.UNKNOWN,
+                List.of(), List.of(), List.of(), 3L, null, null, null, now()))
+                .hasMessageContaining("known confidence");
+
+        for (FraudEngineConfidence confidence : List.of(FraudEngineConfidence.LOW, FraudEngineConfidence.MEDIUM,
+                FraudEngineConfidence.HIGH)) {
+            FraudEngineResult result = new FraudEngineResult("rules.primary", FraudEngineType.RULES, "java",
+                    FraudEngineStatus.AVAILABLE, 0.4000d, RiskLevel.MEDIUM, confidence, List.of(), List.of(),
+                    List.of(), 3L, null, null, null, now());
+
+            assertThat(result.confidence()).isEqualTo(confidence);
+        }
+    }
+
+    @Test
     void latencyIsBounded() {
         assertThatThrownBy(() -> resultWithLatency(-1L)).hasMessageContaining("latencyMs");
         assertThatThrownBy(() -> resultWithLatency(300_001L)).hasMessageContaining("latencyMs");
@@ -71,7 +92,7 @@ class FraudEngineResultValidationTest {
     void operationalStatusesDoNotCarryScoreOrRiskAndDefaultUnknownConfidence() {
         for (FraudEngineStatus status : List.of(FraudEngineStatus.UNAVAILABLE, FraudEngineStatus.TIMEOUT,
                 FraudEngineStatus.SKIPPED)) {
-            FraudEngineResult result = result(status, null, null);
+            FraudEngineResult result = operational(status, null);
 
             assertThat(result.score()).isNull();
             assertThat(result.riskLevel()).isNull();
@@ -83,12 +104,22 @@ class FraudEngineResultValidationTest {
     void operationalStatusesRejectScoreRiskAndKnownConfidence() {
         assertThatThrownBy(() -> result(FraudEngineStatus.UNAVAILABLE, 0.1000d, null))
                 .hasMessageContaining("must not declare score");
-        assertThatThrownBy(() -> result(FraudEngineStatus.TIMEOUT, null, RiskLevel.LOW))
+        assertThatThrownBy(() -> operational(FraudEngineStatus.TIMEOUT, RiskLevel.LOW))
                 .hasMessageContaining("must not declare riskLevel");
         assertThatThrownBy(() -> new FraudEngineResult("ml.python.primary", FraudEngineType.ML_MODEL, "python",
-                FraudEngineStatus.SKIPPED, null, null, FraudEngineConfidence.LOW, List.of(), List.of(), List.of(),
-                3L, null, null, null, now()))
+                FraudEngineStatus.SKIPPED, null, null, FraudEngineConfidence.LOW, List.of("ENGINE_SKIPPED"),
+                List.of(), List.of(), 3L, null, null, "ENGINE_SKIPPED", now()))
                 .hasMessageContaining("UNKNOWN confidence");
+    }
+
+    @Test
+    void nonAvailableStatusesRequireStatusReason() {
+        for (FraudEngineStatus status : List.of(FraudEngineStatus.UNAVAILABLE, FraudEngineStatus.TIMEOUT,
+                FraudEngineStatus.SKIPPED, FraudEngineStatus.DEGRADED, FraudEngineStatus.FALLBACK_USED)) {
+            assertThatThrownBy(() -> nonAvailableWithoutStatusReason(status))
+                    .as(status.name())
+                    .hasMessageContaining("statusReason");
+        }
     }
 
     @Test
@@ -96,11 +127,23 @@ class FraudEngineResultValidationTest {
         assertThat(fallback(0.5000d, RiskLevel.MEDIUM).score()).isEqualTo(0.5d);
         assertThatThrownBy(() -> fallback(0.5000d, null)).hasMessageContaining("provided together");
         assertThatThrownBy(() -> fallback(null, RiskLevel.MEDIUM)).hasMessageContaining("provided together");
-        assertThatThrownBy(() -> fallbackWithoutStatusReason()).hasMessageContaining("statusReason");
 
         assertThat(degraded(0.5000d, RiskLevel.MEDIUM).riskLevel()).isEqualTo(RiskLevel.MEDIUM);
         assertThatThrownBy(() -> degraded(0.5000d, null)).hasMessageContaining("provided together");
         assertThatThrownBy(() -> degraded(null, RiskLevel.MEDIUM)).hasMessageContaining("provided together");
+    }
+
+    @Test
+    void fallbackAndDegradedRejectHighConfidence() {
+        assertThatThrownBy(() -> new FraudEngineResult("rules.primary", FraudEngineType.RULES, "java",
+                FraudEngineStatus.FALLBACK_USED, 0.5000d, RiskLevel.MEDIUM, FraudEngineConfidence.HIGH,
+                List.of("RULE_ENGINE_FALLBACK"), List.of(), List.of(), 3L, null, null,
+                "RULE_ENGINE_FALLBACK", now()))
+                .hasMessageContaining("HIGH confidence");
+        assertThatThrownBy(() -> new FraudEngineResult("rules.primary", FraudEngineType.RULES, "java",
+                FraudEngineStatus.DEGRADED, 0.5000d, RiskLevel.MEDIUM, FraudEngineConfidence.HIGH,
+                List.of("PARTIAL_CONTEXT"), List.of(), List.of(), 3L, null, null, "PARTIAL_CONTEXT", now()))
+                .hasMessageContaining("HIGH confidence");
     }
 
     @Test
@@ -133,7 +176,7 @@ class FraudEngineResultValidationTest {
     }
 
     @Test
-    void contributionValidationIsBoundedAndCompatible() {
+    void contributionValidationIsBoundedStrictAndCompatible() {
         FraudEngineContribution contribution = contribution();
 
         assertThat(contribution.feature()).isEqualTo("TRANSFER_COUNT");
@@ -143,6 +186,8 @@ class FraudEngineResultValidationTest {
                 FraudEngineContributionDirection.NEUTRAL)).hasMessageContaining("feature");
         assertThatThrownBy(() -> new FraudEngineContribution("TRANSFER_COUNT", null, null, null))
                 .hasMessageContaining("direction");
+        assertThatThrownBy(() -> new FraudEngineContribution("transfer_count", null, null,
+                FraudEngineContributionDirection.NEUTRAL)).hasMessageContaining("UPPER_SNAKE");
         assertThatThrownBy(() -> new FraudEngineContribution("TRANSFER_COUNT", null, -1.0001d,
                 FraudEngineContributionDirection.INCREASES_RISK)).hasMessageContaining("weight");
         assertThatThrownBy(() -> new FraudEngineContribution("TRANSFER_COUNT", null, 1.0001d,
@@ -152,7 +197,28 @@ class FraudEngineResultValidationTest {
     }
 
     @Test
-    void evidenceValidationIsBoundedAndCompatible() {
+    void contributionDirectionAndWeightCannotContradict() {
+        assertThat(new FraudEngineContribution("TRANSFER_COUNT", null, 0.2000d,
+                FraudEngineContributionDirection.INCREASES_RISK).weight()).isEqualTo(0.2d);
+        assertThat(new FraudEngineContribution("TRANSFER_COUNT", null, -0.2000d,
+                FraudEngineContributionDirection.DECREASES_RISK).weight()).isEqualTo(-0.2d);
+        assertThat(new FraudEngineContribution("TRANSFER_COUNT", null, 0.0d,
+                FraudEngineContributionDirection.NEUTRAL).weight()).isEqualTo(0.0d);
+        assertThat(new FraudEngineContribution("TRANSFER_COUNT", null, null,
+                FraudEngineContributionDirection.UNKNOWN).weight()).isNull();
+
+        assertThatThrownBy(() -> new FraudEngineContribution("TRANSFER_COUNT", null, -0.2000d,
+                FraudEngineContributionDirection.INCREASES_RISK)).hasMessageContaining("INCREASES_RISK");
+        assertThatThrownBy(() -> new FraudEngineContribution("TRANSFER_COUNT", null, 0.2000d,
+                FraudEngineContributionDirection.DECREASES_RISK)).hasMessageContaining("DECREASES_RISK");
+        assertThatThrownBy(() -> new FraudEngineContribution("TRANSFER_COUNT", null, 0.2000d,
+                FraudEngineContributionDirection.NEUTRAL)).hasMessageContaining("NEUTRAL");
+        assertThatThrownBy(() -> new FraudEngineContribution("TRANSFER_COUNT", null, 0.0d,
+                FraudEngineContributionDirection.UNKNOWN)).hasMessageContaining("UNKNOWN");
+    }
+
+    @Test
+    void evidenceValidationIsBoundedStrictAndCompatible() {
         FraudEngineEvidence evidence = evidence();
 
         assertThat(evidence.reasonCode()).isEqualTo("HIGH_VELOCITY");
@@ -163,6 +229,9 @@ class FraudEngineResultValidationTest {
         assertThat(new FraudEngineEvidence(FraudEngineEvidenceType.RULE_MATCH, null,
                 "High velocity", null, "RULES", FraudEngineEvidenceStatus.AVAILABLE).reasonCode())
                 .isNull();
+        assertThatThrownBy(() -> new FraudEngineEvidence(FraudEngineEvidenceType.RULE_MATCH, "high_velocity",
+                "High velocity", null, "RULES", FraudEngineEvidenceStatus.AVAILABLE))
+                .hasMessageContaining("UPPER_SNAKE");
         assertThatThrownBy(() -> new FraudEngineEvidence(FraudEngineEvidenceType.RULE_MATCH, "HIGH_VELOCITY",
                 "High velocity", null, null, FraudEngineEvidenceStatus.AVAILABLE))
                 .hasMessageContaining("source");
@@ -171,15 +240,41 @@ class FraudEngineResultValidationTest {
     }
 
     @Test
-    void forbiddenRawPiiDecisioningAndTrainingTermsAreRejected() {
+    void forbiddenRawPiiDecisioningAndTrainingTermsAreRejectedAtContributionConstruction() {
         for (String unsafe : List.of("RAW_PAYLOAD", "FEATURE_VECTOR", "STACK_TRACE", "TOKEN", "SECRET",
                 "ENDPOINT", "CUSTOMER_ID", "ACCOUNT_ID", "CARD_ID", "DEVICE_ID", "MERCHANT_ID",
                 "GROUND_TRUTH", "TRAINING_LABEL", "FINAL_DECISION", "RECOMMENDED_ACTION",
                 "PAYMENT_AUTHORIZATION", "RULE_UPDATE")) {
-            FraudEngineContribution contribution = new FraudEngineContribution(unsafe, null, null,
-                    FraudEngineContributionDirection.NEUTRAL);
-            assertThatThrownBy(() -> resultWithLists(List.of(), List.of(contribution), List.of()))
+            assertThatThrownBy(() -> new FraudEngineContribution(unsafe, null, null,
+                    FraudEngineContributionDirection.NEUTRAL))
                     .as(unsafe)
+                    .hasMessageContaining("forbidden");
+        }
+    }
+
+    @Test
+    void evidenceReasonCodeRejectsForbiddenTermsAtConstruction() {
+        for (String unsafe : List.of("RAW_EVIDENCE", "STACK_TRACE", "TOKEN", "SECRET", "ENDPOINT")) {
+            assertThatThrownBy(() -> new FraudEngineEvidence(FraudEngineEvidenceType.RULE_MATCH, unsafe,
+                    "High velocity", null, "RULES", FraudEngineEvidenceStatus.AVAILABLE))
+                    .as(unsafe)
+                    .hasMessageContaining("forbidden");
+        }
+    }
+
+    @Test
+    void evidenceTitleAndDescriptionRejectUnsafeTerms() {
+        for (String unsafe : List.of("raw payload", "raw response", "feature vector", "exception message",
+                "stack trace", "token", "secret", "endpoint", "customer id", "account id", "card id",
+                "device id", "merchant id", "final decision", "recommended action", "payment authorization",
+                "ground truth", "training label")) {
+            assertThatThrownBy(() -> new FraudEngineEvidence(FraudEngineEvidenceType.RULE_MATCH, "HIGH_VELOCITY",
+                    unsafe, null, "RULES", FraudEngineEvidenceStatus.AVAILABLE))
+                    .as("title " + unsafe)
+                    .hasMessageContaining("forbidden");
+            assertThatThrownBy(() -> new FraudEngineEvidence(FraudEngineEvidenceType.RULE_MATCH, "HIGH_VELOCITY",
+                    "High velocity", unsafe, "RULES", FraudEngineEvidenceStatus.AVAILABLE))
+                    .as("description " + unsafe)
                     .hasMessageContaining("forbidden");
         }
     }
@@ -211,7 +306,47 @@ class FraudEngineResultValidationTest {
                 score,
                 riskLevel,
                 status == FraudEngineStatus.AVAILABLE ? FraudEngineConfidence.MEDIUM : FraudEngineConfidence.UNKNOWN,
+                List.of(status == FraudEngineStatus.AVAILABLE ? "HIGH_VELOCITY" : "ENGINE_STATUS"),
                 List.of(),
+                List.of(),
+                3L,
+                null,
+                null,
+                status == FraudEngineStatus.AVAILABLE ? null : "ENGINE_STATUS",
+                now()
+        );
+    }
+
+    private FraudEngineResult operational(FraudEngineStatus status, RiskLevel riskLevel) {
+        return new FraudEngineResult(
+                "ml.python.primary",
+                FraudEngineType.ML_MODEL,
+                "python",
+                status,
+                null,
+                riskLevel,
+                null,
+                List.of("ENGINE_STATUS"),
+                List.of(),
+                List.of(),
+                3L,
+                null,
+                null,
+                "ENGINE_STATUS",
+                now()
+        );
+    }
+
+    private FraudEngineResult nonAvailableWithoutStatusReason(FraudEngineStatus status) {
+        return new FraudEngineResult(
+                "ml.python.primary",
+                FraudEngineType.ML_MODEL,
+                "python",
+                status,
+                null,
+                null,
+                null,
+                List.of("ENGINE_STATUS"),
                 List.of(),
                 List.of(),
                 3L,
@@ -238,26 +373,6 @@ class FraudEngineResultValidationTest {
                 null,
                 null,
                 "RULE_ENGINE_FALLBACK",
-                now()
-        );
-    }
-
-    private FraudEngineResult fallbackWithoutStatusReason() {
-        return new FraudEngineResult(
-                "rules.primary",
-                FraudEngineType.RULES,
-                "java",
-                FraudEngineStatus.FALLBACK_USED,
-                null,
-                null,
-                FraudEngineConfidence.UNKNOWN,
-                List.of("FALLBACK_PATH_USED"),
-                List.of(),
-                List.of(),
-                3L,
-                null,
-                null,
-                null,
                 now()
         );
     }
@@ -291,7 +406,7 @@ class FraudEngineResultValidationTest {
                 0.4000d,
                 RiskLevel.MEDIUM,
                 FraudEngineConfidence.MEDIUM,
-                List.of(),
+                List.of("HIGH_VELOCITY"),
                 List.of(),
                 List.of(),
                 latencyMs,
@@ -335,7 +450,7 @@ class FraudEngineResultValidationTest {
                 0.4000d,
                 RiskLevel.MEDIUM,
                 FraudEngineConfidence.MEDIUM,
-                List.of(),
+                List.of("MODEL_SIGNAL"),
                 List.of(),
                 List.of(),
                 3L,

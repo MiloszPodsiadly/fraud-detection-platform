@@ -9,7 +9,7 @@
   "reasonCodes": ["PARTIAL_CONTEXT"],
   "evidence": [
     {
-      "evidenceType": "OPERATIONAL_FALLBACK",
+      "evidenceType": "OPERATIONAL_STATUS",
       "reasonCode": "PARTIAL_CONTEXT",
       "title": "Rule status",
       "description": "Bounded rule adapter diagnostic.",

@@ -7,7 +7,7 @@
   "reasonCodes": ["ML_MODEL_UNAVAILABLE"],
   "evidence": [
     {
-      "evidenceType": "OPERATIONAL_FALLBACK",
+      "evidenceType": "OPERATIONAL_STATUS",
       "reasonCode": "ML_MODEL_UNAVAILABLE",
       "title": "ML status",
       "description": "Bounded ML adapter signal.",

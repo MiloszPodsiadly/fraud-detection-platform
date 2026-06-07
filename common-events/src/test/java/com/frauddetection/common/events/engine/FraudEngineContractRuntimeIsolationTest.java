@@ -25,7 +25,7 @@ class FraudEngineContractRuntimeIsolationTest {
     void currentScoredTransactionEventDoesNotExposeFutureFraudIntelligenceFields() {
         assertThat(Arrays.stream(TransactionScoredEvent.class.getRecordComponents())
                 .map(RecordComponent::getName))
-                .withFailMessage("FDP-82 is contract-only. Event integration belongs to a later branch with explicit compatibility tests.")
+                .withFailMessage("FDP-101 is contract-only. Event integration belongs to a later branch with explicit compatibility tests.")
                 .doesNotContain(
                         "scoringContext",
                         "engineResults",

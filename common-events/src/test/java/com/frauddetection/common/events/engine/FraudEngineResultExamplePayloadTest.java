@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -62,7 +64,11 @@ class FraudEngineResultExamplePayloadTest {
 
         FraudEngineResult fallback = read("fallback-used-engine-result.json");
         assertThat(fallback.status()).isEqualTo(FraudEngineStatus.FALLBACK_USED);
+        assertThat(fallback.statusReason()).isEqualTo("RULE_ENGINE_FALLBACK");
         assertThat(fallback.fallbackReason()).isEqualTo("RULE_ENGINE_FALLBACK");
+        assertThat(sample("fallback-used-engine-result.json"))
+                .contains("\"statusReason\"")
+                .doesNotContain("\"fallbackReason\"");
 
         FraudEngineResult degraded = read("degraded-engine-result.json");
         assertThat(degraded.status()).isEqualTo(FraudEngineStatus.DEGRADED);
@@ -96,6 +102,32 @@ class FraudEngineResultExamplePayloadTest {
                     "groundtruth"
             );
         }
+    }
+
+    @Test
+    void samplePayloadEvidenceTypesAreDeclaredEnumValues() throws Exception {
+        Set<String> declaredEvidenceTypes = java.util.Arrays.stream(FraudEngineEvidenceType.values())
+                .map(Enum::name)
+                .collect(Collectors.toSet());
+
+        for (String file : SAMPLE_FILES) {
+            for (FraudEngineEvidence evidence : read(file).evidence()) {
+                assertThat(declaredEvidenceTypes).as(file).contains(evidence.evidenceType().name());
+            }
+        }
+    }
+
+    @Test
+    void operationalOutageSamplesUseOperationalStatusEvidence() throws Exception {
+        assertThat(read("timeout-ml-engine-result.json").evidence())
+                .extracting(FraudEngineEvidence::evidenceType)
+                .containsOnly(FraudEngineEvidenceType.OPERATIONAL_STATUS);
+        assertThat(read("unavailable-engine-result.json").evidence())
+                .extracting(FraudEngineEvidence::evidenceType)
+                .containsOnly(FraudEngineEvidenceType.OPERATIONAL_STATUS);
+        assertThat(read("degraded-engine-result.json").evidence())
+                .extracting(FraudEngineEvidence::evidenceType)
+                .containsOnly(FraudEngineEvidenceType.OPERATIONAL_STATUS);
     }
 
     private FraudEngineResult read(String file) throws Exception {

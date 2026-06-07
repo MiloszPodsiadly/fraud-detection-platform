@@ -122,11 +122,12 @@ class FraudEngineResultSerializationTest {
                   "status": "AVAILABLE",
                   "score": 0.7000,
                   "riskLevel": "HIGH",
+                  "confidence": "MEDIUM",
                   "generatedAt": "2026-06-01T10:15:30Z"
                 }
                 """, FraudEngineResult.class);
 
-        assertThat(result.confidence()).isEqualTo(FraudEngineConfidence.UNKNOWN);
+        assertThat(result.confidence()).isEqualTo(FraudEngineConfidence.MEDIUM);
         assertThat(result.reasonCodes()).isEmpty();
         assertThat(result.contributions()).isEmpty();
         assertThat(result.evidence()).isEmpty();
