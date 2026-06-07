@@ -56,7 +56,7 @@ public record FraudEngineResult(
         Objects.requireNonNull(engineType, "engineType is required");
         engineLanguage = validateEngineLanguage(engineLanguage);
         Objects.requireNonNull(status, "status is required");
-        confidence = confidence == null ? FraudEngineConfidence.UNKNOWN : confidence;
+        confidence = normalizeConfidenceForStatus(status, confidence);
         Objects.requireNonNull(generatedAt, "generatedAt is required");
 
         if (score != null) {
@@ -149,7 +149,7 @@ public record FraudEngineResult(
         for (FraudEngineEvidence evidenceItem : copy) {
             Objects.requireNonNull(evidenceItem, "evidence item is required");
             Objects.requireNonNull(evidenceItem.evidenceType(), "evidenceType is required");
-            FraudEngineValuePolicy.optionalSafeIdentifier(
+            FraudEngineValuePolicy.optionalMachineCode(
                     evidenceItem.reasonCode(),
                     "reasonCode",
                     FraudEngineValuePolicy.EVIDENCE_CODE_MAX_LENGTH
@@ -202,6 +202,7 @@ public record FraudEngineResult(
         switch (status) {
             case AVAILABLE -> {
                 requireScoreAndRiskLevel(score, riskLevel, status);
+                requireKnownConfidence(confidence, status);
                 if (statusReason != null) {
                     throw new IllegalArgumentException("AVAILABLE status must not declare statusReason");
                 }
@@ -211,12 +212,14 @@ public record FraudEngineResult(
                 if (confidence != FraudEngineConfidence.UNKNOWN) {
                     throw new IllegalArgumentException(status + " status must declare UNKNOWN confidence");
                 }
+                requireStatusReason(statusReason, status);
             }
             case DEGRADED -> {
                 requirePairedScoreAndRiskLevel(score, riskLevel, status);
                 if (confidence == FraudEngineConfidence.HIGH) {
                     throw new IllegalArgumentException("DEGRADED status must not declare HIGH confidence");
                 }
+                requireStatusReason(statusReason, status);
             }
             case FALLBACK_USED -> {
                 requirePairedScoreAndRiskLevel(score, riskLevel, status);
@@ -225,6 +228,25 @@ public record FraudEngineResult(
                 }
                 requireStatusReason(statusReason, status);
             }
+        }
+    }
+
+    private static FraudEngineConfidence normalizeConfidenceForStatus(
+            FraudEngineStatus status,
+            FraudEngineConfidence confidence
+    ) {
+        if (status == FraudEngineStatus.AVAILABLE) {
+            return confidence;
+        }
+        return confidence == null ? FraudEngineConfidence.UNKNOWN : confidence;
+    }
+
+    private static void requireKnownConfidence(FraudEngineConfidence confidence, FraudEngineStatus status) {
+        if (confidence == null) {
+            throw new IllegalArgumentException(status + " status requires confidence");
+        }
+        if (confidence == FraudEngineConfidence.UNKNOWN) {
+            throw new IllegalArgumentException(status + " status requires known confidence");
         }
     }
 

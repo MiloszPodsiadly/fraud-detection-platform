@@ -17,7 +17,7 @@ public record FraudEngineContribution(
     private static final int WEIGHT_SCALE_MAX = 4;
 
     public FraudEngineContribution {
-        feature = FraudEngineValuePolicy.requireBoundedIdentifier(
+        feature = FraudEngineValuePolicy.requireMachineCode(
                 feature,
                 "feature",
                 FraudEngineValuePolicy.FEATURE_CODE_MAX_LENGTH
@@ -40,6 +40,7 @@ public record FraudEngineContribution(
             }
         }
         Objects.requireNonNull(direction, "direction is required");
+        validateWeightDirection(weight, direction);
     }
 
     public String featureCode() {
@@ -48,5 +49,29 @@ public record FraudEngineContribution(
 
     public String valueBucket() {
         return value;
+    }
+
+    private static void validateWeightDirection(Double weight, FraudEngineContributionDirection direction) {
+        if (weight == null) {
+            return;
+        }
+        switch (direction) {
+            case INCREASES_RISK -> {
+                if (weight < 0.0d) {
+                    throw new IllegalArgumentException("INCREASES_RISK contribution weight must be null or non-negative");
+                }
+            }
+            case DECREASES_RISK -> {
+                if (weight > 0.0d) {
+                    throw new IllegalArgumentException("DECREASES_RISK contribution weight must be null or non-positive");
+                }
+            }
+            case NEUTRAL -> {
+                if (Double.compare(weight, 0.0d) != 0) {
+                    throw new IllegalArgumentException("NEUTRAL contribution weight must be null or zero");
+                }
+            }
+            case UNKNOWN -> throw new IllegalArgumentException("UNKNOWN contribution weight must be null");
+        }
     }
 }

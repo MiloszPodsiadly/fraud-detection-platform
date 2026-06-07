@@ -15,7 +15,7 @@ public record FraudEngineEvidence(
 ) {
     public FraudEngineEvidence {
         Objects.requireNonNull(evidenceType, "evidenceType is required");
-        reasonCode = FraudEngineValuePolicy.optionalBoundedIdentifier(
+        reasonCode = FraudEngineValuePolicy.optionalMachineCode(
                 reasonCode,
                 "reasonCode",
                 FraudEngineValuePolicy.EVIDENCE_CODE_MAX_LENGTH
