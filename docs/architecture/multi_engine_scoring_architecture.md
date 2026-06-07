@@ -11,9 +11,12 @@ transaction -> features -> multiple engines -> risk intelligence -> alert/case -
             -> feedback -> model/rules evaluation
 ```
 
-FDP-101 maintains only the shared engine-result contract and documentation. It does not alter the current event flow,
-current scoring selection, current alert projections, Kafka payloads, API/OpenAPI surface, feedback datasets, or any
-analyst UI.
+FDP-101 tightens and maintains the pre-exposure shared `FraudEngineResult` contract before runtime, Kafka, API, UI,
+projection, orchestration, or dataset-export integration. It does not alter the current event flow, current scoring
+selection, current alert projections, Kafka payloads, API/OpenAPI surface, feedback datasets, or any analyst UI.
+`FraudEngineResult` is not emitted in Kafka, exposed through API/OpenAPI, rendered in UI, or projected by alert-service
+in this branch. Existing `TransactionScoredEvent` shape remains unchanged. Later exposure requires a separate scoped
+PR with compatibility and rollout gates.
 
 ## Declared Engine Categories
 
@@ -42,7 +45,9 @@ The contract is bounded by both string length and collection size:
 
 Reason codes are stable machine-readable identifiers, not descriptions. Producers must not put customer
 identifiers, raw payloads, exception text, account or card data, or secrets in them. `statusReason` uses an even
-narrower uppercase reason-code form.
+narrower uppercase reason-code form. Legacy reason codes may contain the word `METADATA` only as explicitly
+allowlisted bounded machine-readable reason codes. This does not allow metadata bags, arbitrary metadata maps, raw
+metadata payloads, metadata fields, or unbounded metadata values in the contract.
 
 `FraudEngineContribution.feature` is a required UPPER_SNAKE machine code. Contribution `direction` is the semantic
 source of truth; `weight` is diagnostic only, finite, bounded from `-1.0000` through `1.0000`, and consistent with
@@ -53,7 +58,9 @@ does not carry a weight.
 summaries only for display. Producers must not put raw feature vectors, raw request or response payloads, customer,
 account, card, device, or merchant identifiers, exception text, stack traces, tokens, secrets, endpoints, internal
 hostnames, decisioning instructions, training labels, ground truth, or feedback dataset values in them. Validation
-rejects basic unsafe content; it is not a full data-loss-prevention control.
+rejects basic unsafe content; it is not a full data-loss-prevention control. These fields are not raw evidence
+channels, ML explanation dump channels, debug channels, exception channels, or payload channels. Future richer
+explainability requires a separate scoped contract.
 
 `FraudEngineEvidence.source` is a bounded uppercase machine-readable origin code, such as `RULES` or `ML_MODEL`,
 not a description, hostname, service name, endpoint, or channel for operational details.
@@ -81,7 +88,9 @@ backward compatibility and is not serialized as output.
 `engineLanguage` is canonical lowercase, including `java`, `python`, or `other`.
 Contribution direction and evidence type/status are closed contract enums rather than free-form labels.
 `score` and `weight` remain `Double` in Java for compatibility, but JSON producers must emit finite bounded values
-with at most four decimal places. Neither value is a platform probability or decision signal.
+with at most four decimal places. Neither value is a decimal-precision financial amount, calibrated platform
+probability, or decision signal. Missing `score` does not mean zero, and missing `riskLevel` does not mean `LOW`.
+`BigDecimal` may be considered in a future breaking contract cleanup if needed.
 
 ## Existing Scoring Evidence Boundary
 

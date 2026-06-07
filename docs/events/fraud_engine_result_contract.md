@@ -1,6 +1,6 @@
 # FraudEngineResult Contract
 
-Status: FDP-101 bounded shared contract.
+Status: FDP-101 bounded shared contract tightening and maintenance.
 
 ## Boundary
 
@@ -8,9 +8,12 @@ Status: FDP-101 bounded shared contract.
 banking decision, payment authorization, automatic approve, automatic decline, automatic block, analyst
 recommendation, model training label, ground truth record, feedback dataset record, or platform aggregation result.
 
-FDP-101 changes only the shared `common-events` contract, contract tests, sample payloads, and documentation. It does
-not add Kafka event fields, API or OpenAPI surface, analyst-console UI behavior, Mongo projections, scoring
-orchestration, alert-service behavior, feedback export, or dataset export.
+FDP-101 tightens and maintains the pre-exposure shared `FraudEngineResult` contract before runtime, Kafka, API, UI,
+projection, orchestration, or dataset-export integration. `FraudEngineResult` is not emitted in Kafka, exposed through
+API/OpenAPI, rendered in UI, or projected by alert-service in this branch. Existing `TransactionScoredEvent` shape
+remains unchanged. This branch is `common-events` contract/docs/tests only; later exposure requires a separate scoped
+PR with compatibility and rollout gates. FDP-101 does not add Kafka, does not add API, does not add UI, and does not
+add dataset export.
 
 ## Required Fields
 
@@ -22,11 +25,13 @@ orchestration, alert-service behavior, feedback export, or dataset export.
 | `status` | Required controlled enum. |
 | `generatedAt` | Required generation timestamp. |
 
-`score` is optional and must not be interpreted as zero when missing. It is diagnostic engine output, not a probability,
-platform aggregation, final decision, payment authorization, approve, decline, block, analyst recommendation, model
+`score` is optional and must not be interpreted as zero when missing. Missing `riskLevel` must not be interpreted as
+`LOW`. It is diagnostic engine output, not a decimal-precision financial amount, calibrated platform probability,
+platform aggregation, final decisioning, payment authorization, approve, decline, block, analyst recommendation, model
 label, ground truth, or feedback dataset value. The Java contract retains `Double` for compatibility; JSON producers
-must emit finite values from `0.0000` through `1.0000` with at most four decimal places. `riskLevel` must be present
-with `score` whenever status semantics require or allow scored output.
+must emit finite bounded values from `0.0000` through `1.0000` with at most four decimal places. `riskLevel` must be
+present with `score` whenever status semantics require or allow scored output. `BigDecimal` may be considered in a
+future breaking contract cleanup if needed.
 
 ## Bounds
 
@@ -43,14 +48,19 @@ with `score` whenever status semantics require or allow scored output.
 `statusReason` is the canonical serialized JSON field. `fallbackReason` is accepted only as an input alias for
 backward-compatible deserialization and is not emitted by serializers.
 
-Contribution `feature` is a required UPPER_SNAKE machine code and contribution `value` is a safe bounded summary.
-Contribution `direction` is the semantic source of truth. `weight` is diagnostic only: `INCREASES_RISK` allows null
-or non-negative weight, `DECREASES_RISK` allows null or non-positive weight, `NEUTRAL` allows null or zero, and
-`UNKNOWN` requires null.
+Contribution `feature` is a required UPPER_SNAKE machine code and contribution `value` is a bounded bucket/summary
+only. Contribution `direction` is the semantic source of truth. `weight` is diagnostic contribution magnitude, not a
+calibrated probability: `INCREASES_RISK` allows null or non-negative weight, `DECREASES_RISK` allows null or
+non-positive weight, `NEUTRAL` allows null or zero, and `UNKNOWN` requires null.
 
 Evidence `reasonCode` is an optional UPPER_SNAKE machine code and evidence `source` is a bounded machine code.
 Evidence `title` and `description` are bounded display summaries only, not raw payload, response, exception,
-feature-vector, endpoint, identifier, decisioning, training, ground-truth, or feedback channels.
+feature-vector, endpoint, identifier, decisioning, training, ground-truth, feedback, raw evidence, ML explanation
+dump, debug, exception, or payload channels.
+
+Legacy reason codes may contain the word `METADATA` only as explicitly allowlisted bounded machine-readable reason
+codes. This does not allow metadata bags, arbitrary metadata maps, raw metadata payloads, metadata fields, or
+unbounded metadata values in the contract.
 
 ## Status Semantics
 
@@ -79,3 +89,6 @@ as data-loss-prevention coverage.
 
 FDP-101 also does not introduce `ScoringContext`, `FraudSignalEngine`, runtime model retraining, or runtime rule
 updates.
+
+Future richer explainability requires a separate scoped contract rather than overloading `value`, `title`, or
+`description`.

@@ -5,7 +5,8 @@ Status: terminology for the FDP-101 bounded contract foundation.
 ## Scope
 
 These definitions describe shared vocabulary for multi-engine, analyst-assisted investigation. They do not claim
-runtime integration in this branch.
+runtime integration in this branch. FDP-101 tightens and maintains the pre-exposure shared `FraudEngineResult`
+contract before runtime, Kafka, API, UI, projection, orchestration, or dataset-export integration.
 
 | Term | Definition |
 | --- | --- |
@@ -15,9 +16,9 @@ runtime integration in this branch.
 | Engine status | A controlled availability state: `AVAILABLE`, `UNAVAILABLE`, `DEGRADED`, `TIMEOUT`, `FALLBACK_USED`, or `SKIPPED`; each state constrains score, risk level, confidence, and status reason. |
 | Engine confidence | Bounded context about an engine result: `LOW`, `MEDIUM`, `HIGH`, or `UNKNOWN`; it is not a payment verdict. |
 | Status reason | The canonical serialized `statusReason` machine code explaining a non-available or altered engine status; `fallbackReason` is accepted only as a JSON input alias for the same bounded value, and only `FALLBACK_USED` implies actual fallback behavior. |
-| Reason code | A bounded machine-readable identifier for investigation context; it is not human prose and producers must not put customer identifiers, payloads, exception text, account/card data, or secrets into it. |
-| Contribution | A bounded explanation entry whose UPPER_SNAKE feature code and controlled direction (`INCREASES_RISK`, `DECREASES_RISK`, `NEUTRAL`, or `UNKNOWN`) define the semantic meaning; optional weight is diagnostic only and must be consistent with direction. |
-| Evidence | A bounded supporting entry with controlled type and status; its source is an uppercase machine-readable origin code and its title or description is a safe display summary, not a raw payload, endpoint, exception, feature-vector, identifier, decisioning, training, ground-truth, or feedback channel. |
+| Reason code | A bounded machine-readable identifier for investigation context; it is not human prose and producers must not put customer identifiers, payloads, exception text, account/card data, or secrets into it. Legacy reason codes may contain `METADATA` only as explicitly allowlisted bounded machine-readable reason codes, not as metadata bags, arbitrary metadata maps, raw metadata payloads, metadata fields, or unbounded metadata values. |
+| Contribution | A bounded explanation entry whose UPPER_SNAKE feature code and controlled direction (`INCREASES_RISK`, `DECREASES_RISK`, `NEUTRAL`, or `UNKNOWN`) define the semantic meaning; optional weight is diagnostic contribution magnitude, not calibrated probability, and must be consistent with direction. Its `value` is a bounded bucket/summary only, not a raw evidence, ML explanation dump, debug, exception, or payload channel. |
+| Evidence | A bounded supporting entry with controlled type and status; its source is an uppercase machine-readable origin code and its title or description is a bounded display summary, not a raw payload, endpoint, exception, feature-vector, identifier, decisioning, training, ground-truth, feedback, raw evidence, ML explanation dump, debug, exception, or payload channel. |
 | Rule engine | A Java-based engine that evaluates explicit rules and reason codes. |
 | Python ML engine | A Python model-serving engine that supplies ML scoring context; ML is not a final decision source in this phase. |
 | Velocity engine | An engine category for rate, frequency, and burst-style transaction patterns; it is not wired by FDP-101. |
