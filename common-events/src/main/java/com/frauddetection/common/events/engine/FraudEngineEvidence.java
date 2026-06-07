@@ -13,14 +13,36 @@ public record FraudEngineEvidence(
         String source,
         FraudEngineEvidenceStatus status
 ) {
-    private static final int MAX_TEXT_LENGTH = 256;
-
     public FraudEngineEvidence {
         Objects.requireNonNull(evidenceType, "evidenceType is required");
-        FraudEngineValuePolicy.validateOptionalReasonCode(reasonCode, "reasonCode");
-        FraudEngineValuePolicy.requireSafeSummary(title, "title", MAX_TEXT_LENGTH);
-        FraudEngineValuePolicy.validateOptionalSafeSummary(description, "description", MAX_TEXT_LENGTH);
-        FraudEngineValuePolicy.requireSourceCode(source);
+        reasonCode = FraudEngineValuePolicy.optionalBoundedIdentifier(
+                reasonCode,
+                "reasonCode",
+                FraudEngineValuePolicy.EVIDENCE_CODE_MAX_LENGTH
+        );
+        title = FraudEngineValuePolicy.requireSafeSummary(
+                title,
+                "title",
+                FraudEngineValuePolicy.DESCRIPTION_CODE_MAX_LENGTH
+        );
+        description = FraudEngineValuePolicy.validateOptionalSafeSummary(
+                description,
+                "description",
+                FraudEngineValuePolicy.DESCRIPTION_CODE_MAX_LENGTH
+        );
+        source = FraudEngineValuePolicy.requireMachineCode(
+                source,
+                "source",
+                FraudEngineValuePolicy.EVIDENCE_CODE_MAX_LENGTH
+        );
         Objects.requireNonNull(status, "status is required");
+    }
+
+    public String evidenceCode() {
+        return reasonCode;
+    }
+
+    public String descriptionCode() {
+        return title;
     }
 }
