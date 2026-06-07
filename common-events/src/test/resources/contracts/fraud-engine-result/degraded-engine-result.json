@@ -1,0 +1,23 @@
+{
+  "engineId": "rules.primary",
+  "engineType": "RULES",
+  "engineLanguage": "java",
+  "status": "DEGRADED",
+  "score": 0.4500,
+  "riskLevel": "MEDIUM",
+  "confidence": "LOW",
+  "reasonCodes": ["PARTIAL_CONTEXT"],
+  "evidence": [
+    {
+      "evidenceType": "OPERATIONAL_FALLBACK",
+      "reasonCode": "PARTIAL_CONTEXT",
+      "title": "Rule status",
+      "description": "Bounded rule adapter diagnostic.",
+      "source": "RULES",
+      "status": "PARTIAL"
+    }
+  ],
+  "latencyMs": 6,
+  "statusReason": "PARTIAL_CONTEXT",
+  "generatedAt": "2026-06-01T10:15:30Z"
+}

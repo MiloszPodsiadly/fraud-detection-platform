@@ -1,0 +1,32 @@
+{
+  "engineId": "ml.python.primary",
+  "engineType": "ML_MODEL",
+  "engineLanguage": "python",
+  "status": "AVAILABLE",
+  "score": 0.7600,
+  "riskLevel": "HIGH",
+  "confidence": "MEDIUM",
+  "reasonCodes": ["MODEL_HIGH_RISK"],
+  "contributions": [
+    {
+      "feature": "MODEL_SCORE",
+      "value": "HIGH",
+      "weight": 0.3000,
+      "direction": "INCREASES_RISK"
+    }
+  ],
+  "evidence": [
+    {
+      "evidenceType": "MODEL_EXPLANATION",
+      "reasonCode": "MODEL_HIGH_RISK",
+      "title": "ML signal",
+      "description": "Bounded ML adapter signal.",
+      "source": "ML_MODEL",
+      "status": "AVAILABLE"
+    }
+  ],
+  "latencyMs": 28,
+  "modelName": "python-fraud-model",
+  "modelVersion": "v1",
+  "generatedAt": "2026-06-01T10:15:30Z"
+}

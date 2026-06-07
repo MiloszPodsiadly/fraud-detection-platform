@@ -1,77 +1,85 @@
 package com.frauddetection.common.events.engine;
 
-import com.frauddetection.common.events.enums.RiskLevel;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.frauddetection.common.events.contract.TransactionScoredEvent;
+import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.lang.reflect.RecordComponent;
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class FraudEngineResultCompatibilityTest {
 
     @Test
-    void deserializesPythonMlEngineResult() throws Exception {
-        FraudEngineResult result = objectMapper().readValue(
-                Files.readString(example("python-ml-engine-result.json")),
-                FraudEngineResult.class
+    void existingTransactionScoredEventStillSerializes() throws Exception {
+        String json = objectMapper().writeValueAsString(scoredEvent());
+
+        assertThat(json)
+                .contains("\"transactionId\":\"txn-1\"")
+                .contains("\"riskLevel\":\"HIGH\"")
+                .doesNotContain("FraudEngineResult")
+                .doesNotContain("engineResults");
+    }
+
+    @Test
+    void existingTransactionScoredEventStillDeserializes() throws Exception {
+        TransactionScoredEvent event = objectMapper().readValue(objectMapper().writeValueAsString(scoredEvent()),
+                TransactionScoredEvent.class);
+
+        assertThat(event.transactionId()).isEqualTo("txn-1");
+        assertThat(event.riskLevel()).isEqualTo(RiskLevel.HIGH);
+    }
+
+    @Test
+    void addingFraudEngineResultTypesDoesNotChangeCurrentEventShape() {
+        assertThat(Arrays.stream(TransactionScoredEvent.class.getRecordComponents()).map(RecordComponent::getName))
+                .doesNotContain("engineResults", "fraudEngineResults", "fraudEngineResult")
+                .contains("engineIntelligence");
+    }
+
+    @Test
+    void commonEventsBuildsWithoutAlertServiceDependency() {
+        assertThat(FraudEngineResult.class.getPackageName())
+                .isEqualTo("com.frauddetection.common.events.engine");
+        assertThat(Arrays.stream(FraudEngineResult.class.getRecordComponents())
+                .map(RecordComponent::getType)
+                .map(Class::getName))
+                .noneMatch(name -> name.startsWith("com.frauddetection.alert."));
+    }
+
+    private TransactionScoredEvent scoredEvent() {
+        return new TransactionScoredEvent(
+                "event-1",
+                "txn-1",
+                "corr-1",
+                "customer-1",
+                "account-1",
+                Instant.parse("2026-06-01T10:15:30Z"),
+                Instant.parse("2026-06-01T10:14:30Z"),
+                null,
+                null,
+                null,
+                null,
+                null,
+                0.91d,
+                RiskLevel.HIGH,
+                "RULE_BASED",
+                "rules",
+                "v1",
+                Instant.parse("2026-06-01T10:15:30Z"),
+                List.of("HIGH_VELOCITY"),
+                Map.of(),
+                Map.of(),
+                true,
+                List.of(),
+                null
         );
-
-        assertThat(result.engineType()).isEqualTo(FraudEngineType.ML_MODEL);
-        assertThat(result.status()).isEqualTo(FraudEngineStatus.AVAILABLE);
-        assertThat(result.score()).isEqualTo(0.82d);
-        assertThat(result.riskLevel()).isEqualTo(RiskLevel.HIGH);
-        assertThat(result.reasonCodes()).containsExactly("rapidTransferBurst", "deviceNovelty");
-        assertThat(result.modelName()).isEqualTo("python-logistic-fraud-model");
-        assertThat(result.modelVersion()).isEqualTo("v1");
-        assertThat(result.latencyMs()).isEqualTo(28L);
-    }
-
-    @Test
-    void additiveUnknownTopLevelFieldsAreIgnored() throws Exception {
-        String json = Files.readString(example("rules-engine-result.json"));
-        int end = json.lastIndexOf('}');
-        String withUnknownField = json.substring(0, end)
-                + ",\n  \"unknownField\": \"future-value\"\n"
-                + json.substring(end);
-
-        FraudEngineResult result = objectMapper().readValue(withUnknownField, FraudEngineResult.class);
-
-        assertThat(result.engineId()).isEqualTo("rules-v1");
-        assertThat(result.status()).isEqualTo(FraudEngineStatus.AVAILABLE);
-    }
-
-    @Test
-    void additiveUnknownNestedFieldsAreIgnored() throws Exception {
-        String json = Files.readString(example("rules-engine-result.json"))
-                .replace("\"direction\": \"INCREASES_RISK\"", "\"direction\": \"INCREASES_RISK\", \"unknownContribution\": true")
-                .replace("\"status\": \"AVAILABLE\"\n    }", "\"status\": \"AVAILABLE\", \"unknownEvidence\": true\n    }");
-
-        FraudEngineResult result = objectMapper().readValue(json, FraudEngineResult.class);
-
-        assertThat(result.contributions()).hasSize(1);
-        assertThat(result.evidence()).hasSize(1);
-    }
-
-    @Test
-    void additiveUnknownFieldsDoNotRelaxKnownFieldValidation() throws Exception {
-        String invalidJson = Files.readString(example("rules-engine-result.json"))
-                .replace("\"score\": 0.64", "\"score\": 1.64")
-                .replace("\"engineLanguage\": \"java\"", "\"engineLanguage\": \"java\", \"unknownField\": true");
-
-        assertThatThrownBy(() -> objectMapper().readValue(invalidJson, FraudEngineResult.class))
-                .hasMessageContaining("score");
-    }
-
-    private Path example(String filename) {
-        Path moduleRelative = Path.of("..", "docs", "examples", "fraud-engine-result", filename);
-        if (Files.exists(moduleRelative)) {
-            return moduleRelative;
-        }
-        return Path.of("docs", "examples", "fraud-engine-result", filename);
     }
 
     private ObjectMapper objectMapper() {

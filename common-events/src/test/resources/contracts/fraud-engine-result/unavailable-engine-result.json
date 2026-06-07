@@ -1,0 +1,21 @@
+{
+  "engineId": "ml.python.primary",
+  "engineType": "ML_MODEL",
+  "engineLanguage": "python",
+  "status": "UNAVAILABLE",
+  "confidence": "UNKNOWN",
+  "reasonCodes": ["ML_MODEL_UNAVAILABLE"],
+  "evidence": [
+    {
+      "evidenceType": "OPERATIONAL_FALLBACK",
+      "reasonCode": "ML_MODEL_UNAVAILABLE",
+      "title": "ML status",
+      "description": "Bounded ML adapter signal.",
+      "source": "ML_MODEL",
+      "status": "UNAVAILABLE"
+    }
+  ],
+  "latencyMs": 12,
+  "statusReason": "ML_MODEL_UNAVAILABLE",
+  "generatedAt": "2026-06-01T10:15:30Z"
+}

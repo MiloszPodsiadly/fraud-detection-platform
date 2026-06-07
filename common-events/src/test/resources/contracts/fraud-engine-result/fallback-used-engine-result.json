@@ -1,0 +1,13 @@
+{
+  "engineId": "rules.primary",
+  "engineType": "RULES",
+  "engineLanguage": "java",
+  "status": "FALLBACK_USED",
+  "score": 0.5500,
+  "riskLevel": "MEDIUM",
+  "confidence": "LOW",
+  "reasonCodes": ["FALLBACK_PATH_USED"],
+  "fallbackReason": "RULE_ENGINE_FALLBACK",
+  "latencyMs": 8,
+  "generatedAt": "2026-06-01T10:15:30Z"
+}
