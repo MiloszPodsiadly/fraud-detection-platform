@@ -1,7 +1,14 @@
 import unittest
 
 from offline_evaluation.dataset_reader import read_fdp102_jsonl
-from offline_evaluation.dataset_schema import DatasetRecord, DatasetValidationError, evaluation_label_value, ml_ranking_score, risk_category
+from offline_evaluation.dataset_schema import (
+    DatasetRecord,
+    DatasetValidationError,
+    engine_risk_category,
+    evaluation_label_value,
+    ml_ranking_score,
+    risk_category,
+)
 from fdp103_fixtures import jsonl, record
 
 
@@ -149,6 +156,18 @@ class DatasetSchemaValidationTest(unittest.TestCase):
     def test_rejectsUnknownRulesEngineStatus(self):
         self._assert_record_rejected(rulesEngineStatus="MODEL_ERROR")
 
+    def test_rejectsMlRiskWithoutMlEngineStatus(self):
+        self._assert_record_rejected(mlEngineStatus=None, mlRiskLevel="HIGH", mlScoreBucket=None)
+
+    def test_rejectsMlScoreWithoutMlEngineStatus(self):
+        self._assert_record_rejected(mlEngineStatus=None, mlRiskLevel=None, mlScoreBucket="HIGH")
+
+    def test_rejectsRulesRiskWithoutRulesEngineStatus(self):
+        self._assert_record_rejected(rulesEngineStatus=None, rulesRiskLevel="HIGH", rulesScoreBucket=None)
+
+    def test_rejectsRulesScoreWithoutRulesEngineStatus(self):
+        self._assert_record_rejected(rulesEngineStatus=None, rulesRiskLevel=None, rulesScoreBucket="HIGH")
+
     def test_availableMlWithRiskIsUsable(self):
         parsed = read_fdp102_jsonl(jsonl(record(mlEngineStatus="AVAILABLE", mlRiskLevel="HIGH")))
 
@@ -169,6 +188,18 @@ class DatasetSchemaValidationTest(unittest.TestCase):
     def test_rulesUnavailableWithRiskRejected(self):
         self._assert_record_rejected(rulesEngineStatus="UNAVAILABLE", rulesRiskLevel="HIGH")
 
+    def test_mlUnavailableWithUnavailableBucketRejected(self):
+        self._assert_record_rejected(mlEngineStatus="UNAVAILABLE", mlRiskLevel=None, mlScoreBucket="UNAVAILABLE")
+
+    def test_rulesUnavailableWithUnavailableBucketRejected(self):
+        self._assert_record_rejected(rulesEngineStatus="UNAVAILABLE", rulesRiskLevel=None, rulesScoreBucket="UNAVAILABLE")
+
+    def test_mlTimeoutWithUnavailableBucketRejected(self):
+        self._assert_record_rejected(mlEngineStatus="TIMEOUT", mlRiskLevel=None, mlScoreBucket="UNAVAILABLE")
+
+    def test_rulesTimeoutWithUnavailableBucketRejected(self):
+        self._assert_record_rejected(rulesEngineStatus="TIMEOUT", rulesRiskLevel=None, rulesScoreBucket="UNAVAILABLE")
+
     def test_timeoutDoesNotBecomeLowRisk(self):
         parsed = read_fdp102_jsonl(jsonl(record(mlEngineStatus="TIMEOUT", mlRiskLevel=None, mlScoreBucket=None)))
 
@@ -188,6 +219,9 @@ class DatasetSchemaValidationTest(unittest.TestCase):
         )))
 
         self.assertTrue(parsed.records[0].ml_signal_missing)
+
+    def test_engineRiskCategoryTreatsMissingStatusAsMissing(self):
+        self.assertEqual("missing", engine_risk_category(None, "HIGH", None))
 
     def test_fixtureUsesAvailableProjectionStatus(self):
         self.assertEqual("AVAILABLE", record()["projectionStatus"])

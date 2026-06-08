@@ -75,10 +75,11 @@ class OfflineEvaluationDocumentationTest(unittest.TestCase):
         self.assertIn("does not change production scoring", doc)
 
     def test_docsMentionLabelsNotGroundTruth(self):
-        self.assertDocContains("analyst labels are evaluation signals, not ground truth")
+        self.assertDocContains("Analyst labels are evaluation signals only")
+        self.assertDocContains("They are not ground truth")
 
     def test_docsMentionFailedExportAborts(self):
-        self.assertDocContains("failed FDP-102 exports abort evaluation")
+        self.assertDocContains("Failed FDP-102 exports abort evaluation")
 
     def test_docsMentionNotEvaluationEligibleExcluded(self):
         self.assertDocContains("NOT_EVALUATION_ELIGIBLE is excluded from model-quality metrics")
@@ -89,6 +90,11 @@ class OfflineEvaluationDocumentationTest(unittest.TestCase):
     def test_docsMentionPseudonymousInputReferencesStayInternal(self):
         self.assertDocContains("accepts FDP-102 pseudonymous input references only for parsing and deterministic ordering")
         self.assertDocContains("must not emit `evaluationRecordId`, `transactionReference`, `eval-`, or `txnref-`")
+
+    def test_docsMentionStrictEngineStatusPolicy(self):
+        self.assertDocContains("engineStatus as the source of truth for operational availability")
+        self.assertDocContains("risk and score bucket fields must be absent")
+        self.assertDocContains("are not ranked and are not high/low signals")
 
     def assertDocContains(self, text: str):
         self.assertIn(text, self.doc())

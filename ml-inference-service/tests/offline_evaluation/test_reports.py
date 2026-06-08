@@ -6,6 +6,7 @@ from offline_evaluation.dataset_schema import DatasetValidationError
 from offline_evaluation.disagreement_report import build_disagreement_report
 from offline_evaluation.evaluation_runner import build_evaluation_report, build_input_summary
 from offline_evaluation.quality_metrics import build_quality_metrics, ranked_evaluation_record_ids
+from offline_evaluation.report_schema import REPORT_TYPE
 from offline_evaluation.report_writer import report_json
 from fdp103_fixtures import GENERATED_AT, jsonl, record
 
@@ -31,13 +32,6 @@ class InputSummaryReportTest(unittest.TestCase):
 
         self.assertEqual(1, summary["recordsExcludedNotEvaluationEligible"])
 
-    def test_inputSummaryCountsMalformedExcluded(self):
-        parsed = read_fdp102_jsonl(jsonl(record()))
-
-        summary = build_input_summary(parsed, GENERATED_AT, malformed_excluded=1)
-
-        self.assertEqual(0, summary["recordsExcludedAsMalformed"])
-
     def test_inputSummaryCountsMissingMl(self):
         summary = self._summary(record(mlRiskLevel=None, mlScoreBucket=None))
 
@@ -57,6 +51,14 @@ class InputSummaryReportTest(unittest.TestCase):
         summary = self._summary(record())
 
         self.assertEqual("FEEDBACK_SUBMITTED_AT", summary["exportMetadata"]["timeBasis"])
+
+    def test_inputSummaryPreservesExactDeduplicationPolicy(self):
+        summary = self._summary(record())
+
+        self.assertEqual(
+            "TRANSACTION_REFERENCE_NEWEST_SUBMITTED_AT_FEEDBACK_ID_ASC",
+            summary["exportMetadata"]["deduplicationPolicy"],
+        )
 
     def test_inputSummaryIsDeterministic(self):
         parsed = read_fdp102_jsonl(jsonl(record()))
@@ -79,6 +81,11 @@ class InputSummaryReportTest(unittest.TestCase):
 
         self.assertEqual(0, report["inputSummary"]["recordsExcludedAsMalformed"])
         self.assertEqual(0, report["inputSummary"]["recordsExcludedDueToMissingRequiredEvaluationFields"])
+
+    def test_evaluationReportUsesReportTypeConstant(self):
+        report = build_evaluation_report(jsonl(record()), generated_at=GENERATED_AT)
+
+        self.assertEqual(REPORT_TYPE, report["reportType"])
 
     def _summary(self, *records):
         return build_input_summary(read_fdp102_jsonl(jsonl(*records)), GENERATED_AT)
@@ -119,6 +126,14 @@ class DisagreementReportTest(unittest.TestCase):
 
         self.assertEqual(1, report["rulesMissingMlPresent"])
         self.assertEqual(0, report["rulesLowOrMediumMlLowOrMedium"])
+
+    def test_missingMlEngineStatusWithRiskDoesNotEnterDisagreement(self):
+        with self.assertRaises(DatasetValidationError):
+            self._report(record(mlEngineStatus=None, mlRiskLevel="HIGH", mlScoreBucket=None))
+
+    def test_missingRulesEngineStatusWithRiskDoesNotEnterDisagreement(self):
+        with self.assertRaises(DatasetValidationError):
+            self._report(record(rulesEngineStatus=None, rulesRiskLevel="HIGH", rulesScoreBucket=None))
 
     def test_disagreementReportIsDeterministic(self):
         records = read_fdp102_jsonl(jsonl(record(), record(evaluationRecordId="eval-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))).records
@@ -176,6 +191,22 @@ class QualityMetricsTest(unittest.TestCase):
         records = read_fdp102_jsonl(jsonl(record(rulesRiskLevel=None, rulesScoreBucket=None))).records
 
         self.assertEqual(1, build_quality_metrics(records, 1, 1)["missingRulesCount"])
+
+    def test_missingMlEngineStatusWithRiskDoesNotEnterQualityMetrics(self):
+        with self.assertRaises(DatasetValidationError):
+            build_quality_metrics(
+                read_fdp102_jsonl(jsonl(record(mlEngineStatus=None, mlRiskLevel="HIGH", mlScoreBucket=None))).records,
+                1,
+                1,
+            )
+
+    def test_missingRulesEngineStatusWithRiskDoesNotEnterQualityMetrics(self):
+        with self.assertRaises(DatasetValidationError):
+            build_quality_metrics(
+                read_fdp102_jsonl(jsonl(record(rulesEngineStatus=None, rulesRiskLevel="HIGH", rulesScoreBucket=None))).records,
+                1,
+                1,
+            )
 
     def test_deterministicTieBreakByEvaluationRecordId(self):
         records = read_fdp102_jsonl(jsonl(
@@ -285,6 +316,10 @@ class ReportWriterTest(unittest.TestCase):
     def test_reportRejectsEvaluationRecordId(self):
         with self.assertRaises(ValueError):
             report_json({"evaluationRecordId": "eval-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
+
+    def test_reportRejectsTransactionReferenceField(self):
+        with self.assertRaises(ValueError):
+            report_json({"transactionReference": "safe"})
 
     def test_reportRejectsTxnrefPrefix(self):
         with self.assertRaises(ValueError):
