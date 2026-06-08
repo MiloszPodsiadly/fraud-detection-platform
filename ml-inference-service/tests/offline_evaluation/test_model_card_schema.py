@@ -167,6 +167,35 @@ class ModelCardMetricsSummaryValidationTest(unittest.TestCase):
     def test_rejectsUnknownMetricsSummaryField(self):
         self._assert_metrics_rejected(unexpectedAuc=0.99)
 
+    def test_rejectsAcceptedRecordsGreaterThanDatasetRecordsRead(self):
+        self._assert_metrics_rejected(datasetRecordsRead=4, recordsAcceptedForEvaluation=5)
+
+    def test_rejectsExcludedRecordsGreaterThanDatasetRecordsRead(self):
+        self._assert_metrics_rejected(datasetRecordsRead=4, recordsExcludedNotEvaluationEligible=5)
+
+    def test_rejectsAcceptedPlusExcludedGreaterThanDatasetRecordsRead(self):
+        self._assert_metrics_rejected(
+            datasetRecordsRead=4,
+            recordsAcceptedForEvaluation=4,
+            recordsExcludedNotEvaluationEligible=1,
+            notEvaluationEligibleCount=1,
+        )
+
+    def test_rejectsMissingMlCountGreaterThanDatasetRecordsRead(self):
+        self._assert_metrics_rejected(datasetRecordsRead=4, missingMlCount=5)
+
+    def test_rejectsMissingRulesCountGreaterThanDatasetRecordsRead(self):
+        self._assert_metrics_rejected(datasetRecordsRead=4, missingRulesCount=5)
+
+    def test_rejectsMissingProjectionCountGreaterThanDatasetRecordsRead(self):
+        self._assert_metrics_rejected(datasetRecordsRead=4, missingProjectionCount=5)
+
+    def test_rejectsNotEvaluationEligibleMismatch(self):
+        self._assert_metrics_rejected(recordsExcludedNotEvaluationEligible=1, notEvaluationEligibleCount=2)
+
+    def test_rejectsDisagreementSummaryTotalGreaterThanDatasetRecordsRead(self):
+        self._assert_metrics_rejected(datasetRecordsRead=4)
+
     def test_acceptsValidMetricsSummary(self):
         self.assertEqual(valid_metrics_summary(), validate_model_card(valid_model_card())["metricsSummary"])
 
@@ -385,6 +414,18 @@ class ModelCardNoOverclaimTest(unittest.TestCase):
 
 
 class ModelCardWarningValidationTest(unittest.TestCase):
+    def test_allowsEmptyWarnings(self):
+        self.assertEqual([], validate_model_card(valid_model_card(warnings=[]))["warnings"])
+
+    def test_rejectsWarningsAsString(self):
+        self._assert_rejected(warnings="MISSING_ML_SIGNAL_PRESENT")
+
+    def test_rejectsWarningsAsDict(self):
+        self._assert_rejected(warnings={"warning": "MISSING_ML_SIGNAL_PRESENT"})
+
+    def test_rejectsWarningsAsNumber(self):
+        self._assert_rejected(warnings=1)
+
     def test_rejectsTooManyWarnings(self):
         self._assert_rejected(warnings=[f"WARNING_{index}" for index in range(11)])
 
@@ -402,6 +443,12 @@ class ModelCardWarningValidationTest(unittest.TestCase):
 
     def test_rejectsWarningWithRawIdentifier(self):
         self._assert_rejected(warnings=["CUSTOMER_ID"])
+
+    def test_rejectsWarningWithGroundTruthTerm(self):
+        self._assert_rejected(warnings=["GROUND_TRUTH"])
+
+    def test_rejectsWarningWithPaymentAuthorizationTerm(self):
+        self._assert_rejected(warnings=["PAYMENT_AUTHORIZATION"])
 
     def test_rejectsWarningWithFreeText(self):
         self._assert_rejected(warnings=["free text warning"])
@@ -444,7 +491,7 @@ def valid_metrics_summary(**overrides):
     summary = {
         "metricBasis": "bucket_ordered_offline_diagnostic",
         "diagnosticOnly": True,
-        "datasetRecordsRead": 4,
+        "datasetRecordsRead": 5,
         "recordsAcceptedForEvaluation": 3,
         "recordsExcludedNotEvaluationEligible": 1,
         "missingMlCount": 1,

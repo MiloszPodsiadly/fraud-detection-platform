@@ -69,6 +69,39 @@ class ModelCardGeneratorTest(unittest.TestCase):
         self.assertEqual(0.5, metrics["recallAtTopK"])
         self.assertEqual(0.25, metrics["falsePositiveRate"])
 
+    def test_generatorAllowsFdp103ReportWithoutWarnings(self):
+        report = self.report()
+        report.pop("warnings")
+
+        self.assertEqual([], build_model_card(report, self.metadata(), GENERATED_AT)["warnings"])
+
+    def test_generatorAllowsFdp103ReportWithEmptyWarnings(self):
+        report = self.report()
+        report["warnings"] = []
+
+        self.assertEqual([], build_model_card(report, self.metadata(), GENERATED_AT)["warnings"])
+
+    def test_generatorRejectsStringWarningsFromFdp103Report(self):
+        report = self.report()
+        report["warnings"] = "MISSING_ML_SIGNAL_PRESENT"
+
+        with self.assertRaises(ModelCardValidationError):
+            build_model_card(report, self.metadata(), GENERATED_AT)
+
+    def test_generatorRejectsDictWarningsFromFdp103Report(self):
+        report = self.report()
+        report["warnings"] = {"warning": "MISSING_ML_SIGNAL_PRESENT"}
+
+        with self.assertRaises(ModelCardValidationError):
+            build_model_card(report, self.metadata(), GENERATED_AT)
+
+    def test_generatorRejectsUnsafeWarningsFromFdp103Report(self):
+        report = self.report()
+        report["warnings"] = ["PAYMENT_AUTHORIZATION"]
+
+        with self.assertRaises(ModelCardValidationError):
+            build_model_card(report, self.metadata(), GENERATED_AT)
+
     def test_rejectsUnknownQualityMetricField(self):
         report = self.report()
         report["qualityMetrics"]["unexpectedAuc"] = 0.99
@@ -258,7 +291,7 @@ class ModelCardGeneratorTest(unittest.TestCase):
             "precisionAtBudget": 1.0,
             "recallAtTopK": 1.0,
             "falsePositiveRate": 0.0,
-            "mlCaughtRulesMissedCount": 10,
+            "mlCaughtRulesMissedCount": 5,
             "rulesCaughtMlMissedCount": 0,
         })
         return report

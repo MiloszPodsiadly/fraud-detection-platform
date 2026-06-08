@@ -29,7 +29,7 @@
   "metricsSummary": {
     "metricBasis": "bucket_ordered_offline_diagnostic",
     "diagnosticOnly": true,
-    "datasetRecordsRead": 4,
+    "datasetRecordsRead": 5,
     "recordsAcceptedForEvaluation": 3,
     "recordsExcludedNotEvaluationEligible": 1,
     "missingMlCount": 1,
