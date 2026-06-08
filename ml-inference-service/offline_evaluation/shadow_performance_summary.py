@@ -41,6 +41,11 @@ def build_shadow_performance_summary(model_card: dict[str, Any], generated_at: s
             "datasetTimeBasis": safe_model_card["datasetTimeBasis"],
             "datasetDeduplicationPolicy": safe_model_card["datasetDeduplicationPolicy"],
         },
+        "evaluationPopulation": {
+            "datasetRecordsRead": metrics["datasetRecordsRead"],
+            "recordsAcceptedForEvaluation": metrics["recordsAcceptedForEvaluation"],
+            "recordsExcludedNotEvaluationEligible": metrics["recordsExcludedNotEvaluationEligible"],
+        },
         "metrics": {
             "precisionAtBudget": metrics["precisionAtBudget"],
             "recallAtTopK": metrics["recallAtTopK"],

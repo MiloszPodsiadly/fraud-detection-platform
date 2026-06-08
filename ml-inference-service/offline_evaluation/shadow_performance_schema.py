@@ -32,8 +32,8 @@ MAX_LIMITATIONS = 20
 MAX_COUNT_VALUE = 500
 BANNER = (
     "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, "
-    "threshold recommendation, production decisioning approval, payment authorization, automatic approve / "
-    "decline / block logic, or analyst recommendation logic."
+    "not threshold recommendation, not production decisioning approval, not payment authorization, "
+    "not automatic approve / decline / block logic, or not analyst recommendation logic."
 )
 REQUIRED_SUMMARY_FIELDS = {
     "summaryType",
@@ -42,6 +42,7 @@ REQUIRED_SUMMARY_FIELDS = {
     "model",
     "governance",
     "evaluation",
+    "evaluationPopulation",
     "metrics",
     "disagreementSummary",
     "warnings",
@@ -65,6 +66,11 @@ EVALUATION_FIELDS = {
     "metricBasis",
     "datasetTimeBasis",
     "datasetDeduplicationPolicy",
+}
+EVALUATION_POPULATION_FIELDS = {
+    "datasetRecordsRead",
+    "recordsAcceptedForEvaluation",
+    "recordsExcludedNotEvaluationEligible",
 }
 METRIC_FIELDS = {
     "precisionAtBudget",
@@ -91,6 +97,21 @@ DISAGREEMENT_FIELDS = {
 }
 MACHINE_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
 SAFE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+IDENTITY_FORBIDDEN_COMPACT_TERMS = {
+    "http",
+    "https",
+    "s3",
+    "gs",
+    "file",
+    "registry",
+    "bucket",
+    "endpoint",
+    "token",
+    "secret",
+    "artifact",
+    "path",
+}
+IDENTITY_FORBIDDEN_CHARS = {"/", "\\", ":", "?", "&", "=", "@", "$", "{", "}", "[", "]", "(", ")"}
 SAFE_CONTRACT_VALUES = {
     SUMMARY_TYPE,
     SUMMARY_VERSION,
@@ -207,6 +228,10 @@ def validate_shadow_performance_summary(raw: dict[str, Any]) -> dict[str, Any]:
         raise ShadowPerformanceValidationError("shadow performance summary must be an object")
     _reject_unsafe(raw)
     _reject_unknown_or_missing(raw, REQUIRED_SUMMARY_FIELDS, "summary")
+    evaluation_population = _evaluation_population(raw["evaluationPopulation"])
+    metrics = _metrics(raw["metrics"])
+    disagreement_summary = _disagreement_summary(raw["disagreementSummary"])
+    _validate_summary_consistency(evaluation_population, metrics, disagreement_summary)
     normalized = {
         "summaryType": _required_constant(raw, "summaryType", SUMMARY_TYPE),
         "summaryVersion": _required_constant(raw, "summaryVersion", SUMMARY_VERSION),
@@ -214,8 +239,9 @@ def validate_shadow_performance_summary(raw: dict[str, Any]) -> dict[str, Any]:
         "model": _model(raw["model"]),
         "governance": _governance(raw["governance"]),
         "evaluation": _evaluation(raw["evaluation"]),
-        "metrics": _metrics(raw["metrics"]),
-        "disagreementSummary": _disagreement_summary(raw["disagreementSummary"]),
+        "evaluationPopulation": evaluation_population,
+        "metrics": metrics,
+        "disagreementSummary": disagreement_summary,
         "warnings": _machine_code_list(raw, "warnings", MAX_WARNINGS),
         "limitations": _machine_code_list(raw, "limitations", MAX_LIMITATIONS),
         "banner": _required_constant(raw, "banner", BANNER),
@@ -279,6 +305,28 @@ def _evaluation(raw: Any) -> dict[str, str]:
     }
 
 
+def _evaluation_population(raw: Any) -> dict[str, int]:
+    if not isinstance(raw, dict):
+        raise ShadowPerformanceValidationError("evaluationPopulation must be an object")
+    _reject_unknown_or_missing(raw, EVALUATION_POPULATION_FIELDS, "evaluationPopulation")
+    dataset_records = _required_count(raw, "datasetRecordsRead")
+    accepted = _required_count(raw, "recordsAcceptedForEvaluation")
+    excluded_not_eligible = _required_count(raw, "recordsExcludedNotEvaluationEligible")
+    if accepted > dataset_records:
+        raise ShadowPerformanceValidationError("recordsAcceptedForEvaluation must not exceed datasetRecordsRead")
+    if excluded_not_eligible > dataset_records:
+        raise ShadowPerformanceValidationError("recordsExcludedNotEvaluationEligible must not exceed datasetRecordsRead")
+    if accepted + excluded_not_eligible > dataset_records:
+        raise ShadowPerformanceValidationError(
+            "recordsAcceptedForEvaluation plus recordsExcludedNotEvaluationEligible must not exceed datasetRecordsRead"
+        )
+    return {
+        "datasetRecordsRead": dataset_records,
+        "recordsAcceptedForEvaluation": accepted,
+        "recordsExcludedNotEvaluationEligible": excluded_not_eligible,
+    }
+
+
 def _metrics(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ShadowPerformanceValidationError("metrics must be an object")
@@ -294,6 +342,24 @@ def _metrics(raw: Any) -> dict[str, Any]:
         "missingProjectionCount": _required_count(raw, "missingProjectionCount"),
         "notEvaluationEligibleCount": _required_count(raw, "notEvaluationEligibleCount"),
     }
+
+
+def _validate_summary_consistency(
+    evaluation_population: dict[str, int],
+    metrics: dict[str, Any],
+    disagreement_summary: dict[str, int],
+) -> None:
+    dataset_records = evaluation_population["datasetRecordsRead"]
+    excluded_not_eligible = evaluation_population["recordsExcludedNotEvaluationEligible"]
+    if metrics["notEvaluationEligibleCount"] != excluded_not_eligible:
+        raise ShadowPerformanceValidationError(
+            "metrics.notEvaluationEligibleCount must match recordsExcludedNotEvaluationEligible"
+        )
+    for field in sorted(COUNT_FIELDS):
+        if metrics[field] > dataset_records:
+            raise ShadowPerformanceValidationError(f"metrics.{field} must not exceed datasetRecordsRead")
+    if sum(disagreement_summary.values()) > dataset_records:
+        raise ShadowPerformanceValidationError("disagreementSummary total must not exceed datasetRecordsRead")
 
 
 def _disagreement_summary(raw: Any) -> dict[str, int]:
@@ -383,8 +449,15 @@ def _machine_code_list(raw: dict[str, Any], field: str, max_items: int) -> list[
 
 def _safe_identifier(raw: dict[str, Any], field: str) -> str:
     value = _bounded_string(raw, field, 128)
+    compact = _compact(value)
     if SAFE_IDENTIFIER_PATTERN.fullmatch(value) is None or ".." in value:
         raise ShadowPerformanceValidationError(f"{field} must be a safe identifier")
+    if any(character in value for character in IDENTITY_FORBIDDEN_CHARS):
+        raise ShadowPerformanceValidationError(f"{field} must not be an artifact location")
+    if any(character.isspace() for character in value):
+        raise ShadowPerformanceValidationError(f"{field} must not contain whitespace")
+    if any(term in compact for term in IDENTITY_FORBIDDEN_COMPACT_TERMS):
+        raise ShadowPerformanceValidationError(f"{field} must not contain operational location details")
     return value
 
 
