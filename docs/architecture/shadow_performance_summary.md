@@ -8,6 +8,10 @@ Shadow Performance Summary v1 is an offline diagnostic artifact. It consumes onl
 objects and caller-provided generation timestamps. It does not recompute metrics, does not read FDP-102 JSONL exports,
 does not read FDP-103 raw evaluation reports, and does not inspect per-record data.
 
+Shadow Performance Summary v1 carries evaluation population and sample-size context with its diagnostic metrics. This
+context is required so precision, recall, and false-positive-rate values cannot be interpreted without knowing the
+number of records read and accepted for evaluation.
+
 Shadow Performance Summary v1 does not approve model promotion, does not recommend thresholds, does not approve
 production decisioning, does not authorize payments, does not create automatic approve, decline, or block behavior,
 and does not recommend analyst actions. It does not expose API, OpenAPI, UI, or dashboards, and does not create
@@ -36,14 +40,20 @@ The output is deterministic compact JSON with:
 - bounded model identity
 - diagnostic governance and explicit non-goal booleans
 - evaluation context inherited from Model Card v1
+- evaluation population/sample-size context inherited from Model Card v1
 - aggregate diagnostic metric values inherited from Model Card v1
 - rule-vs-ML disagreement summary inherited from Model Card v1
 - bounded warnings and limitations
 - the required offline diagnostics banner
 
+`evaluationPopulation` includes `datasetRecordsRead`, `recordsAcceptedForEvaluation`, and
+`recordsExcludedNotEvaluationEligible`. `precisionAtBudget`, `recallAtTopK`, and `falsePositiveRate` must not be
+interpreted without this population context. `evaluationPopulation` is required to avoid performance overclaim from
+small samples, and it remains diagnostic-only rather than promotion, threshold, or production approval evidence.
+
 The required banner states that shadow performance metrics are offline diagnostics only and are not model promotion
-approval, threshold recommendation, production decisioning approval, payment authorization, automatic
-approve/decline/block logic, or analyst recommendation logic.
+approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic
+approve/decline/block logic, or not analyst recommendation logic.
 
 ## Non-Goals
 
