@@ -1,0 +1,47 @@
+{
+  "reportType": "PYTHON_ML_EVALUATION_FOUNDATION",
+  "generatedAt": "2026-06-08T00:00:00Z",
+  "inputSummary": {
+    "datasetRecordsRead": 5,
+    "recordsAcceptedForEvaluation": 3,
+    "recordsExcludedNotEvaluationEligible": 1,
+    "recordsWithMissingMlSignal": 1,
+    "recordsWithMissingRulesSignal": 1,
+    "recordsWithMissingProjection": 1,
+    "exportMetadata": {
+      "timeBasis": "FEEDBACK_SUBMITTED_AT",
+      "deduplicationPolicy": "TRANSACTION_REFERENCE_NEWEST_SUBMITTED_AT_FEEDBACK_ID_ASC"
+    }
+  },
+  "disagreementSummary": {
+    "rulesHighMlHigh": 1,
+    "rulesHighMlLowOrMedium": 0,
+    "rulesLowOrMediumMlHigh": 1,
+    "rulesLowOrMediumMlLowOrMedium": 1,
+    "rulesMissingMlPresent": 0,
+    "mlMissingRulesPresent": 1,
+    "bothMissing": 0,
+    "notEvaluationEligibleExcluded": 1
+  },
+  "qualityMetrics": {
+    "metricBasis": "bucket_ordered_offline_diagnostic",
+    "precisionAtBudget": 0.666667,
+    "recallAtTopK": 0.5,
+    "falsePositiveRate": 0.25,
+    "mlCaughtRulesMissedCount": 1,
+    "rulesCaughtMlMissedCount": 1,
+    "missingMlCount": 1,
+    "missingRulesCount": 1,
+    "notEvaluationEligibleCount": 1
+  },
+  "exclusions": {
+    "malformed": 0,
+    "missingRequiredEvaluationFields": 0,
+    "notEvaluationEligible": 1
+  },
+  "warnings": [
+    "MISSING_ML_SIGNAL_PRESENT",
+    "MISSING_RULES_SIGNAL_PRESENT",
+    "MISSING_PROJECTION_PRESENT"
+  ]
+}
