@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from copy import deepcopy
 from typing import Any
 
 
@@ -12,12 +11,32 @@ class ModelCardValidationError(ValueError):
 MODEL_CARD_VERSION = "1.0"
 MODEL_CARD_TYPE = "OFFLINE_MODEL_CARD_V1"
 GOVERNANCE_STATUS = "DIAGNOSTIC_ONLY"
-EVALUATION_REPORT_VERSION = "FDP-103"
+EXPECTED_EVALUATION_REPORT_TYPE = "PYTHON_ML_EVALUATION_FOUNDATION"
+EXPECTED_EVALUATION_REPORT_VERSION = "FDP-103"
+EXPECTED_METRIC_BASIS = "bucket_ordered_offline_diagnostic"
+EXPECTED_DATASET_TIME_BASIS = "FEEDBACK_SUBMITTED_AT"
+EXPECTED_DATASET_DEDUPLICATION_POLICY = "TRANSACTION_REFERENCE_NEWEST_SUBMITTED_AT_FEEDBACK_ID_ASC"
+EVALUATION_REPORT_VERSION = EXPECTED_EVALUATION_REPORT_VERSION
 
+MAX_COUNT_VALUE = 500
 MAX_WARNINGS = 10
 MAX_LIMITATIONS = 20
 
-ALLOWED_APPROVED_FOR = {"SHADOW", "COMPARE", "OFFLINE_EVALUATION"}
+ALLOWED_APPROVED_FOR = {"SHADOW", "COMPARE"}
+ALLOWED_INTENDED_USE = {
+    "SHADOW_FRAUD_RISK_DIAGNOSTICS",
+    "COMPARE_MODE_ANALYSIS",
+    "OFFLINE_MODEL_REVIEW",
+    "RULE_VS_ML_DIAGNOSTICS",
+    "MODEL_GOVERNANCE_DOCUMENTATION",
+}
+REQUIRED_NOT_INTENDED_USE = {
+    "NO_AUTOMATIC_APPROVE_DECLINE_BLOCK",
+    "NO_MODEL_PROMOTION_APPROVAL",
+    "NO_PAYMENT_AUTHORIZATION",
+    "NO_PRODUCTION_DECISIONING_APPROVAL",
+    "NO_THRESHOLD_RECOMMENDATION",
+}
 ALLOWED_MODEL_FAMILIES = {
     "LOGISTIC_REGRESSION",
     "RANDOM_FOREST",
@@ -41,6 +60,7 @@ FORBIDDEN_APPROVED_FOR = {
     "CHAMPION",
     "PRODUCTION_APPROVED",
     "RECOMMENDATION_INFLUENCE",
+    "OFFLINE_EVALUATION",
 }
 REQUIRED_MODEL_CARD_FIELDS = {
     "modelCardVersion",
@@ -80,6 +100,32 @@ ALLOWED_METRICS_SUMMARY_FIELDS = {
     "rulesCaughtMlMissedCount",
     "disagreementSummary",
 }
+COUNT_METRIC_FIELDS = {
+    "datasetRecordsRead",
+    "recordsAcceptedForEvaluation",
+    "recordsExcludedNotEvaluationEligible",
+    "missingMlCount",
+    "missingRulesCount",
+    "missingProjectionCount",
+    "notEvaluationEligibleCount",
+    "mlCaughtRulesMissedCount",
+    "rulesCaughtMlMissedCount",
+}
+RATE_METRIC_FIELDS = {
+    "precisionAtBudget",
+    "recallAtTopK",
+    "falsePositiveRate",
+}
+ALLOWED_DISAGREEMENT_SUMMARY_FIELDS = {
+    "rulesHighMlHigh",
+    "rulesHighMlLowOrMedium",
+    "rulesLowOrMediumMlHigh",
+    "rulesLowOrMediumMlLowOrMedium",
+    "rulesMissingMlPresent",
+    "mlMissingRulesPresent",
+    "bothMissing",
+    "notEvaluationEligibleExcluded",
+}
 
 FORBIDDEN_FIELD_NAMES = {
     "transactionreference",
@@ -92,6 +138,16 @@ FORBIDDEN_FIELD_NAMES = {
     "merchantid",
     "analystid",
     "submittedby",
+    "segmentid",
+    "segmentbreakdown",
+    "customerbreakdown",
+    "accountbreakdown",
+    "cardbreakdown",
+    "devicebreakdown",
+    "merchantbreakdown",
+    "analystbreakdown",
+    "perrecordexamples",
+    "rawexamples",
     "correlationid",
     "idempotencykey",
     "requesthash",
@@ -124,9 +180,11 @@ FORBIDDEN_FIELD_NAMES = {
     "rawdataset",
 }
 FORBIDDEN_VALUE_TERMS = set(FORBIDDEN_FIELD_NAMES) | {
+    "eval",
     "txnref",
     "approvedforproduction",
     "modelpassed",
+    "modelpromotionapproved",
     "thresholdrecommended",
     "automaticdecline",
     "autodecline",
@@ -142,11 +200,32 @@ SAFE_NEGATED_MACHINE_CODES = {
     "NO_PRODUCTION_DECISIONING_APPROVAL",
     "NO_PAYMENT_AUTHORIZATION",
     "NO_AUTOMATIC_APPROVE_DECLINE_BLOCK",
+    "BUCKET_ORDERED_METRICS_NOT_CALIBRATED_PROBABILITIES",
+    "OFFLINE_ONLY",
+    "DIAGNOSTIC_ONLY",
 }
 SAFE_CONTRACT_VALUES = SAFE_NEGATED_MACHINE_CODES | {
-    "TRANSACTION_REFERENCE_NEWEST_SUBMITTED_AT_FEEDBACK_ID_ASC",
+    EXPECTED_EVALUATION_REPORT_TYPE,
+    EXPECTED_EVALUATION_REPORT_VERSION,
+    EXPECTED_METRIC_BASIS,
+    EXPECTED_DATASET_TIME_BASIS,
+    EXPECTED_DATASET_DEDUPLICATION_POLICY,
 }
 MACHINE_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+SAFE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+IDENTITY_FORBIDDEN_COMPACT_TERMS = {
+    "http",
+    "https",
+    "s3",
+    "gs",
+    "file",
+    "registry",
+    "bucket",
+    "secret",
+    "token",
+    "endpoint",
+}
+IDENTITY_FORBIDDEN_CHARS = {"/", "\\", ":", "?", "&", "=", "@", "$", "{", "}", "[", "]", "(", ")"}
 
 
 def validate_model_card(raw: dict[str, Any]) -> dict[str, Any]:
@@ -164,18 +243,22 @@ def validate_model_card(raw: dict[str, Any]) -> dict[str, Any]:
         "modelCardVersion": _required_constant(raw, "modelCardVersion", MODEL_CARD_VERSION),
         "cardType": _required_constant(raw, "cardType", MODEL_CARD_TYPE),
         "generatedAt": _bounded_string(raw, "generatedAt", 128),
-        "modelName": _bounded_string(raw, "modelName", 128),
-        "modelVersion": _bounded_string(raw, "modelVersion", 128),
+        "modelName": _safe_identifier(raw, "modelName"),
+        "modelVersion": _safe_identifier(raw, "modelVersion"),
         "modelFamily": _model_family(raw),
-        "featureContractVersion": _bounded_string(raw, "featureContractVersion", 128),
-        "evaluationReportType": _bounded_string(raw, "evaluationReportType", 128),
-        "evaluationReportVersion": _bounded_string(raw, "evaluationReportVersion", 64),
+        "featureContractVersion": _safe_identifier(raw, "featureContractVersion"),
+        "evaluationReportType": _required_constant(raw, "evaluationReportType", EXPECTED_EVALUATION_REPORT_TYPE),
+        "evaluationReportVersion": _required_constant(raw, "evaluationReportVersion", EXPECTED_EVALUATION_REPORT_VERSION),
         "evaluationReportGeneratedAt": _bounded_string(raw, "evaluationReportGeneratedAt", 128),
-        "datasetTimeBasis": _bounded_string(raw, "datasetTimeBasis", 128),
-        "datasetDeduplicationPolicy": _bounded_string(raw, "datasetDeduplicationPolicy", 128),
+        "datasetTimeBasis": _required_constant(raw, "datasetTimeBasis", EXPECTED_DATASET_TIME_BASIS),
+        "datasetDeduplicationPolicy": _required_constant(
+            raw,
+            "datasetDeduplicationPolicy",
+            EXPECTED_DATASET_DEDUPLICATION_POLICY,
+        ),
         "approvedFor": _approved_for(raw),
-        "intendedUse": _machine_code_list(raw, "intendedUse", 10),
-        "notIntendedUse": _machine_code_list(raw, "notIntendedUse", 20),
+        "intendedUse": _intended_use(raw),
+        "notIntendedUse": _not_intended_use(raw),
         "metricsSummary": _metrics_summary(raw),
         "limitations": _bounded_machine_code_list(raw, "limitations", MAX_LIMITATIONS),
         "warnings": _bounded_machine_code_list(raw, "warnings", MAX_WARNINGS),
@@ -189,6 +272,40 @@ def _required_constant(raw: dict[str, Any], field: str, expected: str) -> str:
     value = _bounded_string(raw, field, len(expected))
     if value != expected:
         raise ModelCardValidationError(f"{field} must be {expected}")
+    return value
+
+
+def _required_rate(summary: dict[str, Any], field: str) -> float:
+    value = summary.get(field)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ModelCardValidationError(f"metricsSummary.{field} must be a numeric rate")
+    if value < 0.0 or value > 1.0:
+        raise ModelCardValidationError(f"metricsSummary.{field} must be in range 0.0..1.0")
+    return float(value)
+
+
+def _required_count(summary: dict[str, Any], field: str, max_value: int = MAX_COUNT_VALUE) -> int:
+    value = summary.get(field)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ModelCardValidationError(f"{field} must be a non-negative integer")
+    if value < 0:
+        raise ModelCardValidationError(f"{field} must be non-negative")
+    if value > max_value:
+        raise ModelCardValidationError(f"{field} exceeds maximum value")
+    return value
+
+
+def _safe_identifier(raw: dict[str, Any], field: str) -> str:
+    value = _bounded_string(raw, field, 128)
+    compact = _compact(value)
+    if SAFE_IDENTIFIER_PATTERN.fullmatch(value) is None or ".." in value:
+        raise ModelCardValidationError(f"{field} must be a safe identifier")
+    if any(character in value for character in IDENTITY_FORBIDDEN_CHARS):
+        raise ModelCardValidationError(f"{field} must not be an artifact location")
+    if any(character.isspace() for character in value):
+        raise ModelCardValidationError(f"{field} must not contain whitespace")
+    if any(term in compact for term in IDENTITY_FORBIDDEN_COMPACT_TERMS):
+        raise ModelCardValidationError(f"{field} must not contain operational location details")
     return value
 
 
@@ -209,6 +326,25 @@ def _approved_for(raw: dict[str, Any]) -> list[str]:
     return sorted(set(values))
 
 
+def _intended_use(raw: dict[str, Any]) -> list[str]:
+    values = _machine_code_list(raw, "intendedUse", 10)
+    rejected = [value for value in values if value not in ALLOWED_INTENDED_USE]
+    if rejected:
+        raise ModelCardValidationError("intendedUse contains unsupported value")
+    return sorted(set(values))
+
+
+def _not_intended_use(raw: dict[str, Any]) -> list[str]:
+    values = _machine_code_list(raw, "notIntendedUse", 20)
+    missing = sorted(REQUIRED_NOT_INTENDED_USE - set(values))
+    if missing:
+        raise ModelCardValidationError(f"notIntendedUse missing required non-goals: {', '.join(missing)}")
+    rejected = [value for value in values if value not in SAFE_NEGATED_MACHINE_CODES]
+    if rejected:
+        raise ModelCardValidationError("notIntendedUse contains unsupported value")
+    return sorted(set(values))
+
+
 def _metrics_summary(raw: dict[str, Any]) -> dict[str, Any]:
     value = raw.get("metricsSummary")
     if not isinstance(value, dict) or not value:
@@ -216,13 +352,63 @@ def _metrics_summary(raw: dict[str, Any]) -> dict[str, Any]:
     extra = sorted(set(value) - ALLOWED_METRICS_SUMMARY_FIELDS)
     if extra:
         raise ModelCardValidationError(f"metricsSummary contains unsupported fields: {', '.join(extra)}")
-    summary = deepcopy(value)
-    if summary.get("diagnosticOnly") is not True:
+    missing = sorted(ALLOWED_METRICS_SUMMARY_FIELDS - set(value))
+    if missing:
+        raise ModelCardValidationError(f"metricsSummary missing required fields: {', '.join(missing)}")
+    if value.get("diagnosticOnly") is not True:
         raise ModelCardValidationError("metricsSummary.diagnosticOnly must be true")
-    disagreement = summary.get("disagreementSummary", {})
-    if disagreement is not None and not isinstance(disagreement, dict):
-        raise ModelCardValidationError("metricsSummary.disagreementSummary must be an object")
-    return summary
+
+    summary: dict[str, Any] = {
+        "metricBasis": _required_constant(value, "metricBasis", EXPECTED_METRIC_BASIS),
+        "diagnosticOnly": True,
+    }
+    for field in sorted(COUNT_METRIC_FIELDS):
+        summary[field] = _required_count(value, field)
+    for field in sorted(RATE_METRIC_FIELDS):
+        summary[field] = _required_rate(value, field)
+    summary["disagreementSummary"] = _disagreement_summary(value["disagreementSummary"])
+    return {field: summary[field] for field in _metrics_order()}
+
+
+def _disagreement_summary(raw: Any) -> dict[str, int]:
+    if not isinstance(raw, dict) or not raw:
+        raise ModelCardValidationError("metricsSummary.disagreementSummary must be a non-empty object")
+    extra = sorted(set(raw) - ALLOWED_DISAGREEMENT_SUMMARY_FIELDS)
+    if extra:
+        raise ModelCardValidationError(f"disagreementSummary contains unsupported fields: {', '.join(extra)}")
+    missing = sorted(ALLOWED_DISAGREEMENT_SUMMARY_FIELDS - set(raw))
+    if missing:
+        raise ModelCardValidationError(f"disagreementSummary missing required fields: {', '.join(missing)}")
+    return {
+        "rulesHighMlHigh": _required_count(raw, "rulesHighMlHigh"),
+        "rulesHighMlLowOrMedium": _required_count(raw, "rulesHighMlLowOrMedium"),
+        "rulesLowOrMediumMlHigh": _required_count(raw, "rulesLowOrMediumMlHigh"),
+        "rulesLowOrMediumMlLowOrMedium": _required_count(raw, "rulesLowOrMediumMlLowOrMedium"),
+        "rulesMissingMlPresent": _required_count(raw, "rulesMissingMlPresent"),
+        "mlMissingRulesPresent": _required_count(raw, "mlMissingRulesPresent"),
+        "bothMissing": _required_count(raw, "bothMissing"),
+        "notEvaluationEligibleExcluded": _required_count(raw, "notEvaluationEligibleExcluded"),
+    }
+
+
+def _metrics_order() -> list[str]:
+    return [
+        "metricBasis",
+        "diagnosticOnly",
+        "datasetRecordsRead",
+        "recordsAcceptedForEvaluation",
+        "recordsExcludedNotEvaluationEligible",
+        "missingMlCount",
+        "missingRulesCount",
+        "missingProjectionCount",
+        "notEvaluationEligibleCount",
+        "precisionAtBudget",
+        "recallAtTopK",
+        "falsePositiveRate",
+        "mlCaughtRulesMissedCount",
+        "rulesCaughtMlMissedCount",
+        "disagreementSummary",
+    ]
 
 
 def _bounded_string(raw: dict[str, Any], field: str, max_length: int) -> str:

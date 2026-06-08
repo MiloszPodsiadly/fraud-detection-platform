@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from typing import Any
 
 from offline_evaluation.model_card_schema import (
+    EXPECTED_DATASET_DEDUPLICATION_POLICY,
+    EXPECTED_DATASET_TIME_BASIS,
+    EXPECTED_EVALUATION_REPORT_TYPE,
+    EXPECTED_METRIC_BASIS,
     EVALUATION_REPORT_VERSION,
     GOVERNANCE_STATUS,
     MODEL_CARD_TYPE,
     MODEL_CARD_VERSION,
+    REQUIRED_NOT_INTENDED_USE,
     ModelCardValidationError,
     validate_model_card,
 )
@@ -17,21 +21,15 @@ REQUIRED_LIMITATIONS = [
     "ANALYST_LABELS_ARE_EVALUATION_SIGNALS_NOT_GROUND_TRUTH",
     "BUCKET_ORDERED_METRICS_NOT_CALIBRATED_PROBABILITIES",
     "DIAGNOSTIC_ONLY",
+    "NOT_EVALUATION_ELIGIBLE_EXCLUDED_FROM_QUALITY_METRICS",
     "NO_AUTOMATIC_APPROVE_DECLINE_BLOCK",
     "NO_MODEL_PROMOTION_APPROVAL",
     "NO_PAYMENT_AUTHORIZATION",
     "NO_PRODUCTION_DECISIONING_APPROVAL",
     "NO_THRESHOLD_RECOMMENDATION",
-    "NOT_EVALUATION_ELIGIBLE_EXCLUDED_FROM_QUALITY_METRICS",
     "OFFLINE_ONLY",
 ]
-DEFAULT_NOT_INTENDED_USE = [
-    "NO_AUTOMATIC_APPROVE_DECLINE_BLOCK",
-    "NO_MODEL_PROMOTION_APPROVAL",
-    "NO_PAYMENT_AUTHORIZATION",
-    "NO_PRODUCTION_DECISIONING_APPROVAL",
-    "NO_THRESHOLD_RECOMMENDATION",
-]
+DEFAULT_NOT_INTENDED_USE = sorted(REQUIRED_NOT_INTENDED_USE)
 ALLOWED_MODEL_METADATA_FIELDS = {
     "modelName",
     "modelVersion",
@@ -40,6 +38,27 @@ ALLOWED_MODEL_METADATA_FIELDS = {
     "intendedUse",
     "notIntendedUse",
     "approvedFor",
+}
+ALLOWED_QUALITY_METRIC_FIELDS = {
+    "metricBasis",
+    "precisionAtBudget",
+    "recallAtTopK",
+    "falsePositiveRate",
+    "mlCaughtRulesMissedCount",
+    "rulesCaughtMlMissedCount",
+    "missingMlCount",
+    "missingRulesCount",
+    "notEvaluationEligibleCount",
+}
+ALLOWED_DISAGREEMENT_FIELDS = {
+    "rulesHighMlHigh",
+    "rulesHighMlLowOrMedium",
+    "rulesLowOrMediumMlHigh",
+    "rulesLowOrMediumMlLowOrMedium",
+    "rulesMissingMlPresent",
+    "mlMissingRulesPresent",
+    "bothMissing",
+    "notEvaluationEligibleExcluded",
 }
 
 
@@ -54,8 +73,12 @@ def build_model_card(evaluation_report: dict[str, Any], model_metadata: dict[str
 
     input_summary = _required_object(evaluation_report, "inputSummary")
     export_metadata = _required_object(input_summary, "exportMetadata")
-    quality_metrics = _required_object(evaluation_report, "qualityMetrics")
-    disagreement_summary = _required_object(evaluation_report, "disagreementSummary")
+    quality_metrics = _required_quality_metrics(evaluation_report)
+    disagreement_summary = _required_disagreement_summary(evaluation_report)
+    _require_value(evaluation_report, "reportType", EXPECTED_EVALUATION_REPORT_TYPE)
+    _require_value(quality_metrics, "metricBasis", EXPECTED_METRIC_BASIS)
+    _require_value(export_metadata, "timeBasis", EXPECTED_DATASET_TIME_BASIS)
+    _require_value(export_metadata, "deduplicationPolicy", EXPECTED_DATASET_DEDUPLICATION_POLICY)
 
     model_card = {
         "modelCardVersion": MODEL_CARD_VERSION,
@@ -72,7 +95,7 @@ def build_model_card(evaluation_report: dict[str, Any], model_metadata: dict[str
         "datasetDeduplicationPolicy": export_metadata.get("deduplicationPolicy"),
         "approvedFor": list(model_metadata.get("approvedFor", [])),
         "intendedUse": list(model_metadata.get("intendedUse", [])),
-        "notIntendedUse": list(model_metadata.get("notIntendedUse", DEFAULT_NOT_INTENDED_USE)),
+        "notIntendedUse": _not_intended_use(model_metadata),
         "metricsSummary": _metrics_summary(input_summary, quality_metrics, disagreement_summary),
         "limitations": REQUIRED_LIMITATIONS,
         "warnings": list(evaluation_report.get("warnings", [])),
@@ -101,8 +124,46 @@ def _metrics_summary(
         "falsePositiveRate": quality_metrics.get("falsePositiveRate"),
         "mlCaughtRulesMissedCount": quality_metrics.get("mlCaughtRulesMissedCount"),
         "rulesCaughtMlMissedCount": quality_metrics.get("rulesCaughtMlMissedCount"),
-        "disagreementSummary": deepcopy(disagreement_summary),
+        "disagreementSummary": _disagreement_summary(disagreement_summary),
     }
+
+
+def _disagreement_summary(raw: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "rulesHighMlHigh": raw.get("rulesHighMlHigh"),
+        "rulesHighMlLowOrMedium": raw.get("rulesHighMlLowOrMedium"),
+        "rulesLowOrMediumMlHigh": raw.get("rulesLowOrMediumMlHigh"),
+        "rulesLowOrMediumMlLowOrMedium": raw.get("rulesLowOrMediumMlLowOrMedium"),
+        "rulesMissingMlPresent": raw.get("rulesMissingMlPresent"),
+        "mlMissingRulesPresent": raw.get("mlMissingRulesPresent"),
+        "bothMissing": raw.get("bothMissing"),
+        "notEvaluationEligibleExcluded": raw.get("notEvaluationEligibleExcluded"),
+    }
+
+
+def _not_intended_use(model_metadata: dict[str, Any]) -> list[str]:
+    caller_values = model_metadata.get("notIntendedUse", [])
+    if caller_values is None:
+        caller_values = []
+    if not isinstance(caller_values, list):
+        raise ModelCardValidationError("model metadata notIntendedUse must be a list")
+    return sorted(set(DEFAULT_NOT_INTENDED_USE) | set(caller_values))
+
+
+def _required_quality_metrics(evaluation_report: dict[str, Any]) -> dict[str, Any]:
+    quality_metrics = _required_object(evaluation_report, "qualityMetrics")
+    extra = sorted(set(quality_metrics) - ALLOWED_QUALITY_METRIC_FIELDS)
+    if extra:
+        raise ModelCardValidationError(f"qualityMetrics contains unsupported fields: {', '.join(extra)}")
+    return quality_metrics
+
+
+def _required_disagreement_summary(evaluation_report: dict[str, Any]) -> dict[str, Any]:
+    disagreement_summary = _required_object(evaluation_report, "disagreementSummary")
+    extra = sorted(set(disagreement_summary) - ALLOWED_DISAGREEMENT_FIELDS)
+    if extra:
+        raise ModelCardValidationError(f"disagreementSummary contains unsupported fields: {', '.join(extra)}")
+    return disagreement_summary
 
 
 def _required_object(raw: dict[str, Any], field: str) -> dict[str, Any]:
@@ -110,3 +171,8 @@ def _required_object(raw: dict[str, Any], field: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ModelCardValidationError(f"{field} must be an object")
     return value
+
+
+def _require_value(raw: dict[str, Any], field: str, expected: str) -> None:
+    if raw.get(field) != expected:
+        raise ModelCardValidationError(f"{field} must be {expected}")
