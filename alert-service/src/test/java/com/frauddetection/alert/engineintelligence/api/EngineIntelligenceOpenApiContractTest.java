@@ -112,9 +112,13 @@ class EngineIntelligenceOpenApiContractTest {
     private String engineIntelligenceSchema() throws Exception {
         String openApi = openApi();
         int schemaStart = openApi.indexOf("    EngineIntelligenceReadModel:");
+        int schemaEnd = openApi.indexOf("\n    ShadowPerformance", schemaStart);
+        if (schemaEnd < 0) {
+            schemaEnd = openApi.indexOf("\n  responses:", schemaStart);
+        }
         return openApi.substring(
                 schemaStart,
-                openApi.indexOf("  responses:", schemaStart)
+                schemaEnd
         );
     }
 
