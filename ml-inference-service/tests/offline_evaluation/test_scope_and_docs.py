@@ -170,7 +170,29 @@ class OfflineEvaluationDocumentationTest(unittest.TestCase):
         self.assertModelCardDocContains("does not authorize payments")
 
     def test_docsMentionApprovedForOnlyShadowCompareOffline(self):
-        self.assertModelCardDocContains("approvedFor is limited to SHADOW, COMPARE, and OFFLINE_EVALUATION")
+        self.assertModelCardDocContains("approvedFor is limited to SHADOW and COMPARE")
+
+    def test_docsMentionOfflineEvaluationIsNotApprovalTarget(self):
+        self.assertModelCardDocContains("OFFLINE_EVALUATION is not an approval target")
+
+    def test_docsMentionModelCardStrictValidation(self):
+        doc = MODEL_CARD_DOC.read_text(encoding="utf-8")
+        self.assertIn("Model Card v1 validates FDP-103 report identity", doc)
+        self.assertIn("validates metric basis", doc)
+        self.assertIn("validates dataset time basis", doc)
+        self.assertIn("validates deduplication policy", doc)
+        self.assertIn("validates metric numeric types and ranges", doc)
+        self.assertIn("validates disagreementSummary with allowlisted keys", doc)
+
+    def test_docsMentionModelIdentityIsSafeIdentifier(self):
+        self.assertModelCardDocContains(
+            "Model identity fields are safe identifiers, not URLs, paths, bucket URIs, registry endpoints, artifact locations, or secrets"
+        )
+
+    def test_docsMentionIntendedUseAndNonGoalsAreStrict(self):
+        doc = MODEL_CARD_DOC.read_text(encoding="utf-8")
+        self.assertIn("intendedUse is allowlisted", doc)
+        self.assertIn("required notIntendedUse non-goals cannot be omitted", doc)
 
     def test_docsMentionDashboardIsFutureScope(self):
         self.assertModelCardDocContains("Dashboards and promotion workflows are future scopes")

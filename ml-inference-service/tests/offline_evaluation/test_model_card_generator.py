@@ -69,14 +69,19 @@ class ModelCardGeneratorTest(unittest.TestCase):
         self.assertEqual(0.5, metrics["recallAtTopK"])
         self.assertEqual(0.25, metrics["falsePositiveRate"])
 
-    def test_copiesOnlyAllowedMetrics(self):
+    def test_rejectsUnknownQualityMetricField(self):
         report = self.report()
         report["qualityMetrics"]["unexpectedAuc"] = 0.99
+
+        with self.assertRaises(ModelCardValidationError):
+            build_model_card(report, self.metadata(), GENERATED_AT)
+
+    def test_doesNotCopyUnexpectedInputSummaryFields(self):
+        report = self.report()
         report["inputSummary"]["rawDatasetRows"] = [{"unsafe": True}]
         card = build_model_card(report, self.metadata(), GENERATED_AT)
 
         self.assertEqual(ALLOWED_METRICS, set(card["metricsSummary"]))
-        self.assertNotIn("unexpectedAuc", json.dumps(card))
         self.assertNotIn("rawDatasetRows", json.dumps(card))
 
     def test_preservesMetricBasis(self):
@@ -97,6 +102,13 @@ class ModelCardGeneratorTest(unittest.TestCase):
 
     def test_includesApprovedForShadowCompareOnly(self):
         self.assertEqual(["COMPARE", "SHADOW"], self.model_card()["approvedFor"])
+
+    def test_rejectsOfflineEvaluationApprovedFor(self):
+        metadata = self.metadata()
+        metadata["approvedFor"] = ["OFFLINE_EVALUATION"]
+
+        with self.assertRaises(ModelCardValidationError):
+            build_model_card(self.report(), metadata, GENERATED_AT)
 
     def test_doesNotCopyRawReport(self):
         report = self.report()
@@ -148,6 +160,82 @@ class ModelCardGeneratorTest(unittest.TestCase):
 
         with self.assertRaises(ModelCardValidationError):
             build_model_card(self.report(), metadata, GENERATED_AT)
+
+    def test_rejectsUnsupportedEvaluationReportType(self):
+        report = self.report()
+        report["reportType"] = "OTHER_REPORT"
+
+        with self.assertRaises(ModelCardValidationError):
+            build_model_card(report, self.metadata(), GENERATED_AT)
+
+    def test_rejectsMissingEvaluationReportType(self):
+        report = self.report()
+        report.pop("reportType")
+
+        with self.assertRaises(ModelCardValidationError):
+            build_model_card(report, self.metadata(), GENERATED_AT)
+
+    def test_rejectsUnsupportedMetricBasis(self):
+        report = self.report()
+        report["qualityMetrics"]["metricBasis"] = "roc_auc"
+
+        with self.assertRaises(ModelCardValidationError):
+            build_model_card(report, self.metadata(), GENERATED_AT)
+
+    def test_rejectsMissingMetricBasis(self):
+        report = self.report()
+        report["qualityMetrics"].pop("metricBasis")
+
+        with self.assertRaises(ModelCardValidationError):
+            build_model_card(report, self.metadata(), GENERATED_AT)
+
+    def test_rejectsUnsupportedDatasetTimeBasis(self):
+        report = self.report()
+        report["inputSummary"]["exportMetadata"]["timeBasis"] = "TRANSACTION_CREATED_AT"
+
+        with self.assertRaises(ModelCardValidationError):
+            build_model_card(report, self.metadata(), GENERATED_AT)
+
+    def test_rejectsUnsupportedDatasetDeduplicationPolicy(self):
+        report = self.report()
+        report["inputSummary"]["exportMetadata"]["deduplicationPolicy"] = "LATEST_ONLY"
+
+        with self.assertRaises(ModelCardValidationError):
+            build_model_card(report, self.metadata(), GENERATED_AT)
+
+    def test_rejectsUnknownDisagreementSummaryField(self):
+        report = self.report()
+        report["disagreementSummary"]["rawExamples"] = []
+
+        with self.assertRaises(ModelCardValidationError):
+            build_model_card(report, self.metadata(), GENERATED_AT)
+
+    def test_preservesRequiredNotIntendedUseWhenCallerOverrides(self):
+        metadata = self.metadata()
+        metadata["notIntendedUse"] = ["OFFLINE_ONLY"]
+
+        self.assertEqual(
+            [
+                "NO_AUTOMATIC_APPROVE_DECLINE_BLOCK",
+                "NO_MODEL_PROMOTION_APPROVAL",
+                "NO_PAYMENT_AUTHORIZATION",
+                "NO_PRODUCTION_DECISIONING_APPROVAL",
+                "NO_THRESHOLD_RECOMMENDATION",
+                "OFFLINE_ONLY",
+            ],
+            build_model_card(self.report(), metadata, GENERATED_AT)["notIntendedUse"],
+        )
+
+    def test_generatedModelCardAlwaysIncludesRequiredNonGoals(self):
+        self.assertTrue(
+            set([
+                "NO_AUTOMATIC_APPROVE_DECLINE_BLOCK",
+                "NO_MODEL_PROMOTION_APPROVAL",
+                "NO_PAYMENT_AUTHORIZATION",
+                "NO_PRODUCTION_DECISIONING_APPROVAL",
+                "NO_THRESHOLD_RECOMMENDATION",
+            ]).issubset(set(self.model_card()["notIntendedUse"]))
+        )
 
     def test_goldenModelCardFixtureMatchesGeneratedOutput(self):
         self.assertEqual(self.expected_card(), self.model_card())
