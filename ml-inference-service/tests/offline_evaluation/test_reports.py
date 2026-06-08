@@ -2,6 +2,7 @@ import json
 import unittest
 
 from offline_evaluation.dataset_reader import read_fdp102_jsonl
+from offline_evaluation.dataset_schema import DatasetValidationError
 from offline_evaluation.disagreement_report import build_disagreement_report
 from offline_evaluation.evaluation_runner import build_evaluation_report, build_input_summary
 from offline_evaluation.quality_metrics import build_quality_metrics, ranked_evaluation_record_ids
@@ -35,7 +36,7 @@ class InputSummaryReportTest(unittest.TestCase):
 
         summary = build_input_summary(parsed, GENERATED_AT, malformed_excluded=1)
 
-        self.assertEqual(1, summary["recordsExcludedAsMalformed"])
+        self.assertEqual(0, summary["recordsExcludedAsMalformed"])
 
     def test_inputSummaryCountsMissingMl(self):
         summary = self._summary(record(mlRiskLevel=None, mlScoreBucket=None))
@@ -61,6 +62,23 @@ class InputSummaryReportTest(unittest.TestCase):
         parsed = read_fdp102_jsonl(jsonl(record()))
 
         self.assertEqual(build_input_summary(parsed, GENERATED_AT), build_input_summary(parsed, GENERATED_AT))
+
+    def test_invalidRecordAbortsEvaluation(self):
+        with self.assertRaises(DatasetValidationError):
+            build_evaluation_report(jsonl(record(mlRiskLevel="BROKEN_ENUM")), generated_at=GENERATED_AT)
+
+    def test_missingRequiredFieldAbortsEvaluation(self):
+        bad_record = record()
+        bad_record.pop("evaluationLabel")
+
+        with self.assertRaises(DatasetValidationError):
+            build_evaluation_report(jsonl(bad_record), generated_at=GENERATED_AT)
+
+    def test_successfulReportMalformedCountersAreZero(self):
+        report = build_evaluation_report(jsonl(record()), generated_at=GENERATED_AT)
+
+        self.assertEqual(0, report["inputSummary"]["recordsExcludedAsMalformed"])
+        self.assertEqual(0, report["inputSummary"]["recordsExcludedDueToMissingRequiredEvaluationFields"])
 
     def _summary(self, *records):
         return build_input_summary(read_fdp102_jsonl(jsonl(*records)), GENERATED_AT)
@@ -216,7 +234,27 @@ class ReportWriterTest(unittest.TestCase):
         payload = report_json(self._report())
 
         self.assertNotIn("transactionReference", payload)
+        self.assertNotIn("evaluationRecordId", payload)
+        self.assertNotIn("eval-", payload)
         self.assertNotIn("txnref-", payload)
+
+    def test_inputAllowsPseudonymousReferencesButReportDoesNotEmitThem(self):
+        payload = report_json(self._report())
+
+        self.assertNotIn("eval-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", payload)
+        self.assertNotIn("txnref-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", payload)
+
+    def test_reportDoesNotContainEvaluationRecordId(self):
+        self.assertNotIn("evaluationRecordId", report_json(self._report()))
+
+    def test_reportDoesNotContainTransactionReference(self):
+        self.assertNotIn("transactionReference", report_json(self._report()))
+
+    def test_reportDoesNotContainEvalPrefix(self):
+        self.assertNotIn("eval-", report_json(self._report()))
+
+    def test_reportDoesNotContainTxnrefPrefix(self):
+        self.assertNotIn("txnref-", report_json(self._report()))
 
     def test_reportDoesNotContainRawSensitiveFields(self):
         payload = report_json(self._report())
@@ -235,6 +273,26 @@ class ReportWriterTest(unittest.TestCase):
 
         self.assertNotIn("modelPromotion", payload)
         self.assertNotIn("thresholdRecommendation", payload)
+
+    def test_reportRejectsSnakeCaseGroundTruth(self):
+        with self.assertRaises(ValueError):
+            report_json({"ground_truth": "unsafe"})
+
+    def test_reportRejectsUppercaseTrainingLabel(self):
+        with self.assertRaises(ValueError):
+            report_json({"TRAINING_LABEL": "unsafe"})
+
+    def test_reportRejectsEvaluationRecordId(self):
+        with self.assertRaises(ValueError):
+            report_json({"evaluationRecordId": "eval-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
+
+    def test_reportRejectsTxnrefPrefix(self):
+        with self.assertRaises(ValueError):
+            report_json({"safe": "txnref-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"})
+
+    def test_reportRejectsCompactForbiddenTerms(self):
+        with self.assertRaises(ValueError):
+            report_json({"raw-feature-vector": "unsafe"})
 
     def _report(self):
         return build_evaluation_report(jsonl(record(projectionStatus="MISSING")), review_budget=1, top_k=1, generated_at=GENERATED_AT)

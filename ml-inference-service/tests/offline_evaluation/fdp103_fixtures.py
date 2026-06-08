@@ -34,7 +34,7 @@ def record(**overrides: object) -> dict[str, object]:
         "feedbackType": "ENGINE_INTELLIGENCE_USEFULNESS",
         "usefulness": "HELPFUL",
         "accuracyAssessment": "SIGNALS_LOOK_CORRECT",
-        "projectionStatus": "PRESENT",
+        "projectionStatus": "AVAILABLE",
         "agreementStatus": "ENGINES_AGREE",
         "riskMismatchStatus": "NONE",
         "scoreDeltaBucket": "SMALL_DELTA",
@@ -52,9 +52,10 @@ def record(**overrides: object) -> dict[str, object]:
 
 
 def jsonl(*records: dict[str, object], metadata_overrides: dict[str, object] | None = None) -> str:
-    first = metadata(**(metadata_overrides or {}))
+    first = metadata()
     first["rawRowsRead"] = len(records)
     first["recordsReturned"] = len(records)
+    first.update(metadata_overrides or {})
     lines = [json.dumps(first, separators=(",", ":"))]
     lines.extend(json.dumps({"type": "DATASET_RECORD", "record": item}, separators=(",", ":")) for item in records)
     return "\n".join(lines) + "\n"

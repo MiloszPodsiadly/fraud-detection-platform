@@ -83,6 +83,13 @@ class OfflineEvaluationDocumentationTest(unittest.TestCase):
     def test_docsMentionNotEvaluationEligibleExcluded(self):
         self.assertDocContains("NOT_EVALUATION_ELIGIBLE is excluded from model-quality metrics")
 
+    def test_docsMentionFailFastMalformedInputPolicy(self):
+        self.assertDocContains("FDP-103 v1 fails fast on malformed or invalid schema input")
+
+    def test_docsMentionPseudonymousInputReferencesStayInternal(self):
+        self.assertDocContains("accepts FDP-102 pseudonymous input references only for parsing and deterministic ordering")
+        self.assertDocContains("must not emit `evaluationRecordId`, `transactionReference`, `eval-`, or `txnref-`")
+
     def assertDocContains(self, text: str):
         self.assertIn(text, self.doc())
 
