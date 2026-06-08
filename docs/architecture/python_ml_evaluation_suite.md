@@ -30,6 +30,11 @@ optional metadata or record fields are ignored. Invalid known fields fail valida
 Failed FDP-102 exports abort evaluation. In other words, failed FDP-102 exports abort evaluation. A metadata line with `failureReason != null` is a failed export, not a
 successful empty dataset and not a zero-record evaluation input.
 
+FDP-103 v1 fails fast on malformed or invalid schema input. Malformed-record exclusion counters are reserved for a
+future tolerant evaluation mode and remain zero for successful v1 reports. Invalid known fields, missing required
+fields, unsafe values, inconsistent metadata, overlong lines, and inputs beyond the bounded FDP-102 limits abort
+evaluation before a successful report is generated.
+
 ## Label Semantics
 
 Analyst labels are evaluation signals, not ground truth. In other words, analyst labels are evaluation signals, not ground truth. They are not model training labels, final decisions, payment
@@ -52,6 +57,12 @@ fraud.
 FDP-102 currently supplies risk and score buckets rather than raw numeric ML scores. FDP-103 therefore uses documented
 bucket-based ordering for ranking diagnostics: higher ML risk or score buckets first, then deterministic
 `evaluationRecordId` tie-break. It does not invent raw scores.
+
+FDP-103 accepts FDP-102 pseudonymous input references only for parsing and deterministic ordering. Reports are
+aggregate-only and must not emit `evaluationRecordId`, `transactionReference`, `eval-`, or `txnref-` values.
+
+Reason codes and diagnostic signals are validated as bounded machine-code values. These checks reject obvious unsafe
+raw or sensitive patterns, but they are bounded safeguards, not a full DLP control.
 
 ## Reports
 
