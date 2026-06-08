@@ -261,7 +261,7 @@ def validate_model_card(raw: dict[str, Any]) -> dict[str, Any]:
         "notIntendedUse": _not_intended_use(raw),
         "metricsSummary": _metrics_summary(raw),
         "limitations": _bounded_machine_code_list(raw, "limitations", MAX_LIMITATIONS),
-        "warnings": _bounded_machine_code_list(raw, "warnings", MAX_WARNINGS),
+        "warnings": _optional_machine_code_list(raw, "warnings", MAX_WARNINGS),
         "governanceStatus": _required_constant(raw, "governanceStatus", GOVERNANCE_STATUS),
     }
     _reject_unsafe(normalized)
@@ -367,7 +367,37 @@ def _metrics_summary(raw: dict[str, Any]) -> dict[str, Any]:
     for field in sorted(RATE_METRIC_FIELDS):
         summary[field] = _required_rate(value, field)
     summary["disagreementSummary"] = _disagreement_summary(value["disagreementSummary"])
+    _validate_metric_consistency(summary)
     return {field: summary[field] for field in _metrics_order()}
+
+
+def _validate_metric_consistency(summary: dict[str, Any]) -> None:
+    dataset_records = summary["datasetRecordsRead"]
+    accepted = summary["recordsAcceptedForEvaluation"]
+    excluded_not_eligible = summary["recordsExcludedNotEvaluationEligible"]
+    not_eligible = summary["notEvaluationEligibleCount"]
+    bounded_fields = [
+        "recordsAcceptedForEvaluation",
+        "recordsExcludedNotEvaluationEligible",
+        "missingMlCount",
+        "missingRulesCount",
+        "missingProjectionCount",
+        "notEvaluationEligibleCount",
+        "mlCaughtRulesMissedCount",
+        "rulesCaughtMlMissedCount",
+    ]
+
+    for field in bounded_fields:
+        if summary[field] > dataset_records:
+            raise ModelCardValidationError(f"metricsSummary.{field} must not exceed datasetRecordsRead")
+    if accepted + excluded_not_eligible > dataset_records:
+        raise ModelCardValidationError(
+            "recordsAcceptedForEvaluation plus recordsExcludedNotEvaluationEligible must not exceed datasetRecordsRead"
+        )
+    if not_eligible != excluded_not_eligible:
+        raise ModelCardValidationError("notEvaluationEligibleCount must match recordsExcludedNotEvaluationEligible")
+    if sum(summary["disagreementSummary"].values()) > dataset_records:
+        raise ModelCardValidationError("disagreementSummary total must not exceed datasetRecordsRead")
 
 
 def _disagreement_summary(raw: Any) -> dict[str, int]:
@@ -442,6 +472,25 @@ def _bounded_machine_code_list(raw: dict[str, Any], field: str, max_items: int) 
         if len(value) > 256:
             raise ModelCardValidationError(f"{field} contains oversized item")
     return values[:max_items]
+
+
+def _optional_machine_code_list(raw: dict[str, Any], field: str, max_items: int) -> list[str]:
+    value = raw.get(field, [])
+    if value is None:
+        value = []
+    if not isinstance(value, list):
+        raise ModelCardValidationError(f"{field} must be a list")
+    if len(value) > max_items:
+        raise ModelCardValidationError(f"{field} exceeds maximum item count")
+    result = []
+    for item in value:
+        if not isinstance(item, str) or MACHINE_CODE_PATTERN.fullmatch(item) is None:
+            raise ModelCardValidationError(f"{field} must contain machine-code strings")
+        _reject_unsafe_value(item)
+        if len(item) > 256:
+            raise ModelCardValidationError(f"{field} contains oversized item")
+        result.append(item)
+    return sorted(set(result))
 
 
 def _reject_unsafe(value: Any) -> None:

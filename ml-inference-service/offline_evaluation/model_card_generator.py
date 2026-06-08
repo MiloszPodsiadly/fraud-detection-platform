@@ -98,7 +98,7 @@ def build_model_card(evaluation_report: dict[str, Any], model_metadata: dict[str
         "notIntendedUse": _not_intended_use(model_metadata),
         "metricsSummary": _metrics_summary(input_summary, quality_metrics, disagreement_summary),
         "limitations": REQUIRED_LIMITATIONS,
-        "warnings": list(evaluation_report.get("warnings", [])),
+        "warnings": _warnings(evaluation_report),
         "governanceStatus": GOVERNANCE_STATUS,
     }
     return validate_model_card(model_card)
@@ -148,6 +148,15 @@ def _not_intended_use(model_metadata: dict[str, Any]) -> list[str]:
     if not isinstance(caller_values, list):
         raise ModelCardValidationError("model metadata notIntendedUse must be a list")
     return sorted(set(DEFAULT_NOT_INTENDED_USE) | set(caller_values))
+
+
+def _warnings(evaluation_report: dict[str, Any]) -> list[str]:
+    value = evaluation_report.get("warnings", [])
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ModelCardValidationError("warnings must be a list")
+    return value
 
 
 def _required_quality_metrics(evaluation_report: dict[str, Any]) -> dict[str, Any]:
