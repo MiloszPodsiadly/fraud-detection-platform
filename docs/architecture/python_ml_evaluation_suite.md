@@ -81,6 +81,9 @@ Generated reports are aggregate-first and include:
 - exclusions,
 - bounded warnings.
 
+FDP-104 Model Card v1 consumes FDP-103 aggregate reports only. It does not consume raw dataset rows, per-record
+identifiers, raw payloads, raw feature vectors, or raw reports.
+
 The report writer does not emit per-record output by default and does not emit raw transaction IDs, customer/account/
 card/device/merchant identifiers, analyst IDs, submitted-by values, correlation IDs, idempotency keys, request hashes,
 raw payloads, raw feature vectors, raw evidence, raw ML requests or responses, endpoints, tokens, secrets, stack

@@ -12,9 +12,11 @@ transaction -> features -> multiple engines -> risk intelligence -> alert/case -
 ```
 
 FDP-101 tightens and maintains the pre-exposure shared `FraudEngineResult` contract. FDP-102 adds an internal
-alert-service feedback dataset-export foundation for offline evaluation input only. These changes do not alter the
-current event flow, current scoring selection, Kafka payloads, API/OpenAPI surface, analyst UI, model retraining,
-thresholds, automatic decisioning, recommendations, payment authorization, alert severity, or fraud-case status.
+alert-service feedback dataset-export foundation for offline evaluation input only. FDP-104 adds an offline Model
+Card v1 governance artifact that consumes FDP-103 aggregate evaluation reports only. These changes do not alter the
+current event flow, current scoring selection, Kafka payloads, API/OpenAPI surface, analyst UI, dashboards, model
+retraining, thresholds, automatic decisioning, recommendations, payment authorization, alert severity, or fraud-case
+status.
 Existing `TransactionScoredEvent` shape remains unchanged. Later exposure requires a separate scoped PR with
 compatibility and rollout gates. Later public/operator-triggered export also requires authorization, sensitive-read
 audit, rate limits, privacy review, and retention policy.
