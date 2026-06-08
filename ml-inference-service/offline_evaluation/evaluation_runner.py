@@ -6,9 +6,10 @@ from offline_evaluation.dataset_reader import read_fdp102_jsonl
 from offline_evaluation.dataset_schema import ParsedDataset
 from offline_evaluation.disagreement_report import build_disagreement_report
 from offline_evaluation.quality_metrics import build_quality_metrics
+from offline_evaluation.report_schema import REPORT_TYPE
 
 
-def build_input_summary(parsed: ParsedDataset, generated_at: str | None = None, malformed_excluded: int = 0) -> dict[str, object]:
+def build_input_summary(parsed: ParsedDataset, generated_at: str | None = None) -> dict[str, object]:
     generated = generated_at or datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     return {
         "datasetRecordsRead": parsed.dataset_records_read,
@@ -39,7 +40,7 @@ def build_evaluation_report(jsonl: str, review_budget: int = 10, top_k: int = 10
         "generatedAt": input_summary["evaluationGeneratedAt"],
         "inputSummary": input_summary,
         "qualityMetrics": build_quality_metrics(parsed.records, review_budget, top_k),
-        "reportType": "PYTHON_ML_EVALUATION_FOUNDATION",
+        "reportType": REPORT_TYPE,
         "warnings": _warnings(parsed),
     }
 

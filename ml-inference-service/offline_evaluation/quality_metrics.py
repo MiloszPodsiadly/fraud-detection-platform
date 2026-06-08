@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from offline_evaluation.dataset_schema import DatasetRecord, ml_ranking_score, risk_category
+from offline_evaluation.dataset_schema import DatasetRecord, engine_risk_category, ml_ranking_score
 
 
 def build_quality_metrics(records: tuple[DatasetRecord, ...] | list[DatasetRecord], review_budget: int, top_k: int) -> dict[str, float | int | str]:
@@ -19,7 +19,7 @@ def build_quality_metrics(records: tuple[DatasetRecord, ...] | list[DatasetRecor
     negatives = [record for record in eligible if record.is_evaluation_negative]
     high_ml_negatives = [
         record for record in negatives
-        if risk_category(record.ml_risk_level, record.ml_score_bucket) == "high"
+        if engine_risk_category(record.ml_engine_status, record.ml_risk_level, record.ml_score_bucket) == "high"
     ]
     return {
         "metricBasis": "bucket_ordered_offline_diagnostic",
@@ -28,13 +28,13 @@ def build_quality_metrics(records: tuple[DatasetRecord, ...] | list[DatasetRecor
         "falsePositiveRate": _share(len(high_ml_negatives), len(negatives)),
         "mlCaughtRulesMissedCount": sum(
             1 for record in positives
-            if risk_category(record.ml_risk_level, record.ml_score_bucket) == "high"
-            and risk_category(record.rules_risk_level, record.rules_score_bucket) != "high"
+            if engine_risk_category(record.ml_engine_status, record.ml_risk_level, record.ml_score_bucket) == "high"
+            and engine_risk_category(record.rules_engine_status, record.rules_risk_level, record.rules_score_bucket) != "high"
         ),
         "rulesCaughtMlMissedCount": sum(
             1 for record in positives
-            if risk_category(record.rules_risk_level, record.rules_score_bucket) == "high"
-            and risk_category(record.ml_risk_level, record.ml_score_bucket) != "high"
+            if engine_risk_category(record.rules_engine_status, record.rules_risk_level, record.rules_score_bucket) == "high"
+            and engine_risk_category(record.ml_engine_status, record.ml_risk_level, record.ml_score_bucket) != "high"
         ),
         "missingMlCount": sum(1 for record in records if record.ml_signal_missing),
         "missingRulesCount": sum(1 for record in records if record.rules_signal_missing),

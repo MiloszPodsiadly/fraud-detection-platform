@@ -157,7 +157,7 @@ class DatasetMetadata:
 
     def as_report_dict(self) -> dict[str, Any]:
         return {
-            "deduplicationPolicy": "FDP102_BOUNDED_DEDUPLICATION",
+            "deduplicationPolicy": self.deduplication_policy,
             "exportedAt": self.exported_at,
             "fromInclusive": self.from_inclusive,
             "maxRecords": self.max_records,
@@ -324,6 +324,12 @@ def risk_category(risk_level: str | None, score_bucket: str | None) -> str:
     raise DatasetValidationError("unsupported risk or score bucket")
 
 
+def engine_risk_category(status: str | None, risk_level: str | None, score_bucket: str | None) -> str:
+    if status != "AVAILABLE":
+        return "missing"
+    return risk_category(risk_level, score_bucket)
+
+
 def ml_ranking_score(record: DatasetRecord) -> int:
     if record.ml_engine_status != "AVAILABLE":
         return -1
@@ -354,9 +360,12 @@ def _validate_engine_signal(
         risk_level: str | None,
         score_bucket: str | None,
 ) -> None:
+    has_signal = risk_level is not None or score_bucket is not None
     if status is None:
+        if has_signal:
+            raise DatasetValidationError(f"{prefix}EngineStatus is required when risk or score is present")
         return
-    if status != "AVAILABLE" and (risk_level is not None or score_bucket is not None):
+    if status != "AVAILABLE" and has_signal:
         raise DatasetValidationError(f"{prefix}EngineStatus {status} must not include risk or score")
 
 

@@ -9,8 +9,6 @@ from offline_evaluation.report_schema import MAX_WARNINGS, REPORT_TYPE
 
 FORBIDDEN_REPORT_COMPACT_TERMS = {
     "rawtransactionid",
-    "transactionreference",
-    "evaluationrecordid",
     "customerid",
     "accountid",
     "cardid",
@@ -39,9 +37,14 @@ FORBIDDEN_REPORT_COMPACT_TERMS = {
     "modelpromotion",
     "thresholdrecommendation",
 }
+FORBIDDEN_REPORT_FIELD_NAMES = {
+    "transactionreference",
+    "evaluationrecordid",
+}
 
 
 def report_json(report: dict[str, Any]) -> str:
+    _reject_forbidden_report_fields(report)
     safe_report = dict(report)
     safe_report["reportType"] = REPORT_TYPE
     safe_report["warnings"] = sorted(str(item) for item in safe_report.get("warnings", []))[:MAX_WARNINGS]
@@ -58,6 +61,17 @@ def report_json(report: dict[str, Any]) -> str:
 def write_report(report: dict[str, Any], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(report_json(report), encoding="utf-8")
+
+
+def _reject_forbidden_report_fields(value: Any) -> None:
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if _compact(str(key)) in FORBIDDEN_REPORT_FIELD_NAMES:
+                raise ValueError(f"report contains forbidden field: {key}")
+            _reject_forbidden_report_fields(nested)
+    elif isinstance(value, list):
+        for item in value:
+            _reject_forbidden_report_fields(item)
 
 
 def _compact(value: str) -> str:

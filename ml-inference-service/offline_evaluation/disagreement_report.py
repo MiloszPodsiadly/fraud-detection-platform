@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from offline_evaluation.dataset_schema import DatasetRecord, risk_category
+from offline_evaluation.dataset_schema import DatasetRecord, engine_risk_category
 
 
 def build_disagreement_report(records: tuple[DatasetRecord, ...] | list[DatasetRecord]) -> dict[str, int]:
@@ -18,8 +18,8 @@ def build_disagreement_report(records: tuple[DatasetRecord, ...] | list[DatasetR
         if not record.is_evaluation_eligible:
             report["notEvaluationEligibleExcluded"] += 1
             continue
-        ml = risk_category(record.ml_risk_level, record.ml_score_bucket)
-        rules = risk_category(record.rules_risk_level, record.rules_score_bucket)
+        ml = engine_risk_category(record.ml_engine_status, record.ml_risk_level, record.ml_score_bucket)
+        rules = engine_risk_category(record.rules_engine_status, record.rules_risk_level, record.rules_score_bucket)
         if rules == "missing" and ml == "missing":
             report["bothMissing"] += 1
         elif rules == "missing":
