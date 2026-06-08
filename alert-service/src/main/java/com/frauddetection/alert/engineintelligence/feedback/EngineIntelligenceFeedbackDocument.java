@@ -22,6 +22,10 @@ import java.util.List;
         @CompoundIndex(
                 name = "engine_intelligence_feedback_transaction_submitted_feedback_idx",
                 def = "{'transactionId': 1, 'submittedAt': -1, 'feedbackId': 1}"
+        ),
+        @CompoundIndex(
+                name = "engine_intelligence_feedback_dataset_submitted_idx",
+                def = "{'submittedAt': -1, 'feedbackId': 1}"
         )
 })
 public class EngineIntelligenceFeedbackDocument {
