@@ -58,6 +58,7 @@ class ShadowPerformanceScopeGuardTest(unittest.TestCase):
         self.assertIn("does not recompute metrics", doc)
         self.assertIn("does not read FDP-102 JSONL exports", doc)
         self.assertIn("does not read FDP-103 raw evaluation reports", doc)
+        self.assertIn("evaluation population and sample-size context", doc)
 
     def test_docsDescribeNonGoalsAndNoRuntimeSurface(self):
         doc = SUMMARY_DOC.read_text(encoding="utf-8")
@@ -70,8 +71,23 @@ class ShadowPerformanceScopeGuardTest(unittest.TestCase):
         self.assertIn("scheduled jobs, DB writes, Kafka messages, scoring changes, registry writes", doc)
         self.assertIn("model artifact mutations", doc)
 
+    def test_docsDescribePopulationContextAsRequired(self):
+        doc = SUMMARY_DOC.read_text(encoding="utf-8")
+
+        self.assertIn("precisionAtBudget", doc)
+        self.assertIn("recallAtTopK", doc)
+        self.assertIn("falsePositiveRate", doc)
+        self.assertIn("must not be", doc)
+        self.assertIn("interpreted without this population context", doc)
+        self.assertIn("avoid performance overclaim", doc)
+        self.assertIn("small samples", doc)
+
     def test_glossaryMentionsShadowPerformanceSummary(self):
-        self.assertIn("Shadow Performance Summary v1", GLOSSARY_DOC.read_text(encoding="utf-8"))
+        glossary = GLOSSARY_DOC.read_text(encoding="utf-8")
+
+        self.assertIn("Shadow Performance Summary v1", glossary)
+        self.assertIn("includes population context for offline diagnostic metrics", glossary)
+        self.assertIn("does not recompute metrics", glossary)
 
     def assertNotInAnyOfflineFile(self, *terms: str):
         haystack = "\n".join(path.read_text(encoding="utf-8") for path in OFFLINE_ROOT.rglob("*.py"))
