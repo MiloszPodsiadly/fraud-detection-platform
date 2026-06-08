@@ -27,8 +27,8 @@ The first non-empty line must be `EXPORT_METADATA`. Metadata is required, datase
 unknown line types are rejected, malformed JSONL is rejected, and multiple metadata lines are rejected. Safe unknown
 optional metadata or record fields are ignored. Invalid known fields fail validation.
 
-Failed FDP-102 exports abort evaluation. In other words, failed FDP-102 exports abort evaluation. A metadata line with `failureReason != null` is a failed export, not a
-successful empty dataset and not a zero-record evaluation input.
+Failed FDP-102 exports abort evaluation. A metadata line with `failureReason != null` represents a failed FDP-102
+export. FDP-103 must abort evaluation and must not treat that input as an empty successful dataset.
 
 FDP-103 v1 fails fast on malformed or invalid schema input. Malformed-record exclusion counters are reserved for a
 future tolerant evaluation mode and remain zero for successful v1 reports. Invalid known fields, missing required
@@ -37,8 +37,8 @@ evaluation before a successful report is generated.
 
 ## Label Semantics
 
-Analyst labels are evaluation signals, not ground truth. In other words, analyst labels are evaluation signals, not ground truth. They are not model training labels, final decisions, payment
-decisions, or automatic decisioning signals.
+Analyst labels are evaluation signals only. They are not ground truth, model-training labels, final decisions,
+payment decisions, or automatic decisioning signals.
 
 Allowed labels:
 
@@ -53,6 +53,10 @@ NOT_EVALUATION_ELIGIBLE is excluded from model-quality metrics.
 Missing ML/rules/projection is explicit. Missing ML score is not zero. Missing ML risk is not `LOW`. Missing rules
 score is not zero. Missing rules risk is not `LOW`. Missing projection is counted separately and does not mean no
 fraud.
+
+FDP-103 v1 treats engineStatus as the source of truth for operational availability. For non-AVAILABLE engine statuses,
+risk and score bucket fields must be absent. `UNAVAILABLE`, `TIMEOUT`, `SKIPPED`, `DEGRADED`, and `FALLBACK_USED`
+are not ranked and are not high/low signals.
 
 FDP-102 currently supplies risk and score buckets rather than raw numeric ML scores. FDP-103 therefore uses documented
 bucket-based ordering for ranking diagnostics: higher ML risk or score buckets first, then deterministic
