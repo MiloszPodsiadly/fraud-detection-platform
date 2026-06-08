@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.function.Predicate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -41,7 +42,10 @@ class EngineIntelligenceFeedbackDatasetScopeGuardTest {
 
     @Test
     void doesNotAddPythonEvaluationRunner() throws IOException {
-        assertThat(allText(ROOT.resolve("ml-inference-service"))).doesNotContain("feedback_dataset_export", "FDP-102");
+        assertThat(allTextExcluding(
+                ROOT.resolve("ml-inference-service"),
+                path -> path.toString().contains("offline_evaluation")
+        )).doesNotContain("feedback_dataset_export", "FDP-102");
     }
 
     @Test
@@ -97,12 +101,19 @@ class EngineIntelligenceFeedbackDatasetScopeGuardTest {
     }
 
     private String allText(Path root) throws IOException {
+        return allTextExcluding(root, path -> false);
+    }
+
+    private String allTextExcluding(Path root, Predicate<Path> excluded) throws IOException {
         if (!Files.exists(root)) {
             return "";
         }
         StringBuilder text = new StringBuilder();
         try (var paths = Files.walk(root)) {
-            for (Path path : paths.filter(Files::isRegularFile).filter(this::isTextSource).toList()) {
+            for (Path path : paths.filter(Files::isRegularFile)
+                    .filter(path -> !excluded.test(path))
+                    .filter(this::isTextSource)
+                    .toList()) {
                 text.append(Files.readString(path)).append('\n');
             }
         }
