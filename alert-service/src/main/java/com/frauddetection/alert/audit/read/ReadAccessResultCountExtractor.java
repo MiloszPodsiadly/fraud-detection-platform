@@ -63,7 +63,11 @@ public class ReadAccessResultCountExtractor {
             return analyticsResponse.totals().advisories();
         }
         return switch (category) {
-            case ALERT_DETAIL, FRAUD_CASE_DETAIL, FRAUD_CASE_EVIDENCE_SUMMARY, GOVERNANCE_ADVISORY_DETAIL -> 1;
+            case ALERT_DETAIL,
+                    FRAUD_CASE_DETAIL,
+                    FRAUD_CASE_EVIDENCE_SUMMARY,
+                    GOVERNANCE_ADVISORY_DETAIL,
+                    SHADOW_PERFORMANCE_SUMMARY -> 1;
             case SCORED_TRANSACTION_SEARCH,
                     ENGINE_INTELLIGENCE_READ,
                     ENGINE_INTELLIGENCE_FEEDBACK_READ,
