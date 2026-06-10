@@ -29,7 +29,7 @@ public class ShadowPerformanceSummaryReadService {
         try {
             validator.validate(summary);
         } catch (ShadowPerformanceSummaryValidationException exception) {
-            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "Shadow performance summary is invalid.");
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Shadow performance summary is invalid.");
         }
         return ShadowPerformanceSummaryResponse.from(summary);
     }

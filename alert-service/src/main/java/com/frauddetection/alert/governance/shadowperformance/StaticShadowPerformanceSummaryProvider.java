@@ -1,11 +1,8 @@
 package com.frauddetection.alert.governance.shadowperformance;
 
-import org.springframework.stereotype.Component;
-
 import java.util.List;
 import java.util.Optional;
 
-@Component
 public class StaticShadowPerformanceSummaryProvider implements ShadowPerformanceSummaryProvider {
 
     static final String REQUIRED_BANNER = "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, "

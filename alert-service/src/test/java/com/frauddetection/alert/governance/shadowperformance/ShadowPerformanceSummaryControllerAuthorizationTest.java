@@ -1,8 +1,12 @@
 package com.frauddetection.alert.governance.shadowperformance;
 
+import com.frauddetection.alert.audit.read.ReadAccessAuditOutcome;
+import com.frauddetection.alert.audit.read.ReadAccessAuditResponseAdvice;
+import com.frauddetection.alert.audit.read.ReadAccessAuditService;
 import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
+import com.frauddetection.alert.audit.read.ReadAccessResultCountExtractor;
+import com.frauddetection.alert.audit.read.ReadAccessAuditClassifier;
 import com.frauddetection.alert.audit.read.ReadAccessResourceType;
-import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.auth.AnalystAuthenticationFactory;
@@ -25,13 +29,13 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.server.ResponseStatusException;
 
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.HttpStatus.NOT_FOUND;
 import static org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE;
-import static org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -47,7 +51,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         ApiAccessDeniedHandler.class,
         SecurityErrorResponseWriter.class,
         SecurityDeniedAccessTelemetrySliceTestConfig.class,
-        AlertServiceExceptionHandler.class
+        AlertServiceExceptionHandler.class,
+        ReadAccessAuditResponseAdvice.class,
+        ReadAccessAuditClassifier.class,
+        ReadAccessResultCountExtractor.class
 })
 @ActiveProfiles("test")
 @TestPropertySource(properties = "app.security.demo-auth.enabled=true")
@@ -62,7 +69,7 @@ class ShadowPerformanceSummaryControllerAuthorizationTest {
     private ShadowPerformanceSummaryReadService readService;
 
     @MockBean
-    private SensitiveReadAuditService sensitiveReadAuditService;
+    private ReadAccessAuditService readAccessAuditService;
 
     @MockBean
     private AlertServiceMetrics metrics;
@@ -73,7 +80,7 @@ class ShadowPerformanceSummaryControllerAuthorizationTest {
                 .andExpect(status().isUnauthorized());
 
         verifyNoInteractions(readService);
-        verifyNoInteractions(sensitiveReadAuditService);
+        verifyNoInteractions(readAccessAuditService);
     }
 
     @Test
@@ -82,7 +89,7 @@ class ShadowPerformanceSummaryControllerAuthorizationTest {
                 .andExpect(status().isForbidden());
 
         verifyNoInteractions(readService);
-        verifyNoInteractions(sensitiveReadAuditService);
+        verifyNoInteractions(readAccessAuditService);
     }
 
     @Test
@@ -110,7 +117,7 @@ class ShadowPerformanceSummaryControllerAuthorizationTest {
     }
 
     @Test
-    void userWithShadowPerformanceReadCanReadSummary() throws Exception {
+    void authorizedReadAuditsExactlyOnce() throws Exception {
         when(readService.currentSummary()).thenReturn(validResponse());
 
         mockMvc.perform(get(PATH).with(authentication(auth(AnalystAuthority.SHADOW_PERFORMANCE_READ))))
@@ -123,12 +130,13 @@ class ShadowPerformanceSummaryControllerAuthorizationTest {
                 .andExpect(jsonPath("$.metrics.precisionAtBudget").value(0.666667))
                 .andExpect(jsonPath("$.banner").value(StaticShadowPerformanceSummaryProvider.REQUIRED_BANNER));
 
-        verify(sensitiveReadAuditService).audit(
-                org.mockito.ArgumentMatchers.eq(ReadAccessEndpointCategory.SHADOW_PERFORMANCE_SUMMARY),
-                org.mockito.ArgumentMatchers.eq(ReadAccessResourceType.SHADOW_PERFORMANCE_SUMMARY),
-                org.mockito.ArgumentMatchers.isNull(),
-                org.mockito.ArgumentMatchers.eq(1),
-                any()
+        verify(readAccessAuditService).audit(
+                argThat(target -> target.endpointCategory() == ReadAccessEndpointCategory.SHADOW_PERFORMANCE_SUMMARY
+                        && target.resourceType() == ReadAccessResourceType.SHADOW_PERFORMANCE_SUMMARY
+                        && target.resourceId() == null),
+                eq(ReadAccessAuditOutcome.SUCCESS),
+                eq(1),
+                eq(null)
         );
     }
 
@@ -142,14 +150,14 @@ class ShadowPerformanceSummaryControllerAuthorizationTest {
     }
 
     @Test
-    void returns422WhenSummaryInvalid() throws Exception {
+    void invalidSummaryReturnsServiceUnavailable() throws Exception {
         when(readService.currentSummary()).thenThrow(new ResponseStatusException(
-                UNPROCESSABLE_ENTITY,
+                SERVICE_UNAVAILABLE,
                 "Shadow performance summary is invalid."
         ));
 
         mockMvc.perform(get(PATH).with(authentication(auth(AnalystAuthority.SHADOW_PERFORMANCE_READ))))
-                .andExpect(status().isUnprocessableEntity())
+                .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.message").value("Shadow performance summary is invalid."));
     }
 

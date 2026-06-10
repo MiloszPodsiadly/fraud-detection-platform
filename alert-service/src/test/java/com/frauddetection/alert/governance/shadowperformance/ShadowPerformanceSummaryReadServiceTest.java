@@ -19,6 +19,11 @@ class ShadowPerformanceSummaryReadServiceTest {
     private final ShadowPerformanceSummaryReadService service = new ShadowPerformanceSummaryReadService(provider, validator);
 
     @Test
+    void defaultProviderReturnsEmptyWhenNoCurrentSummaryConfigured() {
+        assertThat(new EmptyShadowPerformanceSummaryProvider().currentSummary()).isEmpty();
+    }
+
+    @Test
     void returnsCurrentShadowPerformanceSummary() {
         ShadowPerformanceSummary summary = validSummary();
         when(provider.currentSummary()).thenReturn(Optional.of(summary));
@@ -44,7 +49,7 @@ class ShadowPerformanceSummaryReadServiceTest {
     }
 
     @Test
-    void returns422WhenSummaryInvalid() {
+    void invalidSummaryReturnsServiceUnavailable() {
         ShadowPerformanceSummary summary = invalidSummary();
         when(provider.currentSummary()).thenReturn(Optional.of(summary));
         org.mockito.Mockito.doThrow(new ShadowPerformanceSummaryValidationException("invalid"))
@@ -53,7 +58,7 @@ class ShadowPerformanceSummaryReadServiceTest {
         assertThatThrownBy(service::currentSummary)
                 .isInstanceOf(ResponseStatusException.class)
                 .extracting(exception -> ((ResponseStatusException) exception).getStatusCode().value())
-                .isEqualTo(422);
+                .isEqualTo(503);
     }
 
     @Test
