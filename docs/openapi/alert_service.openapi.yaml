@@ -1521,6 +1521,32 @@ paths:
           $ref: "#/components/responses/NotFound"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/governance/shadow-performance/summary/current:
+    get:
+      summary: Read current Shadow Performance Summary
+      description: Returns the current validated FDP-105 Shadow Performance Summary as a bounded read-only DTO. Requires shadow-performance:read. The response is diagnostic-only and is not model promotion approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic approve/decline/block logic, and not analyst recommendation logic. This endpoint does not expose raw FDP-102 JSONL, raw FDP-103 reports, raw FDP-104 Model Cards, per-record examples, model registry data, model artifacts, scoring data, promotion fields, threshold recommendation fields, or decisioning fields.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      responses:
+        "200":
+          description: Current validated Shadow Performance Summary returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShadowPerformanceSummaryResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          description: Summary provider is unavailable, current summary fails validation, or sensitive-read audit is unavailable. Invalid current summaries are treated as server-side summary availability failures and never return partial response data or raw validation details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
 components:
   securitySchemes:
     bearerAuth:
@@ -4433,6 +4459,212 @@ components:
         count:
           type: integer
           minimum: 0
+    ShadowPerformanceSummaryResponse:
+      type: object
+      additionalProperties: false
+      required: [summaryType, summaryVersion, generatedAt, model, governance, evaluation, evaluationPopulation, metrics, disagreementSummary, warnings, limitations, banner]
+      properties:
+        summaryType:
+          type: string
+          enum: [SHADOW_PERFORMANCE_SUMMARY_V1]
+        summaryVersion:
+          type: string
+          enum: ["1.0"]
+        generatedAt:
+          type: string
+          format: date-time
+        model:
+          $ref: "#/components/schemas/ShadowPerformanceModelResponse"
+        governance:
+          $ref: "#/components/schemas/ShadowPerformanceGovernanceResponse"
+        evaluation:
+          $ref: "#/components/schemas/ShadowPerformanceEvaluationResponse"
+        evaluationPopulation:
+          $ref: "#/components/schemas/ShadowPerformancePopulationResponse"
+        metrics:
+          $ref: "#/components/schemas/ShadowPerformanceMetricsResponse"
+        disagreementSummary:
+          $ref: "#/components/schemas/ShadowPerformanceDisagreementResponse"
+        warnings:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        limitations:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            minLength: 1
+            maxLength: 256
+        banner:
+          type: string
+          description: Offline diagnostics only. No promotion, threshold, production decisioning, payment authorization, automatic operational action, or analyst recommendation authority is granted.
+    ShadowPerformanceModelResponse:
+      type: object
+      additionalProperties: false
+      required: [modelName, modelVersion, modelFamily, featureContractVersion]
+      properties:
+        modelName:
+          type: string
+          maxLength: 128
+        modelVersion:
+          type: string
+          maxLength: 128
+        modelFamily:
+          type: string
+          enum: [LOGISTIC_REGRESSION]
+        featureContractVersion:
+          type: string
+          maxLength: 128
+    ShadowPerformanceGovernanceResponse:
+      type: object
+      additionalProperties: false
+      required: [governanceStatus, approvedFor, diagnosticOnly, notProductionApproval, notPromotionApproval, notThresholdRecommendation, notPaymentAuthorization, notAutomaticDecisioning]
+      properties:
+        governanceStatus:
+          type: string
+          enum: [DIAGNOSTIC_ONLY]
+        approvedFor:
+          type: array
+          minItems: 2
+          maxItems: 2
+          uniqueItems: true
+          items:
+            type: string
+            enum: [COMPARE, SHADOW]
+        diagnosticOnly:
+          type: boolean
+        notProductionApproval:
+          type: boolean
+        notPromotionApproval:
+          type: boolean
+        notThresholdRecommendation:
+          type: boolean
+        notPaymentAuthorization:
+          type: boolean
+        notAutomaticDecisioning:
+          type: boolean
+    ShadowPerformanceEvaluationResponse:
+      type: object
+      additionalProperties: false
+      required: [evaluationReportType, evaluationReportVersion, metricBasis, datasetTimeBasis, datasetDeduplicationPolicy]
+      properties:
+        evaluationReportType:
+          type: string
+          enum: [PYTHON_ML_EVALUATION_FOUNDATION]
+        evaluationReportVersion:
+          type: string
+          enum: [FDP-103]
+        metricBasis:
+          type: string
+          enum: [bucket_ordered_offline_diagnostic]
+        datasetTimeBasis:
+          type: string
+          enum: [FEEDBACK_SUBMITTED_AT]
+        datasetDeduplicationPolicy:
+          type: string
+          enum: [TRANSACTION_REFERENCE_NEWEST_SUBMITTED_AT_FEEDBACK_ID_ASC]
+    ShadowPerformancePopulationResponse:
+      type: object
+      additionalProperties: false
+      required: [datasetRecordsRead, recordsAcceptedForEvaluation, recordsExcludedNotEvaluationEligible]
+      properties:
+        datasetRecordsRead:
+          type: integer
+          minimum: 0
+          maximum: 500
+        recordsAcceptedForEvaluation:
+          type: integer
+          minimum: 0
+          maximum: 500
+        recordsExcludedNotEvaluationEligible:
+          type: integer
+          minimum: 0
+          maximum: 500
+    ShadowPerformanceMetricsResponse:
+      type: object
+      additionalProperties: false
+      required: [precisionAtBudget, recallAtTopK, falsePositiveRate, mlCaughtRulesMissedCount, rulesCaughtMlMissedCount, missingMlCount, missingRulesCount, missingProjectionCount, notEvaluationEligibleCount]
+      properties:
+        precisionAtBudget:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        recallAtTopK:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        falsePositiveRate:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        mlCaughtRulesMissedCount:
+          type: integer
+          minimum: 0
+          maximum: 500
+        rulesCaughtMlMissedCount:
+          type: integer
+          minimum: 0
+          maximum: 500
+        missingMlCount:
+          type: integer
+          minimum: 0
+          maximum: 500
+        missingRulesCount:
+          type: integer
+          minimum: 0
+          maximum: 500
+        missingProjectionCount:
+          type: integer
+          minimum: 0
+          maximum: 500
+        notEvaluationEligibleCount:
+          type: integer
+          minimum: 0
+          maximum: 500
+    ShadowPerformanceDisagreementResponse:
+      type: object
+      additionalProperties: false
+      required: [rulesHighMlHigh, rulesHighMlLowOrMedium, rulesLowOrMediumMlHigh, rulesLowOrMediumMlLowOrMedium, rulesMissingMlPresent, mlMissingRulesPresent, bothMissing, notEvaluationEligibleExcluded]
+      properties:
+        rulesHighMlHigh:
+          type: integer
+          minimum: 0
+          maximum: 500
+        rulesHighMlLowOrMedium:
+          type: integer
+          minimum: 0
+          maximum: 500
+        rulesLowOrMediumMlHigh:
+          type: integer
+          minimum: 0
+          maximum: 500
+        rulesLowOrMediumMlLowOrMedium:
+          type: integer
+          minimum: 0
+          maximum: 500
+        rulesMissingMlPresent:
+          type: integer
+          minimum: 0
+          maximum: 500
+        mlMissingRulesPresent:
+          type: integer
+          minimum: 0
+          maximum: 500
+        bothMissing:
+          type: integer
+          minimum: 0
+          maximum: 500
+        notEvaluationEligibleExcluded:
+          type: integer
+          minimum: 0
+          maximum: 500
   responses:
     BadRequest:
       description: Request validation failed.

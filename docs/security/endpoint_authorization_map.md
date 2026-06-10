@@ -52,7 +52,7 @@ Do not choose an owner based on URL prefix alone. Choose owner by resource seman
 - `FraudCaseAuthorizationRules` owns the current fraud-case work queue, detail, evidence read and regulated update routes only when the primary resource is a fraud case.
 - `AuditAuthorizationRules` owns audit evidence, audit integrity, audit export, audit degradations, and trust-attestation evidence routes.
 - `SuspiciousTransactionAuthorizationRules` owns protected internal SuspiciousTransaction read-model routes.
-- `GovernanceAuthorizationRules` owns governance advisory projection, analytics, and advisory audit routes.
+- `GovernanceAuthorizationRules` owns governance advisory projection, analytics, advisory audit routes, and explicitly authorized governance diagnostic read APIs.
 - `RecoveryAuthorizationRules` owns operational recovery routes: outbox recovery, regulated mutation recovery, and unknown confirmations.
 - `TrustAuthorizationRules` owns trust incident and system trust-level operational views.
 - `BffAuthorizationRules` owns BFF lifecycle routes only, not business API routes.
@@ -106,6 +106,7 @@ Production BFF hardening remains deployment responsibility unless configured in 
 | `GET /internal/suspicious-transactions`, `GET /internal/suspicious-transactions/summary`, `GET /internal/suspicious-transactions/{suspiciousTransactionId}` | `SuspiciousTransactionAuthorizationRules` | `SUSPICIOUS_TRANSACTION_READ` | Protected internal read-only API | Safe method only | `AuthorizationRulesCoverageTest` |
 | `GET /internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert` | `SuspiciousTransactionAuthorizationRules` | `SUSPICIOUS_TRANSACTION_READ` + `ALERT_READ` | Protected internal backend-resolved linked-alert read context. Client-selected `alertId` query parameter is rejected. | Safe method only | `AuthorizationRulesCoverageTest`, `SuspiciousTransactionReadControllerAuthorizationTest`, `RouteCoverageAgainstMvcMappingsTest` |
 | `/governance/advisories/**` | `GovernanceAuthorizationRules` | `TRANSACTION_MONITOR_READ`, `GOVERNANCE_ADVISORY_AUDIT_WRITE` | Protected or denied | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
+| `GET /api/v1/governance/shadow-performance/summary/current` | `GovernanceAuthorizationRules` | `SHADOW_PERFORMANCE_READ` | Protected read-only diagnostic summary over validated FDP-105 Shadow Performance Summary. Not granted by generic transaction, fraud-case, or analyst read authorities. | Safe method only | `ShadowPerformanceSummaryControllerAuthorizationTest`, `RouteCoverageAgainstMvcMappingsTest` |
 | `/api/v1/audit/**` | `AuditAuthorizationRules` | `AUDIT_READ`, `AUDIT_VERIFY`, `AUDIT_EXPORT`, `AUDIT_DEGRADATION_RESOLVE` | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
 | `/system/trust-level`, `/api/v1/trust/incidents/**` | `TrustAuthorizationRules` | `AUDIT_VERIFY`, trust incident authorities | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
 | `/api/v1/decision-outbox/**`, `/api/v1/regulated-mutations/**`, `/api/v1/outbox/**` | `RecoveryAuthorizationRules` | Recovery, outbox, and audit verification authorities | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
@@ -134,6 +135,7 @@ The FDP-49 route ownership docs represent these Spring MVC controllers:
 - `FraudCaseWorkQueueSummaryController`
 - `GovernanceAdvisoryController`
 - `GovernanceAuditController`
+- `ShadowPerformanceSummaryController`
 - `OutboxRecoveryController`
 - `RegulatedMutationRecoveryController`
 - `ScoredTransactionController`
