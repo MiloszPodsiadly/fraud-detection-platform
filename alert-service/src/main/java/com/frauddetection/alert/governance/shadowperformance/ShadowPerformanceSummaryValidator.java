@@ -2,6 +2,8 @@ package com.frauddetection.alert.governance.shadowperformance;
 
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -71,7 +73,7 @@ class ShadowPerformanceSummaryValidator {
         }
         require("SHADOW_PERFORMANCE_SUMMARY_V1".equals(summary.summaryType()), "summaryType is unsupported");
         require("1.0".equals(summary.summaryVersion()), "summaryVersion is unsupported");
-        safeString(summary.generatedAt(), "generatedAt");
+        instant(summary.generatedAt(), "generatedAt");
         validateModel(summary.model());
         validateGovernance(summary.governance());
         validateEvaluation(summary.evaluation());
@@ -98,6 +100,7 @@ class ShadowPerformanceSummaryValidator {
         require(governance != null, "governance is missing");
         require("DIAGNOSTIC_ONLY".equals(governance.governanceStatus()), "governanceStatus is unsupported");
         require(governance.approvedFor() != null, "approvedFor is missing");
+        require(governance.approvedFor().size() == 2, "approvedFor must contain exactly COMPARE and SHADOW");
         require(APPROVED_FOR.equals(Set.copyOf(governance.approvedFor())), "approvedFor must be COMPARE and SHADOW only");
         require(governance.diagnosticOnly(), "diagnosticOnly must be true");
         require(governance.notProductionApproval(), "notProductionApproval must be true");
@@ -216,6 +219,15 @@ class ShadowPerformanceSummaryValidator {
         require(value != null && !value.isBlank(), field + " is required");
         require(value.length() <= 256, field + " is too long");
         rejectForbidden(value, field);
+    }
+
+    private void instant(String value, String field) {
+        safeString(value, field);
+        try {
+            Instant.parse(value);
+        } catch (DateTimeParseException exception) {
+            throw new ShadowPerformanceSummaryValidationException(field + " must be an ISO-8601 instant");
+        }
     }
 
     private void boundedCount(int value, String field) {
