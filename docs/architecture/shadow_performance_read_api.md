@@ -33,7 +33,9 @@ FDP-102 dataset export
 -> FDP-106 read API DTO
 ```
 
-FDP-106 is only the read API boundary over FDP-105.
+FDP-106 is only the read API boundary over FDP-105. Default runtime does not expose static fixture data: if no
+configured/current summary source exists, the production-safe provider returns empty and the endpoint fails closed with
+`404`. Static fixture summaries are only test/demo/local fixtures when explicitly instantiated by tests or local tooling.
 
 ## Response Boundary
 
@@ -54,11 +56,11 @@ analyst recommendation logic. It is not analyst recommendation logic.
 - `401`: unauthenticated request according to platform security behavior.
 - `403`: authenticated actor lacks `shadow-performance:read`.
 - `404`: no current summary exists.
-- `422`: a current summary exists but fails validation.
-- `503`: summary provider or sensitive-read audit is unavailable.
+- `503`: summary provider is unavailable, sensitive-read audit is unavailable, or a current summary exists but fails validation.
 
-The API never returns an empty fake summary, fabricated zero metrics, partial invalid summary, raw exception message,
-stack trace, file path, or raw artifact content.
+Invalid current summaries are server-side summary availability failures. The API never returns an empty fake summary,
+fabricated zero metrics, static fixture metrics by default, partial invalid summary, raw validation detail, raw exception
+message, stack trace, file path, or raw artifact content.
 
 ## Audit
 
@@ -68,6 +70,8 @@ body, raw metrics blob, raw Model Card, raw FDP-103 report, raw FDP-102 data, pe
 stack traces, or raw exception messages.
 
 Production/operator-facing exposure must keep this endpoint aligned with the platform sensitive-read audit policy.
+Successful reads are audited by the existing sensitive-read response advice; failed provider or invalid-summary reads are
+classified by the sensitive-read failure interceptor, with 5xx outcomes treated as `FAILED`.
 
 ## Non-Goals
 

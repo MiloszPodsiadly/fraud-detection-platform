@@ -1541,14 +1541,12 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "422":
-          description: Current summary exists but failed validation.
+        "503":
+          description: Summary provider is unavailable, current summary fails validation, or sensitive-read audit is unavailable. Invalid current summaries are treated as server-side summary availability failures and never return partial response data or raw validation details.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiErrorResponse"
-        "503":
-          $ref: "#/components/responses/ServiceUnavailable"
 components:
   securitySchemes:
     bearerAuth:
@@ -4533,6 +4531,7 @@ components:
           type: array
           minItems: 2
           maxItems: 2
+          uniqueItems: true
           items:
             type: string
             enum: [COMPARE, SHADOW]

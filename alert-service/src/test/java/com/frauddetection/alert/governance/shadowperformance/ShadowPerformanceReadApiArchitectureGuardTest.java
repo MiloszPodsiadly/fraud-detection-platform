@@ -1,6 +1,7 @@
 package com.frauddetection.alert.governance.shadowperformance;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.frauddetection.alert.audit.read.ReadAccessAuditClassifier;
 import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.audit.read.ReadAccessResourceType;
@@ -10,6 +11,8 @@ import org.springframework.mock.web.MockHttpServletRequest;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ShadowPerformanceReadApiArchitectureGuardTest {
@@ -18,11 +21,31 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
     private static final Path PRODUCTION_ROOT = Path.of("src/main/java/com/frauddetection/alert");
     private static final Path DOC = ROOT.resolve("docs/architecture/shadow_performance_read_api.md");
     private static final Path OPENAPI = ROOT.resolve("docs/openapi/alert_service.openapi.yaml");
+    private static final Path UI_ROOT = ROOT.resolve("analyst-console-ui/src");
 
     @Test
     void serializedResponseDoesNotExposeRawDataOrOverclaimFields() throws Exception {
-        String payload = new ObjectMapper().writeValueAsString(
+        ObjectMapper mapper = new ObjectMapper();
+        String payload = mapper.writeValueAsString(
                 ShadowPerformanceSummaryResponse.from(new StaticShadowPerformanceSummaryProvider().currentSummary().orElseThrow())
+        );
+        JsonNode json = mapper.readTree(payload);
+        List<String> topLevelFields = new ArrayList<>();
+        json.fieldNames().forEachRemaining(topLevelFields::add);
+
+        assertThat(topLevelFields).containsExactly(
+                "summaryType",
+                "summaryVersion",
+                "generatedAt",
+                "model",
+                "governance",
+                "evaluation",
+                "evaluationPopulation",
+                "metrics",
+                "disagreementSummary",
+                "warnings",
+                "limitations",
+                "banner"
         );
 
         for (String term : new String[]{
@@ -69,6 +92,15 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         }) {
             assertThat(payload).doesNotContain(term);
         }
+    }
+
+    @Test
+    void staticFixtureProviderIsNotLoadedByDefault() throws Exception {
+        String staticProvider = Files.readString(PRODUCTION_ROOT.resolve("governance/shadowperformance/StaticShadowPerformanceSummaryProvider.java"));
+        String emptyProvider = Files.readString(PRODUCTION_ROOT.resolve("governance/shadowperformance/EmptyShadowPerformanceSummaryProvider.java"));
+
+        assertThat(staticProvider).doesNotContain("@Component");
+        assertThat(emptyProvider).contains("@Component", "Optional.empty()");
     }
 
     @Test
@@ -148,9 +180,25 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "evaluationPopulation"
         );
         assertThat(openApi).doesNotContain(
+                "/api/v1/governance/shadow-performance/summaries",
+                "/api/v1/governance/shadow-performance/search",
+                "/api/v1/governance/shadow-performance/history",
                 "/api/v1/governance/shadow-performance/promotion",
                 "/api/v1/governance/shadow-performance/threshold",
-                "/api/v1/governance/shadow-performance/decisioning"
+                "/api/v1/governance/shadow-performance/decisioning",
+                "/api/v1/governance/shadow-performance/dashboard"
+        );
+    }
+
+    @Test
+    void fdp106DoesNotAddShadowPerformanceDashboardUi() throws Exception {
+        String uiSource = uiSource();
+
+        assertThat(uiSource).doesNotContain(
+                "/api/v1/governance/shadow-performance",
+                "shadow-performance/summary/current",
+                "shadowPerformance",
+                "ShadowPerformance"
         );
     }
 
@@ -179,6 +227,13 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         Path packageRoot = PRODUCTION_ROOT.resolve("governance/shadowperformance");
         return Files.walk(packageRoot)
                 .filter(path -> path.toString().endsWith(".java"))
+                .map(this::readUnchecked)
+                .reduce("", (left, right) -> left + "\n" + right);
+    }
+
+    private String uiSource() throws Exception {
+        return Files.walk(UI_ROOT)
+                .filter(path -> path.toString().endsWith(".js") || path.toString().endsWith(".jsx"))
                 .map(this::readUnchecked)
                 .reduce("", (left, right) -> left + "\n" + right);
     }
