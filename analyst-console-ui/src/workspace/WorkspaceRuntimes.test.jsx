@@ -12,6 +12,7 @@ const apiClient = {
   getSuspiciousTransaction: vi.fn(),
   listGovernanceAdvisories: vi.fn(),
   getGovernanceAdvisoryAnalytics: vi.fn(),
+  getCurrentShadowPerformanceSummary: vi.fn(),
   getGovernanceAdvisoryAudit: vi.fn(),
   recordGovernanceAdvisoryAudit: vi.fn()
 };
@@ -27,6 +28,7 @@ describe("workspace runtime ownership", () => {
     apiClient.getSuspiciousTransaction.mockResolvedValue({ suspiciousTransactionId: "suspicious-1" });
     apiClient.listGovernanceAdvisories.mockResolvedValue({ status: "AVAILABLE", count: 0, advisory_events: [] });
     apiClient.getGovernanceAdvisoryAnalytics.mockResolvedValue(analytics(1));
+    apiClient.getCurrentShadowPerformanceSummary.mockResolvedValue(shadowSummary());
     apiClient.getGovernanceAdvisoryAudit.mockResolvedValue({ status: "AVAILABLE", audit_events: [] });
     apiClient.recordGovernanceAdvisoryAudit.mockResolvedValue(undefined);
   });
@@ -64,6 +66,9 @@ describe("workspace runtime ownership", () => {
     rerender(runtimeElement("suspiciousTransactions"));
     await waitFor(() => expect(apiClient.listSuspiciousTransactions).toHaveBeenCalledTimes(1));
     expect(apiClient.getSuspiciousTransaction).not.toHaveBeenCalled();
+
+    rerender(runtimeElement("shadowPerformance"));
+    await waitFor(() => expect(apiClient.getCurrentShadowPerformanceSummary).toHaveBeenCalledTimes(1));
   });
 
   it("keeps governance queue and reports analytics as separate active owners", async () => {
@@ -83,13 +88,26 @@ describe("workspace runtime ownership", () => {
     expect(apiClient.getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
   });
 
+  it("does not fetch shadow performance data when shadow authority is missing", async () => {
+    const onResult = vi.fn();
+
+    renderRuntime("shadowPerformance", { canReadShadowPerformance: false }, runtimeValue({ canReadShadowPerformance: false }), {
+      ...runtimeProps(),
+      onResult
+    });
+
+    await waitFor(() => expect(lastRuntimeResult(onResult)).toBeDefined());
+    expect(apiClient.getCurrentShadowPerformanceSummary).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["analyst", "listFraudCaseWorkQueue"],
     ["fraudTransaction", "listAlerts"],
     ["transactionScoring", "listScoredTransactions"],
     ["suspiciousTransactions", "listSuspiciousTransactions"],
     ["compliance", "listGovernanceAdvisories"],
-    ["reports", "getGovernanceAdvisoryAnalytics"]
+    ["reports", "getGovernanceAdvisoryAnalytics"],
+    ["shadowPerformance", "getCurrentShadowPerformanceSummary"]
   ])("surfaces %s runtime API failures without replacing them with fake empty state", async (routeKey, methodName) => {
     apiClient[methodName].mockRejectedValueOnce(new Error(`${routeKey} unavailable`));
     const onResult = vi.fn();
@@ -157,6 +175,7 @@ function runtimeValue(overrides = {}) {
     canReadTransactions: true,
     canReadSuspiciousTransactions: true,
     canReadGovernanceAdvisories: true,
+    canReadShadowPerformance: true,
     canWriteGovernanceAudit: false,
     workspaceSessionResetKey: "demo:analyst-1",
     runtimeStatus: "ready",
@@ -202,5 +221,65 @@ function analytics(advisories) {
     decision_distribution: {},
     lifecycle_distribution: {},
     review_timeliness: { status: "LOW_CONFIDENCE" }
+  };
+}
+
+function shadowSummary() {
+  return {
+    summaryType: "SHADOW_PERFORMANCE_SUMMARY_V1",
+    summaryVersion: "1.0",
+    generatedAt: "2026-06-08T02:00:00Z",
+    model: {
+      modelName: "python-logistic-fraud-model",
+      modelVersion: "2026-04-21.trained.v1",
+      modelFamily: "LOGISTIC_REGRESSION",
+      featureContractVersion: "2026-04-22.v1"
+    },
+    governance: {
+      governanceStatus: "DIAGNOSTIC_ONLY",
+      approvedFor: ["COMPARE", "SHADOW"],
+      diagnosticOnly: true,
+      notProductionApproval: true,
+      notPromotionApproval: true,
+      notThresholdRecommendation: true,
+      notPaymentAuthorization: true,
+      notAutomaticDecisioning: true
+    },
+    evaluation: {
+      evaluationReportType: "PYTHON_ML_EVALUATION_FOUNDATION",
+      evaluationReportVersion: "FDP-103",
+      metricBasis: "bucket_ordered_offline_diagnostic",
+      datasetTimeBasis: "FEEDBACK_SUBMITTED_AT",
+      datasetDeduplicationPolicy: "TRANSACTION_REFERENCE_NEWEST_SUBMITTED_AT_FEEDBACK_ID_ASC"
+    },
+    evaluationPopulation: {
+      datasetRecordsRead: 5,
+      recordsAcceptedForEvaluation: 3,
+      recordsExcludedNotEvaluationEligible: 1
+    },
+    metrics: {
+      precisionAtBudget: 0.666667,
+      recallAtTopK: 0.5,
+      falsePositiveRate: 0.25,
+      mlCaughtRulesMissedCount: 1,
+      rulesCaughtMlMissedCount: 1,
+      missingMlCount: 1,
+      missingRulesCount: 1,
+      missingProjectionCount: 1,
+      notEvaluationEligibleCount: 1
+    },
+    disagreementSummary: {
+      rulesHighMlHigh: 1,
+      rulesHighMlLowOrMedium: 0,
+      rulesLowOrMediumMlHigh: 1,
+      rulesLowOrMediumMlLowOrMedium: 1,
+      rulesMissingMlPresent: 0,
+      mlMissingRulesPresent: 1,
+      bothMissing: 0,
+      notEvaluationEligibleExcluded: 1
+    },
+    warnings: ["MISSING_ML_SIGNAL_PRESENT"],
+    limitations: ["DIAGNOSTIC_ONLY"],
+    banner: "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic."
   };
 }

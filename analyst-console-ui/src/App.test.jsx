@@ -22,6 +22,7 @@ const {
   getSuspiciousTransactionSummary,
   getSuspiciousTransaction,
   getSuspiciousTransactionLinkedAlertContext,
+  getCurrentShadowPerformanceSummary,
   createAlertsApiClient
 } = vi.hoisted(() => {
   const listAlerts = vi.fn();
@@ -37,6 +38,7 @@ const {
   const getSuspiciousTransactionSummary = vi.fn();
   const getSuspiciousTransaction = vi.fn();
   const getSuspiciousTransactionLinkedAlertContext = vi.fn();
+  const getCurrentShadowPerformanceSummary = vi.fn();
   return {
     callbackPath: { value: true },
     completeLoginCallback: vi.fn(),
@@ -74,6 +76,7 @@ const {
     getSuspiciousTransactionSummary,
     getSuspiciousTransaction,
     getSuspiciousTransactionLinkedAlertContext,
+    getCurrentShadowPerformanceSummary,
     createAlertsApiClient: vi.fn(() => ({
       listAlerts,
       listFraudCaseWorkQueue,
@@ -85,6 +88,7 @@ const {
       getSuspiciousTransactionSummary,
       getSuspiciousTransaction,
       getSuspiciousTransactionLinkedAlertContext,
+      getCurrentShadowPerformanceSummary,
       getGovernanceAdvisoryAudit: vi.fn(),
       getAlert,
       getAssistantSummary,
@@ -111,6 +115,7 @@ vi.mock("./api/alertsApi.js", () => ({
   getSuspiciousTransactionSummary,
   getSuspiciousTransaction,
   getSuspiciousTransactionLinkedAlertContext,
+  getCurrentShadowPerformanceSummary,
   getGovernanceAdvisoryAudit: vi.fn(),
   getAssistantSummary,
   getFraudCase,
@@ -150,6 +155,7 @@ describe("App", () => {
     getSuspiciousTransactionSummary.mockResolvedValue({ totalSuspiciousTransactions: 0 });
     getSuspiciousTransaction.mockResolvedValue(suspiciousTransactionDetails("suspicious-stable"));
     getSuspiciousTransactionLinkedAlertContext.mockResolvedValue(linkedAlertContext());
+    getCurrentShadowPerformanceSummary.mockResolvedValue(shadowPerformanceSummary());
     listGovernanceAdvisories.mockResolvedValue({ status: "AVAILABLE", count: 0, retention_limit: 200, advisory_events: [] });
     getGovernanceAdvisoryAnalytics.mockResolvedValue({
       status: "AVAILABLE",
@@ -467,6 +473,59 @@ describe("App", () => {
     expect(listSuspiciousTransactions).not.toHaveBeenCalled();
   });
 
+  it("dashboardHiddenWithoutShadowPerformanceRead", async () => {
+    callbackPath.value = false;
+    refreshSession.mockResolvedValue(authenticatedSession());
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+
+    render(<App />);
+
+    await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("link", { name: "Shadow Performance" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Shadow diagnostics/i })).not.toBeInTheDocument();
+    expect(getCurrentShadowPerformanceSummary).not.toHaveBeenCalled();
+  });
+
+  it("dashboardVisibleWithShadowPerformanceRead", async () => {
+    callbackPath.value = false;
+    const session = authenticatedSessionWithShadowPerformanceRead();
+    refreshSession.mockResolvedValue(session);
+    providerState.value = {
+      ...providerState.value,
+      getInitialSession: () => session,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+
+    render(<App />);
+
+    await waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("link", { name: "Shadow Performance" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "Shadow Performance" }));
+    expect(await screen.findByRole("heading", { name: "Shadow Performance Summary" })).toBeInTheDocument();
+    await waitFor(() => expect(getCurrentShadowPerformanceSummary).toHaveBeenCalledTimes(1));
+  });
+
+  it("dashboardRouteRequiresShadowPerformanceRead", async () => {
+    callbackPath.value = false;
+    window.history.replaceState({}, "", "/?workspace=shadow-performance");
+    refreshSession.mockResolvedValue(authenticatedSession());
+    providerState.value = {
+      ...providerState.value,
+      getSessionState: () => ({ status: "authenticated" }),
+      getRequestHeaders: () => ({ Authorization: "Bearer token-1" })
+    };
+
+    render(<App />);
+
+    expect(await screen.findByText("You do not have permission to view Shadow Performance Summary. Required permission: shadow-performance:read.")).toBeInTheDocument();
+    expect(getCurrentShadowPerformanceSummary).not.toHaveBeenCalled();
+  });
+
   it("directRouteWithoutAuthorityShowsAccessDeniedState", async () => {
     callbackPath.value = false;
     window.history.replaceState({}, "", "/?workspace=suspicious-transactions");
@@ -762,6 +821,19 @@ function authenticatedSessionWithSuspiciousRead() {
   });
 }
 
+function authenticatedSessionWithShadowPerformanceRead() {
+  return authenticatedSession({
+    extraAuthorities: ["shadow-performance:read"],
+    authorities: [
+      "alert:read",
+      "fraud-case:read",
+      "transaction-monitor:read",
+      "assistant-summary:read",
+      "shadow-performance:read"
+    ]
+  });
+}
+
 function alertDetails(alertId) {
   return {
     alertId,
@@ -826,6 +898,66 @@ function linkedAlertContext() {
     transactionId: "txn-1",
     scoreDecisionId: "score-1",
     reasonCodes: ["HIGH_AMOUNT_ACTIVITY"]
+  };
+}
+
+function shadowPerformanceSummary() {
+  return {
+    summaryType: "SHADOW_PERFORMANCE_SUMMARY_V1",
+    summaryVersion: "1.0",
+    generatedAt: "2026-06-08T02:00:00Z",
+    model: {
+      modelName: "python-logistic-fraud-model",
+      modelVersion: "2026-04-21.trained.v1",
+      modelFamily: "LOGISTIC_REGRESSION",
+      featureContractVersion: "2026-04-22.v1"
+    },
+    governance: {
+      governanceStatus: "DIAGNOSTIC_ONLY",
+      approvedFor: ["COMPARE", "SHADOW"],
+      diagnosticOnly: true,
+      notProductionApproval: true,
+      notPromotionApproval: true,
+      notThresholdRecommendation: true,
+      notPaymentAuthorization: true,
+      notAutomaticDecisioning: true
+    },
+    evaluation: {
+      evaluationReportType: "PYTHON_ML_EVALUATION_FOUNDATION",
+      evaluationReportVersion: "FDP-103",
+      metricBasis: "bucket_ordered_offline_diagnostic",
+      datasetTimeBasis: "FEEDBACK_SUBMITTED_AT",
+      datasetDeduplicationPolicy: "TRANSACTION_REFERENCE_NEWEST_SUBMITTED_AT_FEEDBACK_ID_ASC"
+    },
+    evaluationPopulation: {
+      datasetRecordsRead: 5,
+      recordsAcceptedForEvaluation: 3,
+      recordsExcludedNotEvaluationEligible: 1
+    },
+    metrics: {
+      precisionAtBudget: 0.666667,
+      recallAtTopK: 0.5,
+      falsePositiveRate: 0.25,
+      mlCaughtRulesMissedCount: 1,
+      rulesCaughtMlMissedCount: 1,
+      missingMlCount: 1,
+      missingRulesCount: 1,
+      missingProjectionCount: 1,
+      notEvaluationEligibleCount: 1
+    },
+    disagreementSummary: {
+      rulesHighMlHigh: 1,
+      rulesHighMlLowOrMedium: 0,
+      rulesLowOrMediumMlHigh: 1,
+      rulesLowOrMediumMlLowOrMedium: 1,
+      rulesMissingMlPresent: 0,
+      mlMissingRulesPresent: 1,
+      bothMissing: 0,
+      notEvaluationEligibleExcluded: 1
+    },
+    warnings: ["MISSING_ML_SIGNAL_PRESENT"],
+    limitations: ["DIAGNOSTIC_ONLY"],
+    banner: "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic."
   };
 }
 
