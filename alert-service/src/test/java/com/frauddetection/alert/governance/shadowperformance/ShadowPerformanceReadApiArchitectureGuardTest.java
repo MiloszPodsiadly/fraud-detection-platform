@@ -191,14 +191,22 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
     }
 
     @Test
-    void fdp106DoesNotAddShadowPerformanceDashboardUi() throws Exception {
+    void fdp107DashboardUiUsesOnlyCurrentReadEndpoint() throws Exception {
         String uiSource = uiSource();
 
-        assertThat(uiSource).doesNotContain(
-                "/api/v1/governance/shadow-performance",
-                "shadow-performance/summary/current",
+        assertThat(uiSource).contains(
+                "/api/v1/governance/shadow-performance/summary/current",
                 "shadowPerformance",
                 "ShadowPerformance"
+        );
+        assertThat(uiSource).doesNotContain(
+                "/api/v1/governance/shadow-performance/summaries",
+                "/api/v1/governance/shadow-performance/search",
+                "/api/v1/governance/shadow-performance/history",
+                "/api/v1/governance/shadow-performance/promotion",
+                "/api/v1/governance/shadow-performance/threshold",
+                "/api/v1/governance/shadow-performance/decisioning",
+                "/api/v1/governance/shadow-performance/dashboard"
         );
     }
 
