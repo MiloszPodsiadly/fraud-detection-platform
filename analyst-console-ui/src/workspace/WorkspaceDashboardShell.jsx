@@ -31,6 +31,7 @@ export function WorkspaceDashboardShell({
     canReadTransactions,
     canReadSuspiciousTransactions,
     canReadGovernanceAdvisories,
+    canReadShadowPerformance,
     canWriteGovernanceAudit,
     runtimeStatus
   } = useWorkspaceRuntime();
@@ -116,7 +117,10 @@ export function WorkspaceDashboardShell({
             workspacePage={activeRoute.key}
             routeFallbackNotice={routeFallbackNotice}
             refreshNotice={refreshNotice}
-            workspaceRoutes={visibleWorkspaceRoutes(WORKSPACE_ROUTE_ENTRIES, { canReadSuspiciousTransactions })}
+            workspaceRoutes={visibleWorkspaceRoutes(WORKSPACE_ROUTE_ENTRIES, {
+              canReadSuspiciousTransactions,
+              canReadShadowPerformance
+            })}
             workspaceCounters={workspaceCounterState.counters}
             workspaceCountersStatus={workspaceCounterState}
             canReadFraudCases={canReadFraudCases}
@@ -124,6 +128,7 @@ export function WorkspaceDashboardShell({
             canReadTransactions={canReadTransactions}
             canReadSuspiciousTransactions={canReadSuspiciousTransactions}
             canReadGovernanceAdvisories={canReadGovernanceAdvisories}
+            canReadShadowPerformance={canReadShadowPerformance}
             canWriteGovernanceAudit={canWriteGovernanceAudit}
             alertPage={navigationState.alertPage}
             fraudCaseSummary={navigationState.fraudCaseSummary}
@@ -155,6 +160,6 @@ function fallbackNoticeFor({ invalidWorkspaceRoute, resolvedRoute }) {
   return `Unknown workspace route "${requestedKey}"; showing ${resolvedRoute.route.label} workspace.`;
 }
 
-function visibleWorkspaceRoutes(routes, { canReadSuspiciousTransactions }) {
-  return routes.filter((route) => route.key !== "suspiciousTransactions" || canReadSuspiciousTransactions === true);
+function visibleWorkspaceRoutes(routes, capabilities) {
+  return routes.filter((route) => capabilities[route.capabilityKey] !== false);
 }

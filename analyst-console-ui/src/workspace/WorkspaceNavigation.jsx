@@ -10,6 +10,7 @@ export function WorkspaceNavigation({
   canReadTransactions,
   canReadSuspiciousTransactions,
   canReadGovernanceAdvisories,
+  canReadShadowPerformance,
   alertPage,
   transactionPage,
   fraudCaseSummary,
@@ -87,6 +88,11 @@ export function WorkspaceNavigation({
         ? "No access"
         : governanceAnalytics?.totals?.advisories ?? 0,
       authority: canReadGovernanceAdvisories
+    },
+    shadowPerformance: {
+      value: canReadShadowPerformance === false ? "No access" : "Current",
+      authority: canReadShadowPerformance,
+      title: "Current offline diagnostic shadow performance summary."
     },
     compliance: {
       value: canReadGovernanceAdvisories === false
