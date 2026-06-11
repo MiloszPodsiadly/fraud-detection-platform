@@ -24,6 +24,7 @@ const fdp55AllowedBackendFiles = new Set([
 ]);
 const allowedEndpointFiles = new Set([
   "analyst-console-ui/src/api/alertsApi.js",
+  // API client tests assert the exact endpoint owned by alertsApi.js; keep this exception exact.
   "analyst-console-ui/src/api/alertsApi.test.js"
 ]);
 const outOfScopePattern = /\b(assign(?:ment)?|claim|bulk|mass|optimistic|Kafka|outbox|finality)\b/i;
@@ -52,7 +53,7 @@ for (const file of changedFiles) {
       violations.push(`${normalized}: new endpoint strings must stay behind the API client boundary.`);
     }
     if (!isScopeGuardScript(normalized)
-        && !isScopeGuardTest(normalized)
+        && !isAllowedFdp107ShadowScopeGuardTest(normalized)
         && !normalized.startsWith("docs/")
         && !isFdp54GovernanceFile(normalized)
         && introducesForbiddenScope(sourceLine)) {
@@ -80,8 +81,8 @@ function isScopeGuardScript(file) {
   return /^scripts\/check-fdp\d+-scope\.mjs$/.test(file);
 }
 
-function isScopeGuardTest(file) {
-  return /ScopeGuard\.test\.[jt]sx?$/.test(file);
+function isAllowedFdp107ShadowScopeGuardTest(file) {
+  return file === "analyst-console-ui/src/workspace/ShadowPerformanceScopeGuard.test.jsx";
 }
 
 function isFdp52ScopeBranch() {

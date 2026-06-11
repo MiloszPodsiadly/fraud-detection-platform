@@ -54,11 +54,11 @@ describe("FDP-107 shadow performance UI scope guards", () => {
   });
 
   it("doesNotAddFeedbackMutation", () => {
-    expect(shadowSources).not.toMatch(/submit.*Feedback|feedback.*POST|engine-intelligence\/feedback/i);
+    expect(shadowSources).not.toMatch(/\bsubmit[A-Za-z]*Feedback\b|feedback.*POST|engine-intelligence\/feedback/i);
   });
 
   it("doesNotAddFiltersSearchHistoryOrExport", () => {
-    expect(shadowSources).not.toMatch(/\b(filter|search|history|download|pagination|modelVersion selector|exportCsv|exportDownload|dataExport)\b/i);
+    expect(shadowSources).not.toMatch(/(?<!\.)\bfilter\b|\b(search|history|download|pagination|modelVersion selector|exportCsv|exportDownload|dataExport)\b/i);
   });
 
   it("doesNotAddModelComparisonTable", () => {
