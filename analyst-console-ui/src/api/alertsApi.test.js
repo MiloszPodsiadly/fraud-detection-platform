@@ -27,6 +27,7 @@ describe("alertsApi auth headers", () => {
   const getSuspiciousTransactionSummary = (...args) => apiClient.getSuspiciousTransactionSummary(...args);
   const getSuspiciousTransaction = (...args) => apiClient.getSuspiciousTransaction(...args);
   const getSuspiciousTransactionLinkedAlertContext = (...args) => apiClient.getSuspiciousTransactionLinkedAlertContext(...args);
+  const getCurrentShadowPerformanceSummary = (...args) => apiClient.getCurrentShadowPerformanceSummary(...args);
   const listGovernanceAdvisories = (...args) => apiClient.listGovernanceAdvisories(...args);
   const getGovernanceAdvisoryAnalytics = (...args) => apiClient.getGovernanceAdvisoryAnalytics(...args);
   const getGovernanceAdvisoryAudit = (...args) => apiClient.getGovernanceAdvisoryAudit(...args);
@@ -166,6 +167,100 @@ describe("alertsApi auth headers", () => {
         })
       })
     );
+  });
+
+  it("fetchesCurrentShadowPerformanceSummary", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(shadowPerformanceSummary()));
+    resetApiClient(normalizeSession({
+      userId: "analyst-1",
+      roles: ["FRAUD_OPS_ADMIN"],
+      authorities: ["shadow-performance:read"]
+    }), createDemoAuthProvider());
+
+    const summary = await getCurrentShadowPerformanceSummary();
+
+    expect(summary).toMatchObject({
+      summaryType: "SHADOW_PERFORMANCE_SUMMARY_V1",
+      model: { modelName: "python-logistic-fraud-model" }
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/governance/shadow-performance/summary/current",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          "X-Demo-User-Id": "analyst-1"
+        })
+      })
+    );
+  });
+
+  it("callsOnlyShadowPerformanceSummaryCurrentEndpoint", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(shadowPerformanceSummary()));
+
+    await getCurrentShadowPerformanceSummary({
+      signal: new AbortController().signal,
+      modelVersion: "secret-model",
+      from: "2026-01-01",
+      search: "customer-secret",
+      body: JSON.stringify({ transactionReference: "txn-secret" }),
+      method: "POST"
+    });
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/v1/governance/shadow-performance/summary/current");
+    expect(url).not.toContain("?");
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain("secret-model");
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain("customer-secret");
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain("txn-secret");
+    expect(options).not.toHaveProperty("body");
+    expect(options).not.toHaveProperty("method");
+  });
+
+  it.each([
+    ["doesNotCallRawModelCardEndpoint", "/model-card"],
+    ["doesNotCallRawEvaluationReportEndpoint", "/evaluation-report"],
+    ["doesNotCallDatasetExportEndpoint", "/dataset"],
+    ["doesNotCallPromotionEndpoint", "/promotion"],
+    ["doesNotCallThresholdEndpoint", "/threshold"],
+    ["doesNotCallDecisioningEndpoint", "/decisioning"],
+    ["doesNotCallScoringEndpoint", "/scored"],
+    ["doesNotCallModelRegistryEndpoint", "/model-registry"]
+  ])("%s", async (_name, forbiddenPath) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(shadowPerformanceSummary()));
+
+    await getCurrentShadowPerformanceSummary();
+
+    expect(fetchMock.mock.calls[0][0]).not.toContain(forbiddenPath);
+  });
+
+  it("doesNotSendMutationRequest", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(shadowPerformanceSummary()));
+
+    await getCurrentShadowPerformanceSummary({ method: "PATCH", body: "{}" });
+
+    expect(fetchMock.mock.calls[0][1]).not.toHaveProperty("method");
+    expect(fetchMock.mock.calls[0][1]).not.toHaveProperty("body");
+  });
+
+  it.each([
+    ["doesNotCallRawModelCardEndpointOn404", "/model-card"],
+    ["doesNotCallRawEvaluationReportEndpointOn404", "/evaluation-report"],
+    ["doesNotCallDatasetExportEndpointOn404", "/dataset"],
+    ["doesNotCallPromotionEndpointOn404", "/promotion"],
+    ["doesNotCallThresholdEndpointOn404", "/threshold"],
+    ["doesNotCallScoringEndpointOn404", "/scored"],
+    ["doesNotCallModelRegistryEndpointOn404", "/model-registry"],
+    ["doesNotCallHistoryEndpointOn404", "/history"],
+    ["doesNotCallSearchEndpointOn404", "/search"],
+    ["doesNotCallListAllEndpointOn404", "/summaries"]
+  ])("%s", async (_name, forbiddenPath) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ message: "not found" }, 404));
+
+    await expect(getCurrentShadowPerformanceSummary()).rejects.toMatchObject({ status: 404 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/governance/shadow-performance/summary/current");
+    expect(fetchMock.mock.calls[0][0]).not.toContain(forbiddenPath);
   });
 
   it("uses auth headers for governance audit history and writes only decision payload", async () => {
@@ -1581,6 +1676,67 @@ function engineIntelligenceAvailable(overrides = {}) {
     engines: [engineResult()],
     diagnosticSignals: [diagnosticSignal()],
     warnings: [warning()],
+    ...overrides
+  };
+}
+
+function shadowPerformanceSummary(overrides = {}) {
+  return {
+    summaryType: "SHADOW_PERFORMANCE_SUMMARY_V1",
+    summaryVersion: "1.0",
+    generatedAt: "2026-06-08T02:00:00Z",
+    model: {
+      modelName: "python-logistic-fraud-model",
+      modelVersion: "2026-04-21.trained.v1",
+      modelFamily: "LOGISTIC_REGRESSION",
+      featureContractVersion: "2026-04-22.v1"
+    },
+    governance: {
+      governanceStatus: "DIAGNOSTIC_ONLY",
+      approvedFor: ["COMPARE", "SHADOW"],
+      diagnosticOnly: true,
+      notProductionApproval: true,
+      notPromotionApproval: true,
+      notThresholdRecommendation: true,
+      notPaymentAuthorization: true,
+      notAutomaticDecisioning: true
+    },
+    evaluation: {
+      evaluationReportType: "PYTHON_ML_EVALUATION_FOUNDATION",
+      evaluationReportVersion: "FDP-103",
+      metricBasis: "bucket_ordered_offline_diagnostic",
+      datasetTimeBasis: "FEEDBACK_SUBMITTED_AT",
+      datasetDeduplicationPolicy: "TRANSACTION_REFERENCE_NEWEST_SUBMITTED_AT_FEEDBACK_ID_ASC"
+    },
+    evaluationPopulation: {
+      datasetRecordsRead: 5,
+      recordsAcceptedForEvaluation: 3,
+      recordsExcludedNotEvaluationEligible: 1
+    },
+    metrics: {
+      precisionAtBudget: 0.666667,
+      recallAtTopK: 0.5,
+      falsePositiveRate: 0.25,
+      mlCaughtRulesMissedCount: 1,
+      rulesCaughtMlMissedCount: 1,
+      missingMlCount: 1,
+      missingRulesCount: 1,
+      missingProjectionCount: 1,
+      notEvaluationEligibleCount: 1
+    },
+    disagreementSummary: {
+      rulesHighMlHigh: 1,
+      rulesHighMlLowOrMedium: 0,
+      rulesLowOrMediumMlHigh: 1,
+      rulesLowOrMediumMlLowOrMedium: 1,
+      rulesMissingMlPresent: 0,
+      mlMissingRulesPresent: 1,
+      bothMissing: 0,
+      notEvaluationEligibleExcluded: 1
+    },
+    warnings: ["MISSING_ML_SIGNAL_PRESENT"],
+    limitations: ["DIAGNOSTIC_ONLY"],
+    banner: "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.",
     ...overrides
   };
 }

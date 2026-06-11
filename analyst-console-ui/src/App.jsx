@@ -249,8 +249,8 @@ export default function App() {
 
 function visiblePrimaryPages(workspacePages, session) {
   return Object.entries(workspacePages).filter(([page]) => (
-    page !== "suspiciousTransactions"
-    || hasAuthority(session, AUTHORITIES.SUSPICIOUS_TRANSACTION_READ)
+    (page !== "suspiciousTransactions" || hasAuthority(session, AUTHORITIES.SUSPICIOUS_TRANSACTION_READ))
+    && (page !== "shadowPerformance" || hasAuthority(session, AUTHORITIES.SHADOW_PERFORMANCE_READ))
   ));
 }
 

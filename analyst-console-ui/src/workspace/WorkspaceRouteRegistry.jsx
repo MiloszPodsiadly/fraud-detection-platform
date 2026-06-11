@@ -2,6 +2,7 @@ import { AnalystWorkspaceRuntime } from "./AnalystWorkspaceRuntime.jsx";
 import { FraudTransactionWorkspaceRuntime } from "./FraudTransactionWorkspaceRuntime.jsx";
 import { GovernanceWorkspaceRuntime } from "./GovernanceWorkspaceRuntime.jsx";
 import { ReportsWorkspaceRuntime } from "./ReportsWorkspaceRuntime.jsx";
+import { ShadowPerformanceWorkspaceRuntime } from "./ShadowPerformanceWorkspaceRuntime.jsx";
 import { SuspiciousTransactionWorkspaceRuntime } from "./SuspiciousTransactionWorkspaceRuntime.jsx";
 import { TransactionScoringWorkspaceRuntime } from "./TransactionScoringWorkspaceRuntime.jsx";
 
@@ -58,6 +59,17 @@ export const WORKSPACE_ROUTE_REGISTRY = Object.freeze({
     heading: Object.freeze({ label: "Review visibility" }),
     Runtime: ReportsWorkspaceRuntime
   }),
+  shadowPerformance: Object.freeze({
+    key: "shadowPerformance",
+    label: "Shadow Performance",
+    navigationLabel: "Shadow diagnostics",
+    routeValue: "shadow-performance",
+    href: "?workspace=shadow-performance",
+    capabilityKey: "canReadShadowPerformance",
+    heading: Object.freeze({ label: "Shadow Performance Summary" }),
+    showWorkspaceCounters: false,
+    Runtime: ShadowPerformanceWorkspaceRuntime
+  }),
   compliance: Object.freeze({
     key: "compliance",
     label: "Compliance",
@@ -76,6 +88,7 @@ export const WORKSPACE_ROUTE_ORDER = Object.freeze([
   "suspiciousTransactions",
   "analyst",
   "reports",
+  "shadowPerformance",
   "compliance"
 ]);
 

@@ -7,6 +7,7 @@ export function AlertsListPage({
   workspaceRoutes,
   routeFallbackNotice,
   refreshNotice,
+  showWorkspaceCounters = true,
   workspaceCounters = { alerts: null, fraudCases: null, suspiciousTransactions: null, transactions: null },
   workspaceCountersStatus = { degraded: false, failedCounters: [], errorByCounter: {}, stale: false, lastRefreshedAt: null },
   canReadFraudCases,
@@ -14,6 +15,7 @@ export function AlertsListPage({
   canReadTransactions,
   canReadSuspiciousTransactions,
   canReadGovernanceAdvisories,
+  canReadShadowPerformance,
   alertPage,
   transactionPage,
   advisoryQueue,
@@ -35,6 +37,7 @@ export function AlertsListPage({
       <WorkspaceNavigation
         workspacePage={workspacePage}
         workspaceRoutes={workspaceRoutes}
+        showWorkspaceCounters={showWorkspaceCounters}
         workspaceCounters={workspaceCounters}
         workspaceCountersStatus={workspaceCountersStatus}
         canReadFraudCases={canReadFraudCases}
@@ -42,6 +45,7 @@ export function AlertsListPage({
         canReadTransactions={canReadTransactions}
         canReadSuspiciousTransactions={canReadSuspiciousTransactions}
         canReadGovernanceAdvisories={canReadGovernanceAdvisories}
+        canReadShadowPerformance={canReadShadowPerformance}
         alertPage={alertPage}
         transactionPage={transactionPage}
         advisoryQueue={advisoryQueue}

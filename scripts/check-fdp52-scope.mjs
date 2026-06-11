@@ -23,7 +23,9 @@ const fdp55AllowedBackendFiles = new Set([
   "alert-service/src/main/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandler.java"
 ]);
 const allowedEndpointFiles = new Set([
-  "analyst-console-ui/src/api/alertsApi.js"
+  "analyst-console-ui/src/api/alertsApi.js",
+  // API client tests assert the exact endpoint owned by alertsApi.js; keep this exception exact.
+  "analyst-console-ui/src/api/alertsApi.test.js"
 ]);
 const outOfScopePattern = /\b(assign(?:ment)?|claim|bulk|mass|optimistic|Kafka|outbox|finality)\b/i;
 const exportWorkflowPattern = /\bexport\s+(workflow|button|action|csv|download|file|report|data|results)\b/i;
@@ -50,7 +52,11 @@ for (const file of changedFiles) {
     if (!allowedEndpointFiles.has(normalized) && !isFdp54GovernanceFile(normalized) && containsEndpointString(sourceLine)) {
       violations.push(`${normalized}: new endpoint strings must stay behind the API client boundary.`);
     }
-    if (!isScopeGuardScript(normalized) && !normalized.startsWith("docs/") && !isFdp54GovernanceFile(normalized) && introducesForbiddenScope(sourceLine)) {
+    if (!isScopeGuardScript(normalized)
+        && !isAllowedFdp107ShadowScopeGuardTest(normalized)
+        && !normalized.startsWith("docs/")
+        && !isFdp54GovernanceFile(normalized)
+        && introducesForbiddenScope(sourceLine)) {
       violations.push(`${normalized}: FDP-52 must not introduce assignment, claim, export, bulk, optimistic, Kafka/outbox/finality, or idempotency semantics.`);
     }
   }
@@ -73,6 +79,10 @@ function introducesForbiddenScope(sourceLine) {
 
 function isScopeGuardScript(file) {
   return /^scripts\/check-fdp\d+-scope\.mjs$/.test(file);
+}
+
+function isAllowedFdp107ShadowScopeGuardTest(file) {
+  return file === "analyst-console-ui/src/workspace/ShadowPerformanceScopeGuard.test.jsx";
 }
 
 function isFdp52ScopeBranch() {
