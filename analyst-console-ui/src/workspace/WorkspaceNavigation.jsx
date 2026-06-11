@@ -3,6 +3,7 @@ import { WORKSPACE_ROUTE_ENTRIES } from "./WorkspaceRouteRegistry.jsx";
 export function WorkspaceNavigation({
   workspacePage,
   workspaceRoutes = WORKSPACE_ROUTE_ENTRIES,
+  showWorkspaceCounters = true,
   workspaceCounters = { alerts: null, fraudCases: null, suspiciousTransactions: null, transactions: null },
   workspaceCountersStatus = { failedCounters: [], errorByCounter: {}, stale: false },
   canReadFraudCases,
@@ -29,14 +30,20 @@ export function WorkspaceNavigation({
     failedCounterNames,
     workspaceCountersStatus
   ) && workspaceCounters.suspiciousTransactions == null;
-  const transactionGlobalCount = canReadTransactions === false
+  const transactionGlobalCount = !showWorkspaceCounters
+    ? null
+    : canReadTransactions === false
     ? "No access"
     : workspaceCounters.transactions ?? transactionPage?.totalElements ?? 0;
-  const alertGlobalCount = canReadAlerts === false
+  const alertGlobalCount = !showWorkspaceCounters
+    ? null
+    : canReadAlerts === false
     ? "No access"
     : workspaceCounters.alerts ?? alertPage?.totalElements ?? 0;
-  const fraudCaseGlobalCount = fraudCaseSummary?.totalFraudCases ?? fraudCaseTotalElements;
-  const fraudCaseSummaryLabel = fraudCaseSummaryError
+  const fraudCaseGlobalCount = showWorkspaceCounters ? fraudCaseSummary?.totalFraudCases ?? fraudCaseTotalElements : null;
+  const fraudCaseSummaryLabel = !showWorkspaceCounters
+    ? null
+    : fraudCaseSummaryError
     ? "Unavailable"
     : fraudCaseGlobalCount == null ? "0" : String(fraudCaseGlobalCount);
   const fraudCaseSummaryGeneratedAt = fraudCaseSummary?.generatedAt
@@ -65,14 +72,18 @@ export function WorkspaceNavigation({
     suspiciousTransactions: {
       value: canReadSuspiciousTransactions === false
         ? "No access"
-        : workspaceCounters.suspiciousTransactions ?? 0,
+        : showWorkspaceCounters ? workspaceCounters.suspiciousTransactions ?? 0 : null,
       authority: canReadSuspiciousTransactions,
       stale: isCounterStale("suspiciousTransactions", failedCounterNames, workspaceCountersStatus),
       unavailable: suspiciousSummaryUnavailable,
       title: suspiciousSummaryUnavailable
         ? "Summary temporarily unavailable. Not page count, fraud count, case count, or analyst workload."
-        : "Workspace signal total. Not page count, fraud count, case count, or analyst workload.",
-      ariaLabel: suspiciousSummaryUnavailable
+        : showWorkspaceCounters
+          ? "Workspace signal total. Not page count, fraud count, case count, or analyst workload."
+          : "Workspace signal counters are not shown for this diagnostic route.",
+      ariaLabel: !showWorkspaceCounters
+        ? undefined
+        : suspiciousSummaryUnavailable
         ? "Signal total unavailable"
         : `Workspace signal total ${workspaceCounters.suspiciousTransactions ?? 0}`
     },
@@ -80,8 +91,8 @@ export function WorkspaceNavigation({
       value: isFraudCaseSummaryLoading ? "..." : fraudCaseSummaryLabel,
       authority: canReadFraudCases,
       stale: Boolean(fraudCaseSummaryError),
-      title: fraudCaseSummaryHint,
-      ariaLabel: `Global fraud cases ${isFraudCaseSummaryLoading ? "Loading" : fraudCaseSummaryLabel}`
+      title: showWorkspaceCounters ? fraudCaseSummaryHint : "Global fraud case counters are not shown for this diagnostic route.",
+      ariaLabel: showWorkspaceCounters ? `Global fraud cases ${isFraudCaseSummaryLoading ? "Loading" : fraudCaseSummaryLabel}` : undefined
     },
     reports: {
       value: canReadGovernanceAdvisories === false
@@ -111,7 +122,7 @@ export function WorkspaceNavigation({
           href={route.href}
           activePage={workspacePage}
           label={route.navigationLabel}
-          value={navigationState[route.key]?.value ?? 0}
+          value={navigationState[route.key]?.value ?? ""}
           authority={navigationState[route.key]?.authority}
           stale={navigationState[route.key]?.stale}
           unavailable={navigationState[route.key]?.unavailable}

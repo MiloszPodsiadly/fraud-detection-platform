@@ -40,8 +40,9 @@ export function WorkspaceDashboardShell({
   const ActiveWorkspaceRuntime = activeRoute.Runtime;
   const { refreshNotice, consumeRefreshResult } = useWorkspaceRefreshNotice(activeRoute.key);
   const sharedWorkspaceReadsEnabled = runtimeStatus === "ready" && !shouldBlockDashboardFetch(sessionState);
+  const workspaceCountersEnabled = sharedWorkspaceReadsEnabled && activeRoute.showWorkspaceCounters !== false;
   const workspaceCounterState = useWorkspaceCounters({
-    enabled: sharedWorkspaceReadsEnabled,
+    enabled: workspaceCountersEnabled,
     includeAlerts: activeRoute.key !== "fraudTransaction",
     includeFraudCases: activeRoute.key !== "analyst",
     includeTransactions: activeRoute.key !== "transactionScoring"
@@ -74,7 +75,7 @@ export function WorkspaceDashboardShell({
       }) => {
         const refreshDashboard = createWorkspaceRefreshHandler({
           sessionState,
-          sharedWorkspaceReadsEnabled,
+          sharedWorkspaceReadsEnabled: workspaceCountersEnabled,
           refreshWorkspace,
           refreshWorkspaceCounters
         });
@@ -121,6 +122,7 @@ export function WorkspaceDashboardShell({
               canReadSuspiciousTransactions,
               canReadShadowPerformance
             })}
+            showWorkspaceCounters={activeRoute.showWorkspaceCounters !== false}
             workspaceCounters={workspaceCounterState.counters}
             workspaceCountersStatus={workspaceCounterState}
             canReadFraudCases={canReadFraudCases}

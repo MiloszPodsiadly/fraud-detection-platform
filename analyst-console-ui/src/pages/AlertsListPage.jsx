@@ -7,6 +7,7 @@ export function AlertsListPage({
   workspaceRoutes,
   routeFallbackNotice,
   refreshNotice,
+  showWorkspaceCounters = true,
   workspaceCounters = { alerts: null, fraudCases: null, suspiciousTransactions: null, transactions: null },
   workspaceCountersStatus = { degraded: false, failedCounters: [], errorByCounter: {}, stale: false, lastRefreshedAt: null },
   canReadFraudCases,
@@ -36,6 +37,7 @@ export function AlertsListPage({
       <WorkspaceNavigation
         workspacePage={workspacePage}
         workspaceRoutes={workspaceRoutes}
+        showWorkspaceCounters={showWorkspaceCounters}
         workspaceCounters={workspaceCounters}
         workspaceCountersStatus={workspaceCountersStatus}
         canReadFraudCases={canReadFraudCases}

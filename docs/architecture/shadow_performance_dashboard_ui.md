@@ -9,6 +9,9 @@ The UI requires the existing `shadow-performance:read` authority as a frontend v
 ## Scope
 
 - FDP-107 consumes only the FDP-106 current Shadow Performance Summary endpoint.
+- The Shadow Performance workspace consumes only the FDP-106 current summary endpoint.
+- The Shadow Performance workspace does not fetch global platform counters.
+- The Shadow Performance workspace does not render global transaction, alert, suspicious-transaction, or fraud-case counters as part of Shadow Performance diagnostics.
 - FDP-107 does not compute metrics.
 - FDP-107 does not recompute shadow performance.
 - FDP-107 does not read raw artifacts, raw Model Card data, raw FDP-103 reports, or FDP-102 JSONL datasets.
@@ -35,3 +38,5 @@ When FDP-106 returns 404 for `GET /api/v1/governance/shadow-performance/summary/
 This 404 state is not a model quality result. The UI must not display fake, zero, sample, fallback, stale, or cached metrics on 404.
 
 Metrics appear only after FDP-106 exposes a current validated summary. The 404 state remains read-only and diagnostic-only, and it does not approve production decisioning, recommend promotion, recommend thresholds, authorize payments, or influence analyst recommendations.
+
+The 404 state remains context-only. It does not show unrelated platform counters as shadow metrics or as evidence of Shadow Performance health.

@@ -67,6 +67,7 @@ export const WORKSPACE_ROUTE_REGISTRY = Object.freeze({
     href: "?workspace=shadow-performance",
     capabilityKey: "canReadShadowPerformance",
     heading: Object.freeze({ label: "Shadow Performance Summary" }),
+    showWorkspaceCounters: false,
     Runtime: ShadowPerformanceWorkspaceRuntime
   }),
   compliance: Object.freeze({
