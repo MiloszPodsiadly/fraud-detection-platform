@@ -2,6 +2,24 @@ import { LoadingPanel } from "./LoadingPanel.jsx";
 
 const REQUIRED_PERMISSION = "shadow-performance:read";
 const REQUIRED_BANNER = "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.";
+const MAX_DIAGNOSTIC_COUNT = 500;
+const REQUIRED_APPROVED_FOR = ["COMPARE", "SHADOW"];
+const REQUIRED_GOVERNANCE = {
+  governanceStatus: "DIAGNOSTIC_ONLY",
+  diagnosticOnly: true,
+  notProductionApproval: true,
+  notPromotionApproval: true,
+  notThresholdRecommendation: true,
+  notPaymentAuthorization: true,
+  notAutomaticDecisioning: true
+};
+const REQUIRED_EVALUATION = {
+  evaluationReportType: "PYTHON_ML_EVALUATION_FOUNDATION",
+  evaluationReportVersion: "FDP-103",
+  metricBasis: "bucket_ordered_offline_diagnostic",
+  datasetTimeBasis: "FEEDBACK_SUBMITTED_AT",
+  datasetDeduplicationPolicy: "TRANSACTION_REFERENCE_NEWEST_SUBMITTED_AT_FEEDBACK_ID_ASC"
+};
 
 const METRIC_FIELDS = [
   ["precisionAtBudget", "Offline precision at budget", "percent"],
@@ -25,6 +43,8 @@ const DISAGREEMENT_FIELDS = [
   ["bothMissing", "Both missing"],
   ["notEvaluationEligibleExcluded", "Not evaluation eligible excluded"]
 ];
+const RATE_METRIC_FIELDS = METRIC_FIELDS.filter(([, , format]) => format === "percent").map(([field]) => field);
+const COUNT_METRIC_FIELDS = METRIC_FIELDS.filter(([, , format]) => format === "count").map(([field]) => field);
 
 export function ShadowPerformanceDashboard({
   summary,
@@ -128,7 +148,7 @@ function ShadowPerformanceGovernancePanel({ governance }) {
     <ShadowSection title="Governance context">
       <DefinitionList rows={[
         ["Governance status", governance.governanceStatus],
-        ["Approved diagnostic modes", listValue(governance.approvedFor)],
+        ["Allowed diagnostic modes", listValue(governance.approvedFor)],
         ["Diagnostic only", booleanValue(governance.diagnosticOnly)],
         ["Not production approval", booleanValue(governance.notProductionApproval)],
         ["Not promotion approval", booleanValue(governance.notPromotionApproval)],
@@ -348,47 +368,50 @@ function errorStateFor(error) {
 }
 
 function isValidSummary(summary) {
-  return isObject(summary)
-    && isString(summary.summaryType)
-    && isString(summary.summaryVersion)
-    && isString(summary.generatedAt)
-    && isObject(summary.model)
-    && isString(summary.model.modelName)
-    && isString(summary.model.modelVersion)
-    && isString(summary.model.modelFamily)
-    && isString(summary.model.featureContractVersion)
-    && isObject(summary.governance)
-    && isString(summary.governance.governanceStatus)
-    && Array.isArray(summary.governance.approvedFor)
-    && [
-      "diagnosticOnly",
-      "notProductionApproval",
-      "notPromotionApproval",
-      "notThresholdRecommendation",
-      "notPaymentAuthorization",
-      "notAutomaticDecisioning"
-    ].every((field) => typeof summary.governance[field] === "boolean")
-    && isObject(summary.evaluation)
-    && [
-      "evaluationReportType",
-      "evaluationReportVersion",
-      "metricBasis",
-      "datasetTimeBasis",
-      "datasetDeduplicationPolicy"
-    ].every((field) => isString(summary.evaluation[field]))
-    && isObject(summary.evaluationPopulation)
-    && [
-      "datasetRecordsRead",
-      "recordsAcceptedForEvaluation",
-      "recordsExcludedNotEvaluationEligible"
-    ].every((field) => Number.isFinite(Number(summary.evaluationPopulation[field])))
-    && isObject(summary.metrics)
-    && METRIC_FIELDS.every(([field]) => Number.isFinite(Number(summary.metrics[field])))
-    && isObject(summary.disagreementSummary)
-    && DISAGREEMENT_FIELDS.every(([field]) => Number.isFinite(Number(summary.disagreementSummary[field])))
-    && Array.isArray(summary.warnings)
-    && Array.isArray(summary.limitations)
-    && isString(summary.banner);
+  if (!isObject(summary)
+      || summary.summaryType !== "SHADOW_PERFORMANCE_SUMMARY_V1"
+      || summary.summaryVersion !== "1.0"
+      || !isString(summary.generatedAt)
+      || summary.banner !== REQUIRED_BANNER
+      || !isValidModel(summary.model)
+      || !isValidGovernance(summary.governance)
+      || !isValidEvaluation(summary.evaluation)
+      || !isObject(summary.evaluationPopulation)
+      || !isObject(summary.metrics)
+      || !isObject(summary.disagreementSummary)
+      || !isSafeStringArray(summary.warnings)
+      || !isSafeStringArray(summary.limitations)) {
+    return false;
+  }
+
+  const population = summary.evaluationPopulation;
+  const datasetRecordsRead = population.datasetRecordsRead;
+  const accepted = population.recordsAcceptedForEvaluation;
+  const excluded = population.recordsExcludedNotEvaluationEligible;
+  if (!isDiagnosticCount(datasetRecordsRead)
+      || !isDiagnosticCount(accepted)
+      || !isDiagnosticCount(excluded)
+      || accepted > datasetRecordsRead
+      || excluded > datasetRecordsRead
+      || accepted + excluded > datasetRecordsRead) {
+    return false;
+  }
+
+  if (!RATE_METRIC_FIELDS.every((field) => isRate(summary.metrics[field]))) {
+    return false;
+  }
+  if (!COUNT_METRIC_FIELDS.every((field) => isDiagnosticCount(summary.metrics[field]) && summary.metrics[field] <= datasetRecordsRead)) {
+    return false;
+  }
+  if (summary.metrics.notEvaluationEligibleCount !== excluded) {
+    return false;
+  }
+
+  const disagreementValues = DISAGREEMENT_FIELDS.map(([field]) => summary.disagreementSummary[field]);
+  if (!disagreementValues.every(isDiagnosticCount)) {
+    return false;
+  }
+  return disagreementValues.reduce((total, value) => total + value, 0) <= datasetRecordsRead;
 }
 
 function isObject(value) {
@@ -397,6 +420,41 @@ function isObject(value) {
 
 function isString(value) {
   return typeof value === "string" && value.length > 0;
+}
+
+function isValidModel(model) {
+  return isObject(model)
+    && isString(model.modelName)
+    && isString(model.modelVersion)
+    && isString(model.modelFamily)
+    && isString(model.featureContractVersion);
+}
+
+function isValidGovernance(governance) {
+  return isObject(governance)
+    && Object.entries(REQUIRED_GOVERNANCE).every(([field, value]) => governance[field] === value)
+    && Array.isArray(governance.approvedFor)
+    && governance.approvedFor.length === REQUIRED_APPROVED_FOR.length
+    && REQUIRED_APPROVED_FOR.every((value) => governance.approvedFor.includes(value));
+}
+
+function isValidEvaluation(evaluation) {
+  return isObject(evaluation)
+    && Object.entries(REQUIRED_EVALUATION).every(([field, value]) => evaluation[field] === value);
+}
+
+function isRate(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+function isDiagnosticCount(value) {
+  return Number.isInteger(value) && value >= 0 && value <= MAX_DIAGNOSTIC_COUNT;
+}
+
+function isSafeStringArray(value) {
+  return Array.isArray(value)
+    && value.length <= 20
+    && value.every((item) => typeof item === "string" && item.length > 0 && item.length <= 160);
 }
 
 function formatMetric(value, format) {

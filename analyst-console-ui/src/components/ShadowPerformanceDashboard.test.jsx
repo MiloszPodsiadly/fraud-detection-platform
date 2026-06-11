@@ -2,6 +2,9 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ShadowPerformanceDashboard } from "./ShadowPerformanceDashboard.jsx";
 
+const REQUIRED_BANNER = "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.";
+const MALFORMED_MESSAGE = "Shadow Performance Summary response was malformed. Do not use this view for model assessment.";
+
 describe("ShadowPerformanceDashboard", () => {
   it("rendersShadowPerformanceDashboard", () => {
     renderDashboard();
@@ -31,10 +34,10 @@ describe("ShadowPerformanceDashboard", () => {
     expect(screen.getByText("DIAGNOSTIC_ONLY")).toBeInTheDocument();
   });
 
-  it("rendersApprovedForShadowCompareOnly", () => {
+  it("rendersAllowedDiagnosticModesShadowCompareOnly", () => {
     renderDashboard();
 
-    expect(screen.getByText("Approved diagnostic modes")).toBeInTheDocument();
+    expect(screen.getByText("Allowed diagnostic modes")).toBeInTheDocument();
     expect(screen.getByText("COMPARE, SHADOW")).toBeInTheDocument();
   });
 
@@ -270,8 +273,200 @@ describe("ShadowPerformanceDashboard", () => {
   it("rendersMalformedResponseError", () => {
     renderDashboard({ summary: { ...shadowSummary(), metrics: null } });
 
-    expect(screen.getByText("Shadow Performance Summary response was malformed. Do not use this view for model assessment.")).toBeInTheDocument();
+    expect(screen.getByText(MALFORMED_MESSAGE)).toBeInTheDocument();
     expect(screen.queryByText("Offline precision at budget")).not.toBeInTheDocument();
+  });
+
+  it("rejectsWrongSummaryType", () => {
+    expectMalformedSummary((summary) => {
+      summary.summaryType = "MODEL_CARD";
+    });
+  });
+
+  it("rejectsWrongSummaryVersion", () => {
+    expectMalformedSummary((summary) => {
+      summary.summaryVersion = "2.0";
+    });
+  });
+
+  it("rejectsWrongBanner", () => {
+    expectMalformedSummary((summary) => {
+      summary.banner = "Model approved for production";
+    });
+  });
+
+  it("rejectsMissingBannerOnSuccessPayload", () => {
+    expectMalformedSummary((summary) => {
+      delete summary.banner;
+    });
+  });
+
+  it("rejectsProductionGovernanceStatus", () => {
+    expectMalformedSummary((summary) => {
+      summary.governance.governanceStatus = "PRODUCTION_APPROVED";
+    });
+  });
+
+  it("rejectsApprovedForProductionDecisioning", () => {
+    expectMalformedSummary((summary) => {
+      summary.governance.approvedFor = ["COMPARE", "SHADOW", "PRODUCTION_DECISIONING"];
+    });
+  });
+
+  it("rejectsApprovedForValuesOutsideCompareShadow", () => {
+    expectMalformedSummary((summary) => {
+      summary.governance.approvedFor = ["COMPARE", "RETRAINING"];
+    });
+  });
+
+  it("rejectsMissingCompareApprovedFor", () => {
+    expectMalformedSummary((summary) => {
+      summary.governance.approvedFor = ["SHADOW"];
+    });
+  });
+
+  it("rejectsMissingShadowApprovedFor", () => {
+    expectMalformedSummary((summary) => {
+      summary.governance.approvedFor = ["COMPARE"];
+    });
+  });
+
+  it.each([
+    ["rejectsDiagnosticOnlyFalse", "diagnosticOnly"],
+    ["rejectsNotProductionApprovalFalse", "notProductionApproval"],
+    ["rejectsNotPromotionApprovalFalse", "notPromotionApproval"],
+    ["rejectsNotThresholdRecommendationFalse", "notThresholdRecommendation"],
+    ["rejectsNotPaymentAuthorizationFalse", "notPaymentAuthorization"],
+    ["rejectsNotAutomaticDecisioningFalse", "notAutomaticDecisioning"]
+  ])("%s", (_name, field) => {
+    expectMalformedSummary((summary) => {
+      summary.governance[field] = false;
+    });
+  });
+
+  it.each([
+    ["rejectsWrongEvaluationReportType", "evaluationReportType", "MODEL_CARD"],
+    ["rejectsWrongEvaluationReportVersion", "evaluationReportVersion", "FDP-104"],
+    ["rejectsWrongMetricBasis", "metricBasis", "production_threshold"],
+    ["rejectsWrongDatasetTimeBasis", "datasetTimeBasis", "TRANSACTION_CREATED_AT"],
+    ["rejectsWrongDatasetDeduplicationPolicy", "datasetDeduplicationPolicy", "LATEST_ONLY"]
+  ])("%s", (_name, field, value) => {
+    expectMalformedSummary((summary) => {
+      summary.evaluation[field] = value;
+    });
+  });
+
+  it("rejectsNumericStringRates", () => {
+    expectMalformedSummary((summary) => {
+      summary.metrics.precisionAtBudget = "0.9";
+    });
+  });
+
+  it("rejectsNumericStringCounts", () => {
+    expectMalformedSummary((summary) => {
+      summary.metrics.mlCaughtRulesMissedCount = "1";
+    });
+  });
+
+  it("rejectsNaNMetricValues", () => {
+    expectMalformedSummary((summary) => {
+      summary.metrics.recallAtTopK = Number.NaN;
+    });
+  });
+
+  it("rejectsInfiniteMetricValues", () => {
+    expectMalformedSummary((summary) => {
+      summary.metrics.falsePositiveRate = Number.POSITIVE_INFINITY;
+    });
+  });
+
+  it.each([
+    ["rejectsPrecisionGreaterThanOne", "precisionAtBudget", 1.1],
+    ["rejectsPrecisionBelowZero", "precisionAtBudget", -0.1],
+    ["rejectsRecallGreaterThanOne", "recallAtTopK", 1.1],
+    ["rejectsRecallBelowZero", "recallAtTopK", -0.1],
+    ["rejectsFalsePositiveRateGreaterThanOne", "falsePositiveRate", 1.1],
+    ["rejectsFalsePositiveRateBelowZero", "falsePositiveRate", -0.1]
+  ])("%s", (_name, field, value) => {
+    expectMalformedSummary((summary) => {
+      summary.metrics[field] = value;
+    });
+  });
+
+  it("rejectsNegativePopulationCounts", () => {
+    expectMalformedSummary((summary) => {
+      summary.evaluationPopulation.datasetRecordsRead = -1;
+    });
+  });
+
+  it("rejectsPopulationCountsAboveMax", () => {
+    expectMalformedSummary((summary) => {
+      summary.evaluationPopulation.datasetRecordsRead = 501;
+    });
+  });
+
+  it("rejectsAcceptedGreaterThanDatasetRecordsRead", () => {
+    expectMalformedSummary((summary) => {
+      summary.evaluationPopulation.recordsAcceptedForEvaluation = 6;
+    });
+  });
+
+  it("rejectsExcludedGreaterThanDatasetRecordsRead", () => {
+    expectMalformedSummary((summary) => {
+      summary.evaluationPopulation.recordsExcludedNotEvaluationEligible = 6;
+      summary.metrics.notEvaluationEligibleCount = 6;
+    });
+  });
+
+  it("rejectsAcceptedPlusExcludedGreaterThanDatasetRecordsRead", () => {
+    expectMalformedSummary((summary) => {
+      summary.evaluationPopulation.recordsAcceptedForEvaluation = 4;
+      summary.evaluationPopulation.recordsExcludedNotEvaluationEligible = 2;
+      summary.metrics.notEvaluationEligibleCount = 2;
+    });
+  });
+
+  it("rejectsMetricCountGreaterThanDatasetRecordsRead", () => {
+    expectMalformedSummary((summary) => {
+      summary.metrics.mlCaughtRulesMissedCount = 6;
+    });
+  });
+
+  it("rejectsNotEvaluationEligibleMismatch", () => {
+    expectMalformedSummary((summary) => {
+      summary.metrics.notEvaluationEligibleCount = 2;
+    });
+  });
+
+  it("rejectsDisagreementTotalGreaterThanDatasetRecordsRead", () => {
+    expectMalformedSummary((summary) => {
+      summary.disagreementSummary.rulesHighMlHigh = 6;
+    });
+  });
+
+  it("rejectsNegativeDisagreementCount", () => {
+    expectMalformedSummary((summary) => {
+      summary.disagreementSummary.rulesHighMlHigh = -1;
+    });
+  });
+
+  it("rejectsNonIntegerDisagreementCount", () => {
+    expectMalformedSummary((summary) => {
+      summary.disagreementSummary.rulesHighMlHigh = 1.5;
+    });
+  });
+
+  it.each([
+    ["doesNotRenderUnsafeProductionBanner", "Model approved for production", /Model approved for production/i],
+    ["doesNotRenderUnsafePromotionBanner", "Promotion ready", /Promotion ready/i],
+    ["doesNotRenderUnsafeThresholdBanner", "Recommended threshold: 0.8", /Recommended threshold/i],
+    ["doesNotRenderUnsafePaymentAuthorizationBanner", "Payment authorization approved", /Payment authorization approved/i]
+  ])("%s", (_name, banner, unsafeText) => {
+    expectMalformedSummary((summary) => {
+      summary.banner = banner;
+    });
+
+    expect(screen.queryByText(unsafeText)).not.toBeInTheDocument();
   });
 
   it.each([
@@ -466,6 +661,26 @@ function renderDashboardWithRawFields() {
   return container.textContent;
 }
 
+function expectMalformedSummary(mutateSummary) {
+  const summary = cloneSummary();
+  mutateSummary(summary);
+  const { container } = renderDashboard({ summary });
+
+  expect(screen.getByText(MALFORMED_MESSAGE)).toBeInTheDocument();
+  expect(screen.queryByText("Offline precision at budget")).not.toBeInTheDocument();
+  expect(container.querySelector(".metricCard")).not.toBeInTheDocument();
+  expect(screen.queryByText("Model identity")).not.toBeInTheDocument();
+  expect(screen.queryByText("Governance context")).not.toBeInTheDocument();
+  expect(screen.queryByText("Evaluation context")).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Warnings" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Limitations" })).not.toBeInTheDocument();
+  return container;
+}
+
+function cloneSummary() {
+  return JSON.parse(JSON.stringify(shadowSummary()));
+}
+
 function rawFields() {
   return {
     rawModelCard: "raw-model-card-secret",
@@ -556,7 +771,7 @@ function shadowSummary(overrides = {}) {
     },
     warnings: ["MISSING_ML_SIGNAL_PRESENT"],
     limitations: ["OFFLINE_ONLY"],
-    banner: "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.",
+    banner: REQUIRED_BANNER,
     ...overrides
   };
 }
