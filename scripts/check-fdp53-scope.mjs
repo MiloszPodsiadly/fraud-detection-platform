@@ -23,7 +23,9 @@ const fdp55AllowedBackendFiles = new Set([
   "alert-service/src/main/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandler.java"
 ]);
 const allowedEndpointFiles = new Set([
-  "analyst-console-ui/src/api/alertsApi.js"
+  "analyst-console-ui/src/api/alertsApi.js",
+  // API client tests assert exact API-client-owned paths; keep this exception exact.
+  "analyst-console-ui/src/api/alertsApi.test.js"
 ]);
 const workspaceRuntimePrefixes = [
   "analyst-console-ui/src/workspace/"

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isAbortError } from "../api/alertsApi.js";
+import { isAbortError } from "../api/apiErrors.js";
 import { useOptionalWorkspaceRuntime } from "./useWorkspaceRuntime.js";
 
 export function useShadowPerformanceSummary({ enabled = true, apiClient, session, authProvider } = {}) {
