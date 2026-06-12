@@ -6,8 +6,8 @@ import java.util.Optional;
 public class StaticShadowPerformanceSummaryProvider implements ShadowPerformanceSummaryProvider {
 
     static final String REQUIRED_BANNER = "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, "
-            + "threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / "
-            + "block logic, or analyst recommendation logic.";
+            + "not threshold recommendation, not production decisioning approval, not payment authorization, "
+            + "not automatic approve / decline / block logic, or not analyst recommendation logic.";
 
     private static final ShadowPerformanceSummary CURRENT_SUMMARY = new ShadowPerformanceSummary(
             "SHADOW_PERFORMANCE_SUMMARY_V1",

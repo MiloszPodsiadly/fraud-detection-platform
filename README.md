@@ -151,6 +151,14 @@ docker compose --env-file deployment/.env \
   up --build -d
 ```
 
+The Shadow Performance dashboard uses the FDP-108 artifact-backed current provider in this local stack. The base
+Compose file mounts the repository-owned validated `ShadowPerformanceSummary v1` local evaluation artifact
+read-only into `alert-service`, so the FDP-106 current summary endpoint returns dashboard metrics after startup.
+Set `SHADOW_PERFORMANCE_SUMMARY_CURRENT_ENABLED=false` to exercise the fail-closed 404 state, or set
+`SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH` plus a matching read-only mount when testing a different local artifact.
+The provider still must not display fake, sample, fallback, stale, or zero metrics when no valid configured artifact
+is available.
+
 `deployment/.env` is a committed local demo/evaluation configuration fixture, so the project remains runnable for
 evaluation without claiming secret management. Application startup guards reject demo internal-auth
 patterns and local-HMAC trust-authority demo configuration outside `local`, `dev`, or `docker-local` profiles,

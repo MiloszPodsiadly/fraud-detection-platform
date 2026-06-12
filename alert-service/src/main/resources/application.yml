@@ -38,6 +38,13 @@ management:
           server:
             requests: true
 
+shadow-performance:
+  summary:
+    current:
+      enabled: ${SHADOW_PERFORMANCE_SUMMARY_CURRENT_ENABLED:false}
+      path: ${SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH:}
+      max-size-bytes: ${SHADOW_PERFORMANCE_SUMMARY_CURRENT_MAX_SIZE_BYTES:1048576}
+
 app:
   fraud-cases:
     work-queue:

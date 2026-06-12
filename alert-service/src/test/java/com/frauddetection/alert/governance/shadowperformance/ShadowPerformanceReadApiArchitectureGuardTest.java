@@ -22,6 +22,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
     private static final Path DOC = ROOT.resolve("docs/architecture/shadow_performance_read_api.md");
     private static final Path OPENAPI = ROOT.resolve("docs/openapi/alert_service.openapi.yaml");
     private static final Path UI_ROOT = ROOT.resolve("analyst-console-ui/src");
+    private static final Path DOCKER_COMPOSE = ROOT.resolve("deployment/docker-compose.yml");
 
     @Test
     void serializedResponseDoesNotExposeRawDataOrOverclaimFields() throws Exception {
@@ -98,9 +99,20 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
     void staticFixtureProviderIsNotLoadedByDefault() throws Exception {
         String staticProvider = Files.readString(PRODUCTION_ROOT.resolve("governance/shadowperformance/StaticShadowPerformanceSummaryProvider.java"));
         String emptyProvider = Files.readString(PRODUCTION_ROOT.resolve("governance/shadowperformance/EmptyShadowPerformanceSummaryProvider.java"));
+        String configuration = Files.readString(PRODUCTION_ROOT.resolve("governance/shadowperformance/ShadowPerformanceSummaryProviderConfiguration.java"));
 
         assertThat(staticProvider).doesNotContain("@Component");
-        assertThat(emptyProvider).contains("@Component", "Optional.empty()");
+        assertThat(emptyProvider).contains("Optional.empty()");
+        assertThat(emptyProvider).doesNotContain("@Component");
+        assertThat(configuration).contains(
+                "@ConditionalOnMissingBean(ShadowPerformanceSummaryProvider.class)",
+                "emptyShadowPerformanceSummaryProvider"
+        );
+        assertThat(configuration).contains(
+                "@ConditionalOnProperty",
+                "shadow-performance.summary.current",
+                "artifactBackedShadowPerformanceSummaryProvider"
+        );
     }
 
     @Test
@@ -159,6 +171,58 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "block_transaction",
                 "alertSeverity",
                 "fraudCaseStatus"
+        );
+    }
+
+    @Test
+    void fdp108ProviderReadsOnlyConfiguredCurrentSummaryArtifact() throws Exception {
+        String source = Files.readString(PRODUCTION_ROOT.resolve(
+                "governance/shadowperformance/ArtifactBackedShadowPerformanceSummaryProvider.java"
+        ));
+
+        assertThat(source).contains(
+                "ShadowPerformanceSummaryCurrentProperties",
+                "objectMapper.readValue",
+                "validator.validate(summary)"
+        );
+        assertThat(source).doesNotContain(
+                "DirectoryStream",
+                "Files.list",
+                "Files.walk",
+                "glob",
+                "KafkaTemplate",
+                "MongoTemplate",
+                "RestTemplate",
+                "RestClient",
+                "WebClient",
+                "ModelRegistry",
+                "modelArtifact",
+                "Payment",
+                "FraudCase",
+                "AlertRepository",
+                "StaticShadowPerformanceSummaryProvider"
+        );
+    }
+
+    @Test
+    void fdp108ProviderDoesNotWriteOrMutateOperationalState() throws Exception {
+        String source = Files.readString(PRODUCTION_ROOT.resolve(
+                "governance/shadowperformance/ArtifactBackedShadowPerformanceSummaryProvider.java"
+        ));
+
+        assertThat(source).doesNotContain(
+                "Files.write",
+                "Files.create",
+                "Files.delete",
+                "send(",
+                "save(",
+                "insert(",
+                "update(",
+                "promote",
+                "threshold",
+                "retrain",
+                "authorizePayment",
+                "analystRecommendation"
         );
     }
 
@@ -228,6 +292,42 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "not payment authorization",
                 "not automatic approve/decline/block logic",
                 "not analyst recommendation logic"
+        );
+    }
+
+    @Test
+    void docsDescribeFdp108CurrentProviderBoundaries() throws Exception {
+        String doc = Files.readString(ROOT.resolve("docs/architecture/shadow_performance_summary_current_provider.md"));
+
+        assertThat(doc).contains(
+                "FDP-108 provides the current summary source for FDP-106",
+                "read-only",
+                "does not compute metrics",
+                "does not recompute shadow performance",
+                "does not read raw FDP-102/FDP-103/FDP-104 artifacts",
+                "does not expose raw artifacts",
+                "Missing or unconfigured current summary returns 404",
+                "Unavailable or invalid configured source returns 503",
+                "No fake, sample, stale, fallback, or zero metrics",
+                "FDP-108 provides a validated current ShadowPerformanceSummary. It does not create model readiness, promotion approval, threshold recommendation, production decisioning approval, payment authorization, or analyst recommendation logic."
+        );
+    }
+
+    @Test
+    void dockerRuntimeWiresCurrentProviderToReadOnlyLocalArtifact() throws Exception {
+        String baseCompose = Files.readString(DOCKER_COMPOSE);
+
+        assertThat(baseCompose).contains(
+                "SHADOW_PERFORMANCE_SUMMARY_CURRENT_ENABLED: ${SHADOW_PERFORMANCE_SUMMARY_CURRENT_ENABLED:-true}",
+                "SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH: ${SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH:-/run/shadow-performance/current-summary.json}",
+                "SHADOW_PERFORMANCE_SUMMARY_CURRENT_MAX_SIZE_BYTES: ${SHADOW_PERFORMANCE_SUMMARY_CURRENT_MAX_SIZE_BYTES:-1048576}",
+                "../ml-inference-service/tests/offline_evaluation/fixtures/shadow_performance/expected_shadow_performance_summary_v1.json",
+                "target: /run/shadow-performance/current-summary.json",
+                "read_only: true"
+        );
+        assertThat(baseCompose).doesNotContain(
+                "StaticShadowPerformanceSummaryProvider",
+                "SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH: ${SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH:-}"
         );
     }
 
