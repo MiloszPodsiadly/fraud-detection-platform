@@ -49,42 +49,24 @@ describe("WorkspaceDashboardShell FDP-53 composition", () => {
     }));
   });
 
-  it("shadowPerformanceWorkspaceDoesNotCallListAlerts", async () => {
+  it("shadowPerformanceWorkspaceLoadsSharedWorkspaceCounters", async () => {
     const apiClient = renderShadowPerformanceShell();
 
     await waitFor(() => expect(apiClient.getCurrentShadowPerformanceSummary).toHaveBeenCalledTimes(1));
-    expect(apiClient.listAlerts).not.toHaveBeenCalled();
+    await waitFor(() => expect(apiClient.listAlerts).toHaveBeenCalledTimes(1));
+    expect(apiClient.getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1);
+    expect(apiClient.getSuspiciousTransactionSummary).toHaveBeenCalledTimes(1);
+    expect(apiClient.listScoredTransactions).toHaveBeenCalledTimes(1);
   });
 
-  it("shadowPerformanceWorkspaceDoesNotCallFraudCaseSummary", async () => {
+  it("shadowPerformanceWorkspaceRendersSharedWorkspaceCounters", async () => {
     const apiClient = renderShadowPerformanceShell();
 
-    await waitFor(() => expect(apiClient.getCurrentShadowPerformanceSummary).toHaveBeenCalledTimes(1));
-    expect(apiClient.getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
-  });
-
-  it("shadowPerformanceWorkspaceDoesNotCallSuspiciousTransactionSummary", async () => {
-    const apiClient = renderShadowPerformanceShell();
-
-    await waitFor(() => expect(apiClient.getCurrentShadowPerformanceSummary).toHaveBeenCalledTimes(1));
-    expect(apiClient.getSuspiciousTransactionSummary).not.toHaveBeenCalled();
-  });
-
-  it("shadowPerformanceWorkspaceDoesNotCallScoredTransactions", async () => {
-    const apiClient = renderShadowPerformanceShell();
-
-    await waitFor(() => expect(apiClient.getCurrentShadowPerformanceSummary).toHaveBeenCalledTimes(1));
-    expect(apiClient.listScoredTransactions).not.toHaveBeenCalled();
-  });
-
-  it("shadowPerformanceWorkspaceDoesNotRenderPlatformCounterCards", async () => {
-    const apiClient = renderShadowPerformanceShell();
-
-    await waitFor(() => expect(apiClient.getCurrentShadowPerformanceSummary).toHaveBeenCalledTimes(1));
-    expect(screen.queryByText("41")).not.toBeInTheDocument();
-    expect(screen.queryByText("42")).not.toBeInTheDocument();
-    expect(screen.queryByText("43")).not.toBeInTheDocument();
-    expect(screen.queryByText("44")).not.toBeInTheDocument();
+    await waitFor(() => expect(apiClient.listAlerts).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("41")).toBeInTheDocument();
+    expect(screen.getByText("42")).toBeInTheDocument();
+    expect(screen.getByText("43")).toBeInTheDocument();
+    expect(screen.getByText("44")).toBeInTheDocument();
   });
 });
 
@@ -196,6 +178,6 @@ function shadowSummary() {
     },
     warnings: ["MISSING_ML_SIGNAL_PRESENT"],
     limitations: ["DIAGNOSTIC_ONLY"],
-    banner: "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic."
+    banner: "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic approve / decline / block logic, or not analyst recommendation logic."
   };
 }
