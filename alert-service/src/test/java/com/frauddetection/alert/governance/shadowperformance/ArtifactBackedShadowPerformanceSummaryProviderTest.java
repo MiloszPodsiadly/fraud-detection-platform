@@ -1,6 +1,8 @@
 package com.frauddetection.alert.governance.shadowperformance;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -88,6 +90,186 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
                 "\"summaryType\":\"SHADOW_PERFORMANCE_SUMMARY_V1\",\"rawPayload\":\"secret\""));
 
         assertUnavailable(provider(artifact));
+    }
+
+    @Test
+    void throwsUnavailableWhenPrecisionAtBudgetMissing() throws Exception {
+        assertUnavailableWithMissingField("precisionAtBudget");
+    }
+
+    @Test
+    void throwsUnavailableWhenPrecisionAtBudgetNull() throws Exception {
+        assertUnavailableWithNullField("precisionAtBudget");
+    }
+
+    @Test
+    void throwsUnavailableWhenRecallAtTopKMissing() throws Exception {
+        assertUnavailableWithMissingField("recallAtTopK");
+    }
+
+    @Test
+    void throwsUnavailableWhenRecallAtTopKNull() throws Exception {
+        assertUnavailableWithNullField("recallAtTopK");
+    }
+
+    @Test
+    void throwsUnavailableWhenFalsePositiveRateMissing() throws Exception {
+        assertUnavailableWithMissingField("falsePositiveRate");
+    }
+
+    @Test
+    void throwsUnavailableWhenFalsePositiveRateNull() throws Exception {
+        assertUnavailableWithNullField("falsePositiveRate");
+    }
+
+    @Test
+    void throwsUnavailableWhenMetricCountMissing() throws Exception {
+        for (String fieldName : new String[]{
+                "mlCaughtRulesMissedCount",
+                "rulesCaughtMlMissedCount",
+                "missingMlCount",
+                "missingRulesCount",
+                "missingProjectionCount",
+                "notEvaluationEligibleCount"
+        }) {
+            assertUnavailableWithMissingField(fieldName);
+        }
+    }
+
+    @Test
+    void throwsUnavailableWhenMetricCountNull() throws Exception {
+        for (String fieldName : new String[]{
+                "mlCaughtRulesMissedCount",
+                "rulesCaughtMlMissedCount",
+                "missingMlCount",
+                "missingRulesCount",
+                "missingProjectionCount",
+                "notEvaluationEligibleCount"
+        }) {
+            assertUnavailableWithNullField(fieldName);
+        }
+    }
+
+    @Test
+    void throwsUnavailableWhenDatasetRecordsReadMissing() throws Exception {
+        assertUnavailableWithMissingField("datasetRecordsRead");
+    }
+
+    @Test
+    void throwsUnavailableWhenDatasetRecordsReadNull() throws Exception {
+        assertUnavailableWithNullField("datasetRecordsRead");
+    }
+
+    @Test
+    void throwsUnavailableWhenRecordsAcceptedForEvaluationMissing() throws Exception {
+        assertUnavailableWithMissingField("recordsAcceptedForEvaluation");
+    }
+
+    @Test
+    void throwsUnavailableWhenRecordsAcceptedForEvaluationNull() throws Exception {
+        assertUnavailableWithNullField("recordsAcceptedForEvaluation");
+    }
+
+    @Test
+    void throwsUnavailableWhenRecordsExcludedNotEvaluationEligibleMissing() throws Exception {
+        assertUnavailableWithMissingField("recordsExcludedNotEvaluationEligible");
+    }
+
+    @Test
+    void throwsUnavailableWhenRecordsExcludedNotEvaluationEligibleNull() throws Exception {
+        assertUnavailableWithNullField("recordsExcludedNotEvaluationEligible");
+    }
+
+    @Test
+    void throwsUnavailableWhenDisagreementCountMissing() throws Exception {
+        for (String fieldName : new String[]{
+                "rulesHighMlHigh",
+                "rulesHighMlLowOrMedium",
+                "rulesLowOrMediumMlHigh",
+                "rulesLowOrMediumMlLowOrMedium",
+                "rulesMissingMlPresent",
+                "mlMissingRulesPresent",
+                "bothMissing",
+                "notEvaluationEligibleExcluded"
+        }) {
+            assertUnavailableWithMissingField(fieldName);
+        }
+    }
+
+    @Test
+    void throwsUnavailableWhenDisagreementCountNull() throws Exception {
+        for (String fieldName : new String[]{
+                "rulesHighMlHigh",
+                "rulesHighMlLowOrMedium",
+                "rulesLowOrMediumMlHigh",
+                "rulesLowOrMediumMlLowOrMedium",
+                "rulesMissingMlPresent",
+                "mlMissingRulesPresent",
+                "bothMissing",
+                "notEvaluationEligibleExcluded"
+        }) {
+            assertUnavailableWithNullField(fieldName);
+        }
+    }
+
+    @Test
+    void throwsUnavailableWhenDiagnosticOnlyMissing() throws Exception {
+        assertUnavailableWithMissingField("diagnosticOnly");
+    }
+
+    @Test
+    void throwsUnavailableWhenDiagnosticOnlyNull() throws Exception {
+        assertUnavailableWithNullField("diagnosticOnly");
+    }
+
+    @Test
+    void throwsUnavailableWhenNotProductionApprovalMissing() throws Exception {
+        assertUnavailableWithMissingField("notProductionApproval");
+    }
+
+    @Test
+    void throwsUnavailableWhenNotProductionApprovalNull() throws Exception {
+        assertUnavailableWithNullField("notProductionApproval");
+    }
+
+    @Test
+    void throwsUnavailableWhenNotPromotionApprovalMissing() throws Exception {
+        assertUnavailableWithMissingField("notPromotionApproval");
+    }
+
+    @Test
+    void throwsUnavailableWhenNotPromotionApprovalNull() throws Exception {
+        assertUnavailableWithNullField("notPromotionApproval");
+    }
+
+    @Test
+    void throwsUnavailableWhenNotThresholdRecommendationMissing() throws Exception {
+        assertUnavailableWithMissingField("notThresholdRecommendation");
+    }
+
+    @Test
+    void throwsUnavailableWhenNotThresholdRecommendationNull() throws Exception {
+        assertUnavailableWithNullField("notThresholdRecommendation");
+    }
+
+    @Test
+    void throwsUnavailableWhenNotPaymentAuthorizationMissing() throws Exception {
+        assertUnavailableWithMissingField("notPaymentAuthorization");
+    }
+
+    @Test
+    void throwsUnavailableWhenNotPaymentAuthorizationNull() throws Exception {
+        assertUnavailableWithNullField("notPaymentAuthorization");
+    }
+
+    @Test
+    void throwsUnavailableWhenNotAutomaticDecisioningMissing() throws Exception {
+        assertUnavailableWithMissingField("notAutomaticDecisioning");
+    }
+
+    @Test
+    void throwsUnavailableWhenNotAutomaticDecisioningNull() throws Exception {
+        assertUnavailableWithNullField("notAutomaticDecisioning");
     }
 
     @Test
@@ -413,8 +595,67 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
         return artifact;
     }
 
+    private Path writeJson(String json) throws IOException {
+        Path artifact = tempDir.resolve("current-summary.json");
+        Files.writeString(artifact, json);
+        return artifact;
+    }
+
     private String validSummaryJson() throws Exception {
         return objectMapper.writeValueAsString(validSummary());
+    }
+
+    private String withoutField(String json, String fieldName) throws Exception {
+        JsonNode root = objectMapper.readTree(json);
+        assertThat(removeField(root, fieldName))
+                .as("field %s exists in summary JSON", fieldName)
+                .isTrue();
+        return objectMapper.writeValueAsString(root);
+    }
+
+    private String withNullField(String json, String fieldName) throws Exception {
+        JsonNode root = objectMapper.readTree(json);
+        assertThat(nullField(root, fieldName))
+                .as("field %s exists in summary JSON", fieldName)
+                .isTrue();
+        return objectMapper.writeValueAsString(root);
+    }
+
+    private boolean removeField(JsonNode node, String fieldName) {
+        if (node instanceof ObjectNode objectNode && objectNode.remove(fieldName) != null) {
+            return true;
+        }
+        for (JsonNode child : node) {
+            if (removeField(child, fieldName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean nullField(JsonNode node, String fieldName) {
+        if (node instanceof ObjectNode objectNode && objectNode.has(fieldName)) {
+            objectNode.putNull(fieldName);
+            return true;
+        }
+        for (JsonNode child : node) {
+            if (nullField(child, fieldName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void assertUnavailableWithMissingField(String fieldName) throws Exception {
+        Path artifact = writeJson(withoutField(validSummaryJson(), fieldName));
+
+        assertUnavailable(provider(artifact));
+    }
+
+    private void assertUnavailableWithNullField(String fieldName) throws Exception {
+        Path artifact = writeJson(withNullField(validSummaryJson(), fieldName));
+
+        assertUnavailable(provider(artifact));
     }
 
     private void assertUnavailable(ArtifactBackedShadowPerformanceSummaryProvider provider) {

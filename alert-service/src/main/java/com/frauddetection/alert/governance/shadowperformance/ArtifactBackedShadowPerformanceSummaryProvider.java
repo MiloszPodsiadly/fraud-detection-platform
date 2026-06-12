@@ -26,7 +26,10 @@ public class ArtifactBackedShadowPerformanceSummaryProvider implements ShadowPer
         this.properties = properties;
         this.objectMapper = objectMapper.copy()
                 .configure(MapperFeature.ALLOW_COERCION_OF_SCALARS, false)
-                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true);
+                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true)
+                .configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true)
+                .configure(DeserializationFeature.FAIL_ON_NULL_CREATOR_PROPERTIES, true)
+                .configure(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES, true);
         this.validator = validator;
     }
 
