@@ -1,8 +1,11 @@
 package com.frauddetection.alert.governance.shadowperformance;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.nio.file.Path;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -17,6 +20,9 @@ class ShadowPerformanceSummaryReadServiceTest {
     private final ShadowPerformanceSummaryProvider provider = mock(ShadowPerformanceSummaryProvider.class);
     private final ShadowPerformanceSummaryValidator validator = mock(ShadowPerformanceSummaryValidator.class);
     private final ShadowPerformanceSummaryReadService service = new ShadowPerformanceSummaryReadService(provider, validator);
+
+    @TempDir
+    Path tempDir;
 
     @Test
     void defaultProviderReturnsEmptyWhenNoCurrentSummaryConfigured() {
@@ -74,6 +80,25 @@ class ShadowPerformanceSummaryReadServiceTest {
     }
 
     @Test
+    void configuredMissingArtifactMapsToServiceUnavailable() {
+        Path missingArtifact = tempDir.resolve("current-summary.json");
+        ShadowPerformanceSummaryProvider artifactProvider = new ArtifactBackedShadowPerformanceSummaryProvider(
+                new ShadowPerformanceSummaryCurrentProperties(true, tempDir.toString(), missingArtifact.toString(), 1_048_576L),
+                new ObjectMapper(),
+                new ShadowPerformanceSummaryValidator()
+        );
+        ShadowPerformanceSummaryReadService artifactService = new ShadowPerformanceSummaryReadService(
+                artifactProvider,
+                new ShadowPerformanceSummaryValidator()
+        );
+
+        assertThatThrownBy(artifactService::currentSummary)
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(exception -> ((ResponseStatusException) exception).getStatusCode().value())
+                .isEqualTo(503);
+    }
+
+    @Test
     void mapsOnlyFromShadowPerformanceSummaryWithoutRecomputation() {
         ShadowPerformanceSummary summary = validSummary();
         ShadowPerformanceSummary changedMetrics = new ShadowPerformanceSummary(
@@ -100,7 +125,7 @@ class ShadowPerformanceSummaryReadServiceTest {
     }
 
     private ShadowPerformanceSummary validSummary() {
-        return new StaticShadowPerformanceSummaryProvider().currentSummary().orElseThrow();
+        return ShadowPerformanceSummaryTestFixtures.validSummary();
     }
 
     private ShadowPerformanceSummary invalidSummary() {

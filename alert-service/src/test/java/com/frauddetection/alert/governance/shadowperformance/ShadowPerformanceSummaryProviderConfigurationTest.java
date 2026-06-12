@@ -27,6 +27,7 @@ class ShadowPerformanceSummaryProviderConfigurationTest {
         contextRunner
                 .withPropertyValues(
                         "shadow-performance.summary.current.enabled=true",
+                        "shadow-performance.summary.current.base-dir=/tmp",
                         "shadow-performance.summary.current.path=/tmp/current-summary.json"
                 )
                 .run(context -> {
@@ -37,9 +38,9 @@ class ShadowPerformanceSummaryProviderConfigurationTest {
     }
 
     @Test
-    void staticProviderNotEnabledByDefault() {
-        contextRunner.run(context -> assertThat(context)
-                .doesNotHaveBean(StaticShadowPerformanceSummaryProvider.class));
+    void applicationContextDoesNotLoadStaticFixtureProvider() {
+        contextRunner.run(context -> assertThat(context.getBeanNamesForType(ShadowPerformanceSummaryProvider.class))
+                .doesNotContain("staticShadowPerformanceSummaryProvider"));
     }
 
     @Test

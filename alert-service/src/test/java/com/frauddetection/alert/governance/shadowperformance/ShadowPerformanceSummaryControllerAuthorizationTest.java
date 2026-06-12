@@ -128,7 +128,7 @@ class ShadowPerformanceSummaryControllerAuthorizationTest {
                 .andExpect(jsonPath("$.governance.approvedFor[1]").value("SHADOW"))
                 .andExpect(jsonPath("$.evaluationPopulation.datasetRecordsRead").value(5))
                 .andExpect(jsonPath("$.metrics.precisionAtBudget").value(0.666667))
-                .andExpect(jsonPath("$.banner").value(StaticShadowPerformanceSummaryProvider.REQUIRED_BANNER));
+                .andExpect(jsonPath("$.banner").value(ShadowPerformanceSummaryContract.REQUIRED_BANNER));
 
         verify(readAccessAuditService).audit(
                 argThat(target -> target.endpointCategory() == ReadAccessEndpointCategory.SHADOW_PERFORMANCE_SUMMARY
@@ -174,7 +174,7 @@ class ShadowPerformanceSummaryControllerAuthorizationTest {
     }
 
     private ShadowPerformanceSummaryResponse validResponse() {
-        return ShadowPerformanceSummaryResponse.from(new StaticShadowPerformanceSummaryProvider().currentSummary().orElseThrow());
+        return ShadowPerformanceSummaryResponse.from(ShadowPerformanceSummaryTestFixtures.validSummary());
     }
 
     private UsernamePasswordAuthenticationToken auth(String... authorities) {

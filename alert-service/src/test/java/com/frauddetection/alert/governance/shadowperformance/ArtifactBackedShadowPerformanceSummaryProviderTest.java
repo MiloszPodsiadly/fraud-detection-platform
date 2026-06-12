@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.Optional;
 
@@ -28,22 +30,6 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
         Optional<ShadowPerformanceSummary> result = provider(artifact).currentSummary();
 
         assertThat(result).contains(validSummary());
-    }
-
-    @Test
-    void returnsCurrentSummaryFromRepositoryOwnedLocalDockerArtifact() {
-        Path artifact = Path.of("..").toAbsolutePath().normalize()
-                .resolve("ml-inference-service")
-                .resolve("tests")
-                .resolve("offline_evaluation")
-                .resolve("fixtures")
-                .resolve("shadow_performance")
-                .resolve("expected_shadow_performance_summary_v1.json");
-
-        Optional<ShadowPerformanceSummary> result = provider(artifact).currentSummary();
-
-        assertThat(result).isPresent();
-        assertThat(result.orElseThrow().summaryType()).isEqualTo("SHADOW_PERFORMANCE_SUMMARY_V1");
     }
 
     @Test
@@ -116,28 +102,39 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
     }
 
     @Test
-    void returnsEmptyWhenCurrentSummaryFileMissing() {
-        assertThat(provider(tempDir.resolve("missing.json")).currentSummary()).isEmpty();
+    void throwsUnavailableWhenProviderEnabledAndConfiguredArtifactMissing() {
+        assertUnavailable(provider(tempDir.resolve("missing.json")));
+    }
+
+    @Test
+    void doesNotExposeConfiguredPathWhenArtifactUnavailable() {
+        Path missingArtifact = tempDir.resolve("secret-current-summary.json");
+
+        assertThatThrownBy(provider(missingArtifact)::currentSummary)
+                .isInstanceOf(ShadowPerformanceSummaryProviderUnavailableException.class)
+                .hasMessage("Current shadow performance summary artifact unavailable.")
+                .hasMessageNotContaining(tempDir.toString())
+                .hasMessageNotContaining("secret-current-summary.json");
     }
 
     @Test
     void doesNotFallbackToStaticSummary() {
-        assertThat(provider(tempDir.resolve("missing.json")).currentSummary()).isEmpty();
+        assertUnavailable(provider(tempDir.resolve("missing.json")));
     }
 
     @Test
     void doesNotFallbackToSampleSummary() {
-        assertThat(provider(tempDir.resolve("missing.json")).currentSummary()).isEmpty();
+        assertUnavailable(provider(tempDir.resolve("missing.json")));
     }
 
     @Test
     void doesNotFabricateZeroMetrics() {
-        assertThat(provider(tempDir.resolve("missing.json")).currentSummary()).isEmpty();
+        assertUnavailable(provider(tempDir.resolve("missing.json")));
     }
 
     @Test
     void doesNotReturnEmptySummaryObject() {
-        assertThat(provider(tempDir.resolve("missing.json")).currentSummary()).isEmpty();
+        assertUnavailable(provider(tempDir.resolve("missing.json")));
     }
 
     @Test
@@ -247,6 +244,44 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
     }
 
     @Test
+    void requiresConfiguredPathUnderAllowedBaseDirectory() throws Exception {
+        Path artifact = writeSummary(validSummary());
+
+        Optional<ShadowPerformanceSummary> result = provider(true, tempDir, artifact).currentSummary();
+
+        assertThat(result).contains(validSummary());
+    }
+
+    @Test
+    void rejectsPathOutsideAllowedBaseDirectory() throws Exception {
+        Path artifact = writeSummary(validSummary());
+        Path outsideBaseDir = tempDir.resolve("allowed");
+        Files.createDirectories(outsideBaseDir);
+
+        assertUnavailable(provider(true, outsideBaseDir, artifact));
+    }
+
+    @Test
+    void rejectsSymlinkArtifact() throws Exception {
+        Path artifact = writeSummary(validSummary());
+        Path symlink = tempDir.resolve("current-summary-link.json");
+        try {
+            Files.createSymbolicLink(symlink, artifact);
+        } catch (UnsupportedOperationException | IOException exception) {
+            return;
+        }
+
+        assertThat(Files.isSymbolicLink(symlink)).isTrue();
+        assertThat(Files.isRegularFile(symlink, LinkOption.NOFOLLOW_LINKS)).isFalse();
+        assertUnavailable(provider(symlink));
+    }
+
+    @Test
+    void rejectsNonRegularFile() {
+        assertUnavailable(provider(tempDir.resolve("missing.json")));
+    }
+
+    @Test
     void directoryPathRejected() {
         assertUnavailable(provider(tempDir));
     }
@@ -261,15 +296,9 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
 
     @Test
     void relativePathBehaviorIsExplicit() throws Exception {
-        Path artifact = Path.of("target", "fdp108-current-summary-test.json");
-        Files.createDirectories(artifact.getParent());
-        objectMapper.writeValue(artifact.toFile(), validSummary());
+        Path artifact = writeSummary(validSummary());
 
-        try {
-            assertThat(provider(true, artifact).currentSummary()).contains(validSummary());
-        } finally {
-            Files.deleteIfExists(artifact);
-        }
+        assertThat(provider(true, tempDir, artifact.getFileName()).currentSummary()).contains(validSummary());
     }
 
     @Test
@@ -309,7 +338,7 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
 
     @Test
     void doesNotReturnBundledFixtureWhenSourceMissing() {
-        assertThat(provider(tempDir.resolve("missing.json")).currentSummary()).isEmpty();
+        assertUnavailable(provider(tempDir.resolve("missing.json")));
     }
 
     @Test
@@ -329,7 +358,7 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
 
     @Test
     void doesNotReturnZeroMetricsWhenSummaryMissing() {
-        assertThat(provider(tempDir.resolve("missing.json")).currentSummary()).isEmpty();
+        assertUnavailable(provider(tempDir.resolve("missing.json")));
     }
 
     @Test
@@ -355,12 +384,24 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
     }
 
     private ArtifactBackedShadowPerformanceSummaryProvider provider(boolean enabled, Path path, long maxSizeBytes) {
-        return provider(enabled, path == null ? null : path.toString(), maxSizeBytes);
+        return provider(enabled, tempDir, path, maxSizeBytes);
     }
 
     private ArtifactBackedShadowPerformanceSummaryProvider provider(boolean enabled, String path, long maxSizeBytes) {
+        return provider(enabled, tempDir.toString(), path, maxSizeBytes);
+    }
+
+    private ArtifactBackedShadowPerformanceSummaryProvider provider(boolean enabled, Path baseDir, Path path) {
+        return provider(enabled, baseDir, path, 1_048_576L);
+    }
+
+    private ArtifactBackedShadowPerformanceSummaryProvider provider(boolean enabled, Path baseDir, Path path, long maxSizeBytes) {
+        return provider(enabled, baseDir == null ? null : baseDir.toString(), path == null ? null : path.toString(), maxSizeBytes);
+    }
+
+    private ArtifactBackedShadowPerformanceSummaryProvider provider(boolean enabled, String baseDir, String path, long maxSizeBytes) {
         return new ArtifactBackedShadowPerformanceSummaryProvider(
-                new ShadowPerformanceSummaryCurrentProperties(enabled, path, maxSizeBytes),
+                new ShadowPerformanceSummaryCurrentProperties(enabled, baseDir, path, maxSizeBytes),
                 objectMapper,
                 validator
         );
@@ -382,7 +423,7 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
     }
 
     private ShadowPerformanceSummary validSummary() {
-        return new StaticShadowPerformanceSummaryProvider().currentSummary().orElseThrow();
+        return ShadowPerformanceSummaryTestFixtures.validSummary();
     }
 
     private ShadowPerformanceSummary summaryWithMetrics(double precision, double recall, double falsePositiveRate) {

@@ -85,7 +85,7 @@ class ShadowPerformanceSummaryValidator {
         validateMachineCodes(summary.limitations(), 20, "limitations");
         require(summary.limitations() != null, "limitations is missing");
         require(Set.copyOf(summary.limitations()).containsAll(SAFE_LIMITATIONS), "limitations missing diagnostic non-goals");
-        require(StaticShadowPerformanceSummaryProvider.REQUIRED_BANNER.equals(summary.banner()), "banner is unsupported");
+        require(ShadowPerformanceSummaryContract.REQUIRED_BANNER.equals(summary.banner()), "banner is unsupported");
     }
 
     private void validateModel(ShadowPerformanceSummary.ShadowPerformanceModel model) {
@@ -241,7 +241,7 @@ class ShadowPerformanceSummaryValidator {
 
     private void rejectForbidden(String value, String field) {
         String compact = compact(value);
-        if (value.equals(StaticShadowPerformanceSummaryProvider.REQUIRED_BANNER) || SAFE_LIMITATIONS.contains(value)) {
+        if (value.equals(ShadowPerformanceSummaryContract.REQUIRED_BANNER) || SAFE_LIMITATIONS.contains(value)) {
             return;
         }
         require(!compact.contains("eval") && !compact.contains("txnref"), field + " contains forbidden reference");

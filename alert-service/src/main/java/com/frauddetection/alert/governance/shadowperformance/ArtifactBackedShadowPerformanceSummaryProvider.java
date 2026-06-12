@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.Optional;
 
@@ -36,13 +37,8 @@ public class ArtifactBackedShadowPerformanceSummaryProvider implements ShadowPer
         }
 
         Path artifactPath = configuredArtifactPath();
-        if (!Files.exists(artifactPath)) {
-            return Optional.empty();
-        }
-        if (Files.isDirectory(artifactPath)) {
-            throw unavailable();
-        }
         assertJsonArtifact(artifactPath);
+        assertRegularFile(artifactPath);
         assertBoundedSize(artifactPath);
 
         ShadowPerformanceSummary summary = readSummary(artifactPath);
@@ -55,12 +51,21 @@ public class ArtifactBackedShadowPerformanceSummaryProvider implements ShadowPer
     }
 
     private Path configuredArtifactPath() {
+        String configuredBaseDir = properties.baseDir().trim();
         String configuredPath = properties.path().trim();
-        if (configuredPath.contains("..")) {
+        if (configuredBaseDir.contains("..") || configuredPath.contains("..")) {
             throw unavailable();
         }
         try {
-            return Path.of(configuredPath).normalize();
+            Path baseDir = Path.of(configuredBaseDir).toAbsolutePath().normalize();
+            Path artifactPath = Path.of(configuredPath);
+            Path normalizedArtifactPath = (artifactPath.isAbsolute() ? artifactPath : baseDir.resolve(artifactPath))
+                    .toAbsolutePath()
+                    .normalize();
+            if (!normalizedArtifactPath.startsWith(baseDir)) {
+                throw unavailable();
+            }
+            return normalizedArtifactPath;
         } catch (InvalidPathException exception) {
             throw unavailable();
         }
@@ -69,6 +74,12 @@ public class ArtifactBackedShadowPerformanceSummaryProvider implements ShadowPer
     private void assertJsonArtifact(Path artifactPath) {
         Path fileName = artifactPath.getFileName();
         if (fileName == null || !fileName.toString().endsWith(".json")) {
+            throw unavailable();
+        }
+    }
+
+    private void assertRegularFile(Path artifactPath) {
+        if (!Files.isRegularFile(artifactPath, LinkOption.NOFOLLOW_LINKS)) {
             throw unavailable();
         }
     }
