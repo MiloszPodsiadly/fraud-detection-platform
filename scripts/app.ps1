@@ -18,7 +18,8 @@ $composeArgs = @(
     "-f", "deployment/docker-compose.oidc.yml",
     "-f", "deployment/docker-compose.service-identity-mtls.yml",
     "-f", "deployment/docker-compose.trust-authority-jwt.yml",
-    "-f", "deployment/docker-compose.hardened.yml"
+    "-f", "deployment/docker-compose.hardened.yml",
+    "-f", "deployment/docker-compose.shadow-performance-demo.yml"
 )
 
 function Invoke-DockerCompose {

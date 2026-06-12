@@ -23,12 +23,15 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
     private static final Path OPENAPI = ROOT.resolve("docs/openapi/alert_service.openapi.yaml");
     private static final Path UI_ROOT = ROOT.resolve("analyst-console-ui/src");
     private static final Path DOCKER_COMPOSE = ROOT.resolve("deployment/docker-compose.yml");
+    private static final Path DEMO_COMPOSE = ROOT.resolve("deployment/docker-compose.shadow-performance-demo.yml");
+    private static final Path MAKEFILE = ROOT.resolve("Makefile");
+    private static final Path APP_PS1 = ROOT.resolve("scripts/app.ps1");
 
     @Test
     void serializedResponseDoesNotExposeRawDataOrOverclaimFields() throws Exception {
         ObjectMapper mapper = new ObjectMapper();
         String payload = mapper.writeValueAsString(
-                ShadowPerformanceSummaryResponse.from(new StaticShadowPerformanceSummaryProvider().currentSummary().orElseThrow())
+                ShadowPerformanceSummaryResponse.from(ShadowPerformanceSummaryTestFixtures.validSummary())
         );
         JsonNode json = mapper.readTree(payload);
         List<String> topLevelFields = new ArrayList<>();
@@ -96,12 +99,17 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
     }
 
     @Test
-    void staticFixtureProviderIsNotLoadedByDefault() throws Exception {
-        String staticProvider = Files.readString(PRODUCTION_ROOT.resolve("governance/shadowperformance/StaticShadowPerformanceSummaryProvider.java"));
+    void staticFixtureProviderNotPresentInMainSource() throws Exception {
         String emptyProvider = Files.readString(PRODUCTION_ROOT.resolve("governance/shadowperformance/EmptyShadowPerformanceSummaryProvider.java"));
         String configuration = Files.readString(PRODUCTION_ROOT.resolve("governance/shadowperformance/ShadowPerformanceSummaryProviderConfiguration.java"));
+        String source = shadowPerformanceSource();
 
-        assertThat(staticProvider).doesNotContain("@Component");
+        assertThat(PRODUCTION_ROOT.resolve("governance/shadowperformance/StaticShadowPerformanceSummaryProvider.java")).doesNotExist();
+        assertThat(source).doesNotContain(
+                "StaticShadowPerformanceSummaryProvider",
+                "Optional.of(CURRENT_SUMMARY)",
+                "private static final ShadowPerformanceSummary CURRENT_SUMMARY"
+        );
         assertThat(emptyProvider).contains("Optional.empty()");
         assertThat(emptyProvider).doesNotContain("@Component");
         assertThat(configuration).contains(
@@ -113,6 +121,22 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "shadow-performance.summary.current",
                 "artifactBackedShadowPerformanceSummaryProvider"
         );
+    }
+
+    @Test
+    void productionValidatorUsesContractConstantNotStaticFixtureProvider() throws Exception {
+        String validator = Files.readString(PRODUCTION_ROOT.resolve("governance/shadowperformance/ShadowPerformanceSummaryValidator.java"));
+
+        assertThat(validator).contains("ShadowPerformanceSummaryContract.REQUIRED_BANNER");
+        assertThat(validator).doesNotContain("StaticShadowPerformanceSummaryProvider.REQUIRED_BANNER");
+    }
+
+    @Test
+    void testFixturesRemainInTestSourceOnly() throws Exception {
+        Path testFixture = ROOT.resolve("alert-service/src/test/java/com/frauddetection/alert/governance/shadowperformance/ShadowPerformanceSummaryTestFixtures.java");
+
+        assertThat(testFixture).exists();
+        assertThat(shadowPerformanceSource()).doesNotContain("ShadowPerformanceSummaryTestFixtures");
     }
 
     @Test
@@ -182,6 +206,8 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
 
         assertThat(source).contains(
                 "ShadowPerformanceSummaryCurrentProperties",
+                "LinkOption.NOFOLLOW_LINKS",
+                "startsWith(baseDir)",
                 "objectMapper.readValue",
                 "validator.validate(summary)"
         );
@@ -302,32 +328,101 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         assertThat(doc).contains(
                 "FDP-108 provides the current summary source for FDP-106",
                 "read-only",
+                "base runtime is fail-closed by default",
                 "does not compute metrics",
                 "does not recompute shadow performance",
                 "does not read raw FDP-102/FDP-103/FDP-104 artifacts",
                 "does not expose raw artifacts",
-                "Missing or unconfigured current summary returns 404",
+                "Disabled provider or no configured path returns 404",
+                "Configured missing artifact returns 503",
                 "Unavailable or invalid configured source returns 503",
+                "bounded to the configured safe directory",
+                "does not allow symlink artifacts",
+                "demo fixture metrics are not production current summary",
                 "No fake, sample, stale, fallback, or zero metrics",
                 "FDP-108 provides a validated current ShadowPerformanceSummary. It does not create model readiness, promotion approval, threshold recommendation, production decisioning approval, payment authorization, or analyst recommendation logic."
         );
     }
 
     @Test
-    void dockerRuntimeWiresCurrentProviderToReadOnlyLocalArtifact() throws Exception {
+    void baseDockerComposeDoesNotEnableShadowPerformanceCurrentProviderByDefault() throws Exception {
         String baseCompose = Files.readString(DOCKER_COMPOSE);
 
         assertThat(baseCompose).contains(
-                "SHADOW_PERFORMANCE_SUMMARY_CURRENT_ENABLED: ${SHADOW_PERFORMANCE_SUMMARY_CURRENT_ENABLED:-true}",
-                "SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH: ${SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH:-/run/shadow-performance/current-summary.json}",
-                "SHADOW_PERFORMANCE_SUMMARY_CURRENT_MAX_SIZE_BYTES: ${SHADOW_PERFORMANCE_SUMMARY_CURRENT_MAX_SIZE_BYTES:-1048576}",
-                "../ml-inference-service/tests/offline_evaluation/fixtures/shadow_performance/expected_shadow_performance_summary_v1.json",
-                "target: /run/shadow-performance/current-summary.json",
-                "read_only: true"
+                "SHADOW_PERFORMANCE_SUMMARY_CURRENT_ENABLED: ${SHADOW_PERFORMANCE_SUMMARY_CURRENT_ENABLED:-false}",
+                "SHADOW_PERFORMANCE_SUMMARY_CURRENT_BASE_DIR: ${SHADOW_PERFORMANCE_SUMMARY_CURRENT_BASE_DIR:-/run/shadow-performance}",
+                "SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH: ${SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH:-}"
         );
         assertThat(baseCompose).doesNotContain(
-                "StaticShadowPerformanceSummaryProvider",
-                "SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH: ${SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH:-}"
+                "SHADOW_PERFORMANCE_SUMMARY_CURRENT_ENABLED: ${SHADOW_PERFORMANCE_SUMMARY_CURRENT_ENABLED:-true}",
+                "../ml-inference-service/tests/offline_evaluation/fixtures/shadow_performance",
+                "target: /run/shadow-performance/current-summary.json",
+                "current-summary.demo.json"
+        );
+    }
+
+    @Test
+    void shadowPerformanceDemoComposeExplicitlyEnablesCurrentProvider() throws Exception {
+        String demoCompose = Files.readString(DEMO_COMPOSE);
+
+        assertThat(demoCompose).contains(
+                "SHADOW_PERFORMANCE_SUMMARY_CURRENT_ENABLED: \"true\"",
+                "SHADOW_PERFORMANCE_SUMMARY_CURRENT_BASE_DIR: /run/shadow-performance",
+                "SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH: /run/shadow-performance/current-summary.demo.json"
+        );
+    }
+
+    @Test
+    void shadowPerformanceDemoComposeUsesClearlyNamedDemoFixture() throws Exception {
+        String demoCompose = Files.readString(DEMO_COMPOSE);
+
+        assertThat(demoCompose).contains(
+                "local-fixtures/shadow-performance/current-summary.demo.json",
+                "current-summary.demo.json"
+        );
+        assertThat(demoCompose).doesNotContain("ml-inference-service/tests");
+    }
+
+    @Test
+    void shadowPerformanceDemoComposeMountsFixtureReadOnly() throws Exception {
+        String demoCompose = Files.readString(DEMO_COMPOSE);
+
+        assertThat(demoCompose).contains(
+                "target: /run/shadow-performance/current-summary.demo.json",
+                "read_only: true"
+        );
+    }
+
+    @Test
+    void localDemoLaunchersIncludeShadowPerformanceDemoOverlay() throws Exception {
+        String makefile = Files.readString(MAKEFILE);
+        String appPs1 = Files.readString(APP_PS1);
+
+        assertThat(makefile).contains("deployment/docker-compose.shadow-performance-demo.yml");
+        assertThat(appPs1).contains("\"-f\", \"deployment/docker-compose.shadow-performance-demo.yml\"");
+    }
+
+    @Test
+    void docsExplainBaseRuntimeAndLocalDemoLauncherBehavior() throws Exception {
+        String readme = Files.readString(ROOT.resolve("README.md"));
+        String doc = Files.readString(ROOT.resolve("docs/architecture/shadow_performance_summary_current_provider.md"));
+        String baseCompose = Files.readString(DOCKER_COMPOSE);
+
+        assertThat(readme).contains(
+                "base runtime is fail-closed by default",
+                "official local demo launchers include",
+                "docker-compose.shadow-performance-demo.yml",
+                "demo fixture metrics are not production current summary"
+        );
+        assertThat(doc).contains(
+                "base runtime is fail-closed by default",
+                "official local demo launchers include the explicit demo override",
+                "If the base Compose file is run without a configured current summary source, the endpoint returns 404",
+                "docker-compose.shadow-performance-demo.yml",
+                "demo fixture metrics are not production current summary"
+        );
+        assertThat(baseCompose).doesNotContain(
+                "docker-compose.shadow-performance-demo.yml"
         );
     }
 

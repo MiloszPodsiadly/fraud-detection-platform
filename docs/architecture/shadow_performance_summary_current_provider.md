@@ -13,6 +13,7 @@ It reads one explicitly configured current `ShadowPerformanceSummary` JSON artif
 Configuration is server-side only:
 
 - `shadow-performance.summary.current.enabled`
+- `shadow-performance.summary.current.base-dir`
 - `shadow-performance.summary.current.path`
 - `shadow-performance.summary.current.max-size-bytes`
 
@@ -22,7 +23,9 @@ There is no default sample path, classpath fixture, hardcoded summary, directory
 
 ## Source Boundary
 
-The only allowed source is the configured current Shadow Performance Summary v1 JSON artifact.
+The only allowed source is the configured current Shadow Performance Summary v1 JSON artifact under the configured safe base directory. The default base directory is `/run/shadow-performance`. The source is bounded to the configured safe directory and does not allow symlink artifacts.
+
+The configured path is normalized and must resolve under the safe base directory. The provider rejects path traversal, paths outside the base directory, symlink artifacts, directories, non-regular files, unsupported file extensions, and artifacts larger than the configured maximum size.
 
 The provider does not read raw FDP-102/FDP-103/FDP-104 artifacts, raw Model Cards, FDP-102 JSONL exports, model registry data, model artifact binaries, scoring databases, Kafka topics, transaction stores, alert stores, fraud-case stores, or payment authorization services.
 
@@ -30,8 +33,8 @@ The provider does not expose raw artifacts, configured filesystem paths, parser 
 
 ## Failure Semantics
 
-- Missing or unconfigured current summary returns 404.
-- Missing configured artifact returns 404.
+- Disabled provider or no configured path returns 404.
+- Configured missing artifact returns 503.
 - Unavailable or invalid configured source returns 503.
 - Malformed JSON returns 503.
 - Valid JSON that fails `ShadowPerformanceSummaryValidator` returns 503.
@@ -40,13 +43,15 @@ No fake, sample, stale, fallback, or zero metrics are returned. Invalid configur
 
 ## Local Docker Runtime
 
-The local Docker Compose runtime mounts the repository-owned validated `ShadowPerformanceSummary v1` local evaluation artifact read-only at `/run/shadow-performance/current-summary.json` and enables the provider for `alert-service`.
+The base runtime is fail-closed by default. Standard local startup does not mount a current summary artifact and does not enable the provider:
 
-- `SHADOW_PERFORMANCE_SUMMARY_CURRENT_ENABLED=true`
-- `SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH=/run/shadow-performance/current-summary.json`
+- `SHADOW_PERFORMANCE_SUMMARY_CURRENT_ENABLED=false`
+- `SHADOW_PERFORMANCE_SUMMARY_CURRENT_BASE_DIR=/run/shadow-performance`
+- `SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH=`
 - `SHADOW_PERFORMANCE_SUMMARY_CURRENT_MAX_SIZE_BYTES=1048576`
 
-The standard local launchers therefore show dashboard metrics after startup:
+The official local demo launchers include the explicit demo override so the Shadow Performance dashboard shows
+validated local demo metrics immediately after startup:
 
 ```powershell
 .\scripts\app.cmd up
@@ -58,10 +63,28 @@ On macOS or Linux:
 make app-up
 ```
 
-Set `SHADOW_PERFORMANCE_SUMMARY_CURRENT_ENABLED=false` to exercise the fail-closed 404 state. If a different artifact is configured, its path must point to an existing valid current `ShadowPerformanceSummary v1` JSON artifact mounted inside the `alert-service` container. If the provider is disabled or has no path, 404 is expected. If the mounted file is unreadable, malformed, invalid, too large, a directory, or not `.json`, the endpoint returns 503 with a safe generic response.
+For manual local startup, include the explicit demo override:
+
+```bash
+docker compose --env-file deployment/.env \
+  -f deployment/docker-compose.yml \
+  -f deployment/docker-compose.dev.yml \
+  -f deployment/docker-compose.oidc.yml \
+  -f deployment/docker-compose.service-identity-mtls.yml \
+  -f deployment/docker-compose.trust-authority-jwt.yml \
+  -f deployment/docker-compose.hardened.yml \
+  -f deployment/docker-compose.shadow-performance-demo.yml \
+  up --build -d
+```
+
+The demo override mounts `deployment/local-fixtures/shadow-performance/current-summary.demo.json` read-only as `/run/shadow-performance/current-summary.demo.json`. Demo fixture metrics are not production current summary, not promotion readiness, not threshold recommendation, not production decisioning approval, not payment authorization, and not analyst recommendation logic. The demo fixture metrics are local demonstration data only; demo fixture metrics are not production current summary.
+
+If the base Compose file is run without a configured current summary source, the endpoint returns 404. If a different artifact is configured, its path must point to an existing valid current `ShadowPerformanceSummary v1` JSON artifact mounted inside the `alert-service` container under the configured safe base directory. If the provider is disabled or has no path, 404 is expected. If the configured file is missing, unreadable, malformed, invalid, too large, a symlink, a directory, outside the safe base directory, or not `.json`, the endpoint returns 503 with a safe generic response.
 
 ## Non-Goals
 
 The provider is read-only. It does not compute metrics, does not recompute shadow performance, repair invalid metrics, coerce invalid fields, enrich summaries, generate Model Cards, write files, emit Kafka messages, mutate model registry state, mutate model artifacts, mutate alert severity, mutate fraud-case status, trigger retraining, change scoring, authorize payments, or create analyst recommendations.
+
+Static/sample summary data is test/demo fixture only. Production/main provider source is artifact-backed or empty fail-closed. Default runtime never uses hardcoded summary.
 
 FDP-108 provides a validated current ShadowPerformanceSummary. It does not create model readiness, promotion approval, threshold recommendation, production decisioning approval, payment authorization, or analyst recommendation logic.

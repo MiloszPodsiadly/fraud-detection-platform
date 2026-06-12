@@ -148,16 +148,16 @@ docker compose --env-file deployment/.env \
   -f deployment/docker-compose.service-identity-mtls.yml \
   -f deployment/docker-compose.trust-authority-jwt.yml \
   -f deployment/docker-compose.hardened.yml \
+  -f deployment/docker-compose.shadow-performance-demo.yml \
   up --build -d
 ```
 
-The Shadow Performance dashboard uses the FDP-108 artifact-backed current provider in this local stack. The base
-Compose file mounts the repository-owned validated `ShadowPerformanceSummary v1` local evaluation artifact
-read-only into `alert-service`, so the FDP-106 current summary endpoint returns dashboard metrics after startup.
-Set `SHADOW_PERFORMANCE_SUMMARY_CURRENT_ENABLED=false` to exercise the fail-closed 404 state, or set
-`SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH` plus a matching read-only mount when testing a different local artifact.
-The provider still must not display fake, sample, fallback, stale, or zero metrics when no valid configured artifact
-is available.
+The Shadow Performance dashboard uses the FDP-108 artifact-backed current provider. The base runtime is fail-closed by default, but the official local demo launchers include
+`deployment/docker-compose.shadow-performance-demo.yml` so the dashboard shows validated local demo Shadow
+Performance metrics immediately after startup; demo fixture metrics are not production current summary, not
+promotion readiness, not threshold recommendation, not production decisioning approval, not payment authorization,
+and not analyst recommendation logic. The provider must not display fake, sample, fallback, stale, or zero metrics
+when no valid configured artifact is available.
 
 `deployment/.env` is a committed local demo/evaluation configuration fixture, so the project remains runnable for
 evaluation without claiming secret management. Application startup guards reject demo internal-auth
@@ -177,6 +177,7 @@ docker compose --env-file deployment/.env \
   -f deployment/docker-compose.service-identity-mtls.yml \
   -f deployment/docker-compose.trust-authority-jwt.yml \
   -f deployment/docker-compose.hardened.yml \
+  -f deployment/docker-compose.shadow-performance-demo.yml \
   ps
 ```
 
@@ -300,6 +301,7 @@ docker compose --env-file deployment/.env \
   -f deployment/docker-compose.service-identity-mtls.yml \
   -f deployment/docker-compose.trust-authority-jwt.yml \
   -f deployment/docker-compose.hardened.yml \
+  -f deployment/docker-compose.shadow-performance-demo.yml \
   down
 ```
 
@@ -325,6 +327,7 @@ docker compose --env-file deployment/.env \
   -f deployment/docker-compose.service-identity-mtls.yml \
   -f deployment/docker-compose.trust-authority-jwt.yml \
   -f deployment/docker-compose.hardened.yml \
+  -f deployment/docker-compose.shadow-performance-demo.yml \
   down -v
 ```
 
