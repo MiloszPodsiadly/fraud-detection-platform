@@ -31,6 +31,24 @@ The provider does not read raw FDP-102/FDP-103/FDP-104 artifacts, raw Model Card
 
 The provider does not expose raw artifacts, configured filesystem paths, parser exceptions, validation exceptions, or stack traces through the API.
 
+## Primitive Defaulting Boundary
+
+The artifact provider fails closed on missing or null primitive JSON fields. It configures Jackson to reject missing creator properties, null creator properties, null primitives, scalar coercion, and unknown properties.
+
+This prevents malformed artifacts from silently defaulting metrics or governance fields to 0, 0.0, or false.
+
+Missing/null primitive fields are treated as invalid/unavailable configured source and result in 503 through FDP-106.
+
+- Missing primitive metric field -> 503.
+- Null primitive metric field -> 503.
+- Missing/null governance boolean -> 503.
+- Missing/null evaluation population count -> 503.
+- Missing/null disagreement count -> 503.
+- No silent primitive defaults.
+- No zero substitution.
+- No false substitution.
+- No partial summary.
+
 ## Failure Semantics
 
 - Disabled provider or no configured path returns 404.

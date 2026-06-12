@@ -231,6 +231,30 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
     }
 
     @Test
+    void artifactProviderFailsFastOnPrimitiveDefaultingBoundary() throws Exception {
+        String source = Files.readString(PRODUCTION_ROOT.resolve(
+                "governance/shadowperformance/ArtifactBackedShadowPerformanceSummaryProvider.java"
+        ));
+
+        assertThat(source).contains(
+                "MapperFeature.ALLOW_COERCION_OF_SCALARS",
+                "DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES",
+                "DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES",
+                "DeserializationFeature.FAIL_ON_NULL_CREATOR_PROPERTIES",
+                "DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES"
+        );
+        assertThat(source).doesNotContain(
+                "defaultIfMissing",
+                "orElse(0)",
+                "orElse(false)",
+                "precisionAtBudget = 0",
+                "recallAtTopK = 0",
+                "falsePositiveRate = 0",
+                "new ShadowPerformanceSummary("
+        );
+    }
+
+    @Test
     void fdp108ProviderDoesNotWriteOrMutateOperationalState() throws Exception {
         String source = Files.readString(PRODUCTION_ROOT.resolve(
                 "governance/shadowperformance/ArtifactBackedShadowPerformanceSummaryProvider.java"
@@ -338,6 +362,17 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "Unavailable or invalid configured source returns 503",
                 "bounded to the configured safe directory",
                 "does not allow symlink artifacts",
+                "Primitive Defaulting Boundary",
+                "missing or null primitive JSON fields",
+                "Missing primitive metric field -> 503",
+                "Null primitive metric field -> 503",
+                "Missing/null governance boolean -> 503",
+                "Missing/null evaluation population count -> 503",
+                "Missing/null disagreement count -> 503",
+                "No silent primitive defaults",
+                "No zero substitution",
+                "No false substitution",
+                "No partial summary",
                 "demo fixture metrics are not production current summary",
                 "No fake, sample, stale, fallback, or zero metrics",
                 "FDP-108 provides a validated current ShadowPerformanceSummary. It does not create model readiness, promotion approval, threshold recommendation, production decisioning approval, payment authorization, or analyst recommendation logic."
