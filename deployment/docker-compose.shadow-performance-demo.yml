@@ -1,0 +1,14 @@
+# Explicit local/demo override for FDP-108 Shadow Performance metrics.
+# This is not production current summary configuration.
+services:
+  alert-service:
+    environment:
+      SHADOW_PERFORMANCE_SUMMARY_CURRENT_ENABLED: "true"
+      SHADOW_PERFORMANCE_SUMMARY_CURRENT_BASE_DIR: /run/shadow-performance
+      SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH: /run/shadow-performance/current-summary.demo.json
+      SHADOW_PERFORMANCE_SUMMARY_CURRENT_MAX_SIZE_BYTES: ${SHADOW_PERFORMANCE_SUMMARY_CURRENT_MAX_SIZE_BYTES:-1048576}
+    volumes:
+      - type: bind
+        source: ./local-fixtures/shadow-performance/current-summary.demo.json
+        target: /run/shadow-performance/current-summary.demo.json
+        read_only: true

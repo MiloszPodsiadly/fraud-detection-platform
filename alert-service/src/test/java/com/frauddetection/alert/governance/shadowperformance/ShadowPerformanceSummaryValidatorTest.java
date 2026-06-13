@@ -223,6 +223,6 @@ class ShadowPerformanceSummaryValidatorTest {
     }
 
     private ShadowPerformanceSummary validSummary() {
-        return new StaticShadowPerformanceSummaryProvider().currentSummary().orElseThrow();
+        return ShadowPerformanceSummaryTestFixtures.validSummary();
     }
 }
