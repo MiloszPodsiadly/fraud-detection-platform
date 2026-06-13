@@ -1,0 +1,14 @@
+# Explicit local override for using FDP-109 generated Shadow Performance Summary.
+# This is not production scheduling and does not generate the artifact.
+services:
+  alert-service:
+    environment:
+      SHADOW_PERFORMANCE_SUMMARY_CURRENT_ENABLED: "true"
+      SHADOW_PERFORMANCE_SUMMARY_CURRENT_BASE_DIR: /run/shadow-performance
+      SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH: /run/shadow-performance/current-summary.json
+      SHADOW_PERFORMANCE_SUMMARY_CURRENT_MAX_SIZE_BYTES: ${SHADOW_PERFORMANCE_SUMMARY_CURRENT_MAX_SIZE_BYTES:-1048576}
+    volumes:
+      - type: bind
+        source: ./local-generated/shadow-performance/current-summary.json
+        target: /run/shadow-performance/current-summary.json
+        read_only: true

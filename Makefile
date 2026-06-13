@@ -1,19 +1,28 @@
-SECURITY_HARDENED_COMPOSE = docker compose --env-file deployment/.env \
+SECURITY_HARDENED_BASE_COMPOSE = docker compose --env-file deployment/.env \
 	-f deployment/docker-compose.yml \
 	-f deployment/docker-compose.dev.yml \
 	-f deployment/docker-compose.oidc.yml \
 	-f deployment/docker-compose.service-identity-mtls.yml \
 	-f deployment/docker-compose.trust-authority-jwt.yml \
-	-f deployment/docker-compose.hardened.yml \
+	-f deployment/docker-compose.hardened.yml
+
+SHADOW_PERFORMANCE_DEMO_COMPOSE = $(SECURITY_HARDENED_BASE_COMPOSE) \
 	-f deployment/docker-compose.shadow-performance-demo.yml
 
-.PHONY: app-up app-down app-clean app-ps shadow-performance-summary
+SHADOW_PERFORMANCE_GENERATED_COMPOSE = $(SECURITY_HARDENED_BASE_COMPOSE) \
+	-f deployment/docker-compose.shadow-performance-generated.yml
+
+SECURITY_HARDENED_COMPOSE = $(SHADOW_PERFORMANCE_GENERATED_COMPOSE)
+
+.PHONY: app-up app-down app-clean app-ps shadow-performance-summary app-up-shadow-performance-generated shadow-performance-local-loop
 
 deployment/.env:
 	cp deployment/.env.example deployment/.env
 
-app-up: deployment/.env
+app-up: deployment/.env shadow-performance-summary
 	bash scripts/bootstrap-local-fixtures.sh
+	@test -f deployment/local-generated/shadow-performance/current-summary.json || \
+		(echo "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary" && exit 1)
 	$(SECURITY_HARDENED_COMPOSE) up --build -d
 
 app-down: deployment/.env
@@ -30,3 +39,10 @@ shadow-performance-summary:
 		--dataset-jsonl ../deployment/local-demo-inputs/shadow-performance/fdp102-feedback-dataset.synthetic.jsonl \
 		--model-metadata ../deployment/local-demo-inputs/shadow-performance/model-metadata.synthetic.json \
 		--output ../deployment/local-generated/shadow-performance/current-summary.json
+
+app-up-shadow-performance-generated: deployment/.env shadow-performance-summary
+	@test -f deployment/local-generated/shadow-performance/current-summary.json || \
+		(echo "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary" && exit 1)
+	$(SHADOW_PERFORMANCE_GENERATED_COMPOSE) up --build -d
+
+shadow-performance-local-loop: app-up-shadow-performance-generated

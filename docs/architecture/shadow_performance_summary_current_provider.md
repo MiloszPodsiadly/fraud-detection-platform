@@ -68,8 +68,8 @@ The base runtime is fail-closed by default. Standard local startup does not moun
 - `SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH=`
 - `SHADOW_PERFORMANCE_SUMMARY_CURRENT_MAX_SIZE_BYTES=1048576`
 
-The official local demo launchers include the explicit demo override so the Shadow Performance dashboard shows
-validated local demo metrics immediately after startup:
+The official full local launchers generate the local summary first and include the explicit generated override, not
+the demo override, so the Shadow Performance dashboard uses the FDP-109 generated artifact:
 
 ```powershell
 .\scripts\app.cmd up
@@ -81,7 +81,7 @@ On macOS or Linux:
 make app-up
 ```
 
-For manual local startup, include the explicit demo override:
+For manual full local startup, include the explicit generated override:
 
 ```bash
 docker compose --env-file deployment/.env \
@@ -91,11 +91,13 @@ docker compose --env-file deployment/.env \
   -f deployment/docker-compose.service-identity-mtls.yml \
   -f deployment/docker-compose.trust-authority-jwt.yml \
   -f deployment/docker-compose.hardened.yml \
-  -f deployment/docker-compose.shadow-performance-demo.yml \
+  -f deployment/docker-compose.shadow-performance-generated.yml \
   up --build -d
 ```
 
-The demo override mounts `deployment/local-fixtures/shadow-performance/current-summary.demo.json` read-only as `/run/shadow-performance/current-summary.demo.json`. Demo fixture metrics are not production current summary, not promotion readiness, not threshold recommendation, not production decisioning approval, not payment authorization, and not analyst recommendation logic. The demo fixture metrics are local demonstration data only; demo fixture metrics are not production current summary.
+The generated override mounts `deployment/local-generated/shadow-performance/current-summary.json` read-only as `/run/shadow-performance/current-summary.json`. The generated runtime does not use `current-summary.demo.json` and does not generate a summary inside Docker Compose.
+
+The separate demo override mounts `deployment/local-fixtures/shadow-performance/current-summary.demo.json` read-only as `/run/shadow-performance/current-summary.demo.json`. Demo fixture metrics are not production current summary, not promotion readiness, not threshold recommendation, not production decisioning approval, not payment authorization, and not analyst recommendation logic. The demo fixture metrics are local demonstration data only; demo fixture metrics are not production current summary.
 
 If the base Compose file is run without a configured current summary source, the endpoint returns 404. If a different artifact is configured, its path must point to an existing valid current `ShadowPerformanceSummary v1` JSON artifact mounted inside the `alert-service` container under the configured safe base directory. If the provider is disabled or has no path, 404 is expected. If the configured file is missing, unreadable, malformed, invalid, too large, a symlink, a directory, outside the safe base directory, or not `.json`, the endpoint returns 503 with a safe generic response.
 

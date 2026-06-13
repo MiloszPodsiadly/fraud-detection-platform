@@ -68,4 +68,4 @@ The final generated summary must not contain raw FDP-102 JSONL, raw FDP-103 eval
 
 The final summary must not contain promotion readiness score, promotion approval, promotion workflow, threshold recommendation, threshold switching, recommended threshold, champion/challenger status, champion candidate, deploy recommendation, production approval, payment authorization, automatic approve/decline/block, or analyst recommendation logic.
 
-Demo fixture metrics remain only for the explicit FDP-108 local demo compose override. FDP-109 does not use `deployment/local-fixtures/shadow-performance/current-summary.demo.json` as generation input or fallback. A later scope may add a generated-summary compose override; FDP-109 only generates the artifact.
+Demo fixture metrics remain only for the explicit FDP-108 local demo compose override. FDP-109 does not use `deployment/local-fixtures/shadow-performance/current-summary.demo.json` as generation input or fallback. FDP-110 provides the generated-summary compose override; FDP-109 only generates the artifact.

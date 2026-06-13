@@ -40,6 +40,8 @@ jobs:
             files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.hardened.yml
           - name: full-local-security-hardened
             files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml -f deployment/docker-compose.trust-authority-jwt.yml -f deployment/docker-compose.hardened.yml
+          - name: generated-shadow-performance-local
+            files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml -f deployment/docker-compose.trust-authority-jwt.yml -f deployment/docker-compose.hardened.yml -f deployment/docker-compose.shadow-performance-generated.yml
     steps:
       - name: Checkout
         uses: actions/checkout@v4
