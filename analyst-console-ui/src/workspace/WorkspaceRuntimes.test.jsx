@@ -280,6 +280,6 @@ function shadowSummary() {
     },
     warnings: ["MISSING_ML_SIGNAL_PRESENT"],
     limitations: ["DIAGNOSTIC_ONLY"],
-    banner: "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic approve / decline / block logic, or not analyst recommendation logic."
+    banner: "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic."
   };
 }

@@ -87,13 +87,12 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
         payload = write_shadow_performance_summary(self.summary())
 
         self.assertIn(BANNER, payload)
-        self.assertIn("offline diagnostics only", BANNER)
-        self.assertIn("not model promotion approval", BANNER)
-        self.assertIn("not threshold recommendation", BANNER)
-        self.assertIn("not production decisioning approval", BANNER)
-        self.assertIn("not payment authorization", BANNER)
-        self.assertIn("not automatic approve / decline / block", BANNER)
-        self.assertIn("not analyst recommendation logic", BANNER)
+        self.assertEqual(
+            "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, "
+            "threshold recommendation, production decisioning approval, payment authorization, "
+            "automatic approve / decline / block logic, or analyst recommendation logic.",
+            BANNER,
+        )
 
     def test_outputIsDeterministicAndCompactJson(self):
         first = write_shadow_performance_summary(self.summary())

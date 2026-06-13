@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ShadowPerformanceDashboard } from "./ShadowPerformanceDashboard.jsx";
 
-const REQUIRED_BANNER = "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic approve / decline / block logic, or not analyst recommendation logic.";
+const REQUIRED_BANNER = "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.";
 const MALFORMED_MESSAGE = "Shadow Performance Summary response was malformed. Do not use this view for model assessment.";
 
 describe("ShadowPerformanceDashboard", () => {
@@ -15,7 +15,7 @@ describe("ShadowPerformanceDashboard", () => {
   it("rendersDiagnosticOnlyBanner", () => {
     renderDashboard();
 
-    expect(screen.getByText("Shadow performance metrics are offline diagnostics only. They are not model promotion approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic approve / decline / block logic, or not analyst recommendation logic.")).toBeInTheDocument();
+    expect(screen.getByText("Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.")).toBeInTheDocument();
   });
 
   it("rendersModelIdentity", () => {
@@ -235,7 +235,7 @@ describe("ShadowPerformanceDashboard", () => {
   it("rendersDiagnosticOnlyBannerOn404", () => {
     renderDashboard404();
 
-    expect(screen.getByText("Shadow performance metrics are offline diagnostics only. They are not model promotion approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic approve / decline / block logic, or not analyst recommendation logic.")).toBeInTheDocument();
+    expect(screen.getByText("Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.")).toBeInTheDocument();
   });
 
   it("doesNotHideDiagnosticOnlyBannerOn404", () => {

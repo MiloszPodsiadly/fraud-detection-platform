@@ -1,7 +1,7 @@
 import { LoadingPanel } from "./LoadingPanel.jsx";
 
 const REQUIRED_PERMISSION = "shadow-performance:read";
-const REQUIRED_BANNER = "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic approve / decline / block logic, or not analyst recommendation logic.";
+const REQUIRED_BANNER = "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.";
 const MAX_DIAGNOSTIC_COUNT = 500;
 const REQUIRED_APPROVED_FOR = ["COMPARE", "SHADOW"];
 const REQUIRED_GOVERNANCE = {
