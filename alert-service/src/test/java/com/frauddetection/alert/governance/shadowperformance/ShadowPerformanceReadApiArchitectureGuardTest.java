@@ -470,6 +470,8 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         assertThat(readme).contains(
                 "base runtime is fail-closed by default",
                 "official full local launchers include",
+                "Python 3.12+ available as `python`",
+                "FDP-110 local startup runs the FDP-109 Python generator before Docker Compose starts",
                 "generate the local Shadow Performance Summary artifact before starting",
                 "docker-compose.shadow-performance-generated.yml",
                 "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary",
@@ -569,6 +571,11 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "app-up-shadow-performance-generated",
                 "shadow-performance-local-loop"
         );
+        assertThat(makefile).contains(
+                "check-python:",
+                "shadow-performance-summary: check-python",
+                "Python 3.12+ is required to generate the local Shadow Performance Summary"
+        );
         assertThat(generatedTarget).contains(
                 "app-up-shadow-performance-generated: deployment/.env shadow-performance-summary",
                 "deployment/local-generated/shadow-performance/current-summary.json",
@@ -583,6 +590,26 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         );
         assertThat(makeTarget(makefile, "shadow-performance-local-loop"))
                 .contains("shadow-performance-local-loop: app-up-shadow-performance-generated");
+    }
+
+    @Test
+    void localLaunchersFailFastWhenHostPythonIsMissing() throws Exception {
+        String makefile = Files.readString(MAKEFILE);
+        String appPs1 = Files.readString(APP_PS1);
+        String message = "Python 3.12+ is required to generate the local Shadow Performance Summary. Install Python and rerun.";
+
+        assertThat(makefile).contains(
+                "check-python:",
+                "@python --version >/dev/null 2>&1",
+                message,
+                "shadow-performance-summary: check-python"
+        );
+        assertThat(appPs1).contains(
+                "$pythonCommand = Get-Command python -ErrorAction SilentlyContinue",
+                "if ($null -eq $pythonCommand)",
+                message,
+                "python -m offline_evaluation.generate_current_shadow_summary"
+        );
     }
 
     @Test

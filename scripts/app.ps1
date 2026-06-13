@@ -33,6 +33,11 @@ function Invoke-DockerCompose {
 }
 
 function Invoke-ShadowPerformanceSummaryGeneration {
+    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+    if ($null -eq $pythonCommand) {
+        throw "Python 3.12+ is required to generate the local Shadow Performance Summary. Install Python and rerun."
+    }
+
     $previousPythonPath = $env:PYTHONPATH
     Push-Location (Join-Path $repoRoot "ml-inference-service")
     try {

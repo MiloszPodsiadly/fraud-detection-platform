@@ -103,14 +103,13 @@ Docker is the supported local runtime path for this README.
 
 ### Quick Start
 
-Prerequisites are Docker with Compose and OpenSSL. On macOS or Linux with GNU Make installed, from a fresh clone:
+Prerequisites are Docker with Compose, OpenSSL, and Python 3.12+ available as `python`. On macOS or Linux with GNU Make installed, from a fresh clone:
 
 ```bash
 make app-up
 ```
 
-On Windows with Docker Desktop and Git for Windows installed, run the equivalent one-command startup from
-PowerShell:
+On Windows, install Docker Desktop, Git for Windows, and Python 3.12+ available as `python`, then run the equivalent one-command startup from PowerShell:
 
 ```powershell
 .\scripts\app.cmd up
@@ -122,6 +121,8 @@ same Compose overlay combination as `make app-up`. From Git Bash on Windows with
 
 OpenSSL is used only to generate local identity fixture material. Private PEM keys are not committed to this
 repository.
+
+FDP-110 local startup runs the FDP-109 Python generator before Docker Compose starts, so `python` must be available on the host.
 
 ### Most Complete Local Security Demonstration Stack
 

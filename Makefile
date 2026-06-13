@@ -14,7 +14,7 @@ SHADOW_PERFORMANCE_GENERATED_COMPOSE = $(SECURITY_HARDENED_BASE_COMPOSE) \
 
 SECURITY_HARDENED_COMPOSE = $(SHADOW_PERFORMANCE_GENERATED_COMPOSE)
 
-.PHONY: app-up app-down app-clean app-ps shadow-performance-summary app-up-shadow-performance-generated shadow-performance-local-loop
+.PHONY: app-up app-down app-clean app-ps check-python shadow-performance-summary app-up-shadow-performance-generated shadow-performance-local-loop
 
 deployment/.env:
 	cp deployment/.env.example deployment/.env
@@ -34,7 +34,11 @@ app-clean: deployment/.env
 app-ps: deployment/.env
 	$(SECURITY_HARDENED_COMPOSE) ps
 
-shadow-performance-summary:
+check-python:
+	@python --version >/dev/null 2>&1 || \
+		(echo "Python 3.12+ is required to generate the local Shadow Performance Summary. Install Python and rerun." && exit 1)
+
+shadow-performance-summary: check-python
 	cd ml-inference-service && PYTHONPATH=. python -m offline_evaluation.generate_current_shadow_summary \
 		--dataset-jsonl ../deployment/local-demo-inputs/shadow-performance/fdp102-feedback-dataset.synthetic.jsonl \
 		--model-metadata ../deployment/local-demo-inputs/shadow-performance/model-metadata.synthetic.json \
