@@ -178,6 +178,7 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
+          version: v0.71.0
           scanners: secret
           format: table
           exit-code: '1'
@@ -194,6 +195,7 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
+          version: v0.71.0
           scanners: vuln
           format: table
           severity: HIGH,CRITICAL
@@ -215,6 +217,7 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
+          version: v0.71.0
           scanners: vuln
           format: sarif
           output: trivy-fs.sarif
