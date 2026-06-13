@@ -92,28 +92,37 @@ describe("WorkspaceNavigation suspicious transaction counter copy", () => {
 });
 
 describe("WorkspaceNavigation shadow performance diagnostic boundary", () => {
-  it("shadowPerformanceRouteDoesNotRenderGlobalPlatformCounters", () => {
+  it("shadowPerformanceRouteRendersGlobalPlatformCounters", () => {
     render(
       <WorkspaceNavigation
         workspacePage="shadowPerformance"
-        workspaceRoutes={[WORKSPACE_ROUTE_REGISTRY.shadowPerformance]}
-        showWorkspaceCounters={false}
+        workspaceRoutes={[
+          WORKSPACE_ROUTE_REGISTRY.transactionScoring,
+          WORKSPACE_ROUTE_REGISTRY.fraudTransaction,
+          WORKSPACE_ROUTE_REGISTRY.suspiciousTransactions,
+          WORKSPACE_ROUTE_REGISTRY.analyst,
+          WORKSPACE_ROUTE_REGISTRY.shadowPerformance
+        ]}
         workspaceCounters={{
           alerts: 41,
           fraudCases: 42,
           suspiciousTransactions: 43,
           transactions: 44
         }}
+        fraudCaseTotalElements={42}
+        canReadAlerts
+        canReadFraudCases
+        canReadSuspiciousTransactions
+        canReadTransactions
         canReadShadowPerformance
       />
     );
 
     expect(screen.getByText("Shadow diagnostics")).toBeInTheDocument();
     expect(screen.getByText("Current")).toBeInTheDocument();
-    expect(screen.queryByText("41")).not.toBeInTheDocument();
-    expect(screen.queryByText("42")).not.toBeInTheDocument();
-    expect(screen.queryByText("43")).not.toBeInTheDocument();
-    expect(screen.queryByText("44")).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Global fraud cases/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Transactions\s*44/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Alerts\s*41/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Workspace signal total 43/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Global fraud cases\s*42/ })).toBeInTheDocument();
   });
 });
