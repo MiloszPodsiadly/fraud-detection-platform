@@ -17,9 +17,10 @@ from offline_evaluation.shadow_performance_writer import write_shadow_performanc
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DATASET_JSONL = REPO_ROOT / "deployment/local-inputs/shadow-performance/fdp102-feedback-dataset.jsonl"
-DEFAULT_MODEL_METADATA = REPO_ROOT / "deployment/local-inputs/shadow-performance/model-metadata.json"
-DEFAULT_OUTPUT = REPO_ROOT / "deployment/local-generated/shadow-performance/current-summary.json"
+DEFAULT_DATASET_JSONL = REPO_ROOT / "deployment/local-demo-inputs/shadow-performance/fdp102-feedback-dataset.synthetic.jsonl"
+DEFAULT_MODEL_METADATA = REPO_ROOT / "deployment/local-demo-inputs/shadow-performance/model-metadata.synthetic.json"
+DEFAULT_OUTPUT_ROOT = REPO_ROOT / "deployment/local-generated/shadow-performance"
+DEFAULT_OUTPUT = DEFAULT_OUTPUT_ROOT / "current-summary.json"
 FORBIDDEN_GENERATION_INPUT_SEGMENTS = ("deployment", "local-fixtures")
 
 
@@ -35,6 +36,7 @@ def generate_current_shadow_summary(
         generated_at: str | None = None,
         review_budget: int = 10,
         top_k: int = 10,
+        allowed_output_root: Path | None = None,
 ) -> Path:
     dataset_jsonl = _read_required_text_input(dataset_jsonl_path, "FDP-102 dataset JSONL")
     model_metadata = _read_required_json_object(model_metadata_path, "model metadata")
@@ -51,16 +53,16 @@ def generate_current_shadow_summary(
     summary = build_shadow_performance_summary(safe_model_card, timestamp)
     payload = write_shadow_performance_summary(summary)
 
-    publish_current_summary(payload, output_path)
+    publish_current_summary(payload, output_path, allowed_output_root=allowed_output_root)
     return output_path
 
 
-def publish_current_summary(payload: str, output_path: Path) -> Path:
-    final_path = Path(output_path)
-    if final_path.name != "current-summary.json":
-        raise CurrentSummaryGenerationError("output path must end with current-summary.json")
+def publish_current_summary(payload: str, output_path: Path, *, allowed_output_root: Path | None = None) -> Path:
+    final_path = _assert_allowed_output_path(output_path, allowed_output_root=allowed_output_root)
     final_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = final_path.with_name(f"{final_path.name}.tmp")
+    if temp_path.is_symlink():
+        raise CurrentSummaryGenerationError("temporary output path must not be a symlink")
 
     temp_path.write_text(payload, encoding="utf-8")
     try:
@@ -90,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
             generated_at=args.generated_at,
             review_budget=args.review_budget,
             top_k=args.top_k,
+            allowed_output_root=Path(args.allow_output_root) if args.allow_output_root else None,
         )
     except Exception as exc:
         print(f"shadow performance summary generation failed: {exc}", file=sys.stderr)
@@ -105,6 +108,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset-jsonl", default=str(DEFAULT_DATASET_JSONL))
     parser.add_argument("--model-metadata", default=str(DEFAULT_MODEL_METADATA))
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
+    parser.add_argument("--allow-output-root")
     parser.add_argument("--generated-at")
     parser.add_argument("--review-budget", type=int, default=10)
     parser.add_argument("--top-k", type=int, default=10)
@@ -132,6 +136,22 @@ def _reject_forbidden_generation_input(path: Path) -> None:
     normalized_parts = tuple(part.lower() for part in Path(path).parts)
     if _contains_ordered_segments(normalized_parts, FORBIDDEN_GENERATION_INPUT_SEGMENTS):
         raise CurrentSummaryGenerationError("generation input must not come from deployment/local-fixtures")
+
+
+def _assert_allowed_output_path(output_path: Path, *, allowed_output_root: Path | None = None) -> Path:
+    final_path = Path(output_path)
+    if final_path.name != "current-summary.json":
+        raise CurrentSummaryGenerationError("output path must end with current-summary.json")
+    if final_path.parent.exists() and final_path.parent.is_symlink():
+        raise CurrentSummaryGenerationError("output directory must not be a symlink")
+    if final_path.exists() and final_path.is_symlink():
+        raise CurrentSummaryGenerationError("final output path must not be a symlink")
+
+    resolved_output = final_path.resolve(strict=False)
+    resolved_root = Path(allowed_output_root or DEFAULT_OUTPUT_ROOT).resolve(strict=False)
+    if resolved_output.parent != resolved_root:
+        raise CurrentSummaryGenerationError("output path must be under deployment/local-generated/shadow-performance")
+    return final_path
 
 
 def _contains_ordered_segments(parts: tuple[str, ...], segments: tuple[str, ...]) -> bool:

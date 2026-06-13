@@ -244,10 +244,20 @@ class DatasetSchemaValidationTest(unittest.TestCase):
 
         self.assertEqual("eval-0123456789abcdef0123456789abcdef", parsed.records[0].evaluation_record_id)
 
+    def test_datasetReaderAcceptsSyntheticEvaluationRecordId(self):
+        parsed = read_fdp102_jsonl(jsonl(record(evaluationRecordId="synthetic-evaluation-record-001")))
+
+        self.assertEqual("synthetic-evaluation-record-001", parsed.records[0].evaluation_record_id)
+
     def test_datasetReaderAcceptsPseudonymousTransactionReference(self):
         parsed = read_fdp102_jsonl(jsonl(record(transactionReference="txnref-0123456789abcdef0123456789abcdef")))
 
         self.assertEqual("txnref-0123456789abcdef0123456789abcdef", parsed.records[0].transaction_reference)
+
+    def test_datasetReaderAcceptsSyntheticTransactionReference(self):
+        parsed = read_fdp102_jsonl(jsonl(record(transactionReference="synthetic-transaction-reference-001")))
+
+        self.assertEqual("synthetic-transaction-reference-001", parsed.records[0].transaction_reference)
 
     def test_rejectsInvalidEvaluationRecordId(self):
         self._assert_record_rejected(evaluationRecordId="eval-not-hex")
