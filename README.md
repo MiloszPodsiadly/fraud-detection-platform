@@ -159,6 +159,8 @@ If the generated artifact is still missing after local generation, startup fails
 The provider must not display fake, sample, fallback, stale, demo, or zero metrics when no valid configured artifact
 is available.
 
+FDP-110 intentionally combines local generation before Compose, generated runtime mount, and shared global workspace counters as UI context. Global counters in the Shadow Performance workspace are shell-level context only; they are not part of `ShadowPerformanceSummary`, not model evaluation metrics, not promotion readiness, not threshold recommendation, not production decisioning, not payment authorization, and not analyst recommendation logic.
+
 To run the explicit generated-artifact path directly:
 
 ```bash
