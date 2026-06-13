@@ -49,24 +49,25 @@ describe("WorkspaceDashboardShell FDP-53 composition", () => {
     }));
   });
 
-  it("shadowPerformanceWorkspaceLoadsSharedWorkspaceCounters", async () => {
+  it("shadowPerformanceWorkspaceDoesNotLoadSharedWorkspaceCounters", async () => {
     const apiClient = renderShadowPerformanceShell();
 
     await waitFor(() => expect(apiClient.getCurrentShadowPerformanceSummary).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(apiClient.listAlerts).toHaveBeenCalledTimes(1));
-    expect(apiClient.getFraudCaseWorkQueueSummary).toHaveBeenCalledTimes(1);
-    expect(apiClient.getSuspiciousTransactionSummary).toHaveBeenCalledTimes(1);
-    expect(apiClient.listScoredTransactions).toHaveBeenCalledTimes(1);
+    expect(apiClient.listAlerts).not.toHaveBeenCalled();
+    expect(apiClient.getFraudCaseWorkQueueSummary).not.toHaveBeenCalled();
+    expect(apiClient.getSuspiciousTransactionSummary).not.toHaveBeenCalled();
+    expect(apiClient.listScoredTransactions).not.toHaveBeenCalled();
   });
 
-  it("shadowPerformanceWorkspaceRendersSharedWorkspaceCounters", async () => {
+  it("shadowPerformanceWorkspaceDoesNotRenderSharedWorkspaceCounters", async () => {
     const apiClient = renderShadowPerformanceShell();
 
-    await waitFor(() => expect(apiClient.listAlerts).toHaveBeenCalledTimes(1));
-    expect(screen.getByText("41")).toBeInTheDocument();
-    expect(screen.getByText("42")).toBeInTheDocument();
-    expect(screen.getByText("43")).toBeInTheDocument();
-    expect(screen.getByText("44")).toBeInTheDocument();
+    await waitFor(() => expect(apiClient.getCurrentShadowPerformanceSummary).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText("41")).not.toBeInTheDocument();
+    expect(screen.queryByText("42")).not.toBeInTheDocument();
+    expect(screen.queryByText("43")).not.toBeInTheDocument();
+    expect(screen.queryByText("44")).not.toBeInTheDocument();
+    expect(screen.queryByText("Some workspace counters are temporarily unavailable.")).not.toBeInTheDocument();
   });
 });
 
