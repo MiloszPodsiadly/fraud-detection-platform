@@ -175,12 +175,15 @@ jobs:
         run: bash scripts/ci/assert-no-committed-private-keys.sh
       - name: Block repository secrets
         uses: aquasecurity/trivy-action@v0.36.0
+        env:
+          TRIVY_PARALLEL: '1'
         with:
           scan-type: fs
           scan-ref: .
           version: v0.71.0
           scanners: secret
           format: table
+          timeout: 10m
           exit-code: '1'
 
   repository-vulnerability-gate:
@@ -192,6 +195,8 @@ jobs:
 
       - name: Block high or critical repository vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
+        env:
+          TRIVY_PARALLEL: '1'
         with:
           scan-type: fs
           scan-ref: .
@@ -200,6 +205,7 @@ jobs:
           format: table
           severity: HIGH,CRITICAL
           ignore-unfixed: true
+          timeout: 10m
           exit-code: '1'
 
   repository-vulnerability-sarif:
@@ -214,6 +220,8 @@ jobs:
 
       - name: Scan repository filesystem for vulnerability visibility
         uses: aquasecurity/trivy-action@v0.36.0
+        env:
+          TRIVY_PARALLEL: '1'
         with:
           scan-type: fs
           scan-ref: .
@@ -223,6 +231,7 @@ jobs:
           output: trivy-fs.sarif
           severity: LOW,MEDIUM,HIGH,CRITICAL
           ignore-unfixed: true
+          timeout: 10m
           exit-code: '0'
 
       - name: Upload Trivy SARIF
