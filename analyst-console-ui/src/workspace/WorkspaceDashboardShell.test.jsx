@@ -7,6 +7,10 @@ import { WorkspaceDashboardShell } from "./WorkspaceDashboardShell.jsx";
 import { WorkspaceRuntimeContext } from "./useWorkspaceRuntime.js";
 
 const shellSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "WorkspaceDashboardShell.jsx"), "utf8");
+const shadowDashboardSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../components/ShadowPerformanceDashboard.jsx"), "utf8");
+const shadowRuntimeSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "ShadowPerformanceWorkspaceRuntime.jsx"), "utf8");
+const shadowContainerSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "ShadowPerformanceWorkspaceContainer.jsx"), "utf8");
+const shadowPageSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../pages/ShadowPerformanceDashboardPage.jsx"), "utf8");
 
 describe("WorkspaceDashboardShell FDP-53 composition", () => {
   it("renders the active workspace through WorkspaceRouteRegistry", () => {
@@ -68,6 +72,25 @@ describe("WorkspaceDashboardShell FDP-53 composition", () => {
     expect(screen.getByRole("link", { name: /Workspace signal total 43/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Transactions\s*44/ })).toBeInTheDocument();
     expect(screen.queryByText("Some workspace counters are temporarily unavailable.")).not.toBeInTheDocument();
+  });
+
+  it("shadowPerformanceCountersRemainShellOwnedUiContext", () => {
+    const shadowContentSources = [
+      shadowDashboardSource,
+      shadowRuntimeSource,
+      shadowContainerSource,
+      shadowPageSource
+    ].join("\n");
+
+    expect(shellSource).toContain("useWorkspaceCounters");
+    expect(shellSource).toContain("workspaceCounters={workspaceCounterState.counters}");
+    expect(shellSource).toContain("workspaceCountersStatus={workspaceCounterState}");
+    expect(shadowContainerSource).toContain("summary={summaryState.summary}");
+    expect(shadowContentSources).not.toContain("useWorkspaceCounters");
+    expect(shadowContentSources).not.toContain("workspaceCounters");
+    expect(shadowContentSources).not.toContain("workspaceCounterState");
+    expect(shadowContentSources).not.toContain("totalFraudCases");
+    expect(shadowContentSources).not.toContain("totalSuspiciousTransactions");
   });
 });
 

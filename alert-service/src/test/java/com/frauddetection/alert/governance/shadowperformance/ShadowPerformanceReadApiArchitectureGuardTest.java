@@ -448,7 +448,17 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary"
         );
         assertThat(makeTarget(makefile, "app-up")).doesNotContain("docker-compose.shadow-performance-demo.yml");
-        assertThat(appPs1).doesNotContain("\"-f\", \"deployment/docker-compose.shadow-performance-demo.yml\"");
+        assertThat(appPs1).doesNotContain(
+                "\"-f\", \"deployment/docker-compose.shadow-performance-demo.yml\"",
+                "entrypoint:",
+                "command:",
+                "@Scheduled",
+                "scheduler",
+                "cron",
+                "Kafka",
+                "promotion readiness",
+                "threshold recommendation"
+        );
     }
 
     @Test
@@ -580,21 +590,35 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         String doc = Files.readString(GENERATED_RUNTIME_DOC);
 
         assertThat(doc).contains(
-                "FDP-109 generates current-summary.json",
-                "FDP-110 mounts generated current-summary.json",
-                "FDP-108",
-                "FDP-106",
-                "FDP-107",
+                "FDP-110 completes the local generated Shadow Performance runtime loop. It invokes the FDP-109 local generator before Docker Compose starts, mounts the generated current-summary.json artifact into alert-service, lets FDP-108 read it, FDP-106 expose it, and FDP-107 display it.",
+                "FDP-110 intentionally combines local generation before Compose, generated runtime mount, and shared global workspace counters as UI context.",
+                "FDP-109 owns generation logic.",
+                "FDP-110 owns local launcher wiring and runtime mounting.",
+                "FDP-108 owns artifact reading.",
+                "FDP-106 owns the authorized read API.",
+                "FDP-107 owns dashboard display.",
+                "Generation before Compose in a local developer launcher is allowed.",
+                "Generation inside Docker Compose is forbidden.",
+                "Generation inside alert-service runtime is forbidden.",
                 "FDP-110 does not generate a Shadow Performance Summary inside Docker Compose or inside the application runtime.",
                 "The local developer launcher invokes the FDP-109 generator before `docker compose up`",
-                "Base runtime remains fail-closed",
+                "Base runtime is fail-closed",
                 "no configured summary -> 404",
-                "Demo artifact is separate",
-                "generated artifact is separate",
+                "Demo runtime uses `docker-compose.shadow-performance-demo.yml`",
+                "Demo artifact is separate from generated artifact",
+                "Demo artifact is for UI smoke/demo only",
+                "Demo artifact is not FDP-109 generated output",
+                "Demo artifact is not production current summary",
+                "Official local launcher runs FDP-109 generation before Compose.",
+                "Generated runtime uses `docker-compose.shadow-performance-generated.yml`",
                 "deployment/local-generated/shadow-performance/current-summary.json",
+                "Generated runtime exposes the summary through FDP-108/FDP-106/FDP-107.",
                 "generated runtime does not use `current-summary.demo.json`",
                 "generated runtime does not generate summary inside Docker Compose",
                 "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary",
+                "Generation happens before Docker Compose starts.",
+                "Generation does not happen inside Docker Compose.",
+                "Generation does not happen inside alert-service runtime.",
                 "FDP-110 does not run the generator inside Docker Compose",
                 "FDP-110 does not add a scheduler",
                 "FDP-110 does not add cron",
@@ -604,6 +628,71 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "not production decisioning",
                 "not payment authorization",
                 "not analyst recommendation logic"
+        );
+    }
+
+    @Test
+    void docsExplainSharedGlobalCountersAsShellContextOnly() throws Exception {
+        String doc = Files.readString(GENERATED_RUNTIME_DOC);
+        String readme = Files.readString(ROOT.resolve("README.md"));
+
+        assertThat(doc).contains(
+                "## Shared Global Workspace Counters",
+                "Shadow Performance workspace may render shared global workspace counters as shell-level UI context.",
+                "These counters are not part of ShadowPerformanceSummary.",
+                "They are not model evaluation metrics.",
+                "They are not used by FDP-109 generation.",
+                "They are not read by FDP-108 provider.",
+                "They are not returned by FDP-106 current summary endpoint.",
+                "They are not promotion readiness.",
+                "They are not threshold recommendation.",
+                "They are not production decisioning.",
+                "They are not payment authorization.",
+                "They are not analyst recommendation logic."
+        );
+        assertThat(readme).contains(
+                "FDP-110 intentionally combines local generation before Compose, generated runtime mount, and shared global workspace counters as UI context.",
+                "Global counters in the Shadow Performance workspace are shell-level context only",
+                "not part of `ShadowPerformanceSummary`",
+                "not model evaluation metrics",
+                "not promotion readiness",
+                "not threshold recommendation",
+                "not production decisioning",
+                "not payment authorization",
+                "not analyst recommendation logic"
+        );
+    }
+
+    @Test
+    void fdp110UiCountersRemainShellContextAndDoNotEnterSummaryContract() throws Exception {
+        String shell = Files.readString(UI_ROOT.resolve("workspace/WorkspaceDashboardShell.jsx"));
+        String dashboard = Files.readString(UI_ROOT.resolve("components/ShadowPerformanceDashboard.jsx"));
+        String runtime = Files.readString(UI_ROOT.resolve("workspace/ShadowPerformanceWorkspaceRuntime.jsx"));
+        String container = Files.readString(UI_ROOT.resolve("workspace/ShadowPerformanceWorkspaceContainer.jsx"));
+        String page = Files.readString(UI_ROOT.resolve("pages/ShadowPerformanceDashboardPage.jsx"));
+
+        assertThat(shell).contains(
+                "useWorkspaceCounters",
+                "workspaceCounters={workspaceCounterState.counters}",
+                "workspaceCountersStatus={workspaceCounterState}",
+                "showWorkspaceCounters={activeRoute.showWorkspaceCounters !== false}"
+        );
+        assertThat(runtime).contains(
+                "useShadowPerformanceSummary",
+                "summaryState={summaryState}"
+        );
+        assertThat(container).contains(
+                "summary={summaryState.summary}",
+                "isLoading={summaryState.isLoading}",
+                "error={summaryState.error}"
+        );
+        assertThat(String.join("\n", dashboard, runtime, container, page)).doesNotContain(
+                "useWorkspaceCounters",
+                "workspaceCounters",
+                "workspaceCounterState",
+                "setCounterValue",
+                "totalFraudCases",
+                "totalSuspiciousTransactions"
         );
     }
 
