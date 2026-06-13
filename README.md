@@ -103,14 +103,13 @@ Docker is the supported local runtime path for this README.
 
 ### Quick Start
 
-Prerequisites are Docker with Compose and OpenSSL. On macOS or Linux with GNU Make installed, from a fresh clone:
+Prerequisites are Docker with Compose, OpenSSL, and Python 3.12+ available as `python`. On macOS or Linux with GNU Make installed, from a fresh clone:
 
 ```bash
 make app-up
 ```
 
-On Windows with Docker Desktop and Git for Windows installed, run the equivalent one-command startup from
-PowerShell:
+On Windows, install Docker Desktop, Git for Windows, and Python 3.12+ available as `python`, then run the equivalent one-command startup from PowerShell:
 
 ```powershell
 .\scripts\app.cmd up
@@ -122,6 +121,8 @@ same Compose overlay combination as `make app-up`. From Git Bash on Windows with
 
 OpenSSL is used only to generate local identity fixture material. Private PEM keys are not committed to this
 repository.
+
+FDP-110 local startup runs the FDP-109 Python generator before Docker Compose starts, so `python` must be available on the host.
 
 ### Most Complete Local Security Demonstration Stack
 
@@ -137,8 +138,9 @@ currently provided by the repository. It:
 `deployment/.local/` is ignored by Git and excluded from Docker build contexts. Generated private keys stay on
 the local workstation and can be replaced by rerunning the selected startup command.
 
-For manual inspection, the equivalent Compose startup after running `bash scripts/bootstrap-local-fixtures.sh`
-is:
+`make app-up` and `.\scripts\app.cmd up` generate the local Shadow Performance Summary artifact before starting
+Docker Compose. For manual inspection, the equivalent Compose startup after running
+`make shadow-performance-summary` and `bash scripts/bootstrap-local-fixtures.sh` is:
 
 ```bash
 docker compose --env-file deployment/.env \
@@ -148,16 +150,32 @@ docker compose --env-file deployment/.env \
   -f deployment/docker-compose.service-identity-mtls.yml \
   -f deployment/docker-compose.trust-authority-jwt.yml \
   -f deployment/docker-compose.hardened.yml \
-  -f deployment/docker-compose.shadow-performance-demo.yml \
+  -f deployment/docker-compose.shadow-performance-generated.yml \
   up --build -d
 ```
 
-The Shadow Performance dashboard uses the FDP-108 artifact-backed current provider. The base runtime is fail-closed by default, but the official local demo launchers include
-`deployment/docker-compose.shadow-performance-demo.yml` so the dashboard shows validated local demo Shadow
-Performance metrics immediately after startup; demo fixture metrics are not production current summary, not
-promotion readiness, not threshold recommendation, not production decisioning approval, not payment authorization,
-and not analyst recommendation logic. The provider must not display fake, sample, fallback, stale, or zero metrics
-when no valid configured artifact is available.
+The Shadow Performance dashboard uses the FDP-108 artifact-backed current provider. The base runtime is fail-closed by default, and the official full local launchers include
+`deployment/docker-compose.shadow-performance-generated.yml` so the dashboard uses the FDP-109 generated artifact.
+If the generated artifact is still missing after local generation, startup fails with `Generated Shadow Performance Summary not found. Run: make shadow-performance-summary`.
+The provider must not display fake, sample, fallback, stale, demo, or zero metrics when no valid configured artifact
+is available.
+
+FDP-110 intentionally combines local generation before Compose, generated runtime mount, and shared global workspace counters as UI context. Global counters in the Shadow Performance workspace are shell-level context only; they are not part of `ShadowPerformanceSummary`, not model evaluation metrics, not promotion readiness, not threshold recommendation, not production decisioning, not payment authorization, and not analyst recommendation logic.
+
+To run the explicit generated-artifact path directly:
+
+```bash
+make shadow-performance-summary
+make app-up-shadow-performance-generated
+```
+
+The generated runtime mounts `deployment/local-generated/shadow-performance/current-summary.json` read-only into
+`/run/shadow-performance/current-summary.json`. It does not use `current-summary.demo.json` and does not generate a
+summary inside Docker Compose.
+
+The separate demo override `deployment/docker-compose.shadow-performance-demo.yml` remains available only for the
+demo fixture path; demo fixture metrics are not production current summary, not promotion readiness, not threshold
+recommendation, not production decisioning approval, not payment authorization, and not analyst recommendation logic.
 
 `deployment/.env` is a committed local demo/evaluation configuration fixture, so the project remains runnable for
 evaluation without claiming secret management. Application startup guards reject demo internal-auth
@@ -177,7 +195,7 @@ docker compose --env-file deployment/.env \
   -f deployment/docker-compose.service-identity-mtls.yml \
   -f deployment/docker-compose.trust-authority-jwt.yml \
   -f deployment/docker-compose.hardened.yml \
-  -f deployment/docker-compose.shadow-performance-demo.yml \
+  -f deployment/docker-compose.shadow-performance-generated.yml \
   ps
 ```
 
@@ -301,7 +319,7 @@ docker compose --env-file deployment/.env \
   -f deployment/docker-compose.service-identity-mtls.yml \
   -f deployment/docker-compose.trust-authority-jwt.yml \
   -f deployment/docker-compose.hardened.yml \
-  -f deployment/docker-compose.shadow-performance-demo.yml \
+  -f deployment/docker-compose.shadow-performance-generated.yml \
   down
 ```
 
@@ -327,7 +345,7 @@ docker compose --env-file deployment/.env \
   -f deployment/docker-compose.service-identity-mtls.yml \
   -f deployment/docker-compose.trust-authority-jwt.yml \
   -f deployment/docker-compose.hardened.yml \
-  -f deployment/docker-compose.shadow-performance-demo.yml \
+  -f deployment/docker-compose.shadow-performance-generated.yml \
   down -v
 ```
 

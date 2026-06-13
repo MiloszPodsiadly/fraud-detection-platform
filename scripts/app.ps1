@@ -10,6 +10,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $envFile = Join-Path $repoRoot "deployment\.env"
 $envExampleFile = Join-Path $repoRoot "deployment\.env.example"
+$generatedSummaryFile = Join-Path $repoRoot "deployment\local-generated\shadow-performance\current-summary.json"
 $composeArgs = @(
     "compose",
     "--env-file", "deployment/.env",
@@ -19,7 +20,7 @@ $composeArgs = @(
     "-f", "deployment/docker-compose.service-identity-mtls.yml",
     "-f", "deployment/docker-compose.trust-authority-jwt.yml",
     "-f", "deployment/docker-compose.hardened.yml",
-    "-f", "deployment/docker-compose.shadow-performance-demo.yml"
+    "-f", "deployment/docker-compose.shadow-performance-generated.yml"
 )
 
 function Invoke-DockerCompose {
@@ -28,6 +29,32 @@ function Invoke-DockerCompose {
     & docker @($composeArgs + $CommandArgs)
     if ($LASTEXITCODE -ne 0) {
         throw "docker compose failed with exit code $LASTEXITCODE."
+    }
+}
+
+function Invoke-ShadowPerformanceSummaryGeneration {
+    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+    if ($null -eq $pythonCommand) {
+        throw "Python 3.12+ is required to generate the local Shadow Performance Summary. Install Python and rerun."
+    }
+
+    $previousPythonPath = $env:PYTHONPATH
+    Push-Location (Join-Path $repoRoot "ml-inference-service")
+    try {
+        $env:PYTHONPATH = "."
+        & python -m offline_evaluation.generate_current_shadow_summary
+        if ($LASTEXITCODE -ne 0) {
+            throw "Shadow Performance Summary generation failed with exit code $LASTEXITCODE."
+        }
+    }
+    finally {
+        if ($null -eq $previousPythonPath) {
+            Remove-Item Env:\PYTHONPATH -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:PYTHONPATH = $previousPythonPath
+        }
+        Pop-Location
     }
 }
 
@@ -75,6 +102,10 @@ try {
             & $gitBash "./scripts/bootstrap-local-fixtures.sh"
             if ($LASTEXITCODE -ne 0) {
                 throw "Local fixture generation failed with exit code $LASTEXITCODE."
+            }
+            Invoke-ShadowPerformanceSummaryGeneration
+            if (-not (Test-Path -LiteralPath $generatedSummaryFile)) {
+                throw "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary"
             }
             Invoke-DockerCompose @("up", "--build", "-d")
         }

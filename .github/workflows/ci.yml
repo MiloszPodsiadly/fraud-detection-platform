@@ -1079,6 +1079,15 @@ jobs:
             -f deployment/docker-compose.trust-authority-jwt.yml \
             -f deployment/docker-compose.hardened.yml \
             config --quiet
+          docker compose --env-file deployment/.env.example \
+            -f deployment/docker-compose.yml \
+            -f deployment/docker-compose.dev.yml \
+            -f deployment/docker-compose.oidc.yml \
+            -f deployment/docker-compose.service-identity-mtls.yml \
+            -f deployment/docker-compose.trust-authority-jwt.yml \
+            -f deployment/docker-compose.hardened.yml \
+            -f deployment/docker-compose.shadow-performance-generated.yml \
+            config --quiet
 
       - name: Build compose images
         run: |
