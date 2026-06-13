@@ -182,6 +182,7 @@ jobs:
           scan-ref: .
           version: v0.71.0
           cache: false
+          vuln-type: os
           scanners: secret
           format: table
           timeout: 10m
@@ -193,6 +194,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up Java for Trivy Maven analysis
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Prime Maven cache for Trivy
+        run: mvn -B -DskipTests dependency:go-offline
 
       - name: Block high or critical repository vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
@@ -213,12 +224,24 @@ jobs:
   repository-vulnerability-sarif:
     name: Repository Vulnerability SARIF Upload
     runs-on: ubuntu-latest
+    needs: repository-vulnerability-gate
+    if: always()
     permissions:
       contents: read
       security-events: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up Java for Trivy Maven analysis
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Prime Maven cache for Trivy
+        run: mvn -B -DskipTests dependency:go-offline
 
       - name: Scan repository filesystem for vulnerability visibility
         uses: aquasecurity/trivy-action@v0.36.0
