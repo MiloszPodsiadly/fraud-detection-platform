@@ -181,6 +181,7 @@ jobs:
           scan-type: fs
           scan-ref: .
           version: v0.71.0
+          cache: false
           scanners: secret
           format: table
           timeout: 10m
@@ -201,6 +202,7 @@ jobs:
           scan-type: fs
           scan-ref: .
           version: v0.71.0
+          cache: false
           scanners: vuln
           format: table
           severity: HIGH,CRITICAL
@@ -226,6 +228,7 @@ jobs:
           scan-type: fs
           scan-ref: .
           version: v0.71.0
+          cache: false
           scanners: vuln
           format: sarif
           output: trivy-fs.sarif
