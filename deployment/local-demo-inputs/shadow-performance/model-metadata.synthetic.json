@@ -1,0 +1,17 @@
+{
+  "approvedFor": [
+    "COMPARE",
+    "SHADOW"
+  ],
+  "featureContractVersion": "2026-04-22.v1",
+  "intendedUse": [
+    "SHADOW_FRAUD_RISK_DIAGNOSTICS",
+    "RULE_VS_ML_DIAGNOSTICS"
+  ],
+  "modelFamily": "LOGISTIC_REGRESSION",
+  "modelName": "python-logistic-fraud-model",
+  "modelVersion": "2026-04-21.trained.v1",
+  "notIntendedUse": [
+    "OFFLINE_ONLY"
+  ]
+}

@@ -90,3 +90,30 @@ describe("WorkspaceNavigation suspicious transaction counter copy", () => {
     );
   }
 });
+
+describe("WorkspaceNavigation shadow performance diagnostic boundary", () => {
+  it("shadowPerformanceRouteDoesNotRenderGlobalPlatformCounters", () => {
+    render(
+      <WorkspaceNavigation
+        workspacePage="shadowPerformance"
+        workspaceRoutes={[WORKSPACE_ROUTE_REGISTRY.shadowPerformance]}
+        showWorkspaceCounters={false}
+        workspaceCounters={{
+          alerts: 41,
+          fraudCases: 42,
+          suspiciousTransactions: 43,
+          transactions: 44
+        }}
+        canReadShadowPerformance
+      />
+    );
+
+    expect(screen.getByText("Shadow diagnostics")).toBeInTheDocument();
+    expect(screen.getByText("Current")).toBeInTheDocument();
+    expect(screen.queryByText("41")).not.toBeInTheDocument();
+    expect(screen.queryByText("42")).not.toBeInTheDocument();
+    expect(screen.queryByText("43")).not.toBeInTheDocument();
+    expect(screen.queryByText("44")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Global fraud cases/i })).not.toBeInTheDocument();
+  });
+});

@@ -21,8 +21,8 @@ MAX_DATASET_RECORDS = 500
 MAX_JSONL_NON_EMPTY_LINES = 501
 MAX_JSONL_LINE_LENGTH = 64_000
 
-EVALUATION_RECORD_ID_PATTERN = re.compile(r"^eval-[a-f0-9]{32}$")
-TRANSACTION_REFERENCE_PATTERN = re.compile(r"^txnref-[a-f0-9]{32}$")
+EVALUATION_RECORD_ID_PATTERN = re.compile(r"^(eval-[a-f0-9]{32}|synthetic-evaluation-record-[0-9]{3})$")
+TRANSACTION_REFERENCE_PATTERN = re.compile(r"^(txnref-[a-f0-9]{32}|synthetic-transaction-reference-[0-9]{3})$")
 MACHINE_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
 ALLOWED_EVALUATION_LABELS = {
