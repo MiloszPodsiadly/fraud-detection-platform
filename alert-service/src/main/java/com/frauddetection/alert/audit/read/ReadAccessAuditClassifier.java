@@ -80,6 +80,9 @@ public class ReadAccessAuditClassifier {
         if ("/api/v1/governance/shadow-performance/summary/current".equals(pattern)) {
             return Optional.of(target(ReadAccessEndpointCategory.SHADOW_PERFORMANCE_SUMMARY, ReadAccessResourceType.SHADOW_PERFORMANCE_SUMMARY, null, request));
         }
+        if ("/api/v1/governance/promotion-review-readiness/current".equals(pattern)) {
+            return Optional.of(target(ReadAccessEndpointCategory.PROMOTION_REVIEW_READINESS, ReadAccessResourceType.PROMOTION_REVIEW_READINESS, null, request));
+        }
         return Optional.empty();
     }
 

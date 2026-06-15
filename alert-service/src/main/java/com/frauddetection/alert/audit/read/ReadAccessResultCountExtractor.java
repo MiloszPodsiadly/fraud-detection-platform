@@ -67,7 +67,8 @@ public class ReadAccessResultCountExtractor {
                     FRAUD_CASE_DETAIL,
                     FRAUD_CASE_EVIDENCE_SUMMARY,
                     GOVERNANCE_ADVISORY_DETAIL,
-                    SHADOW_PERFORMANCE_SUMMARY -> 1;
+                    SHADOW_PERFORMANCE_SUMMARY,
+                    PROMOTION_REVIEW_READINESS -> 1;
             case SCORED_TRANSACTION_SEARCH,
                     ENGINE_INTELLIGENCE_READ,
                     ENGINE_INTELLIGENCE_FEEDBACK_READ,

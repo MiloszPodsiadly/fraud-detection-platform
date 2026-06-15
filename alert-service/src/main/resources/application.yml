@@ -46,6 +46,13 @@ shadow-performance:
       path: ${SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH:}
       max-size-bytes: ${SHADOW_PERFORMANCE_SUMMARY_CURRENT_MAX_SIZE_BYTES:1048576}
 
+promotion-review-readiness:
+  current:
+    enabled: ${PROMOTION_REVIEW_READINESS_CURRENT_ENABLED:false}
+    base-dir: ${PROMOTION_REVIEW_READINESS_CURRENT_BASE_DIR:/run/promotion-readiness}
+    path: ${PROMOTION_REVIEW_READINESS_CURRENT_PATH:}
+    max-size-bytes: ${PROMOTION_REVIEW_READINESS_CURRENT_MAX_SIZE_BYTES:262144}
+
 app:
   fraud-cases:
     work-queue:
