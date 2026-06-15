@@ -45,7 +45,7 @@ shadow-performance-summary: check-python
 		--output ../deployment/local-generated/shadow-performance/current-summary.json
 
 promotion-readiness-report: check-python
-	cd ml-inference-service && PYTHONPATH=. python -m offline_evaluation.generate_promotion_readiness_report \
+	cd ml-inference-service && PYTHONPATH=. python -m offline_evaluation.generate_promotion_review_readiness_report \
 		--shadow-summary ../deployment/local-generated/shadow-performance/current-summary.json \
 		--output ../deployment/local-generated/promotion-readiness/promotion-review-readiness-report.json
 

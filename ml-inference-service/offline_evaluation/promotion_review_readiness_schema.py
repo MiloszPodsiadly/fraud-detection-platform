@@ -18,7 +18,7 @@ from offline_evaluation.shadow_performance_schema import (
 )
 
 
-class PromotionReadinessValidationError(ValueError):
+class PromotionReviewReadinessValidationError(ValueError):
     """Raised when PromotionReviewReadinessReport v1 is unsafe or outside FDP-111 bounds."""
 
 
@@ -39,7 +39,7 @@ CHECK_NAMES = {
     "MODEL_CARD_PRESENT",
     "MODEL_CARD_VERSION_SUPPORTED",
     "GOVERNANCE_STATUS_DIAGNOSTIC_ONLY",
-    "APPROVED_FOR_COMPARE_AND_SHADOW",
+    "GOVERNANCE_MODES_COMPARE_AND_SHADOW",
     "NOT_PRODUCTION_APPROVAL_TRUE",
     "NOT_PROMOTION_APPROVAL_TRUE",
     "NOT_THRESHOLD_RECOMMENDATION_TRUE",
@@ -67,6 +67,7 @@ REQUIRED_FIELDS = {
     "notProductionDecisioning",
     "notPaymentAuthorization",
     "notAutomaticDecisioning",
+    "notAnalystRecommendation",
     "inputs",
     "checks",
     "reasonCodes",
@@ -80,6 +81,7 @@ SAFE_NEGATED_FIELDS = {
     "notProductionDecisioning",
     "notPaymentAuthorization",
     "notAutomaticDecisioning",
+    "notAnalystRecommendation",
 }
 FORBIDDEN_OUTPUT_TERMS = {
     "approved",
@@ -123,7 +125,7 @@ def build_promotion_review_readiness_report(
 ) -> dict[str, Any]:
     summary = validate_shadow_performance_summary(current_summary)
     if minimum_diagnostic_evidence_records < 1:
-        raise PromotionReadinessValidationError("minimumDiagnosticEvidenceRecords must be positive")
+        raise PromotionReviewReadinessValidationError("minimumDiagnosticEvidenceRecords must be positive")
 
     accepted_records = summary["evaluationPopulation"]["recordsAcceptedForEvaluation"]
     checks = _checks(summary, minimum_diagnostic_evidence_records)
@@ -146,6 +148,7 @@ def build_promotion_review_readiness_report(
         "notProductionDecisioning": True,
         "notPaymentAuthorization": True,
         "notAutomaticDecisioning": True,
+        "notAnalystRecommendation": True,
         "inputs": {
             "shadowPerformanceSummary": {
                 "present": True,
@@ -180,7 +183,7 @@ def promotion_review_readiness_report_json(report: dict[str, Any]) -> str:
 
 def validate_promotion_review_readiness_report(raw: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, dict):
-        raise PromotionReadinessValidationError("promotion review readiness report must be an object")
+        raise PromotionReviewReadinessValidationError("promotion review readiness report must be an object")
     _reject_unknown_or_missing(raw, REQUIRED_FIELDS, "report")
     checks = _check_list(raw["checks"])
     normalized = {
@@ -195,6 +198,7 @@ def validate_promotion_review_readiness_report(raw: dict[str, Any]) -> dict[str,
         "notProductionDecisioning": _required_true(raw, "notProductionDecisioning"),
         "notPaymentAuthorization": _required_true(raw, "notPaymentAuthorization"),
         "notAutomaticDecisioning": _required_true(raw, "notAutomaticDecisioning"),
+        "notAnalystRecommendation": _required_true(raw, "notAnalystRecommendation"),
         "inputs": _inputs(raw["inputs"]),
         "checks": checks,
         "reasonCodes": _machine_code_list(raw, "reasonCodes", 20),
@@ -217,7 +221,7 @@ def _checks(summary: dict[str, Any], minimum_diagnostic_evidence_records: int) -
         _check("MODEL_CARD_PRESENT", "NOT_APPLICABLE", "LOW"),
         _check("MODEL_CARD_VERSION_SUPPORTED", "NOT_APPLICABLE", "LOW"),
         _check("GOVERNANCE_STATUS_DIAGNOSTIC_ONLY", _pass_fail(governance["governanceStatus"] == GOVERNANCE_STATUS)),
-        _check("APPROVED_FOR_COMPARE_AND_SHADOW", _pass_fail(set(governance["approvedFor"]) == ALLOWED_APPROVED_FOR)),
+        _check("GOVERNANCE_MODES_COMPARE_AND_SHADOW", _pass_fail(set(governance["approvedFor"]) == ALLOWED_APPROVED_FOR)),
         _check("NOT_PRODUCTION_APPROVAL_TRUE", _pass_fail(governance["notProductionApproval"] is True)),
         _check("NOT_PROMOTION_APPROVAL_TRUE", _pass_fail(governance["notPromotionApproval"] is True)),
         _check("NOT_THRESHOLD_RECOMMENDATION_TRUE", _pass_fail(governance["notThresholdRecommendation"] is True)),
@@ -254,23 +258,23 @@ def _minimum_evidence_failed(checks: list[dict[str, str]]) -> bool:
 def _validate_status_consistency(report: dict[str, Any]) -> None:
     failed_checks = [check for check in report["checks"] if check["status"] == "FAIL"]
     if report["readinessStatus"] == "REVIEWABLE" and failed_checks:
-        raise PromotionReadinessValidationError("REVIEWABLE requires all required checks to pass")
+        raise PromotionReviewReadinessValidationError("REVIEWABLE requires all required checks to pass")
     if report["readinessStatus"] == GOVERNANCE_STATUS:
-        raise PromotionReadinessValidationError("DIAGNOSTIC_ONLY is governanceStatus, not readinessStatus")
+        raise PromotionReviewReadinessValidationError("DIAGNOSTIC_ONLY is governanceStatus, not readinessStatus")
 
 
 def _inputs(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
-        raise PromotionReadinessValidationError("inputs must be an object")
+        raise PromotionReviewReadinessValidationError("inputs must be an object")
     summary = raw.get("shadowPerformanceSummary")
     if not isinstance(summary, dict):
-        raise PromotionReadinessValidationError("inputs.shadowPerformanceSummary must be an object")
+        raise PromotionReviewReadinessValidationError("inputs.shadowPerformanceSummary must be an object")
     minimum = raw.get("minimumDiagnosticEvidenceRecords")
     accepted = raw.get("recordsAcceptedForEvaluation")
     if isinstance(minimum, bool) or not isinstance(minimum, int) or minimum < 1:
-        raise PromotionReadinessValidationError("minimumDiagnosticEvidenceRecords must be positive")
+        raise PromotionReviewReadinessValidationError("minimumDiagnosticEvidenceRecords must be positive")
     if isinstance(accepted, bool) or not isinstance(accepted, int) or accepted < 0:
-        raise PromotionReadinessValidationError("recordsAcceptedForEvaluation must be non-negative")
+        raise PromotionReviewReadinessValidationError("recordsAcceptedForEvaluation must be non-negative")
     normalized_summary = {
         "present": _required_true(summary, "present"),
         "summaryType": _required_constant(summary, "summaryType", SHADOW_SUMMARY_TYPE),
@@ -286,11 +290,11 @@ def _inputs(raw: Any) -> dict[str, Any]:
 
 def _check_list(raw: Any) -> list[dict[str, str]]:
     if not isinstance(raw, list) or not raw:
-        raise PromotionReadinessValidationError("checks must be a non-empty list")
+        raise PromotionReviewReadinessValidationError("checks must be a non-empty list")
     checks = []
     for item in raw:
         if not isinstance(item, dict):
-            raise PromotionReadinessValidationError("checks must contain objects")
+            raise PromotionReviewReadinessValidationError("checks must contain objects")
         _reject_unknown_or_missing(item, {"name", "status", "severity"}, "check")
         name = _enum(item, "name", CHECK_NAMES)
         status = _enum(item, "status", CHECK_STATUSES)
@@ -302,49 +306,49 @@ def _check_list(raw: Any) -> list[dict[str, str]]:
 def _required_constant(raw: dict[str, Any], field: str, expected: str) -> str:
     value = _required_string(raw, field, len(expected))
     if value != expected:
-        raise PromotionReadinessValidationError(f"{field} must be {expected}")
+        raise PromotionReviewReadinessValidationError(f"{field} must be {expected}")
     return value
 
 
 def _required_string(raw: dict[str, Any], field: str, max_length: int) -> str:
     value = raw.get(field)
     if not isinstance(value, str) or not value:
-        raise PromotionReadinessValidationError(f"{field} must be a non-empty string")
+        raise PromotionReviewReadinessValidationError(f"{field} must be a non-empty string")
     if len(value) > max_length:
-        raise PromotionReadinessValidationError(f"{field} exceeds maximum length")
+        raise PromotionReviewReadinessValidationError(f"{field} exceeds maximum length")
     return value
 
 
 def _required_true(raw: dict[str, Any], field: str) -> bool:
     if raw.get(field) is not True:
-        raise PromotionReadinessValidationError(f"{field} must be true")
+        raise PromotionReviewReadinessValidationError(f"{field} must be true")
     return True
 
 
 def _readiness_status(raw: dict[str, Any]) -> str:
     status = _enum(raw, "readinessStatus", READINESS_STATUSES)
     if status == GOVERNANCE_STATUS:
-        raise PromotionReadinessValidationError("DIAGNOSTIC_ONLY is governanceStatus, not readinessStatus")
+        raise PromotionReviewReadinessValidationError("DIAGNOSTIC_ONLY is governanceStatus, not readinessStatus")
     return status
 
 
 def _enum(raw: dict[str, Any], field: str, allowed: set[str]) -> str:
     value = _required_string(raw, field, 128)
     if value not in allowed:
-        raise PromotionReadinessValidationError(f"{field} has unsupported value")
+        raise PromotionReviewReadinessValidationError(f"{field} has unsupported value")
     return value
 
 
 def _machine_code_list(raw: dict[str, Any], field: str, max_items: int) -> list[str]:
     value = raw.get(field, [])
     if not isinstance(value, list):
-        raise PromotionReadinessValidationError(f"{field} must be a list")
+        raise PromotionReviewReadinessValidationError(f"{field} must be a list")
     if len(value) > max_items:
-        raise PromotionReadinessValidationError(f"{field} exceeds maximum item count")
+        raise PromotionReviewReadinessValidationError(f"{field} exceeds maximum item count")
     result = []
     for item in value:
         if not isinstance(item, str) or MACHINE_CODE_PATTERN.fullmatch(item) is None:
-            raise PromotionReadinessValidationError(f"{field} must contain machine-code strings")
+            raise PromotionReviewReadinessValidationError(f"{field} must contain machine-code strings")
         result.append(item)
     return sorted(set(result))
 
@@ -360,10 +364,10 @@ def _machine_codes(values: list[str]) -> list[str]:
 def _reject_unknown_or_missing(raw: dict[str, Any], allowed: set[str], label: str) -> None:
     extra = sorted(set(raw) - allowed)
     if extra:
-        raise PromotionReadinessValidationError(f"{label} contains unsupported fields: {', '.join(extra)}")
+        raise PromotionReviewReadinessValidationError(f"{label} contains unsupported fields: {', '.join(extra)}")
     missing = sorted(allowed - set(raw))
     if missing:
-        raise PromotionReadinessValidationError(f"{label} missing required fields: {', '.join(missing)}")
+        raise PromotionReviewReadinessValidationError(f"{label} missing required fields: {', '.join(missing)}")
 
 
 def _reject_forbidden_payload(payload: str) -> None:
@@ -376,4 +380,4 @@ def _reject_forbidden_payload(payload: str) -> None:
     compact = "".join(character for character in masked.lower() if character.isalnum())
     for term in FORBIDDEN_OUTPUT_TERMS:
         if term in compact:
-            raise PromotionReadinessValidationError(f"report contains forbidden term: {term}")
+            raise PromotionReviewReadinessValidationError(f"report contains forbidden term: {term}")
