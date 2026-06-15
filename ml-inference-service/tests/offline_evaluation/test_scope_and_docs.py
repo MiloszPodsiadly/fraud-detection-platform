@@ -106,6 +106,7 @@ class OfflineEvaluationScopeGuardTest(unittest.TestCase):
 
     def assertNotInAnyOfflineFile(self, *terms: str):
         haystack = "\n".join(path.read_text(encoding="utf-8") for path in OFFLINE_ROOT.rglob("*.py"))
+        haystack = haystack.replace("notAnalystRecommendation", "")
         for term in terms:
             self.assertNotIn(term, haystack)
 

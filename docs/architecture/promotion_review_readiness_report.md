@@ -32,6 +32,13 @@ FDP-109 generates current-summary.json
 FDP-111 consumes existing bounded artifacts. FDP-111 does not recompute metrics from raw data. The v1 local generator
 consumes the FDP-109 generated `deployment/local-generated/shadow-performance/current-summary.json` artifact.
 
+## V1 Limitation
+
+FDP-111 v1 primarily consumes the FDP-109 generated Shadow Performance Summary artifact.
+
+Model Card checks are included as bounded checklist placeholders and are currently NOT_APPLICABLE until a bounded Model
+Card artifact input is wired in a later scope.
+
 ## Output
 
 The local/offline generator writes:
@@ -61,6 +68,14 @@ REVIEWABLE
 The report may use `minimumDiagnosticEvidenceRecords` as a local review sufficiency check.
 
 Minimum diagnostic evidence is a review sufficiency check, not a model threshold and not a promotion threshold.
+
+## Diagnostic Checks
+
+`GOVERNANCE_MODES_COMPARE_AND_SHADOW` is the governance-mode diagnostic check.
+
+This check validates that the consumed summary is governed for COMPARE and SHADOW diagnostic use only. It is not promotion approval.
+
+The report also includes explicit non-decisioning flags, including `notAnalystRecommendation`.
 
 ## Non-Decisioning Boundary
 

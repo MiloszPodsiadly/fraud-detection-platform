@@ -380,7 +380,7 @@ class CurrentShadowSummaryGenerationTest(unittest.TestCase):
             ):
                 self.assertNotIn(term, payload)
 
-    def test_doesNotCreatePromotionReadiness(self):
+    def test_doesNotCreatePromotionReviewReadiness(self):
         self.assertGeneratedPayloadDoesNotContain("promotion readiness score", "promotionReady", "promotion approved")
 
     def test_doesNotCreateThresholdRecommendation(self):
