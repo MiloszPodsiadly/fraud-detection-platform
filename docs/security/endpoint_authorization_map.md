@@ -107,6 +107,7 @@ Production BFF hardening remains deployment responsibility unless configured in 
 | `GET /internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert` | `SuspiciousTransactionAuthorizationRules` | `SUSPICIOUS_TRANSACTION_READ` + `ALERT_READ` | Protected internal backend-resolved linked-alert read context. Client-selected `alertId` query parameter is rejected. | Safe method only | `AuthorizationRulesCoverageTest`, `SuspiciousTransactionReadControllerAuthorizationTest`, `RouteCoverageAgainstMvcMappingsTest` |
 | `/governance/advisories/**` | `GovernanceAuthorizationRules` | `TRANSACTION_MONITOR_READ`, `GOVERNANCE_ADVISORY_AUDIT_WRITE` | Protected or denied | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
 | `GET /api/v1/governance/shadow-performance/summary/current` | `GovernanceAuthorizationRules` | `SHADOW_PERFORMANCE_READ` | Protected read-only diagnostic summary over validated FDP-105 Shadow Performance Summary. Not granted by generic transaction, fraud-case, or analyst read authorities. | Safe method only | `ShadowPerformanceSummaryControllerAuthorizationTest`, `RouteCoverageAgainstMvcMappingsTest` |
+| `GET /api/v1/governance/promotion-review-readiness/current` | `GovernanceAuthorizationRules` | `PROMOTION_READINESS_READ` | Protected read-only diagnostic report over validated FDP-111 Promotion Review Readiness Report. Not granted by generic transaction, fraud-case, shadow-performance, or analyst read authorities. | Safe method only | `PromotionReviewReadinessReportControllerAuthorizationTest`, `RouteCoverageAgainstMvcMappingsTest` |
 | `/api/v1/audit/**` | `AuditAuthorizationRules` | `AUDIT_READ`, `AUDIT_VERIFY`, `AUDIT_EXPORT`, `AUDIT_DEGRADATION_RESOLVE` | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
 | `/system/trust-level`, `/api/v1/trust/incidents/**` | `TrustAuthorizationRules` | `AUDIT_VERIFY`, trust incident authorities | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
 | `/api/v1/decision-outbox/**`, `/api/v1/regulated-mutations/**`, `/api/v1/outbox/**` | `RecoveryAuthorizationRules` | Recovery, outbox, and audit verification authorities | Protected | Unsafe cookie-backed requests require CSRF | `AuthorizationRulesCoverageTest` |
@@ -135,6 +136,7 @@ The FDP-49 route ownership docs represent these Spring MVC controllers:
 - `FraudCaseWorkQueueSummaryController`
 - `GovernanceAdvisoryController`
 - `GovernanceAuditController`
+- `PromotionReviewReadinessReportController`
 - `ShadowPerformanceSummaryController`
 - `OutboxRecoveryController`
 - `RegulatedMutationRecoveryController`
