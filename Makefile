@@ -14,7 +14,7 @@ SHADOW_PERFORMANCE_GENERATED_COMPOSE = $(SECURITY_HARDENED_BASE_COMPOSE) \
 
 SECURITY_HARDENED_COMPOSE = $(SHADOW_PERFORMANCE_GENERATED_COMPOSE)
 
-.PHONY: app-up app-down app-clean app-ps check-python shadow-performance-summary app-up-shadow-performance-generated shadow-performance-local-loop
+.PHONY: app-up app-down app-clean app-ps check-python shadow-performance-summary promotion-readiness-report app-up-shadow-performance-generated shadow-performance-local-loop
 
 deployment/.env:
 	cp deployment/.env.example deployment/.env
@@ -43,6 +43,11 @@ shadow-performance-summary: check-python
 		--dataset-jsonl ../deployment/local-demo-inputs/shadow-performance/fdp102-feedback-dataset.synthetic.jsonl \
 		--model-metadata ../deployment/local-demo-inputs/shadow-performance/model-metadata.synthetic.json \
 		--output ../deployment/local-generated/shadow-performance/current-summary.json
+
+promotion-readiness-report: check-python
+	cd ml-inference-service && PYTHONPATH=. python -m offline_evaluation.generate_promotion_readiness_report \
+		--shadow-summary ../deployment/local-generated/shadow-performance/current-summary.json \
+		--output ../deployment/local-generated/promotion-readiness/promotion-review-readiness-report.json
 
 app-up-shadow-performance-generated: deployment/.env shadow-performance-summary
 	@test -f deployment/local-generated/shadow-performance/current-summary.json || \
