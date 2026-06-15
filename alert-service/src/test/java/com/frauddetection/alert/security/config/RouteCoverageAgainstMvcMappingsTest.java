@@ -38,6 +38,8 @@ import com.frauddetection.alert.governance.audit.GovernanceAdvisoryController;
 import com.frauddetection.alert.governance.audit.GovernanceAdvisoryProjectionService;
 import com.frauddetection.alert.governance.audit.GovernanceAuditController;
 import com.frauddetection.alert.governance.audit.GovernanceAuditService;
+import com.frauddetection.alert.governance.promotionreviewreadiness.PromotionReviewReadinessReportController;
+import com.frauddetection.alert.governance.promotionreviewreadiness.PromotionReviewReadinessReportReadService;
 import com.frauddetection.alert.governance.shadowperformance.ShadowPerformanceSummaryController;
 import com.frauddetection.alert.governance.shadowperformance.ShadowPerformanceSummaryReadService;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
@@ -119,6 +121,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         GovernanceAdvisoryController.class,
         GovernanceAuditController.class,
         ShadowPerformanceSummaryController.class,
+        PromotionReviewReadinessReportController.class,
         SuspiciousTransactionReadController.class,
         AnalystSessionController.class
 })
@@ -228,6 +231,9 @@ class RouteCoverageAgainstMvcMappingsTest {
 
     @MockBean
     private CurrentAnalystUser currentAnalystUser;
+
+    @MockBean
+    private PromotionReviewReadinessReportReadService promotionReviewReadinessReportReadService;
 
     @MockBean
     private AlertRepository alertRepository;

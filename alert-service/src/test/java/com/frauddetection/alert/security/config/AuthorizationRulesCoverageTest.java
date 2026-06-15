@@ -111,6 +111,11 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
     void governanceRoutesRequireExplicitGovernanceAuthorities() throws Exception {
         expectSecurityLayerDoesNotReject(get("/governance/advisories")
                 .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)));
+        expectSecurityLayerDoesNotReject(get("/api/v1/governance/promotion-review-readiness/current")
+                .with(userWith(AnalystAuthority.PROMOTION_READINESS_READ)));
+        expectDenied(get("/api/v1/governance/promotion-review-readiness/current")
+                .with(userWith(AnalystAuthority.SHADOW_PERFORMANCE_READ)));
+        expectDenied(get("/api/v1/governance/promotion-review-readiness/current"));
         expectDenied(get("/governance/advisories").with(userWith(AnalystAuthority.FRAUD_CASE_READ)));
         expectDenied(get("/governance/advisories"));
         expectDenied(get("/governance/not-real")
