@@ -286,6 +286,7 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
         List<String> args = new ArrayList<>();
         args.add("--server.port=8080");
         args.add("--spring.profiles.active=test,fdp38-live-runtime-checkpoint");
+        args.add("--spring.mongodb.uri=" + mongodbUri);
         args.add("--spring.data.mongodb.uri=" + mongodbUri);
         args.add("--spring.data.redis.host=" + FraudPlatformContainers.redisNetworkHost());
         args.add("--spring.data.redis.port=6379");
