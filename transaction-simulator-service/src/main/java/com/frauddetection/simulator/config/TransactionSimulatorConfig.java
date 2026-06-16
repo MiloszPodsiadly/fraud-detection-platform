@@ -1,17 +1,17 @@
 package com.frauddetection.simulator.config;
 
 import com.frauddetection.common.events.contract.TransactionRawEvent;
+import com.frauddetection.common.events.kafka.JacksonKafkaSerializer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringSerializer;
-import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
-import org.springframework.kafka.support.serializer.JsonSerializer;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.HashMap;
@@ -30,11 +30,13 @@ public class TransactionSimulatorConfig {
     @Bean
     public ProducerFactory<String, TransactionRawEvent> transactionRawEventProducerFactory(KafkaProperties kafkaProperties) {
         Map<String, Object> properties = new HashMap<>(kafkaProperties.buildProducerProperties());
-        properties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
-        properties.put(JsonSerializer.ADD_TYPE_INFO_HEADERS, false);
         properties.put(ProducerConfig.ACKS_CONFIG, "all");
-        return new DefaultKafkaProducerFactory<>(properties);
+
+        return new DefaultKafkaProducerFactory<>(
+                properties,
+                new StringSerializer(),
+                new JacksonKafkaSerializer<>()
+        );
     }
 
     @Bean

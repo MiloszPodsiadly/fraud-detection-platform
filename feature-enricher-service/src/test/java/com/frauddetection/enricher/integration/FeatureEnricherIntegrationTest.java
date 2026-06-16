@@ -2,6 +2,7 @@ package com.frauddetection.enricher.integration;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionRawEvent;
+import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
 import com.frauddetection.common.testsupport.base.AbstractIntegrationTest;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
@@ -16,7 +17,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.junit.jupiter.EnabledIf;
@@ -76,15 +76,14 @@ class FeatureEnricherIntegrationTest extends AbstractIntegrationTest {
         Map<String, Object> properties = Map.of(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, FraudPlatformContainers.kafka().getBootstrapServers(),
                 ConsumerConfig.GROUP_ID_CONFIG, "feature-enricher-it-" + UUID.randomUUID(),
-                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
-                ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class,
-                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class,
-                JsonDeserializer.TRUSTED_PACKAGES, "com.frauddetection.common.events",
-                JsonDeserializer.USE_TYPE_INFO_HEADERS, false,
-                JsonDeserializer.VALUE_DEFAULT_TYPE, TransactionEnrichedEvent.class.getName()
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest"
         );
 
-        try (KafkaConsumer<String, TransactionEnrichedEvent> consumer = new KafkaConsumer<>(properties)) {
+        try (KafkaConsumer<String, TransactionEnrichedEvent> consumer = new KafkaConsumer<>(
+                properties,
+                new StringDeserializer(),
+                new JacksonKafkaDeserializer<>(TransactionEnrichedEvent.class)
+        )) {
             consumer.subscribe(List.of("transactions.enriched.test"));
             long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
 

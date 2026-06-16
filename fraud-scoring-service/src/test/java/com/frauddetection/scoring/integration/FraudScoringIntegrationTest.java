@@ -2,6 +2,7 @@ package com.frauddetection.scoring.integration;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
+import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
 import com.frauddetection.common.testsupport.base.AbstractIntegrationTest;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
@@ -14,7 +15,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.junit.jupiter.EnabledIf;
@@ -61,15 +61,14 @@ class FraudScoringIntegrationTest extends AbstractIntegrationTest {
         Map<String, Object> properties = Map.of(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, FraudPlatformContainers.kafka().getBootstrapServers(),
                 ConsumerConfig.GROUP_ID_CONFIG, "fraud-scoring-it-" + UUID.randomUUID(),
-                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
-                ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class,
-                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class,
-                JsonDeserializer.TRUSTED_PACKAGES, "com.frauddetection.common.events",
-                JsonDeserializer.USE_TYPE_INFO_HEADERS, false,
-                JsonDeserializer.VALUE_DEFAULT_TYPE, TransactionScoredEvent.class.getName()
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest"
         );
 
-        try (KafkaConsumer<String, TransactionScoredEvent> consumer = new KafkaConsumer<>(properties)) {
+        try (KafkaConsumer<String, TransactionScoredEvent> consumer = new KafkaConsumer<>(
+                properties,
+                new StringDeserializer(),
+                new JacksonKafkaDeserializer<>(TransactionScoredEvent.class)
+        )) {
             consumer.subscribe(List.of("transactions.scored.test"));
             long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
 
