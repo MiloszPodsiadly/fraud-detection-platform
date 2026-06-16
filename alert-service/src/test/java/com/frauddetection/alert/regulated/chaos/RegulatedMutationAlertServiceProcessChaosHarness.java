@@ -261,7 +261,7 @@ public final class RegulatedMutationAlertServiceProcessChaosHarness implements A
         command.add(ALERT_SERVICE_MAIN_CLASS);
         command.add("--server.port=" + servicePort);
         command.add("--spring.profiles.active=test");
-        command.add("--spring.data.mongodb.uri=" + mongodbUri);
+        command.add("--spring.mongodb.uri=" + mongodbUri);
         command.add("--spring.data.redis.host=" + FraudPlatformContainers.redis().getHost());
         command.add("--spring.data.redis.port=" + FraudPlatformContainers.redis().getMappedPort(6379));
         command.add("--spring.kafka.bootstrap-servers=" + FraudPlatformContainers.kafka().getBootstrapServers());
