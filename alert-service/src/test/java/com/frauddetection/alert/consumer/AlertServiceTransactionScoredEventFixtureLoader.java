@@ -1,7 +1,7 @@
 package com.frauddetection.alert.consumer;
 
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
-import org.springframework.kafka.support.serializer.JsonDeserializer;
+import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -17,6 +17,9 @@ final class AlertServiceTransactionScoredEventFixtureLoader {
     private static final String UNKNOWN_NESTED = "transaction_scored_event_v2_unknown_nested_engine_intelligence_fields.json";
     private static final String UNKNOWN_TOP_LEVEL = "transaction_scored_event_v2_unknown_top_level_field.json";
     private static final Set<String> KNOWN_FIXTURES = Set.of(OLD, MINIMAL, FULL, UNKNOWN_NESTED, UNKNOWN_TOP_LEVEL);
+
+    private static final JacksonKafkaDeserializer<TransactionScoredEvent> DESERIALIZER =
+            new JacksonKafkaDeserializer<>(TransactionScoredEvent.class);
 
     private AlertServiceTransactionScoredEventFixtureLoader() {
     }
@@ -46,8 +49,7 @@ final class AlertServiceTransactionScoredEventFixtureLoader {
     }
 
     private static TransactionScoredEvent deserialize(String json) {
-        JsonDeserializer<TransactionScoredEvent> deserializer = new JsonDeserializer<>(TransactionScoredEvent.class, false);
-        return deserializer.deserialize("transactions.scored", json.getBytes(StandardCharsets.UTF_8));
+        return DESERIALIZER.deserialize("transactions.scored", json.getBytes(StandardCharsets.UTF_8));
     }
 
     private static String readFixture(String name) {
