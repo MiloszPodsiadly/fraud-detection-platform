@@ -2,17 +2,19 @@ package com.frauddetection.scoring.config;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
+import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
+import com.frauddetection.common.events.kafka.JacksonKafkaSerializer;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.serialization.Serializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -25,8 +27,6 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
-import org.springframework.kafka.support.serializer.JsonDeserializer;
-import org.springframework.kafka.support.serializer.JsonSerializer;
 import org.springframework.util.backoff.FixedBackOff;
 
 import java.util.HashMap;
@@ -43,29 +43,30 @@ import java.util.Map;
 public class FraudScoringKafkaConfig {
 
     private static final Logger log = LoggerFactory.getLogger(FraudScoringKafkaConfig.class);
-    private static final String TRUSTED_EVENT_PACKAGES = "com.frauddetection.common.events.contract,com.frauddetection.common.events.model,com.frauddetection.common.events.enums";
     private static final int PLATFORM_TOPIC_PARTITIONS = 3;
     private static final short PLATFORM_TOPIC_REPLICAS = 1;
 
     @Bean
     public ConsumerFactory<String, TransactionEnrichedEvent> transactionEnrichedEventConsumerFactory(KafkaProperties kafkaProperties) {
         Map<String, Object> properties = new HashMap<>(kafkaProperties.buildConsumerProperties());
-        properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
-        properties.put(JsonDeserializer.VALUE_DEFAULT_TYPE, TransactionEnrichedEvent.class.getName());
-        properties.put(JsonDeserializer.TRUSTED_PACKAGES, TRUSTED_EVENT_PACKAGES);
-        properties.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
-        return new DefaultKafkaConsumerFactory<>(properties);
+
+        return new DefaultKafkaConsumerFactory<>(
+                properties,
+                new StringDeserializer(),
+                new JacksonKafkaDeserializer<>(TransactionEnrichedEvent.class)
+        );
     }
 
     @Bean
     public ProducerFactory<String, TransactionEnrichedEvent> transactionEnrichedEventProducerFactory(KafkaProperties kafkaProperties) {
         Map<String, Object> properties = new HashMap<>(kafkaProperties.buildProducerProperties());
-        properties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
-        properties.put(JsonSerializer.ADD_TYPE_INFO_HEADERS, false);
         properties.put(ProducerConfig.ACKS_CONFIG, "all");
-        return new DefaultKafkaProducerFactory<>(properties);
+
+        return new DefaultKafkaProducerFactory<>(
+                properties,
+                new StringSerializer(),
+                new JacksonKafkaSerializer<>()
+        );
     }
 
     @Bean
@@ -78,11 +79,13 @@ public class FraudScoringKafkaConfig {
     @Bean
     public ProducerFactory<String, TransactionScoredEvent> transactionScoredEventProducerFactory(KafkaProperties kafkaProperties) {
         Map<String, Object> properties = new HashMap<>(kafkaProperties.buildProducerProperties());
-        properties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
-        properties.put(JsonSerializer.ADD_TYPE_INFO_HEADERS, false);
         properties.put(ProducerConfig.ACKS_CONFIG, "all");
-        return new DefaultKafkaProducerFactory<>(properties);
+
+        return new DefaultKafkaProducerFactory<>(
+                properties,
+                new StringSerializer(),
+                new JacksonKafkaSerializer<>()
+        );
     }
 
     @Bean
@@ -95,11 +98,16 @@ public class FraudScoringKafkaConfig {
     @Bean
     public ProducerFactory<Object, Object> deadLetterProducerFactory(KafkaProperties kafkaProperties) {
         Map<String, Object> properties = new HashMap<>(kafkaProperties.buildProducerProperties());
-        properties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
-        properties.put(JsonSerializer.ADD_TYPE_INFO_HEADERS, false);
         properties.put(ProducerConfig.ACKS_CONFIG, "all");
-        return new DefaultKafkaProducerFactory<>(properties);
+
+        @SuppressWarnings("unchecked")
+        Serializer<Object> keySerializer = (Serializer<Object>) (Serializer<?>) new StringSerializer();
+
+        return new DefaultKafkaProducerFactory<>(
+                properties,
+                keySerializer,
+                new JacksonKafkaSerializer<>()
+        );
     }
 
     @Bean
