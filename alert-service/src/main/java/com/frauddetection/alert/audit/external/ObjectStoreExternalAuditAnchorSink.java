@@ -1,11 +1,12 @@
 package com.frauddetection.alert.audit.external;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
+import tools.jackson.core.JacksonException;
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.MapperFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.MapperFeature;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.cfg.MapperBuilder;
+import tools.jackson.databind.json.JsonMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -448,7 +449,7 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     private byte[] serialize(ObjectStoreExternalAuditAnchorPayload anchor) {
         try {
             return objectMapper.writeValueAsBytes(anchor);
-        } catch (JsonProcessingException exception) {
+        } catch (JacksonException exception) {
             throw new ExternalAuditAnchorSinkException("IO_ERROR", "External anchor object could not be serialized.");
         }
     }
@@ -456,7 +457,7 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     private byte[] serialize(ObjectStoreExternalAuditHeadManifest manifest) {
         try {
             return objectMapper.writeValueAsBytes(manifest);
-        } catch (JsonProcessingException exception) {
+        } catch (JacksonException exception) {
             throw new ExternalAuditAnchorSinkException("IO_ERROR", "External anchor head manifest could not be serialized.");
         }
     }
@@ -780,12 +781,15 @@ class ObjectStoreExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     }
 
     private ObjectMapper canonicalMapper(ObjectMapper base) {
-        ObjectMapper mapper = base == null ? JsonMapper.builder().build() : base.copy();
-        mapper.configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true);
-        mapper.configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
-        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
-        mapper.setSerializationInclusion(JsonInclude.Include.ALWAYS);
-        return mapper;
+        MapperBuilder<?, ?> builder = base == null ? JsonMapper.builder().findAndAddModules() : base.rebuild();
+        return builder
+                .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
+                .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
+                .changeDefaultPropertyInclusion(ignored -> JsonInclude.Value.construct(
+                        JsonInclude.Include.ALWAYS,
+                        JsonInclude.Include.ALWAYS
+                ))
+                .build();
     }
 
     private boolean isUnverifiedWrite(String reason) {

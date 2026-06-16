@@ -1,9 +1,9 @@
 package com.frauddetection.alert.engineintelligence.dataset;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -14,7 +14,7 @@ public class EngineIntelligenceFeedbackDatasetJsonlExporter {
     private final ObjectMapper objectMapper;
 
     public EngineIntelligenceFeedbackDatasetJsonlExporter() {
-        this(JsonMapper.builder().addModule(new JavaTimeModule()).build());
+        this(JsonMapper.builder().findAndAddModules().build());
     }
 
     EngineIntelligenceFeedbackDatasetJsonlExporter(ObjectMapper objectMapper) {
@@ -60,7 +60,7 @@ public class EngineIntelligenceFeedbackDatasetJsonlExporter {
     private void appendLine(StringBuilder jsonl, Map<String, Object> line) {
         try {
             jsonl.append(objectMapper.writeValueAsString(line)).append('\n');
-        } catch (JsonProcessingException exception) {
+        } catch (JacksonException exception) {
             throw new EngineIntelligenceFeedbackDatasetSerializationException(
                     EngineIntelligenceFeedbackDatasetExportFailureReason.SERIALIZATION_FAILED
             );

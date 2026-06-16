@@ -1,9 +1,9 @@
 package com.frauddetection.alert.governance.promotionreviewreadiness;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.MapperFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.MapperFeature;
+import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -24,12 +24,13 @@ public class ArtifactBackedPromotionReviewReadinessReportProvider implements Pro
             PromotionReviewReadinessReportValidator validator
     ) {
         this.properties = properties;
-        this.objectMapper = objectMapper.copy()
+        this.objectMapper = objectMapper.rebuild()
                 .configure(MapperFeature.ALLOW_COERCION_OF_SCALARS, false)
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true)
                 .configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true)
                 .configure(DeserializationFeature.FAIL_ON_NULL_CREATOR_PROPERTIES, true)
-                .configure(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES, true);
+                .configure(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES, true)
+                .build();
         this.validator = validator;
     }
 
@@ -111,9 +112,7 @@ public class ArtifactBackedPromotionReviewReadinessReportProvider implements Pro
     private PromotionReviewReadinessReport readReport(Path artifactPath) {
         try {
             return objectMapper.readValue(artifactPath.toFile(), PromotionReviewReadinessReport.class);
-        } catch (JsonProcessingException exception) {
-            throw unavailable();
-        } catch (IOException exception) {
+        } catch (JacksonException exception) {
             throw unavailable();
         }
     }

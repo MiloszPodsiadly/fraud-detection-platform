@@ -1,10 +1,10 @@
 package com.frauddetection.alert.audit;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.MapperFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.json.JsonMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.MapperFeature;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -21,7 +21,6 @@ final class AuditEventHasher {
             .findAndAddModules()
             .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
             .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
-            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
             .build();
 
     private AuditEventHasher() {
@@ -43,7 +42,7 @@ final class AuditEventHasher {
     private static String canonicalJson(AuditEventDocument document) {
         try {
             return OBJECT_MAPPER.writeValueAsString(canonicalMap(document));
-        } catch (JsonProcessingException exception) {
+        } catch (JacksonException exception) {
             throw new IllegalStateException("Audit event canonicalization failed.");
         }
     }

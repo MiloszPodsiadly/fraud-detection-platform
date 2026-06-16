@@ -1,6 +1,6 @@
 package com.frauddetection.alert.security.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.security.auth.BffLogoutSuccessHandler;
 import com.frauddetection.alert.security.auth.BffSecurityProperties;
 import com.frauddetection.alert.security.auth.DemoAuthFilter;

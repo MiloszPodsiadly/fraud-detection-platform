@@ -1,10 +1,11 @@
 package com.frauddetection.simulator.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.simulator.api.ReplaySourceType;
 import com.frauddetection.simulator.config.JsonlReplayProperties;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -43,7 +44,7 @@ public class JsonlReplayDataSource implements ReplayDataSource {
     private TransactionRawEvent readEvent(String line) {
         try {
             return objectMapper.readValue(line, TransactionRawEvent.class);
-        } catch (IOException exception) {
+        } catch (JacksonException exception) {
             throw new IllegalStateException("Failed to parse JSONL replay event.", exception);
         }
     }

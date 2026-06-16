@@ -1,8 +1,8 @@
 package com.frauddetection.trustauthority;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.json.JsonMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -49,7 +49,7 @@ class FileTrustAuthorityAuditSink implements TrustAuthorityAuditSink {
             Files.writeString(path, line, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
             chainPosition = nextPosition;
             latestHash = chained.eventHash();
-        } catch (JsonProcessingException exception) {
+        } catch (JacksonException exception) {
             throw new TrustAuthorityAuditException("Trust authority audit event could not be serialized.", exception);
         } catch (IOException exception) {
             throw new TrustAuthorityAuditException("Trust authority audit event could not be persisted.", exception);
