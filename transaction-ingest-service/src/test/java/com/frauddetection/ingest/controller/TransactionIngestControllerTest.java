@@ -1,14 +1,19 @@
 package com.frauddetection.ingest.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.ingest.api.IngestTransactionRequest;
 import com.frauddetection.ingest.api.IngestTransactionResponse;
 import com.frauddetection.ingest.exception.TransactionIngestExceptionHandler;
 import com.frauddetection.ingest.service.TransactionIngestUseCase;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
+import org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration;
+import org.springframework.boot.security.autoconfigure.web.servlet.SecurityFilterAutoConfiguration;
+import org.springframework.boot.security.autoconfigure.web.servlet.ServletWebSecurityAutoConfiguration;
+import org.springframework.boot.security.test.autoconfigure.webmvc.SecurityMockMvcAutoConfiguration;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -23,7 +28,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(TransactionIngestController.class)
+@WebMvcTest(
+        value = TransactionIngestController.class,
+        excludeAutoConfiguration = {
+                SecurityAutoConfiguration.class,
+                SecurityFilterAutoConfiguration.class,
+                ServletWebSecurityAutoConfiguration.class,
+                UserDetailsServiceAutoConfiguration.class,
+                SecurityMockMvcAutoConfiguration.class
+        }
+)
 @Import(TransactionIngestExceptionHandler.class)
 class TransactionIngestControllerTest {
 
@@ -33,7 +47,7 @@ class TransactionIngestControllerTest {
     @Autowired
     private ObjectMapper objectMapper;
 
-    @MockBean
+    @MockitoBean
     private TransactionIngestUseCase transactionIngestUseCase;
 
     @Test

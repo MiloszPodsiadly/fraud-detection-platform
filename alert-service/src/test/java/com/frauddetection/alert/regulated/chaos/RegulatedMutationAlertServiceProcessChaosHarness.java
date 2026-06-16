@@ -1,7 +1,7 @@
 package com.frauddetection.alert.regulated.chaos;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.persistence.AlertDocument;
@@ -38,7 +38,7 @@ public final class RegulatedMutationAlertServiceProcessChaosHarness implements A
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(2))
             .build();
-    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    private final ObjectMapper objectMapper = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
     private final Path logDirectory;
 
     private Process serviceProcess;

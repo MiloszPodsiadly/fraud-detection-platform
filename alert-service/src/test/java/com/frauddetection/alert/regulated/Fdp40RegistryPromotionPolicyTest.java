@@ -1,6 +1,6 @@
 package com.frauddetection.alert.regulated;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;

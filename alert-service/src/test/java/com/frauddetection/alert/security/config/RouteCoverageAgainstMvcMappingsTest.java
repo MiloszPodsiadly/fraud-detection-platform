@@ -76,8 +76,8 @@ import com.frauddetection.alert.trust.TrustIncidentService;
 import com.frauddetection.alert.trust.TrustSignalCollector;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.bind.annotation.RequestMethod;
@@ -139,127 +139,127 @@ class RouteCoverageAgainstMvcMappingsTest {
     @Autowired
     private RequestMappingHandlerMapping handlerMapping;
 
-    @MockBean
+    @MockitoBean
     private AlertManagementUseCase alertManagementUseCase;
 
-    @MockBean
+    @MockitoBean
     private AnalystCaseSummaryUseCase analystCaseSummaryUseCase;
 
-    @MockBean
+    @MockitoBean
     private FraudCaseManagementService fraudCaseManagementService;
 
-    @MockBean
+    @MockitoBean
     private FraudCaseEvidenceSummaryService fraudCaseEvidenceSummaryService;
 
-    @MockBean
+    @MockitoBean
     private FraudCaseEvidenceTimelineService fraudCaseEvidenceTimelineService;
 
-    @MockBean
+    @MockitoBean
     private FraudCaseQueryService fraudCaseQueryService;
 
-    @MockBean
+    @MockitoBean
     private TransactionMonitoringUseCase transactionMonitoringUseCase;
 
-    @MockBean
+    @MockitoBean
     private EngineIntelligenceReadService engineIntelligenceReadService;
 
-    @MockBean
+    @MockitoBean
     private EngineIntelligenceFeedbackReadService engineIntelligenceFeedbackReadService;
 
-    @MockBean
+    @MockitoBean
     private EngineIntelligenceFeedbackService engineIntelligenceFeedbackService;
 
-    @MockBean
+    @MockitoBean
     private AlertServiceMetrics alertServiceMetrics;
 
-    @MockBean
+    @MockitoBean
     private AuditEventReadService auditEventReadService;
 
-    @MockBean
+    @MockitoBean
     private SensitiveReadAuditService sensitiveReadAuditService;
 
-    @MockBean
+    @MockitoBean
     private AuditIntegrityService auditIntegrityService;
 
-    @MockBean
+    @MockitoBean
     private ExternalAuditIntegrityService externalAuditIntegrityService;
 
-    @MockBean
+    @MockitoBean
     private ExternalAuditCoverageRateLimiter externalAuditCoverageRateLimiter;
 
-    @MockBean
+    @MockitoBean
     private AuditEvidenceExportService auditEvidenceExportService;
 
-    @MockBean
+    @MockitoBean
     private AuditTrustAttestationService auditTrustAttestationService;
 
-    @MockBean
+    @MockitoBean
     private AuditTrustAuthorityClient auditTrustAuthorityClient;
 
-    @MockBean
+    @MockitoBean
     private AuditDegradationService auditDegradationService;
 
-    @MockBean
+    @MockitoBean
     private DecisionOutboxReconciliationService decisionOutboxReconciliationService;
 
-    @MockBean
+    @MockitoBean
     private RegulatedMutationRecoveryService regulatedMutationRecoveryService;
 
-    @MockBean
+    @MockitoBean
     private OutboxRecoveryService outboxRecoveryService;
 
-    @MockBean
+    @MockitoBean
     private TrustIncidentService trustIncidentService;
 
-    @MockBean
+    @MockitoBean
     private TrustSignalCollector trustSignalCollector;
 
-    @MockBean
+    @MockitoBean
     private TrustIncidentPreviewRateLimiter trustIncidentPreviewRateLimiter;
 
-    @MockBean
+    @MockitoBean
     private RegulatedMutationInspectionRateLimiter regulatedMutationInspectionRateLimiter;
 
-    @MockBean
+    @MockitoBean
     private ReadAccessAuditService readAccessAuditService;
 
-    @MockBean
+    @MockitoBean
     private AuditService auditService;
 
-    @MockBean
+    @MockitoBean
     private ExternalAuditAnchorSink externalAuditAnchorSink;
 
-    @MockBean
+    @MockitoBean
     private CurrentAnalystUser currentAnalystUser;
 
-    @MockBean
+    @MockitoBean
     private PromotionReviewReadinessReportReadService promotionReviewReadinessReportReadService;
 
-    @MockBean
+    @MockitoBean
     private AlertRepository alertRepository;
 
-    @MockBean
+    @MockitoBean
     private GovernanceAuditService governanceAuditService;
 
-    @MockBean
+    @MockitoBean
     private GovernanceAdvisoryProjectionService governanceAdvisoryProjectionService;
 
-    @MockBean
+    @MockitoBean
     private ShadowPerformanceSummaryReadService shadowPerformanceSummaryReadService;
 
-    @MockBean
+    @MockitoBean
     private SuspiciousTransactionReadService suspiciousTransactionReadService;
 
-    @MockBean
+    @MockitoBean
     private SuspiciousTransactionLinkedAlertContextService suspiciousTransactionLinkedAlertContextService;
 
-    @MockBean
+    @MockitoBean
     private LinkedAlertContextMetricsRecorder linkedAlertContextMetricsRecorder;
 
-    @MockBean
+    @MockitoBean
     private SuspiciousTransactionQueryTelemetryClassifier suspiciousTransactionQueryTelemetryClassifier;
 
-    @MockBean
+    @MockitoBean
     private SuspiciousTransactionQueryTelemetrySink suspiciousTransactionQueryTelemetrySink;
 
     @Test

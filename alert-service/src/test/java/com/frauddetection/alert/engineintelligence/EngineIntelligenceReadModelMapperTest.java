@@ -1,6 +1,6 @@
 package com.frauddetection.alert.engineintelligence;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModelMapper;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
@@ -35,7 +35,7 @@ class EngineIntelligenceReadModelMapperTest {
     );
 
     private final EngineIntelligenceReadModelMapper mapper = new EngineIntelligenceReadModelMapper();
-    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    private final ObjectMapper objectMapper = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
 
     @Test
     void mapsProjectionToBoundedReadModel() {

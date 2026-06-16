@@ -1,7 +1,7 @@
 package com.frauddetection.alert.governance.promotionreviewreadiness;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.audit.read.ReadAccessAuditClassifier;
 import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.audit.read.ReadAccessResourceType;
@@ -32,7 +32,7 @@ class PromotionReviewReadinessReadApiArchitectureGuardTest {
         ));
         JsonNode json = mapper.readTree(payload);
         List<String> topLevelFields = new ArrayList<>();
-        json.fieldNames().forEachRemaining(topLevelFields::add);
+        topLevelFields.addAll(json.propertyNames());
 
         assertThat(topLevelFields).containsExactly(
                 "reportType",

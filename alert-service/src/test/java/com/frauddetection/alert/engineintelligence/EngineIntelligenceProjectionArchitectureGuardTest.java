@@ -1,6 +1,6 @@
 package com.frauddetection.alert.engineintelligence;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -38,7 +38,7 @@ class EngineIntelligenceProjectionArchitectureGuardTest {
                 .map(Field::getName)
                 .map(this::compact)
                 .reduce("", String::concat);
-        String serialized = new ObjectMapper().findAndRegisterModules()
+        String serialized = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build()
                 .writeValueAsString(new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy())
                         .map("txn-guard", EngineIntelligenceProjectionTestFixtures.fullSummary(), null)
                         .projection()

@@ -1,6 +1,6 @@
 package com.frauddetection.alert.security.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.api.FraudCaseResponse;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
@@ -27,8 +27,8 @@ import com.frauddetection.alert.service.FraudCaseQueryService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -90,22 +90,22 @@ class BffSessionSecurityIntegrationTest {
     @Autowired
     protected ObjectMapper objectMapper;
 
-    @MockBean
+    @MockitoBean
     protected FraudCaseManagementService fraudCaseManagementService;
 
-    @MockBean
+    @MockitoBean
     protected FraudCaseQueryService fraudCaseQueryService;
 
-    @MockBean
+    @MockitoBean
     protected AlertServiceMetrics alertServiceMetrics;
 
-    @MockBean
+    @MockitoBean
     protected SensitiveReadAuditService sensitiveReadAuditService;
 
-    @MockBean
+    @MockitoBean
     protected OidcAnalystAuthoritiesMapper oidcAnalystAuthoritiesMapper;
 
-    @MockBean
+    @MockitoBean
     protected ClientRegistrationRepository clientRegistrationRepository;
 
     @Test

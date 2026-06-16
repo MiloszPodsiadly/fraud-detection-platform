@@ -1,7 +1,7 @@
 package com.frauddetection.scoring.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -102,8 +102,8 @@ final class TransactionFraudScoringServiceEngineIntelligenceTestSupport {
         );
     }
 
-    static String json(TransactionScoredEvent event) throws JsonProcessingException {
-        return new ObjectMapper().findAndRegisterModules().writeValueAsString(event);
+    static String json(TransactionScoredEvent event) throws JacksonException {
+        return tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build().writeValueAsString(event);
     }
 
     record Harness(

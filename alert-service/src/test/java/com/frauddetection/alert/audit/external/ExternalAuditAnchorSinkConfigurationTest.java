@@ -1,6 +1,6 @@
 package com.frauddetection.alert.audit.external;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -315,7 +315,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
         when(client.listKeys("audit-bucket", "audit-anchors", 1)).thenReturn(List.of());
 
         ExternalAuditAnchorSink sink = configuration.externalAuditAnchorSink(
-                new ObjectMapper().findAndRegisterModules(),
+                tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build(),
                 objectStoreClient(client),
                 metrics(),
                 new StandardEnvironment(),
@@ -358,7 +358,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
                 .thenAnswer(invocation -> Optional.of(probe.get()));
 
         assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
-                new ObjectMapper().findAndRegisterModules(),
+                tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build(),
                 objectStoreClient(client),
                 metrics(),
                 new StandardEnvironment(),
@@ -401,7 +401,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
                 .thenAnswer(invocation -> Optional.of(probe.get()));
 
         ExternalAuditAnchorSink sink = configuration.externalAuditAnchorSink(
-                new ObjectMapper().findAndRegisterModules(),
+                tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build(),
                 objectStoreClient(client),
                 metrics(),
                 new StandardEnvironment(),
@@ -462,7 +462,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
                 .thenAnswer(invocation -> Optional.of(probe.get()));
 
         assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
-                new ObjectMapper().findAndRegisterModules(),
+                tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build(),
                 objectStoreClient(client),
                 metrics(),
                 new StandardEnvironment(),
@@ -519,7 +519,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
                 .thenAnswer(invocation -> Optional.of(probe.get()));
 
         assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
-                new ObjectMapper().findAndRegisterModules(),
+                tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build(),
                 objectStoreClient(client),
                 metrics(),
                 new StandardEnvironment(),
@@ -576,7 +576,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
                 .thenAnswer(invocation -> Optional.of(probe.get()));
 
         assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
-                new ObjectMapper().findAndRegisterModules(),
+                tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build(),
                 objectStoreClient(client),
                 metrics(),
                 new StandardEnvironment(),
@@ -606,7 +606,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
         when(client.listKeys("audit-bucket", "audit-anchors", 1)).thenThrow(new IllegalStateException("denied"));
 
         assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
-                new ObjectMapper().findAndRegisterModules(),
+                tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build(),
                 objectStoreClient(client),
                 metrics(),
                 new StandardEnvironment(),
@@ -637,7 +637,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
                 .thenThrow(new IllegalStateException("secret-key credential failed"));
 
         assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
-                new ObjectMapper().findAndRegisterModules(),
+                tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build(),
                 objectStoreClient(client),
                 metrics(),
                 new StandardEnvironment(),
@@ -670,7 +670,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
         when(client.immutabilityLevel("audit-bucket", "audit-anchors")).thenReturn(ExternalImmutabilityLevel.ENFORCED);
 
         ExternalAuditAnchorSink sink = configuration.externalAuditAnchorSink(
-                new ObjectMapper().findAndRegisterModules(),
+                tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build(),
                 objectStoreClient(client),
                 metrics(),
                 new StandardEnvironment(),
@@ -701,7 +701,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
         when(client.listKeys("audit-bucket", "audit-anchors", 1)).thenReturn(List.of());
 
         configuration.externalAuditAnchorSink(
-                new ObjectMapper().findAndRegisterModules(),
+                tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build(),
                 objectStoreClient(client),
                 metrics(),
                 new StandardEnvironment(),

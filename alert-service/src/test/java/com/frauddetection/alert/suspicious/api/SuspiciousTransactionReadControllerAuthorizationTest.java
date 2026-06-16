@@ -16,8 +16,8 @@ import com.frauddetection.alert.suspicious.api.observability.LinkedAlertContextM
 import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetryClassifier;
 import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetrySink;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -55,25 +55,25 @@ class SuspiciousTransactionReadControllerAuthorizationTest {
     @jakarta.annotation.Resource
     private MockMvc mockMvc;
 
-    @MockBean
+    @MockitoBean
     private SuspiciousTransactionReadService service;
 
-    @MockBean
+    @MockitoBean
     private SuspiciousTransactionLinkedAlertContextService linkedAlertContextService;
 
-    @MockBean
+    @MockitoBean
     private SensitiveReadAuditService sensitiveReadAuditService;
 
-    @MockBean
+    @MockitoBean
     private AlertServiceMetrics metrics;
 
-    @MockBean
+    @MockitoBean
     private LinkedAlertContextMetricsRecorder linkedAlertContextMetricsRecorder;
 
-    @MockBean
+    @MockitoBean
     private SuspiciousTransactionQueryTelemetryClassifier queryTelemetryClassifier;
 
-    @MockBean
+    @MockitoBean
     private SuspiciousTransactionQueryTelemetrySink queryTelemetrySink;
 
     @Test

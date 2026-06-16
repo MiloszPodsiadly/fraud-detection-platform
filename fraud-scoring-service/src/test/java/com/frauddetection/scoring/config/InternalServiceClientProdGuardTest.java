@@ -76,8 +76,8 @@ class InternalServiceClientProdGuardTest {
         new InternalServiceAuthHeaders(jwtProperties()).apply(headers);
 
         assertThat(headers.getFirst("Authorization")).startsWith("Bearer ");
-        assertThat(headers.containsKey("X-Internal-Service-Name")).isFalse();
-        assertThat(headers.containsKey("X-Internal-Service-Token")).isFalse();
+        assertThat(headers.getFirst("X-Internal-Service-Name")).isNull();
+        assertThat(headers.getFirst("X-Internal-Service-Token")).isNull();
         String token = headers.getFirst("Authorization").substring("Bearer ".length());
         SignedJWT jwt = SignedJWT.parse(token);
         assertThat(jwt.getHeader().getAlgorithm()).isEqualTo(JWSAlgorithm.RS256);
@@ -385,9 +385,9 @@ class InternalServiceClientProdGuardTest {
 
         new InternalServiceAuthHeaders(mtlsProperties()).apply(headers);
 
-        assertThat(headers.containsKey("Authorization")).isFalse();
-        assertThat(headers.containsKey("X-Internal-Service-Name")).isFalse();
-        assertThat(headers.containsKey("X-Internal-Service-Token")).isFalse();
+        assertThat(headers.getFirst("Authorization")).isNull();
+        assertThat(headers.getFirst("X-Internal-Service-Name")).isNull();
+        assertThat(headers.getFirst("X-Internal-Service-Token")).isNull();
     }
 
     @Test

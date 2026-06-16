@@ -14,8 +14,8 @@ import com.frauddetection.alert.security.error.SecurityErrorResponseWriter;
 import com.frauddetection.alert.service.FraudCaseManagementService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
@@ -50,13 +50,13 @@ class Fdp45FraudCaseWorkQueueSecurityTest {
     @Autowired
     private MockMvc mockMvc;
 
-    @MockBean
+    @MockitoBean
     private FraudCaseManagementService fraudCaseManagementService;
 
-    @MockBean
+    @MockitoBean
     private AlertServiceMetrics alertServiceMetrics;
 
-    @MockBean
+    @MockitoBean
     private SensitiveReadAuditService sensitiveReadAuditService;
 
     @Test

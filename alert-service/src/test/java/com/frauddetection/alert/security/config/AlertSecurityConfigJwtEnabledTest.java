@@ -1,6 +1,6 @@
 package com.frauddetection.alert.security.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
 import com.frauddetection.alert.api.FraudCaseResponse;
@@ -33,8 +33,8 @@ import com.frauddetection.common.events.enums.AnalystDecision;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -92,25 +92,25 @@ class AlertSecurityConfigJwtEnabledTest {
     @Autowired
     private ObjectMapper objectMapper;
 
-    @MockBean
+    @MockitoBean
     private AlertManagementUseCase alertManagementUseCase;
 
-    @MockBean
+    @MockitoBean
     private AnalystCaseSummaryUseCase analystCaseSummaryUseCase;
 
-    @MockBean
+    @MockitoBean
     private FraudCaseManagementService fraudCaseManagementService;
 
-    @MockBean
+    @MockitoBean
     private TransactionMonitoringUseCase transactionMonitoringUseCase;
 
-    @MockBean
+    @MockitoBean
     private JwtDecoder jwtDecoder;
 
-    @MockBean
+    @MockitoBean
     private AlertServiceMetrics alertServiceMetrics;
 
-    @MockBean
+    @MockitoBean
     private SensitiveReadAuditService sensitiveReadAuditService;
 
     @BeforeEach

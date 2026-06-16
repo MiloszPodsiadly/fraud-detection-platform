@@ -1,6 +1,6 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
@@ -35,7 +35,7 @@ class ProducerEngineIntelligenceEnabledEmissionTest {
         ))
                 .emitIfEnabled(request())
                 .orElseThrow();
-        String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(summary);
+        String json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build().writeValueAsString(summary);
 
         assertThat(summary.engines()).hasSize(2);
         assertThat(summary.engines().get(1).riskLevel()).isNull();

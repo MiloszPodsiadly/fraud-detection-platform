@@ -1,6 +1,6 @@
 package com.frauddetection.alert.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.api.FraudCaseTimelineEventType;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.evidence.EvidenceSeverity;
@@ -45,7 +45,7 @@ class FraudCaseEvidenceTimelineServiceTest {
     @Mock
     private AlertRepository alertRepository;
 
-    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    private final ObjectMapper objectMapper = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
 
     @Test
     void FraudCaseEvidenceTimelineFromLinkedAlertsTest() {

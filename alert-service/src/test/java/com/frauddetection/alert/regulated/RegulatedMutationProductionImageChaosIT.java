@@ -1,6 +1,6 @@
 package com.frauddetection.alert.regulated;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosResult;

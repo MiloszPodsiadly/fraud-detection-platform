@@ -1,7 +1,7 @@
 package com.frauddetection.simulator.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import tools.jackson.databind.ObjectMapper;
+
 import com.frauddetection.simulator.config.JsonlReplayProperties;
 import org.junit.jupiter.api.Test;
 
@@ -20,7 +20,7 @@ class JsonlReplayDataSourceTest {
                 """);
 
         JsonlReplayDataSource dataSource = new JsonlReplayDataSource(
-                new ObjectMapper().registerModule(new JavaTimeModule()),
+                tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build(),
                 new JsonlReplayProperties(file.toString())
         );
 

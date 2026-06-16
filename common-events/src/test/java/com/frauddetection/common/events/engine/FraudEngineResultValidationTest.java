@@ -382,7 +382,8 @@ class FraudEngineResultValidationTest {
         assertThat(componentNames).doesNotContain("metadata");
         assertThat(contractFieldTypes()).doesNotContain(Map.class, Object.class);
         assertThat(contractFieldTypes())
-                .noneMatch(type -> type.getName().equals("com.fasterxml.jackson.databind.JsonNode"));
+                .noneMatch(type -> type.getName().equals("com.fasterxml.jackson.databind.JsonNode"))
+                .noneMatch(type -> type.getName().equals("tools.jackson.databind.JsonNode"));
     }
 
     private List<Class<?>> contractFieldTypes() {

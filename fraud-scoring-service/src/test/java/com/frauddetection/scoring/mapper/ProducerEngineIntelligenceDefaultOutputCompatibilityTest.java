@@ -1,7 +1,7 @@
 package com.frauddetection.scoring.mapper;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.domain.FraudScoreResult;
@@ -19,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class ProducerEngineIntelligenceDefaultOutputCompatibilityTest {
 
-    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    private final ObjectMapper objectMapper = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
     private final TransactionScoredEventMapper mapper = new TransactionScoredEventMapper();
 
     @Test

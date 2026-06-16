@@ -1,7 +1,7 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
@@ -32,7 +32,7 @@ class ProducerEngineIntelligenceEnabledEventContractTest {
                                 )
                         ))
         );
-        JsonNode intelligence = new ObjectMapper().findAndRegisterModules().valueToTree(
+        JsonNode intelligence = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build().valueToTree(
                 new TransactionScoredEventMapper().toEvent(request(), scoreResult(), Optional.of(summary))
         ).path("engineIntelligence");
 

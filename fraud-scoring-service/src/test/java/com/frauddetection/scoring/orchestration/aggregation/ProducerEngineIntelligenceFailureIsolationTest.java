@@ -1,6 +1,6 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
@@ -34,7 +34,7 @@ class ProducerEngineIntelligenceFailureIsolationTest {
         ))
                 .emitIfEnabled(request());
         var event = new TransactionScoredEventMapper().toEvent(request(), scoreResult(), intelligence);
-        String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(event);
+        String json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build().writeValueAsString(event);
 
         assertThat(intelligence).isEmpty();
         assertThat(json).doesNotContain("engineIntelligence", "raw-secret-must-not-leak");

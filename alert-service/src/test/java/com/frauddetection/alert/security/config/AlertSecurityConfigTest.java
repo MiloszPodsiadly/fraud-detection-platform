@@ -1,6 +1,6 @@
 package com.frauddetection.alert.security.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
@@ -112,8 +112,8 @@ import com.frauddetection.common.events.enums.AnalystDecision;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -194,94 +194,94 @@ class AlertSecurityConfigTest {
     @Autowired
     private ObjectMapper objectMapper;
 
-    @MockBean
+    @MockitoBean
     private AlertManagementUseCase alertManagementUseCase;
 
-    @MockBean
+    @MockitoBean
     private AnalystCaseSummaryUseCase analystCaseSummaryUseCase;
 
-    @MockBean
+    @MockitoBean
     private FraudCaseManagementService fraudCaseManagementService;
 
-    @MockBean
+    @MockitoBean
     private TransactionMonitoringUseCase transactionMonitoringUseCase;
 
-    @MockBean
+    @MockitoBean
     private EngineIntelligenceReadService engineIntelligenceReadService;
 
-    @MockBean
+    @MockitoBean
     private EngineIntelligenceFeedbackReadService engineIntelligenceFeedbackReadService;
 
-    @MockBean
+    @MockitoBean
     private AlertServiceMetrics alertServiceMetrics;
 
-    @MockBean
+    @MockitoBean
     private AuditEventReadService auditEventReadService;
 
-    @MockBean
+    @MockitoBean
     private SensitiveReadAuditService sensitiveReadAuditService;
 
-    @MockBean
+    @MockitoBean
     private AuditIntegrityService auditIntegrityService;
 
-    @MockBean
+    @MockitoBean
     private ExternalAuditIntegrityService externalAuditIntegrityService;
 
-    @MockBean
+    @MockitoBean
     private ExternalAuditCoverageRateLimiter externalAuditCoverageRateLimiter;
 
-    @MockBean
+    @MockitoBean
     private AuditEvidenceExportService auditEvidenceExportService;
 
-    @MockBean
+    @MockitoBean
     private AuditTrustAttestationService auditTrustAttestationService;
 
-    @MockBean
+    @MockitoBean
     private AuditTrustAuthorityClient auditTrustAuthorityClient;
 
-    @MockBean
+    @MockitoBean
     private AuditDegradationService auditDegradationService;
 
-    @MockBean
+    @MockitoBean
     private DecisionOutboxReconciliationService decisionOutboxReconciliationService;
 
-    @MockBean
+    @MockitoBean
     private RegulatedMutationRecoveryService regulatedMutationRecoveryService;
 
-    @MockBean
+    @MockitoBean
     private OutboxRecoveryService outboxRecoveryService;
 
-    @MockBean
+    @MockitoBean
     private TrustIncidentService trustIncidentService;
 
-    @MockBean
+    @MockitoBean
     private TrustSignalCollector trustSignalCollector;
 
-    @MockBean
+    @MockitoBean
     private TrustIncidentPreviewRateLimiter trustIncidentPreviewRateLimiter;
 
-    @MockBean
+    @MockitoBean
     private RegulatedMutationInspectionRateLimiter regulatedMutationInspectionRateLimiter;
 
-    @MockBean
+    @MockitoBean
     private ReadAccessAuditService readAccessAuditService;
 
-    @MockBean
+    @MockitoBean
     private AuditService auditService;
 
-    @MockBean
+    @MockitoBean
     private ExternalAuditAnchorSink externalAuditAnchorSink;
 
-    @MockBean
+    @MockitoBean
     private CurrentAnalystUser currentAnalystUser;
 
-    @MockBean
+    @MockitoBean
     private AlertRepository alertRepository;
 
-    @MockBean
+    @MockitoBean
     private GovernanceAuditService governanceAuditService;
 
-    @MockBean
+    @MockitoBean
     private GovernanceAdvisoryProjectionService governanceAdvisoryProjectionService;
 
     @BeforeEach
@@ -390,7 +390,7 @@ class AlertSecurityConfigTest {
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(post("/api/v1/trust/incidents/incident-1/resolve")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"reason\":\"verified\",\"resolution_evidence\":{\"type\":\"RUNBOOK_STEP\",\"reference\":\"runbook-1\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
+                        .content("{\"reason\":\"verified\",\"false_positive\":false,\"resolution_evidence\":{\"type\":\"RUNBOOK_STEP\",\"reference\":\"runbook-1\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/regulated-mutations/idem-1"))
                 .andExpect(status().isUnauthorized());
@@ -938,7 +938,7 @@ class AlertSecurityConfigTest {
                         .with(demoUser("FRAUD_OPS_ADMIN"))
                         .header("X-Idempotency-Key", "trust-resolve-1")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"reason\":\"verified\",\"resolution_evidence\":{\"type\":\"RUNBOOK_STEP\",\"reference\":\"runbook-1\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
+                        .content("{\"reason\":\"verified\",\"false_positive\":false,\"resolution_evidence\":{\"type\":\"RUNBOOK_STEP\",\"reference\":\"runbook-1\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.incident_id").value("incident-1"));
         mockMvc.perform(get("/api/v1/trust/incidents").with(authorities(AnalystAuthority.AUDIT_VERIFY)))

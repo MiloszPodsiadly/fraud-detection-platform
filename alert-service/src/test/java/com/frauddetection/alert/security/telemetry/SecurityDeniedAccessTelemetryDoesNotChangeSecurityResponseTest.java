@@ -1,6 +1,6 @@
 package com.frauddetection.alert.security.telemetry;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.error.ApiAccessDeniedHandler;
 import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
@@ -86,7 +86,7 @@ class SecurityDeniedAccessTelemetryDoesNotChangeSecurityResponseTest {
 
     private ApiAuthenticationEntryPoint entryPoint(SecurityDeniedAccessTelemetryRecorder recorder) {
         return new ApiAuthenticationEntryPoint(
-                new SecurityErrorResponseWriter(new ObjectMapper().findAndRegisterModules()),
+                new SecurityErrorResponseWriter(tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build()),
                 new AlertServiceMetrics(new SimpleMeterRegistry()),
                 recorder,
                 new SecurityDeniedAccessRouteClassifier(),
@@ -97,7 +97,7 @@ class SecurityDeniedAccessTelemetryDoesNotChangeSecurityResponseTest {
 
     private ApiAccessDeniedHandler handler(SecurityDeniedAccessTelemetryRecorder recorder) {
         return new ApiAccessDeniedHandler(
-                new SecurityErrorResponseWriter(new ObjectMapper().findAndRegisterModules()),
+                new SecurityErrorResponseWriter(tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build()),
                 new AlertServiceMetrics(new SimpleMeterRegistry()),
                 recorder,
                 new SecurityDeniedAccessRouteClassifier(),

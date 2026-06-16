@@ -64,8 +64,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class FraudDetectionPlatformEndToEndIntegrationTest {
 
     private static final String DISABLE_DEFAULT_SECURITY_AUTO_CONFIG =
-            "org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration,"
-                    + "org.springframework.boot.actuate.autoconfigure.security.servlet.ManagementWebSecurityAutoConfiguration";
+            "org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration,"
+                    + "org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration,"
+                    + "org.springframework.boot.security.autoconfigure.web.servlet.SecurityFilterAutoConfiguration,"
+                    + "org.springframework.boot.security.autoconfigure.web.servlet.ServletWebSecurityAutoConfiguration,"
+                    + "org.springframework.boot.security.autoconfigure.actuate.web.servlet.ManagementWebSecurityAutoConfiguration";
     private static final String TOPIC_SUFFIX = UUID.randomUUID().toString().substring(0, 8);
     private static final String E2E_ANALYST_USER = "e2e-analyst";
     private static final String E2E_ANALYST_ROLE = "FRAUD_OPS_ADMIN";

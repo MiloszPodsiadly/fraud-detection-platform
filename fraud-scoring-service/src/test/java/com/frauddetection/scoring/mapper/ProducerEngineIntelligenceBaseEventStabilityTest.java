@@ -1,7 +1,7 @@
 package com.frauddetection.scoring.mapper;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparison;
@@ -36,7 +36,7 @@ class ProducerEngineIntelligenceBaseEventStabilityTest {
     }
 
     private ObjectNode reviewedBaseFields(Object event) {
-        ObjectNode json = new ObjectMapper().findAndRegisterModules().valueToTree(event);
+        ObjectNode json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build().valueToTree(event);
         json.remove("eventId");
         json.remove("createdAt");
         json.remove("engineIntelligence");

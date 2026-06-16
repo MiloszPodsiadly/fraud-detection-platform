@@ -1,6 +1,6 @@
 package com.frauddetection.scoring.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
@@ -137,7 +137,7 @@ class EngineIntelligenceDefaultDisabledContextSafetyTest {
 
     private String json(TransactionScoredEvent event) {
         try {
-            return new ObjectMapper().findAndRegisterModules().writeValueAsString(event);
+            return tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build().writeValueAsString(event);
         } catch (Exception exception) {
             throw new IllegalStateException("TEST_JSON_SERIALIZATION_FAILED", exception);
         }
