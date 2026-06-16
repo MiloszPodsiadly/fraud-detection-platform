@@ -1,5 +1,6 @@
 package com.frauddetection.alert.integration;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.AlertServiceApplication;
 import com.frauddetection.alert.api.AlertDetailsResponse;
 import com.frauddetection.alert.api.AlertSummaryResponse;
@@ -35,16 +36,16 @@ import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.condition.EnabledIf;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
-import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.RequestEntity;
 import org.springframework.http.ResponseEntity;
-import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.web.client.RestTemplate;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.time.Duration;
@@ -63,9 +64,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 @EnabledIf("dockerAvailable")
 class FraudDetectionPlatformEndToEndIntegrationTest {
 
+    private static final ObjectMapper KAFKA_OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules();
+
     private static final String DISABLE_DEFAULT_SECURITY_AUTO_CONFIG =
-            "org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration,"
-                    + "org.springframework.boot.actuate.autoconfigure.security.servlet.ManagementWebSecurityAutoConfiguration";
+            "org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration,"
+                    + "org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration,"
+                    + "org.springframework.boot.security.autoconfigure.web.servlet.SecurityFilterAutoConfiguration,"
+                    + "org.springframework.boot.security.autoconfigure.web.servlet.ServletWebSecurityAutoConfiguration,"
+                    + "org.springframework.boot.security.autoconfigure.actuate.web.servlet.ManagementWebSecurityAutoConfiguration";
     private static final String TOPIC_SUFFIX = UUID.randomUUID().toString().substring(0, 8);
     private static final String E2E_ANALYST_USER = "e2e-analyst";
     private static final String E2E_ANALYST_ROLE = "FRAUD_OPS_ADMIN";
@@ -125,7 +131,7 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
                 "server.port", 0,
                 "spring.profiles.active", "test",
                 "spring.kafka.bootstrap-servers", FraudPlatformContainers.kafka().getBootstrapServers(),
-                "spring.data.mongodb.uri", FraudPlatformContainers.mongodb().getReplicaSetUrl(MONGODB_DATABASE),
+                "spring.mongodb.uri", FraudPlatformContainers.mongodb().getReplicaSetUrl(MONGODB_DATABASE),
                 "app.security.demo-auth.enabled", true,
                 "app.kafka.topics.transaction-scored", TRANSACTION_SCORED_TOPIC,
                 "app.kafka.topics.fraud-alerts", FRAUD_ALERTS_TOPIC,
@@ -389,27 +395,38 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
                 ConsumerConfig.GROUP_ID_CONFIG, "e2e-" + topic + "-" + UUID.randomUUID(),
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
                 ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class,
-                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class,
-                JsonDeserializer.TRUSTED_PACKAGES, "com.frauddetection.common.events",
-                JsonDeserializer.USE_TYPE_INFO_HEADERS, false,
-                JsonDeserializer.VALUE_DEFAULT_TYPE, valueType.getName()
+                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class
         );
 
-        try (KafkaConsumer<String, T> consumer = new KafkaConsumer<>(properties)) {
+        try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(properties)) {
             consumer.subscribe(List.of(topic));
             long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
 
             while (System.nanoTime() < deadline) {
-                ConsumerRecords<String, T> records = consumer.poll(Duration.ofMillis(500));
-                for (ConsumerRecord<String, T> record : records) {
+                ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(500));
+                for (ConsumerRecord<String, String> record : records) {
                     if (transactionId.equals(record.key())) {
-                        return record;
+                        return new ConsumerRecord<>(
+                                record.topic(),
+                                record.partition(),
+                                record.offset(),
+                                record.key(),
+                                deserializeKafkaValue(record.value(), valueType)
+                        );
                     }
                 }
             }
         }
 
         throw new AssertionError("No Kafka record for transaction " + transactionId + " was published to topic " + topic + ".");
+    }
+
+    private <T> T deserializeKafkaValue(String payload, Class<T> valueType) {
+        try {
+            return KAFKA_OBJECT_MAPPER.readValue(payload, valueType);
+        } catch (IOException exception) {
+            throw new AssertionError("Kafka record payload could not be deserialized as " + valueType.getSimpleName() + ".", exception);
+        }
     }
 
     private <T> T awaitCondition(Supplier<Optional<T>> supplier) {

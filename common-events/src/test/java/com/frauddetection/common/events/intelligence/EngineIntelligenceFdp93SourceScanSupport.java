@@ -1,8 +1,12 @@
 package com.frauddetection.common.events.intelligence;
 
 import java.io.IOException;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.stream.Stream;
@@ -46,19 +50,15 @@ final class EngineIntelligenceFdp93SourceScanSupport {
 
     static List<String> productionJavaFilesContaining(String needle) throws IOException {
         Path root = repositoryRoot();
-        try (Stream<Path> paths = Files.walk(root)) {
-            return paths
-                    .filter(Files::isRegularFile)
-                    .filter(path -> normalize(root.relativize(path)).contains("/src/main/"))
-                    .filter(path -> path.toString().endsWith(".java"))
-                    .filter(path -> !normalize(root.relativize(path)).contains("/target/"))
-                    .filter(path -> !normalize(root.relativize(path)).contains("/generated/"))
-                    .filter(path -> fileContains(path, needle))
-                    .map(root::relativize)
-                    .map(EngineIntelligenceFdp93SourceScanSupport::normalize)
-                    .sorted()
-                    .toList();
-        }
+        return repositoryFiles(root).stream()
+                .filter(path -> normalize(root.relativize(path)).contains("/src/main/"))
+                .filter(path -> path.toString().endsWith(".java"))
+                .filter(path -> !normalize(root.relativize(path)).contains("/generated/"))
+                .filter(path -> fileContains(path, needle))
+                .map(root::relativize)
+                .map(EngineIntelligenceFdp93SourceScanSupport::normalize)
+                .sorted()
+                .toList();
     }
 
     static List<String> filesContainingAny(String relativeRoot, Collection<String> needles) throws IOException {
@@ -80,16 +80,13 @@ final class EngineIntelligenceFdp93SourceScanSupport {
 
     static String productionConfigurationSources() throws IOException {
         Path root = repositoryRoot();
-        try (Stream<Path> paths = Files.walk(root)) {
-            StringBuilder sources = new StringBuilder();
-            for (Path path : paths
-                    .filter(Files::isRegularFile)
-                    .filter(candidate -> isProductionConfigurationPath(normalize(root.relativize(candidate))))
-                    .toList()) {
+        StringBuilder sources = new StringBuilder();
+        for (Path path : repositoryFiles(root)) {
+            if (isProductionConfigurationPath(normalize(root.relativize(path)))) {
                 sources.append(Files.readString(path)).append('\n');
             }
-            return sources.toString();
         }
+        return sources.toString();
     }
 
     static Path repositoryRoot() {
@@ -118,6 +115,39 @@ final class EngineIntelligenceFdp93SourceScanSupport {
                 || path.startsWith("k8s/")
                 || path.startsWith("config/")
                 || path.matches("docker-compose[^/]*\\.ya?ml");
+    }
+
+    private static List<Path> repositoryFiles(Path root) throws IOException {
+        List<Path> files = new ArrayList<>();
+        Files.walkFileTree(root, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                if (isIgnoredRepositoryDirectory(normalize(root.relativize(dir)))) {
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                if (attrs.isRegularFile()) {
+                    files.add(file);
+                }
+                return FileVisitResult.CONTINUE;
+            }
+        });
+        return files;
+    }
+
+    private static boolean isIgnoredRepositoryDirectory(String path) {
+        return path.equals(".git")
+                || path.startsWith(".git/")
+                || path.equals(".m2repo")
+                || path.startsWith(".m2repo/")
+                || path.equals("node_modules")
+                || path.endsWith("/node_modules")
+                || path.equals("target")
+                || path.endsWith("/target");
     }
 
     private static String normalize(Path path) {

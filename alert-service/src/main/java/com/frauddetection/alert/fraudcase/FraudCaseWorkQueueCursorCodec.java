@@ -1,6 +1,6 @@
 package com.frauddetection.alert.fraudcase;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import org.springframework.data.domain.Sort;
 import org.springframework.util.StringUtils;

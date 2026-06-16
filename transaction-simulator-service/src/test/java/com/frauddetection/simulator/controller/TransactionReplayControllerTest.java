@@ -1,6 +1,6 @@
 package com.frauddetection.simulator.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.simulator.api.ReplaySourceType;
 import com.frauddetection.simulator.api.ReplayStartRequest;
 import com.frauddetection.simulator.api.ReplayStatusResponse;
@@ -9,8 +9,13 @@ import com.frauddetection.simulator.exception.ReplayExceptionHandler;
 import com.frauddetection.simulator.service.TransactionReplayUseCase;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
+import org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration;
+import org.springframework.boot.security.autoconfigure.web.servlet.SecurityFilterAutoConfiguration;
+import org.springframework.boot.security.autoconfigure.web.servlet.ServletWebSecurityAutoConfiguration;
+import org.springframework.boot.security.test.autoconfigure.webmvc.SecurityMockMvcAutoConfiguration;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -24,7 +29,16 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(TransactionReplayController.class)
+@WebMvcTest(
+        value = TransactionReplayController.class,
+        excludeAutoConfiguration = {
+                SecurityAutoConfiguration.class,
+                SecurityFilterAutoConfiguration.class,
+                ServletWebSecurityAutoConfiguration.class,
+                UserDetailsServiceAutoConfiguration.class,
+                SecurityMockMvcAutoConfiguration.class
+        }
+)
 @Import(ReplayExceptionHandler.class)
 class TransactionReplayControllerTest {
 
@@ -34,7 +48,7 @@ class TransactionReplayControllerTest {
     @Autowired
     private ObjectMapper objectMapper;
 
-    @MockBean
+    @MockitoBean
     private TransactionReplayUseCase transactionReplayUseCase;
 
     @Test

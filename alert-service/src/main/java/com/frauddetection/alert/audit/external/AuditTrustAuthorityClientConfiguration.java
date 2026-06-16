@@ -24,6 +24,11 @@ class AuditTrustAuthorityClientConfiguration {
     private static final String DEMO_SECRET_ERROR = "Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.";
 
     @Bean
+    RestClient.Builder auditTrustAuthorityRestClientBuilder() {
+        return RestClient.builder();
+    }
+
+    @Bean
     AuditTrustAuthorityClient auditTrustAuthorityClient(
             AuditTrustAuthorityProperties properties,
             RestClient.Builder restClientBuilder

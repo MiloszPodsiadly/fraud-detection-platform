@@ -1,6 +1,6 @@
 package com.frauddetection.alert.audit.external;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.audit.AuditAnchorDocument;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -17,7 +17,7 @@ class LocalFileExternalAuditAnchorSinkTest {
     @TempDir
     Path tempDir;
 
-    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    private final ObjectMapper objectMapper = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
 
     @Test
     void shouldPublishExternalAnchorIdempotentlyWithoutOverwriting() throws Exception {

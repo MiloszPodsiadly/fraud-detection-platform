@@ -15,6 +15,7 @@ public final class AnalystAuthority {
     public static final String ENGINE_INTELLIGENCE_FEEDBACK_WRITE = "engine-intelligence:feedback:write";
     public static final String GOVERNANCE_ADVISORY_AUDIT_WRITE = "governance-advisory:audit:write";
     public static final String SHADOW_PERFORMANCE_READ = "shadow-performance:read";
+    public static final String PROMOTION_READINESS_READ = "promotion-readiness:read";
     public static final String AUDIT_READ = "audit:read";
     public static final String AUDIT_VERIFY = "audit:verify";
     public static final String AUDIT_EXPORT = "audit:export";
@@ -42,6 +43,7 @@ public final class AnalystAuthority {
             ENGINE_INTELLIGENCE_FEEDBACK_WRITE,
             GOVERNANCE_ADVISORY_AUDIT_WRITE,
             SHADOW_PERFORMANCE_READ,
+            PROMOTION_READINESS_READ,
             AUDIT_READ,
             AUDIT_VERIFY,
             AUDIT_EXPORT,

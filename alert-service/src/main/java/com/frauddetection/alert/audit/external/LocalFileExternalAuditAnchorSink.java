@@ -1,7 +1,7 @@
 package com.frauddetection.alert.audit.external;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -139,7 +139,7 @@ class LocalFileExternalAuditAnchorSink implements ExternalAuditAnchorSink {
     private ExternalAuditAnchor readAnchor(String line) {
         try {
             return objectMapper.readValue(line, ExternalAuditAnchor.class);
-        } catch (JsonProcessingException exception) {
+        } catch (JacksonException exception) {
             throw new ExternalAuditAnchorSinkException("IO_ERROR", "External anchor sink contains unreadable data.");
         }
     }

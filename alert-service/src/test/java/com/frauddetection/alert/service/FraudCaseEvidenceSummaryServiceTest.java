@@ -1,6 +1,6 @@
 package com.frauddetection.alert.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.evidence.EvidenceSeverity;
 import com.frauddetection.alert.evidence.EvidenceSnapshotItem;
 import com.frauddetection.alert.evidence.EvidenceSource;
@@ -40,7 +40,7 @@ class FraudCaseEvidenceSummaryServiceTest {
     @Mock
     private AlertRepository alertRepository;
 
-    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    private final ObjectMapper objectMapper = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
 
     @Test
     void FraudCaseEvidenceSummaryFromLinkedAlertsTest() {

@@ -1,6 +1,6 @@
 package com.frauddetection.alert.security.error;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.telemetry.SecurityDeniedAccessAuthStateClassifier;
 import com.frauddetection.alert.security.telemetry.SecurityDeniedAccessMethodClassifier;
@@ -32,7 +32,7 @@ class ApiSecurityTelemetryTest {
     @Test
     void shouldRecordUnauthorizedJwtAttempt() throws Exception {
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
-        ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+        ObjectMapper objectMapper = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
         AlertServiceMetrics metrics = new AlertServiceMetrics(meterRegistry);
         ApiAuthenticationEntryPoint entryPoint = new ApiAuthenticationEntryPoint(
                 new SecurityErrorResponseWriter(objectMapper),
@@ -60,7 +60,7 @@ class ApiSecurityTelemetryTest {
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         AlertServiceMetrics metrics = new AlertServiceMetrics(meterRegistry);
         ApiAuthenticationEntryPoint entryPoint = new ApiAuthenticationEntryPoint(
-                new SecurityErrorResponseWriter(new ObjectMapper().findAndRegisterModules()),
+                new SecurityErrorResponseWriter(tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build()),
                 metrics,
                 new SecurityDeniedAccessTelemetryRecorder(meterRegistry),
                 new SecurityDeniedAccessRouteClassifier(),
@@ -82,7 +82,7 @@ class ApiSecurityTelemetryTest {
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         AlertServiceMetrics metrics = new AlertServiceMetrics(meterRegistry);
         ApiAuthenticationEntryPoint entryPoint = new ApiAuthenticationEntryPoint(
-                new SecurityErrorResponseWriter(new ObjectMapper().findAndRegisterModules()),
+                new SecurityErrorResponseWriter(tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build()),
                 metrics,
                 new SecurityDeniedAccessTelemetryRecorder(meterRegistry),
                 new SecurityDeniedAccessRouteClassifier(),
@@ -105,7 +105,7 @@ class ApiSecurityTelemetryTest {
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         AlertServiceMetrics metrics = new AlertServiceMetrics(meterRegistry);
         ApiAccessDeniedHandler handler = new ApiAccessDeniedHandler(
-                new SecurityErrorResponseWriter(new ObjectMapper().findAndRegisterModules()),
+                new SecurityErrorResponseWriter(tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build()),
                 metrics,
                 new SecurityDeniedAccessTelemetryRecorder(meterRegistry),
                 new SecurityDeniedAccessRouteClassifier(),

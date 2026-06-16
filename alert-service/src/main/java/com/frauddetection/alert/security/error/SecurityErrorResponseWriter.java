@@ -1,6 +1,6 @@
 package com.frauddetection.alert.security.error;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.exception.ApiErrorResponse;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpStatus;

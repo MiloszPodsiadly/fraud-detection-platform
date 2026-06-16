@@ -1181,7 +1181,7 @@ paths:
   /api/v1/transactions/scored:
     get:
       summary: List scored transaction projections
-      description: Returns a bounded scored transaction page for an authenticated analyst. Optional filters are bounded search-readiness controls, not full-text search, export, automated enumeration, or production search-engine certification. Only page, size, query, riskLevel, and classification are accepted; unknown or duplicate single-valued parameters are rejected with INVALID_FILTER. Blank query text is absent; non-empty query text shorter than 3 characters or longer than 128 characters is rejected with a controlled 400 response. Query filtering uses normalized indexed fields populated at write time: transactionIdSearch, customerIdSearch, merchantIdSearch, and currencySearch. Matching uses quoted case-sensitive prefixes on normalized identifiers and exact normalized currency; raw case-insensitive regex over transactionId, customerId, merchantInfo.merchantId, or transactionAmount.currency is not used. Merchant names are not searched. Filtered totalElements/totalPages are capped at 10000 and must be treated as bounded navigation metadata, not exact global totals. Alert-service records a best-effort sensitive read-access audit event with endpoint category SCORED_TRANSACTION_SEARCH, hashed query shape, filter bucket, page/size, bounded result count, and backend-derived actor identity; audit persistence failure does not block the read response.
+      description: Returns a bounded scored transaction page for an authenticated analyst. Optional filters are bounded search-readiness controls, not full-text search, export, automated enumeration, or production search-engine certification. Only page, size, query, riskLevel, and classification are accepted; unknown or duplicate single-valued parameters are rejected with INVALID_FILTER. Blank query text is absent; non-empty query text shorter than 3 characters or longer than 128 characters is rejected with a controlled 400 response. Query filtering uses normalized indexed fields populated at write time; transactionIdSearch, customerIdSearch, merchantIdSearch, and currencySearch. Matching uses quoted case-sensitive prefixes on normalized identifiers and exact normalized currency; raw case-insensitive regex over transactionId, customerId, merchantInfo.merchantId, or transactionAmount.currency is not used. Merchant names are not searched. Filtered totalElements/totalPages are capped at 10000 and must be treated as bounded navigation metadata, not exact global totals. Alert-service records a best-effort sensitive read-access audit event with endpoint category SCORED_TRANSACTION_SEARCH, hashed query shape, filter bucket, page/size, bounded result count, and backend-derived actor identity; audit persistence failure does not block the read response.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1543,6 +1543,32 @@ paths:
           $ref: "#/components/responses/NotFound"
         "503":
           description: Summary provider is unavailable, current summary fails validation, or sensitive-read audit is unavailable. Invalid current summaries are treated as server-side summary availability failures and never return partial response data or raw validation details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+  /api/v1/governance/promotion-review-readiness/current:
+    get:
+      summary: Read current Promotion Review Readiness Report
+      description: Returns the current validated FDP-111 Promotion Review Readiness Report as a bounded read-only DTO. Requires promotion-readiness:read. The response is diagnostic-only and is not model promotion approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic approve/decline/block logic, and not analyst recommendation logic. This endpoint does not generate reports, mutate state, change scoring, trigger workflows, run schedulers, emit Kafka events, expose raw FDP-102 records, raw model cards, raw evaluation reports, transaction references, customer identifiers, model registry data, secrets, paths, promotion fields, threshold recommendation fields, or decisioning fields.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      responses:
+        "200":
+          description: Current validated Promotion Review Readiness Report returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromotionReviewReadinessReportResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          description: Configured report provider is unavailable, current report fails validation, or sensitive-read audit is unavailable. Invalid configured sources are treated as server-side availability failures and never return partial response data or raw validation details.
           content:
             application/json:
               schema:
@@ -4502,6 +4528,110 @@ components:
         banner:
           type: string
           description: Offline diagnostics only. No promotion, threshold, production decisioning, payment authorization, automatic operational action, or analyst recommendation authority is granted.
+    PromotionReviewReadinessReportResponse:
+      type: object
+      additionalProperties: false
+      required: [reportType, reportVersion, generatedAt, governanceStatus, readinessStatus, diagnosticOnly, notPromotionApproval, notThresholdRecommendation, notProductionDecisioning, notPaymentAuthorization, notAutomaticDecisioning, notAnalystRecommendation, inputs, checks, reasonCodes, warnings, limitations, banner]
+      properties:
+        reportType:
+          type: string
+          enum: [PROMOTION_REVIEW_READINESS_REPORT_V1]
+        reportVersion:
+          type: string
+          enum: ["1.0"]
+        generatedAt:
+          type: string
+          format: date-time
+        governanceStatus:
+          type: string
+          enum: [DIAGNOSTIC_ONLY]
+        readinessStatus:
+          type: string
+          enum: [INSUFFICIENT_DATA, NOT_REVIEWABLE, REVIEWABLE]
+        diagnosticOnly:
+          type: boolean
+        notPromotionApproval:
+          type: boolean
+        notThresholdRecommendation:
+          type: boolean
+        notProductionDecisioning:
+          type: boolean
+        notPaymentAuthorization:
+          type: boolean
+        notAutomaticDecisioning:
+          type: boolean
+        notAnalystRecommendation:
+          type: boolean
+        inputs:
+          type: object
+          additionalProperties: false
+          required: [shadowPerformanceSummary, minimumDiagnosticEvidenceRecords, recordsAcceptedForEvaluation]
+          properties:
+            shadowPerformanceSummary:
+              type: object
+              additionalProperties: false
+              required: [present, summaryType, summaryVersion, generatedAt]
+              properties:
+                present:
+                  type: boolean
+                summaryType:
+                  type: string
+                  enum: [SHADOW_PERFORMANCE_SUMMARY_V1]
+                summaryVersion:
+                  type: string
+                  enum: ["1.0"]
+                generatedAt:
+                  type: string
+                  format: date-time
+            minimumDiagnosticEvidenceRecords:
+              type: integer
+              minimum: 1
+            recordsAcceptedForEvaluation:
+              type: integer
+              minimum: 0
+        checks:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, status, severity]
+            properties:
+              name:
+                type: string
+                minLength: 1
+                maxLength: 128
+              status:
+                type: string
+                enum: [PASS, WARN, FAIL, NOT_APPLICABLE]
+              severity:
+                type: string
+                enum: [INFO, LOW, MEDIUM, HIGH]
+        reasonCodes:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        warnings:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        limitations:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        banner:
+          type: string
+          description: Offline diagnostic aid only. No promotion approval, threshold recommendation, production decisioning, payment authorization, automatic operational action, or analyst recommendation authority is granted.
     ShadowPerformanceModelResponse:
       type: object
       additionalProperties: false

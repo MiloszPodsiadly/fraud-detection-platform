@@ -19,8 +19,8 @@ import com.frauddetection.alert.security.error.ApiAccessDeniedHandler;
 import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
 import com.frauddetection.alert.security.error.SecurityErrorResponseWriter;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -65,13 +65,13 @@ class ShadowPerformanceSummaryControllerAuthorizationTest {
     @jakarta.annotation.Resource
     private MockMvc mockMvc;
 
-    @MockBean
+    @MockitoBean
     private ShadowPerformanceSummaryReadService readService;
 
-    @MockBean
+    @MockitoBean
     private ReadAccessAuditService readAccessAuditService;
 
-    @MockBean
+    @MockitoBean
     private AlertServiceMetrics metrics;
 
     @Test

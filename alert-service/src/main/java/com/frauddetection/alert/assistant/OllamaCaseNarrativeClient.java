@@ -1,7 +1,7 @@
 package com.frauddetection.alert.assistant;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.config.AssistantProperties;
 import com.frauddetection.alert.domain.AlertCase;
 import org.slf4j.Logger;
@@ -62,7 +62,7 @@ public class OllamaCaseNarrativeClient {
             }
 
             return Optional.of(parseNarrative(response.response()));
-        } catch (RestClientException | JsonProcessingException exception) {
+        } catch (RestClientException | JacksonException exception) {
             log.atWarn()
                     .addKeyValue("alertId", alert.alertId())
                     .addKeyValue("transactionId", alert.transactionId())
@@ -73,7 +73,7 @@ public class OllamaCaseNarrativeClient {
         }
     }
 
-    private OllamaCaseNarrative parseNarrative(String response) throws JsonProcessingException {
+    private OllamaCaseNarrative parseNarrative(String response) throws JacksonException {
         String json = extractJson(response);
         OllamaNarrativePayload payload = objectMapper.readValue(json, OllamaNarrativePayload.class);
         return new OllamaCaseNarrative(
@@ -95,7 +95,7 @@ public class OllamaCaseNarrativeClient {
         return response;
     }
 
-    private String prompt(AlertCase alert, AnalystCaseSummaryResponse summary) throws JsonProcessingException {
+    private String prompt(AlertCase alert, AnalystCaseSummaryResponse summary) throws JacksonException {
         Map<String, Object> caseData = Map.of(
                 "alertId", alert.alertId(),
                 "transactionId", alert.transactionId(),

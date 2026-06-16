@@ -117,6 +117,7 @@ services:
       TRUST_AUTHORITY_NAME: ${TRUST_AUTHORITY_NAME:-local-trust-authority}
       TRUST_AUTHORITY_KEY_ID: ${TRUST_AUTHORITY_KEY_ID:-local-ed25519-key-1}
       MONGODB_URI: mongodb://mongodb:27017/fraud_trust_authority?serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
+      SPRING_MONGODB_URI: mongodb://mongodb:27017/fraud_trust_authority?serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
       TRUST_AUTHORITY_PRIVATE_KEY_PATH: /tmp/audit-trust-authority/ed25519-private.key
       TRUST_AUTHORITY_PUBLIC_KEY_PATH: /tmp/audit-trust-authority/ed25519-public.key
       TRUST_AUTHORITY_AUDIT_PATH: /tmp/audit-trust-authority/trust-authority-audit.jsonl
@@ -268,6 +269,7 @@ services:
       SPRING_PROFILES_ACTIVE: docker
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       MONGODB_URI: mongodb://mongodb:27017/fraud_alerts?serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
+      SPRING_MONGODB_URI: mongodb://mongodb:27017/fraud_alerts?serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
       REDIS_HOST: redis
       REDIS_PORT: 6379
       ML_GOVERNANCE_BASE_URL: http://ml-inference-service:8090

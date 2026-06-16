@@ -1,7 +1,7 @@
 package com.frauddetection.common.events.intelligence;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import tools.jackson.databind.ObjectMapper;
+
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -78,6 +78,6 @@ final class EngineIntelligenceTestSupport {
     }
 
     static ObjectMapper objectMapper() {
-        return new ObjectMapper().registerModule(new JavaTimeModule());
+        return tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
     }
 }

@@ -6,8 +6,8 @@ import com.frauddetection.common.events.evidence.ScoringEvidenceSource;
 import com.frauddetection.common.events.evidence.ScoringEvidenceStatus;
 import com.frauddetection.common.events.evidence.ScoringEvidenceType;
 import com.frauddetection.common.events.enums.RiskLevel;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import tools.jackson.databind.ObjectMapper;
+
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -108,6 +108,6 @@ class TransactionScoredEventScoringEvidenceAdditiveContractTest {
     }
 
     private ObjectMapper objectMapper() {
-        return new ObjectMapper().registerModule(new JavaTimeModule());
+        return tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
     }
 }

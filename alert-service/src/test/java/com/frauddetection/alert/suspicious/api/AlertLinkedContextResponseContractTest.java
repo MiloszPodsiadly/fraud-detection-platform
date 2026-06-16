@@ -1,6 +1,6 @@
 package com.frauddetection.alert.suspicious.api;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
@@ -114,7 +114,7 @@ class AlertLinkedContextResponseContractTest {
                 "score-decision-1"
         );
 
-        String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(response);
+        String json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build().writeValueAsString(response);
 
         assertThat(json)
                 .contains("alertId", "transactionId", "customerId", "accountId", "alertScore")

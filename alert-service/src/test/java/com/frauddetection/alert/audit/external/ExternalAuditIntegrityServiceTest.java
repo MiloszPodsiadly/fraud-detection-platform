@@ -935,7 +935,7 @@ class ExternalAuditIntegrityServiceTest {
                 "audit-bucket",
                 "audit-anchors",
                 client,
-                new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules()
+                new tools.jackson.databind.ObjectMapper()
         );
     }
 

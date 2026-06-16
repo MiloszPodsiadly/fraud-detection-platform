@@ -1,10 +1,10 @@
 package com.frauddetection.trustauthority;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.MapperFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.json.JsonMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.MapperFeature;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -41,7 +41,7 @@ final class TrustAuthorityAuditHasher {
         try {
             byte[] bytes = CANONICAL_JSON.writeValueAsBytes(canonical);
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-        } catch (JsonProcessingException | NoSuchAlgorithmException exception) {
+        } catch (JacksonException | NoSuchAlgorithmException exception) {
             throw new TrustAuthorityAuditException("Trust authority audit event could not be hashed.", exception);
         }
     }

@@ -4,7 +4,7 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.error.ApiAccessDeniedHandler;
 import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
@@ -122,7 +122,7 @@ class SecurityDeniedAccessHandlerTelemetryFailureLogTest {
 
     private ApiAuthenticationEntryPoint entryPoint(SecurityDeniedAccessTelemetryRecorder recorder) {
         return new ApiAuthenticationEntryPoint(
-                new SecurityErrorResponseWriter(new ObjectMapper().findAndRegisterModules()),
+                new SecurityErrorResponseWriter(tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build()),
                 new AlertServiceMetrics(new SimpleMeterRegistry()),
                 recorder,
                 new SecurityDeniedAccessRouteClassifier(),
@@ -133,7 +133,7 @@ class SecurityDeniedAccessHandlerTelemetryFailureLogTest {
 
     private ApiAccessDeniedHandler handler(SecurityDeniedAccessTelemetryRecorder recorder) {
         return new ApiAccessDeniedHandler(
-                new SecurityErrorResponseWriter(new ObjectMapper().findAndRegisterModules()),
+                new SecurityErrorResponseWriter(tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build()),
                 new AlertServiceMetrics(new SimpleMeterRegistry()),
                 recorder,
                 new SecurityDeniedAccessRouteClassifier(),

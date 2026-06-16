@@ -1,10 +1,10 @@
 package com.frauddetection.alert.audit.external;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.MapperFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.json.JsonMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.MapperFeature;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditAnchorDocument;
 import com.frauddetection.alert.audit.AuditAnchorRepository;
@@ -466,7 +466,7 @@ public class AuditEvidenceExportService {
             byte[] canonicalJson = CANONICAL_JSON.writeValueAsBytes(canonical);
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             return HexFormat.of().formatHex(digest.digest(canonicalJson));
-        } catch (JsonProcessingException | NoSuchAlgorithmException exception) {
+        } catch (JacksonException | NoSuchAlgorithmException exception) {
             throw new IllegalStateException("Audit evidence export fingerprint could not be computed.");
         }
     }

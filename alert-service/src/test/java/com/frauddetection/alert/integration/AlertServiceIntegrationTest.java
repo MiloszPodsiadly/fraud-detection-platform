@@ -26,7 +26,7 @@ class AlertServiceIntegrationTest extends AbstractIntegrationTest {
     static void registerProperties(DynamicPropertyRegistry registry) {
         FraudPlatformContainers.startAll();
         registry.add("spring.kafka.bootstrap-servers", () -> FraudPlatformContainers.kafka().getBootstrapServers());
-        registry.add("spring.data.mongodb.uri", () -> FraudPlatformContainers.mongodb().getReplicaSetUrl("alert_service_test"));
+        registry.add("spring.mongodb.uri", () -> FraudPlatformContainers.mongodb().getReplicaSetUrl("alert_service_test"));
         registry.add("app.kafka.topics.transaction-scored", () -> "transactions.scored.alert.test");
         registry.add("app.kafka.topics.fraud-alerts", () -> "fraud.alerts.test");
         registry.add("app.kafka.topics.fraud-decisions", () -> "fraud.decisions.test");

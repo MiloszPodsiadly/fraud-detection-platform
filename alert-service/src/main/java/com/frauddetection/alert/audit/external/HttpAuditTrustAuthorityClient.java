@@ -1,11 +1,11 @@
 package com.frauddetection.alert.audit.external;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.MapperFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.json.JsonMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.MapperFeature;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 import com.nimbusds.jose.JOSEObjectType;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
@@ -160,7 +160,7 @@ class HttpAuditTrustAuthorityClient implements AuditTrustAuthorityClient {
         try {
             byte[] serialized = CANONICAL_JSON.writeValueAsBytes(canonical);
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(serialized));
-        } catch (JsonProcessingException | NoSuchAlgorithmException exception) {
+        } catch (JacksonException | NoSuchAlgorithmException exception) {
             throw new IllegalStateException("Audit anchor signing payload could not be hashed.");
         }
     }

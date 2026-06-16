@@ -5,7 +5,7 @@ import com.frauddetection.alert.regulated.RegulatedMutationExecutionStatus;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 
 public record RegulatedMutationChaosResult(
         String scenarioName,

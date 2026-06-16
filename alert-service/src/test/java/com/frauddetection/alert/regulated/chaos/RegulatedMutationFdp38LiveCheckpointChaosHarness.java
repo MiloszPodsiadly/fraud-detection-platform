@@ -1,9 +1,10 @@
 package com.frauddetection.alert.regulated.chaos;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
@@ -61,7 +62,7 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(2))
             .build();
-    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    private final ObjectMapper objectMapper = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
     private final Path logDirectory = Path.of("target", "fdp38-chaos");
     private final List<RegulatedMutationChaosResult> results = new ArrayList<>();
     private final List<String> checkpointNames = new ArrayList<>();
@@ -285,6 +286,7 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
         List<String> args = new ArrayList<>();
         args.add("--server.port=8080");
         args.add("--spring.profiles.active=test,fdp38-live-runtime-checkpoint");
+        args.add("--spring.mongodb.uri=" + mongodbUri);
         args.add("--spring.data.mongodb.uri=" + mongodbUri);
         args.add("--spring.data.redis.host=" + FraudPlatformContainers.redisNetworkHost());
         args.add("--spring.data.redis.port=6379");
@@ -629,11 +631,11 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
         try {
             JsonNode existing = objectMapper.readTree(summary.toFile()).path(fieldName);
             if (existing.isObject()) {
-                existing.fields().forEachRemaining(entry -> aggregate.set(entry.getKey(), entry.getValue()));
+                existing.properties().forEach(entry -> aggregate.set(entry.getKey(), entry.getValue()));
             }
             return aggregate;
-        } catch (IOException exception) {
-            throw new UncheckedIOException("Unable to read existing FDP-38 proof summary", exception);
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("Unable to read existing FDP-38 proof summary", exception);
         }
     }
 
@@ -649,8 +651,8 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
                 existing.forEach(value -> addUniqueFailedReason(aggregate, value.asText()));
             }
             return aggregate;
-        } catch (IOException exception) {
-            throw new UncheckedIOException("Unable to read existing FDP-38 proof summary", exception);
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("Unable to read existing FDP-38 proof summary", exception);
         }
     }
 
@@ -672,8 +674,8 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
                 if (existing.isArray()) {
                     existing.forEach(name -> names.add(name.asText()));
                 }
-            } catch (IOException exception) {
-                throw new UncheckedIOException("Unable to read existing FDP-38 proof summary", exception);
+            } catch (JacksonException exception) {
+                throw new IllegalStateException("Unable to read existing FDP-38 proof summary", exception);
             }
         }
         names.addAll(checkpointNames);
@@ -688,8 +690,8 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
         try {
             JsonNode value = objectMapper.readTree(summary.toFile()).path(fieldName);
             return value.isMissingNode() ? defaultValue : value.asBoolean(defaultValue);
-        } catch (IOException exception) {
-            throw new UncheckedIOException("Unable to read existing FDP-38 proof summary", exception);
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("Unable to read existing FDP-38 proof summary", exception);
         }
     }
 

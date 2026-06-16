@@ -20,9 +20,9 @@ import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.security.authorization.AnalystRole;
 import com.frauddetection.alert.security.principal.AnalystPrincipal;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
+
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -382,7 +382,7 @@ class AuditEvidenceExportServiceTest {
                 null
         );
 
-        ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        ObjectMapper objectMapper = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
         Map<String, Object> json = objectMapper.readValue(
                 objectMapper.writeValueAsString(response),
                 new TypeReference<>() {

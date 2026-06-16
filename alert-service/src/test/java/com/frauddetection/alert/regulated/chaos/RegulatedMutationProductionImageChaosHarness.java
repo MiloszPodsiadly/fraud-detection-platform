@@ -1,9 +1,9 @@
 package com.frauddetection.alert.regulated.chaos;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.persistence.AlertDocument;
@@ -61,7 +61,7 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(2))
             .build();
-    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    private final ObjectMapper objectMapper = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
     private final Path logDirectory = Path.of("target", "fdp37-chaos");
     private final List<RegulatedMutationChaosResult> results = new ArrayList<>();
     private final Map<String, String> scenarioTransactionModes = new HashMap<>();
@@ -600,6 +600,7 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
         List<String> args = new ArrayList<>();
         args.add("--server.port=8080");
         args.add("--spring.profiles.active=test");
+        args.add("--spring.mongodb.uri=" + mongodbUri);
         args.add("--spring.data.mongodb.uri=" + mongodbUri);
         args.add("--spring.data.redis.host=" + FraudPlatformContainers.redisNetworkHost());
         args.add("--spring.data.redis.port=6379");

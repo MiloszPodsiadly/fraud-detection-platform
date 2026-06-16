@@ -1,6 +1,6 @@
 package com.frauddetection.scoring.mapper;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparison;
@@ -24,7 +24,7 @@ class TransactionScoredEventMapperEngineIntelligenceTest {
     private static final Instant GENERATED_AT = Instant.parse("2026-05-31T10:00:00Z");
 
     private final TransactionScoredEventMapper mapper = new TransactionScoredEventMapper();
-    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    private final ObjectMapper objectMapper = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
 
     @Test
     void mapperOmitsEngineIntelligenceWhenOptionalEmpty() throws Exception {

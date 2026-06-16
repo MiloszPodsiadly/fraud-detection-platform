@@ -31,7 +31,7 @@ class Fdp38LiveRuntimeCheckpointBarrierConfiguration {
             RegulatedMutationLeaseRenewalService leaseRenewalService,
             AlertServiceMetrics metrics,
             @Value("${app.regulated-mutations.checkpoint-renewal.extension:PT30S}") Duration requestedExtension,
-            @Value("${spring.data.mongodb.uri}") String mongoUri,
+            @Value("${spring.mongodb.uri:${spring.data.mongodb.uri}}") String mongoUri,
             @Value("${app.fdp38.live-runtime-checkpoint.name}") Fdp38LiveRuntimeCheckpoint checkpoint,
             @Value("${app.fdp38.live-runtime-checkpoint.idempotency-key}") String idempotencyKey
     ) {

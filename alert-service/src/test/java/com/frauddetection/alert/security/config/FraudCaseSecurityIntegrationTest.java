@@ -1,6 +1,6 @@
 package com.frauddetection.alert.security.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.api.FraudCaseEvidenceSummaryResponse;
 import com.frauddetection.alert.api.FraudCaseEvidenceTimelineResponse;
 import com.frauddetection.alert.api.FraudCaseTimelineEventResponse;
@@ -35,8 +35,8 @@ import com.frauddetection.alert.service.FraudCaseQueryService;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
@@ -82,22 +82,22 @@ class FraudCaseSecurityIntegrationTest {
     @Autowired
     private FraudCaseResponseMapper responseMapper;
 
-    @MockBean
+    @MockitoBean
     private FraudCaseManagementService fraudCaseManagementService;
 
-    @MockBean
+    @MockitoBean
     private FraudCaseEvidenceSummaryService fraudCaseEvidenceSummaryService;
 
-    @MockBean
+    @MockitoBean
     private FraudCaseEvidenceTimelineService fraudCaseEvidenceTimelineService;
 
-    @MockBean
+    @MockitoBean
     private FraudCaseQueryService fraudCaseQueryService;
 
-    @MockBean
+    @MockitoBean
     private AlertServiceMetrics alertServiceMetrics;
 
-    @MockBean
+    @MockitoBean
     private SensitiveReadAuditService sensitiveReadAuditService;
 
     @Test

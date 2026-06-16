@@ -1,6 +1,6 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -42,7 +42,7 @@ class PublicEngineIntelligenceMapperTest {
 
     @Test
     void mapsDisagreementWithoutDecline() throws Exception {
-        String json = new ObjectMapper().findAndRegisterModules()
+        String json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build()
                 .writeValueAsString(map(0.9d, RiskLevel.CRITICAL, 0.1d, RiskLevel.LOW));
 
         assertThat(json).contains("DISAGREEMENT").doesNotContainIgnoringCase("decline", "approve");
@@ -118,7 +118,7 @@ class PublicEngineIntelligenceMapperTest {
 
     @Test
     void serializedTimeoutEngineIntelligenceDoesNotContainRiskLevelLow() throws Exception {
-        String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(mapper.map(
+        String json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build().writeValueAsString(mapper.map(
                 resultWithNormalizedEngine(AggregationTestSupport.normalized(
                         "rules.primary",
                         FraudEngineStatus.TIMEOUT,
@@ -133,7 +133,7 @@ class PublicEngineIntelligenceMapperTest {
 
     @Test
     void serializedOperationalDiagnosticSignalDoesNotContainRiskLevelHigh() throws Exception {
-        String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(mapper.map(resultWithSignal(signal(
+        String json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build().writeValueAsString(mapper.map(resultWithSignal(signal(
                 FraudEngineStatus.AVAILABLE,
                 RiskLevel.HIGH,
                 0.9d,
@@ -155,7 +155,7 @@ class PublicEngineIntelligenceMapperTest {
 
     @Test
     void serializedOperationalSignalDoesNotContainVeryHighScoreBucket() throws Exception {
-        String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(mapper.map(resultWithSignal(signal(
+        String json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build().writeValueAsString(mapper.map(resultWithSignal(signal(
                 FraudEngineStatus.AVAILABLE,
                 null,
                 0.9d,
@@ -167,7 +167,7 @@ class PublicEngineIntelligenceMapperTest {
 
     @Test
     void mapsDiagnosticSignalsWithoutRawEvidence() throws Exception {
-        String json = new ObjectMapper().findAndRegisterModules()
+        String json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build()
                 .writeValueAsString(map(0.8d, RiskLevel.HIGH, 0.7d, RiskLevel.HIGH));
 
         assertThat(json).contains("diagnosticSignals").doesNotContain("evidence", "description", "contribution");

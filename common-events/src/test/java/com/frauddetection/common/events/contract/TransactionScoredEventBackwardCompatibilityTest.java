@@ -1,8 +1,8 @@
 package com.frauddetection.common.events.contract;
 
 import com.frauddetection.common.events.enums.RiskLevel;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import tools.jackson.databind.ObjectMapper;
+
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -153,7 +153,7 @@ class TransactionScoredEventBackwardCompatibilityTest {
     }
 
     private ObjectMapper objectMapper() {
-        return new ObjectMapper().registerModule(new JavaTimeModule());
+        return tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
     }
 
     private String scoredEventWithAttributesJson(String attributesJson) {

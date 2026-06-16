@@ -1,10 +1,10 @@
 package com.frauddetection.alert.audit.external;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.MapperFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.json.JsonMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.MapperFeature;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 import com.frauddetection.alert.audit.AuditAnchorDocument;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -29,13 +29,12 @@ class ObjectStoreExternalAuditAnchorSinkTest {
 
     private static final String ENCODED_PARTITION = "c291cmNlX3NlcnZpY2U6YWxlcnQtc2VydmljZQ";
 
-    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    private final ObjectMapper objectMapper = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
     private final ObjectMapper canonicalObjectMapper = JsonMapper.builder()
             .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
             .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
-            .configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false)
             .build()
-            .findAndRegisterModules();
+            ;
     private final InMemoryObjectStoreAuditAnchorClient client = new InMemoryObjectStoreAuditAnchorClient();
     private final ObjectStoreExternalAuditAnchorSink sink = new ObjectStoreExternalAuditAnchorSink(
             "audit-bucket",
@@ -666,7 +665,7 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     private byte[] serialize(ObjectStoreExternalAuditAnchorPayload payload) {
         try {
             return canonicalObjectMapper.writeValueAsBytes(payload);
-        } catch (JsonProcessingException exception) {
+        } catch (JacksonException exception) {
             throw new IllegalStateException(exception);
         }
     }

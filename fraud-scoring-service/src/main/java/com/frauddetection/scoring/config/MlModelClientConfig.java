@@ -11,6 +11,11 @@ import java.net.URI;
 public class MlModelClientConfig {
 
     @Bean
+    public RestClient.Builder restClientBuilder() {
+        return RestClient.builder();
+    }
+
+    @Bean
     public RestClient mlModelRestClient(
             MlModelClientProperties properties,
             InternalServiceAuthHeaders internalAuthHeaders,
