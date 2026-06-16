@@ -173,6 +173,30 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
                 .hasMessageNotContaining("secret-current-report.json");
     }
 
+    @Test
+    void acceptsValidFdp111ReportWithRecordsAcceptedForEvaluationAbove500() throws Exception {
+        JsonNode root = objectMapper.readTree(validReportJson());
+        ((ObjectNode) root.get("inputs")).put("recordsAcceptedForEvaluation", 501);
+
+        Optional<PromotionReviewReadinessReport> result =
+                provider(writeJson(objectMapper.writeValueAsString(root))).currentReport();
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().inputs().recordsAcceptedForEvaluation()).isEqualTo(501);
+    }
+
+    @Test
+    void acceptsValidFdp111ReportWithMinimumDiagnosticEvidenceRecordsAbove500() throws Exception {
+        JsonNode root = objectMapper.readTree(validReportJson());
+        ((ObjectNode) root.get("inputs")).put("minimumDiagnosticEvidenceRecords", 501);
+
+        Optional<PromotionReviewReadinessReport> result =
+                provider(writeJson(objectMapper.writeValueAsString(root))).currentReport();
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().inputs().minimumDiagnosticEvidenceRecords()).isEqualTo(501);
+    }
+
     private ArtifactBackedPromotionReviewReadinessReportProvider provider(Path path) {
         return provider(true, path);
     }

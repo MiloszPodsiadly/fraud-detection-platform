@@ -11,7 +11,6 @@ import java.util.regex.Pattern;
 @Component
 class PromotionReviewReadinessReportValidator {
 
-    private static final int MAX_COUNT_VALUE = 500;
     private static final Pattern MACHINE_CODE_PATTERN = Pattern.compile("^[A-Z][A-Z0-9_]{0,127}$");
     private static final Set<String> READINESS_STATUSES = Set.of("INSUFFICIENT_DATA", "NOT_REVIEWABLE", "REVIEWABLE");
     private static final Set<String> CHECK_STATUSES = Set.of("PASS", "WARN", "FAIL", "NOT_APPLICABLE");
@@ -161,7 +160,6 @@ class PromotionReviewReadinessReportValidator {
 
     private void boundedCount(int value, String field) {
         require(value >= 0, field + " must be non-negative");
-        require(value <= MAX_COUNT_VALUE, field + " exceeds maximum");
     }
 
     private void rejectForbidden(String value, String field) {

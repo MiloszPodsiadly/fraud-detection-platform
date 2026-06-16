@@ -1181,7 +1181,7 @@ paths:
   /api/v1/transactions/scored:
     get:
       summary: List scored transaction projections
-      description: Returns a bounded scored transaction page for an authenticated analyst. Optional filters are bounded search-readiness controls, not full-text search, export, automated enumeration, or production search-engine certification. Only page, size, query, riskLevel, and classification are accepted; unknown or duplicate single-valued parameters are rejected with INVALID_FILTER. Blank query text is absent; non-empty query text shorter than 3 characters or longer than 128 characters is rejected with a controlled 400 response. Query filtering uses normalized indexed fields populated at write time: transactionIdSearch, customerIdSearch, merchantIdSearch, and currencySearch. Matching uses quoted case-sensitive prefixes on normalized identifiers and exact normalized currency; raw case-insensitive regex over transactionId, customerId, merchantInfo.merchantId, or transactionAmount.currency is not used. Merchant names are not searched. Filtered totalElements/totalPages are capped at 10000 and must be treated as bounded navigation metadata, not exact global totals. Alert-service records a best-effort sensitive read-access audit event with endpoint category SCORED_TRANSACTION_SEARCH, hashed query shape, filter bucket, page/size, bounded result count, and backend-derived actor identity; audit persistence failure does not block the read response.
+      description: Returns a bounded scored transaction page for an authenticated analyst. Optional filters are bounded search-readiness controls, not full-text search, export, automated enumeration, or production search-engine certification. Only page, size, query, riskLevel, and classification are accepted; unknown or duplicate single-valued parameters are rejected with INVALID_FILTER. Blank query text is absent; non-empty query text shorter than 3 characters or longer than 128 characters is rejected with a controlled 400 response. Query filtering uses normalized indexed fields populated at write time; transactionIdSearch, customerIdSearch, merchantIdSearch, and currencySearch. Matching uses quoted case-sensitive prefixes on normalized identifiers and exact normalized currency; raw case-insensitive regex over transactionId, customerId, merchantInfo.merchantId, or transactionAmount.currency is not used. Merchant names are not searched. Filtered totalElements/totalPages are capped at 10000 and must be treated as bounded navigation metadata, not exact global totals. Alert-service records a best-effort sensitive read-access audit event with endpoint category SCORED_TRANSACTION_SEARCH, hashed query shape, filter bucket, page/size, bounded result count, and backend-derived actor identity; audit persistence failure does not block the read response.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -4586,11 +4586,9 @@ components:
             minimumDiagnosticEvidenceRecords:
               type: integer
               minimum: 1
-              maximum: 500
             recordsAcceptedForEvaluation:
               type: integer
               minimum: 0
-              maximum: 500
         checks:
           type: array
           minItems: 1
