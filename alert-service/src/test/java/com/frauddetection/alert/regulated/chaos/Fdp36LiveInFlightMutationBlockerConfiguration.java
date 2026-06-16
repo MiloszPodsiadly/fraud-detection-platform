@@ -30,7 +30,7 @@ class Fdp36LiveInFlightMutationBlockerConfiguration {
             AlertRepository alertRepository,
             AlertDocumentMapper alertDocumentMapper,
             DecisionOutboxWriter decisionOutboxWriter,
-            @Value("${spring.data.mongodb.uri}") String mongoUri,
+            @Value("${spring.mongodb.uri:${spring.data.mongodb.uri}}") String mongoUri,
             @Value("${app.fdp36.live-in-flight.idempotency-key}") String blockedIdempotencyKey
     ) {
         return new BlockingSubmitDecisionMutationHandler(
