@@ -20,3 +20,8 @@ deployment/service-identity/*-key.pem
 deployment/service-identity/*private*.pem
 deployment/service-identity/**/*private*.pem
 deployment/service-identity/**/*-key.pem
+
+.env
+.env.*
+
+!.env.example

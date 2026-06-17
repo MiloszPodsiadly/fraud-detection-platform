@@ -59,11 +59,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Verify committed local runtime fixture is explicitly scoped
+      - name: Generate local runtime fixture from example
         run: |
+          test -f deployment/.env.example
+          cp deployment/.env.example deployment/.env
           test -f deployment/.env
-          grep -F "Committed local runtime fixture" deployment/.env
-          grep -F "intentionally committed for local evaluation" README.md
 
       - name: Assert base does not publish host ports
         run: docker compose --env-file deployment/.env.example -f deployment/docker-compose.yml config --format json | node scripts/check-compose-security-config.mjs base
@@ -88,6 +88,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Generate local runtime fixture from example
+        run: |
+          test -f deployment/.env.example
+          cp deployment/.env.example deployment/.env
+          test -f deployment/.env
+
       - name: Assert default dev services exclude AI
         run: |
           services="$(docker compose --env-file deployment/.env -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml config --services)"
@@ -108,6 +114,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Generate local runtime fixture from example
+        run: |
+          test -f deployment/.env.example
+          cp deployment/.env.example deployment/.env
+          test -f deployment/.env
+
       - name: Start services and verify read-only application runtime
         run: bash scripts/ci/compose-runtime-smoke.sh app-hardening
 
@@ -118,6 +130,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Generate local runtime fixture from example
+        run: |
+          test -f deployment/.env.example
+          cp deployment/.env.example deployment/.env
+          test -f deployment/.env
 
       - name: Generate local identity fixtures
         run: bash scripts/bootstrap-local-fixtures.sh
