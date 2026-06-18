@@ -7,6 +7,7 @@ const promotionApiSource = [
   lineContaining(alertsApiSource, "getCurrentPromotionReviewReadinessReport"),
   functionBlock(alertsApiSource, "promotionReviewReadinessReportRequest")
 ].join("\n");
+const currentReadEndpoint = ["", "api", "v1", "governance", "promotion-review-readiness", "current"].join("/");
 const promotionSources = [
   "src/components/PromotionReviewReadinessPanel.jsx",
   "src/workspace/ShadowPerformanceWorkspaceRuntime.jsx",
@@ -19,7 +20,7 @@ const docs = readFileSync(join(process.cwd(), "../docs/architecture/promotion_re
 
 describe("FDP-114 promotion review readiness UI scope guards", () => {
   it("apiClientCallsOnlyCurrentReadEndpoint", () => {
-    expect(promotionApiSource).toContain("/api/v1/governance/promotion-review-readiness/current");
+    expect(promotionApiSource).toContain(currentReadEndpoint);
     expect(promotionApiSource).not.toMatch(/\/generate|\/workflow|\/model-registry|\/threshold|\/scored|\/payments?/i);
   });
 
