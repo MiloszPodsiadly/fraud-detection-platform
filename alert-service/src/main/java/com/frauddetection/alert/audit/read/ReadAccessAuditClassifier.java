@@ -47,6 +47,9 @@ public class ReadAccessAuditClassifier {
         if ("/api/v1/transactions/scored".equals(pattern)) {
             return Optional.of(target(ReadAccessEndpointCategory.SCORED_TRANSACTION_SEARCH, ReadAccessResourceType.SCORED_TRANSACTION, null, request));
         }
+        if ("/api/v1/transactions/scored/{transactionId}".equals(pattern)) {
+            return Optional.of(target(ReadAccessEndpointCategory.SCORED_TRANSACTION_DETAIL, ReadAccessResourceType.SCORED_TRANSACTION, variables.get("transactionId"), request));
+        }
         if ("/api/v1/transactions/scored/{transactionId}/engine-intelligence".equals(pattern)) {
             return Optional.of(target(ReadAccessEndpointCategory.ENGINE_INTELLIGENCE_READ, ReadAccessResourceType.SCORED_TRANSACTION, variables.get("transactionId"), request));
         }

@@ -34,6 +34,112 @@ class EngineIntelligenceOpenApiContractTest {
     }
 
     @Test
+    void openApiContainsScoredTransactionDetailWithBoundedEngineIntelligence() throws Exception {
+        assertThat(openApi()).contains("/api/v1/transactions/scored/{transactionId}:");
+        assertThat(scoredTransactionDetailPath()).contains(
+                "summary: Read one scored transaction with bounded engine intelligence",
+                "pattern: \"^[A-Za-z0-9._:-]+$\"",
+                "$ref: \"#/components/schemas/ScoredTransactionDetailResponse\"",
+                "\"400\":",
+                "\"401\":",
+                "\"403\":",
+                "\"404\":"
+        );
+        assertThat(scoredTransactionSchema()).contains(
+                "transactionId:",
+                "fraudScore:",
+                "riskLevel:",
+                "alertRecommended:",
+                "reasonCodes:"
+        ).doesNotContain("engineIntelligence:");
+        assertThat(scoredTransactionDetailSchema()).contains(
+                "required:",
+                "- engineIntelligence",
+                "engineIntelligence:",
+                "$ref: \"#/components/schemas/EngineIntelligenceResponse\""
+        );
+    }
+
+    @Test
+    void openApiListSchemaIsLightweightAndDoesNotRequireEngineIntelligence() throws Exception {
+        assertThat(scoredTransactionListPath()).contains("$ref: \"#/components/schemas/PagedScoredTransactionResponse\"");
+        assertThat(pagedScoredTransactionSchema()).contains(
+                "Lightweight scored transaction list page",
+                "$ref: \"#/components/schemas/ScoredTransactionResponse\""
+        );
+        assertThat(scoredTransactionSchema()).contains("Engine intelligence diagnostics are intentionally omitted")
+                .doesNotContain("engineIntelligence:");
+    }
+
+    @Test
+    void openApiScoredTransactionEngineIntelligenceHasExplicitAbsenceAndDegradationStatuses() throws Exception {
+        String schema = publicEngineIntelligenceSchema();
+
+        assertThat(schema).contains(
+                "EngineIntelligenceResponse:",
+                "enum: [AVAILABLE, ABSENT, UNAVAILABLE, DEGRADED]",
+                "- contractVersion",
+                "- generatedAt",
+                "- comparison",
+                "ABSENT means no projection exists",
+                "UNAVAILABLE means the projection read path degraded",
+                "explicit null contractVersion, generatedAt, and comparison fields",
+                "EngineIntelligenceEngineResponse:",
+                "enum: [AVAILABLE, UNAVAILABLE, TIMEOUT, DEGRADED, NOT_APPLICABLE]",
+                "EngineIntelligenceDiagnosticSignalResponse:",
+                "EngineIntelligenceWarningResponse:"
+        );
+    }
+
+    @Test
+    void openApiScoredTransactionEngineIntelligenceDocumentsAnalystOnlyBoundary() throws Exception {
+        assertThat(scoredTransactionDetailPath()).contains(
+                "analyst intelligence read only",
+                "does not recompute scoring",
+                "payment authorization",
+                "automatic approve",
+                "automatic decline",
+                "automatic block",
+                "model promotion",
+                "threshold recommendation",
+                "workflow execution",
+                "final bank authorization"
+        );
+    }
+
+    @Test
+    void openApiScoredTransactionEngineIntelligenceDoesNotExposeRawInternalFields() throws Exception {
+        assertThat(scoredTransactionSchema() + publicEngineIntelligenceSchema()).doesNotContain(
+                "_id",
+                "FraudEngineResult",
+                "NormalizedFraudEngineResult",
+                "rawEvidence",
+                "rawContribution",
+                "featureSnapshot",
+                "featureVector",
+                "rawPayload",
+                "rawMlRequest",
+                "rawMlResponse",
+                "payloadHash",
+                "endpoint",
+                "token",
+                "secret",
+                "stacktrace",
+                "exceptionMessage",
+                "internalAggregation",
+                "ScoringContext",
+                "finalDecision",
+                "recommendedAction",
+                "approveTransaction",
+                "declineTransaction",
+                "blockTransaction",
+                "paymentAuthorization",
+                "winningEngine",
+                "platformRiskScore"
+        );
+    }
+
+    @Test
     void openApiDoesNotContainRawInternalOrDecisioningFields() throws Exception {
         assertThat(engineIntelligenceSchema()).doesNotContain(
                 "_id", "rawEvidence", "rawContribution", "featureSnapshot", "featureVector", "rawPayload",
@@ -126,6 +232,42 @@ class EngineIntelligenceOpenApiContractTest {
         String openApi = openApi();
         int pathStart = openApi.indexOf("  /api/v1/transactions/scored/{transactionId}/engine-intelligence:");
         return openApi.substring(pathStart, openApi.indexOf("\n  /", pathStart + 1));
+    }
+
+    private String scoredTransactionDetailPath() throws Exception {
+        String openApi = openApi();
+        int pathStart = openApi.indexOf("  /api/v1/transactions/scored/{transactionId}:");
+        return openApi.substring(pathStart, openApi.indexOf("\n  /", pathStart + 1));
+    }
+
+    private String scoredTransactionListPath() throws Exception {
+        String openApi = openApi();
+        int pathStart = openApi.indexOf("  /api/v1/transactions/scored:");
+        return openApi.substring(pathStart, openApi.indexOf("\n  /", pathStart + 1));
+    }
+
+    private String scoredTransactionSchema() throws Exception {
+        String openApi = openApi();
+        int schemaStart = openApi.indexOf("    ScoredTransactionResponse:");
+        return openApi.substring(schemaStart, openApi.indexOf("\n    ScoredTransactionDetailResponse:", schemaStart));
+    }
+
+    private String scoredTransactionDetailSchema() throws Exception {
+        String openApi = openApi();
+        int schemaStart = openApi.indexOf("    ScoredTransactionDetailResponse:");
+        return openApi.substring(schemaStart, openApi.indexOf("\n    AuditEventReadResponse:", schemaStart));
+    }
+
+    private String pagedScoredTransactionSchema() throws Exception {
+        String openApi = openApi();
+        int schemaStart = openApi.indexOf("    PagedScoredTransactionResponse:");
+        return openApi.substring(schemaStart, openApi.indexOf("\n    MoneyResponse:", schemaStart));
+    }
+
+    private String publicEngineIntelligenceSchema() throws Exception {
+        String openApi = openApi();
+        int schemaStart = openApi.indexOf("    EngineIntelligenceResponse:");
+        return openApi.substring(schemaStart, openApi.indexOf("\n    EngineIntelligenceReadModel:", schemaStart));
     }
 
     private String schema(String name) throws Exception {

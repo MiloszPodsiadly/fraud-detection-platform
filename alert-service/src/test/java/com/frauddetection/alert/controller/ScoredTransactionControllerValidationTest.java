@@ -1,7 +1,9 @@
 package com.frauddetection.alert.controller;
 
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
+import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
 import com.frauddetection.alert.mapper.ScoredTransactionResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.service.ScoredTransactionSearchPolicy;
@@ -32,7 +34,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         }
 )
 @AutoConfigureMockMvc(addFilters = false)
-@Import({AlertResponseMapper.class, ScoredTransactionResponseMapper.class, ScoredTransactionSearchPolicy.class, AlertServiceExceptionHandler.class})
+@Import({
+        AlertResponseMapper.class,
+        ScoredTransactionResponseMapper.class,
+        EngineIntelligenceResponseMapper.class,
+        ScoredTransactionSearchPolicy.class,
+        AlertServiceExceptionHandler.class
+})
 class ScoredTransactionControllerValidationTest {
 
     @Autowired
@@ -40,6 +48,9 @@ class ScoredTransactionControllerValidationTest {
 
     @MockitoBean
     private TransactionMonitoringUseCase transactionMonitoringUseCase;
+
+    @MockitoBean
+    private EngineIntelligenceReadService engineIntelligenceReadService;
 
     @MockitoBean
     private AlertServiceMetrics metrics;

@@ -1181,7 +1181,7 @@ paths:
   /api/v1/transactions/scored:
     get:
       summary: List scored transaction projections
-      description: Returns a bounded scored transaction page for an authenticated analyst. Optional filters are bounded search-readiness controls, not full-text search, export, automated enumeration, or production search-engine certification. Only page, size, query, riskLevel, and classification are accepted; unknown or duplicate single-valued parameters are rejected with INVALID_FILTER. Blank query text is absent; non-empty query text shorter than 3 characters or longer than 128 characters is rejected with a controlled 400 response. Query filtering uses normalized indexed fields populated at write time; transactionIdSearch, customerIdSearch, merchantIdSearch, and currencySearch. Matching uses quoted case-sensitive prefixes on normalized identifiers and exact normalized currency; raw case-insensitive regex over transactionId, customerId, merchantInfo.merchantId, or transactionAmount.currency is not used. Merchant names are not searched. Filtered totalElements/totalPages are capped at 10000 and must be treated as bounded navigation metadata, not exact global totals. Alert-service records a best-effort sensitive read-access audit event with endpoint category SCORED_TRANSACTION_SEARCH, hashed query shape, filter bucket, page/size, bounded result count, and backend-derived actor identity; audit persistence failure does not block the read response.
+      description: Returns a bounded scored transaction page for an authenticated analyst. The list response remains lightweight and does not expand engine intelligence diagnostics; use the transaction detail read for a single transaction diagnostic view. Optional filters are bounded search-readiness controls, not full-text search, export, automated enumeration, or production search-engine certification. Only page, size, query, riskLevel, and classification are accepted; unknown or duplicate single-valued parameters are rejected with INVALID_FILTER. Blank query text is absent; non-empty query text shorter than 3 characters or longer than 128 characters is rejected with a controlled 400 response. Query filtering uses normalized indexed fields populated at write time; transactionIdSearch, customerIdSearch, merchantIdSearch, and currencySearch. Matching uses quoted case-sensitive prefixes on normalized identifiers and exact normalized currency; raw case-insensitive regex over transactionId, customerId, merchantInfo.merchantId, or transactionAmount.currency is not used. Merchant names are not searched. Filtered totalElements/totalPages are capped at 10000 and must be treated as bounded navigation metadata, not exact global totals. Alert-service records a best-effort sensitive read-access audit event with endpoint category SCORED_TRANSACTION_SEARCH, hashed query shape, filter bucket, page/size, bounded result count, and backend-derived actor identity; audit persistence failure does not block the read response.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1230,13 +1230,44 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PagedGenericObject"
+                $ref: "#/components/schemas/PagedScoredTransactionResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "400":
           $ref: "#/components/responses/BadRequest"
+  /api/v1/transactions/scored/{transactionId}:
+    get:
+      summary: Read one scored transaction with bounded engine intelligence
+      description: Returns one scored transaction projection by exact transactionId plus a bounded analyst diagnostic engineIntelligence object assembled from the existing alert-service engine intelligence projection. This is an analyst intelligence read only. It does not recompute scoring, invoke ML, rules, orchestration, Kafka, list search, case aggregation, recommendation layers, payment authorization, automatic approve, automatic decline, automatic block, model promotion, threshold recommendation, workflow execution, or final bank authorization. Missing projections for old transactions are returned explicitly as engineIntelligence.status=ABSENT. Projection store read degradation is returned as engineIntelligence.status=UNAVAILABLE without changing the scored transaction fields.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._:-]+$"
+      responses:
+        "200":
+          description: Scored transaction detail returned with bounded analyst engine intelligence diagnostics.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScoredTransactionDetailResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /api/v1/transactions/scored/{transactionId}/engine-intelligence:
     get:
       summary: Read bounded projected engine intelligence for one scored transaction
@@ -2791,6 +2822,154 @@ components:
         totalPages:
           type: integer
           minimum: 0
+    PagedScoredTransactionResponse:
+      type: object
+      required:
+        - content
+        - page
+        - size
+        - totalElements
+        - totalPages
+      additionalProperties: false
+      description: Lightweight scored transaction list page. Items do not expose engineIntelligence diagnostics.
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScoredTransactionResponse"
+        page:
+          type: integer
+          minimum: 0
+        size:
+          type: integer
+          minimum: 1
+        totalElements:
+          type: integer
+          minimum: 0
+        totalPages:
+          type: integer
+          minimum: 0
+    MoneyResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        amount:
+          type: number
+        currency:
+          type: string
+    MerchantInfoResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        merchantId:
+          type: string
+          nullable: true
+        merchantName:
+          type: string
+          nullable: true
+        merchantCategoryCode:
+          type: string
+          nullable: true
+        merchantCategory:
+          type: string
+          nullable: true
+        acquiringCountryCode:
+          type: string
+          nullable: true
+        channel:
+          type: string
+          nullable: true
+        cardPresent:
+          type: boolean
+          nullable: true
+        attributes:
+          $ref: "#/components/schemas/GenericObject"
+    ScoredTransactionResponse:
+      type: object
+      additionalProperties: false
+      description: Lightweight scored transaction list item. Engine intelligence diagnostics are intentionally omitted from list responses.
+      properties:
+        transactionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        customerId:
+          type: string
+          nullable: true
+        correlationId:
+          type: string
+          nullable: true
+        transactionTimestamp:
+          type: string
+          format: date-time
+          nullable: true
+        scoredAt:
+          type: string
+          format: date-time
+          nullable: true
+        transactionAmount:
+          $ref: "#/components/schemas/MoneyResponse"
+        merchantInfo:
+          $ref: "#/components/schemas/MerchantInfoResponse"
+        fraudScore:
+          type: number
+          nullable: true
+        riskLevel:
+          $ref: "#/components/schemas/RiskLevel"
+        alertRecommended:
+          type: boolean
+          nullable: true
+        reasonCodes:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+    ScoredTransactionDetailResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - transactionId
+        - engineIntelligence
+      properties:
+        transactionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        customerId:
+          type: string
+          nullable: true
+        correlationId:
+          type: string
+          nullable: true
+        transactionTimestamp:
+          type: string
+          format: date-time
+          nullable: true
+        scoredAt:
+          type: string
+          format: date-time
+          nullable: true
+        transactionAmount:
+          $ref: "#/components/schemas/MoneyResponse"
+        merchantInfo:
+          $ref: "#/components/schemas/MerchantInfoResponse"
+        fraudScore:
+          type: number
+          nullable: true
+        riskLevel:
+          $ref: "#/components/schemas/RiskLevel"
+        alertRecommended:
+          type: boolean
+          nullable: true
+        reasonCodes:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        engineIntelligence:
+          $ref: "#/components/schemas/EngineIntelligenceResponse"
     AuditEventReadResponse:
       type: object
       additionalProperties: false
@@ -4352,6 +4531,132 @@ components:
           default: 25
         hasMore:
           type: boolean
+    EngineIntelligenceResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - contractVersion
+        - generatedAt
+        - comparison
+        - engines
+        - diagnosticSignals
+        - warnings
+      description: Bounded analyst diagnostic response assembled from the existing alert-service engine intelligence projection. ABSENT and UNAVAILABLE responses include explicit null contractVersion, generatedAt, and comparison fields plus empty arrays. It is not a final decision, payment authorization, automatic approve, automatic decline, automatic block, model promotion, threshold recommendation, recommendation layer, workflow action, or bank authorization.
+      properties:
+        status:
+          type: string
+          enum: [AVAILABLE, ABSENT, UNAVAILABLE, DEGRADED]
+          description: ABSENT means no projection exists for this scored transaction, which is expected for old transactions and disabled producer periods. UNAVAILABLE means the projection read path degraded.
+        contractVersion:
+          type: integer
+          minimum: 1
+          nullable: true
+        generatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        comparison:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/EngineIntelligenceComparisonResponse"
+        engines:
+          type: array
+          maxItems: 2
+          items:
+            $ref: "#/components/schemas/EngineIntelligenceEngineResponse"
+        diagnosticSignals:
+          type: array
+          maxItems: 5
+          items:
+            $ref: "#/components/schemas/EngineIntelligenceDiagnosticSignalResponse"
+        warnings:
+          type: array
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/EngineIntelligenceWarningResponse"
+    EngineIntelligenceComparisonResponse:
+      type: object
+      additionalProperties: false
+      required: [agreementStatus, riskMismatchStatus, scoreDeltaBucket]
+      properties:
+        agreementStatus:
+          type: string
+          enum: [AGREEMENT, ADJACENT_RISK_VARIANCE, DISAGREEMENT, PARTIAL, INSUFFICIENT_DATA, REQUIRED_ENGINE_NOT_COMPARABLE]
+        riskMismatchStatus:
+          type: string
+          enum: [SAME_RISK_LEVEL, ADJACENT_RISK_LEVEL, MATERIAL_RISK_MISMATCH, NOT_COMPARABLE]
+        scoreDeltaBucket:
+          type: string
+          enum: [NONE, SMALL, MEDIUM, LARGE, UNAVAILABLE]
+    EngineIntelligenceEngineResponse:
+      type: object
+      additionalProperties: false
+      required: [engineId, engineType, status, scoreBucket, reasonCodes]
+      properties:
+        engineId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        engineType:
+          type: string
+        status:
+          type: string
+          enum: [AVAILABLE, UNAVAILABLE, TIMEOUT, DEGRADED, NOT_APPLICABLE]
+        riskLevel:
+          type: string
+          nullable: true
+          enum: [LOW, MEDIUM, HIGH, CRITICAL]
+        scoreBucket:
+          type: string
+          enum: [NONE, LOW, MEDIUM, HIGH, VERY_HIGH, UNAVAILABLE]
+        reasonCodes:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+    EngineIntelligenceDiagnosticSignalResponse:
+      type: object
+      additionalProperties: false
+      required: [engineId, engineType, engineStatus, signalCategory, scoreBucket, reasonCode]
+      properties:
+        engineId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        engineType:
+          type: string
+        engineStatus:
+          type: string
+          enum: [AVAILABLE, UNAVAILABLE, TIMEOUT, DEGRADED, NOT_APPLICABLE]
+        signalCategory:
+          type: string
+          enum: [FRAUD_SIGNAL, OPERATIONAL_SIGNAL]
+        riskLevel:
+          type: string
+          nullable: true
+          enum: [LOW, MEDIUM, HIGH, CRITICAL]
+        scoreBucket:
+          type: string
+          enum: [NONE, LOW, MEDIUM, HIGH, VERY_HIGH, UNAVAILABLE]
+        reasonCode:
+          type: string
+          minLength: 1
+          maxLength: 128
+    EngineIntelligenceWarningResponse:
+      type: object
+      additionalProperties: false
+      required: [warningCode, count]
+      properties:
+        warningCode:
+          type: string
+          minLength: 1
+          maxLength: 128
+        count:
+          type: integer
+          minimum: 0
     EngineIntelligenceReadModel:
       type: object
       additionalProperties: false

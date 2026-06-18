@@ -66,6 +66,7 @@ import com.frauddetection.alert.governance.audit.GovernanceAuditDecision;
 import com.frauddetection.alert.governance.audit.GovernanceAuditEventResponse;
 import com.frauddetection.alert.governance.audit.GovernanceAuditService;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
+import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.mapper.ScoredTransactionResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
@@ -180,6 +181,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         AlertResponseMapper.class,
         FraudCaseResponseMapper.class,
         ScoredTransactionResponseMapper.class,
+        EngineIntelligenceResponseMapper.class,
         ScoredTransactionSearchPolicy.class,
         EngineIntelligenceFeedbackReadQueryPolicy.class,
         AlertServiceExceptionHandler.class
@@ -342,6 +344,8 @@ class AlertSecurityConfigTest {
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/transactions/scored"))
                 .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/transactions/scored/txn-1"))
+                .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/audit/events"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/audit/integrity"))
@@ -441,6 +445,31 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/transactions/scored").with(demoUser("READ_ONLY_ANALYST")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray());
+    }
+
+    @Test
+    void scoredTransactionDetailUsesSameAuthorityAsScoredTransactionRead() throws Exception {
+        when(transactionMonitoringUseCase.getScoredTransaction("txn-old"))
+                .thenReturn(new com.frauddetection.alert.domain.ScoredTransaction(
+                        "txn-old",
+                        "customer-1",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0.5d,
+                        com.frauddetection.common.events.enums.RiskLevel.MEDIUM,
+                        false,
+                        List.of()
+                ));
+        when(engineIntelligenceReadService.read("txn-old"))
+                .thenReturn(EngineIntelligenceReadModel.notProjected("txn-old"));
+
+        mockMvc.perform(get("/api/v1/transactions/scored/txn-old")
+                        .with(authorities(AnalystAuthority.TRANSACTION_MONITOR_READ)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.engineIntelligence.status").value("ABSENT"));
     }
 
     @Test

@@ -11,6 +11,8 @@ public interface TransactionMonitoringUseCase {
 
     Page<ScoredTransaction> listScoredTransactions(Pageable pageable);
 
+    ScoredTransaction getScoredTransaction(String transactionId);
+
     default Page<ScoredTransaction> listScoredTransactions(Pageable pageable, ScoredTransactionSearchCriteria criteria) {
         return listScoredTransactions(pageable);
     }

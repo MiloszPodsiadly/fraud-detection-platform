@@ -43,6 +43,7 @@ import com.frauddetection.alert.governance.promotionreviewreadiness.PromotionRev
 import com.frauddetection.alert.governance.shadowperformance.ShadowPerformanceSummaryController;
 import com.frauddetection.alert.governance.shadowperformance.ShadowPerformanceSummaryReadService;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
+import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.mapper.ScoredTransactionResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
@@ -129,6 +130,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         AlertResponseMapper.class,
         FraudCaseResponseMapper.class,
         ScoredTransactionResponseMapper.class,
+        EngineIntelligenceResponseMapper.class,
         ScoredTransactionSearchPolicy.class,
         EngineIntelligenceFeedbackReadQueryPolicy.class,
         AlertServiceExceptionHandler.class
@@ -289,6 +291,7 @@ class RouteCoverageAgainstMvcMappingsTest {
                         "GET /api/v1/alerts/{alertId}/assistant-summary",
                         "POST /api/v1/alerts/{alertId}/decision",
                         "GET /api/v1/transactions/scored",
+                        "GET /api/v1/transactions/scored/{transactionId}",
                         "GET /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback",
                         "POST /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback",
                         "GET /internal/suspicious-transactions",

@@ -52,6 +52,8 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
     void transactionRoutesRequireExplicitTransactionAuthority() throws Exception {
         expectSecurityLayerDoesNotReject(get("/api/v1/transactions/scored")
                 .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)));
+        expectSecurityLayerDoesNotReject(get("/api/v1/transactions/scored/txn-1")
+                .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)));
         expectSecurityLayerDoesNotReject(get("/api/v1/transactions/scored/txn-1/engine-intelligence")
                 .with(userWith(AnalystAuthority.TRANSACTION_MONITOR_READ)));
         expectSecurityLayerDoesNotReject(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
@@ -59,6 +61,7 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
         expectSecurityLayerDoesNotReject(post("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
                 .with(userWith(AnalystAuthority.ENGINE_INTELLIGENCE_FEEDBACK_WRITE)).with(csrf()));
         expectDenied(get("/api/v1/transactions/scored").with(userWith(AnalystAuthority.FRAUD_CASE_READ)));
+        expectDenied(get("/api/v1/transactions/scored/txn-1").with(userWith(AnalystAuthority.FRAUD_CASE_READ)));
         expectDenied(get("/api/v1/transactions/scored/txn-1/engine-intelligence")
                 .with(userWith(AnalystAuthority.FRAUD_CASE_READ)));
         expectDenied(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
@@ -72,6 +75,7 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
         expectDenied(post("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback")
                 .with(userWith(AnalystAuthority.FRAUD_CASE_READ)).with(csrf()));
         expectDenied(get("/api/v1/transactions/scored"));
+        expectDenied(get("/api/v1/transactions/scored/txn-1"));
         expectDenied(get("/api/v1/transactions/scored/txn-1/engine-intelligence"));
         expectDenied(get("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback"));
         expectDenied(post("/api/v1/transactions/scored/txn-1/engine-intelligence/feedback").with(csrf()));

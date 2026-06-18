@@ -78,4 +78,10 @@ class ReadAccessResultCountExtractorTest {
                 ReadAccessEndpointCategory.ENGINE_INTELLIGENCE_READ
         )).isZero();
     }
+
+    @Test
+    void shouldCountScoredTransactionDetailAsOneRead() {
+        assertThat(extractor.resultCount(new Object(), ReadAccessEndpointCategory.SCORED_TRANSACTION_DETAIL))
+                .isEqualTo(1);
+    }
 }
