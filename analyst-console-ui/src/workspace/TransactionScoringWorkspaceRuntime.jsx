@@ -51,6 +51,7 @@ export function TransactionScoringWorkspaceRuntime({
         onPageChange={changeTransactionPage}
         onPageSizeChange={changeTransactionPageSize}
         apiClient={apiClient}
+        canReadTransactions={canReadTransactions}
       />
     ),
     navigationState: {

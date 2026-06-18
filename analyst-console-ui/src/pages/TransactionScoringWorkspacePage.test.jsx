@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { TransactionScoringWorkspacePage } from "./TransactionScoringWorkspacePage.jsx";
 
 vi.mock("../components/TransactionRiskIntelligencePanel.jsx", () => ({
-  TransactionRiskIntelligencePanel: ({ transactionId }) => (
-    <section aria-label="Mock transaction risk intelligence">Risk intelligence for {transactionId}</section>
+  TransactionRiskIntelligencePanel: ({ transactionId, enabled }) => (
+    <section aria-label="Mock transaction risk intelligence">Risk intelligence for {transactionId}; enabled: {String(enabled)}</section>
   )
 }));
 
@@ -36,7 +36,33 @@ describe("TransactionScoringWorkspacePage", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Details" })[1]);
 
     expect(screen.getByRole("region", { name: "Mock transaction risk intelligence" })).toHaveTextContent("txn-2");
+    expect(screen.getByRole("region", { name: "Mock transaction risk intelligence" })).toHaveTextContent("enabled: true");
     expect(screen.queryByText("Risk intelligence for txn-1")).not.toBeInTheDocument();
+  });
+
+  it("passes disabled detail read gate when transaction reads are not enabled", () => {
+    render(
+      <TransactionScoringWorkspacePage
+        transactionPage={{
+          content: [transaction("txn-1")],
+          page: 0,
+          size: 25,
+          totalPages: 1,
+          totalElements: 1
+        }}
+        isLoading={false}
+        error={null}
+        onRetry={vi.fn()}
+        onTransactionPageChange={vi.fn()}
+        onTransactionPageSizeChange={vi.fn()}
+        apiClient={{ getScoredTransactionDetail: vi.fn() }}
+        canReadTransactions={false}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+
+    expect(screen.getByRole("region", { name: "Mock transaction risk intelligence" })).toHaveTextContent("enabled: false");
   });
 });
 

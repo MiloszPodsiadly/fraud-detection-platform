@@ -27,7 +27,20 @@ describe("TransactionRiskIntelligencePanel", () => {
     expect(within(summary).getByText("txn-1")).toBeInTheDocument();
     expect(within(summary).getByText("corr-1")).toBeInTheDocument();
     expect(within(summary).getByText("0.91")).toBeInTheDocument();
+    expect(within(summary).getByText("Alert recommendation flag")).toBeInTheDocument();
+    expect(within(summary).getByText("Present")).toBeInTheDocument();
     expect(screen.getByText("alertRecommended is a scored transaction field, not a final payment decision.")).toBeInTheDocument();
+  });
+
+  it("does not enable detail fetch when panel reads are disabled", () => {
+    renderPanel({ enabled: false });
+
+    expect(useScoredTransactionDetail).toHaveBeenCalledWith(expect.objectContaining({
+      transactionId: "txn-1",
+      enabled: false
+    }));
+    expect(screen.getByText("Transaction risk intelligence is not available without transaction read permission.")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Scored transaction summary" })).not.toBeInTheDocument();
   });
 
   it.each([
@@ -131,8 +144,8 @@ describe("TransactionRiskIntelligencePanel", () => {
   });
 });
 
-function renderPanel() {
-  return render(<TransactionRiskIntelligencePanel transactionId="txn-1" apiClient={{}} />);
+function renderPanel(props = {}) {
+  return render(<TransactionRiskIntelligencePanel transactionId="txn-1" apiClient={{}} {...props} />);
 }
 
 function detail(overrides = {}) {

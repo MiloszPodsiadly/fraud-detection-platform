@@ -16,6 +16,7 @@ export function TransactionScoringWorkspacePage({
   onTransactionPageChange,
   onTransactionPageSizeChange,
   apiClient,
+  canReadTransactions = true,
   workspaceHeadingProps = {}
 }) {
   const transactions = transactionPage.content || [];
@@ -65,6 +66,7 @@ export function TransactionScoringWorkspacePage({
               <TransactionRiskIntelligencePanel
                 transactionId={transaction.transactionId}
                 apiClient={apiClient}
+                enabled={canReadTransactions === true}
               />
             )}
           />

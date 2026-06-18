@@ -39,7 +39,8 @@ export function TransactionRiskIntelligencePanel({
         </p>
       </div>
 
-      {!shouldFetch && <p className="emptyStateMessage">No transaction selected.</p>}
+      {!enabled && <p className="emptyStateMessage">Transaction risk intelligence is not available without transaction read permission.</p>}
+      {enabled && !transactionId && <p className="emptyStateMessage">No transaction selected.</p>}
       {shouldFetch && isLoading && <p className="loadingText">Loading transaction risk intelligence...</p>}
       {shouldFetch && !isLoading && error && (
         <p className="formError">{errorMessage(error)}</p>
@@ -64,7 +65,7 @@ function TransactionRiskIntelligenceDetail({ detail }) {
           <Field label="Scored at" value={formatDateTime(detail.scoredAt)} />
           <Field label="Fraud score" value={formatScore(detail.fraudScore)} />
           <Field label="Risk level" value={detail.riskLevel || "Not available"} />
-          <Field label="Alert recommended" value={detail.alertRecommended ? "Yes" : "No"} />
+          <Field label="Alert recommendation flag" value={detail.alertRecommended ? "Present" : "Not present"} />
           <Field label="Reason codes" value={listText(detail.reasonCodes)} />
         </dl>
         <p className="sectionCopy">alertRecommended is a scored transaction field, not a final payment decision.</p>
