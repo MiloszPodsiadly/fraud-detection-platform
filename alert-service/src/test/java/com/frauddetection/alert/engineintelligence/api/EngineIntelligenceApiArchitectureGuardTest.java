@@ -31,15 +31,29 @@ class EngineIntelligenceApiArchitectureGuardTest {
     );
 
     @Test
-    void onlyBoundedReadModelPackageMayExposeEngineIntelligence() throws Exception {
-        String legacyApiSources = sources(
-                "alert-service/src/main/java/com/frauddetection/alert/api",
-                "alert-service/src/main/java/com/frauddetection/alert/controller"
-        );
+    void engineIntelligencePublicApiSurfaceIsExplicitlyBounded() throws Exception {
         String openApi = sources("docs/openapi/alert_service.openapi.yaml");
 
-        assertThat(legacyApiSources).doesNotContain("EngineIntelligence");
+        assertThat(filesContainingIgnoringCase("alert-service/src/main/java/com/frauddetection/alert/api", "EngineIntelligence"))
+                .isSubsetOf(List.of(
+                        "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceComparisonResponse.java",
+                        "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceDiagnosticSignalResponse.java",
+                        "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceEngineResponse.java",
+                        "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceEngineStatusResponse.java",
+                        "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceResponse.java",
+                        "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceResponseStatus.java",
+                        "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceWarningResponse.java",
+                        "alert-service/src/main/java/com/frauddetection/alert/api/ScoredTransactionResponse.java"
+                ));
+        assertThat(filesContainingIgnoringCase("alert-service/src/main/java/com/frauddetection/alert/controller", "EngineIntelligence"))
+                .isSubsetOf(List.of("alert-service/src/main/java/com/frauddetection/alert/controller/ScoredTransactionController.java"));
+        assertThat(filesContainingIgnoringCase("alert-service/src/main/java/com/frauddetection/alert/mapper", "EngineIntelligence"))
+                .isSubsetOf(List.of(
+                        "alert-service/src/main/java/com/frauddetection/alert/mapper/EngineIntelligenceResponseMapper.java",
+                        "alert-service/src/main/java/com/frauddetection/alert/mapper/ScoredTransactionResponseMapper.java"
+                ));
         assertThat(openApi)
+                .contains("EngineIntelligenceResponse")
                 .contains("EngineIntelligenceReadModel")
                 .doesNotContain("EngineIntelligenceProjection");
     }
@@ -150,6 +164,103 @@ class EngineIntelligenceApiArchitectureGuardTest {
     }
 
     @Test
+    void scoredTransactionDetailDoesNotRecomputeEngineIntelligence() throws Exception {
+        String detailCompositionSources = sources(
+                "alert-service/src/main/java/com/frauddetection/alert/controller/ScoredTransactionController.java",
+                "alert-service/src/main/java/com/frauddetection/alert/mapper/EngineIntelligenceResponseMapper.java",
+                "alert-service/src/main/java/com/frauddetection/alert/mapper/ScoredTransactionResponseMapper.java",
+                "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceComparisonResponse.java",
+                "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceDiagnosticSignalResponse.java",
+                "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceEngineResponse.java",
+                "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceResponse.java",
+                "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceWarningResponse.java"
+        );
+
+        assertThat(detailCompositionSources).doesNotContain(
+                "calculateAgreement",
+                "computeAgreement",
+                "deriveAgreement",
+                "calculateRiskMismatch",
+                "computeRiskMismatch",
+                "deriveRiskMismatch",
+                "calculateScoreDelta",
+                "computeScoreDelta",
+                "deriveScoreDelta",
+                "strongestSignals",
+                "rankReasonCodes",
+                "normalizeEngineStatus"
+        );
+    }
+
+    @Test
+    void scoredTransactionDetailPublicDtoDoesNotExposeRawInternalPayloads() throws Exception {
+        String publicDtoSources = sources("alert-service/src/main/java/com/frauddetection/alert/api");
+
+        assertThat(publicDtoSources).doesNotContain(
+                "FraudEngineResult",
+                "NormalizedFraudEngineResult",
+                "rawFeatureVector",
+                "rawMlRequest",
+                "rawMlResponse",
+                "rawEvidence",
+                "rawPayload",
+                "groundTruth",
+                "trainingLabel",
+                "finalDecision",
+                "stackTrace",
+                "exceptionMessage",
+                "modelPath",
+                "secret",
+                "token"
+        );
+    }
+
+    @Test
+    void scoredTransactionDetailDoesNotAddDecisioningPaymentPromotionOrRecommendationBehavior() throws Exception {
+        String detailSources = sources(
+                "alert-service/src/main/java/com/frauddetection/alert/controller/ScoredTransactionController.java",
+                "alert-service/src/main/java/com/frauddetection/alert/mapper/EngineIntelligenceResponseMapper.java",
+                "alert-service/src/main/java/com/frauddetection/alert/mapper/ScoredTransactionResponseMapper.java",
+                "alert-service/src/main/java/com/frauddetection/alert/service/TransactionMonitoringService.java",
+                "alert-service/src/main/java/com/frauddetection/alert/service/TransactionMonitoringUseCase.java",
+                "alert-service/src/main/java/com/frauddetection/alert/service/ScoredTransactionReadPolicy.java"
+        );
+
+        assertThat(detailSources).doesNotContain(
+                "paymentAuthorization",
+                "authorizePayment",
+                "approveTransaction",
+                "declineTransaction",
+                "blockTransaction",
+                "promoteModel",
+                "deployModel",
+                "thresholdRecommendation",
+                "recommendedThreshold",
+                "changeThreshold",
+                "championActivation",
+                "recommendationService"
+        );
+    }
+
+    @Test
+    void scoredTransactionDetailUsesExactBoundedTransactionLookup() throws Exception {
+        String transactionMonitoringService = sources(
+                "alert-service/src/main/java/com/frauddetection/alert/service/TransactionMonitoringService.java"
+        );
+        String detailMethod = substringBetween(
+                transactionMonitoringService,
+                "public ScoredTransaction getScoredTransaction(String transactionId)",
+                "\n    @Override",
+                transactionMonitoringService.indexOf("public ScoredTransaction getScoredTransaction(String transactionId)")
+        );
+
+        assertThat(detailMethod)
+                .contains("ScoredTransactionReadPolicy.normalizeTransactionId(transactionId)")
+                .contains("repository.findByTransactionId(boundedTransactionId)")
+                .doesNotContain("findAll", "MongoTemplate", ".regex(", "Pattern.quote", "contains(");
+    }
+
+    @Test
     void feedbackReadResponseAndOpenApiDoNotExposeRawInternalFields() throws Exception {
         String readDtoSources = sources(
                 "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceFeedbackReadModel.java",
@@ -238,6 +349,25 @@ class EngineIntelligenceApiArchitectureGuardTest {
                 .contains("No execution, decisioning, retraining, or rule updates");
     }
 
+    @Test
+    void governanceIndexesScoredTransactionEngineIntelligenceDetailBoundary() throws Exception {
+        String architectureIndex = sources("docs/architecture/index.md");
+        String architectureDoc = sources("docs/architecture/engine_intelligence_scored_transaction_api.md");
+
+        assertThat(architectureIndex)
+                .contains("engine_intelligence_scored_transaction_api.md")
+                .contains("Engine intelligence on scored transaction detail")
+                .contains("FDP-115");
+        assertThat(architectureDoc)
+                .contains("GET /api/v1/transactions/scored/{transactionId}")
+                .contains("ScoredTransactionResponse.engineIntelligence")
+                .contains("does not recompute agreement")
+                .contains("engineIntelligence.status=ABSENT")
+                .contains("engineIntelligence.status=UNAVAILABLE")
+                .contains("must not expose")
+                .contains("FDP-115 does not add");
+    }
+
     private String sources(String... relativePaths) throws IOException {
         StringBuilder sources = new StringBuilder();
         for (String relativePath : relativePaths) {
@@ -284,6 +414,16 @@ class EngineIntelligenceApiArchitectureGuardTest {
                         || file.endsWith("/alertsApi.test.js")
                         || file.endsWith("/styles.css"))
                 .toList();
+    }
+
+    private String substringBetween(String source, String startNeedle, String endNeedle, int searchFrom) {
+        int start = source.indexOf(startNeedle);
+        assertThat(start).isGreaterThanOrEqualTo(0);
+        int end = source.indexOf(endNeedle, searchFrom + startNeedle.length());
+        if (end < 0) {
+            end = source.length();
+        }
+        return source.substring(start, end);
     }
 
     private static boolean containsIgnoringCase(Path path, String normalizedNeedle) {

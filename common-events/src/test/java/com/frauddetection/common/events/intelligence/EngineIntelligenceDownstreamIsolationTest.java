@@ -19,14 +19,26 @@ class EngineIntelligenceDownstreamIsolationTest {
         assertThat(sourcesExcluding(
                 alertService,
                 alertService.resolve("engineintelligence"),
-                alertService.resolve("service/TransactionMonitoringService.java")
+                alertService.resolve("service/TransactionMonitoringService.java"),
+                alertService.resolve("api/EngineIntelligenceComparisonResponse.java"),
+                alertService.resolve("api/EngineIntelligenceDiagnosticSignalResponse.java"),
+                alertService.resolve("api/EngineIntelligenceEngineResponse.java"),
+                alertService.resolve("api/EngineIntelligenceEngineStatusResponse.java"),
+                alertService.resolve("api/EngineIntelligenceResponse.java"),
+                alertService.resolve("api/EngineIntelligenceResponseStatus.java"),
+                alertService.resolve("api/EngineIntelligenceWarningResponse.java"),
+                alertService.resolve("api/ScoredTransactionResponse.java"),
+                alertService.resolve("controller/ScoredTransactionController.java"),
+                alertService.resolve("mapper/EngineIntelligenceResponseMapper.java"),
+                alertService.resolve("mapper/ScoredTransactionResponseMapper.java")
         )).doesNotContain("EngineIntelligenceSummary", "engineIntelligence");
     }
 
     @Test
-    void apiAndUiDoNotExposeEngineIntelligence() throws Exception {
+    void controllersExposeEngineIntelligenceOnlyThroughScoredTransactionDetail() throws Exception {
         Path root = repositoryRoot();
-        assertThat(sources(root.resolve("alert-service/src/main/java/com/frauddetection/alert/controller")))
+        Path controllers = root.resolve("alert-service/src/main/java/com/frauddetection/alert/controller");
+        assertThat(sourcesExcluding(controllers, controllers.resolve("ScoredTransactionController.java")))
                 .doesNotContain("EngineIntelligenceSummary", "engineIntelligence");
         assertThat(EngineIntelligenceFdp93SourceScanSupport.filesContainingAny(
                 "analyst-console-ui/src",
@@ -37,8 +49,13 @@ class EngineIntelligenceDownstreamIsolationTest {
     }
 
     @Test
-    void feedbackWorkflowDoesNotReferenceEngineIntelligence() throws Exception {
-        assertThat(sources(repositoryRoot().resolve("alert-service/src/main/java/com/frauddetection/alert/mapper")))
+    void mappersReferenceEngineIntelligenceOnlyThroughBoundedReadResponses() throws Exception {
+        Path mappers = repositoryRoot().resolve("alert-service/src/main/java/com/frauddetection/alert/mapper");
+        assertThat(sourcesExcluding(
+                mappers,
+                mappers.resolve("EngineIntelligenceResponseMapper.java"),
+                mappers.resolve("ScoredTransactionResponseMapper.java")
+        ))
                 .doesNotContain("EngineIntelligenceSummary", "engineIntelligence");
     }
 
