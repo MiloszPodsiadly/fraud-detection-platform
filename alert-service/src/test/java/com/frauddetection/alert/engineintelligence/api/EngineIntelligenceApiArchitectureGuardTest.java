@@ -25,8 +25,14 @@ class EngineIntelligenceApiArchitectureGuardTest {
             "analyst-console-ui/src/components/EngineIntelligencePanel.jsx",
             "analyst-console-ui/src/components/EngineIntelligencePanel.test.jsx",
             "analyst-console-ui/src/components/EngineIntelligencePanelScopeGuard.test.js",
+            "analyst-console-ui/src/components/TransactionRiskIntelligencePanel.jsx",
+            "analyst-console-ui/src/components/TransactionRiskIntelligencePanel.test.jsx",
             "analyst-console-ui/src/pages/FraudCaseDetailsPage.jsx",
             "analyst-console-ui/src/pages/FraudCaseDetailsPage.test.jsx",
+            "analyst-console-ui/src/transactions/transactionRiskIntelligenceScopeGuard.test.js",
+            "analyst-console-ui/src/transactions/transactionRiskIntelligenceValidation.js",
+            "analyst-console-ui/src/transactions/transactionRiskIntelligenceValidation.test.js",
+            "analyst-console-ui/src/transactions/useScoredTransactionDetail.test.js",
             "analyst-console-ui/src/styles.css"
     );
 
@@ -428,6 +434,11 @@ class EngineIntelligenceApiArchitectureGuardTest {
                 // FDP-114 Promotion Review Readiness owns governance diagnostics scope guards.
                 // It must not be treated as an Engine Intelligence UI surface.
                 .filter(file -> file.contains("/EngineIntelligence")
+                        || file.contains("/TransactionRiskIntelligence")
+                        || file.endsWith("/transactionRiskIntelligenceScopeGuard.test.js")
+                        || file.endsWith("/transactionRiskIntelligenceValidation.js")
+                        || file.endsWith("/transactionRiskIntelligenceValidation.test.js")
+                        || file.endsWith("/useScoredTransactionDetail.test.js")
                         || file.endsWith("/FraudCaseDetailsPage.jsx")
                         || file.endsWith("/FraudCaseDetailsPage.test.jsx")
                         || file.endsWith("/alertsApi.js")
