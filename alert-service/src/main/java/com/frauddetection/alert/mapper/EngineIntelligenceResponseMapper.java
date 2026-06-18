@@ -22,6 +22,8 @@ public class EngineIntelligenceResponseMapper {
     static final int MAX_PUBLIC_REASON_CODES = 5;
 
     public EngineIntelligenceResponse toResponse(EngineIntelligenceReadModel readModel) {
+        // available=false is reserved for not-projected/absent records. Projection read failures
+        // stay on the controller path and are exposed as UNAVAILABLE, not ABSENT.
         if (readModel == null || !readModel.available()) {
             return EngineIntelligenceResponse.absent();
         }
@@ -41,6 +43,11 @@ public class EngineIntelligenceResponseMapper {
     }
 
     private EngineIntelligenceResponseStatus status(EngineIntelligenceReadModel readModel) {
+        // This is public exposure health only. It is derived from already-projected engine
+        // statuses and warning presence; it must not use scores, risk levels, agreement,
+        // risk mismatch, score delta, reason ranking, strongest signals, ML invocation,
+        // rules invocation, or scoring logic. ABSENT and UNAVAILABLE are handled outside
+        // this calculation and are never computed from comparison values.
         if (hasLimitedProjectionData(readModel)) {
             return EngineIntelligenceResponseStatus.DEGRADED;
         }

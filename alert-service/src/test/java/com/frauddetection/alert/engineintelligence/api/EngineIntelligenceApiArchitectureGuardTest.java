@@ -177,6 +177,7 @@ class EngineIntelligenceApiArchitectureGuardTest {
                 "alert-service/src/main/java/com/frauddetection/alert/api/ScoredTransactionDetailResponse.java",
                 "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceWarningResponse.java"
         );
+        String normalizedDetailCompositionSources = detailCompositionSources.toLowerCase(Locale.ROOT);
 
         assertThat(detailCompositionSources).doesNotContain(
                 "calculateAgreement",
@@ -191,6 +192,23 @@ class EngineIntelligenceApiArchitectureGuardTest {
                 "strongestSignals",
                 "rankReasonCodes",
                 "normalizeEngineStatus"
+        );
+        assertThat(normalizedDetailCompositionSources).doesNotContain(
+                "calculaterisk",
+                "computerisk",
+                "deriverisk",
+                "calculatescore",
+                "computescore",
+                "derivescore",
+                "scoringservice",
+                "fraudscoring",
+                "rulesengine",
+                "mlclient",
+                "modelclient",
+                "orchestrator",
+                "kafkatemplate",
+                "kafkaproducer",
+                ".send("
         );
     }
 

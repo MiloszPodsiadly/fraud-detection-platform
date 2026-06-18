@@ -112,7 +112,7 @@ class ScoredTransactionControllerDetailTest {
         when(transactionMonitoringUseCase.getScoredTransaction("txn-old")).thenReturn(scoredTransaction("txn-old"));
         when(engineIntelligenceReadService.read("txn-old")).thenReturn(EngineIntelligenceReadModel.notProjected("txn-old"));
 
-        mockMvc.perform(get("/api/v1/transactions/scored/txn-old"))
+        String response = mockMvc.perform(get("/api/v1/transactions/scored/txn-old"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.transactionId").value("txn-old"))
                 .andExpect(jsonPath("$.engineIntelligence.status").value("ABSENT"))
@@ -121,7 +121,21 @@ class ScoredTransactionControllerDetailTest {
                 .andExpect(jsonPath("$.engineIntelligence.comparison").isEmpty())
                 .andExpect(jsonPath("$.engineIntelligence.engines").isArray())
                 .andExpect(jsonPath("$.engineIntelligence.diagnosticSignals").isArray())
-                .andExpect(jsonPath("$.engineIntelligence.warnings").isArray());
+                .andExpect(jsonPath("$.engineIntelligence.warnings").isArray())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(response).contains(
+                "\"engineIntelligence\"",
+                "\"status\":\"ABSENT\"",
+                "\"contractVersion\":null",
+                "\"generatedAt\":null",
+                "\"comparison\":null",
+                "\"engines\":[]",
+                "\"diagnosticSignals\":[]",
+                "\"warnings\":[]"
+        );
     }
 
     @Test
@@ -130,14 +144,30 @@ class ScoredTransactionControllerDetailTest {
         when(engineIntelligenceReadService.read("txn-store-failure"))
                 .thenThrow(new EngineIntelligenceProjectionReadUnavailableException());
 
-        mockMvc.perform(get("/api/v1/transactions/scored/txn-store-failure"))
+        String response = mockMvc.perform(get("/api/v1/transactions/scored/txn-store-failure"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.transactionId").value("txn-store-failure"))
                 .andExpect(jsonPath("$.engineIntelligence.status").value("UNAVAILABLE"))
                 .andExpect(jsonPath("$.engineIntelligence.contractVersion").isEmpty())
                 .andExpect(jsonPath("$.engineIntelligence.generatedAt").isEmpty())
                 .andExpect(jsonPath("$.engineIntelligence.comparison").isEmpty())
-                .andExpect(jsonPath("$.engineIntelligence.engines").isArray());
+                .andExpect(jsonPath("$.engineIntelligence.engines").isArray())
+                .andExpect(jsonPath("$.engineIntelligence.diagnosticSignals").isArray())
+                .andExpect(jsonPath("$.engineIntelligence.warnings").isArray())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(response).contains(
+                "\"engineIntelligence\"",
+                "\"status\":\"UNAVAILABLE\"",
+                "\"contractVersion\":null",
+                "\"generatedAt\":null",
+                "\"comparison\":null",
+                "\"engines\":[]",
+                "\"diagnosticSignals\":[]",
+                "\"warnings\":[]"
+        );
     }
 
     @Test

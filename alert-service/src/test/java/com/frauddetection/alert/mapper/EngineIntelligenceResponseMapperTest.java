@@ -32,8 +32,10 @@ class EngineIntelligenceResponseMapperTest {
 
     @Test
     void mapsMissingEngineIntelligenceToAbsentResponse() {
-        EngineIntelligenceResponse response = mapper.toResponse(EngineIntelligenceReadModel.notProjected("txn-old"));
+        EngineIntelligenceReadModel notProjected = EngineIntelligenceReadModel.notProjected("txn-old");
+        EngineIntelligenceResponse response = mapper.toResponse(notProjected);
 
+        assertThat(notProjected.available()).isFalse();
         assertThat(response.status()).isEqualTo(EngineIntelligenceResponseStatus.ABSENT);
         assertThat(response.contractVersion()).isNull();
         assertThat(response.generatedAt()).isNull();
@@ -63,16 +65,26 @@ class EngineIntelligenceResponseMapperTest {
     }
 
     @Test
-    void mapsUnavailableTimeoutAndSkippedEngineStatesVisibly() {
+    void preservesProjectedComparisonValuesExactlyWithoutCalculatingThem() {
+        EngineIntelligenceResponse response = mapper.toResponse(readModel(
+                FraudEngineStatus.AVAILABLE,
+                FraudEngineStatus.AVAILABLE,
+                EngineIntelligenceAgreementStatus.DISAGREEMENT,
+                EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH,
+                EngineIntelligenceScoreDeltaBucket.LARGE,
+                List.of()
+        ));
+
+        assertThat(response.comparison().agreementStatus()).isEqualTo(EngineIntelligenceAgreementStatus.DISAGREEMENT);
+        assertThat(response.comparison().riskMismatchStatus()).isEqualTo(EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH);
+        assertThat(response.comparison().scoreDeltaBucket()).isEqualTo(EngineIntelligenceScoreDeltaBucket.LARGE);
+    }
+
+    @Test
+    void unavailableEngineRemainsVisibleAndDegradesTopLevelStatus() {
         EngineIntelligenceResponse unavailable = mapper.toResponse(readModel(
                 FraudEngineStatus.AVAILABLE,
                 FraudEngineStatus.UNAVAILABLE,
-                EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
-                List.of()
-        ));
-        EngineIntelligenceResponse timeout = mapper.toResponse(readModel(
-                FraudEngineStatus.TIMEOUT,
-                FraudEngineStatus.SKIPPED,
                 EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
                 List.of()
         ));
@@ -80,9 +92,34 @@ class EngineIntelligenceResponseMapperTest {
         assertThat(unavailable.status()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
         assertThat(unavailable.engines()).extracting("status")
                 .contains(EngineIntelligenceEngineStatusResponse.UNAVAILABLE);
+    }
+
+    @Test
+    void timeoutRemainsVisibleAndDegradesTopLevelStatus() {
+        EngineIntelligenceResponse timeout = mapper.toResponse(readModel(
+                FraudEngineStatus.TIMEOUT,
+                FraudEngineStatus.AVAILABLE,
+                EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
+                List.of()
+        ));
+
         assertThat(timeout.status()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
         assertThat(timeout.engines()).extracting("status")
-                .contains(EngineIntelligenceEngineStatusResponse.TIMEOUT, EngineIntelligenceEngineStatusResponse.NOT_APPLICABLE);
+                .contains(EngineIntelligenceEngineStatusResponse.TIMEOUT);
+    }
+
+    @Test
+    void skippedMapsToNotApplicableWithoutDegradingByItself() {
+        EngineIntelligenceResponse skipped = mapper.toResponse(readModel(
+                FraudEngineStatus.SKIPPED,
+                FraudEngineStatus.AVAILABLE,
+                EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
+                List.of()
+        ));
+
+        assertThat(skipped.status()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
+        assertThat(skipped.engines()).extracting("status")
+                .contains(EngineIntelligenceEngineStatusResponse.NOT_APPLICABLE);
     }
 
     @Test
@@ -197,14 +234,32 @@ class EngineIntelligenceResponseMapperTest {
             EngineIntelligenceAgreementStatus agreementStatus,
             List<EngineIntelligenceWarningReadModel> warnings
     ) {
+        return readModel(
+                rulesStatus,
+                mlStatus,
+                agreementStatus,
+                EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
+                EngineIntelligenceScoreDeltaBucket.UNAVAILABLE,
+                warnings
+        );
+    }
+
+    private EngineIntelligenceReadModel readModel(
+            FraudEngineStatus rulesStatus,
+            FraudEngineStatus mlStatus,
+            EngineIntelligenceAgreementStatus agreementStatus,
+            EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
+            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket,
+            List<EngineIntelligenceWarningReadModel> warnings
+    ) {
         return EngineIntelligenceReadModel.projected(
                 "txn-1",
                 1,
                 Instant.parse("2026-06-18T10:00:00Z"),
                 new EngineIntelligenceComparisonReadModel(
                         agreementStatus,
-                        EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
-                        EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
+                        riskMismatchStatus,
+                        scoreDeltaBucket
                 ),
                 List.of(
                         engine("rules.primary", FraudEngineType.RULES, rulesStatus, List.of("RULE_MATCH")),
