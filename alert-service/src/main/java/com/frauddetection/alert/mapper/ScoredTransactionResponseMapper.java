@@ -1,6 +1,7 @@
 package com.frauddetection.alert.mapper;
 
 import com.frauddetection.alert.api.EngineIntelligenceResponse;
+import com.frauddetection.alert.api.ScoredTransactionDetailResponse;
 import com.frauddetection.alert.api.ScoredTransactionResponse;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import org.springframework.stereotype.Component;
@@ -15,14 +16,26 @@ public class ScoredTransactionResponseMapper {
     }
 
     public ScoredTransactionResponse toResponse(ScoredTransaction transaction) {
-        return toResponse(transaction, null);
+        return new ScoredTransactionResponse(
+                transaction.transactionId(),
+                transaction.customerId(),
+                transaction.correlationId(),
+                transaction.transactionTimestamp(),
+                transaction.scoredAt(),
+                alertResponseMapper.toMoneyResponse(transaction.transactionAmount()),
+                alertResponseMapper.toMerchantInfoResponse(transaction.merchantInfo()),
+                transaction.fraudScore(),
+                transaction.riskLevel(),
+                transaction.alertRecommended(),
+                transaction.reasonCodes()
+        );
     }
 
-    public ScoredTransactionResponse toResponse(
+    public ScoredTransactionDetailResponse toDetailResponse(
             ScoredTransaction transaction,
             EngineIntelligenceResponse engineIntelligence
     ) {
-        return new ScoredTransactionResponse(
+        return new ScoredTransactionDetailResponse(
                 transaction.transactionId(),
                 transaction.customerId(),
                 transaction.correlationId(),

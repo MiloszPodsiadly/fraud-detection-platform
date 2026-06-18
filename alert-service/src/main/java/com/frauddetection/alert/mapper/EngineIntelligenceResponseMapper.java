@@ -16,6 +16,11 @@ import java.util.List;
 @Component
 public class EngineIntelligenceResponseMapper {
 
+    static final int MAX_PUBLIC_ENGINES = 2;
+    static final int MAX_PUBLIC_DIAGNOSTIC_SIGNALS = 5;
+    static final int MAX_PUBLIC_WARNINGS = 10;
+    static final int MAX_PUBLIC_REASON_CODES = 5;
+
     public EngineIntelligenceResponse toResponse(EngineIntelligenceReadModel readModel) {
         if (readModel == null || !readModel.available()) {
             return EngineIntelligenceResponse.absent();
@@ -43,10 +48,13 @@ public class EngineIntelligenceResponseMapper {
     }
 
     private boolean hasLimitedProjectionData(EngineIntelligenceReadModel readModel) {
-        return readModel.engines() != null && readModel.engines().stream()
+        return list(readModel.engines()).isEmpty()
+                || !list(readModel.warnings()).isEmpty()
+                || list(readModel.engines()).stream()
                 .anyMatch(engine -> engine.status() == FraudEngineStatus.DEGRADED
                         || engine.status() == FraudEngineStatus.TIMEOUT
-                        || engine.status() == FraudEngineStatus.UNAVAILABLE);
+                        || engine.status() == FraudEngineStatus.UNAVAILABLE
+                        || engine.status() == FraudEngineStatus.FALLBACK_USED);
     }
 
     private EngineIntelligenceComparisonResponse comparison(EngineIntelligenceReadModel readModel) {
@@ -62,19 +70,23 @@ public class EngineIntelligenceResponseMapper {
 
     private List<EngineIntelligenceEngineResponse> engines(EngineIntelligenceReadModel readModel) {
         return list(readModel.engines()).stream()
+                .limit(MAX_PUBLIC_ENGINES)
                 .map(engine -> new EngineIntelligenceEngineResponse(
                         engine.engineId(),
                         engine.engineType(),
                         publicStatus(engine.status()),
                         engine.riskLevel(),
                         engine.scoreBucket(),
-                        engine.reasonCodes()
+                        list(engine.reasonCodes()).stream()
+                                .limit(MAX_PUBLIC_REASON_CODES)
+                                .toList()
                 ))
                 .toList();
     }
 
     private List<EngineIntelligenceDiagnosticSignalResponse> diagnosticSignals(EngineIntelligenceReadModel readModel) {
         return list(readModel.diagnosticSignals()).stream()
+                .limit(MAX_PUBLIC_DIAGNOSTIC_SIGNALS)
                 .map(signal -> new EngineIntelligenceDiagnosticSignalResponse(
                         signal.engineId(),
                         signal.engineType(),
@@ -89,6 +101,7 @@ public class EngineIntelligenceResponseMapper {
 
     private List<EngineIntelligenceWarningResponse> warnings(EngineIntelligenceReadModel readModel) {
         return list(readModel.warnings()).stream()
+                .limit(MAX_PUBLIC_WARNINGS)
                 .map(warning -> new EngineIntelligenceWarningResponse(warning.warningCode(), warning.count()))
                 .toList();
     }

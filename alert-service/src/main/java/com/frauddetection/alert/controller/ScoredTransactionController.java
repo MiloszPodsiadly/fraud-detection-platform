@@ -1,6 +1,7 @@
 package com.frauddetection.alert.controller;
 
 import com.frauddetection.alert.api.PagedResponse;
+import com.frauddetection.alert.api.ScoredTransactionDetailResponse;
 import com.frauddetection.alert.api.ScoredTransactionResponse;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
@@ -83,10 +84,10 @@ public class ScoredTransactionController {
     }
 
     @GetMapping("/scored/{transactionId}")
-    public ScoredTransactionResponse getScoredTransaction(@PathVariable String transactionId) {
+    public ScoredTransactionDetailResponse getScoredTransaction(@PathVariable String transactionId) {
         var scoredTransaction = transactionMonitoringUseCase.getScoredTransaction(transactionId);
         var engineIntelligence = engineIntelligenceResponse(scoredTransaction.transactionId());
-        return responseMapper.toResponse(scoredTransaction, engineIntelligence);
+        return responseMapper.toDetailResponse(scoredTransaction, engineIntelligence);
     }
 
     private com.frauddetection.alert.api.EngineIntelligenceResponse engineIntelligenceResponse(String transactionId) {
