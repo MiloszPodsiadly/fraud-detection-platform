@@ -10,7 +10,7 @@ export function TransactionScoringWorkspaceRuntime({
   setCounterValue,
   children
 }) {
-  const { canReadTransactions } = useWorkspaceRuntime();
+  const { apiClient, canReadTransactions } = useWorkspaceRuntime();
   const transactionStreamState = useScoredTransactionStream({
     enabled: sharedWorkspaceReadsEnabled && canReadTransactions === true
   });
@@ -50,6 +50,7 @@ export function TransactionScoringWorkspaceRuntime({
         onFiltersChange={changeTransactionFilters}
         onPageChange={changeTransactionPage}
         onPageSizeChange={changeTransactionPageSize}
+        apiClient={apiClient}
       />
     ),
     navigationState: {

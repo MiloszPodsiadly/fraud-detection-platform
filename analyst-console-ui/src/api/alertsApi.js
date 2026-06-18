@@ -24,6 +24,7 @@ export function createAlertsApiClient({
     listFraudCaseWorkQueue: (requestParams, requestOptions) => listFraudCaseWorkQueueWithRequest(request, requestParams, requestOptions),
     getFraudCaseWorkQueueSummary: (requestOptions) => request("/api/v1/fraud-cases/work-queue/summary", requestOptions),
     listScoredTransactions: (requestParams, requestOptions) => listScoredTransactionsWithRequest(request, requestParams, requestOptions),
+    getScoredTransactionDetail: (transactionId, requestOptions) => getScoredTransactionDetailWithRequest(request, transactionId, requestOptions),
     listSuspiciousTransactions: (requestParams, requestOptions) => listSuspiciousTransactionsWithRequest(request, requestParams, requestOptions),
     getSuspiciousTransactionSummary: (requestOptions) => request("/internal/suspicious-transactions/summary", requestOptions),
     getSuspiciousTransaction: (suspiciousTransactionId, requestOptions) => request(`/internal/suspicious-transactions/${encodeURIComponent(suspiciousTransactionId)}`, requestOptions),
@@ -174,6 +175,27 @@ function listScoredTransactionsWithRequest(request, { page = 0, size = 25, query
   appendOptionalParam(params, "riskLevel", riskLevel);
   appendOptionalParam(params, "classification", classification || status);
   return request(`/api/v1/transactions/scored?${params.toString()}`, { signal });
+}
+
+function getScoredTransactionDetailWithRequest(request, transactionId, requestOptions = {}) {
+  const normalizedTransactionId = normalizeEngineIntelligenceTransactionId(transactionId);
+  if (!isValidEngineIntelligenceTransactionId(normalizedTransactionId)) {
+    return Promise.reject(new ApiError({
+      status: 400,
+      error: "INVALID_TRANSACTION_ID",
+      message: "Invalid scored transaction identifier."
+    }));
+  }
+  return request(
+    `/api/v1/transactions/scored/${encodeURIComponent(normalizedTransactionId)}`,
+    scoredTransactionDetailRequestOptions(requestOptions)
+  );
+}
+
+function scoredTransactionDetailRequestOptions({ signal } = {}) {
+  return {
+    ...(signal ? { signal } : {})
+  };
 }
 
 function listSuspiciousTransactionsWithRequest(request, {
