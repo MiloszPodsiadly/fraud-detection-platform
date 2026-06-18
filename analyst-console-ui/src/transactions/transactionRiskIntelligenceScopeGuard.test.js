@@ -35,10 +35,10 @@ const FORBIDDEN_TERMS = [
   ["ground", "Truth"].join(""),
   ["training", "Label"].join(""),
   ["final", "Decision"].join(""),
-  "POST /api/v1/transactions/scored",
-  "PUT /api/v1/transactions/scored",
-  "PATCH /api/v1/transactions/scored",
-  "DELETE /api/v1/transactions/scored"
+  endpointUse("POST"),
+  endpointUse("PUT"),
+  endpointUse("PATCH"),
+  endpointUse("DELETE")
 ];
 
 const FORBIDDEN_ACTION_PHRASES = [
@@ -103,7 +103,7 @@ describe("transactionRiskIntelligenceScopeGuard", () => {
   it("uses only the FDP-115 scored transaction detail read endpoint in the new client method", () => {
     const clientMethod = scoredTransactionDetailClientSource();
 
-    expect(clientMethod).toContain("/api/v1/transactions/scored/");
+    expect(clientMethod).toContain(scoredTransactionsEndpoint());
     expect(clientMethod).not.toContain("/engine-intelligence");
     expect(clientMethod).not.toContain("feedback");
     expect(clientMethod).not.toContain("method:");
@@ -113,6 +113,14 @@ describe("transactionRiskIntelligenceScopeGuard", () => {
 
 function sourceFile(relativePath) {
   return readFileSync(resolve(process.cwd(), relativePath), "utf8");
+}
+
+function endpointUse(method) {
+  return `${method} ${scoredTransactionsEndpoint().replace(/\/$/, "")}`;
+}
+
+function scoredTransactionsEndpoint() {
+  return ["/", "api", "/v1/transactions/", "scored", "/"].join("");
 }
 
 function normalizedSource(relativePaths) {
