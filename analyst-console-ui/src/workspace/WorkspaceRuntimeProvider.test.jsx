@@ -36,6 +36,7 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.canReadSuspiciousTransactions).toBe(false);
     expect(result.current.canReadGovernanceAdvisories).toBe(true);
     expect(result.current.canReadShadowPerformance).toBe(false);
+    expect(result.current.canReadPromotionReadiness).toBe(false);
     expect(result.current.canWriteGovernanceAudit).toBe(false);
     expect(result.current.runtimeStatus).toBe("ready");
   });
@@ -57,6 +58,7 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.canReadTransactions).toBe(true);
     expect(result.current.canReadSuspiciousTransactions).toBe(true);
     expect(result.current.canReadShadowPerformance).toBe(false);
+    expect(result.current.canReadPromotionReadiness).toBe(false);
     expect(result.current.canWriteGovernanceAudit).toBe(false);
     expect(result.current.apiClient).toEqual({ client: true });
   });
@@ -126,6 +128,7 @@ describe("WorkspaceRuntimeProvider", () => {
     });
 
     expect(result.current.canReadShadowPerformance).toBe(false);
+    expect(result.current.canReadPromotionReadiness).toBe(false);
     expect(result.current.canReadGovernanceAdvisories).toBe(true);
   });
 
@@ -142,6 +145,23 @@ describe("WorkspaceRuntimeProvider", () => {
     });
 
     expect(result.current.canReadShadowPerformance).toBe(true);
+    expect(result.current.canReadPromotionReadiness).toBe(false);
+  });
+
+  it("promotionReadinessVisibleWithPromotionReadinessRead", () => {
+    const session = authenticatedSession({
+      authorities: ["promotion-readiness:read"]
+    });
+    const { result } = renderHook(() => useWorkspaceRuntime(), {
+      wrapper: ({ children }) => (
+        <WorkspaceRuntimeProvider session={session} authProvider={{ kind: "oidc" }}>
+          {children}
+        </WorkspaceRuntimeProvider>
+      )
+    });
+
+    expect(result.current.canReadPromotionReadiness).toBe(true);
+    expect(result.current.canReadShadowPerformance).toBe(false);
   });
 
   it.each([
@@ -159,6 +179,21 @@ describe("WorkspaceRuntimeProvider", () => {
     });
 
     expect(result.current.canReadShadowPerformance).toBe(false);
+    expect(result.current.canReadPromotionReadiness).toBe(false);
+  });
+
+  it("shadowPerformanceReadDoesNotGrantPromotionReadiness", () => {
+    const session = authenticatedSession({ authorities: ["shadow-performance:read"] });
+    const { result } = renderHook(() => useWorkspaceRuntime(), {
+      wrapper: ({ children }) => (
+        <WorkspaceRuntimeProvider session={session} authProvider={{ kind: "oidc" }}>
+          {children}
+        </WorkspaceRuntimeProvider>
+      )
+    });
+
+    expect(result.current.canReadShadowPerformance).toBe(true);
+    expect(result.current.canReadPromotionReadiness).toBe(false);
   });
 
   it("reports missing authorities as unknown capabilities", () => {
@@ -179,6 +214,7 @@ describe("WorkspaceRuntimeProvider", () => {
     expect(result.current.canReadSuspiciousTransactions).toBeUndefined();
     expect(result.current.canReadGovernanceAdvisories).toBeUndefined();
     expect(result.current.canReadShadowPerformance).toBeUndefined();
+    expect(result.current.canReadPromotionReadiness).toBeUndefined();
     expect(result.current.canWriteGovernanceAudit).toBeUndefined();
   });
 

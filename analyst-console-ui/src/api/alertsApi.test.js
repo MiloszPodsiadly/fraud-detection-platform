@@ -5,6 +5,7 @@ import {
   createAlertsApiClient,
   toUtcInstantParam,
 } from "./alertsApi.js";
+import { isValidPromotionReviewReadinessReport } from "../governance/promotionReviewReadinessReportValidation.js";
 import { normalizeSession } from "../auth/session.js";
 import { createBffAuthProvider, createDemoAuthProvider, createOidcAuthProvider } from "../auth/authProvider.js";
 import { createInMemoryOidcSessionSource } from "../auth/oidcSessionSource.js";
@@ -28,6 +29,7 @@ describe("alertsApi auth headers", () => {
   const getSuspiciousTransaction = (...args) => apiClient.getSuspiciousTransaction(...args);
   const getSuspiciousTransactionLinkedAlertContext = (...args) => apiClient.getSuspiciousTransactionLinkedAlertContext(...args);
   const getCurrentShadowPerformanceSummary = (...args) => apiClient.getCurrentShadowPerformanceSummary(...args);
+  const getCurrentPromotionReviewReadinessReport = (...args) => apiClient.getCurrentPromotionReviewReadinessReport(...args);
   const listGovernanceAdvisories = (...args) => apiClient.listGovernanceAdvisories(...args);
   const getGovernanceAdvisoryAnalytics = (...args) => apiClient.getGovernanceAdvisoryAnalytics(...args);
   const getGovernanceAdvisoryAudit = (...args) => apiClient.getGovernanceAdvisoryAudit(...args);
@@ -192,6 +194,200 @@ describe("alertsApi auth headers", () => {
         })
       })
     );
+  });
+
+  it("fetchesCurrentPromotionReviewReadinessReport", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(promotionReviewReadinessReport()));
+    resetApiClient(normalizeSession({
+      userId: "analyst-1",
+      roles: ["FRAUD_OPS_ADMIN"],
+      authorities: ["promotion-readiness:read"]
+    }), createDemoAuthProvider());
+
+    const report = await getCurrentPromotionReviewReadinessReport();
+
+    expect(report).toMatchObject({
+      reportType: "PROMOTION_REVIEW_READINESS_REPORT_V1",
+      governanceStatus: "DIAGNOSTIC_ONLY",
+      readinessStatus: "REVIEWABLE"
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/governance/promotion-review-readiness/current",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          "X-Demo-User-Id": "analyst-1"
+        })
+      })
+    );
+  });
+
+  it("promotionReviewReadinessSupportsAbortSignal", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(promotionReviewReadinessReport()));
+    const signal = new AbortController().signal;
+
+    await getCurrentPromotionReviewReadinessReport({ signal });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/governance/promotion-review-readiness/current",
+      expect.objectContaining({ signal })
+    );
+  });
+
+  it("promotionReviewReadinessCallsOnlyCurrentReadEndpoint", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(promotionReviewReadinessReport()));
+
+    await getCurrentPromotionReviewReadinessReport({
+      signal: new AbortController().signal,
+      modelVersion: "secret-model",
+      from: "2026-01-01",
+      search: "customer-secret",
+      body: JSON.stringify({ transactionReference: "txn-secret" }),
+      method: "POST"
+    });
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/v1/governance/promotion-review-readiness/current");
+    expect(url).not.toContain("?");
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain("secret-model");
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain("customer-secret");
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain("txn-secret");
+    expect(options).not.toHaveProperty("body");
+    expect(options).not.toHaveProperty("method");
+  });
+
+  it.each([401, 403, 404, 503])("promotionReviewReadinessPropagates%s", async (status) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ message: "read failed" }, status));
+
+    await expect(getCurrentPromotionReviewReadinessReport()).rejects.toMatchObject({ status });
+  });
+
+  it.each([
+    ["doesNotUsePost", "POST"],
+    ["doesNotUsePut", "PUT"],
+    ["doesNotUsePatch", "PATCH"],
+    ["doesNotUseDelete", "DELETE"]
+  ])("promotionReviewReadiness%s", async (_name, method) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(promotionReviewReadinessReport()));
+
+    await getCurrentPromotionReviewReadinessReport({ method, body: "{}" });
+
+    expect(fetchMock.mock.calls[0][1]).not.toHaveProperty("method");
+    expect(fetchMock.mock.calls[0][1]).not.toHaveProperty("body");
+  });
+
+  it.each([
+    ["doesNotCallReportGeneration", "/generate"],
+    ["doesNotCallWorkflow", "/workflow"],
+    ["doesNotCallModelRegistryMutation", "/model-registry"],
+    ["doesNotCallThresholdEndpoint", "/threshold"],
+    ["doesNotCallScoringEndpoint", "/scored"],
+    ["doesNotCallPaymentEndpoint", "/payment"],
+    ["doesNotCallAlertMutationEndpoint", "/alerts/alert-1/decision"],
+    ["doesNotCallFraudCaseMutationEndpoint", "/fraud-cases/case-1"]
+  ])("promotionReviewReadiness%s", async (_name, forbiddenPath) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(promotionReviewReadinessReport()));
+
+    await getCurrentPromotionReviewReadinessReport();
+
+    expect(fetchMock.mock.calls[0][0]).not.toContain(forbiddenPath);
+  });
+
+  it("promotionReviewReadinessValidationAcceptsValidReport", () => {
+    expect(isValidPromotionReviewReadinessReport(promotionReviewReadinessReport())).toBe(true);
+  });
+
+  it.each([
+    ["invalidReportType", (report) => { report.reportType = "OTHER"; }],
+    ["invalidReportVersion", (report) => { report.reportVersion = "2.0"; }],
+    ["missingGeneratedAt", (report) => { delete report.generatedAt; }],
+    ["invalidGeneratedAt", (report) => { report.generatedAt = "not-a-date"; }],
+    ["invalidGovernanceStatus", (report) => { report.governanceStatus = "PRODUCTION"; }],
+    ["invalidReadinessStatus", (report) => { report.readinessStatus = "APPROVED"; }],
+    ["missingDiagnosticOnly", (report) => { delete report.diagnosticOnly; }],
+    ["diagnosticOnlyFalse", (report) => { report.diagnosticOnly = false; }],
+    ["missingNotPromotionApproval", (report) => { delete report.notPromotionApproval; }],
+    ["notPromotionApprovalFalse", (report) => { report.notPromotionApproval = false; }],
+    ["missingNotThresholdRecommendation", (report) => { delete report.notThresholdRecommendation; }],
+    ["notThresholdRecommendationFalse", (report) => { report.notThresholdRecommendation = false; }],
+    ["missingNotProductionDecisioning", (report) => { delete report.notProductionDecisioning; }],
+    ["notProductionDecisioningFalse", (report) => { report.notProductionDecisioning = false; }],
+    ["missingNotPaymentAuthorization", (report) => { delete report.notPaymentAuthorization; }],
+    ["notPaymentAuthorizationFalse", (report) => { report.notPaymentAuthorization = false; }],
+    ["missingNotAutomaticDecisioning", (report) => { delete report.notAutomaticDecisioning; }],
+    ["notAutomaticDecisioningFalse", (report) => { report.notAutomaticDecisioning = false; }],
+    ["missingNotAnalystRecommendation", (report) => { delete report.notAnalystRecommendation; }],
+    ["notAnalystRecommendationFalse", (report) => { report.notAnalystRecommendation = false; }],
+    ["missingBanner", (report) => { delete report.banner; }],
+    ["oversizedBanner", (report) => { report.banner = "A".repeat(513); }],
+    ["missingInputs", (report) => { delete report.inputs; }],
+    ["missingShadowPerformanceSummaryInput", (report) => { delete report.inputs.shadowPerformanceSummary; }],
+    ["rawShadowSummaryType", (report) => { report.inputs.shadowPerformanceSummary.summaryType = "rawPayload"; }],
+    ["unsafeShadowSummaryVersion", (report) => { report.inputs.shadowPerformanceSummary.summaryVersion = "approved"; }],
+    ["invalidShadowSummaryGeneratedAt", (report) => { report.inputs.shadowPerformanceSummary.generatedAt = "not-a-date"; }],
+    ["missingMinimumDiagnosticEvidenceRecords", (report) => { delete report.inputs.minimumDiagnosticEvidenceRecords; }],
+    ["zeroMinimumDiagnosticEvidenceRecords", (report) => { report.inputs.minimumDiagnosticEvidenceRecords = 0; }],
+    ["oversizedMinimumDiagnosticEvidenceRecords", (report) => { report.inputs.minimumDiagnosticEvidenceRecords = 501; }],
+    ["negativeRecordsAcceptedForEvaluation", (report) => { report.inputs.recordsAcceptedForEvaluation = -1; }],
+    ["oversizedRecordsAcceptedForEvaluation", (report) => { report.inputs.recordsAcceptedForEvaluation = 501; }],
+    ["missingChecks", (report) => { delete report.checks; }],
+    ["checksNotArray", (report) => { report.checks = {}; }],
+    ["emptyChecks", (report) => { report.checks = []; }],
+    ["nullCheckItem", (report) => { report.checks = [null]; }],
+    ["missingCheckName", (report) => { delete report.checks[0].name; }],
+    ["missingCheckStatus", (report) => { delete report.checks[0].status; }],
+    ["missingCheckSeverity", (report) => { delete report.checks[0].severity; }],
+    ["unsupportedCheckStatus", (report) => { report.checks[0].status = "DONE"; }],
+    ["unsupportedCheckSeverity", (report) => { report.checks[0].severity = "CRITICAL"; }],
+    ["duplicateCheckNames", (report) => { report.checks = [report.checks[0], { ...report.checks[0] }]; }],
+    ["reviewableWithFailCheck", (report) => { report.checks[0].status = "FAIL"; }],
+    ["reasonCodesNotArray", (report) => { report.reasonCodes = {}; }],
+    ["warningsNotArray", (report) => { report.warnings = {}; }],
+    ["limitationsNotArray", (report) => { report.limitations = {}; }],
+    ["oversizedChecks", (report) => { report.checks = Array.from({ length: 51 }, (_value, index) => ({ name: `CHECK_${index}`, status: "PASS", severity: "INFO" })); }],
+    ["oversizedReasonCodes", (report) => { report.reasonCodes = Array.from({ length: 21 }, (_value, index) => `REASON_${index}`); }],
+    ["oversizedWarnings", (report) => { report.warnings = Array.from({ length: 21 }, (_value, index) => `WARNING_${index}`); }],
+    ["oversizedLimitations", (report) => { report.limitations = Array.from({ length: 21 }, (_value, index) => `LIMITATION_${index}`); }],
+    ["oversizedCheckName", (report) => { report.checks[0].name = "A".repeat(129); }],
+    ["oversizedReasonCode", (report) => { report.reasonCodes = ["A".repeat(129)]; }],
+    ["invalidReasonCodeMachineFormat", (report) => { report.reasonCodes = ["not machine code"]; }]
+  ])("promotionReviewReadinessValidationRejects%s", (_name, mutate) => {
+    const report = promotionReviewReadinessReport();
+    mutate(report);
+
+    expect(isValidPromotionReviewReadinessReport(report)).toBe(false);
+  });
+
+  it.each([
+    ["rawIdentifierInCheckName", (report) => { report.checks[0].name = "rawPayload"; }],
+    ["rawIdentifierInReasonCode", (report) => { report.reasonCodes = ["RAW_PAYLOAD"]; }],
+    ["transactionReferenceInWarning", (report) => { report.warnings = ["TRANSACTION_REFERENCE"]; }],
+    ["filesystemPathInLimitation", (report) => { report.limitations = ["C:\\SECRET_PATH"]; }],
+    ["stackTraceInCheckName", (report) => { report.checks[0].name = "STACK_TRACE"; }],
+    ["secretInMachineCode", (report) => { report.reasonCodes = ["TOKEN_SECRET"]; }],
+    ["approvedInCheckName", (report) => { report.checks[0].name = "MODEL_APPROVED"; }],
+    ["promotedInReasonCode", (report) => { report.reasonCodes = ["PROMOTED"]; }],
+    ["readyForProductionInWarning", (report) => { report.warnings = ["READY_FOR_PRODUCTION"]; }],
+    ["deployableInLimitation", (report) => { report.limitations = ["DEPLOYABLE"]; }],
+    ["recommendedThresholdInCheckName", (report) => { report.checks[0].name = "RECOMMENDED_THRESHOLD"; }],
+    ["paymentAuthorizedInMachineCode", (report) => { report.reasonCodes = ["PAYMENT_AUTHORIZED"]; }],
+    ["autoApproveInWarning", (report) => { report.warnings = ["AUTO_APPROVE"]; }],
+    ["autoDeclineInWarning", (report) => { report.warnings = ["AUTO_DECLINE"]; }],
+    ["blockTransactionInLimitation", (report) => { report.limitations = ["BLOCK_TRANSACTION"]; }],
+    ["analystRecommendationInReasonCode", (report) => { report.reasonCodes = ["ANALYST_RECOMMENDATION"]; }]
+  ])("promotionReviewReadinessValidationRejects%s", (_name, mutate) => {
+    const report = promotionReviewReadinessReport();
+    mutate(report);
+
+    expect(isValidPromotionReviewReadinessReport(report)).toBe(false);
+  });
+
+  it("promotionReviewReadinessInvalidResponseReturnsSafeState", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(promotionReviewReadinessReport({
+      notPaymentAuthorization: false
+    })));
+
+    await expect(getCurrentPromotionReviewReadinessReport()).resolves.toEqual({ state: "invalid-response" });
   });
 
   it("callsOnlyShadowPerformanceSummaryCurrentEndpoint", async () => {
@@ -1737,6 +1933,41 @@ function shadowPerformanceSummary(overrides = {}) {
     warnings: ["MISSING_ML_SIGNAL_PRESENT"],
     limitations: ["DIAGNOSTIC_ONLY"],
     banner: "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.",
+    ...overrides
+  };
+}
+
+function promotionReviewReadinessReport(overrides = {}) {
+  return {
+    reportType: "PROMOTION_REVIEW_READINESS_REPORT_V1",
+    reportVersion: "1.0",
+    generatedAt: "2026-06-13T00:00:00Z",
+    governanceStatus: "DIAGNOSTIC_ONLY",
+    readinessStatus: "REVIEWABLE",
+    diagnosticOnly: true,
+    notPromotionApproval: true,
+    notThresholdRecommendation: true,
+    notProductionDecisioning: true,
+    notPaymentAuthorization: true,
+    notAutomaticDecisioning: true,
+    notAnalystRecommendation: true,
+    inputs: {
+      shadowPerformanceSummary: {
+        present: true,
+        summaryType: "SHADOW_PERFORMANCE_SUMMARY_V1",
+        summaryVersion: "1.0",
+        generatedAt: "2026-06-08T02:00:00Z"
+      },
+      minimumDiagnosticEvidenceRecords: 1,
+      recordsAcceptedForEvaluation: 3
+    },
+    checks: [
+      { name: "CURRENT_SUMMARY_PRESENT", status: "PASS", severity: "INFO" }
+    ],
+    reasonCodes: [],
+    warnings: ["MISSING_ML_SIGNAL_PRESENT"],
+    limitations: ["OFFLINE_DIAGNOSTIC_AID_ONLY"],
+    banner: "Promotion review readiness is an offline diagnostic aid only. It is not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.",
     ...overrides
   };
 }

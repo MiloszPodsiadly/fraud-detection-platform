@@ -13,6 +13,7 @@ const apiClient = {
   listGovernanceAdvisories: vi.fn(),
   getGovernanceAdvisoryAnalytics: vi.fn(),
   getCurrentShadowPerformanceSummary: vi.fn(),
+  getCurrentPromotionReviewReadinessReport: vi.fn(),
   getGovernanceAdvisoryAudit: vi.fn(),
   recordGovernanceAdvisoryAudit: vi.fn()
 };
@@ -29,6 +30,7 @@ describe("workspace runtime ownership", () => {
     apiClient.listGovernanceAdvisories.mockResolvedValue({ status: "AVAILABLE", count: 0, advisory_events: [] });
     apiClient.getGovernanceAdvisoryAnalytics.mockResolvedValue(analytics(1));
     apiClient.getCurrentShadowPerformanceSummary.mockResolvedValue(shadowSummary());
+    apiClient.getCurrentPromotionReviewReadinessReport.mockResolvedValue(promotionReadinessReport());
     apiClient.getGovernanceAdvisoryAudit.mockResolvedValue({ status: "AVAILABLE", audit_events: [] });
     apiClient.recordGovernanceAdvisoryAudit.mockResolvedValue(undefined);
   });
@@ -69,6 +71,7 @@ describe("workspace runtime ownership", () => {
 
     rerender(runtimeElement("shadowPerformance"));
     await waitFor(() => expect(apiClient.getCurrentShadowPerformanceSummary).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiClient.getCurrentPromotionReviewReadinessReport).toHaveBeenCalledTimes(1));
   });
 
   it("keeps governance queue and reports analytics as separate active owners", async () => {
@@ -100,6 +103,42 @@ describe("workspace runtime ownership", () => {
     expect(apiClient.getCurrentShadowPerformanceSummary).not.toHaveBeenCalled();
   });
 
+  it("does not fetch promotion readiness data when promotion readiness authority is missing", async () => {
+    const onResult = vi.fn();
+
+    renderRuntime("shadowPerformance", { canReadPromotionReadiness: false }, runtimeValue({ canReadPromotionReadiness: false }), {
+      ...runtimeProps(),
+      onResult
+    });
+
+    await waitFor(() => expect(lastRuntimeResult(onResult)).toBeDefined());
+    expect(apiClient.getCurrentPromotionReviewReadinessReport).not.toHaveBeenCalled();
+  });
+
+  it("shadow performance read alone does not grant promotion readiness read", async () => {
+    renderRuntime("shadowPerformance", { canReadPromotionReadiness: false }, runtimeValue({
+      canReadShadowPerformance: true,
+      canReadPromotionReadiness: false
+    }));
+
+    await waitFor(() => expect(apiClient.getCurrentShadowPerformanceSummary).toHaveBeenCalledTimes(1));
+    expect(apiClient.getCurrentPromotionReviewReadinessReport).not.toHaveBeenCalled();
+  });
+
+  it("loads promotion readiness only when shared reads are enabled and capability is true", async () => {
+    const route = WORKSPACE_ROUTE_REGISTRY.shadowPerformance;
+    const Runtime = route.Runtime;
+    render(
+      <WorkspaceRuntimeContext.Provider value={runtimeValue({ canReadPromotionReadiness: true })}>
+        <Runtime route={route} sharedWorkspaceReadsEnabled={false}>
+          {(result) => <div>{result.workspaceContent}</div>}
+        </Runtime>
+      </WorkspaceRuntimeContext.Provider>
+    );
+
+    await waitFor(() => expect(apiClient.getCurrentPromotionReviewReadinessReport).not.toHaveBeenCalled());
+  });
+
   it.each([
     ["analyst", "listFraudCaseWorkQueue"],
     ["fraudTransaction", "listAlerts"],
@@ -115,6 +154,47 @@ describe("workspace runtime ownership", () => {
     renderRuntime(routeKey, {}, runtimeValue(), { ...runtimeProps(), onResult });
 
     await waitFor(() => expect(lastRuntimeResult(onResult)?.error?.message).toBe(`${routeKey} unavailable`));
+  });
+
+  it("promotion readiness failure does not hide shadow performance state", async () => {
+    apiClient.getCurrentPromotionReviewReadinessReport.mockRejectedValueOnce({ status: 503 });
+
+    const onResult = vi.fn();
+    const { container } = renderRuntime("shadowPerformance", {}, runtimeValue(), { ...runtimeProps(), onResult });
+
+    await waitFor(() => expect(apiClient.getCurrentShadowPerformanceSummary).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(container.textContent).toContain("Shadow Performance Summary"));
+    expect(container.textContent).toContain("Promotion Review Readiness report is unavailable or invalid");
+    expect(lastRuntimeResult(onResult)?.error).toBeNull();
+  });
+
+  it("shadow performance failure does not hide promotion readiness state", async () => {
+    apiClient.getCurrentShadowPerformanceSummary.mockRejectedValueOnce({ status: 503 });
+
+    const { container } = renderRuntime("shadowPerformance");
+
+    await waitFor(() => expect(apiClient.getCurrentPromotionReviewReadinessReport).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(container.textContent).toContain("Promotion Review Readiness"));
+    expect(container.textContent).toContain("REVIEWABLE");
+  });
+
+  it("refresh reloads both shadow and promotion readiness safely", async () => {
+    const onResult = vi.fn();
+    renderRuntime("shadowPerformance", {}, runtimeValue(), { ...runtimeProps(), onResult });
+    await waitFor(() => expect(apiClient.getCurrentShadowPerformanceSummary).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiClient.getCurrentPromotionReviewReadinessReport).toHaveBeenCalledTimes(1));
+
+    lastRuntimeResult(onResult).refreshWorkspace();
+
+    await waitFor(() => expect(apiClient.getCurrentShadowPerformanceSummary).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(apiClient.getCurrentPromotionReviewReadinessReport).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not introduce promotion readiness write calls", async () => {
+    renderRuntime("shadowPerformance");
+
+    await waitFor(() => expect(apiClient.getCurrentPromotionReviewReadinessReport).toHaveBeenCalledTimes(1));
+    expect(apiClient.recordGovernanceAdvisoryAudit).not.toHaveBeenCalled();
   });
 
   it("does not hidden-fetch reports analytics from compliance runtime", async () => {
@@ -176,6 +256,7 @@ function runtimeValue(overrides = {}) {
     canReadSuspiciousTransactions: true,
     canReadGovernanceAdvisories: true,
     canReadShadowPerformance: true,
+    canReadPromotionReadiness: true,
     canWriteGovernanceAudit: false,
     workspaceSessionResetKey: "demo:analyst-1",
     runtimeStatus: "ready",
@@ -281,5 +362,37 @@ function shadowSummary() {
     warnings: ["MISSING_ML_SIGNAL_PRESENT"],
     limitations: ["DIAGNOSTIC_ONLY"],
     banner: "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic."
+  };
+}
+
+function promotionReadinessReport() {
+  return {
+    reportType: "PROMOTION_REVIEW_READINESS_REPORT_V1",
+    reportVersion: "1.0",
+    generatedAt: "2026-06-13T00:00:00Z",
+    governanceStatus: "DIAGNOSTIC_ONLY",
+    readinessStatus: "REVIEWABLE",
+    diagnosticOnly: true,
+    notPromotionApproval: true,
+    notThresholdRecommendation: true,
+    notProductionDecisioning: true,
+    notPaymentAuthorization: true,
+    notAutomaticDecisioning: true,
+    notAnalystRecommendation: true,
+    inputs: {
+      shadowPerformanceSummary: {
+        present: true,
+        summaryType: "SHADOW_PERFORMANCE_SUMMARY_V1",
+        summaryVersion: "1.0",
+        generatedAt: "2026-06-08T02:00:00Z"
+      },
+      minimumDiagnosticEvidenceRecords: 1,
+      recordsAcceptedForEvaluation: 3
+    },
+    checks: [{ name: "CURRENT_SUMMARY_PRESENT", status: "PASS", severity: "INFO" }],
+    reasonCodes: [],
+    warnings: [],
+    limitations: ["OFFLINE_DIAGNOSTIC_AID_ONLY"],
+    banner: "Promotion review readiness is an offline diagnostic aid only. It is not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic."
   };
 }

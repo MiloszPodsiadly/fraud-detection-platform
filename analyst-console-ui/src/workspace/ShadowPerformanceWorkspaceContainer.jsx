@@ -3,14 +3,21 @@ import { ShadowPerformanceDashboardPage } from "../pages/ShadowPerformanceDashbo
 export function ShadowPerformanceWorkspaceContainer({
   headingLabel = "Shadow Performance Summary",
   summaryState,
-  canReadShadowPerformance
+  promotionReadinessState = { report: null, isLoading: false, error: null },
+  canReadShadowPerformance,
+  canReadPromotionReadiness
 }) {
   return (
     <ShadowPerformanceDashboardPage
       summary={summaryState.summary}
       isLoading={summaryState.isLoading}
       error={summaryState.error}
+      promotionReadinessReport={promotionReadinessState.report}
+      promotionReadinessIsLoading={promotionReadinessState.isLoading}
+      promotionReadinessError={promotionReadinessState.error}
+      onPromotionReadinessRetry={promotionReadinessState.refresh}
       canReadShadowPerformance={canReadShadowPerformance}
+      canReadPromotionReadiness={canReadPromotionReadiness}
       onRetry={summaryState.refresh}
       workspaceHeadingProps={workspaceHeadingProps(headingLabel)}
     />
