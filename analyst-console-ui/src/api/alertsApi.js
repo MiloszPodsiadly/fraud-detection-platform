@@ -2,6 +2,7 @@ import { ApiError } from "./apiError.js";
 import { isAbortError } from "./apiErrors.js";
 import { authHeadersForSession } from "../auth/authHeaders.js";
 import { getConfiguredAuthProvider } from "../auth/authProvider.js";
+import { isValidPromotionReviewReadinessReport } from "../governance/promotionReviewReadinessReportValidation.js";
 
 export { isAbortError } from "./apiErrors.js";
 
@@ -31,6 +32,7 @@ export function createAlertsApiClient({
       linkedAlertContextRequestOptions(requestOptions)
     ),
     getCurrentShadowPerformanceSummary: (requestOptions) => shadowPerformanceSummaryRequest(request, requestOptions),
+    getCurrentPromotionReviewReadinessReport: (requestOptions) => promotionReviewReadinessReportRequest(request, requestOptions),
     listGovernanceAdvisories: (requestParams, requestOptions) => listGovernanceAdvisoriesWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAnalytics: (requestParams, requestOptions) => getGovernanceAdvisoryAnalyticsWithRequest(request, requestParams, requestOptions),
     getGovernanceAdvisoryAudit: (eventId, requestOptions) => request(`/governance/advisories/${encodeURIComponent(eventId)}/audit`, requestOptions),
@@ -218,6 +220,16 @@ function shadowPerformanceSummaryRequest(request, { signal } = {}) {
   return request("/api/v1/governance/shadow-performance/summary/current", {
     ...(signal ? { signal } : {})
   });
+}
+
+async function promotionReviewReadinessReportRequest(request, { signal } = {}) {
+  const response = await request("/api/v1/governance/promotion-review-readiness/current", {
+    ...(signal ? { signal } : {})
+  });
+  if (!isValidPromotionReviewReadinessReport(response)) {
+    return Object.freeze({ state: "invalid-response" });
+  }
+  return response;
 }
 
 const ENGINE_INTELLIGENCE_TRANSACTION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
