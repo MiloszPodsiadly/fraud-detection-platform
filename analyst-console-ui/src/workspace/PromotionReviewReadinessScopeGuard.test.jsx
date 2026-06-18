@@ -34,20 +34,26 @@ describe("FDP-114 promotion review readiness UI scope guards", () => {
   });
 
   it.each([
+    /Approve/,
     /Approved/,
+    /Promote/,
+    /Deploy/,
     /Safe to promote/i,
     /Ready for production/i,
-    /Promote model/i,
-    /Deploy model/i,
     /Recommended threshold/i,
     /Change threshold/i,
-    /Threshold approved/i,
     /Payment authorized/i,
     /Auto approve/i,
     /Auto decline/i,
-    /Block transaction/i
+    /Block transaction/i,
+    /(?<!Not )Analyst recommendation/i
   ])("doesNotRenderUnsafePositiveActionLanguage %s", (unsafePattern) => {
     expect(promotionSources).not.toMatch(unsafePattern);
+  });
+
+  it("allowsNeutralRetryDiagnosticsCopy", () => {
+    expect(promotionSources).toContain("Retry diagnostics");
+    expect(promotionSources).not.toMatch(/Retry approval|Retry workflow|Retry threshold|Retry payment/i);
   });
 
   it("doesNotDisplayRawArtifactOrEntityIdentifierLabels", () => {

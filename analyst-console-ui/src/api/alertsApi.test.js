@@ -300,6 +300,8 @@ describe("alertsApi auth headers", () => {
   it.each([
     ["invalidReportType", (report) => { report.reportType = "OTHER"; }],
     ["invalidReportVersion", (report) => { report.reportVersion = "2.0"; }],
+    ["missingGeneratedAt", (report) => { delete report.generatedAt; }],
+    ["invalidGeneratedAt", (report) => { report.generatedAt = "not-a-date"; }],
     ["invalidGovernanceStatus", (report) => { report.governanceStatus = "PRODUCTION"; }],
     ["invalidReadinessStatus", (report) => { report.readinessStatus = "APPROVED"; }],
     ["missingDiagnosticOnly", (report) => { delete report.diagnosticOnly; }],
@@ -317,8 +319,62 @@ describe("alertsApi auth headers", () => {
     ["missingNotAnalystRecommendation", (report) => { delete report.notAnalystRecommendation; }],
     ["notAnalystRecommendationFalse", (report) => { report.notAnalystRecommendation = false; }],
     ["missingBanner", (report) => { delete report.banner; }],
+    ["oversizedBanner", (report) => { report.banner = "A".repeat(513); }],
+    ["missingInputs", (report) => { delete report.inputs; }],
+    ["missingShadowPerformanceSummaryInput", (report) => { delete report.inputs.shadowPerformanceSummary; }],
+    ["rawShadowSummaryType", (report) => { report.inputs.shadowPerformanceSummary.summaryType = "rawPayload"; }],
+    ["unsafeShadowSummaryVersion", (report) => { report.inputs.shadowPerformanceSummary.summaryVersion = "approved"; }],
+    ["invalidShadowSummaryGeneratedAt", (report) => { report.inputs.shadowPerformanceSummary.generatedAt = "not-a-date"; }],
+    ["missingMinimumDiagnosticEvidenceRecords", (report) => { delete report.inputs.minimumDiagnosticEvidenceRecords; }],
+    ["zeroMinimumDiagnosticEvidenceRecords", (report) => { report.inputs.minimumDiagnosticEvidenceRecords = 0; }],
+    ["oversizedMinimumDiagnosticEvidenceRecords", (report) => { report.inputs.minimumDiagnosticEvidenceRecords = 501; }],
+    ["negativeRecordsAcceptedForEvaluation", (report) => { report.inputs.recordsAcceptedForEvaluation = -1; }],
+    ["oversizedRecordsAcceptedForEvaluation", (report) => { report.inputs.recordsAcceptedForEvaluation = 501; }],
     ["missingChecks", (report) => { delete report.checks; }],
-    ["checksNotArray", (report) => { report.checks = {}; }]
+    ["checksNotArray", (report) => { report.checks = {}; }],
+    ["emptyChecks", (report) => { report.checks = []; }],
+    ["nullCheckItem", (report) => { report.checks = [null]; }],
+    ["missingCheckName", (report) => { delete report.checks[0].name; }],
+    ["missingCheckStatus", (report) => { delete report.checks[0].status; }],
+    ["missingCheckSeverity", (report) => { delete report.checks[0].severity; }],
+    ["unsupportedCheckStatus", (report) => { report.checks[0].status = "DONE"; }],
+    ["unsupportedCheckSeverity", (report) => { report.checks[0].severity = "CRITICAL"; }],
+    ["duplicateCheckNames", (report) => { report.checks = [report.checks[0], { ...report.checks[0] }]; }],
+    ["reviewableWithFailCheck", (report) => { report.checks[0].status = "FAIL"; }],
+    ["reasonCodesNotArray", (report) => { report.reasonCodes = {}; }],
+    ["warningsNotArray", (report) => { report.warnings = {}; }],
+    ["limitationsNotArray", (report) => { report.limitations = {}; }],
+    ["oversizedChecks", (report) => { report.checks = Array.from({ length: 51 }, (_value, index) => ({ name: `CHECK_${index}`, status: "PASS", severity: "INFO" })); }],
+    ["oversizedReasonCodes", (report) => { report.reasonCodes = Array.from({ length: 21 }, (_value, index) => `REASON_${index}`); }],
+    ["oversizedWarnings", (report) => { report.warnings = Array.from({ length: 21 }, (_value, index) => `WARNING_${index}`); }],
+    ["oversizedLimitations", (report) => { report.limitations = Array.from({ length: 21 }, (_value, index) => `LIMITATION_${index}`); }],
+    ["oversizedCheckName", (report) => { report.checks[0].name = "A".repeat(129); }],
+    ["oversizedReasonCode", (report) => { report.reasonCodes = ["A".repeat(129)]; }],
+    ["invalidReasonCodeMachineFormat", (report) => { report.reasonCodes = ["not machine code"]; }]
+  ])("promotionReviewReadinessValidationRejects%s", (_name, mutate) => {
+    const report = promotionReviewReadinessReport();
+    mutate(report);
+
+    expect(isValidPromotionReviewReadinessReport(report)).toBe(false);
+  });
+
+  it.each([
+    ["rawIdentifierInCheckName", (report) => { report.checks[0].name = "rawPayload"; }],
+    ["rawIdentifierInReasonCode", (report) => { report.reasonCodes = ["RAW_PAYLOAD"]; }],
+    ["transactionReferenceInWarning", (report) => { report.warnings = ["TRANSACTION_REFERENCE"]; }],
+    ["filesystemPathInLimitation", (report) => { report.limitations = ["C:\\SECRET_PATH"]; }],
+    ["stackTraceInCheckName", (report) => { report.checks[0].name = "STACK_TRACE"; }],
+    ["secretInMachineCode", (report) => { report.reasonCodes = ["TOKEN_SECRET"]; }],
+    ["approvedInCheckName", (report) => { report.checks[0].name = "MODEL_APPROVED"; }],
+    ["promotedInReasonCode", (report) => { report.reasonCodes = ["PROMOTED"]; }],
+    ["readyForProductionInWarning", (report) => { report.warnings = ["READY_FOR_PRODUCTION"]; }],
+    ["deployableInLimitation", (report) => { report.limitations = ["DEPLOYABLE"]; }],
+    ["recommendedThresholdInCheckName", (report) => { report.checks[0].name = "RECOMMENDED_THRESHOLD"; }],
+    ["paymentAuthorizedInMachineCode", (report) => { report.reasonCodes = ["PAYMENT_AUTHORIZED"]; }],
+    ["autoApproveInWarning", (report) => { report.warnings = ["AUTO_APPROVE"]; }],
+    ["autoDeclineInWarning", (report) => { report.warnings = ["AUTO_DECLINE"]; }],
+    ["blockTransactionInLimitation", (report) => { report.limitations = ["BLOCK_TRANSACTION"]; }],
+    ["analystRecommendationInReasonCode", (report) => { report.reasonCodes = ["ANALYST_RECOMMENDATION"]; }]
   ])("promotionReviewReadinessValidationRejects%s", (_name, mutate) => {
     const report = promotionReviewReadinessReport();
     mutate(report);

@@ -159,11 +159,13 @@ describe("workspace runtime ownership", () => {
   it("promotion readiness failure does not hide shadow performance state", async () => {
     apiClient.getCurrentPromotionReviewReadinessReport.mockRejectedValueOnce({ status: 503 });
 
-    const { container } = renderRuntime("shadowPerformance");
+    const onResult = vi.fn();
+    const { container } = renderRuntime("shadowPerformance", {}, runtimeValue(), { ...runtimeProps(), onResult });
 
     await waitFor(() => expect(apiClient.getCurrentShadowPerformanceSummary).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(container.textContent).toContain("Shadow Performance Summary"));
     expect(container.textContent).toContain("Promotion Review Readiness report is unavailable or invalid");
+    expect(lastRuntimeResult(onResult)?.error).toBeNull();
   });
 
   it("shadow performance failure does not hide promotion readiness state", async () => {

@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { PromotionReviewReadinessPanel } from "./PromotionReviewReadinessPanel.jsx";
 
 describe("PromotionReviewReadinessPanel", () => {
@@ -94,6 +94,20 @@ describe("PromotionReviewReadinessPanel", () => {
     expect(screen.getByText("OFFLINE_DIAGNOSTIC_AID_ONLY")).toBeInTheDocument();
   });
 
+  it("renders valid device merchant and customer machine codes", () => {
+    renderPanel({
+      report: report({
+        reasonCodes: ["DEVICE_SIGNAL_PRESENT"],
+        warnings: ["MERCHANT_SEGMENT_COVERAGE"],
+        limitations: ["CUSTOMER_SEGMENT_COVERAGE"]
+      })
+    });
+
+    expect(screen.getByText("DEVICE_SIGNAL_PRESENT")).toBeInTheDocument();
+    expect(screen.getByText("MERCHANT_SEGMENT_COVERAGE")).toBeInTheDocument();
+    expect(screen.getByText("CUSTOMER_SEGMENT_COVERAGE")).toBeInTheDocument();
+  });
+
   it.each([
     [401, "You are not authenticated."],
     [403, "You do not have permission to read Promotion Review Readiness diagnostics."],
@@ -116,6 +130,19 @@ describe("PromotionReviewReadinessPanel", () => {
     renderPanel({ report: null, error: { state: "invalid-response" } });
 
     expect(screen.getByText("The Promotion Review Readiness response is malformed or missing required safety fields.")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["rawPayload term", { checks: [{ name: "RAW_PAYLOAD", status: "PASS", severity: "INFO" }] }],
+    ["transactionReference term", { reasonCodes: ["TRANSACTION_REFERENCE"] }],
+    ["filesystem path", { warnings: ["C:\\SECRET_PATH"] }],
+    ["stacktrace term", { limitations: ["STACKTRACE"] }],
+    ["secret term", { reasonCodes: ["TOKEN_SECRET"] }]
+  ])("renders invalid response state for %s", (_name, patch) => {
+    renderPanel({ report: report(patch) });
+
+    expect(screen.getByText("The Promotion Review Readiness response is malformed or missing required safety fields.")).toBeInTheDocument();
+    expect(screen.queryByText("CURRENT_SUMMARY_PRESENT")).not.toBeInTheDocument();
   });
 
   it("renders malformed response state", () => {
@@ -158,6 +185,35 @@ describe("PromotionReviewReadinessPanel", () => {
     renderPanel();
 
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("renders retry diagnostics for 503 state", () => {
+    renderPanel({ report: null, error: { status: 503 }, onRetry: vi.fn() });
+
+    expect(screen.getByRole("button", { name: "Retry diagnostics" })).toBeInTheDocument();
+  });
+
+  it("retry diagnostics calls onRetry once", () => {
+    const onRetry = vi.fn();
+    renderPanel({ report: null, error: { status: 503 }, onRetry });
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry diagnostics" }));
+
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not render retry diagnostics on valid success", () => {
+    renderPanel({ onRetry: vi.fn() });
+
+    expect(screen.queryByRole("button", { name: "Retry diagnostics" })).not.toBeInTheDocument();
+  });
+
+  it("retry diagnostics is not approval workflow threshold payment or analyst action wording", () => {
+    renderPanel({ report: null, error: { status: 503 }, onRetry: vi.fn() });
+
+    const button = screen.getByRole("button", { name: "Retry diagnostics" });
+    expect(button).toBeInTheDocument();
+    expect(button).not.toHaveTextContent(/approve|workflow|threshold|payment|analyst action/i);
   });
 
   it("renders safe no permission state", () => {
