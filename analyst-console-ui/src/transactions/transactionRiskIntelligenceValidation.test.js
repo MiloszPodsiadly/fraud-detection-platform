@@ -76,14 +76,98 @@ describe("transactionRiskIntelligenceValidation", () => {
         ...engineIntelligence(),
         engines: [engine({ reasonCodes: ["A", "B", "C", "D", "E", "F"] })]
       }
-    }))).toMatchObject({ valid: false, reason: "ENGINE_REASON_CODE_LIMIT_EXCEEDED" });
+    }))).toMatchObject({ valid: false, reason: "INVALID_ENGINE_INTELLIGENCE_ENGINE" });
   });
 
-  it("rejects unsafe internal fields anywhere in the display payload", () => {
+  it.each([
+    ["empty object", {}],
+    ["unknown field", { banana: "x" }],
+    ["missing agreementStatus", { riskMismatchStatus: "NOT_COMPARABLE", scoreDeltaBucket: "UNAVAILABLE" }],
+    ["missing riskMismatchStatus", { agreementStatus: "PARTIAL", scoreDeltaBucket: "UNAVAILABLE" }],
+    ["missing scoreDeltaBucket", { agreementStatus: "PARTIAL", riskMismatchStatus: "NOT_COMPARABLE" }],
+    ["invalid enum", { agreementStatus: "BANANA", riskMismatchStatus: "NOT_COMPARABLE", scoreDeltaBucket: "UNAVAILABLE" }]
+  ])("rejects comparison %s", (_caseName, comparison) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      engineIntelligence: { ...engineIntelligence(), comparison }
+    }))).toMatchObject({ valid: false, reason: "INVALID_ENGINE_INTELLIGENCE_COMPARISON" });
+  });
+
+  it.each([
+    ["without engineId", { engineId: "" }],
+    ["without engineType", { engineType: undefined }],
+    ["with invalid status", { status: "FALLBACK_USED" }],
+    ["with reasonCodes not array", { reasonCodes: "HIGH_VELOCITY" }],
+    ["with non-string reasonCode", { reasonCodes: ["HIGH_VELOCITY", 1] }],
+    ["with invalid scoreBucket", { scoreBucket: "NOT_COMPARABLE" }]
+  ])("rejects engine %s", (_caseName, engineOverride) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      engineIntelligence: { ...engineIntelligence(), engines: [engine(engineOverride)] }
+    }))).toMatchObject({ valid: false, reason: "INVALID_ENGINE_INTELLIGENCE_ENGINE" });
+  });
+
+  it("accepts engine null risk level for unavailable projected risk", () => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      engineIntelligence: { ...engineIntelligence(), engines: [engine({ riskLevel: null, scoreBucket: "UNAVAILABLE" })] }
+    })).valid).toBe(true);
+  });
+
+  it.each([
+    ["without reasonCode", { reasonCode: "" }],
+    ["without engineId", { engineId: "" }],
+    ["without engineType", { engineType: undefined }],
+    ["without engineStatus", { engineStatus: undefined }],
+    ["without signalCategory", { signalCategory: "" }],
+    ["with invalid engineStatus", { engineStatus: "SKIPPED" }],
+    ["with invalid scoreBucket", { scoreBucket: "NOT_COMPARABLE" }]
+  ])("rejects diagnostic signal %s", (_caseName, signalOverride) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      engineIntelligence: { ...engineIntelligence(), diagnosticSignals: [signal(signalOverride)] }
+    }))).toMatchObject({ valid: false, reason: "INVALID_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNAL" });
+  });
+
+  it("accepts diagnostic signal null risk level for operational diagnostics", () => {
     expect(validateTransactionRiskIntelligenceDetail(detail({
       engineIntelligence: {
         ...engineIntelligence(),
-        engines: [engine({ extra: { [["raw", "Payload"].join("")]: "hidden" } })]
+        diagnosticSignals: [signal({
+          signalCategory: "OPERATIONAL_SIGNAL",
+          riskLevel: null,
+          scoreBucket: "UNAVAILABLE"
+        })]
+      }
+    })).valid).toBe(true);
+  });
+
+  it.each([
+    ["without warningCode", { warningCode: "" }],
+    ["without count", { count: undefined }],
+    ["with negative count", { count: -1 }],
+    ["with non-numeric count", { count: "1" }],
+    ["with non-integer count", { count: 1.5 }]
+  ])("rejects warning %s", (_caseName, warningOverride) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      engineIntelligence: {
+        ...engineIntelligence(),
+        warnings: [{ warningCode: "ENGINE_RESULT_LIMIT_APPLIED", count: 1, ...warningOverride }]
+      }
+    }))).toMatchObject({ valid: false, reason: "INVALID_ENGINE_INTELLIGENCE_WARNING" });
+  });
+
+  it.each([
+    "rawMlRequest",
+    "rawMLRequest",
+    "RawMlRequest",
+    "rawFeatureVector",
+    "RAWFEATUREVECTOR",
+    "finalDecision",
+    "FinalDecision",
+    "paymentAuthorization",
+    "PaymentAuthorization"
+  ])("rejects unsafe internal field %s case-insensitively", (unsafeFieldName) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      engineIntelligence: {
+        ...engineIntelligence(),
+        engines: [engine({ extra: { [unsafeFieldName]: "hidden" } })]
       }
     }))).toMatchObject({ valid: false, reason: "UNSAFE_DETAIL_RESPONSE" });
   });

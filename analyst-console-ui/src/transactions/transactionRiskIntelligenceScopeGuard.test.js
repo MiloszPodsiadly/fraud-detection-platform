@@ -41,6 +41,35 @@ const FORBIDDEN_TERMS = [
   "DELETE /api/v1/transactions/scored"
 ];
 
+const FORBIDDEN_ACTION_PHRASES = [
+  "safe to approve",
+  "approve payment",
+  "decline payment",
+  "block transaction",
+  "recommended action",
+  "recommended analyst action",
+  "model should be promoted",
+  "threshold should change",
+  "authorize payment",
+  "final decision",
+  "payment decision"
+];
+
+const ALLOWED_NEGATIVE_BOUNDARY_STATEMENTS = [
+  "not a final payment decision",
+  "does not approve, decline, block",
+  "does not authorize payment",
+  "not operational instructions",
+  "this panel does not approve, decline, block, authorize payment, recommend action, promote models, or change thresholds"
+];
+
+const FORBIDDEN_FEEDBACK_SURFACES = [
+  "EngineIntelligenceFeedbackPanel",
+  "submitEngineIntelligenceFeedback",
+  "submitFeedback",
+  "feedbackSubmit"
+];
+
 describe("transactionRiskIntelligenceScopeGuard", () => {
   it("keeps FDP-116 source files read-only and bounded", () => {
     const source = FDP_116_SOURCE_FILES.map(sourceFile).join("\n");
@@ -53,6 +82,22 @@ describe("transactionRiskIntelligenceScopeGuard", () => {
     expect(source).toContain("scoreDeltaBucket");
     expect(source).toContain("reasonCodes");
     expect(source).toContain("warningCode");
+  });
+
+  it("does not introduce positive payment decisioning or recommendation language", () => {
+    const source = withoutAllowedNegativeBoundaryStatements(normalizedSource(FDP_116_SOURCE_FILES));
+
+    for (const forbiddenPhrase of FORBIDDEN_ACTION_PHRASES) {
+      expect(source).not.toContain(forbiddenPhrase);
+    }
+  });
+
+  it("does not import or render the feedback submission surface in the FDP-116 path", () => {
+    const source = FDP_116_SOURCE_FILES.map(sourceFile).join("\n");
+
+    for (const forbiddenSurface of FORBIDDEN_FEEDBACK_SURFACES) {
+      expect(source).not.toContain(forbiddenSurface);
+    }
   });
 
   it("uses only the FDP-115 scored transaction detail read endpoint in the new client method", () => {
@@ -68,6 +113,21 @@ describe("transactionRiskIntelligenceScopeGuard", () => {
 
 function sourceFile(relativePath) {
   return readFileSync(resolve(process.cwd(), relativePath), "utf8");
+}
+
+function normalizedSource(relativePaths) {
+  return relativePaths
+    .map(sourceFile)
+    .join("\n")
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function withoutAllowedNegativeBoundaryStatements(source) {
+  return [...ALLOWED_NEGATIVE_BOUNDARY_STATEMENTS].sort((left, right) => right.length - left.length).reduce(
+    (current, allowedStatement) => current.replaceAll(allowedStatement, ""),
+    source
+  );
 }
 
 function scoredTransactionDetailClientSource() {
