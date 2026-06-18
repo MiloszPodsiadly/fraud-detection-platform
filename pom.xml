@@ -35,6 +35,7 @@
         <assertj.version>3.27.7</assertj.version>
         <nimbus-jose-jwt.version>10.9.1</nimbus-jose-jwt.version>
         <spring-kafka.version>4.1.0</spring-kafka.version>
+        <kafka-clients.version>4.3.0</kafka-clients.version>
         <netty.version>4.2.15.Final</netty.version>
         <tomcat.version>11.0.22</tomcat.version>
         <commons-compress.version>1.28.0</commons-compress.version>
@@ -88,6 +89,11 @@
                 <groupId>org.tukaani</groupId>
                 <artifactId>xz</artifactId>
                 <version>${xz.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>kafka-clients</artifactId>
+                <version>${kafka-clients.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
