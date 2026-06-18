@@ -54,6 +54,25 @@ class ReadAccessAuditClassifierTest {
     }
 
     @Test
+    void shouldClassifyScoredTransactionDetailAsTransactionScopedSensitiveRead() {
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "GET",
+                "/api/v1/transactions/scored/txn-1"
+        );
+        request.setAttribute(
+                HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE,
+                "/api/v1/transactions/scored/{transactionId}"
+        );
+        request.setAttribute(HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE, Map.of("transactionId", "txn-1"));
+
+        ReadAccessAuditTarget target = classifier.classify(request).orElseThrow();
+
+        assertThat(target.endpointCategory()).isEqualTo(ReadAccessEndpointCategory.SCORED_TRANSACTION_DETAIL);
+        assertThat(target.resourceType()).isEqualTo(ReadAccessResourceType.SCORED_TRANSACTION);
+        assertThat(target.resourceId()).isEqualTo("txn-1");
+    }
+
+    @Test
     void classifiesEngineIntelligenceFeedbackReadEndpoint() {
         ReadAccessAuditTarget target = classifier.classify(feedbackReadRequest("txn-1", "25")).orElseThrow();
 

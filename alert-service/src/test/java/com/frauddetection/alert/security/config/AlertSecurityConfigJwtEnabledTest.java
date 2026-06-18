@@ -14,7 +14,9 @@ import com.frauddetection.alert.controller.FraudCaseController;
 import com.frauddetection.alert.controller.ScoredTransactionController;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
 import com.frauddetection.alert.mapper.AlertResponseMapper;
+import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.alert.mapper.ScoredTransactionResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
@@ -75,6 +77,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         AlertResponseMapper.class,
         FraudCaseResponseMapper.class,
         ScoredTransactionResponseMapper.class,
+        EngineIntelligenceResponseMapper.class,
         ScoredTransactionSearchPolicy.class,
         AlertServiceExceptionHandler.class
 })
@@ -103,6 +106,9 @@ class AlertSecurityConfigJwtEnabledTest {
 
     @MockitoBean
     private TransactionMonitoringUseCase transactionMonitoringUseCase;
+
+    @MockitoBean
+    private EngineIntelligenceReadService engineIntelligenceReadService;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
