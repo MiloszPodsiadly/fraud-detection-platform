@@ -43,6 +43,7 @@ class EngineIntelligenceApiArchitectureGuardTest {
                         "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceResponse.java",
                         "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceResponseStatus.java",
                         "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceWarningResponse.java",
+                        "alert-service/src/main/java/com/frauddetection/alert/api/ScoredTransactionDetailResponse.java",
                         "alert-service/src/main/java/com/frauddetection/alert/api/ScoredTransactionResponse.java"
                 ));
         assertThat(filesContainingIgnoringCase("alert-service/src/main/java/com/frauddetection/alert/controller", "EngineIntelligence"))
@@ -173,6 +174,7 @@ class EngineIntelligenceApiArchitectureGuardTest {
                 "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceDiagnosticSignalResponse.java",
                 "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceEngineResponse.java",
                 "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceResponse.java",
+                "alert-service/src/main/java/com/frauddetection/alert/api/ScoredTransactionDetailResponse.java",
                 "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceWarningResponse.java"
         );
 
@@ -360,7 +362,7 @@ class EngineIntelligenceApiArchitectureGuardTest {
                 .contains("FDP-115");
         assertThat(architectureDoc)
                 .contains("GET /api/v1/transactions/scored/{transactionId}")
-                .contains("ScoredTransactionResponse.engineIntelligence")
+                .contains("ScoredTransactionDetailResponse.engineIntelligence")
                 .contains("does not recompute agreement")
                 .contains("engineIntelligence.status=ABSENT")
                 .contains("engineIntelligence.status=UNAVAILABLE")

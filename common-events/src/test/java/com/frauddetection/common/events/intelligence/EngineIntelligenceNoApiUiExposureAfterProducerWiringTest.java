@@ -16,6 +16,7 @@ class EngineIntelligenceNoApiUiExposureAfterProducerWiringTest {
             "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceResponse.java",
             "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceResponseStatus.java",
             "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceWarningResponse.java",
+            "alert-service/src/main/java/com/frauddetection/alert/api/ScoredTransactionDetailResponse.java",
             "alert-service/src/main/java/com/frauddetection/alert/api/ScoredTransactionResponse.java",
             "alert-service/src/main/java/com/frauddetection/alert/controller/ScoredTransactionController.java",
             "alert-service/src/main/java/com/frauddetection/alert/mapper/EngineIntelligenceResponseMapper.java",

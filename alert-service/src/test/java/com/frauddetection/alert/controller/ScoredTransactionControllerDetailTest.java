@@ -116,8 +116,12 @@ class ScoredTransactionControllerDetailTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.transactionId").value("txn-old"))
                 .andExpect(jsonPath("$.engineIntelligence.status").value("ABSENT"))
+                .andExpect(jsonPath("$.engineIntelligence.contractVersion").isEmpty())
+                .andExpect(jsonPath("$.engineIntelligence.generatedAt").isEmpty())
+                .andExpect(jsonPath("$.engineIntelligence.comparison").isEmpty())
                 .andExpect(jsonPath("$.engineIntelligence.engines").isArray())
-                .andExpect(jsonPath("$.engineIntelligence.comparison").doesNotExist());
+                .andExpect(jsonPath("$.engineIntelligence.diagnosticSignals").isArray())
+                .andExpect(jsonPath("$.engineIntelligence.warnings").isArray());
     }
 
     @Test
@@ -130,6 +134,9 @@ class ScoredTransactionControllerDetailTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.transactionId").value("txn-store-failure"))
                 .andExpect(jsonPath("$.engineIntelligence.status").value("UNAVAILABLE"))
+                .andExpect(jsonPath("$.engineIntelligence.contractVersion").isEmpty())
+                .andExpect(jsonPath("$.engineIntelligence.generatedAt").isEmpty())
+                .andExpect(jsonPath("$.engineIntelligence.comparison").isEmpty())
                 .andExpect(jsonPath("$.engineIntelligence.engines").isArray());
     }
 

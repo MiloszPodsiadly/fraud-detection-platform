@@ -23,14 +23,13 @@ class ScoredTransactionResponseMapperTest {
         assertThat(response.fraudScore()).isEqualTo(0.91d);
         assertThat(response.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
         assertThat(response.reasonCodes()).containsExactly("HIGH_VELOCITY");
-        assertThat(response.engineIntelligence()).isNull();
     }
 
     @Test
     void detailResponseAddsDelegatedEngineIntelligence() {
         EngineIntelligenceResponse engineIntelligence = EngineIntelligenceResponse.absent();
 
-        var response = mapper.toResponse(scoredTransaction(), engineIntelligence);
+        var response = mapper.toDetailResponse(scoredTransaction(), engineIntelligence);
 
         assertThat(response.engineIntelligence()).isSameAs(engineIntelligence);
     }

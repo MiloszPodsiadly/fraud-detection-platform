@@ -48,7 +48,8 @@ class EngineIntelligenceResponseMapperTest {
         EngineIntelligenceResponse response = mapper.toResponse(readModel(
                 FraudEngineStatus.AVAILABLE,
                 FraudEngineStatus.AVAILABLE,
-                EngineIntelligenceAgreementStatus.DISAGREEMENT
+                EngineIntelligenceAgreementStatus.DISAGREEMENT,
+                List.of()
         ));
 
         assertThat(response.status()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
@@ -58,7 +59,7 @@ class EngineIntelligenceResponseMapperTest {
         assertThat(response.engines()).extracting("status")
                 .containsExactly(EngineIntelligenceEngineStatusResponse.AVAILABLE, EngineIntelligenceEngineStatusResponse.AVAILABLE);
         assertThat(response.diagnosticSignals()).hasSize(1);
-        assertThat(response.warnings()).hasSize(1);
+        assertThat(response.warnings()).isEmpty();
     }
 
     @Test
@@ -66,12 +67,14 @@ class EngineIntelligenceResponseMapperTest {
         EngineIntelligenceResponse unavailable = mapper.toResponse(readModel(
                 FraudEngineStatus.AVAILABLE,
                 FraudEngineStatus.UNAVAILABLE,
-                EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA
+                EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
+                List.of()
         ));
         EngineIntelligenceResponse timeout = mapper.toResponse(readModel(
                 FraudEngineStatus.TIMEOUT,
                 FraudEngineStatus.SKIPPED,
-                EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA
+                EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
+                List.of()
         ));
 
         assertThat(unavailable.status()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
@@ -93,11 +96,81 @@ class EngineIntelligenceResponseMapperTest {
     }
 
     @Test
+    void absentAndUnavailableResponsesSerializeExplicitNullFields() throws Exception {
+        String absent = objectMapper.writeValueAsString(EngineIntelligenceResponse.absent());
+        String unavailable = objectMapper.writeValueAsString(EngineIntelligenceResponse.unavailable());
+
+        assertThat(absent).contains(
+                "\"status\":\"ABSENT\"",
+                "\"contractVersion\":null",
+                "\"generatedAt\":null",
+                "\"comparison\":null",
+                "\"engines\":[]",
+                "\"diagnosticSignals\":[]",
+                "\"warnings\":[]"
+        );
+        assertThat(unavailable).contains(
+                "\"status\":\"UNAVAILABLE\"",
+                "\"contractVersion\":null",
+                "\"generatedAt\":null",
+                "\"comparison\":null",
+                "\"engines\":[]",
+                "\"diagnosticSignals\":[]",
+                "\"warnings\":[]"
+        );
+    }
+
+    @Test
+    void limitsPublicProjectionArraysToOpenApiBounds() {
+        EngineIntelligenceResponse response = mapper.toResponse(readModelWithManyValues());
+
+        assertThat(response.engines()).hasSize(2);
+        assertThat(response.engines().getFirst().reasonCodes()).hasSize(5);
+        assertThat(response.diagnosticSignals()).hasSize(5);
+        assertThat(response.warnings()).hasSize(10);
+    }
+
+    @Test
+    void warningsFallbackAndEmptyEnginesDegradePublicExposureStatus() {
+        EngineIntelligenceResponse warning = mapper.toResponse(readModel(
+                FraudEngineStatus.AVAILABLE,
+                FraudEngineStatus.AVAILABLE,
+                EngineIntelligenceAgreementStatus.AGREEMENT,
+                List.of(new EngineIntelligenceWarningReadModel(EngineIntelligenceWarningCode.ENGINE_RESULT_LIMIT_APPLIED, 1))
+        ));
+        EngineIntelligenceResponse fallback = mapper.toResponse(readModel(
+                FraudEngineStatus.FALLBACK_USED,
+                FraudEngineStatus.AVAILABLE,
+                EngineIntelligenceAgreementStatus.PARTIAL,
+                List.of()
+        ));
+        EngineIntelligenceResponse emptyEngines = mapper.toResponse(EngineIntelligenceReadModel.projected(
+                "txn-empty",
+                1,
+                Instant.parse("2026-06-18T10:00:00Z"),
+                new EngineIntelligenceComparisonReadModel(
+                        EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
+                        EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
+                        EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
+                ),
+                List.of(),
+                List.of(),
+                List.of()
+        ));
+
+        assertThat(warning.status()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
+        assertThat(fallback.status()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
+        assertThat(fallback.engines()).extracting("status").contains(EngineIntelligenceEngineStatusResponse.DEGRADED);
+        assertThat(emptyEngines.status()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
+    }
+
+    @Test
     void publicResponseDoesNotExposeRawInternalPayloads() throws Exception {
         String serialized = objectMapper.writeValueAsString(mapper.toResponse(readModel(
                 FraudEngineStatus.AVAILABLE,
                 FraudEngineStatus.AVAILABLE,
-                EngineIntelligenceAgreementStatus.PARTIAL
+                EngineIntelligenceAgreementStatus.PARTIAL,
+                List.of()
         )));
 
         assertThat(serialized).doesNotContain(
@@ -121,7 +194,8 @@ class EngineIntelligenceResponseMapperTest {
     private EngineIntelligenceReadModel readModel(
             FraudEngineStatus rulesStatus,
             FraudEngineStatus mlStatus,
-            EngineIntelligenceAgreementStatus agreementStatus
+            EngineIntelligenceAgreementStatus agreementStatus,
+            List<EngineIntelligenceWarningReadModel> warnings
     ) {
         return EngineIntelligenceReadModel.projected(
                 "txn-1",
@@ -145,7 +219,46 @@ class EngineIntelligenceResponseMapperTest {
                         EngineIntelligenceScoreBucket.HIGH,
                         "RULE_MATCH"
                 )),
-                List.of(new EngineIntelligenceWarningReadModel(EngineIntelligenceWarningCode.ENGINE_RESULT_LIMIT_APPLIED, 1))
+                warnings
+        );
+    }
+
+    private EngineIntelligenceReadModel readModelWithManyValues() {
+        List<String> reasonCodes = java.util.stream.IntStream.range(0, 100)
+                .mapToObj(index -> "REASON_" + index)
+                .toList();
+        List<EngineIntelligenceEngineReadModel> engines = java.util.stream.IntStream.range(0, 100)
+                .mapToObj(index -> engine("engine-" + index, FraudEngineType.RULES, FraudEngineStatus.AVAILABLE, reasonCodes))
+                .toList();
+        List<EngineIntelligenceDiagnosticSignalReadModel> diagnosticSignals = java.util.stream.IntStream.range(0, 100)
+                .mapToObj(index -> new EngineIntelligenceDiagnosticSignalReadModel(
+                        "engine-" + index,
+                        FraudEngineType.RULES,
+                        FraudEngineStatus.AVAILABLE,
+                        EngineIntelligenceSignalCategory.FRAUD_SIGNAL,
+                        RiskLevel.HIGH,
+                        EngineIntelligenceScoreBucket.HIGH,
+                        "REASON_" + index
+                ))
+                .toList();
+        List<EngineIntelligenceWarningReadModel> warnings = java.util.stream.IntStream.range(0, 100)
+                .mapToObj(index -> new EngineIntelligenceWarningReadModel(
+                        EngineIntelligenceWarningCode.ENGINE_RESULT_LIMIT_APPLIED,
+                        index
+                ))
+                .toList();
+        return EngineIntelligenceReadModel.projected(
+                "txn-many",
+                1,
+                Instant.parse("2026-06-18T10:00:00Z"),
+                new EngineIntelligenceComparisonReadModel(
+                        EngineIntelligenceAgreementStatus.DISAGREEMENT,
+                        EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH,
+                        EngineIntelligenceScoreDeltaBucket.LARGE
+                ),
+                engines,
+                diagnosticSignals,
+                warnings
         );
     }
 

@@ -27,6 +27,7 @@ class EngineIntelligenceDownstreamIsolationTest {
                 alertService.resolve("api/EngineIntelligenceResponse.java"),
                 alertService.resolve("api/EngineIntelligenceResponseStatus.java"),
                 alertService.resolve("api/EngineIntelligenceWarningResponse.java"),
+                alertService.resolve("api/ScoredTransactionDetailResponse.java"),
                 alertService.resolve("api/ScoredTransactionResponse.java"),
                 alertService.resolve("controller/ScoredTransactionController.java"),
                 alertService.resolve("mapper/EngineIntelligenceResponseMapper.java"),

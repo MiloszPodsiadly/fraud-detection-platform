@@ -39,7 +39,7 @@ class EngineIntelligenceOpenApiContractTest {
         assertThat(scoredTransactionDetailPath()).contains(
                 "summary: Read one scored transaction with bounded engine intelligence",
                 "pattern: \"^[A-Za-z0-9._:-]+$\"",
-                "$ref: \"#/components/schemas/ScoredTransactionResponse\"",
+                "$ref: \"#/components/schemas/ScoredTransactionDetailResponse\"",
                 "\"400\":",
                 "\"401\":",
                 "\"403\":",
@@ -50,10 +50,25 @@ class EngineIntelligenceOpenApiContractTest {
                 "fraudScore:",
                 "riskLevel:",
                 "alertRecommended:",
-                "reasonCodes:",
+                "reasonCodes:"
+        ).doesNotContain("engineIntelligence:");
+        assertThat(scoredTransactionDetailSchema()).contains(
+                "required:",
+                "- engineIntelligence",
                 "engineIntelligence:",
                 "$ref: \"#/components/schemas/EngineIntelligenceResponse\""
         );
+    }
+
+    @Test
+    void openApiListSchemaIsLightweightAndDoesNotRequireEngineIntelligence() throws Exception {
+        assertThat(scoredTransactionListPath()).contains("$ref: \"#/components/schemas/PagedScoredTransactionResponse\"");
+        assertThat(pagedScoredTransactionSchema()).contains(
+                "Lightweight scored transaction list page",
+                "$ref: \"#/components/schemas/ScoredTransactionResponse\""
+        );
+        assertThat(scoredTransactionSchema()).contains("Engine intelligence diagnostics are intentionally omitted")
+                .doesNotContain("engineIntelligence:");
     }
 
     @Test
@@ -63,8 +78,12 @@ class EngineIntelligenceOpenApiContractTest {
         assertThat(schema).contains(
                 "EngineIntelligenceResponse:",
                 "enum: [AVAILABLE, ABSENT, UNAVAILABLE, DEGRADED]",
+                "- contractVersion",
+                "- generatedAt",
+                "- comparison",
                 "ABSENT means no projection exists",
                 "UNAVAILABLE means the projection read path degraded",
+                "explicit null contractVersion, generatedAt, and comparison fields",
                 "EngineIntelligenceEngineResponse:",
                 "enum: [AVAILABLE, UNAVAILABLE, TIMEOUT, DEGRADED, NOT_APPLICABLE]",
                 "EngineIntelligenceDiagnosticSignalResponse:",
@@ -221,10 +240,28 @@ class EngineIntelligenceOpenApiContractTest {
         return openApi.substring(pathStart, openApi.indexOf("\n  /", pathStart + 1));
     }
 
+    private String scoredTransactionListPath() throws Exception {
+        String openApi = openApi();
+        int pathStart = openApi.indexOf("  /api/v1/transactions/scored:");
+        return openApi.substring(pathStart, openApi.indexOf("\n  /", pathStart + 1));
+    }
+
     private String scoredTransactionSchema() throws Exception {
         String openApi = openApi();
         int schemaStart = openApi.indexOf("    ScoredTransactionResponse:");
+        return openApi.substring(schemaStart, openApi.indexOf("\n    ScoredTransactionDetailResponse:", schemaStart));
+    }
+
+    private String scoredTransactionDetailSchema() throws Exception {
+        String openApi = openApi();
+        int schemaStart = openApi.indexOf("    ScoredTransactionDetailResponse:");
         return openApi.substring(schemaStart, openApi.indexOf("\n    AuditEventReadResponse:", schemaStart));
+    }
+
+    private String pagedScoredTransactionSchema() throws Exception {
+        String openApi = openApi();
+        int schemaStart = openApi.indexOf("    PagedScoredTransactionResponse:");
+        return openApi.substring(schemaStart, openApi.indexOf("\n    MoneyResponse:", schemaStart));
     }
 
     private String publicEngineIntelligenceSchema() throws Exception {
