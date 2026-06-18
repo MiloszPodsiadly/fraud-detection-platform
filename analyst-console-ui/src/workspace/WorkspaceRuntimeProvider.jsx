@@ -24,6 +24,7 @@ export function WorkspaceRuntimeProvider({ session, authProvider, enabled = true
     canReadTransactions: authorityState(session, AUTHORITIES.TRANSACTION_MONITOR_READ),
     canReadSuspiciousTransactions: authorityState(session, AUTHORITIES.SUSPICIOUS_TRANSACTION_READ),
     canReadShadowPerformance: authorityState(session, AUTHORITIES.SHADOW_PERFORMANCE_READ),
+    canReadPromotionReadiness: authorityState(session, AUTHORITIES.PROMOTION_READINESS_READ),
     // Governance advisory read views are backed by TRANSACTION_MONITOR_READ in the current backend authorization model.
     // Governance audit writes require GOVERNANCE_ADVISORY_AUDIT_WRITE; do not reuse read capability for write affordances.
     canReadGovernanceAdvisories: authorityState(session, AUTHORITIES.TRANSACTION_MONITOR_READ),
