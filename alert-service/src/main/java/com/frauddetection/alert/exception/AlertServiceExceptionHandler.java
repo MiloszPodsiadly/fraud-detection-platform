@@ -23,6 +23,8 @@ import com.frauddetection.alert.idempotency.SharedInvalidIdempotencyKeyException
 import com.frauddetection.alert.idempotency.SharedMissingIdempotencyKeyException;
 import com.frauddetection.alert.regulated.MissingIdempotencyKeyException;
 import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
+import com.frauddetection.alert.service.ScoredTransactionNotFoundException;
+import com.frauddetection.alert.service.ScoredTransactionReadValidationException;
 import com.frauddetection.alert.service.ScoredTransactionSearchValidationException;
 import com.frauddetection.alert.suspicious.api.SuspiciousTransactionReadValidationException;
 import jakarta.validation.ConstraintViolationException;
@@ -224,6 +226,13 @@ public class AlertServiceExceptionHandler {
         );
     }
 
+    @ExceptionHandler(ScoredTransactionNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleScoredTransactionNotFound(ScoredTransactionNotFoundException exception) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+                new ApiErrorResponse(Instant.now(), 404, "Not Found", "Scored transaction not found.", List.of("reason:SCORED_TRANSACTION_NOT_FOUND"))
+        );
+    }
+
     @ExceptionHandler(EngineIntelligenceScoredTransactionNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleEngineIntelligenceScoredTransactionNotFound(
             EngineIntelligenceScoredTransactionNotFoundException exception
@@ -319,6 +328,13 @@ public class AlertServiceExceptionHandler {
 
     @ExceptionHandler(ScoredTransactionSearchValidationException.class)
     public ResponseEntity<ApiErrorResponse> handleScoredTransactionSearchValidation(ScoredTransactionSearchValidationException exception) {
+        return ResponseEntity.badRequest().body(
+                new ApiErrorResponse(Instant.now(), 400, "Bad Request", exception.getMessage(), List.of("code:" + exception.code()))
+        );
+    }
+
+    @ExceptionHandler(ScoredTransactionReadValidationException.class)
+    public ResponseEntity<ApiErrorResponse> handleScoredTransactionReadValidation(ScoredTransactionReadValidationException exception) {
         return ResponseEntity.badRequest().body(
                 new ApiErrorResponse(Instant.now(), 400, "Bad Request", exception.getMessage(), List.of("code:" + exception.code()))
         );

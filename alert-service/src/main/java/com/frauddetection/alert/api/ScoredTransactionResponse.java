@@ -1,5 +1,6 @@
 package com.frauddetection.alert.api;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.frauddetection.common.events.enums.RiskLevel;
 
 import java.time.Instant;
@@ -16,6 +17,7 @@ public record ScoredTransactionResponse(
         Double fraudScore,
         RiskLevel riskLevel,
         Boolean alertRecommended,
-        List<String> reasonCodes
+        List<String> reasonCodes,
+        @JsonInclude(JsonInclude.Include.NON_NULL) EngineIntelligenceResponse engineIntelligence
 ) {
 }

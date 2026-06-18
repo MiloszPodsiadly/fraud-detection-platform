@@ -2,6 +2,9 @@ package com.frauddetection.alert.controller;
 
 import com.frauddetection.alert.api.PagedResponse;
 import com.frauddetection.alert.api.ScoredTransactionResponse;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
+import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
 import com.frauddetection.alert.mapper.ScoredTransactionResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.service.ScoredTransactionSearchCriteria;
@@ -13,6 +16,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.util.MultiValueMap;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -24,17 +28,23 @@ public class ScoredTransactionController {
 
     private final TransactionMonitoringUseCase transactionMonitoringUseCase;
     private final ScoredTransactionResponseMapper responseMapper;
+    private final EngineIntelligenceReadService engineIntelligenceReadService;
+    private final EngineIntelligenceResponseMapper engineIntelligenceResponseMapper;
     private final ScoredTransactionSearchPolicy searchPolicy;
     private final AlertServiceMetrics metrics;
 
     public ScoredTransactionController(
             TransactionMonitoringUseCase transactionMonitoringUseCase,
             ScoredTransactionResponseMapper responseMapper,
+            EngineIntelligenceReadService engineIntelligenceReadService,
+            EngineIntelligenceResponseMapper engineIntelligenceResponseMapper,
             ScoredTransactionSearchPolicy searchPolicy,
             AlertServiceMetrics metrics
     ) {
         this.transactionMonitoringUseCase = transactionMonitoringUseCase;
         this.responseMapper = responseMapper;
+        this.engineIntelligenceReadService = engineIntelligenceReadService;
+        this.engineIntelligenceResponseMapper = engineIntelligenceResponseMapper;
         this.searchPolicy = searchPolicy;
         this.metrics = metrics;
     }
@@ -70,6 +80,21 @@ public class ScoredTransactionController {
                 result.getNumber(),
                 result.getSize()
         );
+    }
+
+    @GetMapping("/scored/{transactionId}")
+    public ScoredTransactionResponse getScoredTransaction(@PathVariable String transactionId) {
+        var scoredTransaction = transactionMonitoringUseCase.getScoredTransaction(transactionId);
+        var engineIntelligence = engineIntelligenceResponse(scoredTransaction.transactionId());
+        return responseMapper.toResponse(scoredTransaction, engineIntelligence);
+    }
+
+    private com.frauddetection.alert.api.EngineIntelligenceResponse engineIntelligenceResponse(String transactionId) {
+        try {
+            return engineIntelligenceResponseMapper.toResponse(engineIntelligenceReadService.read(transactionId));
+        } catch (EngineIntelligenceProjectionReadUnavailableException exception) {
+            return engineIntelligenceResponseMapper.unavailable();
+        }
     }
 
     private org.springframework.data.domain.Page<com.frauddetection.alert.domain.ScoredTransaction> runSearch(

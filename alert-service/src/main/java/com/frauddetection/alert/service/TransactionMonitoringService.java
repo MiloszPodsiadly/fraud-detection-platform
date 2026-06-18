@@ -67,6 +67,14 @@ public class TransactionMonitoringService implements TransactionMonitoringUseCas
     }
 
     @Override
+    public ScoredTransaction getScoredTransaction(String transactionId) {
+        String boundedTransactionId = ScoredTransactionReadPolicy.normalizeTransactionId(transactionId);
+        return repository.findByTransactionId(boundedTransactionId)
+                .map(mapper::toDomain)
+                .orElseThrow(ScoredTransactionNotFoundException::new);
+    }
+
+    @Override
     public Page<ScoredTransaction> listScoredTransactions(Pageable pageable, ScoredTransactionSearchCriteria criteria) {
         if (criteria == null || !criteria.hasFilters()) {
             return listScoredTransactions(pageable);
