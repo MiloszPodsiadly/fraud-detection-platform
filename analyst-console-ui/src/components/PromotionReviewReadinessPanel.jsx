@@ -17,31 +17,12 @@ const READINESS_COPY = Object.freeze({
   ]
 });
 
-const SENSITIVE_PATTERNS = [
-  /secret/i,
-  /token/i,
-  /stack\s*trace/i,
-  /stacktrace/i,
-  /exception/i,
-  /raw\s*artifact/i,
-  /raw[A-Z_ -]?/i,
-  /transaction\s*reference/i,
-  /transactionReference/i,
-  /customer/i,
-  /account/i,
-  /card/i,
-  /device/i,
-  /merchant/i,
-  /[A-Za-z]:[\\/]/,
-  /\/(?:var|tmp|run|home|users)\//i,
-  /PromotionReviewReadinessReport[A-Za-z]*/
-];
-
 export function PromotionReviewReadinessPanel({
   report,
   isLoading,
   error,
-  canReadPromotionReadiness
+  canReadPromotionReadiness,
+  onRetry
 }) {
   const invalid = !isLoading
     && !error
@@ -69,12 +50,14 @@ export function PromotionReviewReadinessPanel({
       )}
       {canReadPromotionReadiness !== false && isLoading && <LoadingPanel label="Loading Promotion Review Readiness..." />}
       {canReadPromotionReadiness !== false && !isLoading && error && (
-        <PromotionReadinessState {...errorStateFor(error)} />
+        <PromotionReadinessState {...errorStateFor(error)} onRetry={onRetry} />
       )}
       {invalid && (
         <PromotionReadinessState
           title="Malformed diagnostic response"
           message={INVALID_MESSAGE}
+          canRetry
+          onRetry={onRetry}
         />
       )}
       {canReadPromotionReadiness !== false && !isLoading && !error && report && !invalid && (
@@ -88,7 +71,7 @@ function PromotionReadinessSuccess({ report }) {
   return (
     <div className="shadowPerformanceStack promotionReadinessStack">
       <div className="stateBanner shadowPerformanceBanner promotionReadinessBanner" role="status">
-        {safeText(report.banner)}
+        {displayText(report.banner)}
       </div>
       <PromotionReadinessStatus status={report.readinessStatus} />
       <div className="shadowPerformanceGrid">
@@ -96,28 +79,28 @@ function PromotionReadinessSuccess({ report }) {
           <DefinitionList rows={[
             ["Report type", report.reportType],
             ["Report version", report.reportVersion],
-            ["Generated", formatTimestamp(report.generatedAt)],
+            ["Generated", displayTimestamp(report.generatedAt)],
             ["Governance status", report.governanceStatus],
             ["Readiness status", report.readinessStatus]
           ]} />
         </PromotionSection>
         <PromotionSection title="Diagnostic boundary">
           <DefinitionList rows={[
-            ["Diagnostic only", booleanValue(report.diagnosticOnly)],
-            ["Not promotion approval", booleanValue(report.notPromotionApproval)],
-            ["Not threshold recommendation", booleanValue(report.notThresholdRecommendation)],
-            ["Not production decisioning", booleanValue(report.notProductionDecisioning)],
-            ["Not payment authorization", booleanValue(report.notPaymentAuthorization)],
-            ["Not automatic decisioning", booleanValue(report.notAutomaticDecisioning)],
-            ["Not analyst recommendation", booleanValue(report.notAnalystRecommendation)]
+            ["Diagnostic only", displayBoolean(report.diagnosticOnly)],
+            ["Not promotion approval", displayBoolean(report.notPromotionApproval)],
+            ["Not threshold recommendation", displayBoolean(report.notThresholdRecommendation)],
+            ["Not production decisioning", displayBoolean(report.notProductionDecisioning)],
+            ["Not payment authorization", displayBoolean(report.notPaymentAuthorization)],
+            ["Not automatic decisioning", displayBoolean(report.notAutomaticDecisioning)],
+            ["Not analyst recommendation", displayBoolean(report.notAnalystRecommendation)]
           ]} />
         </PromotionSection>
         <PromotionSection title="Input summary">
           <DefinitionList rows={[
-            ["Shadow summary present", booleanValue(report.inputs?.shadowPerformanceSummary?.present)],
+            ["Shadow summary present", displayBoolean(report.inputs?.shadowPerformanceSummary?.present)],
             ["Shadow summary type", report.inputs?.shadowPerformanceSummary?.summaryType],
             ["Shadow summary version", report.inputs?.shadowPerformanceSummary?.summaryVersion],
-            ["Shadow summary generated", formatTimestamp(report.inputs?.shadowPerformanceSummary?.generatedAt)],
+            ["Shadow summary generated", displayTimestamp(report.inputs?.shadowPerformanceSummary?.generatedAt)],
             ["Minimum diagnostic evidence records", report.inputs?.minimumDiagnosticEvidenceRecords],
             ["Records accepted for evaluation", report.inputs?.recordsAcceptedForEvaluation]
           ]} />
@@ -138,7 +121,7 @@ function PromotionReadinessStatus({ status }) {
   return (
     <section className="statePanel promotionReadinessStatus" aria-label="Promotion Review Readiness status">
       <p className="eyebrow">Readiness status</p>
-      <h3>{safeText(status)}</h3>
+      <h3>{displayMachineCode(status)}</h3>
       {copy.map((line) => <p key={line}>{line}</p>)}
     </section>
   );
@@ -158,10 +141,10 @@ function PromotionChecksTable({ checks }) {
           </thead>
           <tbody>
             {checks.map((check, index) => (
-              <tr key={`${safeText(check?.name)}-${index}`}>
-                <td>{safeText(check?.name)}</td>
-                <td>{safeText(check?.status)}</td>
-                <td>{safeText(check?.severity)}</td>
+              <tr key={`${displayMachineCode(check?.name)}-${index}`}>
+                <td>{displayMachineCode(check?.name)}</td>
+                <td>{displayMachineCode(check?.status)}</td>
+                <td>{displayMachineCode(check?.severity)}</td>
               </tr>
             ))}
           </tbody>
@@ -176,7 +159,7 @@ function PromotionList({ title, items, emptyLabel }) {
     <PromotionSection title={title}>
       {Array.isArray(items) && items.length > 0 ? (
         <ul className="shadowPerformanceList">
-          {items.map((item, index) => <li key={`${safeText(item)}-${index}`}>{safeText(item)}</li>)}
+          {items.map((item, index) => <li key={`${displayMachineCode(item)}-${index}`}>{displayMachineCode(item)}</li>)}
         </ul>
       ) : (
         <p className="sectionCopy">{emptyLabel}</p>
@@ -207,11 +190,16 @@ function DefinitionList({ rows }) {
   );
 }
 
-function PromotionReadinessState({ title, message }) {
+function PromotionReadinessState({ title, message, canRetry = false, onRetry }) {
   return (
     <div className="statePanel warningPanel" role="alert">
       <h3>{title}</h3>
       <p>{message}</p>
+      {canRetry && onRetry && (
+        <button className="secondaryButton" type="button" onClick={onRetry}>
+          Retry diagnostics
+        </button>
+      )}
     </div>
   );
 }
@@ -220,48 +208,54 @@ function errorStateFor(error) {
   if (error?.status === 401) {
     return {
       title: "Session required",
-      message: "You are not authenticated."
+      message: "You are not authenticated.",
+      canRetry: false
     };
   }
   if (error?.status === 403) {
     return {
       title: "Access denied",
-      message: "You do not have permission to read Promotion Review Readiness diagnostics."
+      message: "You do not have permission to read Promotion Review Readiness diagnostics.",
+      canRetry: false
     };
   }
   if (error?.status === 404) {
     return {
       title: "No current diagnostic report",
-      message: "No current Promotion Review Readiness report is configured. Generate and expose the diagnostic report first."
+      message: "No current Promotion Review Readiness report is configured. Generate and expose the diagnostic report first.",
+      canRetry: true
     };
   }
   if (error?.status === 503) {
     return {
       title: "Diagnostic report unavailable",
-      message: "Promotion Review Readiness report is unavailable or invalid. Do not use this report for assessment."
+      message: "Promotion Review Readiness report is unavailable or invalid. Do not use this report for assessment.",
+      canRetry: true
     };
   }
   if (error?.state === "invalid-response") {
     return {
       title: "Malformed diagnostic response",
-      message: INVALID_MESSAGE
+      message: INVALID_MESSAGE,
+      canRetry: true
     };
   }
   return {
     title: "Unable to load diagnostics",
-    message: "Could not reach the Promotion Review Readiness API."
+    message: "Could not reach the Promotion Review Readiness API.",
+    canRetry: true
   };
 }
 
-function formatTimestamp(value) {
+function displayTimestamp(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return value;
+    return displayText(value);
   }
   return date.toLocaleString();
 }
 
-function booleanValue(value) {
+function displayBoolean(value) {
   return value ? "Yes" : "No";
 }
 
@@ -269,13 +263,14 @@ function displayValue(value) {
   if (value === null || value === undefined || value === "") {
     return "Unavailable";
   }
-  return safeText(value);
+  return displayText(value);
 }
 
-function safeText(value) {
+function displayText(value) {
   const text = String(value ?? "").trim();
-  if (!text || SENSITIVE_PATTERNS.some((pattern) => pattern.test(text))) {
-    return "Unavailable";
-  }
-  return text;
+  return text || "Unavailable";
+}
+
+function displayMachineCode(value) {
+  return displayText(value);
 }

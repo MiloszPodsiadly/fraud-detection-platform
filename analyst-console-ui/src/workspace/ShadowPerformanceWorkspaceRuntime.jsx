@@ -32,7 +32,7 @@ export function ShadowPerformanceWorkspaceRuntime({
         canReadPromotionReadiness={canReadPromotionReadiness}
       />
     ),
-    error: summaryState.error || promotionReadinessState.error,
+    error: summaryState.error,
     refreshWorkspace
   }));
 }

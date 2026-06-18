@@ -8,6 +8,7 @@ export function ShadowPerformanceDashboardPage({
   promotionReadinessReport,
   promotionReadinessIsLoading,
   promotionReadinessError,
+  onPromotionReadinessRetry,
   canReadShadowPerformance,
   canReadPromotionReadiness,
   onRetry,
@@ -28,6 +29,7 @@ export function ShadowPerformanceDashboardPage({
         isLoading={promotionReadinessIsLoading}
         error={promotionReadinessError}
         canReadPromotionReadiness={canReadPromotionReadiness}
+        onRetry={onPromotionReadinessRetry}
       />
     </>
   );

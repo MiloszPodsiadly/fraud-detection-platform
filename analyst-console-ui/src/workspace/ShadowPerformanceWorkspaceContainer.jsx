@@ -15,6 +15,7 @@ export function ShadowPerformanceWorkspaceContainer({
       promotionReadinessReport={promotionReadinessState.report}
       promotionReadinessIsLoading={promotionReadinessState.isLoading}
       promotionReadinessError={promotionReadinessState.error}
+      onPromotionReadinessRetry={promotionReadinessState.refresh}
       canReadShadowPerformance={canReadShadowPerformance}
       canReadPromotionReadiness={canReadPromotionReadiness}
       onRetry={summaryState.refresh}
