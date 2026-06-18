@@ -7,9 +7,6 @@
     "node": ">=22.0.0",
     "npm": ">=10.0.0"
   },
-  "config": {
-    "ignore-scripts": true
-  },
   "scripts": {
     "generate:authorities": "node ../scripts/generate-frontend-authorities.mjs",
     "check:authorities": "node ../scripts/generate-frontend-authorities.mjs --check",
