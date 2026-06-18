@@ -3,6 +3,13 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
+  "config": {
+    "ignore-scripts": true
+  },
   "scripts": {
     "generate:authorities": "node ../scripts/generate-frontend-authorities.mjs",
     "check:authorities": "node ../scripts/generate-frontend-authorities.mjs --check",
@@ -33,6 +40,8 @@
     "vitest": "4.1.9"
   },
   "overrides": {
-    "undici": "8.5.0"
+    "undici": "8.5.0",
+    "minimist": "^1.2.8",
+    "ws": "^8.21.0"
   }
 }
