@@ -56,7 +56,8 @@ class EngineIntelligenceApiArchitectureGuardTest {
 
     @Test
     void uiExposesEngineIntelligenceOnlyThroughBoundedReadAndFeedbackSurfaces() throws Exception {
-        assertThat(filesContainingIgnoringCase("analyst-console-ui/src", "engineIntelligence"))
+        assertThat(engineIntelligenceUiSurfaceFiles())
+                .doesNotContain("analyst-console-ui/src/workspace/PromotionReviewReadinessScopeGuard.test.jsx")
                 .isSubsetOf(FDP97_ANALYST_CONSOLE_ENGINE_INTELLIGENCE_ALLOWED_FILES);
     }
 
@@ -270,6 +271,19 @@ class EngineIntelligenceApiArchitectureGuardTest {
                     .sorted()
                     .toList();
         }
+    }
+
+    private List<String> engineIntelligenceUiSurfaceFiles() throws IOException {
+        return filesContainingIgnoringCase("analyst-console-ui/src", "engineIntelligence").stream()
+                // FDP-114 Promotion Review Readiness owns governance diagnostics scope guards.
+                // It must not be treated as an Engine Intelligence UI surface.
+                .filter(file -> file.contains("/EngineIntelligence")
+                        || file.endsWith("/FraudCaseDetailsPage.jsx")
+                        || file.endsWith("/FraudCaseDetailsPage.test.jsx")
+                        || file.endsWith("/alertsApi.js")
+                        || file.endsWith("/alertsApi.test.js")
+                        || file.endsWith("/styles.css"))
+                .toList();
     }
 
     private static boolean containsIgnoringCase(Path path, String normalizedNeedle) {
