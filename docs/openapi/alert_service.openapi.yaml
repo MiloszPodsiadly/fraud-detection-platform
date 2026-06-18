@@ -1230,7 +1230,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PagedGenericObject"
+                $ref: "#/components/schemas/PagedScoredTransactionResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1259,7 +1259,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ScoredTransactionResponse"
+                $ref: "#/components/schemas/ScoredTransactionDetailResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -2822,6 +2822,33 @@ components:
         totalPages:
           type: integer
           minimum: 0
+    PagedScoredTransactionResponse:
+      type: object
+      required:
+        - content
+        - page
+        - size
+        - totalElements
+        - totalPages
+      additionalProperties: false
+      description: Lightweight scored transaction list page. Items do not expose engineIntelligence diagnostics.
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScoredTransactionResponse"
+        page:
+          type: integer
+          minimum: 0
+        size:
+          type: integer
+          minimum: 1
+        totalElements:
+          type: integer
+          minimum: 0
+        totalPages:
+          type: integer
+          minimum: 0
     MoneyResponse:
       type: object
       additionalProperties: false
@@ -2858,6 +2885,47 @@ components:
         attributes:
           $ref: "#/components/schemas/GenericObject"
     ScoredTransactionResponse:
+      type: object
+      additionalProperties: false
+      description: Lightweight scored transaction list item. Engine intelligence diagnostics are intentionally omitted from list responses.
+      properties:
+        transactionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        customerId:
+          type: string
+          nullable: true
+        correlationId:
+          type: string
+          nullable: true
+        transactionTimestamp:
+          type: string
+          format: date-time
+          nullable: true
+        scoredAt:
+          type: string
+          format: date-time
+          nullable: true
+        transactionAmount:
+          $ref: "#/components/schemas/MoneyResponse"
+        merchantInfo:
+          $ref: "#/components/schemas/MerchantInfoResponse"
+        fraudScore:
+          type: number
+          nullable: true
+        riskLevel:
+          $ref: "#/components/schemas/RiskLevel"
+        alertRecommended:
+          type: boolean
+          nullable: true
+        reasonCodes:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+    ScoredTransactionDetailResponse:
       type: object
       additionalProperties: false
       required:
@@ -4468,10 +4536,13 @@ components:
       additionalProperties: false
       required:
         - status
+        - contractVersion
+        - generatedAt
+        - comparison
         - engines
         - diagnosticSignals
         - warnings
-      description: Bounded analyst diagnostic response assembled from the existing alert-service engine intelligence projection. It is not a final decision, payment authorization, automatic approve, automatic decline, automatic block, model promotion, threshold recommendation, recommendation layer, workflow action, or bank authorization.
+      description: Bounded analyst diagnostic response assembled from the existing alert-service engine intelligence projection. ABSENT and UNAVAILABLE responses include explicit null contractVersion, generatedAt, and comparison fields plus empty arrays. It is not a final decision, payment authorization, automatic approve, automatic decline, automatic block, model promotion, threshold recommendation, recommendation layer, workflow action, or bank authorization.
       properties:
         status:
           type: string

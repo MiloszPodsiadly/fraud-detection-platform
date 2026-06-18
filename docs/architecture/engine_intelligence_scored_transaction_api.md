@@ -7,7 +7,10 @@ Status: FDP-115 implemented read API boundary.
 FDP-115 exposes already-projected engine intelligence on the single scored transaction detail API:
 
 - `GET /api/v1/transactions/scored/{transactionId}`
-- `ScoredTransactionResponse.engineIntelligence`
+- `ScoredTransactionDetailResponse.engineIntelligence`
+
+The list API, `GET /api/v1/transactions/scored`, remains lightweight and returns `ScoredTransactionResponse` items
+without engine intelligence diagnostics.
 
 This is an analyst diagnostic read surface. It is not a scoring path, decisioning path, recommendation path,
 promotion path, threshold-management path, payment-authorization path, or workflow execution path.
@@ -40,10 +43,13 @@ The public detail response exposes:
 - bounded warnings
 
 `engineIntelligence.status=ABSENT` is explicit and expected for old transactions or periods when producer emission was
-disabled and no projection exists. The scored transaction remains readable.
+disabled and no projection exists. The scored transaction remains readable. The JSON shape includes explicit null
+`contractVersion`, `generatedAt`, and `comparison` fields plus empty `engines`, `diagnosticSignals`, and `warnings`
+arrays.
 
 `engineIntelligence.status=UNAVAILABLE` is explicit when the engine intelligence projection read path is degraded. The
-scored transaction fields still come from the scored transaction projection.
+scored transaction fields still come from the scored transaction projection, with the same explicit null-and-empty-array
+shape as ABSENT.
 
 `engineIntelligence.status=DEGRADED` preserves visible degraded, timed-out, or unavailable engine state from the existing
 projection without turning it into a final decision.
