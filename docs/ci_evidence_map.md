@@ -28,36 +28,6 @@ Candidate for consolidation:
 - No
 - Rationale: This is the broad backend regression baseline and should stay diagnosable.
 
-## Dependency Vulnerability Scan
-
-Purpose:
-- Run the Maven dependency vulnerability scanning baseline.
-
-Proves:
-- The `security-scan` Maven profile remains executable in CI.
-- OWASP Dependency-Check can analyze Maven runtime dependencies when vulnerability data is available.
-- Critical findings at CVSS 9.0 or higher remain merge-blocking when reported.
-- Dependency-Check reports are uploaded when generated.
-
-Does not prove:
-- Container image scanning, secret scanning, SBOM generation, signed images, SLSA/provenance, or production deployment hardening.
-- That remote vulnerability feeds are always available; feed rate limits or outages are treated as a non-blocking baseline degradation.
-
-Required for merge:
-- Yes
-
-Primary proof files:
-- `pom.xml`
-- `.github/workflows/ci.yml`
-- `docs/security/dependency_vulnerability_scanning.md`
-
-Related FDP branches:
-- Security dependency scanning baseline
-
-Candidate for consolidation:
-- No
-- Rationale: Dependency vulnerability scanning has different failure modes and evidence artifacts from compile/test jobs.
-
 ## FDP-42 Fraud Case Management
 
 Purpose:
