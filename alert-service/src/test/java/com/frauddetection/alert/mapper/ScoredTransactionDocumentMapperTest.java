@@ -4,6 +4,7 @@ import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.model.Money;
+import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -48,5 +49,42 @@ class ScoredTransactionDocumentMapperTest {
         assertThat(document.getCustomerIdSearch()).isEqualTo("customer-123");
         assertThat(document.getMerchantIdSearch()).isEqualTo("merchant-9");
         assertThat(document.getCurrencySearch()).isEqualTo("pln");
+    }
+
+    @Test
+    void shouldStoreAnalystRecommendationFromEventWithoutRecomputingIt() {
+        var event = new TransactionScoredEvent(
+                "event-1",
+                "txn-1",
+                "correlation-1",
+                "customer-1",
+                "account-1",
+                Instant.parse("2026-01-01T00:00:00Z"),
+                Instant.parse("2026-01-01T00:00:00Z"),
+                new Money(BigDecimal.TEN, "PLN"),
+                new MerchantInfo("merchant-9", "Merchant", "5411", "GROCERY", "PL", "ECOMMERCE", false, Map.of()),
+                null,
+                null,
+                null,
+                0.91,
+                RiskLevel.CRITICAL,
+                "strategy",
+                "model",
+                "v1",
+                Instant.parse("2026-01-01T00:00:01Z"),
+                List.of("DEVICE_NOVELTY"),
+                Map.of(),
+                Map.of(),
+                true,
+                List.of(),
+                null,
+                AnalystRecommendationResult.absent()
+        );
+
+        var document = mapper.toDocument(event);
+        var domain = mapper.toDomain(document);
+
+        assertThat(document.getAnalystRecommendation()).isSameAs(event.analystRecommendation());
+        assertThat(domain.analystRecommendation()).isSameAs(event.analystRecommendation());
     }
 }

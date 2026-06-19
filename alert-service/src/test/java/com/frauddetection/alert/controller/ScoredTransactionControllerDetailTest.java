@@ -22,6 +22,12 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreement
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
+import com.frauddetection.common.events.recommendation.AnalystRecommendation;
+import com.frauddetection.common.events.recommendation.AnalystRecommendationConfidence;
+import com.frauddetection.common.events.recommendation.AnalystRecommendationNonDecisioning;
+import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
+import com.frauddetection.common.events.recommendation.AnalystRecommendationSource;
+import com.frauddetection.common.events.recommendation.AnalystRecommendationStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
@@ -90,6 +96,9 @@ class ScoredTransactionControllerDetailTest {
                 .andExpect(jsonPath("$.engineIntelligence.contractVersion").value(1))
                 .andExpect(jsonPath("$.engineIntelligence.comparison.agreementStatus").value("PARTIAL"))
                 .andExpect(jsonPath("$.engineIntelligence.engines[0].engineId").value("rules.primary"))
+                .andExpect(jsonPath("$.analystRecommendation.status").value("AVAILABLE"))
+                .andExpect(jsonPath("$.analystRecommendation.recommendation").value("RECOMMEND_REVIEW"))
+                .andExpect(jsonPath("$.analystRecommendation.nonDecisioning.notPaymentAuthorization").value(true))
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
@@ -103,8 +112,31 @@ class ScoredTransactionControllerDetailTest {
                 "groundTruth",
                 "trainingLabel",
                 "finalDecision",
+                "paymentDecision",
                 "paymentAuthorization"
         );
+    }
+
+    @Test
+    void detailEndpointReturnsAbsentAnalystRecommendationForOldTransactionProjection() throws Exception {
+        when(transactionMonitoringUseCase.getScoredTransaction("txn-old"))
+                .thenReturn(scoredTransactionWithoutRecommendation("txn-old"));
+        when(engineIntelligenceReadService.read("txn-old")).thenReturn(EngineIntelligenceReadModel.notProjected("txn-old"));
+
+        mockMvc.perform(get("/api/v1/transactions/scored/txn-old"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.analystRecommendation.status").value("ABSENT"))
+                .andExpect(jsonPath("$.analystRecommendation.recommendation").isEmpty())
+                .andExpect(jsonPath("$.analystRecommendation.confidence").value("UNKNOWN"))
+                .andExpect(jsonPath("$.analystRecommendation.source").value("ENGINE_INTELLIGENCE_ABSENT"))
+                .andExpect(jsonPath("$.analystRecommendation.reasonCodes").isArray())
+                .andExpect(jsonPath("$.analystRecommendation.warnings").isArray())
+                .andExpect(jsonPath("$.analystRecommendation.nonDecisioning.notPaymentAuthorization").value(true))
+                .andExpect(jsonPath("$.analystRecommendation.nonDecisioning.notAutomaticDecisioning").value(true))
+                .andExpect(jsonPath("$.analystRecommendation.nonDecisioning.notCaseAction").value(true))
+                .andExpect(jsonPath("$.analystRecommendation.nonDecisioning.notWorkflowAction").value(true))
+                .andExpect(jsonPath("$.analystRecommendation.nonDecisioning.notModelPromotion").value(true))
+                .andExpect(jsonPath("$.analystRecommendation.nonDecisioning.notThresholdRecommendation").value(true));
     }
 
     @Test
@@ -206,7 +238,8 @@ class ScoredTransactionControllerDetailTest {
         mockMvc.perform(get("/api/v1/transactions/scored"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].transactionId").value("txn-1"))
-                .andExpect(jsonPath("$.content[0].engineIntelligence").doesNotExist());
+                .andExpect(jsonPath("$.content[0].engineIntelligence").doesNotExist())
+                .andExpect(jsonPath("$.content[0].analystRecommendation").doesNotExist());
 
         verify(engineIntelligenceReadService, org.mockito.Mockito.never()).read(any());
     }
@@ -223,7 +256,37 @@ class ScoredTransactionControllerDetailTest {
                 0.91d,
                 RiskLevel.CRITICAL,
                 true,
-                List.of("HIGH_VELOCITY")
+                List.of("HIGH_VELOCITY"),
+                analystRecommendation()
+        );
+    }
+
+    private ScoredTransaction scoredTransactionWithoutRecommendation(String transactionId) {
+        return new ScoredTransaction(
+                transactionId,
+                "customer-1",
+                "correlation-1",
+                Instant.parse("2026-06-18T10:00:00Z"),
+                Instant.parse("2026-06-18T10:00:01Z"),
+                null,
+                null,
+                0.91d,
+                RiskLevel.CRITICAL,
+                true,
+                List.of("HIGH_VELOCITY"),
+                null
+        );
+    }
+
+    private AnalystRecommendationResult analystRecommendation() {
+        return new AnalystRecommendationResult(
+                AnalystRecommendationStatus.AVAILABLE,
+                AnalystRecommendation.RECOMMEND_REVIEW,
+                AnalystRecommendationConfidence.MEDIUM,
+                AnalystRecommendationSource.RULES_RISK,
+                List.of("RULES_CRITICAL_RISK"),
+                List.of(),
+                AnalystRecommendationNonDecisioning.advisoryOnly()
         );
     }
 

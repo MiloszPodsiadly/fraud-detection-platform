@@ -4,6 +4,7 @@ import com.frauddetection.alert.api.EngineIntelligenceResponse;
 import com.frauddetection.alert.api.ScoredTransactionDetailResponse;
 import com.frauddetection.alert.api.ScoredTransactionResponse;
 import com.frauddetection.alert.domain.ScoredTransaction;
+import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -47,7 +48,14 @@ public class ScoredTransactionResponseMapper {
                 transaction.riskLevel(),
                 transaction.alertRecommended(),
                 transaction.reasonCodes(),
-                engineIntelligence
+                engineIntelligence,
+                analystRecommendation(transaction)
         );
+    }
+
+    private AnalystRecommendationResult analystRecommendation(ScoredTransaction transaction) {
+        return transaction.analystRecommendation() == null
+                ? AnalystRecommendationResult.absent()
+                : transaction.analystRecommendation();
     }
 }

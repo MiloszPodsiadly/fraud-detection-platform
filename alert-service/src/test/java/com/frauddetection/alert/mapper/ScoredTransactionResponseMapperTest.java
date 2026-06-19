@@ -3,6 +3,7 @@ package com.frauddetection.alert.mapper;
 import com.frauddetection.alert.api.EngineIntelligenceResponse;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -34,7 +35,27 @@ class ScoredTransactionResponseMapperTest {
         assertThat(response.engineIntelligence()).isSameAs(engineIntelligence);
     }
 
+    @Test
+    void detailResponseUsesStoredAnalystRecommendationWhenPresent() {
+        var recommendation = AnalystRecommendationResult.absent();
+
+        var response = mapper.toDetailResponse(scoredTransaction(recommendation), EngineIntelligenceResponse.absent());
+
+        assertThat(response.analystRecommendation()).isSameAs(recommendation);
+    }
+
+    @Test
+    void detailResponseDefaultsOldProjectionToAbsentAnalystRecommendation() {
+        var response = mapper.toDetailResponse(scoredTransaction(null), EngineIntelligenceResponse.absent());
+
+        assertThat(response.analystRecommendation().status().name()).isEqualTo("ABSENT");
+    }
+
     private ScoredTransaction scoredTransaction() {
+        return scoredTransaction(null);
+    }
+
+    private ScoredTransaction scoredTransaction(AnalystRecommendationResult analystRecommendation) {
         return new ScoredTransaction(
                 "txn-1",
                 "customer-1",
@@ -46,7 +67,8 @@ class ScoredTransactionResponseMapperTest {
                 0.91d,
                 RiskLevel.CRITICAL,
                 true,
-                List.of("HIGH_VELOCITY")
+                List.of("HIGH_VELOCITY"),
+                analystRecommendation
         );
     }
 }

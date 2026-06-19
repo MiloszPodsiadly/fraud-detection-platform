@@ -54,7 +54,8 @@ class TransactionMonitoringServiceSearchTest {
                 null,
                 null,
                 null,
-                List.of()
+                List.of(),
+                null
         );
         List<ScoredTransactionDocument> countProbe = IntStream
                 .range(0, ScoredTransactionSearchPolicy.MAX_FILTERED_TOTAL_COUNT + 1)
