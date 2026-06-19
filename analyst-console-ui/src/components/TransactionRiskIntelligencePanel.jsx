@@ -1,5 +1,6 @@
 import { formatDateTime, formatScore } from "../utils/format.js";
 import { useScoredTransactionDetail } from "../transactions/useScoredTransactionDetail.js";
+import { transactionRiskIntelligencePanelId } from "../transactions/transactionRiskIntelligencePanelId.js";
 
 const STATUS_COPY = {
   AVAILABLE: "Engine Intelligence is available for this transaction.",
@@ -205,15 +206,6 @@ function nullableText(value) {
 
 function statusClass(status) {
   return typeof status === "string" ? status.charAt(0) + status.slice(1).toLowerCase() : "Unavailable";
-}
-
-export function transactionRiskIntelligencePanelId(transactionId) {
-  const normalized = transactionId === null || transactionId === undefined ? "none" : String(transactionId).trim();
-  const safeTransactionId = normalized
-    .replace(/[^A-Za-z0-9_-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-  return `transaction-risk-intelligence-${safeTransactionId || "none"}`;
 }
 
 function errorMessage(error) {

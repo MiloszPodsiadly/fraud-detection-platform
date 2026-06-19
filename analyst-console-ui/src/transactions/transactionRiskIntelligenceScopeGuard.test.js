@@ -7,6 +7,7 @@ const FDP_116_SOURCE_FILES = [
   "src/transactions/transactionRiskIntelligenceValidation.js",
   "src/transactions/useScoredTransactionDetail.js",
   "src/transactions/transactionRiskIntelligenceFixtures.js",
+  "src/transactions/transactionRiskIntelligencePanelId.js",
   "src/pages/TransactionScoringWorkspacePage.jsx",
   "src/components/TransactionMonitorTable.jsx",
   "src/workspace/TransactionScoringWorkspaceContainer.jsx",

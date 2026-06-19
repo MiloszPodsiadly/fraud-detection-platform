@@ -1,7 +1,7 @@
 import { Fragment } from "react";
 import { formatAmount, formatDateTime, formatScore } from "../utils/format.js";
 import { RiskBadge } from "./RiskBadge.jsx";
-import { transactionRiskIntelligencePanelId } from "./TransactionRiskIntelligencePanel.jsx";
+import { transactionRiskIntelligencePanelId } from "../transactions/transactionRiskIntelligencePanelId.js";
 
 export function TransactionMonitorTable({
   transactions,

@@ -1,7 +1,8 @@
 import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { TransactionRiskIntelligencePanel, transactionRiskIntelligencePanelId } from "./TransactionRiskIntelligencePanel.jsx";
+import { TransactionRiskIntelligencePanel } from "./TransactionRiskIntelligencePanel.jsx";
 import { useScoredTransactionDetail } from "../transactions/useScoredTransactionDetail.js";
+import { transactionRiskIntelligencePanelId } from "../transactions/transactionRiskIntelligencePanelId.js";
 import {
   absentDetail,
   availableDetail,
