@@ -10,6 +10,7 @@ import com.frauddetection.common.events.model.DeviceInfo;
 import com.frauddetection.common.events.model.LocationInfo;
 import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.model.Money;
+import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 
 import java.time.Instant;
 import java.util.List;
@@ -40,7 +41,8 @@ public record TransactionScoredEvent(
         Map<String, Object> featureSnapshot,
         Boolean alertRecommended,
         List<ScoringEvidenceItem> scoringEvidence,
-        @JsonInclude(JsonInclude.Include.NON_NULL) EngineIntelligenceSummary engineIntelligence
+        @JsonInclude(JsonInclude.Include.NON_NULL) EngineIntelligenceSummary engineIntelligence,
+        @JsonInclude(JsonInclude.Include.NON_NULL) AnalystRecommendationResult analystRecommendation
 ) {
     public TransactionScoredEvent {
         scoringEvidence = scoringEvidence == null ? List.of() : List.copyOf(scoringEvidence);
@@ -95,6 +97,62 @@ public record TransactionScoredEvent(
                 featureSnapshot,
                 alertRecommended,
                 scoringEvidence,
+                null,
+                null
+        );
+    }
+
+    public TransactionScoredEvent(
+            String eventId,
+            String transactionId,
+            String correlationId,
+            String customerId,
+            String accountId,
+            Instant createdAt,
+            Instant transactionTimestamp,
+            Money transactionAmount,
+            MerchantInfo merchantInfo,
+            DeviceInfo deviceInfo,
+            LocationInfo locationInfo,
+            CustomerContext customerContext,
+            Double fraudScore,
+            RiskLevel riskLevel,
+            String scoringStrategy,
+            String modelName,
+            String modelVersion,
+            Instant inferenceTimestamp,
+            List<String> reasonCodes,
+            Map<String, Object> scoreDetails,
+            Map<String, Object> featureSnapshot,
+            Boolean alertRecommended,
+            List<ScoringEvidenceItem> scoringEvidence,
+            EngineIntelligenceSummary engineIntelligence
+    ) {
+        this(
+                eventId,
+                transactionId,
+                correlationId,
+                customerId,
+                accountId,
+                createdAt,
+                transactionTimestamp,
+                transactionAmount,
+                merchantInfo,
+                deviceInfo,
+                locationInfo,
+                customerContext,
+                fraudScore,
+                riskLevel,
+                scoringStrategy,
+                modelName,
+                modelVersion,
+                inferenceTimestamp,
+                reasonCodes,
+                scoreDetails,
+                featureSnapshot,
+                alertRecommended,
+                scoringEvidence,
+                engineIntelligence,
                 null
         );
     }
