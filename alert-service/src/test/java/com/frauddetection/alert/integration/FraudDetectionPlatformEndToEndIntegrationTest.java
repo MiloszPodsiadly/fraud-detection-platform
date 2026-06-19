@@ -1,6 +1,5 @@
 package com.frauddetection.alert.integration;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.AlertServiceApplication;
 import com.frauddetection.alert.api.AlertDetailsResponse;
 import com.frauddetection.alert.api.AlertSummaryResponse;
@@ -13,6 +12,7 @@ import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
 import com.frauddetection.enricher.FeatureEnricherServiceApplication;
 import com.frauddetection.ingest.TransactionIngestServiceApplication;
@@ -45,9 +45,9 @@ import org.springframework.http.RequestEntity;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
 
-import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -63,8 +63,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @EnabledIf("dockerAvailable")
 class FraudDetectionPlatformEndToEndIntegrationTest {
-
-    private static final ObjectMapper KAFKA_OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules();
 
     private static final String DISABLE_DEFAULT_SECURITY_AUTO_CONFIG =
             "org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration,"
@@ -423,8 +421,11 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
 
     private <T> T deserializeKafkaValue(String payload, Class<T> valueType) {
         try {
-            return KAFKA_OBJECT_MAPPER.readValue(payload, valueType);
-        } catch (IOException exception) {
+            return new JacksonKafkaDeserializer<>(valueType).deserialize(
+                    "e2e-test",
+                    payload.getBytes(StandardCharsets.UTF_8)
+            );
+        } catch (RuntimeException exception) {
             throw new AssertionError("Kafka record payload could not be deserialized as " + valueType.getSimpleName() + ".", exception);
         }
     }
