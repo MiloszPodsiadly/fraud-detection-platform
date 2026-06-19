@@ -1,11 +1,12 @@
 import { formatDateTime, formatScore } from "../utils/format.js";
 import { useScoredTransactionDetail } from "../transactions/useScoredTransactionDetail.js";
+import { transactionRiskIntelligencePanelId } from "../transactions/transactionRiskIntelligencePanelId.js";
 
 const STATUS_COPY = {
   AVAILABLE: "Engine Intelligence is available for this transaction.",
-  ABSENT: "No Engine Intelligence projection exists for this transaction.",
-  UNAVAILABLE: "Engine Intelligence could not be safely read for this transaction.",
-  DEGRADED: "Engine Intelligence is available with limitations."
+  ABSENT: "No Engine Intelligence projection exists for this scored transaction. This can happen for older transactions or when Engine Intelligence was not emitted.",
+  UNAVAILABLE: "The scored transaction was found, but Engine Intelligence could not be safely read. The transaction detail remains available, but diagnostics are unavailable.",
+  DEGRADED: "Engine Intelligence is available with limitations. Review the warnings section for diagnostic constraints."
 };
 
 const ENGINE_STATUS_COPY = {
@@ -19,9 +20,12 @@ const ENGINE_STATUS_COPY = {
 export function TransactionRiskIntelligencePanel({
   transactionId,
   enabled = true,
-  apiClient
+  apiClient,
+  panelId
 }) {
   const shouldFetch = Boolean(enabled && transactionId);
+  const safePanelId = panelId || transactionRiskIntelligencePanelId(transactionId);
+  const titleId = `${safePanelId}-title`;
   const { detail, isLoading, error } = useScoredTransactionDetail({
     transactionId,
     enabled: shouldFetch,
@@ -29,14 +33,11 @@ export function TransactionRiskIntelligencePanel({
   });
 
   return (
-    <section className="transactionRiskIntelligencePanel" aria-labelledby={`tri-${transactionId || "none"}-title`}>
-      <div className="detailSection">
+    <section className="transactionRiskIntelligencePanel" id={safePanelId} aria-labelledby={titleId}>
+      <div className="detailSection transactionRiskIntelligenceHeader">
         <p className="eyebrow">Transaction diagnostics</p>
-        <h3 id={`tri-${transactionId || "none"}-title`}>Transaction Risk Intelligence</h3>
-        <p className="sectionCopy">
-          Read-only engine diagnostics for analyst review. This panel does not approve, decline, block,
-          authorize payment, recommend action, promote models, or change thresholds.
-        </p>
+        <h3 id={titleId}>Transaction Risk Intelligence</h3>
+        <DiagnosticBoundaryBanner />
       </div>
 
       {!enabled && <p className="emptyStateMessage">Transaction risk intelligence is not available without transaction read permission.</p>}
@@ -56,8 +57,8 @@ function TransactionRiskIntelligenceDetail({ detail }) {
   const intelligence = detail.engineIntelligence;
   return (
     <>
-      <section className="detailSection" aria-label="Scored transaction summary">
-        <h4>Scored transaction summary</h4>
+      <section className="detailSection" aria-label="Transaction Summary">
+        <h4>Transaction Summary</h4>
         <dl>
           <Field label="Transaction ID" value={detail.transactionId} />
           <Field label="Correlation ID" value={detail.correlationId} />
@@ -71,8 +72,8 @@ function TransactionRiskIntelligenceDetail({ detail }) {
         <p className="sectionCopy">alertRecommended is a scored transaction field, not a final payment decision.</p>
       </section>
 
-      <section className="detailSection" aria-label="Engine Intelligence status">
-        <h4>Engine Intelligence status</h4>
+      <section className={`detailSection transactionRiskStatus transactionRiskStatus${statusClass(intelligence.status)}`} aria-label="Engine Intelligence Status">
+        <h4>Engine Intelligence Status</h4>
         <dl>
           <Field label="Status" value={intelligence.status} />
           <Field label="Contract version" value={nullableText(intelligence.contractVersion)} />
@@ -91,9 +92,9 @@ function TransactionRiskIntelligenceDetail({ detail }) {
 
 function ComparisonSummary({ comparison }) {
   return (
-    <section className="detailSection" aria-label="Comparison summary">
-      <h4>Comparison summary</h4>
-      {!comparison && <p className="sectionCopy">Comparison data is not available for this transaction.</p>}
+    <section className="detailSection" aria-label="Projected Comparison">
+      <h4>Projected Comparison</h4>
+      {!comparison && <p className="sectionCopy">Projected engine comparison is not available for this transaction.</p>}
       {comparison && (
         <>
           <dl>
@@ -112,9 +113,9 @@ function ComparisonSummary({ comparison }) {
 
 function EngineResults({ engines }) {
   return (
-    <section className="detailSection" aria-label="Engine results">
-      <h4>Engine results</h4>
-      {engines.length === 0 && <p className="sectionCopy">No engine results are available in the projected diagnostics.</p>}
+    <section className="detailSection" aria-label="Engine Results">
+      <h4>Engine Results</h4>
+      {engines.length === 0 && <p className="sectionCopy">No bounded engine results are available in the projected diagnostics.</p>}
       {engines.map((engine) => (
         <article className="summaryCard" key={`${engine.engineId}-${engine.engineType}`}>
           <h5>{engine.engineId}</h5>
@@ -133,10 +134,10 @@ function EngineResults({ engines }) {
 
 function DiagnosticSignals({ diagnosticSignals }) {
   return (
-    <section className="detailSection" aria-label="Diagnostic signals">
-      <h4>Diagnostic signals</h4>
+    <section className="detailSection" aria-label="Diagnostic Signals">
+      <h4>Diagnostic Signals</h4>
       <p className="sectionCopy">Displayed as diagnostics only.</p>
-      {diagnosticSignals.length === 0 && <p className="sectionCopy">No diagnostic signals are available.</p>}
+      {diagnosticSignals.length === 0 && <p className="sectionCopy">No bounded diagnostic signals are available.</p>}
       {diagnosticSignals.map((signal, index) => (
         <article className="summaryCard" key={`${signal.engineId}-${signal.reasonCode || index}`}>
           <dl>
@@ -156,11 +157,11 @@ function DiagnosticSignals({ diagnosticSignals }) {
 
 function Warnings({ warnings }) {
   return (
-    <section className="detailSection" aria-label="Warnings">
-      <h4>Warnings</h4>
+    <section className="detailSection" aria-label="Warnings and Limitations">
+      <h4>Warnings and Limitations</h4>
       <p className="sectionCopy">Warnings describe limitations in the projected diagnostic data.</p>
       <p className="sectionCopy">Warnings are not operational instructions.</p>
-      {warnings.length === 0 && <p className="sectionCopy">No warnings are present.</p>}
+      {warnings.length === 0 && <p className="sectionCopy">No warnings are present in the projected diagnostics.</p>}
       {warnings.map((warning) => (
         <article className="summaryCard" key={warning.warningCode}>
           <dl>
@@ -169,6 +170,19 @@ function Warnings({ warnings }) {
           </dl>
         </article>
       ))}
+    </section>
+  );
+}
+
+function DiagnosticBoundaryBanner() {
+  return (
+    <section className="diagnosticBoundaryBanner" aria-label="Diagnostic Boundary">
+      <h4>Diagnostic Boundary</h4>
+      <p>
+        Transaction Risk Intelligence is a read-only diagnostic view. It does not approve, does not decline,
+        does not block, does not authorize payment, does not recommend analyst action, does not promote models,
+        does not change thresholds, and does not trigger workflow.
+      </p>
     </section>
   );
 }
@@ -190,9 +204,16 @@ function nullableText(value) {
   return value === null || value === undefined ? "Not available" : String(value);
 }
 
+function statusClass(status) {
+  return typeof status === "string" ? status.charAt(0) + status.slice(1).toLowerCase() : "Unavailable";
+}
+
 function errorMessage(error) {
   if (error?.message === "INVALID_TRANSACTION_RISK_INTELLIGENCE_RESPONSE") {
     return "The transaction risk intelligence response is malformed or missing required safety fields.";
+  }
+  if (error?.name === "AbortError" || error?.code === "ABORT_ERR") {
+    return "Transaction risk intelligence loading was interrupted before diagnostics could be displayed.";
   }
   if (error?.status === 400) {
     return "This transaction identifier is invalid.";

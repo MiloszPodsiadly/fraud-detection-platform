@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import { formatAmount, formatDateTime, formatScore } from "../utils/format.js";
 import { RiskBadge } from "./RiskBadge.jsx";
+import { transactionRiskIntelligencePanelId } from "../transactions/transactionRiskIntelligencePanelId.js";
 
 export function TransactionMonitorTable({
   transactions,
@@ -26,6 +27,7 @@ export function TransactionMonitorTable({
         <tbody>
           {transactions.map((transaction) => {
             const expanded = expandedTransactionId === transaction.transactionId;
+            const detailPanelId = transactionRiskIntelligencePanelId(transaction.transactionId);
             return (
               <Fragment key={transaction.transactionId}>
                 <tr key={transaction.transactionId}>
@@ -52,6 +54,7 @@ export function TransactionMonitorTable({
                         className="secondaryButton compactButton"
                         type="button"
                         aria-expanded={expanded}
+                        aria-controls={detailPanelId}
                         onClick={() => onToggleTransaction(expanded ? null : transaction.transactionId)}
                       >
                         {expanded ? "Hide details" : "Details"}
@@ -61,7 +64,7 @@ export function TransactionMonitorTable({
                 </tr>
                 {expanded && typeof renderTransactionDetail === "function" && (
                   <tr className="transactionDetailRow" key={`${transaction.transactionId}-detail`}>
-                    <td colSpan={8}>{renderTransactionDetail(transaction)}</td>
+                    <td colSpan={8}>{renderTransactionDetail(transaction, detailPanelId)}</td>
                   </tr>
                 )}
               </Fragment>

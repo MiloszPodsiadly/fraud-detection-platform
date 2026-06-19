@@ -43,3 +43,34 @@ It does not compute comparison, rank engines, infer a winning engine, infer a fi
 FDP-116 does not add recommendation, feedback submission, case actions, payment authorization, model promotion,
 threshold recommendation, workflow behavior, scoring changes, backend changes, OpenAPI changes, or raw payload
 display.
+
+## FDP-118 UI Hardening
+
+FDP-118 hardens the FDP-116 read-only Transaction Risk Intelligence UI. The change improves layout, visual grouping,
+diagnostic boundary wording, status presentation, empty states, error states, accessibility, keyboard-oriented tests,
+safe fixtures, scope guards, and documentation.
+
+The panel remains frontend-only and read-only. It continues to consume only the FDP-115 scored transaction detail API:
+
+`GET /api/v1/transactions/scored/{transactionId}`
+
+FDP-118 groups the panel into:
+
+- Transaction Summary
+- Engine Intelligence Status
+- Projected Comparison
+- Engine Results
+- Diagnostic Signals
+- Warnings and Limitations
+- Diagnostic Boundary
+
+The expanded transaction row keeps `aria-expanded` and adds `aria-controls` pointing at the stable panel id:
+
+`transaction-risk-intelligence-{safeTransactionId}`
+
+The id is sanitized for HTML usage only. The original transaction id remains the value passed to the detail API client.
+
+FDP-118 does not add feedback submission, recommendation, case actions, approve/decline/block behavior, payment
+authorization, model promotion, threshold recommendation, workflow, Kafka behavior, scheduler/cron/daemon behavior,
+scoring changes, backend changes, OpenAPI changes, dependency changes, raw payload display, a global risk intelligence
+dashboard, or bulk transaction intelligence export.

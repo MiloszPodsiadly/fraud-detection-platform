@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { validateTransactionRiskIntelligenceDetail } from "./transactionRiskIntelligenceValidation.js";
+import {
+  malformedInvalidEngine,
+  malformedInvalidWarning,
+  malformedMissingEngineIntelligence
+} from "./transactionRiskIntelligenceFixtures.js";
 
 describe("transactionRiskIntelligenceValidation", () => {
   it("accepts valid AVAILABLE detail", () => {
@@ -50,6 +55,21 @@ describe("transactionRiskIntelligenceValidation", () => {
     delete value.engineIntelligence;
 
     expect(validateTransactionRiskIntelligenceDetail(value)).toMatchObject({ valid: false, reason: "MISSING_ENGINE_INTELLIGENCE" });
+  });
+
+  it("rejects malformed display fixtures", () => {
+    expect(validateTransactionRiskIntelligenceDetail(malformedMissingEngineIntelligence())).toMatchObject({
+      valid: false,
+      reason: "MISSING_ENGINE_INTELLIGENCE"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedInvalidEngine())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ENGINE_INTELLIGENCE_ENGINE"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedInvalidWarning())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ENGINE_INTELLIGENCE_WARNING"
+    });
   });
 
   it("rejects invalid status", () => {
