@@ -57,9 +57,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository/org/owasp/dependency-check-data
-          key: dependency-check-${{ runner.os }}-${{ github.run_id }}
+          key: dependency-check-v2-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
-            dependency-check-${{ runner.os }}-
+            dependency-check-v2-${{ runner.os }}-
 
       - name: Run Maven dependency vulnerability scan
         run: |
