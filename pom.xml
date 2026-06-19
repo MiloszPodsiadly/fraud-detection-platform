@@ -44,6 +44,7 @@
         <archunit.version>1.4.2</archunit.version>
         <bouncycastle.version>1.84</bouncycastle.version>
         <xz.version>1.12</xz.version>
+        <jackson-core.version>3.2.0</jackson-core.version>
     </properties>
 
     <dependencyManagement>
@@ -111,6 +112,11 @@
                 <artifactId>common-test-support</artifactId>
                 <version>${project.version}</version>
                 <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>tools.jackson.core</groupId>
+                <artifactId>jackson-core</artifactId>
+                <version>${jackson-core.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
