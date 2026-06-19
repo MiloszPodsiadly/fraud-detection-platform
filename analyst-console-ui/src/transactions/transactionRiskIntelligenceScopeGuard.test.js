@@ -6,6 +6,7 @@ const FDP_116_SOURCE_FILES = [
   "src/components/TransactionRiskIntelligencePanel.jsx",
   "src/transactions/transactionRiskIntelligenceValidation.js",
   "src/transactions/useScoredTransactionDetail.js",
+  "src/transactions/transactionRiskIntelligenceFixtures.js",
   "src/pages/TransactionScoringWorkspacePage.jsx",
   "src/components/TransactionMonitorTable.jsx",
   "src/workspace/TransactionScoringWorkspaceContainer.jsx",
@@ -27,6 +28,8 @@ const FORBIDDEN_TERMS = [
   ["recommended", "Action"].join(""),
   ["feedback", "Submit"].join(""),
   ["submit", "Feedback"].join(""),
+  ["raw", "ML", "Request"].join(""),
+  ["raw", "ML", "Response"].join(""),
   ["raw", "Ml", "Request"].join(""),
   ["raw", "Ml", "Response"].join(""),
   ["raw", "Feature", "Vector"].join(""),
@@ -58,7 +61,11 @@ const FORBIDDEN_ACTION_PHRASES = [
 const ALLOWED_NEGATIVE_BOUNDARY_STATEMENTS = [
   "not a final payment decision",
   "does not approve, decline, block",
+  "does not approve",
+  "does not decline",
+  "does not block",
   "does not authorize payment",
+  "does not recommend analyst action",
   "not operational instructions",
   "this panel does not approve, decline, block, authorize payment, recommend action, promote models, or change thresholds"
 ];
