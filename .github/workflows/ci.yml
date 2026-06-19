@@ -62,8 +62,12 @@ jobs:
             dependency-check-${{ runner.os }}-
 
       - name: Run Maven dependency vulnerability scan
-        if: ${{ secrets.NVD_API_KEY != '' }}
         run: |
+          if [ -z "${NVD_API_KEY:-}" ]; then
+            echo "NVD_API_KEY is not configured; skipping OWASP Dependency-Check baseline to avoid NVD rate-limit failures."
+            echo "Configure the repository secret NVD_API_KEY to enable the dependency vulnerability scan."
+            exit 0
+          fi
           set +e
           mvn -B -Psecurity-scan -DskipTests -DfailOnError=true verify > dependency-check.log 2>&1
           status=$?
@@ -76,12 +80,6 @@ jobs:
           exit "$status"
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
-
-      - name: Skip Maven dependency vulnerability scan without NVD API key
-        if: ${{ secrets.NVD_API_KEY == '' }}
-        run: |
-          echo "NVD_API_KEY is not configured; skipping OWASP Dependency-Check baseline to avoid NVD rate-limit failures."
-          echo "Configure the repository secret NVD_API_KEY to enable the dependency vulnerability scan."
 
       - name: Upload Dependency-Check reports
         if: always()
