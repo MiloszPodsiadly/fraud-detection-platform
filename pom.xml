@@ -44,7 +44,7 @@
         <archunit.version>1.4.2</archunit.version>
         <bouncycastle.version>1.84</bouncycastle.version>
         <xz.version>1.12</xz.version>
-        <jackson-core.version>3.2.0</jackson-core.version>
+        <jackson.version>3.2.0</jackson.version>
     </properties>
 
     <dependencyManagement>
@@ -116,7 +116,13 @@
             <dependency>
                 <groupId>tools.jackson.core</groupId>
                 <artifactId>jackson-core</artifactId>
-                <version>${jackson-core.version}</version>
+                <version>${jackson.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>tools.jackson.core</groupId>
+                <artifactId>jackson-databind</artifactId>
+                <version>${jackson.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
