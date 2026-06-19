@@ -18,10 +18,10 @@ class ProducerEngineIntelligenceDoesNotMigrateScoringRuntimeTest {
         assertThat(scoringService)
                 .contains(
                         "FraudScoreResult scoreResult = fraudScoringEngine.score(scoringRequest);",
-                        "Optional<EngineIntelligenceSummary> engineIntelligence = engineIntelligence(scoringRequest);",
+                        "EngineIntelligenceEmission engineIntelligence = engineIntelligence(scoringRequest);",
                         "engineIntelligenceEmissionService.emitIfEnabled(scoringRequest)",
                         "scoreResult,",
-                        "engineIntelligence"
+                        "engineIntelligence.summary()"
                 )
                 .doesNotContain("FraudScoringOrchestrator");
     }

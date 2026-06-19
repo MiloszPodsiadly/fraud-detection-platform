@@ -14,6 +14,7 @@ import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEm
 import com.frauddetection.scoring.orchestration.aggregation.FraudEngineAggregationService;
 import com.frauddetection.scoring.orchestration.aggregation.PublicEngineIntelligenceMapper;
 import com.frauddetection.scoring.service.FraudScoringEngine;
+import com.frauddetection.scoring.service.AnalystRecommendationService;
 import com.frauddetection.scoring.service.MlFraudScoringEngine;
 import com.frauddetection.scoring.service.TransactionFraudScoringService;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -73,7 +74,8 @@ class EngineIntelligenceDefaultDisabledContextSafetyTest {
                     publisher,
                     context.getBean(ScoringProperties.class),
                     new ScoringMetrics(new SimpleMeterRegistry()),
-                    context.getBean(EngineIntelligenceEmissionService.class)
+                    context.getBean(EngineIntelligenceEmissionService.class),
+                    new AnalystRecommendationService()
             );
 
             service.score(input);
@@ -81,8 +83,10 @@ class EngineIntelligenceDefaultDisabledContextSafetyTest {
             ArgumentCaptor<TransactionScoredEvent> captor = ArgumentCaptor.forClass(TransactionScoredEvent.class);
             verify(publisher).publish(captor.capture());
             assertThat(captor.getValue().engineIntelligence()).isNull();
+            assertThat(captor.getValue().analystRecommendation().status().name()).isEqualTo("ABSENT");
             assertThat(json(captor.getValue()))
-                    .doesNotContain("\"engineIntelligence\"");
+                    .doesNotContain("\"engineIntelligence\"")
+                    .contains("\"analystRecommendation\"");
             verify(orchestrator, never()).evaluate(org.mockito.ArgumentMatchers.any());
             verify(aggregation, never()).aggregate(org.mockito.ArgumentMatchers.any());
             verify(mapper, never()).map(org.mockito.ArgumentMatchers.any());
@@ -109,7 +113,8 @@ class EngineIntelligenceDefaultDisabledContextSafetyTest {
                             publisher,
                             context.getBean(ScoringProperties.class),
                             new ScoringMetrics(new SimpleMeterRegistry()),
-                            context.getBean(EngineIntelligenceEmissionService.class)
+                            context.getBean(EngineIntelligenceEmissionService.class),
+                            new AnalystRecommendationService()
                     );
 
                     service.score(input);

@@ -66,7 +66,8 @@ final class TransactionFraudScoringServiceEngineIntelligenceTestSupport {
                 publisher,
                 new ScoringProperties(0.75d, 0.90d, ScoringMode.RULE_BASED),
                 new ScoringMetrics(new SimpleMeterRegistry()),
-                emissionService
+                emissionService,
+                new AnalystRecommendationService()
         );
         return new Harness(input, request, result, scoringEngine, publisher, emissionService, service);
     }

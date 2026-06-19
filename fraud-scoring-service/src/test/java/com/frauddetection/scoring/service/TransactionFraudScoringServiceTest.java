@@ -39,7 +39,8 @@ class TransactionFraudScoringServiceTest {
                 publisher,
                 new ScoringProperties(0.75d, 0.90d, ScoringMode.RULE_BASED),
                 new ScoringMetrics(meterRegistry),
-                emissionService
+                emissionService,
+                new AnalystRecommendationService()
         );
         var event = TransactionFixtures.enrichedTransaction().build();
         var scoreResult = new FraudScoreResult(
@@ -59,14 +60,24 @@ class TransactionFraudScoringServiceTest {
 
         when(scoringEngine.score(FraudScoringRequest.from(event))).thenReturn(scoreResult);
         when(emissionService.emitIfEnabled(FraudScoringRequest.from(event))).thenReturn(Optional.empty());
-        when(mapper.toEvent(FraudScoringRequest.from(event), scoreResult, Optional.empty())).thenReturn(scoredEvent);
+        when(mapper.toEvent(
+                FraudScoringRequest.from(event),
+                scoreResult,
+                Optional.empty(),
+                com.frauddetection.common.events.recommendation.AnalystRecommendationResult.absent()
+        )).thenReturn(scoredEvent);
 
         service.score(event);
 
         var inOrder = inOrder(scoringEngine, emissionService, mapper, publisher);
         inOrder.verify(scoringEngine).score(FraudScoringRequest.from(event));
         inOrder.verify(emissionService).emitIfEnabled(FraudScoringRequest.from(event));
-        inOrder.verify(mapper).toEvent(FraudScoringRequest.from(event), scoreResult, Optional.empty());
+        inOrder.verify(mapper).toEvent(
+                FraudScoringRequest.from(event),
+                scoreResult,
+                Optional.empty(),
+                com.frauddetection.common.events.recommendation.AnalystRecommendationResult.absent()
+        );
         inOrder.verify(publisher).publish(scoredEvent);
         org.assertj.core.api.Assertions.assertThat(meterRegistry.get("fraud.scoring.requests")
                 .tags("mode", "rule_based", "outcome", "success", "fallback_used", "false", "risk_level", "critical")
