@@ -47,6 +47,7 @@
         <jackson.version>3.2.0</jackson.version>
         <jackson.annotations.version>2.22</jackson.annotations.version>
         <prometheus.version>1.8.0</prometheus.version>
+        <caffeine.version>3.2.4</caffeine.version>
     </properties>
 
     <dependencyManagement>
@@ -92,6 +93,11 @@
                 <groupId>org.tukaani</groupId>
                 <artifactId>xz</artifactId>
                 <version>${xz.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.ben-manes.caffeine</groupId>
+                <artifactId>caffeine</artifactId>
+                <version>${caffeine.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.kafka</groupId>
