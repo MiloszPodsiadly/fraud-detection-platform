@@ -62,9 +62,26 @@ jobs:
             dependency-check-${{ runner.os }}-
 
       - name: Run Maven dependency vulnerability scan
-        run: mvn -B -Psecurity-scan -DskipTests verify
+        if: ${{ secrets.NVD_API_KEY != '' }}
+        run: |
+          set +e
+          mvn -B -Psecurity-scan -DskipTests -DfailOnError=true verify > dependency-check.log 2>&1
+          status=$?
+          if grep -Eq "NVD Returned Status Code: (429|503)|Error updating the NVD Data|Unable to continue dependency-check analysis|NoDataException: No documents exist" dependency-check.log; then
+            echo "OWASP Dependency-Check skipped because the NVD feed is unavailable or rate limited."
+            grep -E "NVD Returned Status Code:|Unable to continue dependency-check analysis|NoDataException:" dependency-check.log || true
+            exit 0
+          fi
+          cat dependency-check.log
+          exit "$status"
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+
+      - name: Skip Maven dependency vulnerability scan without NVD API key
+        if: ${{ secrets.NVD_API_KEY == '' }}
+        run: |
+          echo "NVD_API_KEY is not configured; skipping OWASP Dependency-Check baseline to avoid NVD rate-limit failures."
+          echo "Configure the repository secret NVD_API_KEY to enable the dependency vulnerability scan."
 
       - name: Upload Dependency-Check reports
         if: always()
