@@ -209,7 +209,8 @@
                             <failBuildOnCVSS>9.0</failBuildOnCVSS>
                             <failOnError>false</failOnError>
                             <nvdApiKeyEnvironmentVariable>NVD_API_KEY</nvdApiKeyEnvironmentVariable>
-                            <nvdMaxRetryCount>3</nvdMaxRetryCount>
+                            <nvdApiDelay>6000</nvdApiDelay>
+                            <nvdMaxRetryCount>10</nvdMaxRetryCount>
                             <skipTestScope>true</skipTestScope>
                             <nodeAnalyzerEnabled>false</nodeAnalyzerEnabled>
                             <nodeAuditAnalyzerEnabled>false</nodeAuditAnalyzerEnabled>
