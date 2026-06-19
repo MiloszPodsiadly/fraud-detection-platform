@@ -62,11 +62,12 @@ export function TransactionScoringWorkspacePage({
             transactions={transactions}
             expandedTransactionId={expandedTransactionId}
             onToggleTransaction={setExpandedTransactionId}
-            renderTransactionDetail={(transaction) => (
+            renderTransactionDetail={(transaction, detailPanelId) => (
               <TransactionRiskIntelligencePanel
                 transactionId={transaction.transactionId}
                 apiClient={apiClient}
                 enabled={canReadTransactions === true}
+                panelId={detailPanelId}
               />
             )}
           />

@@ -2102,6 +2102,20 @@ button:focus-visible,
   font-size: 0.95rem;
 }
 
+.detailSection h4,
+.detailSection h5 {
+  margin: 0 0 0.8rem;
+  color: var(--ink);
+}
+
+.detailSection h4 {
+  font-size: 0.92rem;
+}
+
+.detailSection h5 {
+  font-size: 0.86rem;
+}
+
 .detailSection dl {
   display: grid;
   grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr);
@@ -2120,6 +2134,58 @@ button:focus-visible,
   margin: 0;
   font-weight: 850;
   overflow-wrap: anywhere;
+}
+
+.transactionRiskIntelligencePanel {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.transactionRiskIntelligenceHeader {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.diagnosticBoundaryBanner {
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: 0.5rem;
+  background: rgba(239, 246, 255, 0.78);
+  padding: 0.85rem;
+}
+
+.diagnosticBoundaryBanner h4,
+.diagnosticBoundaryBanner p {
+  margin: 0;
+}
+
+.diagnosticBoundaryBanner h4 {
+  color: var(--blue);
+  font-size: 0.82rem;
+}
+
+.diagnosticBoundaryBanner p {
+  margin-top: 0.45rem;
+  color: var(--ink);
+}
+
+.transactionRiskStatus {
+  border-left: 0.3rem solid rgba(37, 99, 235, 0.45);
+}
+
+.transactionRiskStatusAvailable {
+  border-left-color: rgba(22, 163, 74, 0.48);
+}
+
+.transactionRiskStatusAbsent {
+  border-left-color: rgba(100, 116, 139, 0.48);
+}
+
+.transactionRiskStatusUnavailable {
+  border-left-color: rgba(220, 38, 38, 0.48);
+}
+
+.transactionRiskStatusDegraded {
+  border-left-color: rgba(217, 119, 6, 0.55);
 }
 
 .tagList {
