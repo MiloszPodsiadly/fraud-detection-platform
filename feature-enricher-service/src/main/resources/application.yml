@@ -1,6 +1,8 @@
 spring:
   application:
     name: feature-enricher-service
+  cache:
+    type: caffeine
   data:
     redis:
       host: ${REDIS_HOST:localhost}
