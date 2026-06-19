@@ -48,6 +48,7 @@
         <jackson.annotations.version>2.22</jackson.annotations.version>
         <prometheus.version>1.8.0</prometheus.version>
         <caffeine.version>3.2.4</caffeine.version>
+        <dependency-check-maven.version>12.2.2</dependency-check-maven.version>
     </properties>
 
     <dependencyManagement>
@@ -189,4 +190,43 @@
             </plugins>
         </pluginManagement>
     </build>
+
+    <profiles>
+        <profile>
+            <id>security-scan</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.owasp</groupId>
+                        <artifactId>dependency-check-maven</artifactId>
+                        <version>${dependency-check-maven.version}</version>
+                        <inherited>false</inherited>
+                        <configuration>
+                            <format>HTML,JSON,XML</format>
+                            <outputDirectory>${project.build.directory}</outputDirectory>
+                            <dataDirectory>${user.home}/.m2/repository/org/owasp/dependency-check-data</dataDirectory>
+                            <prettyPrint>true</prettyPrint>
+                            <failBuildOnCVSS>9.0</failBuildOnCVSS>
+                            <failOnError>false</failOnError>
+                            <nvdApiKeyEnvironmentVariable>NVD_API_KEY</nvdApiKeyEnvironmentVariable>
+                            <nvdMaxRetryCount>3</nvdMaxRetryCount>
+                            <skipTestScope>true</skipTestScope>
+                            <nodeAnalyzerEnabled>false</nodeAnalyzerEnabled>
+                            <nodeAuditAnalyzerEnabled>false</nodeAuditAnalyzerEnabled>
+                            <retireJsAnalyzerEnabled>false</retireJsAnalyzerEnabled>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>dependency-vulnerability-scan</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>aggregate</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
