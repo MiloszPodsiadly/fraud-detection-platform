@@ -1,6 +1,8 @@
 spring:
   application:
     name: alert-service
+  cache:
+    type: caffeine
   data:
     mongodb:
       uri: ${MONGODB_URI:mongodb://localhost:27017/fraud_alerts}

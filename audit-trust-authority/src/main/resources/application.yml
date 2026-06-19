@@ -1,6 +1,8 @@
 spring:
   application:
     name: audit-trust-authority
+  cache:
+    type: caffeine
   data:
     mongodb:
       uri: ${MONGODB_URI:mongodb://localhost:27017/fraud_trust_authority?serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000}
