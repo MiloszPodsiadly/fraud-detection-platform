@@ -24,6 +24,7 @@ describe("alertsApi auth headers", () => {
   const listFraudCaseWorkQueue = (...args) => apiClient.listFraudCaseWorkQueue(...args);
   const getFraudCaseWorkQueueSummary = (...args) => apiClient.getFraudCaseWorkQueueSummary(...args);
   const listScoredTransactions = (...args) => apiClient.listScoredTransactions(...args);
+  const getScoredTransactionDetail = (...args) => apiClient.getScoredTransactionDetail(...args);
   const listSuspiciousTransactions = (...args) => apiClient.listSuspiciousTransactions(...args);
   const getSuspiciousTransactionSummary = (...args) => apiClient.getSuspiciousTransactionSummary(...args);
   const getSuspiciousTransaction = (...args) => apiClient.getSuspiciousTransaction(...args);
@@ -1190,6 +1191,74 @@ describe("alertsApi auth headers", () => {
     );
   });
 
+  it("loads scored transaction detail through the FDP-115 detail GET path only", async () => {
+    const signal = new AbortController().signal;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(scoredTransactionDetail()));
+
+    const result = await getScoredTransactionDetail(" txn:1 ", {
+      signal,
+      method: "POST",
+      body: JSON.stringify({ ignored: true }),
+      search: "?ignored=true"
+    });
+
+    expect(result.transactionId).toBe("txn:1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/transactions/scored/txn%3A1",
+      expect.objectContaining({
+        signal,
+        headers: expect.objectContaining({ "Content-Type": "application/json" })
+      })
+    );
+    expect(fetchMock.mock.calls[0][0]).not.toContain("/engine-intelligence");
+    expect(fetchMock.mock.calls[0][0]).not.toContain("feedback");
+    expect(fetchMock.mock.calls[0][1]).not.toEqual(expect.objectContaining({
+      method: expect.any(String),
+      body: expect.any(String)
+    }));
+  });
+
+  it("uses existing auth headers for scored transaction detail", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(scoredTransactionDetail()));
+    resetApiClient(normalizeSession({ userId: "analyst-1", roles: ["ANALYST"] }), createDemoAuthProvider());
+
+    await getScoredTransactionDetail("txn-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/transactions/scored/txn-1",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "X-Demo-User-Id": "analyst-1",
+          "Content-Type": "application/json"
+        })
+      })
+    );
+  });
+
+  it.each([400, 401, 403, 404, 503])("propagates scored transaction detail %s errors", async (status) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
+      error: `E${status}`,
+      message: `status ${status}`,
+      details: ["reason:test"]
+    }, status));
+
+    await expect(getScoredTransactionDetail("txn-1")).rejects.toMatchObject({
+      status,
+      message: expect.stringContaining(`status ${status}`)
+    });
+  });
+
+  it("rejects invalid scored transaction detail identifiers without a request", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(scoredTransactionDetail()));
+
+    await expect(getScoredTransactionDetail("approve transaction")).rejects.toMatchObject({
+      status: 400,
+      error: "INVALID_TRANSACTION_ID"
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("uses cursor slice params for suspicious transaction reads without page or totals", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
       content: [],
@@ -1977,6 +2046,36 @@ function comparison() {
     agreementStatus: "DISAGREEMENT",
     riskMismatchStatus: "MATERIAL_RISK_MISMATCH",
     scoreDeltaBucket: "LARGE"
+  };
+}
+
+function scoredTransactionDetail(overrides = {}) {
+  return {
+    transactionId: "txn:1",
+    correlationId: "corr-1",
+    transactionTimestamp: "2026-06-18T10:00:00Z",
+    scoredAt: "2026-06-18T10:00:01Z",
+    fraudScore: 0.91,
+    riskLevel: "CRITICAL",
+    alertRecommended: true,
+    reasonCodes: ["HIGH_VELOCITY"],
+    engineIntelligence: {
+      status: "AVAILABLE",
+      contractVersion: 1,
+      generatedAt: "2026-06-18T10:00:02Z",
+      comparison: comparison(),
+      engines: [{
+        engineId: "rules.primary",
+        engineType: "RULES",
+        status: "AVAILABLE",
+        riskLevel: "CRITICAL",
+        scoreBucket: "HIGH",
+        reasonCodes: ["HIGH_VELOCITY"]
+      }],
+      diagnosticSignals: [],
+      warnings: []
+    },
+    ...overrides
   };
 }
 

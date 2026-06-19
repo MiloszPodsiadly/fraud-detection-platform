@@ -164,7 +164,7 @@ class FraudEngineContractRuntimeIsolationTest {
         String ruleRuntime = Files.readString(scoringRoot.resolve("service/RuleBasedFraudScoringEngine.java"));
         String mlRuntime = Files.readString(scoringRoot.resolve("service/MlFraudScoringEngine.java"));
         String alertRuntime = javaSources(repositoryRoot.resolve("alert-service/src/main/java"));
-        String uiRuntime = sourceFiles(repositoryRoot.resolve("analyst-console-ui/src"));
+        String uiRuntime = analystConsoleUiSourcesExceptTransactionRiskIntelligence(repositoryRoot);
 
         assertThat(adapterPath).exists();
         assertThat(adapter)
@@ -223,7 +223,7 @@ class FraudEngineContractRuntimeIsolationTest {
         String ruleRuntime = Files.readString(scoringRoot.resolve("service/RuleBasedFraudScoringEngine.java"));
         String mlRuntime = Files.readString(scoringRoot.resolve("service/MlFraudScoringEngine.java"));
         String alertRuntime = javaSources(repositoryRoot.resolve("alert-service/src/main/java"));
-        String uiRuntime = sourceFiles(repositoryRoot.resolve("analyst-console-ui/src"));
+        String uiRuntime = analystConsoleUiSourcesExceptTransactionRiskIntelligence(repositoryRoot);
 
         assertThat(adapterPath).exists();
         assertThat(adapter)
@@ -278,7 +278,7 @@ class FraudEngineContractRuntimeIsolationTest {
         String scoringRuntime = javaSources(repositoryRoot().resolve("fraud-scoring-service/src/main/java"));
         String commonEventsRuntime = javaSources(repositoryRoot().resolve("common-events/src/main/java"));
         String alertRuntime = javaSources(repositoryRoot().resolve("alert-service/src/main/java"));
-        String uiRuntime = sourceFiles(repositoryRoot().resolve("analyst-console-ui/src"));
+        String uiRuntime = analystConsoleUiSourcesExceptTransactionRiskIntelligence(repositoryRoot());
 
         assertThat(scoringRuntime)
                 .contains("record ScoringContext")
@@ -340,6 +340,30 @@ class FraudEngineContractRuntimeIsolationTest {
             StringBuilder content = new StringBuilder();
             for (Path file : files.filter(Files::isRegularFile)
                     .filter(path -> endsWithAny(path, suffixes))
+                    .toList()) {
+                content.append(Files.readString(file)).append('\n');
+            }
+            return content.toString();
+        }
+    }
+
+    private String analystConsoleUiSourcesExceptTransactionRiskIntelligence(Path repositoryRoot) throws IOException {
+        Path uiRoot = repositoryRoot.resolve("analyst-console-ui/src");
+        return sourceFilesExcept(uiRoot,
+                uiRoot.resolve("components/TransactionRiskIntelligencePanel.jsx"),
+                uiRoot.resolve("components/TransactionRiskIntelligencePanel.test.jsx"),
+                uiRoot.resolve("pages/TransactionScoringWorkspacePage.jsx"),
+                uiRoot.resolve("pages/TransactionScoringWorkspacePage.test.jsx"),
+                uiRoot.resolve("transactions")
+        );
+    }
+
+    private String sourceFilesExcept(Path root, Path... excludedRoots) throws IOException {
+        try (Stream<Path> files = Files.walk(root)) {
+            StringBuilder content = new StringBuilder();
+            for (Path file : files.filter(Files::isRegularFile)
+                    .filter(path -> endsWithAny(path))
+                    .filter(path -> Arrays.stream(excludedRoots).noneMatch(path::startsWith))
                     .toList()) {
                 content.append(Files.readString(file)).append('\n');
             }

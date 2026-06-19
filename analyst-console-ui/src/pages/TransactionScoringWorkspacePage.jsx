@@ -4,6 +4,7 @@ import { ErrorState } from "../components/ErrorState.jsx";
 import { LoadingPanel } from "../components/LoadingPanel.jsx";
 import { PaginationControls } from "../components/PaginationControls.jsx";
 import { TransactionMonitorTable } from "../components/TransactionMonitorTable.jsx";
+import { TransactionRiskIntelligencePanel } from "../components/TransactionRiskIntelligencePanel.jsx";
 
 export function TransactionScoringWorkspacePage({
   transactionPage,
@@ -14,9 +15,18 @@ export function TransactionScoringWorkspacePage({
   onTransactionFiltersChange = () => {},
   onTransactionPageChange,
   onTransactionPageSizeChange,
+  apiClient,
+  canReadTransactions = true,
   workspaceHeadingProps = {}
 }) {
   const transactions = transactionPage.content || [];
+  const [expandedTransactionId, setExpandedTransactionId] = useState(null);
+
+  useEffect(() => {
+    if (expandedTransactionId && !transactions.some((transaction) => transaction.transactionId === expandedTransactionId)) {
+      setExpandedTransactionId(null);
+    }
+  }, [expandedTransactionId, transactions]);
 
   return (
     <section className="panel" id="transaction-stream" aria-labelledby="transaction-stream-title">
@@ -48,7 +58,18 @@ export function TransactionScoringWorkspacePage({
       )}
       {!isLoading && !error && transactions.length > 0 && (
         <>
-          <TransactionMonitorTable transactions={transactions} />
+          <TransactionMonitorTable
+            transactions={transactions}
+            expandedTransactionId={expandedTransactionId}
+            onToggleTransaction={setExpandedTransactionId}
+            renderTransactionDetail={(transaction) => (
+              <TransactionRiskIntelligencePanel
+                transactionId={transaction.transactionId}
+                apiClient={apiClient}
+                enabled={canReadTransactions === true}
+              />
+            )}
+          />
           <PaginationControls
             page={transactionPage.page}
             size={transactionPage.size}

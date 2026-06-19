@@ -6,7 +6,9 @@ export function TransactionScoringWorkspaceContainer({
   onRetryWorkspace,
   onFiltersChange,
   onPageChange,
-  onPageSizeChange
+  onPageSizeChange,
+  apiClient,
+  canReadTransactions
 }) {
   return (
     <TransactionScoringWorkspacePage
@@ -18,6 +20,8 @@ export function TransactionScoringWorkspaceContainer({
       onTransactionFiltersChange={onFiltersChange}
       onTransactionPageChange={onPageChange}
       onTransactionPageSizeChange={onPageSizeChange}
+      apiClient={apiClient}
+      canReadTransactions={canReadTransactions}
       workspaceHeadingProps={workspaceHeadingProps(headingLabel)}
     />
   );

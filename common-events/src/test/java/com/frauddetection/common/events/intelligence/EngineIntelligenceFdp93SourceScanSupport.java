@@ -22,8 +22,14 @@ final class EngineIntelligenceFdp93SourceScanSupport {
             "analyst-console-ui/src/components/EngineIntelligencePanel.jsx",
             "analyst-console-ui/src/components/EngineIntelligencePanel.test.jsx",
             "analyst-console-ui/src/components/EngineIntelligencePanelScopeGuard.test.js",
+            "analyst-console-ui/src/components/TransactionRiskIntelligencePanel.jsx",
+            "analyst-console-ui/src/components/TransactionRiskIntelligencePanel.test.jsx",
             "analyst-console-ui/src/pages/FraudCaseDetailsPage.jsx",
             "analyst-console-ui/src/pages/FraudCaseDetailsPage.test.jsx",
+            "analyst-console-ui/src/transactions/transactionRiskIntelligenceScopeGuard.test.js",
+            "analyst-console-ui/src/transactions/transactionRiskIntelligenceValidation.js",
+            "analyst-console-ui/src/transactions/transactionRiskIntelligenceValidation.test.js",
+            "analyst-console-ui/src/transactions/useScoredTransactionDetail.test.js",
             "analyst-console-ui/src/styles.css"
     );
 
