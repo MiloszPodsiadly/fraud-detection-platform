@@ -35,12 +35,56 @@ class AnalystRecommendationApiArchitectureGuardTest {
     }
 
     @Test
-    void noFrontendAnalystRecommendationUiWasAddedInFdp119() throws Exception {
-        String frontendSources = sources(repositoryRoot().resolve("analyst-console-ui/src"));
+    void frontendAnalystRecommendationSurfaceIsReadOnlyDisplayOnly() throws Exception {
+        Path repositoryRoot = repositoryRoot();
+        String frontendSources = sources(repositoryRoot.resolve("analyst-console-ui/src/components/AnalystRecommendationPanel.jsx"))
+                + sources(repositoryRoot.resolve("analyst-console-ui/src/components/TransactionRiskIntelligencePanel.jsx"))
+                + sources(repositoryRoot.resolve("analyst-console-ui/src/transactions/transactionRiskIntelligenceFixtures.js"))
+                + sources(repositoryRoot.resolve("analyst-console-ui/src/transactions/transactionRiskIntelligenceValidation.js"));
+        String lowerCaseFrontendSources = frontendSources.toLowerCase(java.util.Locale.ROOT);
 
-        assertThat(frontendSources).doesNotContain(
-                "RECOMMEND_REVIEW",
-                "RECOMMEND_CASE_CREATION"
+        assertThat(frontendSources)
+                .contains("AnalystRecommendationPanel")
+                .contains("RECOMMEND_REVIEW")
+                .contains("RECOMMEND_CASE_CREATION")
+                .doesNotContain(
+                        "approveTransaction",
+                        "declineTransaction",
+                        "blockTransaction",
+                        "authorizePayment",
+                        "createCase",
+                        "startWorkflow",
+                        "applyRecommendation",
+                        "acceptRecommendation",
+                        "rejectRecommendation",
+                        "submitFeedback",
+                        "feedbackSubmit",
+                        "promoteModel",
+                        "deployModel",
+                        "thresholdRecommendation",
+                        "recommendedThreshold",
+                        "changeThreshold",
+                        "rawMlRequest",
+                        "rawMlResponse",
+                        "rawFeatureVector",
+                        "FraudEngineResult",
+                        "rawEvidence",
+                        "groundTruth",
+                        "trainingLabel",
+                        "finalDecision",
+                        "paymentDecision"
+                );
+        assertThat(lowerCaseFrontendSources).doesNotContain(
+                "safe to approve",
+                "approve payment",
+                "decline payment",
+                "block transaction",
+                "automatically create case",
+                "apply recommendation",
+                "accept recommendation",
+                "reject recommendation",
+                "recommendation accepted",
+                "recommendation applied"
         );
     }
 
@@ -80,6 +124,7 @@ class AnalystRecommendationApiArchitectureGuardTest {
                     .filter(file -> file.toString().endsWith(".java")
                             || file.toString().endsWith(".js")
                             || file.toString().endsWith(".jsx"))
+                    .filter(file -> !file.toString().contains(".test."))
                     .toList()) {
                 content.append(Files.readString(path)).append('\n');
             }
