@@ -68,6 +68,39 @@ class AnalystRecommendationContractTest {
     }
 
     @Test
+    void availableAndDegradedRecommendationsRequireReasonCodes() {
+        assertThatThrownBy(() -> new AnalystRecommendationResult(
+                AnalystRecommendationStatus.AVAILABLE,
+                AnalystRecommendation.RECOMMEND_REVIEW,
+                AnalystRecommendationConfidence.LOW,
+                AnalystRecommendationSource.RULES_RISK,
+                List.of(),
+                List.of(),
+                AnalystRecommendationNonDecisioning.advisoryOnly()
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("ANALYST_RECOMMENDATION_AVAILABLE_REASON_REQUIRED");
+
+        assertThatThrownBy(() -> new AnalystRecommendationResult(
+                AnalystRecommendationStatus.DEGRADED,
+                AnalystRecommendation.RECOMMEND_REVIEW,
+                AnalystRecommendationConfidence.LOW,
+                AnalystRecommendationSource.ENGINE_INTELLIGENCE_DEGRADED,
+                List.of(),
+                List.of(new AnalystRecommendationWarning("ENGINE_INTELLIGENCE_DEGRADED", 1)),
+                AnalystRecommendationNonDecisioning.advisoryOnly()
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("ANALYST_RECOMMENDATION_AVAILABLE_REASON_REQUIRED");
+    }
+
+    @Test
+    void unavailableStatusesRejectRecommendationValues() {
+        assertUnavailableStatusRejectsRecommendation(AnalystRecommendationStatus.UNAVAILABLE);
+        assertUnavailableStatusRejectsRecommendation(AnalystRecommendationStatus.ABSENT);
+        assertUnavailableStatusRejectsRecommendation(AnalystRecommendationStatus.INSUFFICIENT_DATA);
+        assertUnavailableStatusRejectsRecommendation(AnalystRecommendationStatus.NOT_APPLICABLE);
+    }
+
+    @Test
     void decisioningFlagsMustAllRemainTrue() {
         assertThatThrownBy(() -> new AnalystRecommendationNonDecisioning(true, true, false, true, true, true))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -79,5 +112,18 @@ class AnalystRecommendationContractTest {
         assertThatThrownBy(() -> new AnalystRecommendationWarning("PAYMENT_AUTHORIZATION", 1))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("ANALYST_RECOMMENDATION_WARNING_CODE_INVALID");
+    }
+
+    private void assertUnavailableStatusRejectsRecommendation(AnalystRecommendationStatus status) {
+        assertThatThrownBy(() -> new AnalystRecommendationResult(
+                status,
+                AnalystRecommendation.RECOMMEND_REVIEW,
+                AnalystRecommendationConfidence.LOW,
+                AnalystRecommendationSource.ENGINE_INTELLIGENCE_UNAVAILABLE,
+                List.of("REASON_PRESENT"),
+                List.of(),
+                AnalystRecommendationNonDecisioning.advisoryOnly()
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("ANALYST_RECOMMENDATION_UNAVAILABLE_RECOMMENDATION_INVALID");
     }
 }

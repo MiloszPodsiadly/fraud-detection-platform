@@ -36,6 +36,10 @@ public record AnalystRecommendationResult(
                 || status == AnalystRecommendationStatus.DEGRADED)) {
             throw new IllegalArgumentException("ANALYST_RECOMMENDATION_AVAILABLE_RECOMMENDATION_REQUIRED");
         }
+        if (reasonCodes.isEmpty() && (status == AnalystRecommendationStatus.AVAILABLE
+                || status == AnalystRecommendationStatus.DEGRADED)) {
+            throw new IllegalArgumentException("ANALYST_RECOMMENDATION_AVAILABLE_REASON_REQUIRED");
+        }
         if (recommendation != null && (status == AnalystRecommendationStatus.ABSENT
                 || status == AnalystRecommendationStatus.NOT_APPLICABLE
                 || status == AnalystRecommendationStatus.INSUFFICIENT_DATA

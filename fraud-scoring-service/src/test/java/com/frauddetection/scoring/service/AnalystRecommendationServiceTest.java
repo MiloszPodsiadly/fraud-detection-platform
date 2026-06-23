@@ -93,6 +93,24 @@ class AnalystRecommendationServiceTest {
     }
 
     @Test
+    void recommendNoActionKeepsNonDecisioningBoundary() {
+        var result = service.recommend(scoreResult(RiskLevel.LOW), Optional.of(summary(
+                rules(RiskLevel.LOW, "LOW_MODEL_RISK"),
+                ml(RiskLevel.LOW, "LOW_MODEL_RISK")
+        )));
+
+        assertThat(result.status()).isEqualTo(AnalystRecommendationStatus.AVAILABLE);
+        assertThat(result.recommendation()).isEqualTo(AnalystRecommendation.RECOMMEND_NO_ACTION);
+        assertThat(result.reasonCodes()).containsAnyOf("BOTH_ENGINES_LOW_RISK", "LOW_RISK_DIAGNOSTIC_CONTEXT");
+        assertThat(result.nonDecisioning().notPaymentAuthorization()).isTrue();
+        assertThat(result.nonDecisioning().notAutomaticDecisioning()).isTrue();
+        assertThat(result.nonDecisioning().notCaseAction()).isTrue();
+        assertThat(result.nonDecisioning().notWorkflowAction()).isTrue();
+        assertThat(result.nonDecisioning().notModelPromotion()).isTrue();
+        assertThat(result.nonDecisioning().notThresholdRecommendation()).isTrue();
+    }
+
+    @Test
     void degradedEngineIntelligenceKeepsVisibleDegradedStatusWithoutEscalatingSeverity() {
         var result = service.recommend(scoreResult(RiskLevel.HIGH), Optional.of(summary(
                 List.of(new EngineIntelligenceWarningSummary(EngineIntelligenceWarningCode.REASON_CODE_LIMIT_APPLIED, 1)),
