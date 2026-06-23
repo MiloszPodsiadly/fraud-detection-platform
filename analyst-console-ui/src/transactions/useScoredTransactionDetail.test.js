@@ -175,6 +175,22 @@ function detail(overrides = {}) {
       diagnosticSignals: [],
       warnings: []
     },
+    analystRecommendation: {
+      status: "AVAILABLE",
+      recommendation: "RECOMMEND_REVIEW",
+      confidence: "LOW",
+      source: "RULES_RISK",
+      reasonCodes: ["RULES_HIGH_RISK"],
+      warnings: [],
+      nonDecisioning: {
+        notPaymentAuthorization: true,
+        notAutomaticDecisioning: true,
+        notCaseAction: true,
+        notWorkflowAction: true,
+        notModelPromotion: true,
+        notThresholdRecommendation: true
+      }
+    },
     ...overrides
   };
 }

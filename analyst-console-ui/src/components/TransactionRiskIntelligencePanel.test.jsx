@@ -33,7 +33,7 @@ describe("TransactionRiskIntelligencePanel", () => {
     expect(boundary).toHaveTextContent("read-only diagnostic view");
     expect(boundary).toHaveTextContent("does not approve");
     expect(boundary).toHaveTextContent("does not authorize payment");
-    expect(boundary).toHaveTextContent("does not recommend analyst action");
+    expect(boundary).toHaveTextContent("does not create a case");
   });
 
   it("uses a stable sanitized panel id", () => {
@@ -102,6 +102,15 @@ describe("TransactionRiskIntelligencePanel", () => {
     expect(screen.getByText("Projected engine comparison is not available for this transaction.")).toBeInTheDocument();
   });
 
+  it("renders analyst recommendation after projected comparison and before engine results", () => {
+    const { container } = renderPanel();
+
+    const text = container.textContent;
+    expect(screen.getByRole("region", { name: "Analyst Recommendation" })).toHaveTextContent("RECOMMEND_REVIEW");
+    expect(text.indexOf("Projected Comparison")).toBeLessThan(text.indexOf("Analyst Recommendation"));
+    expect(text.indexOf("Analyst Recommendation")).toBeLessThan(text.indexOf("Engine Results"));
+  });
+
   it("renders engine results diagnostic signals and warnings sections", () => {
     renderPanel();
 
@@ -167,6 +176,9 @@ describe("TransactionRiskIntelligencePanel", () => {
     expect(container.querySelector("form")).toBeNull();
     expect(text).not.toContain("safe to approve");
     expect(text).not.toContain("recommended action");
+    expect(text).not.toContain("apply recommendation");
+    expect(text).not.toContain("accept recommendation");
+    expect(text).not.toContain("reject recommendation");
     expect(text).not.toContain("rawmlrequest");
     expect(text).not.toContain("rawmlresponse");
     expect(text).not.toContain("rawfeaturevector");
