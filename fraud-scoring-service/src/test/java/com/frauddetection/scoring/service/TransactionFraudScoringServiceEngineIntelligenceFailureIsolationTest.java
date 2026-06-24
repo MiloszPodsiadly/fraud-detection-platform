@@ -19,6 +19,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
 
+import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.analystRecommendationService;
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.harness;
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.json;
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.scoreResult;
@@ -73,7 +74,8 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
         var input = TransactionFixtures.enrichedTransaction().build();
         var request = FraudScoringRequest.from(input);
         var scoreResult = scoreResult();
-        var baseEvent = new TransactionScoredEventMapper().toEvent(request, scoreResult, Optional.empty());
+        var recommendation = analystRecommendationService().unavailable();
+        var baseEvent = new TransactionScoredEventMapper().toEvent(request, scoreResult, Optional.empty(), recommendation);
         FraudScoringEngine scoringEngine = mock(FraudScoringEngine.class);
         EngineIntelligenceEmissionService emissionService = mock(EngineIntelligenceEmissionService.class);
         TransactionScoredEventMapper mapper = mock(TransactionScoredEventMapper.class);
@@ -81,19 +83,20 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
         ScoringMetrics metrics = mock(ScoringMetrics.class);
         when(scoringEngine.score(request)).thenReturn(scoreResult);
         when(emissionService.emitIfEnabled(request)).thenThrow(new IllegalStateException("raw-secret"));
-        when(mapper.toEvent(request, scoreResult, Optional.empty())).thenReturn(baseEvent);
+        when(mapper.toEvent(request, scoreResult, Optional.empty(), recommendation)).thenReturn(baseEvent);
         var service = new TransactionFraudScoringService(
                 scoringEngine,
                 mapper,
                 publisher,
                 new ScoringProperties(0.75d, 0.90d, ScoringMode.RULE_BASED),
                 metrics,
-                emissionService
+                emissionService,
+                analystRecommendationService()
         );
 
         service.score(input);
 
-        verify(mapper).toEvent(request, scoreResult, Optional.empty());
+        verify(mapper).toEvent(request, scoreResult, Optional.empty(), recommendation);
         verify(publisher).publish(baseEvent);
         verify(metrics).recordScoringRequest(
                 eq(ScoringMode.RULE_BASED),
@@ -103,6 +106,7 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
                 anyLong()
         );
         assertThat(baseEvent.engineIntelligence()).isNull();
+        assertThat(baseEvent.analystRecommendation().status().name()).isEqualTo("UNAVAILABLE");
         assertThat(baseEvent.fraudScore()).isEqualTo(scoreResult.fraudScore());
         assertThat(baseEvent.riskLevel()).isEqualTo(scoreResult.riskLevel());
         assertThat(baseEvent.alertRecommended()).isEqualTo(scoreResult.alertRecommended());

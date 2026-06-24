@@ -1,6 +1,7 @@
 package com.frauddetection.alert.api;
 
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 
 import java.time.Instant;
 import java.util.List;
@@ -17,6 +18,7 @@ public record ScoredTransactionDetailResponse(
         RiskLevel riskLevel,
         Boolean alertRecommended,
         List<String> reasonCodes,
-        EngineIntelligenceResponse engineIntelligence
+        EngineIntelligenceResponse engineIntelligence,
+        AnalystRecommendationResult analystRecommendation
 ) {
 }

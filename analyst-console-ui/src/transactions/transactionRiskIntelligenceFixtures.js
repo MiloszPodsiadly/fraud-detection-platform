@@ -1,3 +1,6 @@
+export const ANALYST_RECOMMENDATION_VERSION = "analyst-recommendation-v1";
+export const ANALYST_RECOMMENDATION_GENERATED_AT = "2026-06-19T10:00:00Z";
+
 export function availableDetail(overrides = {}) {
   return mergeDetail({
     transactionId: "txn-available-1",
@@ -8,7 +11,8 @@ export function availableDetail(overrides = {}) {
     riskLevel: "CRITICAL",
     alertRecommended: true,
     reasonCodes: ["HIGH_VELOCITY"],
-    engineIntelligence: availableEngineIntelligence()
+    engineIntelligence: availableEngineIntelligence(),
+    analystRecommendation: availableAnalystRecommendation()
   }, overrides);
 }
 
@@ -23,7 +27,8 @@ export function absentDetail(overrides = {}) {
       engines: [],
       diagnosticSignals: [],
       warnings: []
-    }
+    },
+    analystRecommendation: absentAnalystRecommendation()
   }), overrides);
 }
 
@@ -38,7 +43,8 @@ export function unavailableDetail(overrides = {}) {
       engines: [],
       diagnosticSignals: [],
       warnings: []
-    }
+    },
+    analystRecommendation: unavailableAnalystRecommendation()
   }), overrides);
 }
 
@@ -56,7 +62,8 @@ export function degradedDetail(overrides = {}) {
         reasonCodes: ["HIGH_VELOCITY"]
       }],
       warnings: [{ warningCode: "ENGINE_RESULT_LIMIT_APPLIED", count: 1 }]
-    })
+    }),
+    analystRecommendation: degradedAnalystRecommendation()
   }), overrides);
 }
 
@@ -104,6 +111,233 @@ export function malformedInvalidWarning() {
     engineIntelligence: availableEngineIntelligence({
       warnings: [{ warningCode: "ENGINE_RESULT_LIMIT_APPLIED", count: -1 }]
     })
+  });
+}
+
+export function availableRecommendationDetail(overrides = {}) {
+  return availableDetail(overrides);
+}
+
+export function recommendReviewDetail(overrides = {}) {
+  return availableDetail({
+    transactionId: "txn-recommend-review-1",
+    analystRecommendation: availableAnalystRecommendation({
+      recommendation: "RECOMMEND_REVIEW",
+      source: "RULES_RISK",
+      reasonCodes: ["RULES_HIGH_RISK"]
+    }),
+    ...overrides
+  });
+}
+
+export function recommendCaseCreationDetail(overrides = {}) {
+  return availableDetail({
+    transactionId: "txn-recommend-case-creation-1",
+    analystRecommendation: availableAnalystRecommendation({
+      recommendation: "RECOMMEND_CASE_CREATION",
+      source: "RULES_RISK",
+      reasonCodes: ["RAPID_TRANSFER_PATTERN", "RULES_HIGH_RISK"]
+    }),
+    ...overrides
+  });
+}
+
+export function recommendStepUpReviewDetail(overrides = {}) {
+  return availableDetail({
+    transactionId: "txn-recommend-step-up-review-1",
+    analystRecommendation: availableAnalystRecommendation({
+      recommendation: "RECOMMEND_STEP_UP_REVIEW",
+      source: "RISK_MISMATCH",
+      reasonCodes: ["STEP_UP_REVIEW_CONTEXT"]
+    }),
+    ...overrides
+  });
+}
+
+export function recommendMonitorDetail(overrides = {}) {
+  return availableDetail({
+    transactionId: "txn-recommend-monitor-1",
+    analystRecommendation: availableAnalystRecommendation({
+      recommendation: "RECOMMEND_MONITOR",
+      source: "ENGINE_COMPARISON",
+      reasonCodes: ["MONITORING_CONTEXT"]
+    }),
+    ...overrides
+  });
+}
+
+export function recommendNoActionDetail(overrides = {}) {
+  return availableDetail({
+    transactionId: "txn-recommend-no-action-1",
+    riskLevel: "LOW",
+    alertRecommended: false,
+    analystRecommendation: availableAnalystRecommendation({
+      recommendation: "RECOMMEND_NO_ACTION",
+      source: "ENGINE_COMPARISON",
+      reasonCodes: ["BOTH_ENGINES_LOW_RISK", "LOW_RISK_DIAGNOSTIC_CONTEXT"]
+    }),
+    ...overrides
+  });
+}
+
+export function absentRecommendationDetail(overrides = {}) {
+  return absentDetail(overrides);
+}
+
+export function notApplicableRecommendationDetail(overrides = {}) {
+  return availableDetail({
+    transactionId: "txn-recommend-not-applicable-1",
+    analystRecommendation: {
+      status: "NOT_APPLICABLE",
+      recommendation: null,
+      recommendationVersion: ANALYST_RECOMMENDATION_VERSION,
+      generatedAt: null,
+      confidence: "UNKNOWN",
+      source: "NOT_APPLICABLE",
+      reasonCodes: ["ENGINE_INTELLIGENCE_NO_COMPARABLE_ENGINES"],
+      warnings: [],
+      nonDecisioning: nonDecisioningBoundary()
+    },
+    ...overrides
+  });
+}
+
+export function insufficientDataRecommendationDetail(overrides = {}) {
+  return availableDetail({
+    transactionId: "txn-recommend-insufficient-data-1",
+    analystRecommendation: {
+      status: "INSUFFICIENT_DATA",
+      recommendation: null,
+      recommendationVersion: ANALYST_RECOMMENDATION_VERSION,
+      generatedAt: null,
+      confidence: "UNKNOWN",
+      source: "ENGINE_INTELLIGENCE_ABSENT",
+      reasonCodes: ["ENGINE_INTELLIGENCE_NO_ENGINES"],
+      warnings: [],
+      nonDecisioning: nonDecisioningBoundary()
+    },
+    ...overrides
+  });
+}
+
+export function unavailableRecommendationDetail(overrides = {}) {
+  return unavailableDetail(overrides);
+}
+
+export function degradedRecommendationDetail(overrides = {}) {
+  return degradedDetail(overrides);
+}
+
+export function malformedRecommendationMissingFlags() {
+  const detail = availableDetail();
+  delete detail.analystRecommendation.nonDecisioning.notWorkflowAction;
+  return detail;
+}
+
+export function malformedRecommendationAvailableWithoutReason() {
+  return availableDetail({
+    analystRecommendation: availableAnalystRecommendation({ reasonCodes: [] })
+  });
+}
+
+export function malformedRecommendationAvailableWithoutValue() {
+  return availableDetail({
+    analystRecommendation: availableAnalystRecommendation({ recommendation: null })
+  });
+}
+
+export function malformedRecommendationUnavailableWithValue() {
+  return unavailableDetail({
+    analystRecommendation: unavailableAnalystRecommendation({
+      recommendation: "RECOMMEND_NO_ACTION"
+    })
+  });
+}
+
+export function malformedRecommendationFalseNonDecisioningFlag() {
+  return availableDetail({
+    analystRecommendation: availableAnalystRecommendation({
+      nonDecisioning: {
+        ...nonDecisioningBoundary(),
+        notPaymentAuthorization: false
+      }
+    })
+  });
+}
+
+export function malformedRecommendationTooManyReasonCodes() {
+  return availableDetail({
+    analystRecommendation: availableAnalystRecommendation({
+      reasonCodes: ["R1", "R2", "R3", "R4", "R5", "R6"]
+    })
+  });
+}
+
+export function malformedRecommendationTooManyWarnings() {
+  return availableDetail({
+    analystRecommendation: availableAnalystRecommendation({
+      warnings: Array.from({ length: 11 }, (_, index) => ({ warningCode: `WARNING_${index}`, count: 1 }))
+    })
+  });
+}
+
+export function malformedRecommendationMissingVersion() {
+  const detail = availableDetail();
+  delete detail.analystRecommendation.recommendationVersion;
+  return detail;
+}
+
+export function malformedRecommendationBlankVersion() {
+  return availableDetail({
+    analystRecommendation: availableAnalystRecommendation({ recommendationVersion: " " })
+  });
+}
+
+export function malformedRecommendationMissingGeneratedAt() {
+  const detail = availableDetail();
+  delete detail.analystRecommendation.generatedAt;
+  return detail;
+}
+
+export function malformedRecommendationAvailableWithoutGeneratedAt() {
+  return availableDetail({
+    analystRecommendation: availableAnalystRecommendation({ generatedAt: null })
+  });
+}
+
+export function malformedRecommendationDegradedWithoutGeneratedAt() {
+  return degradedDetail({
+    analystRecommendation: degradedAnalystRecommendation({ generatedAt: null })
+  });
+}
+
+export function malformedRecommendationAbsentWithInvalidGeneratedAt() {
+  return absentDetail({
+    analystRecommendation: absentAnalystRecommendation({ generatedAt: "not-a-date" })
+  });
+}
+
+export function malformedRecommendationUnavailableWithInvalidGeneratedAt() {
+  return unavailableDetail({
+    analystRecommendation: unavailableAnalystRecommendation({ generatedAt: "not-a-date" })
+  });
+}
+
+export function malformedRecommendationAvailableWithoutSource() {
+  return availableDetail({
+    analystRecommendation: availableAnalystRecommendation({ source: undefined })
+  });
+}
+
+export function malformedRecommendationDegradedWithoutSource() {
+  return degradedDetail({
+    analystRecommendation: degradedAnalystRecommendation({ source: undefined })
+  });
+}
+
+export function malformedRecommendationNullSource() {
+  return availableDetail({
+    analystRecommendation: availableAnalystRecommendation({ source: null })
   });
 }
 
@@ -155,10 +389,82 @@ function availableEngineIntelligence(overrides = {}) {
   };
 }
 
+function availableAnalystRecommendation(overrides = {}) {
+  return {
+    status: "AVAILABLE",
+    recommendation: "RECOMMEND_REVIEW",
+    recommendationVersion: ANALYST_RECOMMENDATION_VERSION,
+    generatedAt: ANALYST_RECOMMENDATION_GENERATED_AT,
+    confidence: "LOW",
+    source: "RULES_RISK",
+    reasonCodes: ["RULES_HIGH_RISK"],
+    warnings: [],
+    nonDecisioning: nonDecisioningBoundary(),
+    ...overrides
+  };
+}
+
+function absentAnalystRecommendation(overrides = {}) {
+  return {
+    status: "ABSENT",
+    recommendation: null,
+    recommendationVersion: ANALYST_RECOMMENDATION_VERSION,
+    generatedAt: null,
+    confidence: "UNKNOWN",
+    source: "ENGINE_INTELLIGENCE_ABSENT",
+    reasonCodes: [],
+    warnings: [],
+    nonDecisioning: nonDecisioningBoundary(),
+    ...overrides
+  };
+}
+
+function unavailableAnalystRecommendation(overrides = {}) {
+  return {
+    status: "UNAVAILABLE",
+    recommendation: null,
+    recommendationVersion: ANALYST_RECOMMENDATION_VERSION,
+    generatedAt: null,
+    confidence: "UNKNOWN",
+    source: "ENGINE_INTELLIGENCE_UNAVAILABLE",
+    reasonCodes: [],
+    warnings: [],
+    nonDecisioning: nonDecisioningBoundary(),
+    ...overrides
+  };
+}
+
+function degradedAnalystRecommendation(overrides = {}) {
+  return {
+    status: "DEGRADED",
+    recommendation: "RECOMMEND_REVIEW",
+    recommendationVersion: ANALYST_RECOMMENDATION_VERSION,
+    generatedAt: ANALYST_RECOMMENDATION_GENERATED_AT,
+    confidence: "LOW",
+    source: "ENGINE_INTELLIGENCE_DEGRADED",
+    reasonCodes: ["RULES_HIGH_RISK"],
+    warnings: [{ warningCode: "ENGINE_INTELLIGENCE_DEGRADED", count: 1 }],
+    nonDecisioning: nonDecisioningBoundary(),
+    ...overrides
+  };
+}
+
+function nonDecisioningBoundary() {
+  return {
+    notPaymentAuthorization: true,
+    notAutomaticDecisioning: true,
+    notCaseAction: true,
+    notWorkflowAction: true,
+    notModelPromotion: true,
+    notThresholdRecommendation: true
+  };
+}
+
 function mergeDetail(base, overrides) {
   return {
     ...base,
     ...overrides,
-    engineIntelligence: overrides.engineIntelligence || base.engineIntelligence
+    engineIntelligence: overrides.engineIntelligence || base.engineIntelligence,
+    analystRecommendation: overrides.analystRecommendation || base.analystRecommendation
   };
 }

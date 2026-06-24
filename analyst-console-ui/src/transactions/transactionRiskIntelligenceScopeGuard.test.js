@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const FDP_116_SOURCE_FILES = [
+  "src/components/AnalystRecommendationPanel.jsx",
   "src/components/TransactionRiskIntelligencePanel.jsx",
   "src/transactions/transactionRiskIntelligenceValidation.js",
   "src/transactions/useScoredTransactionDetail.js",
@@ -20,6 +21,11 @@ const FORBIDDEN_TERMS = [
   ["block", "Transaction"].join(""),
   ["payment", "Authorization"].join(""),
   ["authorize", "Payment"].join(""),
+  ["create", "Case"].join(""),
+  ["start", "Workflow"].join(""),
+  ["apply", "Recommendation"].join(""),
+  ["accept", "Recommendation"].join(""),
+  ["reject", "Recommendation"].join(""),
   ["promote", "Model"].join(""),
   ["deploy", "Model"].join(""),
   ["threshold", "Recommendation"].join(""),
@@ -50,6 +56,14 @@ const FORBIDDEN_ACTION_PHRASES = [
   "approve payment",
   "decline payment",
   "block transaction",
+  "payment decision",
+  "final decision",
+  "automatically create case",
+  "apply recommendation",
+  "accept recommendation",
+  "reject recommendation",
+  "recommendation accepted",
+  "recommendation applied",
   "recommended action",
   "recommended analyst action",
   "model should be promoted",
@@ -62,12 +76,15 @@ const FORBIDDEN_ACTION_PHRASES = [
 const ALLOWED_NEGATIVE_BOUNDARY_STATEMENTS = [
   "not a final payment decision",
   "does not approve, decline, block",
+  "does not approve, decline, block, authorize payment, create a case, trigger workflow, promote a model, or change thresholds",
   "does not approve",
   "does not decline",
   "does not block",
   "does not authorize payment",
-  "does not recommend analyst action",
+  "does not create a case",
+  "does not trigger step-up automatically or start workflow",
   "not operational instructions",
+  "not transaction approval and not payment authorization",
   "this panel does not approve, decline, block, authorize payment, recommend action, promote models, or change thresholds"
 ];
 
@@ -90,6 +107,11 @@ describe("transactionRiskIntelligenceScopeGuard", () => {
     expect(source).toContain("scoreDeltaBucket");
     expect(source).toContain("reasonCodes");
     expect(source).toContain("warningCode");
+    expect(source).toContain("RECOMMEND_REVIEW");
+    expect(source).toContain("RECOMMEND_CASE_CREATION");
+    expect(source).toContain("RECOMMEND_STEP_UP_REVIEW");
+    expect(source).toContain("RECOMMEND_MONITOR");
+    expect(source).toContain("RECOMMEND_NO_ACTION");
   });
 
   it("does not introduce positive payment decisioning or recommendation language", () => {

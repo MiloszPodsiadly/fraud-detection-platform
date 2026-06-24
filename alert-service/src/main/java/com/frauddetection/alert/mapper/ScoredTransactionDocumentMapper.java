@@ -28,6 +28,7 @@ public class ScoredTransactionDocumentMapper {
         document.setRiskLevel(event.riskLevel());
         document.setAlertRecommended(event.alertRecommended());
         document.setReasonCodes(event.reasonCodes());
+        document.setAnalystRecommendation(event.analystRecommendation());
         return document;
     }
 
@@ -43,7 +44,8 @@ public class ScoredTransactionDocumentMapper {
                 document.getFraudScore(),
                 document.getRiskLevel(),
                 document.getAlertRecommended(),
-                document.getReasonCodes()
+                document.getReasonCodes(),
+                document.getAnalystRecommendation()
         );
     }
 

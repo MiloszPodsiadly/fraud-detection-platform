@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
 
+import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.analystRecommendationService;
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.harness;
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.json;
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.scoreResult;
@@ -28,6 +29,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
     void defaultConfigPublishesEventWithoutEngineIntelligence() throws Exception {
         TransactionScoredEvent event = harness(Optional.empty()).scoreAndCapture();
         assertThat(event.engineIntelligence()).isNull();
+        assertThat(event.analystRecommendation().status().name()).isEqualTo("ABSENT");
         assertThat(json(event)).doesNotContain("\"engineIntelligence\"");
     }
 
@@ -35,6 +37,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
     void explicitFalsePublishesEventWithoutEngineIntelligence() throws Exception {
         TransactionScoredEvent event = harness(Optional.empty()).scoreAndCapture();
         assertThat(event.engineIntelligence()).isNull();
+        assertThat(event.analystRecommendation().status().name()).isEqualTo("ABSENT");
         assertThat(json(event)).doesNotContain("\"engineIntelligence\"");
     }
 
@@ -51,7 +54,8 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
         var request = FraudScoringRequest.from(input);
         var scoreResult = scoreResult();
         var summary = summary();
-        var scoredEvent = new TransactionScoredEventMapper().toEvent(request, scoreResult, Optional.of(summary));
+        var recommendation = analystRecommendationService().recommend(scoreResult, Optional.of(summary));
+        var scoredEvent = new TransactionScoredEventMapper().toEvent(request, scoreResult, Optional.of(summary), recommendation);
         FraudScoringEngine scoringEngine = mock(FraudScoringEngine.class);
         EngineIntelligenceEmissionService emissionService = mock(EngineIntelligenceEmissionService.class);
         TransactionScoredEventMapper mapper = mock(TransactionScoredEventMapper.class);
@@ -59,21 +63,22 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
         ScoringMetrics metrics = mock(ScoringMetrics.class);
         when(scoringEngine.score(request)).thenReturn(scoreResult);
         when(emissionService.emitIfEnabled(request)).thenReturn(Optional.of(summary));
-        when(mapper.toEvent(request, scoreResult, Optional.of(summary))).thenReturn(scoredEvent);
+        when(mapper.toEvent(request, scoreResult, Optional.of(summary), recommendation)).thenReturn(scoredEvent);
         var service = new TransactionFraudScoringService(
                 scoringEngine,
                 mapper,
                 publisher,
                 new ScoringProperties(0.75d, 0.90d, ScoringMode.RULE_BASED),
                 metrics,
-                emissionService
+                emissionService,
+                analystRecommendationService()
         );
 
         service.score(input);
 
         verify(scoringEngine).score(request);
         verify(emissionService).emitIfEnabled(request);
-        verify(mapper).toEvent(request, scoreResult, Optional.of(summary));
+        verify(mapper).toEvent(request, scoreResult, Optional.of(summary), recommendation);
         verify(publisher).publish(scoredEvent);
         assertThat(scoredEvent.engineIntelligence()).isEqualTo(summary);
         assertThat(json(scoredEvent))
@@ -102,6 +107,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
     void enabledEmissionFailurePublishesBaseEvent() throws Exception {
         TransactionScoredEvent event = harness(Optional.empty()).scoreAndCapture();
         assertThat(event.engineIntelligence()).isNull();
+        assertThat(event.analystRecommendation().status().name()).isEqualTo("ABSENT");
         assertThat(json(event)).doesNotContain("\"engineIntelligence\"", "raw-secret");
     }
 
@@ -112,7 +118,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
 
         assertThat(enabled)
                 .usingRecursiveComparison()
-                .ignoringFields("eventId", "createdAt", "engineIntelligence")
+                .ignoringFields("eventId", "createdAt", "engineIntelligence", "analystRecommendation")
                 .isEqualTo(disabled);
     }
 }

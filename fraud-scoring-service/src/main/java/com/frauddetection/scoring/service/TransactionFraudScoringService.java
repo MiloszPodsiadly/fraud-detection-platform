@@ -3,6 +3,7 @@ package com.frauddetection.scoring.service;
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.config.ScoringProperties;
@@ -27,6 +28,7 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
     private final ScoringProperties scoringProperties;
     private final ScoringMetrics scoringMetrics;
     private final EngineIntelligenceEmissionService engineIntelligenceEmissionService;
+    private final AnalystRecommendationService analystRecommendationService;
 
     public TransactionFraudScoringService(
             FraudScoringEngine fraudScoringEngine,
@@ -34,7 +36,8 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
             TransactionScoredEventPublisher transactionScoredEventPublisher,
             ScoringProperties scoringProperties,
             ScoringMetrics scoringMetrics,
-            EngineIntelligenceEmissionService engineIntelligenceEmissionService
+            EngineIntelligenceEmissionService engineIntelligenceEmissionService,
+            AnalystRecommendationService analystRecommendationService
     ) {
         this.fraudScoringEngine = fraudScoringEngine;
         this.transactionScoredEventMapper = transactionScoredEventMapper;
@@ -42,6 +45,7 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
         this.scoringProperties = scoringProperties;
         this.scoringMetrics = scoringMetrics;
         this.engineIntelligenceEmissionService = engineIntelligenceEmissionService;
+        this.analystRecommendationService = analystRecommendationService;
     }
 
     @Override
@@ -55,11 +59,13 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
         try {
             FraudScoringRequest scoringRequest = FraudScoringRequest.from(event);
             FraudScoreResult scoreResult = fraudScoringEngine.score(scoringRequest);
-            Optional<EngineIntelligenceSummary> engineIntelligence = engineIntelligence(scoringRequest);
+            EngineIntelligenceEmission engineIntelligence = engineIntelligence(scoringRequest);
+            AnalystRecommendationResult analystRecommendation = analystRecommendation(scoreResult, engineIntelligence);
             TransactionScoredEvent scoredEvent = transactionScoredEventMapper.toEvent(
                     scoringRequest,
                     scoreResult,
-                    engineIntelligence
+                    engineIntelligence.summary(),
+                    analystRecommendation
             );
             transactionScoredEventPublisher.publish(scoredEvent);
 
@@ -89,12 +95,24 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
         }
     }
 
-    private Optional<EngineIntelligenceSummary> engineIntelligence(FraudScoringRequest scoringRequest) {
+    private AnalystRecommendationResult analystRecommendation(FraudScoreResult scoreResult, EngineIntelligenceEmission engineIntelligence) {
+        if (engineIntelligence.unavailable()) {
+            return analystRecommendationService.unavailable();
+        }
         try {
-            return engineIntelligenceEmissionService.emitIfEnabled(scoringRequest);
+            return analystRecommendationService.recommend(scoreResult, engineIntelligence.summary());
+        } catch (RuntimeException exception) {
+            log.warn("Analyst recommendation enrichment omitted.", exception);
+            return analystRecommendationService.unavailable();
+        }
+    }
+
+    private EngineIntelligenceEmission engineIntelligence(FraudScoringRequest scoringRequest) {
+        try {
+            return new EngineIntelligenceEmission(engineIntelligenceEmissionService.emitIfEnabled(scoringRequest), false);
         } catch (RuntimeException exception) {
             log.warn("Engine intelligence enrichment omitted.");
-            return Optional.empty();
+            return new EngineIntelligenceEmission(Optional.empty(), true);
         }
     }
 
@@ -104,5 +122,8 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
             return false;
         }
         return Boolean.TRUE.equals(diagnostics.get("fallbackUsed"));
+    }
+
+    private record EngineIntelligenceEmission(Optional<EngineIntelligenceSummary> summary, boolean unavailable) {
     }
 }

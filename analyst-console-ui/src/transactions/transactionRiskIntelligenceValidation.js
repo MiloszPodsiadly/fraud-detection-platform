@@ -29,6 +29,40 @@ const ENGINE_STATUSES = new Set(["AVAILABLE", "UNAVAILABLE", "TIMEOUT", "DEGRADE
 const RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
 const SCORE_BUCKETS = new Set(["NONE", "LOW", "MEDIUM", "HIGH", "VERY_HIGH", "UNAVAILABLE"]);
 const SIGNAL_CATEGORIES = new Set(["FRAUD_SIGNAL", "OPERATIONAL_SIGNAL"]);
+const ANALYST_RECOMMENDATION_STATUSES = new Set([
+  "AVAILABLE",
+  "ABSENT",
+  "NOT_APPLICABLE",
+  "INSUFFICIENT_DATA",
+  "UNAVAILABLE",
+  "DEGRADED"
+]);
+const ANALYST_RECOMMENDATION_REQUIRED_STATUSES = new Set(["AVAILABLE", "DEGRADED"]);
+const ANALYST_RECOMMENDATIONS = new Set([
+  "RECOMMEND_REVIEW",
+  "RECOMMEND_CASE_CREATION",
+  "RECOMMEND_STEP_UP_REVIEW",
+  "RECOMMEND_MONITOR",
+  "RECOMMEND_NO_ACTION"
+]);
+const ANALYST_RECOMMENDATION_CONFIDENCES = new Set(["UNKNOWN", "LOW", "MEDIUM"]);
+const ANALYST_RECOMMENDATION_SOURCES = new Set([
+  "RULES_RISK",
+  "ENGINE_COMPARISON",
+  "RISK_MISMATCH",
+  "ENGINE_INTELLIGENCE_ABSENT",
+  "ENGINE_INTELLIGENCE_DEGRADED",
+  "ENGINE_INTELLIGENCE_UNAVAILABLE",
+  "NOT_APPLICABLE"
+]);
+const NON_DECISIONING_FLAGS = [
+  "notPaymentAuthorization",
+  "notAutomaticDecisioning",
+  "notCaseAction",
+  "notWorkflowAction",
+  "notModelPromotion",
+  "notThresholdRecommendation"
+];
 const MAX_ENGINES = 2;
 const MAX_DIAGNOSTIC_SIGNALS = 5;
 const MAX_WARNINGS = 10;
@@ -92,6 +126,10 @@ export function validateTransactionRiskIntelligenceDetail(detail) {
   if (!engineIntelligence.warnings.every(isWarningShape)) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_WARNING");
   }
+  const analystRecommendationValidation = validateAnalystRecommendation(detail.analystRecommendation);
+  if (!analystRecommendationValidation.valid) {
+    return analystRecommendationValidation;
+  }
   return Object.freeze({ valid: true, detail });
 }
 
@@ -139,6 +177,60 @@ function isWarningShape(warning) {
     && warning.count >= 0;
 }
 
+function validateAnalystRecommendation(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return invalid("MISSING_ANALYST_RECOMMENDATION");
+  }
+  if (!oneOf(value.status, ANALYST_RECOMMENDATION_STATUSES)) {
+    return invalid("INVALID_ANALYST_RECOMMENDATION_STATUS");
+  }
+  if (!safeString(value.recommendationVersion)) {
+    return invalid("INVALID_ANALYST_RECOMMENDATION_VERSION");
+  }
+  if (!oneOf(value.confidence, ANALYST_RECOMMENDATION_CONFIDENCES)) {
+    return invalid("INVALID_ANALYST_RECOMMENDATION_CONFIDENCE");
+  }
+  if (!oneOf(value.source, ANALYST_RECOMMENDATION_SOURCES)) {
+    return invalid("INVALID_ANALYST_RECOMMENDATION_SOURCE");
+  }
+  if (!safeStringArray(value.reasonCodes, MAX_REASON_CODES)) {
+    return invalid("INVALID_ANALYST_RECOMMENDATION_REASON_CODES");
+  }
+  if (!isBoundedArray(value.warnings, MAX_WARNINGS)) {
+    return invalid("ANALYST_RECOMMENDATION_WARNING_LIMIT_EXCEEDED");
+  }
+  if (!value.warnings.every(isWarningShape)) {
+    return invalid("INVALID_ANALYST_RECOMMENDATION_WARNING");
+  }
+  if (!isNonDecisioningShape(value.nonDecisioning)) {
+    return invalid("INVALID_ANALYST_RECOMMENDATION_NON_DECISIONING");
+  }
+  if (ANALYST_RECOMMENDATION_REQUIRED_STATUSES.has(value.status)) {
+    if (!parseableDateString(value.generatedAt)) {
+      return invalid("INVALID_ANALYST_RECOMMENDATION_GENERATED_AT");
+    }
+    if (!oneOf(value.recommendation, ANALYST_RECOMMENDATIONS)) {
+      return invalid("INVALID_ANALYST_RECOMMENDATION_VALUE");
+    }
+    if (value.reasonCodes.length === 0) {
+      return invalid("ANALYST_RECOMMENDATION_REASON_REQUIRED");
+    }
+  } else {
+    if (value.generatedAt === undefined || (value.generatedAt !== null && !parseableDateString(value.generatedAt))) {
+      return invalid("INVALID_ANALYST_RECOMMENDATION_GENERATED_AT");
+    }
+    if (value.recommendation !== null && value.recommendation !== undefined) {
+      return invalid("INCONSISTENT_ANALYST_RECOMMENDATION_VALUE");
+    }
+  }
+  return Object.freeze({ valid: true });
+}
+
+function isNonDecisioningShape(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value))
+    && NON_DECISIONING_FLAGS.every((flag) => value[flag] === true);
+}
+
 function isBoundedArray(value, maxLength) {
   return Array.isArray(value) && value.length <= maxLength;
 }
@@ -157,6 +249,10 @@ function isStringOrNull(value) {
 
 function safeString(value) {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function parseableDateString(value) {
+  return safeString(value) && !Number.isNaN(Date.parse(value));
 }
 
 function oneOf(value, allowedValues) {

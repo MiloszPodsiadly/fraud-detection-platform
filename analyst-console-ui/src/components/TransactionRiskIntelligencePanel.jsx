@@ -1,4 +1,5 @@
 import { formatDateTime, formatScore } from "../utils/format.js";
+import { AnalystRecommendationPanel } from "./AnalystRecommendationPanel.jsx";
 import { useScoredTransactionDetail } from "../transactions/useScoredTransactionDetail.js";
 import { transactionRiskIntelligencePanelId } from "../transactions/transactionRiskIntelligencePanelId.js";
 
@@ -83,6 +84,7 @@ function TransactionRiskIntelligenceDetail({ detail }) {
       </section>
 
       <ComparisonSummary comparison={intelligence.comparison} />
+      <AnalystRecommendationPanel recommendation={detail.analystRecommendation} />
       <EngineResults engines={intelligence.engines} />
       <DiagnosticSignals diagnosticSignals={intelligence.diagnosticSignals} />
       <Warnings warnings={intelligence.warnings} />
@@ -180,7 +182,7 @@ function DiagnosticBoundaryBanner() {
       <h4>Diagnostic Boundary</h4>
       <p>
         Transaction Risk Intelligence is a read-only diagnostic view. It does not approve, does not decline,
-        does not block, does not authorize payment, does not recommend analyst action, does not promote models,
+        does not block, does not authorize payment, does not create a case, does not promote models,
         does not change thresholds, and does not trigger workflow.
       </p>
     </section>

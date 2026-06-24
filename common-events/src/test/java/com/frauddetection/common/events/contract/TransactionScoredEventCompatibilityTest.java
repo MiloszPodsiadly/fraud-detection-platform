@@ -18,6 +18,7 @@ class TransactionScoredEventCompatibilityTest {
     @Test
     void oldTransactionScoredEventJsonWithoutEngineIntelligenceDeserializes() throws Exception {
         assertThat(objectMapper().readValue(oldJson(), TransactionScoredEvent.class).engineIntelligence()).isNull();
+        assertThat(objectMapper().readValue(oldJson(), TransactionScoredEvent.class).analystRecommendation()).isNull();
     }
 
     @Test
@@ -63,6 +64,20 @@ class TransactionScoredEventCompatibilityTest {
     }
 
     @Test
+    void newTransactionScoredEventJsonWithAnalystRecommendationDeserializes() throws Exception {
+        TransactionScoredEvent event = objectMapper().readValue(newJsonWithAnalystRecommendation(), TransactionScoredEvent.class);
+
+        assertThat(event.analystRecommendation()).isNotNull();
+        assertThat(event.analystRecommendation().status().name()).isEqualTo("AVAILABLE");
+        assertThat(event.analystRecommendation().recommendation().name()).isEqualTo("RECOMMEND_REVIEW");
+        assertThat(event.analystRecommendation().recommendationVersion()).isEqualTo("analyst-recommendation-v1");
+        assertThat(event.analystRecommendation().generatedAt()).isEqualTo(Instant.parse("2026-06-19T10:00:00Z"));
+        assertThat(event.analystRecommendation().nonDecisioning().notPaymentAuthorization()).isTrue();
+        assertThat(event.analystRecommendation().nonDecisioning().notAutomaticDecisioning()).isTrue();
+        assertThat(event.analystRecommendation().nonDecisioning().notCaseAction()).isTrue();
+    }
+
+    @Test
     void existingTransactionScoredEventFieldsRemainUnchanged() {
         assertThat(Arrays.stream(TransactionScoredEvent.class.getRecordComponents()).map(RecordComponent::getName))
                 .containsSubsequence(
@@ -70,18 +85,24 @@ class TransactionScoredEventCompatibilityTest {
                         "transactionTimestamp", "transactionAmount", "merchantInfo", "deviceInfo", "locationInfo",
                         "customerContext", "fraudScore", "riskLevel", "scoringStrategy", "modelName", "modelVersion",
                         "inferenceTimestamp", "reasonCodes", "scoreDetails", "featureSnapshot", "alertRecommended",
-                        "scoringEvidence", "engineIntelligence"
+                        "scoringEvidence", "engineIntelligence", "analystRecommendation"
                 );
     }
 
     @Test
     void existingScoredEventSerializationWithoutEngineIntelligenceRemainsStable() throws Exception {
-        assertThat(objectMapper().writeValueAsString(oldConstructorEvent())).doesNotContain("engineIntelligence");
+        assertThat(objectMapper().writeValueAsString(oldConstructorEvent()))
+                .doesNotContain("engineIntelligence", "analystRecommendation");
     }
 
     @Test
     void newEngineIntelligenceFieldIsOptional() {
         assertThat(oldConstructorEvent().engineIntelligence()).isNull();
+    }
+
+    @Test
+    void newAnalystRecommendationFieldIsOptional() {
+        assertThat(oldConstructorEvent().analystRecommendation()).isNull();
     }
 
     private TransactionScoredEvent oldConstructorEvent() {
@@ -140,6 +161,33 @@ class TransactionScoredEventCompatibilityTest {
                   %s
                 }
                 """.formatted(futureField)
+        );
+    }
+
+    private String newJsonWithAnalystRecommendation() {
+        return oldJson().replace(
+                "\"alertRecommended\": true",
+                """
+                "alertRecommended": true,
+                "analystRecommendation": {
+                  "status": "AVAILABLE",
+                  "recommendation": "RECOMMEND_REVIEW",
+                  "recommendationVersion": "analyst-recommendation-v1",
+                  "generatedAt": "2026-06-19T10:00:00Z",
+                  "confidence": "MEDIUM",
+                  "source": "RULES_RISK",
+                  "reasonCodes": ["RULES_HIGH_RISK"],
+                  "warnings": [],
+                  "nonDecisioning": {
+                    "notPaymentAuthorization": true,
+                    "notAutomaticDecisioning": true,
+                    "notCaseAction": true,
+                    "notWorkflowAction": true,
+                    "notModelPromotion": true,
+                    "notThresholdRecommendation": true
+                  }
+                }
+                """
         );
     }
 }

@@ -1,14 +1,56 @@
 import { describe, expect, it } from "vitest";
 import { validateTransactionRiskIntelligenceDetail } from "./transactionRiskIntelligenceValidation.js";
 import {
+  absentRecommendationDetail,
+  degradedRecommendationDetail,
+  insufficientDataRecommendationDetail,
   malformedInvalidEngine,
   malformedInvalidWarning,
-  malformedMissingEngineIntelligence
+  malformedMissingEngineIntelligence,
+  malformedRecommendationAvailableWithoutReason,
+  malformedRecommendationAvailableWithoutGeneratedAt,
+  malformedRecommendationAvailableWithoutSource,
+  malformedRecommendationAvailableWithoutValue,
+  malformedRecommendationAbsentWithInvalidGeneratedAt,
+  malformedRecommendationBlankVersion,
+  malformedRecommendationDegradedWithoutGeneratedAt,
+  malformedRecommendationDegradedWithoutSource,
+  malformedRecommendationFalseNonDecisioningFlag,
+  malformedRecommendationMissingGeneratedAt,
+  malformedRecommendationMissingFlags,
+  malformedRecommendationMissingVersion,
+  malformedRecommendationNullSource,
+  malformedRecommendationTooManyReasonCodes,
+  malformedRecommendationTooManyWarnings,
+  malformedRecommendationUnavailableWithInvalidGeneratedAt,
+  malformedRecommendationUnavailableWithValue,
+  notApplicableRecommendationDetail,
+  recommendCaseCreationDetail,
+  recommendMonitorDetail,
+  recommendNoActionDetail,
+  recommendReviewDetail,
+  recommendStepUpReviewDetail,
+  unavailableRecommendationDetail
 } from "./transactionRiskIntelligenceFixtures.js";
 
 describe("transactionRiskIntelligenceValidation", () => {
   it("accepts valid AVAILABLE detail", () => {
     expect(validateTransactionRiskIntelligenceDetail(detail()).valid).toBe(true);
+  });
+
+  it.each([
+    ["review", recommendReviewDetail()],
+    ["case creation", recommendCaseCreationDetail()],
+    ["step up review", recommendStepUpReviewDetail()],
+    ["monitor", recommendMonitorDetail()],
+    ["no action", recommendNoActionDetail()],
+    ["absent", absentRecommendationDetail()],
+    ["not applicable", notApplicableRecommendationDetail()],
+    ["insufficient data", insufficientDataRecommendationDetail()],
+    ["unavailable", unavailableRecommendationDetail()],
+    ["degraded", degradedRecommendationDetail()]
+  ])("accepts public analyst recommendation fixture %s", (_caseName, fixture) => {
+    expect(validateTransactionRiskIntelligenceDetail(fixture).valid).toBe(true);
   });
 
   it("accepts ABSENT with explicit null fields and empty arrays", () => {
@@ -70,6 +112,119 @@ describe("transactionRiskIntelligenceValidation", () => {
       valid: false,
       reason: "INVALID_ENGINE_INTELLIGENCE_WARNING"
     });
+  });
+
+  it("rejects missing analystRecommendation", () => {
+    const value = detail();
+    delete value.analystRecommendation;
+
+    expect(validateTransactionRiskIntelligenceDetail(value)).toMatchObject({
+      valid: false,
+      reason: "MISSING_ANALYST_RECOMMENDATION"
+    });
+  });
+
+  it("rejects malformed analyst recommendation fixtures", () => {
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationMissingFlags())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_NON_DECISIONING"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationAvailableWithoutReason())).toMatchObject({
+      valid: false,
+      reason: "ANALYST_RECOMMENDATION_REASON_REQUIRED"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationAvailableWithoutValue())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_VALUE"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationUnavailableWithValue())).toMatchObject({
+      valid: false,
+      reason: "INCONSISTENT_ANALYST_RECOMMENDATION_VALUE"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationFalseNonDecisioningFlag())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_NON_DECISIONING"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationTooManyReasonCodes())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_REASON_CODES"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationTooManyWarnings())).toMatchObject({
+      valid: false,
+      reason: "ANALYST_RECOMMENDATION_WARNING_LIMIT_EXCEEDED"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationMissingVersion())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_VERSION"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationBlankVersion())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_VERSION"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationMissingGeneratedAt())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_GENERATED_AT"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationAvailableWithoutGeneratedAt())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_GENERATED_AT"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationDegradedWithoutGeneratedAt())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_GENERATED_AT"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationAbsentWithInvalidGeneratedAt())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_GENERATED_AT"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationUnavailableWithInvalidGeneratedAt())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_GENERATED_AT"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationAvailableWithoutSource())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_SOURCE"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationDegradedWithoutSource())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_SOURCE"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationNullSource())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_SOURCE"
+    });
+  });
+
+  it.each([
+    ["ABSENT", absentRecommendationDetail()],
+    ["INSUFFICIENT_DATA", insufficientDataRecommendationDetail()],
+    ["UNAVAILABLE", unavailableRecommendationDetail()]
+  ])("does not normalize %s to RECOMMEND_NO_ACTION", (_status, fixture) => {
+    const result = validateTransactionRiskIntelligenceDetail(fixture);
+
+    expect(result.valid).toBe(true);
+    expect(result.detail.analystRecommendation.recommendation).toBeNull();
+  });
+
+  it.each([
+    ["ABSENT", absentRecommendationDetail()],
+    ["NOT_APPLICABLE", notApplicableRecommendationDetail()],
+    ["INSUFFICIENT_DATA", insufficientDataRecommendationDetail()],
+    ["UNAVAILABLE", unavailableRecommendationDetail()]
+  ])("accepts %s with generatedAt null", (_status, fixture) => {
+    const result = validateTransactionRiskIntelligenceDetail(fixture);
+
+    expect(result.valid).toBe(true);
+    expect(result.detail.analystRecommendation.generatedAt).toBeNull();
+  });
+
+  it("rejects unsafe fields inside analystRecommendation", () => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      analystRecommendation: {
+        ...analystRecommendation(),
+        rawEvidence: "hidden"
+      }
+    }))).toMatchObject({ valid: false, reason: "UNSAFE_DETAIL_RESPONSE" });
   });
 
   it("rejects invalid status", () => {
@@ -218,6 +373,7 @@ function detail(overrides = {}) {
     alertRecommended: true,
     reasonCodes: ["HIGH_VELOCITY"],
     engineIntelligence: engineIntelligence(),
+    analystRecommendation: analystRecommendation(),
     ...overrides
   };
 }
@@ -259,6 +415,28 @@ function signal(overrides = {}) {
     riskLevel: "CRITICAL",
     scoreBucket: "HIGH",
     reasonCode: "HIGH_VELOCITY",
+    ...overrides
+  };
+}
+
+function analystRecommendation(overrides = {}) {
+  return {
+    status: "AVAILABLE",
+    recommendation: "RECOMMEND_REVIEW",
+    recommendationVersion: "analyst-recommendation-v1",
+    generatedAt: "2026-06-19T10:00:00Z",
+    confidence: "LOW",
+    source: "RULES_RISK",
+    reasonCodes: ["RULES_HIGH_RISK"],
+    warnings: [],
+    nonDecisioning: {
+      notPaymentAuthorization: true,
+      notAutomaticDecisioning: true,
+      notCaseAction: true,
+      notWorkflowAction: true,
+      notModelPromotion: true,
+      notThresholdRecommendation: true
+    },
     ...overrides
   };
 }
