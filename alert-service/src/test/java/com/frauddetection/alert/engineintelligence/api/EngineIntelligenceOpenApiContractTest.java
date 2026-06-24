@@ -89,6 +89,7 @@ class EngineIntelligenceOpenApiContractTest {
                 "example: analyst-recommendation-v1",
                 "generatedAt:",
                 "format: date-time",
+                "nullable: true",
                 "enum: [UNKNOWN, LOW, MEDIUM]",
                 "enum: [RULES_RISK, ENGINE_COMPARISON, RISK_MISMATCH, ENGINE_INTELLIGENCE_ABSENT, ENGINE_INTELLIGENCE_DEGRADED, ENGINE_INTELLIGENCE_UNAVAILABLE, NOT_APPLICABLE]",
                 "maxItems: 5",

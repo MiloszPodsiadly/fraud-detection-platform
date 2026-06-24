@@ -23,7 +23,7 @@ class AnalystRecommendationContractTest {
                 "\"status\":\"UNAVAILABLE\"",
                 "\"recommendation\":null",
                 "\"recommendationVersion\":\"analyst-recommendation-v1\"",
-                "\"generatedAt\":\"1970-01-01T00:00:00Z\"",
+                "\"generatedAt\":null",
                 "\"confidence\":\"UNKNOWN\"",
                 "\"source\":\"ENGINE_INTELLIGENCE_UNAVAILABLE\"",
                 "\"reasonCodes\":[]",
@@ -43,6 +43,31 @@ class AnalystRecommendationContractTest {
 
         assertThat(absent.status()).isEqualTo(AnalystRecommendationStatus.ABSENT);
         assertThat(absent.recommendation()).isNull();
+        assertThat(absent.generatedAt()).isNull();
+    }
+
+    @Test
+    void nonGeneratedFactoryShapesDoNotExposeFakeGeneratedAt() {
+        assertThat(AnalystRecommendationResult.absent().generatedAt()).isNull();
+        assertThat(AnalystRecommendationResult.unavailable().generatedAt()).isNull();
+        assertThat(AnalystRecommendationResult.insufficientData("ENGINE_INTELLIGENCE_NO_ENGINES").generatedAt())
+                .isNull();
+        assertThat(AnalystRecommendationResult.notApplicable("ENGINE_INTELLIGENCE_NO_COMPARABLE_ENGINES").generatedAt())
+                .isNull();
+    }
+
+    @Test
+    void timestampedFactoryShapesKeepRealGeneratedAt() {
+        assertThat(AnalystRecommendationResult.absent(GENERATED_AT).generatedAt()).isEqualTo(GENERATED_AT);
+        assertThat(AnalystRecommendationResult.unavailable(GENERATED_AT).generatedAt()).isEqualTo(GENERATED_AT);
+        assertThat(AnalystRecommendationResult.insufficientData(
+                "ENGINE_INTELLIGENCE_NO_ENGINES",
+                GENERATED_AT
+        ).generatedAt()).isEqualTo(GENERATED_AT);
+        assertThat(AnalystRecommendationResult.notApplicable(
+                "ENGINE_INTELLIGENCE_NO_COMPARABLE_ENGINES",
+                GENERATED_AT
+        ).generatedAt()).isEqualTo(GENERATED_AT);
     }
 
     @Test
@@ -135,7 +160,7 @@ class AnalystRecommendationContractTest {
     }
 
     @Test
-    void recommendationsRequireVersionAndGeneratedAt() {
+    void recommendationsRequireVersionAndAvailableGeneratedAt() {
         assertThatThrownBy(() -> new AnalystRecommendationResult(
                 AnalystRecommendationStatus.AVAILABLE,
                 AnalystRecommendation.RECOMMEND_REVIEW,
@@ -159,8 +184,21 @@ class AnalystRecommendationContractTest {
                 List.of("RULES_HIGH_RISK"),
                 List.of(),
                 AnalystRecommendationNonDecisioning.advisoryOnly()
-        )).isInstanceOf(NullPointerException.class)
-                .hasMessage("generatedAt is required");
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("ANALYST_RECOMMENDATION_AVAILABLE_GENERATED_AT_REQUIRED");
+
+        assertThatThrownBy(() -> new AnalystRecommendationResult(
+                AnalystRecommendationStatus.DEGRADED,
+                AnalystRecommendation.RECOMMEND_REVIEW,
+                AnalystRecommendationResult.RECOMMENDATION_VERSION,
+                null,
+                AnalystRecommendationConfidence.LOW,
+                AnalystRecommendationSource.ENGINE_INTELLIGENCE_DEGRADED,
+                List.of("RULES_HIGH_RISK"),
+                List.of(new AnalystRecommendationWarning("ENGINE_INTELLIGENCE_DEGRADED", 1)),
+                AnalystRecommendationNonDecisioning.advisoryOnly()
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("ANALYST_RECOMMENDATION_AVAILABLE_GENERATED_AT_REQUIRED");
     }
 
     @Test

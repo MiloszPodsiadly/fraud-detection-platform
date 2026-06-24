@@ -25,7 +25,6 @@ public record AnalystRecommendationResult(
     public AnalystRecommendationResult {
         Objects.requireNonNull(status, "status is required");
         recommendationVersion = requireVersion(recommendationVersion);
-        generatedAt = Objects.requireNonNull(generatedAt, "generatedAt is required");
         confidence = confidence == null ? AnalystRecommendationConfidence.UNKNOWN : confidence;
         reasonCodes = AnalystRecommendationValuePolicy.copyBounded(reasonCodes, MAX_REASON_CODES, "reasonCodes");
         warnings = AnalystRecommendationValuePolicy.copyBounded(warnings, MAX_WARNINGS, "warnings");
@@ -46,6 +45,10 @@ public record AnalystRecommendationResult(
                 || status == AnalystRecommendationStatus.DEGRADED)) {
             throw new IllegalArgumentException("ANALYST_RECOMMENDATION_AVAILABLE_SOURCE_REQUIRED");
         }
+        if (generatedAt == null && (status == AnalystRecommendationStatus.AVAILABLE
+                || status == AnalystRecommendationStatus.DEGRADED)) {
+            throw new IllegalArgumentException("ANALYST_RECOMMENDATION_AVAILABLE_GENERATED_AT_REQUIRED");
+        }
         Objects.requireNonNull(source, "source is required");
         if (reasonCodes.isEmpty() && (status == AnalystRecommendationStatus.AVAILABLE
                 || status == AnalystRecommendationStatus.DEGRADED)) {
@@ -60,7 +63,7 @@ public record AnalystRecommendationResult(
     }
 
     public static AnalystRecommendationResult absent() {
-        return absent(Instant.EPOCH);
+        return absent(null);
     }
 
     public static AnalystRecommendationResult absent(Instant generatedAt) {
@@ -72,7 +75,7 @@ public record AnalystRecommendationResult(
     }
 
     public static AnalystRecommendationResult insufficientData(String reasonCode) {
-        return insufficientData(reasonCode, Instant.EPOCH);
+        return insufficientData(reasonCode, null);
     }
 
     public static AnalystRecommendationResult insufficientData(String reasonCode, Instant generatedAt) {
@@ -90,7 +93,7 @@ public record AnalystRecommendationResult(
     }
 
     public static AnalystRecommendationResult unavailable() {
-        return unavailable(Instant.EPOCH);
+        return unavailable(null);
     }
 
     public static AnalystRecommendationResult unavailable(Instant generatedAt) {
@@ -102,7 +105,7 @@ public record AnalystRecommendationResult(
     }
 
     public static AnalystRecommendationResult notApplicable(String reasonCode) {
-        return notApplicable(reasonCode, Instant.EPOCH);
+        return notApplicable(reasonCode, null);
     }
 
     public static AnalystRecommendationResult notApplicable(String reasonCode, Instant generatedAt) {

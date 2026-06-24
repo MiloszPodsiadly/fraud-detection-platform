@@ -2994,6 +2994,7 @@ components:
         generatedAt:
           type: string
           format: date-time
+          nullable: true
         confidence:
           type: string
           enum: [UNKNOWN, LOW, MEDIUM]

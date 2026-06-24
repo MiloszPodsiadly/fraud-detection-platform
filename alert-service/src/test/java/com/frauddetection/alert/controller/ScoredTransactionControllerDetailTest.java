@@ -125,12 +125,12 @@ class ScoredTransactionControllerDetailTest {
                 .thenReturn(scoredTransactionWithoutRecommendation("txn-old"));
         when(engineIntelligenceReadService.read("txn-old")).thenReturn(EngineIntelligenceReadModel.notProjected("txn-old"));
 
-        mockMvc.perform(get("/api/v1/transactions/scored/txn-old"))
+        String response = mockMvc.perform(get("/api/v1/transactions/scored/txn-old"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.analystRecommendation.status").value("ABSENT"))
                 .andExpect(jsonPath("$.analystRecommendation.recommendation").isEmpty())
                 .andExpect(jsonPath("$.analystRecommendation.recommendationVersion").value("analyst-recommendation-v1"))
-                .andExpect(jsonPath("$.analystRecommendation.generatedAt").exists())
+                .andExpect(jsonPath("$.analystRecommendation.generatedAt").isEmpty())
                 .andExpect(jsonPath("$.analystRecommendation.confidence").value("UNKNOWN"))
                 .andExpect(jsonPath("$.analystRecommendation.source").value("ENGINE_INTELLIGENCE_ABSENT"))
                 .andExpect(jsonPath("$.analystRecommendation.reasonCodes").isArray())
@@ -140,7 +140,14 @@ class ScoredTransactionControllerDetailTest {
                 .andExpect(jsonPath("$.analystRecommendation.nonDecisioning.notCaseAction").value(true))
                 .andExpect(jsonPath("$.analystRecommendation.nonDecisioning.notWorkflowAction").value(true))
                 .andExpect(jsonPath("$.analystRecommendation.nonDecisioning.notModelPromotion").value(true))
-                .andExpect(jsonPath("$.analystRecommendation.nonDecisioning.notThresholdRecommendation").value(true));
+                .andExpect(jsonPath("$.analystRecommendation.nonDecisioning.notThresholdRecommendation").value(true))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(response)
+                .contains("\"analystRecommendation\"", "\"generatedAt\":null")
+                .doesNotContain("1970-01-01T00:00:00Z");
     }
 
     @Test

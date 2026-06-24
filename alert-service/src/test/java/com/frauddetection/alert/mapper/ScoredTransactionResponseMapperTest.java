@@ -49,6 +49,7 @@ class ScoredTransactionResponseMapperTest {
         var response = mapper.toDetailResponse(scoredTransaction(null), EngineIntelligenceResponse.absent());
 
         assertThat(response.analystRecommendation().status().name()).isEqualTo("ABSENT");
+        assertThat(response.analystRecommendation().generatedAt()).isNull();
     }
 
     private ScoredTransaction scoredTransaction() {
