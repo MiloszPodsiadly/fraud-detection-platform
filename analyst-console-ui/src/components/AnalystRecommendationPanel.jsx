@@ -1,3 +1,5 @@
+import { formatDateTime } from "../utils/format.js";
+
 const STATUS_COPY = {
   AVAILABLE: "A bounded analyst recommendation is available.",
   DEGRADED: "Recommendation is available with diagnostic limitations. Review warnings before interpreting this advisory signal.",
@@ -35,6 +37,8 @@ export function AnalystRecommendationPanel({ recommendation }) {
       <dl>
         <Field label="Status" value={recommendation.status} />
         <Field label="Recommendation" value={recommendation.recommendation || "None"} />
+        <Field label="Recommendation version" value={recommendation.recommendationVersion || "Not available"} />
+        <Field label="Generated at" value={formatDateTime(recommendation.generatedAt)} />
         <Field label="Source" value={recommendation.source || "Not available"} />
         <Field label="Confidence" value={recommendation.confidence || "Not available"} />
         <Field label="Reason codes" value={listText(recommendation.reasonCodes)} />

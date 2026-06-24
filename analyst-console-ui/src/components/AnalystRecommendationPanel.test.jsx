@@ -49,6 +49,8 @@ describe("AnalystRecommendationPanel", () => {
     const { container } = render(<AnalystRecommendationPanel recommendation={detail.analystRecommendation} />);
 
     expect(screen.getByText("RULES_HIGH_RISK")).toBeInTheDocument();
+    expect(screen.getByText("analyst-recommendation-v1")).toBeInTheDocument();
+    expect(screen.getByText("Generated at")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Analyst Recommendation Warnings" })).toHaveTextContent("ENGINE_INTELLIGENCE_DEGRADED");
     expect(screen.getByRole("region", { name: "Analyst Recommendation Boundary" })).toHaveTextContent("Not payment authorization");
     expect(screen.getAllByText("Confirmed")).toHaveLength(6);

@@ -8,9 +8,15 @@ import {
   malformedInvalidWarning,
   malformedMissingEngineIntelligence,
   malformedRecommendationAvailableWithoutReason,
+  malformedRecommendationAvailableWithoutSource,
   malformedRecommendationAvailableWithoutValue,
+  malformedRecommendationBlankVersion,
+  malformedRecommendationDegradedWithoutSource,
   malformedRecommendationFalseNonDecisioningFlag,
+  malformedRecommendationMissingGeneratedAt,
   malformedRecommendationMissingFlags,
+  malformedRecommendationMissingVersion,
+  malformedRecommendationNullSource,
   malformedRecommendationTooManyReasonCodes,
   malformedRecommendationTooManyWarnings,
   malformedRecommendationUnavailableWithValue,
@@ -142,6 +148,30 @@ describe("transactionRiskIntelligenceValidation", () => {
     expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationTooManyWarnings())).toMatchObject({
       valid: false,
       reason: "ANALYST_RECOMMENDATION_WARNING_LIMIT_EXCEEDED"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationMissingVersion())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_VERSION"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationBlankVersion())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_VERSION"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationMissingGeneratedAt())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_GENERATED_AT"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationAvailableWithoutSource())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_SOURCE"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationDegradedWithoutSource())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_SOURCE"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationNullSource())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_SOURCE"
     });
   });
 
@@ -361,6 +391,8 @@ function analystRecommendation(overrides = {}) {
   return {
     status: "AVAILABLE",
     recommendation: "RECOMMEND_REVIEW",
+    recommendationVersion: "analyst-recommendation-v1",
+    generatedAt: "2026-06-19T10:00:00Z",
     confidence: "LOW",
     source: "RULES_RISK",
     reasonCodes: ["RULES_HIGH_RISK"],

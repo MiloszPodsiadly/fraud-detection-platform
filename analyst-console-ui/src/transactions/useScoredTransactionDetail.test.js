@@ -178,6 +178,8 @@ function detail(overrides = {}) {
     analystRecommendation: {
       status: "AVAILABLE",
       recommendation: "RECOMMEND_REVIEW",
+      recommendationVersion: "analyst-recommendation-v1",
+      generatedAt: "2026-06-19T10:00:00Z",
       confidence: "LOW",
       source: "RULES_RISK",
       reasonCodes: ["RULES_HIGH_RISK"],

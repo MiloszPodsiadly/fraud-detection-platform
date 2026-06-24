@@ -184,6 +184,12 @@ function validateAnalystRecommendation(value) {
   if (!oneOf(value.status, ANALYST_RECOMMENDATION_STATUSES)) {
     return invalid("INVALID_ANALYST_RECOMMENDATION_STATUS");
   }
+  if (!safeString(value.recommendationVersion)) {
+    return invalid("INVALID_ANALYST_RECOMMENDATION_VERSION");
+  }
+  if (!parseableDateString(value.generatedAt)) {
+    return invalid("INVALID_ANALYST_RECOMMENDATION_GENERATED_AT");
+  }
   if (!oneOf(value.confidence, ANALYST_RECOMMENDATION_CONFIDENCES)) {
     return invalid("INVALID_ANALYST_RECOMMENDATION_CONFIDENCE");
   }
@@ -238,6 +244,10 @@ function isStringOrNull(value) {
 
 function safeString(value) {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function parseableDateString(value) {
+  return safeString(value) && !Number.isNaN(Date.parse(value));
 }
 
 function oneOf(value, allowedValues) {

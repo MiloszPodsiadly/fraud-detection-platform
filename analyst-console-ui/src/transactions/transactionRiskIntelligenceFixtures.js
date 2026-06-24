@@ -1,3 +1,6 @@
+export const ANALYST_RECOMMENDATION_VERSION = "analyst-recommendation-v1";
+export const ANALYST_RECOMMENDATION_GENERATED_AT = "2026-06-19T10:00:00Z";
+
 export function availableDetail(overrides = {}) {
   return mergeDetail({
     transactionId: "txn-available-1",
@@ -187,6 +190,8 @@ export function notApplicableRecommendationDetail(overrides = {}) {
     analystRecommendation: {
       status: "NOT_APPLICABLE",
       recommendation: null,
+      recommendationVersion: ANALYST_RECOMMENDATION_VERSION,
+      generatedAt: ANALYST_RECOMMENDATION_GENERATED_AT,
       confidence: "UNKNOWN",
       source: "NOT_APPLICABLE",
       reasonCodes: ["ENGINE_INTELLIGENCE_NO_COMPARABLE_ENGINES"],
@@ -203,6 +208,8 @@ export function insufficientDataRecommendationDetail(overrides = {}) {
     analystRecommendation: {
       status: "INSUFFICIENT_DATA",
       recommendation: null,
+      recommendationVersion: ANALYST_RECOMMENDATION_VERSION,
+      generatedAt: ANALYST_RECOMMENDATION_GENERATED_AT,
       confidence: "UNKNOWN",
       source: "ENGINE_INTELLIGENCE_ABSENT",
       reasonCodes: ["ENGINE_INTELLIGENCE_NO_ENGINES"],
@@ -274,6 +281,42 @@ export function malformedRecommendationTooManyWarnings() {
   });
 }
 
+export function malformedRecommendationMissingVersion() {
+  const detail = availableDetail();
+  delete detail.analystRecommendation.recommendationVersion;
+  return detail;
+}
+
+export function malformedRecommendationBlankVersion() {
+  return availableDetail({
+    analystRecommendation: availableAnalystRecommendation({ recommendationVersion: " " })
+  });
+}
+
+export function malformedRecommendationMissingGeneratedAt() {
+  const detail = availableDetail();
+  delete detail.analystRecommendation.generatedAt;
+  return detail;
+}
+
+export function malformedRecommendationAvailableWithoutSource() {
+  return availableDetail({
+    analystRecommendation: availableAnalystRecommendation({ source: undefined })
+  });
+}
+
+export function malformedRecommendationDegradedWithoutSource() {
+  return degradedDetail({
+    analystRecommendation: degradedAnalystRecommendation({ source: undefined })
+  });
+}
+
+export function malformedRecommendationNullSource() {
+  return availableDetail({
+    analystRecommendation: availableAnalystRecommendation({ source: null })
+  });
+}
+
 export function permissionDeniedError(status = 403) {
   return { status };
 }
@@ -326,6 +369,8 @@ function availableAnalystRecommendation(overrides = {}) {
   return {
     status: "AVAILABLE",
     recommendation: "RECOMMEND_REVIEW",
+    recommendationVersion: ANALYST_RECOMMENDATION_VERSION,
+    generatedAt: ANALYST_RECOMMENDATION_GENERATED_AT,
     confidence: "LOW",
     source: "RULES_RISK",
     reasonCodes: ["RULES_HIGH_RISK"],
@@ -339,6 +384,8 @@ function absentAnalystRecommendation(overrides = {}) {
   return {
     status: "ABSENT",
     recommendation: null,
+    recommendationVersion: ANALYST_RECOMMENDATION_VERSION,
+    generatedAt: ANALYST_RECOMMENDATION_GENERATED_AT,
     confidence: "UNKNOWN",
     source: "ENGINE_INTELLIGENCE_ABSENT",
     reasonCodes: [],
@@ -352,6 +399,8 @@ function unavailableAnalystRecommendation(overrides = {}) {
   return {
     status: "UNAVAILABLE",
     recommendation: null,
+    recommendationVersion: ANALYST_RECOMMENDATION_VERSION,
+    generatedAt: ANALYST_RECOMMENDATION_GENERATED_AT,
     confidence: "UNKNOWN",
     source: "ENGINE_INTELLIGENCE_UNAVAILABLE",
     reasonCodes: [],
@@ -365,6 +414,8 @@ function degradedAnalystRecommendation(overrides = {}) {
   return {
     status: "DEGRADED",
     recommendation: "RECOMMEND_REVIEW",
+    recommendationVersion: ANALYST_RECOMMENDATION_VERSION,
+    generatedAt: ANALYST_RECOMMENDATION_GENERATED_AT,
     confidence: "LOW",
     source: "ENGINE_INTELLIGENCE_DEGRADED",
     reasonCodes: ["RULES_HIGH_RISK"],
