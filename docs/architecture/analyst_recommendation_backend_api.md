@@ -34,10 +34,12 @@ read-only; it does not compute recommendation values.
 `UNAVAILABLE` must not carry a recommendation value. `RECOMMEND_NO_ACTION` means only that this advisory layer has no
 additional review suggestion. It is not transaction approval, payment authorization, or fraud clearance.
 
-Every `AnalystRecommendationResult` includes `recommendationVersion` and `generatedAt`. The current version is
-`analyst-recommendation-v1`. `generatedAt` records when the recommendation artifact was produced by
-`fraud-scoring-service`; legacy missing stored values are exposed as an explicit `ABSENT` compatibility shape rather
-than `RECOMMEND_NO_ACTION`. `source` is required and non-null, including `AVAILABLE` and `DEGRADED` recommendations.
+Every `AnalystRecommendationResult` includes `recommendationVersion` and the `generatedAt` field. The current version
+is `analyst-recommendation-v1`. `generatedAt` is required for `AVAILABLE` and `DEGRADED` recommendation artifacts
+produced by `fraud-scoring-service`; for `ABSENT`, `NOT_APPLICABLE`, `INSUFFICIENT_DATA`, and `UNAVAILABLE` it may be
+`null` when no recommendation artifact was actually generated. Legacy missing stored values are exposed as an explicit
+`ABSENT` compatibility shape with `generatedAt: null` rather than `RECOMMEND_NO_ACTION` or a fake timestamp. `source`
+is required and non-null, including `AVAILABLE` and `DEGRADED` recommendations.
 
 ## Boundaries
 
