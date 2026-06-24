@@ -8,9 +8,12 @@ import {
   malformedInvalidWarning,
   malformedMissingEngineIntelligence,
   malformedRecommendationAvailableWithoutReason,
+  malformedRecommendationAvailableWithoutGeneratedAt,
   malformedRecommendationAvailableWithoutSource,
   malformedRecommendationAvailableWithoutValue,
+  malformedRecommendationAbsentWithInvalidGeneratedAt,
   malformedRecommendationBlankVersion,
+  malformedRecommendationDegradedWithoutGeneratedAt,
   malformedRecommendationDegradedWithoutSource,
   malformedRecommendationFalseNonDecisioningFlag,
   malformedRecommendationMissingGeneratedAt,
@@ -19,6 +22,7 @@ import {
   malformedRecommendationNullSource,
   malformedRecommendationTooManyReasonCodes,
   malformedRecommendationTooManyWarnings,
+  malformedRecommendationUnavailableWithInvalidGeneratedAt,
   malformedRecommendationUnavailableWithValue,
   notApplicableRecommendationDetail,
   recommendCaseCreationDetail,
@@ -161,6 +165,22 @@ describe("transactionRiskIntelligenceValidation", () => {
       valid: false,
       reason: "INVALID_ANALYST_RECOMMENDATION_GENERATED_AT"
     });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationAvailableWithoutGeneratedAt())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_GENERATED_AT"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationDegradedWithoutGeneratedAt())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_GENERATED_AT"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationAbsentWithInvalidGeneratedAt())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_GENERATED_AT"
+    });
+    expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationUnavailableWithInvalidGeneratedAt())).toMatchObject({
+      valid: false,
+      reason: "INVALID_ANALYST_RECOMMENDATION_GENERATED_AT"
+    });
     expect(validateTransactionRiskIntelligenceDetail(malformedRecommendationAvailableWithoutSource())).toMatchObject({
       valid: false,
       reason: "INVALID_ANALYST_RECOMMENDATION_SOURCE"
@@ -184,6 +204,18 @@ describe("transactionRiskIntelligenceValidation", () => {
 
     expect(result.valid).toBe(true);
     expect(result.detail.analystRecommendation.recommendation).toBeNull();
+  });
+
+  it.each([
+    ["ABSENT", absentRecommendationDetail()],
+    ["NOT_APPLICABLE", notApplicableRecommendationDetail()],
+    ["INSUFFICIENT_DATA", insufficientDataRecommendationDetail()],
+    ["UNAVAILABLE", unavailableRecommendationDetail()]
+  ])("accepts %s with generatedAt null", (_status, fixture) => {
+    const result = validateTransactionRiskIntelligenceDetail(fixture);
+
+    expect(result.valid).toBe(true);
+    expect(result.detail.analystRecommendation.generatedAt).toBeNull();
   });
 
   it("rejects unsafe fields inside analystRecommendation", () => {

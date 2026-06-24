@@ -57,4 +57,14 @@ describe("AnalystRecommendationPanel", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(container.querySelector("form")).toBeNull();
   });
+
+  it("renders null generatedAt as not available without epoch fallback", () => {
+    const detail = absentRecommendationDetail();
+    const { container } = render(<AnalystRecommendationPanel recommendation={detail.analystRecommendation} />);
+
+    const panel = screen.getByRole("region", { name: "Analyst Recommendation" });
+    expect(within(panel).getByText("Generated at")).toBeInTheDocument();
+    expect(within(panel).getByText("Not available")).toBeInTheDocument();
+    expect(container).not.toHaveTextContent("1970");
+  });
 });

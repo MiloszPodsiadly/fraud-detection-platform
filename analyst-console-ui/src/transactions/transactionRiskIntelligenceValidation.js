@@ -187,9 +187,6 @@ function validateAnalystRecommendation(value) {
   if (!safeString(value.recommendationVersion)) {
     return invalid("INVALID_ANALYST_RECOMMENDATION_VERSION");
   }
-  if (!parseableDateString(value.generatedAt)) {
-    return invalid("INVALID_ANALYST_RECOMMENDATION_GENERATED_AT");
-  }
   if (!oneOf(value.confidence, ANALYST_RECOMMENDATION_CONFIDENCES)) {
     return invalid("INVALID_ANALYST_RECOMMENDATION_CONFIDENCE");
   }
@@ -209,14 +206,22 @@ function validateAnalystRecommendation(value) {
     return invalid("INVALID_ANALYST_RECOMMENDATION_NON_DECISIONING");
   }
   if (ANALYST_RECOMMENDATION_REQUIRED_STATUSES.has(value.status)) {
+    if (!parseableDateString(value.generatedAt)) {
+      return invalid("INVALID_ANALYST_RECOMMENDATION_GENERATED_AT");
+    }
     if (!oneOf(value.recommendation, ANALYST_RECOMMENDATIONS)) {
       return invalid("INVALID_ANALYST_RECOMMENDATION_VALUE");
     }
     if (value.reasonCodes.length === 0) {
       return invalid("ANALYST_RECOMMENDATION_REASON_REQUIRED");
     }
-  } else if (value.recommendation !== null && value.recommendation !== undefined) {
-    return invalid("INCONSISTENT_ANALYST_RECOMMENDATION_VALUE");
+  } else {
+    if (value.generatedAt === undefined || (value.generatedAt !== null && !parseableDateString(value.generatedAt))) {
+      return invalid("INVALID_ANALYST_RECOMMENDATION_GENERATED_AT");
+    }
+    if (value.recommendation !== null && value.recommendation !== undefined) {
+      return invalid("INCONSISTENT_ANALYST_RECOMMENDATION_VALUE");
+    }
   }
   return Object.freeze({ valid: true });
 }

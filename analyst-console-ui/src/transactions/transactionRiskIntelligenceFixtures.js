@@ -191,7 +191,7 @@ export function notApplicableRecommendationDetail(overrides = {}) {
       status: "NOT_APPLICABLE",
       recommendation: null,
       recommendationVersion: ANALYST_RECOMMENDATION_VERSION,
-      generatedAt: ANALYST_RECOMMENDATION_GENERATED_AT,
+      generatedAt: null,
       confidence: "UNKNOWN",
       source: "NOT_APPLICABLE",
       reasonCodes: ["ENGINE_INTELLIGENCE_NO_COMPARABLE_ENGINES"],
@@ -209,7 +209,7 @@ export function insufficientDataRecommendationDetail(overrides = {}) {
       status: "INSUFFICIENT_DATA",
       recommendation: null,
       recommendationVersion: ANALYST_RECOMMENDATION_VERSION,
-      generatedAt: ANALYST_RECOMMENDATION_GENERATED_AT,
+      generatedAt: null,
       confidence: "UNKNOWN",
       source: "ENGINE_INTELLIGENCE_ABSENT",
       reasonCodes: ["ENGINE_INTELLIGENCE_NO_ENGINES"],
@@ -299,6 +299,30 @@ export function malformedRecommendationMissingGeneratedAt() {
   return detail;
 }
 
+export function malformedRecommendationAvailableWithoutGeneratedAt() {
+  return availableDetail({
+    analystRecommendation: availableAnalystRecommendation({ generatedAt: null })
+  });
+}
+
+export function malformedRecommendationDegradedWithoutGeneratedAt() {
+  return degradedDetail({
+    analystRecommendation: degradedAnalystRecommendation({ generatedAt: null })
+  });
+}
+
+export function malformedRecommendationAbsentWithInvalidGeneratedAt() {
+  return absentDetail({
+    analystRecommendation: absentAnalystRecommendation({ generatedAt: "not-a-date" })
+  });
+}
+
+export function malformedRecommendationUnavailableWithInvalidGeneratedAt() {
+  return unavailableDetail({
+    analystRecommendation: unavailableAnalystRecommendation({ generatedAt: "not-a-date" })
+  });
+}
+
 export function malformedRecommendationAvailableWithoutSource() {
   return availableDetail({
     analystRecommendation: availableAnalystRecommendation({ source: undefined })
@@ -385,7 +409,7 @@ function absentAnalystRecommendation(overrides = {}) {
     status: "ABSENT",
     recommendation: null,
     recommendationVersion: ANALYST_RECOMMENDATION_VERSION,
-    generatedAt: ANALYST_RECOMMENDATION_GENERATED_AT,
+    generatedAt: null,
     confidence: "UNKNOWN",
     source: "ENGINE_INTELLIGENCE_ABSENT",
     reasonCodes: [],
@@ -400,7 +424,7 @@ function unavailableAnalystRecommendation(overrides = {}) {
     status: "UNAVAILABLE",
     recommendation: null,
     recommendationVersion: ANALYST_RECOMMENDATION_VERSION,
-    generatedAt: ANALYST_RECOMMENDATION_GENERATED_AT,
+    generatedAt: null,
     confidence: "UNKNOWN",
     source: "ENGINE_INTELLIGENCE_UNAVAILABLE",
     reasonCodes: [],
