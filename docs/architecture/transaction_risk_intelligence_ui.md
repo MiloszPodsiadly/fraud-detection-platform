@@ -35,6 +35,9 @@ The frontend display validator requires:
 - analyst recommendation status in `AVAILABLE`, `ABSENT`, `NOT_APPLICABLE`, `INSUFFICIENT_DATA`, `UNAVAILABLE`, or `DEGRADED`
 - recommendation values only for `AVAILABLE` and `DEGRADED`
 - no recommendation values for `ABSENT`, `NOT_APPLICABLE`, `INSUFFICIENT_DATA`, or `UNAVAILABLE`
+- `recommendationVersion` as a non-empty string
+- `generatedAt` as a parseable timestamp
+- `source` as a required non-null public enum value
 - analyst recommendation reason codes max 5 and warnings max 10
 - all analyst recommendation non-decisioning flags set to true
 
@@ -50,8 +53,8 @@ or display raw payloads.
 ## Analyst Recommendation Display
 
 FDP-119 adds a read-only Analyst Recommendation section after Projected Comparison and before Engine Results. The
-section displays status, recommendation value when present, source, confidence, reason codes, warnings, and the
-non-decisioning boundary. It uses safe copy for all statuses:
+section displays status, recommendation value when present, recommendation version, generated timestamp, source,
+confidence, reason codes, warnings, and the non-decisioning boundary. It uses safe copy for all statuses:
 
 - `AVAILABLE`: a bounded advisory recommendation is available.
 - `DEGRADED`: a recommendation is available with diagnostic limitations.

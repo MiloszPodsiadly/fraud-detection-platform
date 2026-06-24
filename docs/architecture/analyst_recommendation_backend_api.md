@@ -34,6 +34,11 @@ read-only; it does not compute recommendation values.
 `UNAVAILABLE` must not carry a recommendation value. `RECOMMEND_NO_ACTION` means only that this advisory layer has no
 additional review suggestion. It is not transaction approval, payment authorization, or fraud clearance.
 
+Every `AnalystRecommendationResult` includes `recommendationVersion` and `generatedAt`. The current version is
+`analyst-recommendation-v1`. `generatedAt` records when the recommendation artifact was produced by
+`fraud-scoring-service`; legacy missing stored values are exposed as an explicit `ABSENT` compatibility shape rather
+than `RECOMMEND_NO_ACTION`. `source` is required and non-null, including `AVAILABLE` and `DEGRADED` recommendations.
+
 ## Boundaries
 
 This layer is advisory-only. It does not authorize payments, approve, decline, block, create fraud cases, mutate
@@ -49,7 +54,3 @@ rejects unsafe raw/internal fields, and displays only read-only advisory text.
 
 The recommendation is exposed through scored transaction detail reads and is covered by the existing scored transaction
 detail read audit path. No high-cardinality recommendation metrics are emitted by this baseline.
-
-Known future hardening: the recommendation DTO does not currently carry a dedicated `recommendationVersion` or
-`generatedAt` field. Adding those fields would require propagation through the event, persistence, API schema, frontend
-validation, fixtures, and compatibility tests.
