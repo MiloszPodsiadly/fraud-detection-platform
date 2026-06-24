@@ -17,8 +17,11 @@ import com.frauddetection.common.events.recommendation.AnalystRecommendationWarn
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 @Service
@@ -31,23 +34,34 @@ public class AnalystRecommendationService {
             "RAPID_TRANSFER_PATTERN_MATCHED"
     );
 
+    private final Clock clock;
+
+    public AnalystRecommendationService() {
+        this(Clock.systemUTC());
+    }
+
+    AnalystRecommendationService(Clock clock) {
+        this.clock = Objects.requireNonNull(clock, "clock is required");
+    }
+
     public AnalystRecommendationResult recommend(
             FraudScoreResult scoreResult,
             Optional<EngineIntelligenceSummary> engineIntelligence
     ) {
+        Instant generatedAt = Instant.now(clock);
         if (engineIntelligence.isEmpty()) {
-            return AnalystRecommendationResult.absent();
+            return AnalystRecommendationResult.absent(generatedAt);
         }
 
         EngineIntelligenceSummary summary = engineIntelligence.get();
         if (summary.engines().isEmpty()) {
-            return AnalystRecommendationResult.insufficientData("ENGINE_INTELLIGENCE_NO_ENGINES");
+            return AnalystRecommendationResult.insufficientData("ENGINE_INTELLIGENCE_NO_ENGINES", generatedAt);
         }
 
         Optional<EngineIntelligenceEngineResult> rules = engine(summary, FraudEngineType.RULES);
         Optional<EngineIntelligenceEngineResult> ml = engine(summary, FraudEngineType.ML_MODEL);
         if (rules.isEmpty() && ml.isEmpty()) {
-            return AnalystRecommendationResult.notApplicable("ENGINE_INTELLIGENCE_NO_COMPARABLE_ENGINES");
+            return AnalystRecommendationResult.notApplicable("ENGINE_INTELLIGENCE_NO_COMPARABLE_ENGINES", generatedAt);
         }
 
         boolean degraded = degraded(summary);
@@ -57,12 +71,15 @@ public class AnalystRecommendationService {
                 .or(() -> bothLowRecommendation(rules, ml, degraded));
 
         return decision
-                .map(RecommendationDecision::toResult)
-                .orElseGet(() -> AnalystRecommendationResult.insufficientData("ANALYST_RECOMMENDATION_NO_RULE_MATCH"));
+                .map(nextDecision -> nextDecision.toResult(generatedAt))
+                .orElseGet(() -> AnalystRecommendationResult.insufficientData(
+                        "ANALYST_RECOMMENDATION_NO_RULE_MATCH",
+                        generatedAt
+                ));
     }
 
     public AnalystRecommendationResult unavailable() {
-        return AnalystRecommendationResult.unavailable();
+        return AnalystRecommendationResult.unavailable(Instant.now(clock));
     }
 
     private Optional<RecommendationDecision> rapidTransferRecommendation(
@@ -197,10 +214,12 @@ public class AnalystRecommendationService {
             List<String> reasonCodes,
             List<AnalystRecommendationWarning> warnings
     ) {
-        private AnalystRecommendationResult toResult() {
+        private AnalystRecommendationResult toResult(Instant generatedAt) {
             return new AnalystRecommendationResult(
                     status,
                     recommendation,
+                    AnalystRecommendationResult.RECOMMENDATION_VERSION,
+                    generatedAt,
                     confidence,
                     source,
                     List.copyOf(new LinkedHashSet<>(reasonCodes)),

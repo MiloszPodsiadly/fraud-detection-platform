@@ -98,6 +98,8 @@ class ScoredTransactionControllerDetailTest {
                 .andExpect(jsonPath("$.engineIntelligence.engines[0].engineId").value("rules.primary"))
                 .andExpect(jsonPath("$.analystRecommendation.status").value("AVAILABLE"))
                 .andExpect(jsonPath("$.analystRecommendation.recommendation").value("RECOMMEND_REVIEW"))
+                .andExpect(jsonPath("$.analystRecommendation.recommendationVersion").value("analyst-recommendation-v1"))
+                .andExpect(jsonPath("$.analystRecommendation.generatedAt").value("2026-06-19T10:00:00Z"))
                 .andExpect(jsonPath("$.analystRecommendation.nonDecisioning.notPaymentAuthorization").value(true))
                 .andReturn()
                 .getResponse()
@@ -127,6 +129,8 @@ class ScoredTransactionControllerDetailTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.analystRecommendation.status").value("ABSENT"))
                 .andExpect(jsonPath("$.analystRecommendation.recommendation").isEmpty())
+                .andExpect(jsonPath("$.analystRecommendation.recommendationVersion").value("analyst-recommendation-v1"))
+                .andExpect(jsonPath("$.analystRecommendation.generatedAt").exists())
                 .andExpect(jsonPath("$.analystRecommendation.confidence").value("UNKNOWN"))
                 .andExpect(jsonPath("$.analystRecommendation.source").value("ENGINE_INTELLIGENCE_ABSENT"))
                 .andExpect(jsonPath("$.analystRecommendation.reasonCodes").isArray())
@@ -282,6 +286,8 @@ class ScoredTransactionControllerDetailTest {
         return new AnalystRecommendationResult(
                 AnalystRecommendationStatus.AVAILABLE,
                 AnalystRecommendation.RECOMMEND_REVIEW,
+                AnalystRecommendationResult.RECOMMENDATION_VERSION,
+                Instant.parse("2026-06-19T10:00:00Z"),
                 AnalystRecommendationConfidence.MEDIUM,
                 AnalystRecommendationSource.RULES_RISK,
                 List.of("RULES_CRITICAL_RISK"),

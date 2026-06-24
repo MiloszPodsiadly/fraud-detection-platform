@@ -102,7 +102,7 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
         try {
             return analystRecommendationService.recommend(scoreResult, engineIntelligence.summary());
         } catch (RuntimeException exception) {
-            log.warn("Analyst recommendation enrichment omitted.");
+            log.warn("Analyst recommendation enrichment omitted.", exception);
             return analystRecommendationService.unavailable();
         }
     }

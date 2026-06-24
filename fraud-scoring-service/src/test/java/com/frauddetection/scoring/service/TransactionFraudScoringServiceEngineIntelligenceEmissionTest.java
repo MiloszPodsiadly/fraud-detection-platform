@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
 
+import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.analystRecommendationService;
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.harness;
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.json;
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.scoreResult;
@@ -53,7 +54,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
         var request = FraudScoringRequest.from(input);
         var scoreResult = scoreResult();
         var summary = summary();
-        var recommendation = new AnalystRecommendationService().recommend(scoreResult, Optional.of(summary));
+        var recommendation = analystRecommendationService().recommend(scoreResult, Optional.of(summary));
         var scoredEvent = new TransactionScoredEventMapper().toEvent(request, scoreResult, Optional.of(summary), recommendation);
         FraudScoringEngine scoringEngine = mock(FraudScoringEngine.class);
         EngineIntelligenceEmissionService emissionService = mock(EngineIntelligenceEmissionService.class);
@@ -70,7 +71,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
                 new ScoringProperties(0.75d, 0.90d, ScoringMode.RULE_BASED),
                 metrics,
                 emissionService,
-                new AnalystRecommendationService()
+                analystRecommendationService()
         );
 
         service.score(input);

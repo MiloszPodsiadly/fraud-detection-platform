@@ -70,6 +70,8 @@ class TransactionScoredEventCompatibilityTest {
         assertThat(event.analystRecommendation()).isNotNull();
         assertThat(event.analystRecommendation().status().name()).isEqualTo("AVAILABLE");
         assertThat(event.analystRecommendation().recommendation().name()).isEqualTo("RECOMMEND_REVIEW");
+        assertThat(event.analystRecommendation().recommendationVersion()).isEqualTo("analyst-recommendation-v1");
+        assertThat(event.analystRecommendation().generatedAt()).isEqualTo(Instant.parse("2026-06-19T10:00:00Z"));
         assertThat(event.analystRecommendation().nonDecisioning().notPaymentAuthorization()).isTrue();
         assertThat(event.analystRecommendation().nonDecisioning().notAutomaticDecisioning()).isTrue();
         assertThat(event.analystRecommendation().nonDecisioning().notCaseAction()).isTrue();
@@ -170,6 +172,8 @@ class TransactionScoredEventCompatibilityTest {
                 "analystRecommendation": {
                   "status": "AVAILABLE",
                   "recommendation": "RECOMMEND_REVIEW",
+                  "recommendationVersion": "analyst-recommendation-v1",
+                  "generatedAt": "2026-06-19T10:00:00Z",
                   "confidence": "MEDIUM",
                   "source": "RULES_RISK",
                   "reasonCodes": ["RULES_HIGH_RISK"],

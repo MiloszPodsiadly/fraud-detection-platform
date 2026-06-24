@@ -19,7 +19,9 @@ import com.frauddetection.common.events.recommendation.AnalystRecommendationStat
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -28,7 +30,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class AnalystRecommendationServiceTest {
 
-    private final AnalystRecommendationService service = new AnalystRecommendationService();
+    private static final Instant FIXED_INSTANT = Instant.parse("2026-06-19T10:00:00Z");
+    private static final Clock FIXED_CLOCK = Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC);
+
+    private final AnalystRecommendationService service = new AnalystRecommendationService(FIXED_CLOCK);
 
     @Test
     void absentEngineIntelligenceMapsToAbsentWithoutNoActionRecommendation() {
@@ -37,6 +42,8 @@ class AnalystRecommendationServiceTest {
         assertThat(result.status()).isEqualTo(AnalystRecommendationStatus.ABSENT);
         assertThat(result.recommendation()).isNull();
         assertThat(result.source()).isEqualTo(AnalystRecommendationSource.ENGINE_INTELLIGENCE_ABSENT);
+        assertThat(result.recommendationVersion()).isEqualTo("analyst-recommendation-v1");
+        assertThat(result.generatedAt()).isEqualTo(FIXED_INSTANT);
     }
 
     @Test
@@ -49,6 +56,8 @@ class AnalystRecommendationServiceTest {
         assertThat(result.recommendation()).isEqualTo(AnalystRecommendation.RECOMMEND_REVIEW);
         assertThat(result.confidence()).isEqualTo(AnalystRecommendationConfidence.LOW);
         assertThat(result.source()).isEqualTo(AnalystRecommendationSource.RULES_RISK);
+        assertThat(result.recommendationVersion()).isEqualTo("analyst-recommendation-v1");
+        assertThat(result.generatedAt()).isEqualTo(FIXED_INSTANT);
         assertThat(result.reasonCodes()).containsExactly("RULES_HIGH_RISK");
         assertThat(result.nonDecisioning().notPaymentAuthorization()).isTrue();
         assertThat(result.nonDecisioning().notAutomaticDecisioning()).isTrue();
@@ -120,6 +129,8 @@ class AnalystRecommendationServiceTest {
         assertThat(result.status()).isEqualTo(AnalystRecommendationStatus.DEGRADED);
         assertThat(result.source()).isEqualTo(AnalystRecommendationSource.ENGINE_INTELLIGENCE_DEGRADED);
         assertThat(result.recommendation()).isEqualTo(AnalystRecommendation.RECOMMEND_REVIEW);
+        assertThat(result.recommendationVersion()).isEqualTo("analyst-recommendation-v1");
+        assertThat(result.generatedAt()).isEqualTo(FIXED_INSTANT);
         assertThat(result.warnings()).singleElement()
                 .satisfies(warning -> assertThat(warning.warningCode()).isEqualTo("ENGINE_INTELLIGENCE_DEGRADED"));
     }
@@ -148,6 +159,8 @@ class AnalystRecommendationServiceTest {
         assertThat(result.status()).isEqualTo(AnalystRecommendationStatus.UNAVAILABLE);
         assertThat(result.recommendation()).isNull();
         assertThat(result.source()).isEqualTo(AnalystRecommendationSource.ENGINE_INTELLIGENCE_UNAVAILABLE);
+        assertThat(result.recommendationVersion()).isEqualTo("analyst-recommendation-v1");
+        assertThat(result.generatedAt()).isEqualTo(FIXED_INSTANT);
     }
 
     private FraudScoreResult scoreResult(RiskLevel riskLevel) {

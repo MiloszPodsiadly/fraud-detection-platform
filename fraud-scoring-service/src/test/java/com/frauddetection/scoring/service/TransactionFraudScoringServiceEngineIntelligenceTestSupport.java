@@ -22,7 +22,9 @@ import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEm
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -33,6 +35,7 @@ import static org.mockito.Mockito.when;
 
 final class TransactionFraudScoringServiceEngineIntelligenceTestSupport {
     static final Instant GENERATED_AT = Instant.parse("2026-05-31T10:00:00Z");
+    private static final Clock RECOMMENDATION_CLOCK = Clock.fixed(GENERATED_AT, ZoneOffset.UTC);
 
     private TransactionFraudScoringServiceEngineIntelligenceTestSupport() {
     }
@@ -67,9 +70,13 @@ final class TransactionFraudScoringServiceEngineIntelligenceTestSupport {
                 new ScoringProperties(0.75d, 0.90d, ScoringMode.RULE_BASED),
                 new ScoringMetrics(new SimpleMeterRegistry()),
                 emissionService,
-                new AnalystRecommendationService()
+                analystRecommendationService()
         );
         return new Harness(input, request, result, scoringEngine, publisher, emissionService, service);
+    }
+
+    static AnalystRecommendationService analystRecommendationService() {
+        return new AnalystRecommendationService(RECOMMENDATION_CLOCK);
     }
 
     static FraudScoreResult scoreResult() {

@@ -19,6 +19,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
 
+import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.analystRecommendationService;
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.harness;
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.json;
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.scoreResult;
@@ -73,7 +74,7 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
         var input = TransactionFixtures.enrichedTransaction().build();
         var request = FraudScoringRequest.from(input);
         var scoreResult = scoreResult();
-        var recommendation = new AnalystRecommendationService().unavailable();
+        var recommendation = analystRecommendationService().unavailable();
         var baseEvent = new TransactionScoredEventMapper().toEvent(request, scoreResult, Optional.empty(), recommendation);
         FraudScoringEngine scoringEngine = mock(FraudScoringEngine.class);
         EngineIntelligenceEmissionService emissionService = mock(EngineIntelligenceEmissionService.class);
@@ -90,7 +91,7 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
                 new ScoringProperties(0.75d, 0.90d, ScoringMode.RULE_BASED),
                 metrics,
                 emissionService,
-                new AnalystRecommendationService()
+                analystRecommendationService()
         );
 
         service.score(input);

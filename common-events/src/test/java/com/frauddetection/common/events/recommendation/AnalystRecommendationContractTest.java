@@ -3,12 +3,15 @@ package com.frauddetection.common.events.recommendation;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AnalystRecommendationContractTest {
+
+    private static final Instant GENERATED_AT = Instant.parse("2026-06-19T10:00:00Z");
 
     private final ObjectMapper objectMapper = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
 
@@ -19,6 +22,8 @@ class AnalystRecommendationContractTest {
         assertThat(json).contains(
                 "\"status\":\"UNAVAILABLE\"",
                 "\"recommendation\":null",
+                "\"recommendationVersion\":\"analyst-recommendation-v1\"",
+                "\"generatedAt\":\"1970-01-01T00:00:00Z\"",
                 "\"confidence\":\"UNKNOWN\"",
                 "\"source\":\"ENGINE_INTELLIGENCE_UNAVAILABLE\"",
                 "\"reasonCodes\":[]",
@@ -45,6 +50,8 @@ class AnalystRecommendationContractTest {
         assertThatThrownBy(() -> new AnalystRecommendationResult(
                 AnalystRecommendationStatus.AVAILABLE,
                 AnalystRecommendation.RECOMMEND_REVIEW,
+                AnalystRecommendationResult.RECOMMENDATION_VERSION,
+                GENERATED_AT,
                 AnalystRecommendationConfidence.LOW,
                 AnalystRecommendationSource.RULES_RISK,
                 List.of("R1", "R2", "R3", "R4", "R5", "R6"),
@@ -56,6 +63,8 @@ class AnalystRecommendationContractTest {
         assertThatThrownBy(() -> new AnalystRecommendationResult(
                 AnalystRecommendationStatus.AVAILABLE,
                 AnalystRecommendation.RECOMMEND_REVIEW,
+                AnalystRecommendationResult.RECOMMENDATION_VERSION,
+                GENERATED_AT,
                 AnalystRecommendationConfidence.LOW,
                 AnalystRecommendationSource.RULES_RISK,
                 List.of("RULES_HIGH_RISK"),
@@ -72,6 +81,8 @@ class AnalystRecommendationContractTest {
         assertThatThrownBy(() -> new AnalystRecommendationResult(
                 AnalystRecommendationStatus.AVAILABLE,
                 AnalystRecommendation.RECOMMEND_REVIEW,
+                AnalystRecommendationResult.RECOMMENDATION_VERSION,
+                GENERATED_AT,
                 AnalystRecommendationConfidence.LOW,
                 AnalystRecommendationSource.RULES_RISK,
                 List.of(),
@@ -83,6 +94,8 @@ class AnalystRecommendationContractTest {
         assertThatThrownBy(() -> new AnalystRecommendationResult(
                 AnalystRecommendationStatus.DEGRADED,
                 AnalystRecommendation.RECOMMEND_REVIEW,
+                AnalystRecommendationResult.RECOMMENDATION_VERSION,
+                GENERATED_AT,
                 AnalystRecommendationConfidence.LOW,
                 AnalystRecommendationSource.ENGINE_INTELLIGENCE_DEGRADED,
                 List.of(),
@@ -90,6 +103,64 @@ class AnalystRecommendationContractTest {
                 AnalystRecommendationNonDecisioning.advisoryOnly()
         )).isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("ANALYST_RECOMMENDATION_AVAILABLE_REASON_REQUIRED");
+    }
+
+    @Test
+    void availableAndDegradedRecommendationsRequireSource() {
+        assertThatThrownBy(() -> new AnalystRecommendationResult(
+                AnalystRecommendationStatus.AVAILABLE,
+                AnalystRecommendation.RECOMMEND_REVIEW,
+                AnalystRecommendationResult.RECOMMENDATION_VERSION,
+                GENERATED_AT,
+                AnalystRecommendationConfidence.LOW,
+                null,
+                List.of("RULES_HIGH_RISK"),
+                List.of(),
+                AnalystRecommendationNonDecisioning.advisoryOnly()
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("ANALYST_RECOMMENDATION_AVAILABLE_SOURCE_REQUIRED");
+
+        assertThatThrownBy(() -> new AnalystRecommendationResult(
+                AnalystRecommendationStatus.DEGRADED,
+                AnalystRecommendation.RECOMMEND_REVIEW,
+                AnalystRecommendationResult.RECOMMENDATION_VERSION,
+                GENERATED_AT,
+                AnalystRecommendationConfidence.LOW,
+                null,
+                List.of("RULES_HIGH_RISK"),
+                List.of(new AnalystRecommendationWarning("ENGINE_INTELLIGENCE_DEGRADED", 1)),
+                AnalystRecommendationNonDecisioning.advisoryOnly()
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("ANALYST_RECOMMENDATION_AVAILABLE_SOURCE_REQUIRED");
+    }
+
+    @Test
+    void recommendationsRequireVersionAndGeneratedAt() {
+        assertThatThrownBy(() -> new AnalystRecommendationResult(
+                AnalystRecommendationStatus.AVAILABLE,
+                AnalystRecommendation.RECOMMEND_REVIEW,
+                " ",
+                GENERATED_AT,
+                AnalystRecommendationConfidence.LOW,
+                AnalystRecommendationSource.RULES_RISK,
+                List.of("RULES_HIGH_RISK"),
+                List.of(),
+                AnalystRecommendationNonDecisioning.advisoryOnly()
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("ANALYST_RECOMMENDATION_VERSION_REQUIRED");
+
+        assertThatThrownBy(() -> new AnalystRecommendationResult(
+                AnalystRecommendationStatus.AVAILABLE,
+                AnalystRecommendation.RECOMMEND_REVIEW,
+                AnalystRecommendationResult.RECOMMENDATION_VERSION,
+                null,
+                AnalystRecommendationConfidence.LOW,
+                AnalystRecommendationSource.RULES_RISK,
+                List.of("RULES_HIGH_RISK"),
+                List.of(),
+                AnalystRecommendationNonDecisioning.advisoryOnly()
+        )).isInstanceOf(NullPointerException.class)
+                .hasMessage("generatedAt is required");
     }
 
     @Test
@@ -118,6 +189,8 @@ class AnalystRecommendationContractTest {
         assertThatThrownBy(() -> new AnalystRecommendationResult(
                 status,
                 AnalystRecommendation.RECOMMEND_REVIEW,
+                AnalystRecommendationResult.RECOMMENDATION_VERSION,
+                GENERATED_AT,
                 AnalystRecommendationConfidence.LOW,
                 AnalystRecommendationSource.ENGINE_INTELLIGENCE_UNAVAILABLE,
                 List.of("REASON_PRESENT"),
