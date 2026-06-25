@@ -25,6 +25,8 @@ describe("alertsApi auth headers", () => {
   const getFraudCaseWorkQueueSummary = (...args) => apiClient.getFraudCaseWorkQueueSummary(...args);
   const listScoredTransactions = (...args) => apiClient.listScoredTransactions(...args);
   const getScoredTransactionDetail = (...args) => apiClient.getScoredTransactionDetail(...args);
+  const getFraudFeedback = (...args) => apiClient.getFraudFeedback(...args);
+  const createFraudFeedback = (...args) => apiClient.createFraudFeedback(...args);
   const listSuspiciousTransactions = (...args) => apiClient.listSuspiciousTransactions(...args);
   const getSuspiciousTransactionSummary = (...args) => apiClient.getSuspiciousTransactionSummary(...args);
   const getSuspiciousTransaction = (...args) => apiClient.getSuspiciousTransaction(...args);
@@ -1231,6 +1233,41 @@ describe("alertsApi auth headers", () => {
           "X-Demo-User-Id": "analyst-1",
           "Content-Type": "application/json"
         })
+      })
+    );
+  });
+
+  it("loads fraud feedback through the API client boundary", async () => {
+    const signal = new AbortController().signal;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ feedbackId: "feedback-1" }));
+
+    await getFraudFeedback(" txn:1 ", { signal });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/transactions/scored/txn%3A1/feedback",
+      expect.objectContaining({
+        signal,
+        headers: expect.objectContaining({ "Content-Type": "application/json" })
+      })
+    );
+  });
+
+  it("creates fraud feedback through the API client boundary", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ feedbackId: "feedback-1" }));
+    const feedback = {
+      analystDecision: "MARKED_FRAUD",
+      feedbackLabel: "CONFIRMED_FRAUD",
+      decisionReasonCodes: ["CUSTOMER_CONFIRMED_FRAUD"]
+    };
+
+    await createFraudFeedback("txn-1", feedback);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/transactions/scored/txn-1/feedback",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify(feedback),
+        headers: expect.objectContaining({ "Content-Type": "application/json" })
       })
     );
   });

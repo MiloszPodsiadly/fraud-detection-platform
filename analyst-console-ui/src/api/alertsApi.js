@@ -25,6 +25,8 @@ export function createAlertsApiClient({
     getFraudCaseWorkQueueSummary: (requestOptions) => request("/api/v1/fraud-cases/work-queue/summary", requestOptions),
     listScoredTransactions: (requestParams, requestOptions) => listScoredTransactionsWithRequest(request, requestParams, requestOptions),
     getScoredTransactionDetail: (transactionId, requestOptions) => getScoredTransactionDetailWithRequest(request, transactionId, requestOptions),
+    getFraudFeedback: (transactionId, requestOptions) => getFraudFeedbackWithRequest(request, transactionId, requestOptions),
+    createFraudFeedback: (transactionId, feedback, requestOptions) => createFraudFeedbackWithRequest(request, transactionId, feedback, requestOptions),
     listSuspiciousTransactions: (requestParams, requestOptions) => listSuspiciousTransactionsWithRequest(request, requestParams, requestOptions),
     getSuspiciousTransactionSummary: (requestOptions) => request("/internal/suspicious-transactions/summary", requestOptions),
     getSuspiciousTransaction: (suspiciousTransactionId, requestOptions) => request(`/internal/suspicious-transactions/${encodeURIComponent(suspiciousTransactionId)}`, requestOptions),
@@ -196,6 +198,37 @@ function scoredTransactionDetailRequestOptions({ signal } = {}) {
   return {
     ...(signal ? { signal } : {})
   };
+}
+
+function getFraudFeedbackWithRequest(request, transactionId, requestOptions = {}) {
+  const normalizedTransactionId = normalizeEngineIntelligenceTransactionId(transactionId);
+  if (!isValidEngineIntelligenceTransactionId(normalizedTransactionId)) {
+    return Promise.reject(new ApiError({
+      status: 400,
+      error: "INVALID_TRANSACTION_ID",
+      message: "Invalid scored transaction identifier."
+    }));
+  }
+  return request(
+    `/api/v1/transactions/scored/${encodeURIComponent(normalizedTransactionId)}/feedback`,
+    scoredTransactionDetailRequestOptions(requestOptions)
+  );
+}
+
+function createFraudFeedbackWithRequest(request, transactionId, feedback, { signal } = {}) {
+  const normalizedTransactionId = normalizeEngineIntelligenceTransactionId(transactionId);
+  if (!isValidEngineIntelligenceTransactionId(normalizedTransactionId)) {
+    return Promise.reject(new ApiError({
+      status: 400,
+      error: "INVALID_TRANSACTION_ID",
+      message: "Invalid scored transaction identifier."
+    }));
+  }
+  return request(`/api/v1/transactions/scored/${encodeURIComponent(normalizedTransactionId)}/feedback`, {
+    method: "POST",
+    signal,
+    body: JSON.stringify(feedback)
+  });
 }
 
 function listSuspiciousTransactionsWithRequest(request, {

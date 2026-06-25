@@ -77,6 +77,7 @@ const ALLOWED_NEGATIVE_BOUNDARY_STATEMENTS = [
   "not a final payment decision",
   "does not approve, decline, block",
   "does not approve, decline, block, authorize payment, create a case, trigger workflow, promote a model, or change thresholds",
+  "does not authorize payment, approve, decline, block, change scoring, update recommendations, create cases, trigger workflow, train models, promote models, or change thresholds",
   "does not approve",
   "does not decline",
   "does not block",
@@ -171,9 +172,9 @@ function withoutAllowedNegativeBoundaryStatements(source) {
 function scoredTransactionDetailClientSource() {
   const source = sourceFile("src/api/alertsApi.js");
   const sourceStart = source.indexOf("function getScoredTransactionDetailWithRequest");
-  const sourceEnd = source.indexOf("function listSuspiciousTransactionsWithRequest");
+  const sourceEnd = source.indexOf("function scoredTransactionDetailRequestOptions", sourceStart);
   const methodEntryStart = source.indexOf("getScoredTransactionDetail:");
-  const methodEntryEnd = source.indexOf("listSuspiciousTransactions:", methodEntryStart);
+  const methodEntryEnd = source.indexOf("getFraudFeedback:", methodEntryStart);
   return [
     source.slice(methodEntryStart, methodEntryEnd),
     source.slice(sourceStart, sourceEnd)
