@@ -1,6 +1,6 @@
 # Transaction Risk Intelligence UI
 
-Status: FDP-116/FDP-118 read-only frontend diagnostics with FDP-119 analyst recommendation display.
+Status: FDP-116/FDP-118 diagnostics, FDP-119 analyst recommendation display, and FDP-121 bounded analyst feedback capture.
 
 ## Scope
 
@@ -10,8 +10,8 @@ scored transaction detail API:
 `GET /api/v1/transactions/scored/{transactionId}`
 
 The UI displays bounded Engine Intelligence diagnostics and the FDP-119 `analystRecommendation` detail field already
-stored and exposed by alert-service. It does not create a new backend API, OpenAPI contract, scoring path, workflow
-route, or write surface.
+stored and exposed by alert-service. FDP-121 adds an `Analyst Feedback` section that uses the alert-service feedback
+API for explicit analyst review outcome capture.
 
 ## Boundaries
 
@@ -19,9 +19,28 @@ route, or write surface.
 - The scored transaction list remains a lightweight list.
 - The panel fetches detail only for the explicitly expanded transaction row.
 - The panel does not use the older dedicated Engine Intelligence read endpoint as its main source.
-- The panel does not use feedback endpoints.
+- The panel uses FDP-121 feedback endpoints only for the `Analyst Feedback` section.
 - The panel does not compute Analyst Recommendation values.
 - Backend authorization remains authoritative; frontend capability and rendering choices are not security decisions.
+
+## Analyst Feedback Capture
+
+The panel calls:
+
+`GET /api/v1/transactions/scored/{transactionId}/feedback`
+
+and, only after explicit analyst form submit:
+
+`POST /api/v1/transactions/scored/{transactionId}/feedback`
+
+The UI allows only bounded labels and neutral decision names. It renders existing feedback as read-only and does not
+offer a second submit when feedback already exists. Duplicate POST returns `409 CONFLICT`.
+
+Feedback records analyst review outcome only. It does not authorize payment, approve, decline, block, change scoring,
+update recommendations, create cases, trigger workflow, train models, promote models, or change thresholds.
+
+Analyst feedback labels are future evaluation signals, not certified legal ground truth. Notes are bounded and are not
+used for ML training or dataset export in FDP-121.
 
 ## Display Rules
 
@@ -68,9 +87,9 @@ authorization, fraud clearance, or a final bank decision.
 
 ## Non-Claims
 
-The Transaction Risk Intelligence UI does not add feedback submission, case actions, payment authorization, model
-promotion, threshold recommendation, workflow behavior, scoring changes, backend mutations, OpenAPI changes, or raw
-payload display. FDP-119 adds read-only rendering of the existing detail API `analystRecommendation` field only.
+The Transaction Risk Intelligence UI does not add case actions, payment authorization, model promotion, threshold
+recommendation, workflow behavior, scoring changes, recommendation mutation, dataset export, ML evaluation, or raw
+payload display. FDP-121 adds bounded feedback submission only.
 
 ## FDP-118 UI Hardening
 
@@ -104,5 +123,6 @@ scoring changes, backend changes, OpenAPI changes, dependency changes, raw paylo
 dashboard, or bulk transaction intelligence export.
 
 FDP-119 changes that non-claim only by adding read-only Analyst Recommendation rendering from the scored transaction
-detail response. It still does not add buttons, forms, apply/accept/reject behavior, feedback, case creation, workflow
-mutation, payment authorization, model promotion, threshold changes, scoring changes, or frontend recommendation logic.
+detail response. FDP-121 adds bounded Analyst Feedback capture but still does not add apply/accept/reject behavior,
+case creation, workflow mutation, payment authorization, model promotion, threshold changes, scoring changes, or
+frontend recommendation logic.
