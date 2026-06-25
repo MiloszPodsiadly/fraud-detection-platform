@@ -30,6 +30,7 @@ class EngineIntelligenceDownstreamIsolationTest {
                 alertService.resolve("api/ScoredTransactionDetailResponse.java"),
                 alertService.resolve("api/ScoredTransactionResponse.java"),
                 alertService.resolve("controller/ScoredTransactionController.java"),
+                alertService.resolve("feedback"),
                 alertService.resolve("mapper/EngineIntelligenceResponseMapper.java"),
                 alertService.resolve("mapper/ScoredTransactionResponseMapper.java")
         )).doesNotContain("EngineIntelligenceSummary", "engineIntelligence");

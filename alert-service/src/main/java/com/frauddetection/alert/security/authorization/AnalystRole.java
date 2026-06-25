@@ -7,6 +7,7 @@ public enum AnalystRole {
             AnalystAuthority.ALERT_READ,
             AnalystAuthority.ASSISTANT_SUMMARY_READ,
             AnalystAuthority.FRAUD_CASE_READ,
+            AnalystAuthority.FRAUD_FEEDBACK_READ,
             AnalystAuthority.TRANSACTION_MONITOR_READ
     )),
     ANALYST(Set.of(
@@ -14,6 +15,8 @@ public enum AnalystRole {
             AnalystAuthority.ASSISTANT_SUMMARY_READ,
             AnalystAuthority.ALERT_DECISION_SUBMIT,
             AnalystAuthority.FRAUD_CASE_READ,
+            AnalystAuthority.FRAUD_FEEDBACK_READ,
+            AnalystAuthority.FRAUD_FEEDBACK_WRITE,
             AnalystAuthority.TRANSACTION_MONITOR_READ,
             AnalystAuthority.ENGINE_INTELLIGENCE_FEEDBACK_WRITE,
             AnalystAuthority.SUSPICIOUS_TRANSACTION_READ,
@@ -26,6 +29,8 @@ public enum AnalystRole {
             AnalystAuthority.FRAUD_CASE_READ,
             AnalystAuthority.FRAUD_CASE_AUDIT_READ,
             AnalystAuthority.FRAUD_CASE_UPDATE,
+            AnalystAuthority.FRAUD_FEEDBACK_READ,
+            AnalystAuthority.FRAUD_FEEDBACK_WRITE,
             AnalystAuthority.TRANSACTION_MONITOR_READ,
             AnalystAuthority.ENGINE_INTELLIGENCE_FEEDBACK_READ,
             AnalystAuthority.ENGINE_INTELLIGENCE_FEEDBACK_WRITE,

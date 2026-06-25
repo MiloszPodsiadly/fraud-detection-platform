@@ -45,6 +45,10 @@ final class SecurityRouteOwnershipRegistry {
                 "TransactionAuthorizationRules");
         route(routes, "POST", "/api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback",
                 "TransactionAuthorizationRules");
+        route(routes, "GET", "/api/v1/transactions/scored/{transactionId}/feedback",
+                "TransactionAuthorizationRules");
+        route(routes, "POST", "/api/v1/transactions/scored/{transactionId}/feedback",
+                "TransactionAuthorizationRules");
         route(routes, "GET", "/internal/suspicious-transactions", "SuspiciousTransactionAuthorizationRules");
         route(routes, "GET", "/internal/suspicious-transactions/summary", "SuspiciousTransactionAuthorizationRules");
         route(routes, "GET", "/internal/suspicious-transactions/{suspiciousTransactionId}/linked-alert",

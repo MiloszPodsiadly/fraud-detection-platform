@@ -27,6 +27,8 @@ import com.frauddetection.alert.controller.FraudCaseEvidenceTimelineController;
 import com.frauddetection.alert.controller.FraudCaseWorkQueueSummaryController;
 import com.frauddetection.alert.controller.ScoredTransactionController;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
+import com.frauddetection.alert.feedback.FraudFeedbackController;
+import com.frauddetection.alert.feedback.FraudFeedbackService;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackController;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackReadController;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackReadQueryPolicy;
@@ -104,6 +106,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         FraudCaseEvidenceTimelineController.class,
         FraudCaseWorkQueueSummaryController.class,
         ScoredTransactionController.class,
+        FraudFeedbackController.class,
         EngineIntelligenceFeedbackController.class,
         EngineIntelligenceFeedbackReadController.class,
         EngineIntelligenceReadController.class,
@@ -170,6 +173,9 @@ class RouteCoverageAgainstMvcMappingsTest {
 
     @MockitoBean
     private EngineIntelligenceFeedbackService engineIntelligenceFeedbackService;
+
+    @MockitoBean
+    private FraudFeedbackService fraudFeedbackService;
 
     @MockitoBean
     private AlertServiceMetrics alertServiceMetrics;
@@ -292,6 +298,8 @@ class RouteCoverageAgainstMvcMappingsTest {
                         "POST /api/v1/alerts/{alertId}/decision",
                         "GET /api/v1/transactions/scored",
                         "GET /api/v1/transactions/scored/{transactionId}",
+                        "GET /api/v1/transactions/scored/{transactionId}/feedback",
+                        "POST /api/v1/transactions/scored/{transactionId}/feedback",
                         "GET /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback",
                         "POST /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback",
                         "GET /internal/suspicious-transactions",
