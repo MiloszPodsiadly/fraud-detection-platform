@@ -38,6 +38,31 @@ const DECISION_LABEL_MAP = Object.freeze({
   MARKED_INCONCLUSIVE: "INCONCLUSIVE",
   REQUESTED_MORE_INFO: "NEEDS_MORE_INFO"
 });
+const LABEL_REASON_CODE_MAP = Object.freeze({
+  CONFIRMED_FRAUD: new Set([
+    "CUSTOMER_CONFIRMED_FRAUD",
+    "DOCUMENTATION_CONFIRMED_FRAUD",
+    "CHARGEBACK_SIGNAL",
+    "ACCOUNT_TAKEOVER_INDICATOR",
+    "ANALYST_CONFIRMED_FRAUD"
+  ]),
+  CONFIRMED_LEGITIMATE: new Set([
+    "CUSTOMER_CONFIRMED_LEGITIMATE",
+    "DOCUMENTATION_CONFIRMED_LEGITIMATE",
+    "MERCHANT_CONFIRMED",
+    "FALSE_POSITIVE_PATTERN",
+    "ANALYST_CONFIRMED_LEGITIMATE"
+  ]),
+  INCONCLUSIVE: new Set([
+    "INSUFFICIENT_EVIDENCE",
+    "ANALYST_INCONCLUSIVE"
+  ]),
+  NEEDS_MORE_INFO: new Set([
+    "NEEDS_CUSTOMER_CONTACT",
+    "INSUFFICIENT_EVIDENCE",
+    "ANALYST_NEEDS_MORE_INFO"
+  ])
+});
 const REASON_CODE_PATTERN = /^[A-Z0-9_]+$/;
 const MAX_REASON_CODES = 10;
 const MAX_REASON_CODE_LENGTH = 128;
@@ -87,6 +112,9 @@ export function validateFraudFeedbackRequest(request) {
   }
   if (!reasonCodes.every((code) => REASON_CODE_SET.has(code.trim()))) {
     return invalid("UNKNOWN_REASON_CODE");
+  }
+  if (!reasonCodes.every((code) => LABEL_REASON_CODE_MAP[request.feedbackLabel].has(code.trim()))) {
+    return invalid("REASON_CODE_LABEL_MISMATCH");
   }
   if (request.notes !== null && request.notes !== undefined) {
     if (typeof request.notes !== "string" || request.notes.length > MAX_NOTES_LENGTH) {

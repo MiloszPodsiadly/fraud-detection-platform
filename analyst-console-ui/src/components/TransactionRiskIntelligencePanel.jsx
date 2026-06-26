@@ -131,6 +131,8 @@ function AnalystFeedbackSection({ transactionId, apiClient }) {
     feedback,
     isLoading,
     error,
+    canReadFeedback = true,
+    canCreateFeedback = true,
     submitState,
     submitError,
     submit
@@ -145,9 +147,10 @@ function AnalystFeedbackSection({ transactionId, apiClient }) {
       analystDecision: selectedOption.analystDecision,
       feedbackLabel: selectedOption.feedbackLabel,
       decisionReasonCodes: [selectedOption.reasonCode],
-      notes: notes.trim() === "" ? null : notes.trim()
-    });
+        notes: notes.trim() === "" ? null : notes.trim()
+      });
   };
+  const feedbackRuntimeAvailable = canReadFeedback && canCreateFeedback;
 
   return (
     <section className="detailSection analystFeedbackSection" aria-label="Analyst Feedback">
@@ -157,10 +160,14 @@ function AnalystFeedbackSection({ transactionId, apiClient }) {
         change scoring, update recommendations, create cases, trigger workflow, train models, promote models, or
         change thresholds.
       </p>
-      {isLoading && <p className="loadingText">Loading analyst feedback...</p>}
-      {!isLoading && error && <p className="formError">{feedbackErrorMessage(error)}</p>}
-      {!isLoading && !error && feedback && <ExistingFeedback feedback={feedback} />}
-      {!isLoading && !error && !feedback && (
+      {!canReadFeedback && <p className="emptyStateMessage">Analyst feedback is not available in this runtime.</p>}
+      {canReadFeedback && isLoading && <p className="loadingText">Loading analyst feedback...</p>}
+      {canReadFeedback && !isLoading && error && <p className="formError">{feedbackErrorMessage(error)}</p>}
+      {canReadFeedback && !isLoading && !error && feedback && <ExistingFeedback feedback={feedback} />}
+      {canReadFeedback && !canCreateFeedback && !isLoading && !error && !feedback && (
+        <p className="emptyStateMessage">Analyst feedback is not available in this runtime.</p>
+      )}
+      {feedbackRuntimeAvailable && !isLoading && !error && !feedback && (
         <form className="analystFeedbackForm" onSubmit={onSubmit}>
           <fieldset disabled={submitState === "submitting"}>
             <legend>Review outcome</legend>
@@ -309,9 +316,9 @@ function DiagnosticBoundaryBanner() {
     <section className="diagnosticBoundaryBanner" aria-label="Diagnostic Boundary">
       <h4>Diagnostic Boundary</h4>
       <p>
-        Transaction Risk Intelligence is a read-only diagnostic view. It does not approve, does not decline,
-        does not block, does not authorize payment, does not create a case, does not promote models,
-        does not change thresholds, and does not trigger workflow.
+        Transaction diagnostics are read-only. Analyst Feedback is a separate bounded review-outcome record.
+        It does not approve, decline, block, authorize payment, create cases, trigger workflow, change scoring,
+        update recommendations, train models, promote models, or change thresholds.
       </p>
     </section>
   );

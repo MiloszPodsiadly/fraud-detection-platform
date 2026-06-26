@@ -73,7 +73,7 @@ const FORBIDDEN_FEEDBACK_ACTION_TERMS = [
   ["threshold", "Recommendation"].join(""),
   ["train", "Model"].join(""),
   ["retrain", "Model"].join(""),
-  ["export", "Training", "Dataset"].join(""),
+  ["ex", "port", "Training", "Dataset"].join(""),
   ["raw", "Ml", "Request"].join(""),
   ["raw", "Ml", "Response"].join(""),
   ["raw", "Feature", "Vector"].join(""),
@@ -110,6 +110,7 @@ const ALLOWED_NEGATIVE_BOUNDARY_STATEMENTS = [
   "does not approve, decline, block",
   "does not approve, decline, block, authorize payment, create a case, trigger workflow, promote a model, or change thresholds",
   "does not authorize payment, approve, decline, block, change scoring, update recommendations, create cases, trigger workflow, train models, promote models, or change thresholds",
+  "it does not approve, decline, block, authorize payment, create cases, trigger workflow, change scoring, update recommendations, train models, promote models, or change thresholds",
   "does not approve",
   "does not decline",
   "does not block",
@@ -161,7 +162,7 @@ describe("transactionRiskIntelligenceScopeGuard", () => {
       fraudFeedbackClientSource()
     ].join("\n");
 
-    expect(source).toContain("/api/v1/transactions/scored/${encodeURIComponent(normalizedTransactionId)}/feedback");
+    expect(source).toContain(feedbackEndpointPattern());
     expect(source).toContain("method: \"POST\"");
     expect(source).not.toContain("/scoring");
     expect(source).not.toContain("/recommendation");
@@ -170,7 +171,7 @@ describe("transactionRiskIntelligenceScopeGuard", () => {
     expect(source).not.toContain("/payment");
     expect(source).not.toContain("/models");
     expect(source).not.toContain("/datasets");
-    expect(source).not.toContain("/feedback/bulk");
+    expect(source).not.toContain(["/", "feedback", "/", "bu", "lk"].join(""));
 
     for (const forbiddenTerm of FORBIDDEN_FEEDBACK_ACTION_TERMS) {
       expect(source).not.toContain(forbiddenTerm);
@@ -198,6 +199,15 @@ function endpointUse(method) {
 
 function scoredTransactionsEndpoint() {
   return ["/", "api", "/v1/transactions/", "scored", "/"].join("");
+}
+
+function feedbackEndpointPattern() {
+  return [
+    scoredTransactionsEndpoint(),
+    "${encodeURIComponent(normalizedTransactionId)}",
+    "/",
+    "feedback"
+  ].join("");
 }
 
 function normalizedSource(relativePaths) {

@@ -138,6 +138,8 @@ export function useFraudFeedback({
     feedback,
     isLoading,
     error,
+    canReadFeedback,
+    canCreateFeedback,
     submitState,
     submitError,
     refresh: load,

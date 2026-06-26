@@ -32,6 +32,8 @@ describe("TransactionRiskIntelligencePanel", () => {
       feedback: null,
       isLoading: false,
       error: null,
+      canReadFeedback: true,
+      canCreateFeedback: true,
       submitState: "idle",
       submitError: null,
       submit: vi.fn()
@@ -43,10 +45,12 @@ describe("TransactionRiskIntelligencePanel", () => {
 
     expect(screen.getByRole("heading", { name: "Transaction Risk Intelligence" })).toBeInTheDocument();
     const boundary = screen.getByRole("region", { name: "Diagnostic Boundary" });
-    expect(boundary).toHaveTextContent("read-only diagnostic view");
-    expect(boundary).toHaveTextContent("does not approve");
-    expect(boundary).toHaveTextContent("does not authorize payment");
-    expect(boundary).toHaveTextContent("does not create a case");
+    expect(boundary).toHaveTextContent("Transaction diagnostics are read-only.");
+    expect(boundary).toHaveTextContent("Analyst Feedback is a separate bounded review-outcome record.");
+    expect(boundary).not.toHaveTextContent("read-only diagnostic view");
+    expect(boundary).toHaveTextContent("It does not approve");
+    expect(boundary).toHaveTextContent("authorize payment");
+    expect(boundary).toHaveTextContent("create cases");
   });
 
   it("uses a stable sanitized panel id", () => {
@@ -210,6 +214,8 @@ describe("TransactionRiskIntelligencePanel", () => {
       feedback: null,
       isLoading: false,
       error: null,
+      canReadFeedback: true,
+      canCreateFeedback: true,
       submitState: "idle",
       submitError: null,
       submit
@@ -233,6 +239,8 @@ describe("TransactionRiskIntelligencePanel", () => {
       feedback: null,
       isLoading: false,
       error: null,
+      canReadFeedback: true,
+      canCreateFeedback: true,
       submitState: "idle",
       submitError: null,
       submit
@@ -261,6 +269,8 @@ describe("TransactionRiskIntelligencePanel", () => {
       },
       isLoading: false,
       error: null,
+      canReadFeedback: true,
+      canCreateFeedback: true,
       submitState: "idle",
       submitError: null,
       submit: vi.fn()
@@ -290,6 +300,8 @@ describe("TransactionRiskIntelligencePanel", () => {
       },
       isLoading: false,
       error: null,
+      canReadFeedback: true,
+      canCreateFeedback: true,
       submitState: "idle",
       submitError: null,
       submit: vi.fn()
@@ -316,6 +328,8 @@ describe("TransactionRiskIntelligencePanel", () => {
       feedback: null,
       isLoading: false,
       error,
+      canReadFeedback: true,
+      canCreateFeedback: true,
       submitState: "idle",
       submitError: null,
       submit: vi.fn()
@@ -324,6 +338,45 @@ describe("TransactionRiskIntelligencePanel", () => {
     renderPanel();
 
     expect(screen.getByText(copy)).toBeInTheDocument();
+  });
+
+  it("does not render feedback form when runtime cannot read fraud feedback", () => {
+    useFraudFeedback.mockReturnValue({
+      feedback: null,
+      isLoading: false,
+      error: null,
+      canReadFeedback: false,
+      canCreateFeedback: true,
+      submitState: "idle",
+      submitError: null,
+      submit: vi.fn()
+    });
+
+    renderPanel();
+
+    expect(screen.getByText("Analyst feedback is not available in this runtime.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Record feedback" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Mark as confirmed fraud")).not.toBeInTheDocument();
+  });
+
+  it("does not render submit surface when runtime cannot create fraud feedback", () => {
+    const submit = vi.fn();
+    useFraudFeedback.mockReturnValue({
+      feedback: null,
+      isLoading: false,
+      error: null,
+      canReadFeedback: true,
+      canCreateFeedback: false,
+      submitState: "idle",
+      submitError: null,
+      submit
+    });
+
+    renderPanel();
+
+    expect(screen.getByText("Analyst feedback is not available in this runtime.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Record feedback" })).not.toBeInTheDocument();
+    expect(submit).not.toHaveBeenCalled();
   });
 });
 

@@ -49,4 +49,30 @@ describe("fraudFeedbackValidation", () => {
       decisionReasonCodes: ["CUSTOMER_CONFIRMED_FRAUD", "ANALYST_CONFIRMED_FRAUD"]
     })).toMatchObject({ valid: true });
   });
+
+  it.each([
+    ["MARKED_FRAUD", "CONFIRMED_FRAUD", "CUSTOMER_CONFIRMED_FRAUD"],
+    ["MARKED_LEGITIMATE", "CONFIRMED_LEGITIMATE", "CUSTOMER_CONFIRMED_LEGITIMATE"],
+    ["MARKED_INCONCLUSIVE", "INCONCLUSIVE", "INSUFFICIENT_EVIDENCE"],
+    ["REQUESTED_MORE_INFO", "NEEDS_MORE_INFO", "NEEDS_CUSTOMER_CONTACT"]
+  ])("accepts %s and %s with compatible %s reason code", (analystDecision, feedbackLabel, reasonCode) => {
+    expect(validateFraudFeedbackRequest({
+      analystDecision,
+      feedbackLabel,
+      decisionReasonCodes: [reasonCode]
+    })).toMatchObject({ valid: true });
+  });
+
+  it.each([
+    ["MARKED_FRAUD", "CONFIRMED_FRAUD", "CUSTOMER_CONFIRMED_LEGITIMATE"],
+    ["MARKED_LEGITIMATE", "CONFIRMED_LEGITIMATE", "CUSTOMER_CONFIRMED_FRAUD"],
+    ["MARKED_INCONCLUSIVE", "INCONCLUSIVE", "CUSTOMER_CONFIRMED_FRAUD"],
+    ["REQUESTED_MORE_INFO", "NEEDS_MORE_INFO", "CHARGEBACK_SIGNAL"]
+  ])("rejects %s and %s with incompatible %s reason code", (analystDecision, feedbackLabel, reasonCode) => {
+    expect(validateFraudFeedbackRequest({
+      analystDecision,
+      feedbackLabel,
+      decisionReasonCodes: [reasonCode]
+    })).toEqual({ valid: false, reason: "REASON_CODE_LABEL_MISMATCH" });
+  });
 });
