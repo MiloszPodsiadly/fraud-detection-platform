@@ -36,10 +36,15 @@ and, only after explicit analyst form submit:
 The UI allows only bounded labels and neutral decision names. It renders existing feedback as read-only and does not
 offer a second submit when feedback already exists. Duplicate POST returns `409 CONFLICT`.
 
+Decision and label must match the backend contract: `MARKED_FRAUD` with `CONFIRMED_FRAUD`, `MARKED_LEGITIMATE` with
+`CONFIRMED_LEGITIMATE`, `MARKED_INCONCLUSIVE` with `INCONCLUSIVE`, and `REQUESTED_MORE_INFO` with `NEEDS_MORE_INFO`.
+Reason codes come from the bounded FDP-121 allowlist only.
+
 Feedback records analyst review outcome only. It does not authorize payment, approve, decline, block, change scoring,
 update recommendations, create cases, trigger workflow, train models, promote models, or change thresholds.
 
-Analyst feedback labels are future evaluation signals, not certified legal ground truth. Notes are bounded and are not
+Analyst feedback labels are future evaluation signals, not certified legal ground truth. Notes are bounded, normalized
+before submit, stored for analyst context only, not returned raw in existing-feedback responses, not audited, and not
 used for ML training or dataset export in FDP-121.
 
 ## Display Rules
