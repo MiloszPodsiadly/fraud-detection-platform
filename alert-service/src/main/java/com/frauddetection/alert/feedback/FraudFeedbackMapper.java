@@ -20,7 +20,7 @@ public class FraudFeedbackMapper {
                 record.getCreatedAt(),
                 record.getCreatedBy(),
                 immutable(record.getDecisionReasonCodes()),
-                record.getNotes(),
+                record.getNotes() != null && !record.getNotes().isBlank(),
                 record.getFraudScore(),
                 record.getRiskLevel(),
                 record.getAlertRecommended(),

@@ -23,7 +23,7 @@ public record FraudFeedbackResponse(
         Instant createdAt,
         String createdBy,
         List<String> decisionReasonCodes,
-        String notes,
+        Boolean notesPresent,
         Double fraudScore,
         RiskLevel riskLevel,
         Boolean alertRecommended,

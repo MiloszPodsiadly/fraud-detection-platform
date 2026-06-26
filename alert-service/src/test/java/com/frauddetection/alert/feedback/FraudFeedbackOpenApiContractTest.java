@@ -30,7 +30,18 @@ class FraudFeedbackOpenApiContractTest {
                 .contains("FeedbackLabelSource:")
                 .contains("enum: [ANALYST_REVIEW]")
                 .contains("FraudFeedbackStatus:")
-                .contains("enum: [RECORDED]");
+                .contains("enum: [RECORDED]")
+                .contains("FraudFeedbackReasonCode:")
+                .contains("CUSTOMER_CONFIRMED_FRAUD")
+                .contains("ANALYST_CONFIRMED_FRAUD")
+                .contains("UNKNOWN_REASON")
+                .contains("CONFIRMED_FRAUD requires MARKED_FRAUD")
+                .contains("CONFIRMED_LEGITIMATE requires MARKED_LEGITIMATE")
+                .contains("INCONCLUSIVE requires MARKED_INCONCLUSIVE")
+                .contains("NEEDS_MORE_INFO requires REQUESTED_MORE_INFO")
+                .contains("$ref: \"#/components/schemas/FraudFeedbackReasonCode\"")
+                .contains("notesPresent")
+                .contains("does not expose raw notes");
     }
 
     @Test
@@ -39,8 +50,9 @@ class FraudFeedbackOpenApiContractTest {
 
         assertThat(openApi)
                 .contains("maxItems: 10")
-                .contains("pattern: \"^[A-Z0-9_]+$\"")
                 .contains("maxLength: 500")
+                .contains("decision/label mismatch")
+                .contains("unknown reason code")
                 .contains("does not mutate scoring, recommendation, payment, workflow, case, model, threshold, or dataset behavior")
                 .doesNotContain("APPROVE_PAYMENT", "DECLINE_PAYMENT", "BLOCK_TRANSACTION", "AUTHORIZE_PAYMENT");
     }

@@ -3056,9 +3056,33 @@ components:
     FraudFeedbackStatus:
       type: string
       enum: [RECORDED]
+    FraudFeedbackReasonCode:
+      type: string
+      enum:
+        - CUSTOMER_CONFIRMED_FRAUD
+        - CUSTOMER_CONFIRMED_LEGITIMATE
+        - DOCUMENTATION_CONFIRMED_FRAUD
+        - DOCUMENTATION_CONFIRMED_LEGITIMATE
+        - MERCHANT_CONFIRMED
+        - CHARGEBACK_SIGNAL
+        - ACCOUNT_TAKEOVER_INDICATOR
+        - FALSE_POSITIVE_PATTERN
+        - INSUFFICIENT_EVIDENCE
+        - NEEDS_CUSTOMER_CONTACT
+        - ANALYST_CONFIRMED_FRAUD
+        - ANALYST_CONFIRMED_LEGITIMATE
+        - ANALYST_INCONCLUSIVE
+        - ANALYST_NEEDS_MORE_INFO
+      description: Bounded reason code allowlist for FDP-121 analyst feedback. Unknown uppercase strings are rejected.
     CreateFraudFeedbackRequest:
       type: object
       additionalProperties: false
+      description: >
+        Creates one bounded analyst feedback record. analystDecision must match feedbackLabel:
+        CONFIRMED_FRAUD requires MARKED_FRAUD; CONFIRMED_LEGITIMATE requires MARKED_LEGITIMATE;
+        INCONCLUSIVE requires MARKED_INCONCLUSIVE; NEEDS_MORE_INFO requires REQUESTED_MORE_INFO.
+        400 validation failures include decision/label mismatch, unknown reason code such as UNKNOWN_REASON, unsafe notes,
+        too many reason codes, and invalid reason code format.
       required: [analystDecision, feedbackLabel]
       properties:
         analystDecision:
@@ -3069,10 +3093,7 @@ components:
           type: array
           maxItems: 10
           items:
-            type: string
-            minLength: 1
-            maxLength: 128
-            pattern: "^[A-Z0-9_]+$"
+            $ref: "#/components/schemas/FraudFeedbackReasonCode"
         notes:
           type: string
           nullable: true
@@ -3090,6 +3111,7 @@ components:
         - labelSource
         - feedbackStatus
         - createdAt
+        - notesPresent
       properties:
         feedbackId:
           type: string
@@ -3123,13 +3145,10 @@ components:
           type: array
           maxItems: 10
           items:
-            type: string
-            minLength: 1
-            maxLength: 128
-        notes:
-          type: string
-          nullable: true
-          maxLength: 500
+            $ref: "#/components/schemas/FraudFeedbackReasonCode"
+        notesPresent:
+          type: boolean
+          description: FDP-121 stores bounded notes internally for analyst context only, but does not expose raw notes in feedback responses.
         fraudScore:
           type: number
           nullable: true

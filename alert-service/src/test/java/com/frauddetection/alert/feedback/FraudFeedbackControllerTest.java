@@ -67,11 +67,14 @@ class FraudFeedbackControllerTest {
                 .andExpect(jsonPath("$.feedbackLabel").value("CONFIRMED_FRAUD"))
                 .andExpect(jsonPath("$.labelSource").value("ANALYST_REVIEW"))
                 .andExpect(jsonPath("$.feedbackStatus").value("RECORDED"))
+                .andExpect(jsonPath("$.notesPresent").value(false))
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
 
         assertThat(body).doesNotContain(
+                "notes\"",
+                "Customer confirmed fraud",
                 "groundTruth",
                 "trainingLabel",
                 "finalDecision",
@@ -152,7 +155,7 @@ class FraudFeedbackControllerTest {
                 Instant.parse("2026-06-25T10:15:30Z"),
                 "analyst-1",
                 List.of("CUSTOMER_CONFIRMED_FRAUD"),
-                null,
+                false,
                 0.91d,
                 RiskLevel.CRITICAL,
                 true,

@@ -14,8 +14,8 @@ import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -111,6 +111,10 @@ public class FraudFeedbackService {
         if (repository.existsByTransactionId(boundedTransactionId)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "FRAUD_FEEDBACK_ALREADY_RECORDED");
         }
+        String actor = currentAnalystUser.get()
+                .map(principal -> principal.userId())
+                .filter(userId -> !userId.isBlank())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "FRAUD_FEEDBACK_ACTOR_REQUIRED"));
 
         FraudFeedbackRecord record = new FraudFeedbackRecord();
         record.setFeedbackId("ffb-" + UUID.randomUUID());
@@ -122,7 +126,7 @@ public class FraudFeedbackService {
         record.setLabelSource(FeedbackLabelSource.ANALYST_REVIEW);
         record.setFeedbackStatus(FraudFeedbackStatus.RECORDED);
         record.setCreatedAt(clock.instant());
-        record.setCreatedBy(currentAnalystUser.get().map(principal -> principal.userId()).orElse(null));
+        record.setCreatedBy(actor);
         record.setDecisionReasonCodes(validated.decisionReasonCodes());
         record.setNotes(validated.notes());
         record.setFraudScore(transaction.fraudScore());
@@ -194,7 +198,9 @@ public class FraudFeedbackService {
                         null,
                         null,
                         "POST /api/v1/transactions/scored/{transactionId}/feedback",
-                        "transactionId=present;feedbackLabel=" + saved.getFeedbackLabel() + ";status=" + saved.getFeedbackStatus(),
+                        "transactionId=" + saved.getTransactionId()
+                                + ";feedbackLabel=" + saved.getFeedbackLabel()
+                                + ";status=" + saved.getFeedbackStatus(),
                         1
                 )
         );
@@ -210,9 +216,22 @@ public class FraudFeedbackService {
         if (request.feedbackLabel() == null) {
             throw badRequest("FRAUD_FEEDBACK_LABEL_REQUIRED");
         }
+        validateDecisionMatchesLabel(request.analystDecision(), request.feedbackLabel());
         List<String> reasonCodes = validateReasonCodes(request.decisionReasonCodes());
         String notes = validateNotes(request.notes());
         return new ValidatedFeedback(request.analystDecision(), request.feedbackLabel(), reasonCodes, notes);
+    }
+
+    private void validateDecisionMatchesLabel(AnalystDecision decision, FraudFeedbackLabel label) {
+        boolean matches = switch (decision) {
+            case MARKED_FRAUD -> label == FraudFeedbackLabel.CONFIRMED_FRAUD;
+            case MARKED_LEGITIMATE -> label == FraudFeedbackLabel.CONFIRMED_LEGITIMATE;
+            case MARKED_INCONCLUSIVE -> label == FraudFeedbackLabel.INCONCLUSIVE;
+            case REQUESTED_MORE_INFO -> label == FraudFeedbackLabel.NEEDS_MORE_INFO;
+        };
+        if (!matches) {
+            throw badRequest("FRAUD_FEEDBACK_DECISION_LABEL_MISMATCH");
+        }
     }
 
     private List<String> validateReasonCodes(List<String> reasonCodes) {
@@ -236,6 +255,11 @@ public class FraudFeedbackService {
             throw badRequest("FRAUD_FEEDBACK_REASON_CODE_INVALID");
         }
         rejectUnsafeTerms(normalized, "FRAUD_FEEDBACK_REASON_CODE_UNSAFE");
+        try {
+            FraudFeedbackReasonCode.valueOf(normalized);
+        } catch (IllegalArgumentException exception) {
+            throw badRequest("FRAUD_FEEDBACK_REASON_CODE_UNKNOWN");
+        }
         return normalized;
     }
 

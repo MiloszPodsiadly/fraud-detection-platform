@@ -2,6 +2,7 @@ package com.frauddetection.alert.feedback;
 
 import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
 import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditEventMetadataSummary;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
@@ -23,6 +24,8 @@ import com.frauddetection.common.events.recommendation.AnalystRecommendationNonD
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationSource;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationStatus;
+import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DuplicateKeyException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
@@ -90,6 +93,7 @@ class FraudFeedbackServiceTest {
         assertThat(response.feedbackStatus()).isEqualTo(FraudFeedbackStatus.RECORDED);
         assertThat(response.createdAt()).isEqualTo(Instant.parse("2026-06-25T10:15:30Z"));
         assertThat(response.createdBy()).isEqualTo("analyst-1");
+        assertThat(response.notesPresent()).isTrue();
         assertThat(response.fraudScore()).isEqualTo(0.91d);
         assertThat(response.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
         assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
@@ -97,6 +101,7 @@ class FraudFeedbackServiceTest {
         assertThat(response.analystRecommendation()).isEqualTo(AnalystRecommendation.RECOMMEND_REVIEW);
         assertThat(savedRecords).hasSize(1);
 
+        ArgumentCaptor<AuditEventMetadataSummary> metadata = ArgumentCaptor.forClass(AuditEventMetadataSummary.class);
         verify(auditService).audit(
                 eq(AuditAction.RECORD_FRAUD_FEEDBACK),
                 eq(AuditResourceType.FRAUD_FEEDBACK),
@@ -105,8 +110,20 @@ class FraudFeedbackServiceTest {
                 eq("analyst-1"),
                 eq(AuditOutcome.SUCCESS),
                 eq(null),
-                any()
+                metadata.capture()
         );
+        assertThat(metadata.getValue().filtersSummary())
+                .contains("transactionId=txn-1")
+                .contains("feedbackLabel=CONFIRMED_FRAUD")
+                .contains("status=RECORDED")
+                .doesNotContain(
+                        "Customer confirmed fraud",
+                        "rawMlRequest",
+                        "rawFeatureVector",
+                        "rawEvidence",
+                        "token",
+                        "secret"
+                );
     }
 
     @Test
@@ -131,6 +148,7 @@ class FraudFeedbackServiceTest {
 
         assertThat(response.feedbackId()).isEqualTo("feedback-1");
         assertThat(response.feedbackLabel()).isEqualTo(FraudFeedbackLabel.CONFIRMED_LEGITIMATE);
+        assertThat(response.notesPresent()).isFalse();
     }
 
     @Test
@@ -156,6 +174,58 @@ class FraudFeedbackServiceTest {
     }
 
     @Test
+    void rejectsDecisionLabelMismatches() {
+        assertBadRequest(request(AnalystDecision.MARKED_FRAUD, FraudFeedbackLabel.CONFIRMED_LEGITIMATE),
+                "FRAUD_FEEDBACK_DECISION_LABEL_MISMATCH");
+        assertBadRequest(request(AnalystDecision.MARKED_LEGITIMATE, FraudFeedbackLabel.CONFIRMED_FRAUD),
+                "FRAUD_FEEDBACK_DECISION_LABEL_MISMATCH");
+        assertBadRequest(request(AnalystDecision.MARKED_INCONCLUSIVE, FraudFeedbackLabel.CONFIRMED_LEGITIMATE),
+                "FRAUD_FEEDBACK_DECISION_LABEL_MISMATCH");
+        assertBadRequest(request(AnalystDecision.REQUESTED_MORE_INFO, FraudFeedbackLabel.CONFIRMED_FRAUD),
+                "FRAUD_FEEDBACK_DECISION_LABEL_MISMATCH");
+    }
+
+    @Test
+    void acceptsValidDecisionLabelPairs() {
+        assertAccepted(request(AnalystDecision.MARKED_FRAUD, FraudFeedbackLabel.CONFIRMED_FRAUD));
+        assertAccepted(request(AnalystDecision.MARKED_LEGITIMATE, FraudFeedbackLabel.CONFIRMED_LEGITIMATE));
+        assertAccepted(request(AnalystDecision.MARKED_INCONCLUSIVE, FraudFeedbackLabel.INCONCLUSIVE));
+        assertAccepted(request(AnalystDecision.REQUESTED_MORE_INFO, FraudFeedbackLabel.NEEDS_MORE_INFO));
+    }
+
+    @Test
+    void acceptsAllowlistedReasonCodes() {
+        assertAccepted(new CreateFraudFeedbackRequest(
+                AnalystDecision.MARKED_FRAUD,
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                List.of("CUSTOMER_CONFIRMED_FRAUD", "ANALYST_CONFIRMED_FRAUD"),
+                null
+        ));
+    }
+
+    @Test
+    void rejectsUnknownReasonCodes() {
+        assertBadRequest(new CreateFraudFeedbackRequest(
+                AnalystDecision.MARKED_FRAUD,
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                List.of("UNKNOWN_REASON"),
+                null
+        ), "FRAUD_FEEDBACK_REASON_CODE_UNKNOWN");
+        assertBadRequest(new CreateFraudFeedbackRequest(
+                AnalystDecision.MARKED_FRAUD,
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                List.of("RANDOM_REASON"),
+                null
+        ), "FRAUD_FEEDBACK_REASON_CODE_UNKNOWN");
+        assertBadRequest(new CreateFraudFeedbackRequest(
+                AnalystDecision.MARKED_FRAUD,
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                List.of("FRAUD_123"),
+                null
+        ), "FRAUD_FEEDBACK_REASON_CODE_UNKNOWN");
+    }
+
+    @Test
     void rejectsInvalidReasonCodeFormat() {
         assertBadRequest(new CreateFraudFeedbackRequest(
                 AnalystDecision.MARKED_FRAUD,
@@ -163,6 +233,16 @@ class FraudFeedbackServiceTest {
                 List.of("bad-code"),
                 null
         ), "FRAUD_FEEDBACK_REASON_CODE_INVALID");
+    }
+
+    @Test
+    void rejectsUnsafeReasonCode() {
+        assertBadRequest(new CreateFraudFeedbackRequest(
+                AnalystDecision.MARKED_FRAUD,
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                List.of("RAW_EVIDENCE"),
+                null
+        ), "FRAUD_FEEDBACK_REASON_CODE_UNSAFE");
     }
 
     @Test
@@ -185,6 +265,46 @@ class FraudFeedbackServiceTest {
         assertThat(response.agreementStatus()).isNull();
     }
 
+    @Test
+    void missingCurrentAnalystUserFailsClosedBeforeSaveAndAudit() {
+        when(currentAnalystUser.get()).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.create("txn-1", request()))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException statusException = (ResponseStatusException) exception;
+                    assertThat(statusException.getStatusCode().value()).isEqualTo(403);
+                    assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_ACTOR_REQUIRED");
+                });
+
+        verify(repository, never()).save(any());
+        verify(auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void duplicateKeyRaceReturns409AndDoesNotAuditSuccess() {
+        when(repository.existsByTransactionId("txn-1")).thenReturn(false);
+        when(repository.save(any(FraudFeedbackRecord.class))).thenThrow(new DuplicateKeyException("duplicate"));
+
+        assertThatThrownBy(() -> service.create("txn-1", request()))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException statusException = (ResponseStatusException) exception;
+                    assertThat(statusException.getStatusCode().value()).isEqualTo(409);
+                    assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_ALREADY_RECORDED");
+                });
+
+        verify(auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void responseUsesNotesPresentWithoutRawNotes() {
+        FraudFeedbackResponse response = service.create("txn-1", request());
+
+        assertThat(response.notesPresent()).isTrue();
+        assertThat(response.toString()).doesNotContain("Customer confirmed fraud");
+    }
+
     private void assertBadRequest(CreateFraudFeedbackRequest request, String reason) {
         assertThatThrownBy(() -> service.create("txn-1", request))
                 .isInstanceOf(ResponseStatusException.class)
@@ -195,11 +315,27 @@ class FraudFeedbackServiceTest {
                 });
     }
 
+    private void assertAccepted(CreateFraudFeedbackRequest request) {
+        savedRecords.clear();
+        service.create("txn-1", request);
+        assertThat(savedRecords).hasSize(1);
+    }
+
     private CreateFraudFeedbackRequest request() {
+        return request(AnalystDecision.MARKED_FRAUD, FraudFeedbackLabel.CONFIRMED_FRAUD);
+    }
+
+    private CreateFraudFeedbackRequest request(AnalystDecision decision, FraudFeedbackLabel label) {
+        String reasonCode = switch (decision) {
+            case MARKED_FRAUD -> "ANALYST_CONFIRMED_FRAUD";
+            case MARKED_LEGITIMATE -> "ANALYST_CONFIRMED_LEGITIMATE";
+            case MARKED_INCONCLUSIVE -> "ANALYST_INCONCLUSIVE";
+            case REQUESTED_MORE_INFO -> "ANALYST_NEEDS_MORE_INFO";
+        };
         return new CreateFraudFeedbackRequest(
-                AnalystDecision.MARKED_FRAUD,
-                FraudFeedbackLabel.CONFIRMED_FRAUD,
-                List.of("CUSTOMER_CONFIRMED_FRAUD"),
+                decision,
+                label,
+                List.of(reasonCode),
                 "Customer confirmed fraud"
         );
     }
