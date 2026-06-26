@@ -145,7 +145,7 @@ function AnalystFeedbackSection({ transactionId, apiClient }) {
       analystDecision: selectedOption.analystDecision,
       feedbackLabel: selectedOption.feedbackLabel,
       decisionReasonCodes: [selectedOption.reasonCode],
-      notes
+      notes: notes.trim() === "" ? null : notes.trim()
     });
   };
 
@@ -213,6 +213,7 @@ function ExistingFeedback({ feedback }) {
         <Field label="Status" value={feedback.feedbackStatus} />
         <Field label="Created at" value={formatDateTime(feedback.createdAt)} />
         <Field label="Reason codes" value={listText(feedback.decisionReasonCodes)} />
+        <Field label="Notes" value={feedback.notesPresent ? "Present" : "None"} />
       </dl>
       <p className="sectionCopy">One active feedback record is already present for this transaction.</p>
     </article>

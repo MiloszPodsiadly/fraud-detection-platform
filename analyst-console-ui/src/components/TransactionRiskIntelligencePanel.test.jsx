@@ -223,8 +223,28 @@ describe("TransactionRiskIntelligencePanel", () => {
       analystDecision: "MARKED_FRAUD",
       feedbackLabel: "CONFIRMED_FRAUD",
       decisionReasonCodes: ["ANALYST_CONFIRMED_FRAUD"],
-      notes: ""
+      notes: null
     }));
+  });
+
+  it("trims bounded analyst feedback notes before submit", async () => {
+    const submit = vi.fn();
+    useFraudFeedback.mockReturnValue({
+      feedback: null,
+      isLoading: false,
+      error: null,
+      submitState: "idle",
+      submitError: null,
+      submit
+    });
+    renderPanel();
+
+    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "  bounded note  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Record feedback" }));
+
+    await waitFor(() => expect(submit).toHaveBeenCalledWith(expect.objectContaining({
+      notes: "bounded note"
+    })));
   });
 
   it("renders existing feedback and disables duplicate submission surface", () => {
@@ -235,7 +255,9 @@ describe("TransactionRiskIntelligencePanel", () => {
         labelSource: "ANALYST_REVIEW",
         feedbackStatus: "RECORDED",
         createdAt: "2026-06-25T10:15:30Z",
-        decisionReasonCodes: ["ANALYST_CONFIRMED_LEGITIMATE"]
+        decisionReasonCodes: ["ANALYST_CONFIRMED_LEGITIMATE"],
+        notesPresent: true,
+        notes: "Sensitive analyst note"
       },
       isLoading: false,
       error: null,
@@ -246,8 +268,38 @@ describe("TransactionRiskIntelligencePanel", () => {
 
     renderPanel();
 
+    const feedbackRegion = screen.getByRole("region", { name: "Analyst Feedback" });
     expect(screen.getByText("Feedback recorded")).toBeInTheDocument();
+    expect(within(feedbackRegion).getByText("Notes")).toBeInTheDocument();
+    expect(within(feedbackRegion).getByText("Present")).toBeInTheDocument();
+    expect(screen.queryByText("Sensitive analyst note")).not.toBeInTheDocument();
     expect(screen.getByText("One active feedback record is already present for this transaction.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Record feedback" })).not.toBeInTheDocument();
+  });
+
+  it("renders existing feedback without notes indicator when notes are absent", () => {
+    useFraudFeedback.mockReturnValue({
+      feedback: {
+        feedbackLabel: "CONFIRMED_LEGITIMATE",
+        analystDecision: "MARKED_LEGITIMATE",
+        labelSource: "ANALYST_REVIEW",
+        feedbackStatus: "RECORDED",
+        createdAt: "2026-06-25T10:15:30Z",
+        decisionReasonCodes: ["ANALYST_CONFIRMED_LEGITIMATE"],
+        notesPresent: false
+      },
+      isLoading: false,
+      error: null,
+      submitState: "idle",
+      submitError: null,
+      submit: vi.fn()
+    });
+
+    renderPanel();
+
+    const feedbackRegion = screen.getByRole("region", { name: "Analyst Feedback" });
+    expect(within(feedbackRegion).getByText("Notes")).toBeInTheDocument();
+    expect(within(feedbackRegion).getByText("None")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Record feedback" })).not.toBeInTheDocument();
   });
 

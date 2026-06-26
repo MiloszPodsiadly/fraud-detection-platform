@@ -12,8 +12,32 @@ export const ANALYST_DECISIONS = Object.freeze([
   "REQUESTED_MORE_INFO"
 ]);
 
+export const FRAUD_FEEDBACK_REASON_CODES = Object.freeze([
+  "CUSTOMER_CONFIRMED_FRAUD",
+  "CUSTOMER_CONFIRMED_LEGITIMATE",
+  "DOCUMENTATION_CONFIRMED_FRAUD",
+  "DOCUMENTATION_CONFIRMED_LEGITIMATE",
+  "MERCHANT_CONFIRMED",
+  "CHARGEBACK_SIGNAL",
+  "ACCOUNT_TAKEOVER_INDICATOR",
+  "FALSE_POSITIVE_PATTERN",
+  "INSUFFICIENT_EVIDENCE",
+  "NEEDS_CUSTOMER_CONTACT",
+  "ANALYST_CONFIRMED_FRAUD",
+  "ANALYST_CONFIRMED_LEGITIMATE",
+  "ANALYST_INCONCLUSIVE",
+  "ANALYST_NEEDS_MORE_INFO"
+]);
+
 const LABEL_SET = new Set(FRAUD_FEEDBACK_LABELS);
 const DECISION_SET = new Set(ANALYST_DECISIONS);
+const REASON_CODE_SET = new Set(FRAUD_FEEDBACK_REASON_CODES);
+const DECISION_LABEL_MAP = Object.freeze({
+  MARKED_FRAUD: "CONFIRMED_FRAUD",
+  MARKED_LEGITIMATE: "CONFIRMED_LEGITIMATE",
+  MARKED_INCONCLUSIVE: "INCONCLUSIVE",
+  REQUESTED_MORE_INFO: "NEEDS_MORE_INFO"
+});
 const REASON_CODE_PATTERN = /^[A-Z0-9_]+$/;
 const MAX_REASON_CODES = 10;
 const MAX_REASON_CODE_LENGTH = 128;
@@ -48,6 +72,9 @@ export function validateFraudFeedbackRequest(request) {
   if (!LABEL_SET.has(request.feedbackLabel)) {
     return invalid("INVALID_FEEDBACK_LABEL");
   }
+  if (DECISION_LABEL_MAP[request.analystDecision] !== request.feedbackLabel) {
+    return invalid("FEEDBACK_DECISION_LABEL_MISMATCH");
+  }
   const reasonCodes = request.decisionReasonCodes ?? [];
   if (!Array.isArray(reasonCodes) || reasonCodes.length > MAX_REASON_CODES) {
     return invalid("INVALID_REASON_CODES");
@@ -57,6 +84,9 @@ export function validateFraudFeedbackRequest(request) {
   }
   if (reasonCodes.some(containsUnsafeTerm)) {
     return invalid("UNSAFE_REASON_CODE");
+  }
+  if (!reasonCodes.every((code) => REASON_CODE_SET.has(code.trim()))) {
+    return invalid("UNKNOWN_REASON_CODE");
   }
   if (request.notes !== null && request.notes !== undefined) {
     if (typeof request.notes !== "string" || request.notes.length > MAX_NOTES_LENGTH) {
