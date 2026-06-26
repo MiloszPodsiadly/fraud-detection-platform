@@ -15,6 +15,12 @@ const FDP_116_SOURCE_FILES = [
   "src/workspace/TransactionScoringWorkspaceRuntime.jsx"
 ];
 
+const FEEDBACK_CAPTURE_SOURCE_FILES = [
+  "src/components/TransactionRiskIntelligencePanel.jsx",
+  "src/transactions/fraudFeedbackValidation.js",
+  "src/transactions/useFraudFeedback.js"
+];
+
 const FORBIDDEN_TERMS = [
   ["approve", "Transaction"].join(""),
   ["decline", "Transaction"].join(""),
@@ -33,8 +39,6 @@ const FORBIDDEN_TERMS = [
   ["change", "Threshold"].join(""),
   ["recommendation", "Service"].join(""),
   ["recommended", "Action"].join(""),
-  ["feedback", "Submit"].join(""),
-  ["submit", "Feedback"].join(""),
   ["raw", "ML", "Request"].join(""),
   ["raw", "ML", "Response"].join(""),
   ["raw", "Ml", "Request"].join(""),
@@ -49,6 +53,34 @@ const FORBIDDEN_TERMS = [
   endpointUse("PUT"),
   endpointUse("PATCH"),
   endpointUse("DELETE")
+];
+
+const FORBIDDEN_FEEDBACK_ACTION_TERMS = [
+  ["approve", "Payment"].join(""),
+  ["decline", "Payment"].join(""),
+  ["block", "Transaction"].join(""),
+  ["authorize", "Payment"].join(""),
+  ["automatic", "Decision"].join(""),
+  ["auto", "Approve"].join(""),
+  ["auto", "Decline"].join(""),
+  ["auto", "Block"].join(""),
+  ["apply", "Recommendation"].join(""),
+  ["accept", "Recommendation"].join(""),
+  ["reject", "Recommendation"].join(""),
+  ["promote", "Model"].join(""),
+  ["deploy", "Model"].join(""),
+  ["change", "Threshold"].join(""),
+  ["threshold", "Recommendation"].join(""),
+  ["train", "Model"].join(""),
+  ["retrain", "Model"].join(""),
+  ["ex", "port", "Training", "Dataset"].join(""),
+  ["raw", "Ml", "Request"].join(""),
+  ["raw", "Ml", "Response"].join(""),
+  ["raw", "Feature", "Vector"].join(""),
+  ["raw", "Evidence"].join(""),
+  ["final", "Decision"].join(""),
+  ["payment", "Decision"].join(""),
+  ["payment", "Authorization"].join("")
 ];
 
 const FORBIDDEN_ACTION_PHRASES = [
@@ -77,6 +109,8 @@ const ALLOWED_NEGATIVE_BOUNDARY_STATEMENTS = [
   "not a final payment decision",
   "does not approve, decline, block",
   "does not approve, decline, block, authorize payment, create a case, trigger workflow, promote a model, or change thresholds",
+  "does not authorize payment, approve, decline, block, change scoring, update recommendations, create cases, trigger workflow, train models, promote models, or change thresholds",
+  "it does not approve, decline, block, authorize payment, create cases, trigger workflow, change scoring, update recommendations, train models, promote models, or change thresholds",
   "does not approve",
   "does not decline",
   "does not block",
@@ -96,7 +130,7 @@ const FORBIDDEN_FEEDBACK_SURFACES = [
 ];
 
 describe("transactionRiskIntelligenceScopeGuard", () => {
-  it("keeps FDP-116 source files read-only and bounded", () => {
+  it("keeps transaction risk intelligence diagnostics bounded and feedback capture non-decisioning", () => {
     const source = FDP_116_SOURCE_FILES.map(sourceFile).join("\n");
 
     for (const forbiddenTerm of FORBIDDEN_TERMS) {
@@ -122,11 +156,25 @@ describe("transactionRiskIntelligenceScopeGuard", () => {
     }
   });
 
-  it("does not import or render the feedback submission surface in the FDP-116 path", () => {
-    const source = FDP_116_SOURCE_FILES.map(sourceFile).join("\n");
+  it("allows only bounded transaction fraud feedback as the write surface", () => {
+    const source = [
+      FEEDBACK_CAPTURE_SOURCE_FILES.map(sourceFile).join("\n"),
+      fraudFeedbackClientSource()
+    ].join("\n");
 
-    for (const forbiddenSurface of FORBIDDEN_FEEDBACK_SURFACES) {
-      expect(source).not.toContain(forbiddenSurface);
+    expect(source).toContain(feedbackEndpointPattern());
+    expect(source).toContain("method: \"POST\"");
+    expect(source).not.toContain("/scoring");
+    expect(source).not.toContain("/recommendation");
+    expect(source).not.toContain("/workflow");
+    expect(source).not.toContain("/fraud-cases");
+    expect(source).not.toContain("/payment");
+    expect(source).not.toContain("/models");
+    expect(source).not.toContain("/datasets");
+    expect(source).not.toContain(["/", "feedback", "/", "bu", "lk"].join(""));
+
+    for (const forbiddenTerm of FORBIDDEN_FEEDBACK_ACTION_TERMS) {
+      expect(source).not.toContain(forbiddenTerm);
     }
   });
 
@@ -153,6 +201,15 @@ function scoredTransactionsEndpoint() {
   return ["/", "api", "/v1/transactions/", "scored", "/"].join("");
 }
 
+function feedbackEndpointPattern() {
+  return [
+    scoredTransactionsEndpoint(),
+    "${encodeURIComponent(normalizedTransactionId)}",
+    "/",
+    "feedback"
+  ].join("");
+}
+
 function normalizedSource(relativePaths) {
   return relativePaths
     .map(sourceFile)
@@ -171,11 +228,25 @@ function withoutAllowedNegativeBoundaryStatements(source) {
 function scoredTransactionDetailClientSource() {
   const source = sourceFile("src/api/alertsApi.js");
   const sourceStart = source.indexOf("function getScoredTransactionDetailWithRequest");
-  const sourceEnd = source.indexOf("function listSuspiciousTransactionsWithRequest");
+  const sourceEnd = source.indexOf("function scoredTransactionDetailRequestOptions", sourceStart);
   const methodEntryStart = source.indexOf("getScoredTransactionDetail:");
-  const methodEntryEnd = source.indexOf("listSuspiciousTransactions:", methodEntryStart);
+  const methodEntryEnd = source.indexOf("getFraudFeedback:", methodEntryStart);
   return [
     source.slice(methodEntryStart, methodEntryEnd),
     source.slice(sourceStart, sourceEnd)
+  ].join("\n");
+}
+
+function fraudFeedbackClientSource() {
+  const source = sourceFile("src/api/alertsApi.js");
+  const methodStart = source.indexOf("getFraudFeedback:");
+  const methodEnd = source.indexOf("listSuspiciousTransactions:", methodStart);
+  const getStart = source.indexOf("function getFraudFeedbackWithRequest");
+  const createStart = source.indexOf("function createFraudFeedbackWithRequest");
+  const createEnd = source.indexOf("function listSuspiciousTransactionsWithRequest", createStart);
+  return [
+    source.slice(methodStart, methodEnd),
+    source.slice(getStart, createStart),
+    source.slice(createStart, createEnd)
   ].join("\n");
 }

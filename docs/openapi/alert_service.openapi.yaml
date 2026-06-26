@@ -1268,6 +1268,75 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/v1/transactions/scored/{transactionId}/feedback:
+    post:
+      summary: Record bounded analyst fraud feedback for one scored transaction
+      description: Records one active analyst review outcome for an existing scored transaction. Requires fraud-feedback:write. This feedback is an analyst review outcome and future evaluation signal only. It is not certified legal ground truth, payment authorization, automatic approve, automatic decline, automatic block, case creation, workflow execution, scoring mutation, recommendation mutation, model retraining, model promotion, threshold recommendation, dataset export, or ML evaluation. Duplicate POST for a transaction with existing active feedback returns 409 and does not overwrite the original record.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._:-]+$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFraudFeedbackRequest"
+      responses:
+        "201":
+          description: Bounded analyst feedback record created and audited.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FraudFeedbackResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    get:
+      summary: Read active bounded analyst fraud feedback for one scored transaction
+      description: Returns the active feedback record for an existing scored transaction. Requires fraud-feedback:read. Existing transactions without feedback return 404 in FDP-121 v1. This endpoint is read-only and does not export datasets, invoke scoring, update recommendations, trigger workflows, create cases, authorize payments, train models, promote models, or change thresholds.
+      security:
+        - bearerAuth: []
+        - demoAuth: []
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._:-]+$"
+      responses:
+        "200":
+          description: Active bounded analyst feedback record returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FraudFeedbackResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /api/v1/transactions/scored/{transactionId}/engine-intelligence:
     get:
       summary: Read bounded projected engine intelligence for one scored transaction
@@ -2973,6 +3042,178 @@ components:
           $ref: "#/components/schemas/EngineIntelligenceResponse"
         analystRecommendation:
           $ref: "#/components/schemas/AnalystRecommendationResult"
+    FraudFeedbackLabel:
+      type: string
+      enum: [CONFIRMED_FRAUD, CONFIRMED_LEGITIMATE, INCONCLUSIVE, NEEDS_MORE_INFO]
+      description: Bounded analyst review outcome label. Not legal ground truth, training label certification, payment authorization, or automatic decisioning.
+    AnalystDecision:
+      type: string
+      enum: [MARKED_FRAUD, MARKED_LEGITIMATE, MARKED_INCONCLUSIVE, REQUESTED_MORE_INFO]
+      description: Neutral analyst review action naming. Values intentionally avoid approve, decline, block, and authorize-payment language.
+    FeedbackLabelSource:
+      type: string
+      enum: [ANALYST_REVIEW]
+    FraudFeedbackStatus:
+      type: string
+      enum: [RECORDED]
+    FraudFeedbackReasonCode:
+      type: string
+      enum:
+        - CUSTOMER_CONFIRMED_FRAUD
+        - CUSTOMER_CONFIRMED_LEGITIMATE
+        - DOCUMENTATION_CONFIRMED_FRAUD
+        - DOCUMENTATION_CONFIRMED_LEGITIMATE
+        - MERCHANT_CONFIRMED
+        - CHARGEBACK_SIGNAL
+        - ACCOUNT_TAKEOVER_INDICATOR
+        - FALSE_POSITIVE_PATTERN
+        - INSUFFICIENT_EVIDENCE
+        - NEEDS_CUSTOMER_CONTACT
+        - ANALYST_CONFIRMED_FRAUD
+        - ANALYST_CONFIRMED_LEGITIMATE
+        - ANALYST_INCONCLUSIVE
+        - ANALYST_NEEDS_MORE_INFO
+      description: Bounded reason code allowlist for FDP-121 analyst feedback. Unknown uppercase strings are rejected.
+    CreateFraudFeedbackRequest:
+      type: object
+      additionalProperties: false
+      description: >
+        Creates one bounded analyst feedback record. analystDecision must match feedbackLabel:
+        CONFIRMED_FRAUD requires MARKED_FRAUD; CONFIRMED_LEGITIMATE requires MARKED_LEGITIMATE;
+        INCONCLUSIVE requires MARKED_INCONCLUSIVE; NEEDS_MORE_INFO requires REQUESTED_MORE_INFO.
+        Reason codes must come from FraudFeedbackReasonCode and must be compatible with feedbackLabel.
+        CONFIRMED_FRAUD reason codes: CUSTOMER_CONFIRMED_FRAUD, DOCUMENTATION_CONFIRMED_FRAUD,
+        CHARGEBACK_SIGNAL, ACCOUNT_TAKEOVER_INDICATOR, ANALYST_CONFIRMED_FRAUD.
+        CONFIRMED_LEGITIMATE reason codes: CUSTOMER_CONFIRMED_LEGITIMATE, DOCUMENTATION_CONFIRMED_LEGITIMATE,
+        MERCHANT_CONFIRMED, FALSE_POSITIVE_PATTERN, ANALYST_CONFIRMED_LEGITIMATE.
+        INCONCLUSIVE reason codes: INSUFFICIENT_EVIDENCE, ANALYST_INCONCLUSIVE.
+        NEEDS_MORE_INFO reason codes: NEEDS_CUSTOMER_CONTACT, INSUFFICIENT_EVIDENCE, ANALYST_NEEDS_MORE_INFO.
+        At least one reason code is required. Empty reason code lists return 400.
+        400 validation failures include decision/label mismatch, missing reason codes
+        FRAUD_FEEDBACK_REASON_CODES_REQUIRED, unknown reason code such as UNKNOWN_REASON, reason-code/label mismatch
+        FRAUD_FEEDBACK_REASON_CODE_LABEL_MISMATCH, unsafe notes, too many reason codes, and invalid reason code format.
+      required: [analystDecision, feedbackLabel, decisionReasonCodes]
+      properties:
+        analystDecision:
+          $ref: "#/components/schemas/AnalystDecision"
+        feedbackLabel:
+          $ref: "#/components/schemas/FraudFeedbackLabel"
+        decisionReasonCodes:
+          type: array
+          minItems: 1
+          maxItems: 10
+          description: At least one bounded, allowlisted, label-compatible reason code is required.
+          items:
+            $ref: "#/components/schemas/FraudFeedbackReasonCode"
+        notes:
+          type: string
+          nullable: true
+          maxLength: 500
+          description: Optional bounded analyst-readable note. FDP-121 does not use notes for ML training or dataset export and rejects unsafe raw/internal terms.
+    FraudFeedbackResponse:
+      type: object
+      additionalProperties: false
+      description: Bounded persisted analyst feedback record owned by alert-service. It records analyst review outcome only and does not mutate scoring, recommendation, payment, workflow, case, model, threshold, or dataset behavior.
+      required:
+        - feedbackId
+        - transactionId
+        - analystDecision
+        - feedbackLabel
+        - labelSource
+        - feedbackStatus
+        - createdAt
+        - notesPresent
+      properties:
+        feedbackId:
+          type: string
+          minLength: 1
+          maxLength: 160
+        transactionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        customerId:
+          type: string
+          nullable: true
+        correlationId:
+          type: string
+          nullable: true
+        analystDecision:
+          $ref: "#/components/schemas/AnalystDecision"
+        feedbackLabel:
+          $ref: "#/components/schemas/FraudFeedbackLabel"
+        labelSource:
+          $ref: "#/components/schemas/FeedbackLabelSource"
+        feedbackStatus:
+          $ref: "#/components/schemas/FraudFeedbackStatus"
+        createdAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+          nullable: true
+        decisionReasonCodes:
+          type: array
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/FraudFeedbackReasonCode"
+        notesPresent:
+          type: boolean
+          description: FDP-121 stores bounded notes internally for analyst context only, but does not expose raw notes in feedback responses.
+        fraudScore:
+          type: number
+          nullable: true
+        riskLevel:
+          $ref: "#/components/schemas/RiskLevel"
+        alertRecommended:
+          type: boolean
+          nullable: true
+        scoredAt:
+          type: string
+          format: date-time
+          nullable: true
+        transactionTimestamp:
+          type: string
+          format: date-time
+          nullable: true
+        engineIntelligenceStatus:
+          type: string
+          nullable: true
+          enum: [AVAILABLE, ABSENT, UNAVAILABLE, DEGRADED]
+        agreementStatus:
+          type: string
+          nullable: true
+          enum: [AGREEMENT, ADJACENT_RISK_VARIANCE, DISAGREEMENT, PARTIAL, INSUFFICIENT_DATA, REQUIRED_ENGINE_NOT_COMPARABLE]
+        riskMismatchStatus:
+          type: string
+          nullable: true
+          enum: [SAME_RISK_LEVEL, ADJACENT_RISK_LEVEL, MATERIAL_RISK_MISMATCH, NOT_COMPARABLE]
+        scoreDeltaBucket:
+          type: string
+          nullable: true
+          enum: [NONE, SMALL, MEDIUM, LARGE, UNAVAILABLE]
+        analystRecommendationStatus:
+          type: string
+          nullable: true
+          enum: [AVAILABLE, ABSENT, NOT_APPLICABLE, INSUFFICIENT_DATA, UNAVAILABLE, DEGRADED]
+        analystRecommendation:
+          type: string
+          nullable: true
+          enum: [RECOMMEND_REVIEW, RECOMMEND_CASE_CREATION, RECOMMEND_STEP_UP_REVIEW, RECOMMEND_MONITOR, RECOMMEND_NO_ACTION]
+        analystRecommendationVersion:
+          type: string
+          nullable: true
+        analystRecommendationGeneratedAt:
+          type: string
+          format: date-time
+          nullable: true
+        analystRecommendationReasonCodes:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
     AnalystRecommendationResult:
       type: object
       additionalProperties: false

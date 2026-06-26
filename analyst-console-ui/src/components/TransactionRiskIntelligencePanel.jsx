@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { formatDateTime, formatScore } from "../utils/format.js";
 import { AnalystRecommendationPanel } from "./AnalystRecommendationPanel.jsx";
 import { useScoredTransactionDetail } from "../transactions/useScoredTransactionDetail.js";
+import { useFraudFeedback } from "../transactions/useFraudFeedback.js";
 import { transactionRiskIntelligencePanelId } from "../transactions/transactionRiskIntelligencePanelId.js";
 
 const STATUS_COPY = {
@@ -48,13 +50,13 @@ export function TransactionRiskIntelligencePanel({
         <p className="formError">{errorMessage(error)}</p>
       )}
       {shouldFetch && !isLoading && !error && detail && (
-        <TransactionRiskIntelligenceDetail detail={detail} />
+        <TransactionRiskIntelligenceDetail detail={detail} apiClient={apiClient} />
       )}
     </section>
   );
 }
 
-function TransactionRiskIntelligenceDetail({ detail }) {
+function TransactionRiskIntelligenceDetail({ detail, apiClient }) {
   const intelligence = detail.engineIntelligence;
   return (
     <>
@@ -85,10 +87,143 @@ function TransactionRiskIntelligenceDetail({ detail }) {
 
       <ComparisonSummary comparison={intelligence.comparison} />
       <AnalystRecommendationPanel recommendation={detail.analystRecommendation} />
+      <AnalystFeedbackSection transactionId={detail.transactionId} apiClient={apiClient} />
       <EngineResults engines={intelligence.engines} />
       <DiagnosticSignals diagnosticSignals={intelligence.diagnosticSignals} />
       <Warnings warnings={intelligence.warnings} />
     </>
+  );
+}
+
+const FEEDBACK_OPTIONS = [
+  {
+    feedbackLabel: "CONFIRMED_FRAUD",
+    analystDecision: "MARKED_FRAUD",
+    label: "Mark as confirmed fraud",
+    reasonCode: "ANALYST_CONFIRMED_FRAUD",
+    copy: "Confirmed fraud records the analyst review outcome only. It does not automatically block the transaction or create a case."
+  },
+  {
+    feedbackLabel: "CONFIRMED_LEGITIMATE",
+    analystDecision: "MARKED_LEGITIMATE",
+    label: "Mark as confirmed legitimate",
+    reasonCode: "ANALYST_CONFIRMED_LEGITIMATE",
+    copy: "Confirmed legitimate records the analyst review outcome only. It is not payment approval or transaction authorization."
+  },
+  {
+    feedbackLabel: "INCONCLUSIVE",
+    analystDecision: "MARKED_INCONCLUSIVE",
+    label: "Mark as inconclusive",
+    reasonCode: "ANALYST_INCONCLUSIVE",
+    copy: "This feedback is not a positive or negative training label."
+  },
+  {
+    feedbackLabel: "NEEDS_MORE_INFO",
+    analystDecision: "REQUESTED_MORE_INFO",
+    label: "Needs more information",
+    reasonCode: "ANALYST_NEEDS_MORE_INFO",
+    copy: "This feedback is not a positive or negative training label."
+  }
+];
+
+function AnalystFeedbackSection({ transactionId, apiClient }) {
+  const {
+    feedback,
+    isLoading,
+    error,
+    canReadFeedback = true,
+    canCreateFeedback = true,
+    submitState,
+    submitError,
+    submit
+  } = useFraudFeedback({ transactionId, enabled: Boolean(transactionId), apiClient });
+  const [selectedLabel, setSelectedLabel] = useState("CONFIRMED_FRAUD");
+  const [notes, setNotes] = useState("");
+  const selectedOption = FEEDBACK_OPTIONS.find((option) => option.feedbackLabel === selectedLabel) || FEEDBACK_OPTIONS[0];
+
+  const onSubmit = (event) => {
+    event.preventDefault();
+    submit({
+      analystDecision: selectedOption.analystDecision,
+      feedbackLabel: selectedOption.feedbackLabel,
+      decisionReasonCodes: [selectedOption.reasonCode],
+        notes: notes.trim() === "" ? null : notes.trim()
+      });
+  };
+  const feedbackRuntimeAvailable = canReadFeedback && canCreateFeedback;
+
+  return (
+    <section className="detailSection analystFeedbackSection" aria-label="Analyst Feedback">
+      <h4>Analyst Feedback</h4>
+      <p className="sectionCopy">
+        Feedback records analyst review outcome only. It does not authorize payment, approve, decline, block,
+        change scoring, update recommendations, create cases, trigger workflow, train models, promote models, or
+        change thresholds.
+      </p>
+      {!canReadFeedback && <p className="emptyStateMessage">Analyst feedback is not available in this runtime.</p>}
+      {canReadFeedback && isLoading && <p className="loadingText">Loading analyst feedback...</p>}
+      {canReadFeedback && !isLoading && error && <p className="formError">{feedbackErrorMessage(error)}</p>}
+      {canReadFeedback && !isLoading && !error && feedback && <ExistingFeedback feedback={feedback} />}
+      {canReadFeedback && !canCreateFeedback && !isLoading && !error && !feedback && (
+        <p className="emptyStateMessage">Analyst feedback is not available in this runtime.</p>
+      )}
+      {feedbackRuntimeAvailable && !isLoading && !error && !feedback && (
+        <form className="analystFeedbackForm" onSubmit={onSubmit}>
+          <fieldset disabled={submitState === "submitting"}>
+            <legend>Review outcome</legend>
+            <div className="feedbackOptionGrid">
+              {FEEDBACK_OPTIONS.map((option) => (
+                <label className="feedbackOption" key={option.feedbackLabel}>
+                  <input
+                    type="radio"
+                    name="fraudFeedbackLabel"
+                    value={option.feedbackLabel}
+                    checked={selectedLabel === option.feedbackLabel}
+                    onChange={() => setSelectedLabel(option.feedbackLabel)}
+                  />
+                  <span>{option.label}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <p className="sectionCopy">{selectedOption.copy}</p>
+          <label className="feedbackNotesField">
+            <span>Notes</span>
+            <textarea
+              maxLength={500}
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              rows={3}
+            />
+          </label>
+          {submitState === "validation-error" && <p className="formError">Feedback request is invalid.</p>}
+          {submitState === "duplicate" && <p className="formError">Feedback already exists for this transaction.</p>}
+          {submitState === "error" && <p className="formError">{feedbackErrorMessage(submitError)}</p>}
+          {submitState === "success" && <p className="formSuccess">Feedback recorded.</p>}
+          <button type="submit" disabled={submitState === "submitting"}>
+            {submitState === "submitting" ? "Recording..." : "Record feedback"}
+          </button>
+        </form>
+      )}
+    </section>
+  );
+}
+
+function ExistingFeedback({ feedback }) {
+  return (
+    <article className="summaryCard">
+      <h5>Feedback recorded</h5>
+      <dl>
+        <Field label="Feedback label" value={feedback.feedbackLabel} />
+        <Field label="Analyst decision" value={feedback.analystDecision} />
+        <Field label="Label source" value={feedback.labelSource} />
+        <Field label="Status" value={feedback.feedbackStatus} />
+        <Field label="Created at" value={formatDateTime(feedback.createdAt)} />
+        <Field label="Reason codes" value={listText(feedback.decisionReasonCodes)} />
+        <Field label="Notes" value={feedback.notesPresent ? "Present" : "None"} />
+      </dl>
+      <p className="sectionCopy">One active feedback record is already present for this transaction.</p>
+    </article>
   );
 }
 
@@ -181,9 +316,9 @@ function DiagnosticBoundaryBanner() {
     <section className="diagnosticBoundaryBanner" aria-label="Diagnostic Boundary">
       <h4>Diagnostic Boundary</h4>
       <p>
-        Transaction Risk Intelligence is a read-only diagnostic view. It does not approve, does not decline,
-        does not block, does not authorize payment, does not create a case, does not promote models,
-        does not change thresholds, and does not trigger workflow.
+        Transaction diagnostics are read-only. Analyst Feedback is a separate bounded review-outcome record.
+        It does not approve, decline, block, authorize payment, create cases, trigger workflow, change scoring,
+        update recommendations, train models, promote models, or change thresholds.
       </p>
     </section>
   );
@@ -227,4 +362,23 @@ function errorMessage(error) {
     return "Scored transaction not found.";
   }
   return "Transaction risk intelligence is temporarily unavailable.";
+}
+
+function feedbackErrorMessage(error) {
+  if (error?.status === 400) {
+    return "Feedback request failed validation.";
+  }
+  if (error?.status === 401 || error?.status === 403) {
+    return "You do not have permission to read or record analyst feedback.";
+  }
+  if (error?.status === 404) {
+    return "Scored transaction or feedback was not found.";
+  }
+  if (error?.status === 409) {
+    return "Feedback already exists for this transaction.";
+  }
+  if (error?.status === 503) {
+    return "Analyst feedback is temporarily unavailable.";
+  }
+  return "Analyst feedback could not be loaded or recorded.";
 }
