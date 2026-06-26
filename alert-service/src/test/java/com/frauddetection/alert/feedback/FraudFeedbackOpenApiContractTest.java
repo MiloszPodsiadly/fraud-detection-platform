@@ -39,6 +39,11 @@ class FraudFeedbackOpenApiContractTest {
                 .contains("CONFIRMED_LEGITIMATE requires MARKED_LEGITIMATE")
                 .contains("INCONCLUSIVE requires MARKED_INCONCLUSIVE")
                 .contains("NEEDS_MORE_INFO requires REQUESTED_MORE_INFO")
+                .contains("Reason codes must come from FraudFeedbackReasonCode and must be compatible with feedbackLabel")
+                .contains("CONFIRMED_FRAUD reason codes: CUSTOMER_CONFIRMED_FRAUD")
+                .contains("CONFIRMED_LEGITIMATE reason codes: CUSTOMER_CONFIRMED_LEGITIMATE")
+                .contains("INCONCLUSIVE reason codes: INSUFFICIENT_EVIDENCE")
+                .contains("NEEDS_MORE_INFO reason codes: NEEDS_CUSTOMER_CONTACT")
                 .contains("$ref: \"#/components/schemas/FraudFeedbackReasonCode\"")
                 .contains("notesPresent")
                 .contains("does not expose raw notes");
@@ -53,6 +58,7 @@ class FraudFeedbackOpenApiContractTest {
                 .contains("maxLength: 500")
                 .contains("decision/label mismatch")
                 .contains("unknown reason code")
+                .contains("FRAUD_FEEDBACK_REASON_CODE_LABEL_MISMATCH")
                 .contains("does not mutate scoring, recommendation, payment, workflow, case, model, threshold, or dataset behavior")
                 .doesNotContain("APPROVE_PAYMENT", "DECLINE_PAYMENT", "BLOCK_TRANSACTION", "AUTHORIZE_PAYMENT");
     }

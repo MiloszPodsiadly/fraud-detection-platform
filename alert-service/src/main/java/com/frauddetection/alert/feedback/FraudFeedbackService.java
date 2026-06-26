@@ -21,8 +21,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Clock;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -107,14 +109,14 @@ public class FraudFeedbackService {
     public FraudFeedbackResponse create(String transactionId, CreateFraudFeedbackRequest request) {
         ValidatedFeedback validated = validate(request);
         ScoredTransaction transaction = transactionMonitoringUseCase.getScoredTransaction(transactionId);
-        String boundedTransactionId = transaction.transactionId();
-        if (repository.existsByTransactionId(boundedTransactionId)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "FRAUD_FEEDBACK_ALREADY_RECORDED");
-        }
         String actor = currentAnalystUser.get()
                 .map(principal -> principal.userId())
                 .filter(userId -> !userId.isBlank())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "FRAUD_FEEDBACK_ACTOR_REQUIRED"));
+        String boundedTransactionId = transaction.transactionId();
+        if (repository.existsByTransactionId(boundedTransactionId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "FRAUD_FEEDBACK_ALREADY_RECORDED");
+        }
 
         FraudFeedbackRecord record = new FraudFeedbackRecord();
         record.setFeedbackId("ffb-" + UUID.randomUUID());
@@ -218,6 +220,7 @@ public class FraudFeedbackService {
         }
         validateDecisionMatchesLabel(request.analystDecision(), request.feedbackLabel());
         List<String> reasonCodes = validateReasonCodes(request.decisionReasonCodes());
+        validateReasonCodesMatchLabel(request.feedbackLabel(), reasonCodes);
         String notes = validateNotes(request.notes());
         return new ValidatedFeedback(request.analystDecision(), request.feedbackLabel(), reasonCodes, notes);
     }
@@ -232,6 +235,43 @@ public class FraudFeedbackService {
         if (!matches) {
             throw badRequest("FRAUD_FEEDBACK_DECISION_LABEL_MISMATCH");
         }
+    }
+
+    private void validateReasonCodesMatchLabel(FraudFeedbackLabel feedbackLabel, List<String> reasonCodes) {
+        Set<FraudFeedbackReasonCode> allowedCodes = allowedReasonCodes(feedbackLabel);
+        for (String reasonCode : reasonCodes) {
+            if (!allowedCodes.contains(FraudFeedbackReasonCode.valueOf(reasonCode))) {
+                throw badRequest("FRAUD_FEEDBACK_REASON_CODE_LABEL_MISMATCH");
+            }
+        }
+    }
+
+    private Set<FraudFeedbackReasonCode> allowedReasonCodes(FraudFeedbackLabel feedbackLabel) {
+        return switch (feedbackLabel) {
+            case CONFIRMED_FRAUD -> EnumSet.of(
+                    FraudFeedbackReasonCode.CUSTOMER_CONFIRMED_FRAUD,
+                    FraudFeedbackReasonCode.DOCUMENTATION_CONFIRMED_FRAUD,
+                    FraudFeedbackReasonCode.CHARGEBACK_SIGNAL,
+                    FraudFeedbackReasonCode.ACCOUNT_TAKEOVER_INDICATOR,
+                    FraudFeedbackReasonCode.ANALYST_CONFIRMED_FRAUD
+            );
+            case CONFIRMED_LEGITIMATE -> EnumSet.of(
+                    FraudFeedbackReasonCode.CUSTOMER_CONFIRMED_LEGITIMATE,
+                    FraudFeedbackReasonCode.DOCUMENTATION_CONFIRMED_LEGITIMATE,
+                    FraudFeedbackReasonCode.MERCHANT_CONFIRMED,
+                    FraudFeedbackReasonCode.FALSE_POSITIVE_PATTERN,
+                    FraudFeedbackReasonCode.ANALYST_CONFIRMED_LEGITIMATE
+            );
+            case INCONCLUSIVE -> EnumSet.of(
+                    FraudFeedbackReasonCode.INSUFFICIENT_EVIDENCE,
+                    FraudFeedbackReasonCode.ANALYST_INCONCLUSIVE
+            );
+            case NEEDS_MORE_INFO -> EnumSet.of(
+                    FraudFeedbackReasonCode.NEEDS_CUSTOMER_CONTACT,
+                    FraudFeedbackReasonCode.INSUFFICIENT_EVIDENCE,
+                    FraudFeedbackReasonCode.ANALYST_NEEDS_MORE_INFO
+            );
+        };
     }
 
     private List<String> validateReasonCodes(List<String> reasonCodes) {

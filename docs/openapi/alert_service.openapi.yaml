@@ -3081,8 +3081,16 @@ components:
         Creates one bounded analyst feedback record. analystDecision must match feedbackLabel:
         CONFIRMED_FRAUD requires MARKED_FRAUD; CONFIRMED_LEGITIMATE requires MARKED_LEGITIMATE;
         INCONCLUSIVE requires MARKED_INCONCLUSIVE; NEEDS_MORE_INFO requires REQUESTED_MORE_INFO.
-        400 validation failures include decision/label mismatch, unknown reason code such as UNKNOWN_REASON, unsafe notes,
-        too many reason codes, and invalid reason code format.
+        Reason codes must come from FraudFeedbackReasonCode and must be compatible with feedbackLabel.
+        CONFIRMED_FRAUD reason codes: CUSTOMER_CONFIRMED_FRAUD, DOCUMENTATION_CONFIRMED_FRAUD,
+        CHARGEBACK_SIGNAL, ACCOUNT_TAKEOVER_INDICATOR, ANALYST_CONFIRMED_FRAUD.
+        CONFIRMED_LEGITIMATE reason codes: CUSTOMER_CONFIRMED_LEGITIMATE, DOCUMENTATION_CONFIRMED_LEGITIMATE,
+        MERCHANT_CONFIRMED, FALSE_POSITIVE_PATTERN, ANALYST_CONFIRMED_LEGITIMATE.
+        INCONCLUSIVE reason codes: INSUFFICIENT_EVIDENCE, ANALYST_INCONCLUSIVE.
+        NEEDS_MORE_INFO reason codes: NEEDS_CUSTOMER_CONTACT, INSUFFICIENT_EVIDENCE, ANALYST_NEEDS_MORE_INFO.
+        400 validation failures include decision/label mismatch, unknown reason code such as UNKNOWN_REASON,
+        reason-code/label mismatch FRAUD_FEEDBACK_REASON_CODE_LABEL_MISMATCH, unsafe notes, too many reason codes,
+        and invalid reason code format.
       required: [analystDecision, feedbackLabel]
       properties:
         analystDecision:

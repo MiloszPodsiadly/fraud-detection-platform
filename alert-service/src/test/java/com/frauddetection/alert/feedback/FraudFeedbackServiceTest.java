@@ -204,6 +204,60 @@ class FraudFeedbackServiceTest {
     }
 
     @Test
+    void validatesReasonCodesAgainstFeedbackLabel() {
+        assertReasonCodeAccepted(
+                AnalystDecision.MARKED_FRAUD,
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                "CUSTOMER_CONFIRMED_FRAUD"
+        );
+        assertReasonCodeAccepted(
+                AnalystDecision.MARKED_FRAUD,
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                "ANALYST_CONFIRMED_FRAUD"
+        );
+        assertReasonCodeMismatch(
+                AnalystDecision.MARKED_FRAUD,
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                "CUSTOMER_CONFIRMED_LEGITIMATE"
+        );
+        assertReasonCodeAccepted(
+                AnalystDecision.MARKED_LEGITIMATE,
+                FraudFeedbackLabel.CONFIRMED_LEGITIMATE,
+                "CUSTOMER_CONFIRMED_LEGITIMATE"
+        );
+        assertReasonCodeMismatch(
+                AnalystDecision.MARKED_LEGITIMATE,
+                FraudFeedbackLabel.CONFIRMED_LEGITIMATE,
+                "CUSTOMER_CONFIRMED_FRAUD"
+        );
+        assertReasonCodeAccepted(
+                AnalystDecision.MARKED_INCONCLUSIVE,
+                FraudFeedbackLabel.INCONCLUSIVE,
+                "INSUFFICIENT_EVIDENCE"
+        );
+        assertReasonCodeMismatch(
+                AnalystDecision.MARKED_INCONCLUSIVE,
+                FraudFeedbackLabel.INCONCLUSIVE,
+                "CUSTOMER_CONFIRMED_FRAUD"
+        );
+        assertReasonCodeAccepted(
+                AnalystDecision.REQUESTED_MORE_INFO,
+                FraudFeedbackLabel.NEEDS_MORE_INFO,
+                "NEEDS_CUSTOMER_CONTACT"
+        );
+        assertReasonCodeAccepted(
+                AnalystDecision.REQUESTED_MORE_INFO,
+                FraudFeedbackLabel.NEEDS_MORE_INFO,
+                "ANALYST_NEEDS_MORE_INFO"
+        );
+        assertReasonCodeMismatch(
+                AnalystDecision.REQUESTED_MORE_INFO,
+                FraudFeedbackLabel.NEEDS_MORE_INFO,
+                "CHARGEBACK_SIGNAL"
+        );
+    }
+
+    @Test
     void rejectsUnknownReasonCodes() {
         assertBadRequest(new CreateFraudFeedbackRequest(
                 AnalystDecision.MARKED_FRAUD,
@@ -282,6 +336,24 @@ class FraudFeedbackServiceTest {
     }
 
     @Test
+    void missingCurrentAnalystUserFailsClosedBeforeDuplicateLookup() {
+        when(currentAnalystUser.get()).thenReturn(Optional.empty());
+        when(repository.existsByTransactionId("txn-1")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.create("txn-1", request()))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException statusException = (ResponseStatusException) exception;
+                    assertThat(statusException.getStatusCode().value()).isEqualTo(403);
+                    assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_ACTOR_REQUIRED");
+                });
+
+        verify(repository, never()).existsByTransactionId("txn-1");
+        verify(repository, never()).save(any());
+        verify(auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void duplicateKeyRaceReturns409AndDoesNotAuditSuccess() {
         when(repository.existsByTransactionId("txn-1")).thenReturn(false);
         when(repository.save(any(FraudFeedbackRecord.class))).thenThrow(new DuplicateKeyException("duplicate"));
@@ -319,6 +391,32 @@ class FraudFeedbackServiceTest {
         savedRecords.clear();
         service.create("txn-1", request);
         assertThat(savedRecords).hasSize(1);
+    }
+
+    private void assertReasonCodeAccepted(
+            AnalystDecision analystDecision,
+            FraudFeedbackLabel feedbackLabel,
+            String reasonCode
+    ) {
+        assertAccepted(new CreateFraudFeedbackRequest(
+                analystDecision,
+                feedbackLabel,
+                List.of(reasonCode),
+                null
+        ));
+    }
+
+    private void assertReasonCodeMismatch(
+            AnalystDecision analystDecision,
+            FraudFeedbackLabel feedbackLabel,
+            String reasonCode
+    ) {
+        assertBadRequest(new CreateFraudFeedbackRequest(
+                analystDecision,
+                feedbackLabel,
+                List.of(reasonCode),
+                null
+        ), "FRAUD_FEEDBACK_REASON_CODE_LABEL_MISMATCH");
     }
 
     private CreateFraudFeedbackRequest request() {
