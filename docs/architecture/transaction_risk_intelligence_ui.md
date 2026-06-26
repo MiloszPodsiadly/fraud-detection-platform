@@ -41,7 +41,7 @@ Decision and label must match the backend contract: `MARKED_FRAUD` with `CONFIRM
 Reason codes come from the bounded FDP-121 allowlist only and must match the selected feedback label:
 `CONFIRMED_FRAUD` uses fraud-confirming reason codes, `CONFIRMED_LEGITIMATE` uses legitimate-confirming reason
 codes, `INCONCLUSIVE` uses inconclusive evidence reason codes, and `NEEDS_MORE_INFO` uses more-information reason
-codes.
+codes. The UI rejects feedback without at least one bounded, label-compatible reason code before submit.
 
 Feedback records analyst review outcome only. It does not authorize payment, approve, decline, block, change scoring,
 update recommendations, create cases, trigger workflow, train models, promote models, or change thresholds.

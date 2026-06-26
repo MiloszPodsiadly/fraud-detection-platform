@@ -100,8 +100,17 @@ export function validateFraudFeedbackRequest(request) {
   if (DECISION_LABEL_MAP[request.analystDecision] !== request.feedbackLabel) {
     return invalid("FEEDBACK_DECISION_LABEL_MISMATCH");
   }
-  const reasonCodes = request.decisionReasonCodes ?? [];
-  if (!Array.isArray(reasonCodes) || reasonCodes.length > MAX_REASON_CODES) {
+  const reasonCodes = request.decisionReasonCodes;
+  if (reasonCodes === null || reasonCodes === undefined) {
+    return invalid("REASON_CODES_REQUIRED");
+  }
+  if (!Array.isArray(reasonCodes)) {
+    return invalid("INVALID_REASON_CODES");
+  }
+  if (reasonCodes.length === 0) {
+    return invalid("REASON_CODES_REQUIRED");
+  }
+  if (reasonCodes.length > MAX_REASON_CODES) {
     return invalid("INVALID_REASON_CODES");
   }
   if (!reasonCodes.every(isReasonCode)) {
