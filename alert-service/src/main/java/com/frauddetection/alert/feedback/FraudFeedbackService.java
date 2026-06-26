@@ -14,6 +14,8 @@ import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
@@ -31,6 +33,7 @@ import java.util.regex.Pattern;
 @Service
 public class FraudFeedbackService {
 
+    private static final Logger log = LoggerFactory.getLogger(FraudFeedbackService.class);
     private static final int MAX_REASON_CODES = 10;
     private static final int MAX_REASON_CODE_LENGTH = 128;
     private static final int MAX_NOTES_LENGTH = 500;
@@ -145,7 +148,16 @@ public class FraudFeedbackService {
         } catch (DuplicateKeyException exception) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "FRAUD_FEEDBACK_ALREADY_RECORDED", exception);
         }
-        auditWrite(saved);
+        try {
+            auditWrite(saved);
+        } catch (RuntimeException auditException) {
+            rollbackSavedFeedback(saved, auditException);
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "FRAUD_FEEDBACK_AUDIT_UNAVAILABLE",
+                    auditException
+            );
+        }
         return mapper.toResponse(saved);
     }
 
@@ -168,6 +180,9 @@ public class FraudFeedbackService {
                 record.setScoreDeltaBucket(readModel.comparison().scoreDeltaBucket());
             }
         } catch (EngineIntelligenceProjectionReadUnavailableException exception) {
+            record.setEngineIntelligenceStatus(EngineIntelligenceResponseStatus.UNAVAILABLE);
+        } catch (RuntimeException exception) {
+            log.warn("Fraud feedback engine intelligence snapshot unavailable.");
             record.setEngineIntelligenceStatus(EngineIntelligenceResponseStatus.UNAVAILABLE);
         }
     }
@@ -206,6 +221,14 @@ public class FraudFeedbackService {
                         1
                 )
         );
+    }
+
+    private void rollbackSavedFeedback(FraudFeedbackRecord saved, RuntimeException auditException) {
+        try {
+            repository.deleteById(saved.getFeedbackId());
+        } catch (RuntimeException cleanupException) {
+            auditException.addSuppressed(cleanupException);
+        }
     }
 
     private ValidatedFeedback validate(CreateFraudFeedbackRequest request) {
@@ -275,8 +298,8 @@ public class FraudFeedbackService {
     }
 
     private List<String> validateReasonCodes(List<String> reasonCodes) {
-        if (reasonCodes == null) {
-            return List.of();
+        if (reasonCodes == null || reasonCodes.isEmpty()) {
+            throw badRequest("FRAUD_FEEDBACK_REASON_CODES_REQUIRED");
         }
         if (reasonCodes.size() > MAX_REASON_CODES) {
             throw badRequest("FRAUD_FEEDBACK_REASON_CODES_TOO_MANY");

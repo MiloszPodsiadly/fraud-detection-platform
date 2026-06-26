@@ -3088,10 +3088,11 @@ components:
         MERCHANT_CONFIRMED, FALSE_POSITIVE_PATTERN, ANALYST_CONFIRMED_LEGITIMATE.
         INCONCLUSIVE reason codes: INSUFFICIENT_EVIDENCE, ANALYST_INCONCLUSIVE.
         NEEDS_MORE_INFO reason codes: NEEDS_CUSTOMER_CONTACT, INSUFFICIENT_EVIDENCE, ANALYST_NEEDS_MORE_INFO.
-        400 validation failures include decision/label mismatch, unknown reason code such as UNKNOWN_REASON,
-        reason-code/label mismatch FRAUD_FEEDBACK_REASON_CODE_LABEL_MISMATCH, unsafe notes, too many reason codes,
-        and invalid reason code format.
-      required: [analystDecision, feedbackLabel]
+        At least one reason code is required. Empty reason code lists return 400.
+        400 validation failures include decision/label mismatch, missing reason codes
+        FRAUD_FEEDBACK_REASON_CODES_REQUIRED, unknown reason code such as UNKNOWN_REASON, reason-code/label mismatch
+        FRAUD_FEEDBACK_REASON_CODE_LABEL_MISMATCH, unsafe notes, too many reason codes, and invalid reason code format.
+      required: [analystDecision, feedbackLabel, decisionReasonCodes]
       properties:
         analystDecision:
           $ref: "#/components/schemas/AnalystDecision"
@@ -3099,7 +3100,9 @@ components:
           $ref: "#/components/schemas/FraudFeedbackLabel"
         decisionReasonCodes:
           type: array
+          minItems: 1
           maxItems: 10
+          description: At least one bounded, allowlisted, label-compatible reason code is required.
           items:
             $ref: "#/components/schemas/FraudFeedbackReasonCode"
         notes:

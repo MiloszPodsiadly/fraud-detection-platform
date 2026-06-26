@@ -41,6 +41,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -140,6 +141,43 @@ class FraudFeedbackServiceTest {
     }
 
     @Test
+    void auditFailureAfterSaveReturns503AndCompensatesSavedFeedback() {
+        doThrow(new IllegalStateException("audit unavailable"))
+                .when(auditService).audit(any(), any(), any(), any(), any(), any(), any(), any());
+
+        assertThatThrownBy(() -> service.create("txn-1", request()))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException statusException = (ResponseStatusException) exception;
+                    assertThat(statusException.getStatusCode().value()).isEqualTo(503);
+                    assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_AUDIT_UNAVAILABLE");
+                    assertThat(statusException.getMessage()).doesNotContain("Customer confirmed fraud");
+                });
+
+        assertThat(savedRecords).hasSize(1);
+        verify(repository).deleteById(savedRecords.getFirst().getFeedbackId());
+    }
+
+    @Test
+    void auditFailureSuppressesCleanupFailureOnOriginalAuditException() {
+        IllegalStateException auditFailure = new IllegalStateException("audit unavailable");
+        IllegalStateException cleanupFailure = new IllegalStateException("cleanup unavailable");
+        doThrow(auditFailure).when(auditService).audit(any(), any(), any(), any(), any(), any(), any(), any());
+        doThrow(cleanupFailure).when(repository).deleteById(any());
+
+        assertThatThrownBy(() -> service.create("txn-1", request()))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException statusException = (ResponseStatusException) exception;
+                    assertThat(statusException.getStatusCode().value()).isEqualTo(503);
+                    assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_AUDIT_UNAVAILABLE");
+                    assertThat(statusException.getCause()).isSameAs(auditFailure);
+                    assertThat(statusException.getCause().getSuppressed()).containsExactly(cleanupFailure);
+                    assertThat(statusException.getMessage()).doesNotContain("Customer confirmed fraud");
+                });
+    }
+
+    @Test
     void readsExistingFeedback() {
         FraudFeedbackRecord record = record();
         when(repository.findByTransactionId("txn-1")).thenReturn(Optional.of(record));
@@ -171,6 +209,32 @@ class FraudFeedbackServiceTest {
         );
 
         assertBadRequest(invalid, "FRAUD_FEEDBACK_REASON_CODES_TOO_MANY");
+    }
+
+    @Test
+    void rejectsMissingReasonCodes() {
+        assertBadRequest(new CreateFraudFeedbackRequest(
+                AnalystDecision.MARKED_FRAUD,
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                null,
+                null
+        ), "FRAUD_FEEDBACK_REASON_CODES_REQUIRED");
+        assertBadRequest(new CreateFraudFeedbackRequest(
+                AnalystDecision.MARKED_FRAUD,
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                List.of(),
+                null
+        ), "FRAUD_FEEDBACK_REASON_CODES_REQUIRED");
+    }
+
+    @Test
+    void acceptsMaximumReasonCodesWhenAllAreBoundedAndCompatible() {
+        assertAccepted(new CreateFraudFeedbackRequest(
+                AnalystDecision.MARKED_FRAUD,
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                java.util.Collections.nCopies(10, "ANALYST_CONFIRMED_FRAUD"),
+                null
+        ));
     }
 
     @Test
@@ -317,6 +381,43 @@ class FraudFeedbackServiceTest {
 
         assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.UNAVAILABLE);
         assertThat(response.agreementStatus()).isNull();
+    }
+
+    @Test
+    void unexpectedEngineIntelligenceReadFailureIsStoredAsUnavailableAndFeedbackStillPersists() {
+        when(engineIntelligenceReadService.read("txn-1"))
+                .thenThrow(new IllegalStateException("rawMlRequest Customer confirmed fraud"));
+
+        FraudFeedbackResponse response = service.create("txn-1", request());
+
+        assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.UNAVAILABLE);
+        assertThat(response.agreementStatus()).isNull();
+        assertThat(savedRecords).hasSize(1);
+        assertThat(savedRecords.getFirst().toString()).doesNotContain("rawMlRequest", "Customer confirmed fraud");
+    }
+
+    @Test
+    void unexpectedEngineIntelligenceMapperFailureIsStoredAsUnavailableAndFeedbackStillPersists() {
+        EngineIntelligenceResponseMapper mapper = mock(EngineIntelligenceResponseMapper.class);
+        when(mapper.toResponse(any(EngineIntelligenceReadModel.class)))
+                .thenThrow(new IllegalStateException("rawEvidence Customer confirmed fraud"));
+        FraudFeedbackService mapperFailureService = new FraudFeedbackService(
+                repository,
+                new FraudFeedbackMapper(),
+                transactionMonitoringUseCase,
+                engineIntelligenceReadService,
+                mapper,
+                currentAnalystUser,
+                auditService,
+                Clock.fixed(Instant.parse("2026-06-25T10:15:30Z"), ZoneOffset.UTC)
+        );
+
+        FraudFeedbackResponse response = mapperFailureService.create("txn-1", request());
+
+        assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.UNAVAILABLE);
+        assertThat(response.agreementStatus()).isNull();
+        assertThat(savedRecords).hasSize(1);
+        assertThat(savedRecords.getFirst().toString()).doesNotContain("rawEvidence", "Customer confirmed fraud");
     }
 
     @Test

@@ -39,6 +39,7 @@ class FraudFeedbackOpenApiContractTest {
                 .contains("CONFIRMED_LEGITIMATE requires MARKED_LEGITIMATE")
                 .contains("INCONCLUSIVE requires MARKED_INCONCLUSIVE")
                 .contains("NEEDS_MORE_INFO requires REQUESTED_MORE_INFO")
+                .contains("required: [analystDecision, feedbackLabel, decisionReasonCodes]")
                 .contains("Reason codes must come from FraudFeedbackReasonCode and must be compatible with feedbackLabel")
                 .contains("CONFIRMED_FRAUD reason codes: CUSTOMER_CONFIRMED_FRAUD")
                 .contains("CONFIRMED_LEGITIMATE reason codes: CUSTOMER_CONFIRMED_LEGITIMATE")
@@ -55,7 +56,10 @@ class FraudFeedbackOpenApiContractTest {
 
         assertThat(openApi)
                 .contains("maxItems: 10")
+                .contains("minItems: 1")
                 .contains("maxLength: 500")
+                .contains("At least one reason code is required")
+                .contains("FRAUD_FEEDBACK_REASON_CODES_REQUIRED")
                 .contains("decision/label mismatch")
                 .contains("unknown reason code")
                 .contains("FRAUD_FEEDBACK_REASON_CODE_LABEL_MISMATCH")

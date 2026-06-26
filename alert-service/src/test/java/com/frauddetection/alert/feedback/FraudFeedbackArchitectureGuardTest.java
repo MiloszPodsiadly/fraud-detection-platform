@@ -60,6 +60,21 @@ class FraudFeedbackArchitectureGuardTest {
                 .doesNotContain("APPROVE_PAYMENT", "DECLINE_PAYMENT", "BLOCK_TRANSACTION", "AUTHORIZE_PAYMENT");
     }
 
+    @Test
+    void feedbackDatasetAndEvaluationMisuseRulesStayDocumented() throws IOException {
+        String docs = Files.readString(architectureDoc());
+
+        assertThat(docs)
+                .contains("evaluation candidates")
+                .contains("not certified legal ground truth")
+                .contains("INCONCLUSIVE")
+                .contains("NEEDS_MORE_INFO")
+                .contains("must not be used as positive or negative labels")
+                .contains("notes are not training input")
+                .contains("must not be exported to datasets")
+                .contains("bounded signals, not raw evidence");
+    }
+
     private String source() throws IOException {
         StringBuilder source = new StringBuilder();
         try (var files = Files.walk(FEEDBACK_MAIN)) {
@@ -76,5 +91,13 @@ class FraudFeedbackArchitectureGuardTest {
         } catch (IOException exception) {
             throw new IllegalStateException(exception);
         }
+    }
+
+    private Path architectureDoc() {
+        Path fromModule = Path.of("..", "docs", "architecture", "fraud_feedback_loop.md");
+        if (Files.exists(fromModule)) {
+            return fromModule;
+        }
+        return Path.of("docs", "architecture", "fraud_feedback_loop.md");
     }
 }

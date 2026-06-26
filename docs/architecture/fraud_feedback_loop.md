@@ -51,6 +51,9 @@ instead of accepted by format alone. Reason codes must also match the selected f
 - `INCONCLUSIVE`: `INSUFFICIENT_EVIDENCE`, `ANALYST_INCONCLUSIVE`
 - `NEEDS_MORE_INFO`: `NEEDS_CUSTOMER_CONTACT`, `INSUFFICIENT_EVIDENCE`, `ANALYST_NEEDS_MORE_INFO`
 
+Every feedback record requires at least one bounded, label-compatible reason code. Feedback without reason codes is
+rejected.
+
 One active feedback record is allowed per transaction. A second POST returns `409 CONFLICT` and does not overwrite the
 existing record. Existing transactions without feedback return `404 NOT_FOUND` on the feedback read endpoint.
 
@@ -90,8 +93,23 @@ Every successful feedback write emits a platform audit event with the actor, tra
 feedback id, feedback label, created timestamp, and recorded status. Audit metadata does not include raw notes, raw
 customer payloads, raw ML payloads, raw feature vectors, or raw evidence.
 
-FDP-121 emits audit after successful persistence. Transactional or outbox-style audit hardening is future scope for
-shared write-action infrastructure and is not implemented ad hoc in this feedback slice.
+FDP-121 requires a successful audit for a successful feedback write response. If audit fails after persistence, the
+service performs best-effort cleanup of the saved feedback record and returns `FRAUD_FEEDBACK_AUDIT_UNAVAILABLE`.
+Full transactional or outbox-style audit hardening remains future scope for shared write-action infrastructure and is
+not implemented ad hoc in this feedback slice.
+
+## Future Dataset And Evaluation Rules
+
+`CONFIRMED_FRAUD` and `CONFIRMED_LEGITIMATE` are evaluation candidates only. They are not certified legal ground truth.
+
+`INCONCLUSIVE` and `NEEDS_MORE_INFO` must not be used as positive or negative labels. They must be excluded from binary
+evaluation or handled as a separate unresolved bucket.
+
+Notes are analyst-readable context only; notes are not training input in FDP-121 and must not be exported to datasets
+without a future governance and sanitization scope.
+
+Feedback reason codes are bounded signals, not raw evidence. Feedback does not trigger training, retraining, model
+promotion, threshold change, or dataset export.
 
 ## Analyst Console Capture
 
