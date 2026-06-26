@@ -42,7 +42,14 @@ The decision and label pair must match:
 - `REQUESTED_MORE_INFO` -> `NEEDS_MORE_INFO`
 
 Feedback reason codes are controlled by the `FraudFeedbackReasonCode` allowlist. Unknown uppercase strings are rejected
-instead of accepted by format alone.
+instead of accepted by format alone. Reason codes must also match the selected feedback label:
+
+- `CONFIRMED_FRAUD`: `CUSTOMER_CONFIRMED_FRAUD`, `DOCUMENTATION_CONFIRMED_FRAUD`, `CHARGEBACK_SIGNAL`,
+  `ACCOUNT_TAKEOVER_INDICATOR`, `ANALYST_CONFIRMED_FRAUD`
+- `CONFIRMED_LEGITIMATE`: `CUSTOMER_CONFIRMED_LEGITIMATE`, `DOCUMENTATION_CONFIRMED_LEGITIMATE`,
+  `MERCHANT_CONFIRMED`, `FALSE_POSITIVE_PATTERN`, `ANALYST_CONFIRMED_LEGITIMATE`
+- `INCONCLUSIVE`: `INSUFFICIENT_EVIDENCE`, `ANALYST_INCONCLUSIVE`
+- `NEEDS_MORE_INFO`: `NEEDS_CUSTOMER_CONTACT`, `INSUFFICIENT_EVIDENCE`, `ANALYST_NEEDS_MORE_INFO`
 
 One active feedback record is allowed per transaction. A second POST returns `409 CONFLICT` and does not overwrite the
 existing record. Existing transactions without feedback return `404 NOT_FOUND` on the feedback read endpoint.
@@ -83,12 +90,16 @@ Every successful feedback write emits a platform audit event with the actor, tra
 feedback id, feedback label, created timestamp, and recorded status. Audit metadata does not include raw notes, raw
 customer payloads, raw ML payloads, raw feature vectors, or raw evidence.
 
+FDP-121 emits audit after successful persistence. Transactional or outbox-style audit hardening is future scope for
+shared write-action infrastructure and is not implemented ad hoc in this feedback slice.
+
 ## Analyst Console Capture
 
 The Transaction Risk Intelligence panel includes an `Analyst Feedback` section for the expanded scored transaction.
 It loads existing feedback, renders a no-feedback state, allows explicit submit only when no active feedback exists,
 and displays duplicate, validation, permission, not-found, unavailable, and network error states safely.
 
-The UI validates matching labels/decisions, reason-code allowlist values, reason-code bounds, note length, and unsafe terms before submit. It does not submit
-automatically, does not apply Analyst Recommendation, and does not call scoring, recommendation generation, workflow,
-case, payment, model, threshold, bulk, or export endpoints.
+The UI validates matching labels/decisions, reason-code allowlist values, label-compatible reason codes,
+reason-code bounds, note length, and unsafe terms before submit. It does not submit automatically, does not apply
+Analyst Recommendation, and does not call scoring, recommendation generation, workflow, case, payment, model,
+threshold, bulk, or export endpoints.

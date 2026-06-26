@@ -4,7 +4,7 @@ Status: FDP-116/FDP-118 diagnostics, FDP-119 analyst recommendation display, and
 
 ## Scope
 
-FDP-116 adds a read-only Analyst Console panel for a single scored transaction. The panel consumes the FDP-115
+FDP-116 adds read-only transaction diagnostic sections for a single scored transaction. The panel consumes the FDP-115
 scored transaction detail API:
 
 `GET /api/v1/transactions/scored/{transactionId}`
@@ -38,7 +38,10 @@ offer a second submit when feedback already exists. Duplicate POST returns `409 
 
 Decision and label must match the backend contract: `MARKED_FRAUD` with `CONFIRMED_FRAUD`, `MARKED_LEGITIMATE` with
 `CONFIRMED_LEGITIMATE`, `MARKED_INCONCLUSIVE` with `INCONCLUSIVE`, and `REQUESTED_MORE_INFO` with `NEEDS_MORE_INFO`.
-Reason codes come from the bounded FDP-121 allowlist only.
+Reason codes come from the bounded FDP-121 allowlist only and must match the selected feedback label:
+`CONFIRMED_FRAUD` uses fraud-confirming reason codes, `CONFIRMED_LEGITIMATE` uses legitimate-confirming reason
+codes, `INCONCLUSIVE` uses inconclusive evidence reason codes, and `NEEDS_MORE_INFO` uses more-information reason
+codes.
 
 Feedback records analyst review outcome only. It does not authorize payment, approve, decline, block, change scoring,
 update recommendations, create cases, trigger workflow, train models, promote models, or change thresholds.
@@ -98,11 +101,13 @@ payload display. FDP-121 adds bounded feedback submission only.
 
 ## FDP-118 UI Hardening
 
-FDP-118 hardens the FDP-116 read-only Transaction Risk Intelligence UI. The change improves layout, visual grouping,
+FDP-118 hardens the FDP-116 Transaction Risk Intelligence diagnostic UI. The change improves layout, visual grouping,
 diagnostic boundary wording, status presentation, empty states, error states, accessibility, keyboard-oriented tests,
 safe fixtures, scope guards, and documentation.
 
-The panel remains frontend-only and read-only. It continues to consume only the FDP-115 scored transaction detail API:
+The diagnostic sections remain frontend-only and read-only. FDP-121 adds a separate bounded `Analyst Feedback` write
+record; that feedback surface is not part of the diagnostic read model. The panel continues to consume only the
+FDP-115 scored transaction detail API for transaction diagnostics:
 
 `GET /api/v1/transactions/scored/{transactionId}`
 
