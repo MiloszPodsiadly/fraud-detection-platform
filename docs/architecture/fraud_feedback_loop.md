@@ -108,11 +108,15 @@ feedback record. That fallback is not claimed as full atomicity.
 the durable audit intent.
 
 The write-action audit outbox is published by an internal scheduled trigger. The scheduler is enabled by default with
-`app.audit.outbox.publisher.enabled=true` and uses `app.audit.outbox.publisher.fixed-delay-ms=30000`. The publisher
-atomically claims records with `PUBLISHING` before calling `AuditService`, so concurrent scheduler runs skip records
-they cannot claim. There is no public recovery endpoint, admin UI, public outbox API, public dataset API, Kafka feedback
-publishing, or manual recovery API in FDP-122. Audit publication is at-least-once unless downstream `AuditService`
-idempotency provides exactly-once effects.
+`app.audit.outbox.publisher.enabled=true`, uses `app.audit.outbox.publisher.fixed-delay-ms=30000`, and stores a
+five-minute default claim lease with `app.audit.outbox.publisher.claim-lease-ms=300000`. The publisher atomically claims
+records with `PUBLISHING` before calling `AuditService`, so concurrent scheduler runs skip records they cannot claim.
+`PUBLISHING` is a leased claim state, not a terminal state: the record stores `claimExpiresAt`, fresh claims remain owned
+by their current publisher, and stale PUBLISHING records are recoverable by a later scheduler run after
+`claimExpiresAt <= now`. There is no public recovery endpoint, admin UI, public outbox API, public dataset API, Kafka
+feedback publishing, or manual recovery API in FDP-122. Audit publication is at-least-once. A crash after
+`AuditService.audit` but before marking the outbox record published may cause re-publication after lease expiry, so
+exact-once audit effects require downstream `AuditService` idempotency or consumer-side deduplication.
 
 ## Dataset Governance Rules
 

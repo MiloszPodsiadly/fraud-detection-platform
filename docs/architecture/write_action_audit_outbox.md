@@ -35,6 +35,7 @@ Each record contains:
 - `lastAttemptAt`
 - `claimedAt`
 - `claimOwner`
+- `claimExpiresAt`
 - `publishedAt`
 - `lastErrorCode`
 - `lastErrorMessage`
@@ -81,30 +82,38 @@ Unsafe metadata is rejected before persistence with `WRITE_ACTION_AUDIT_OUTBOX_M
 
 - `app.audit.outbox.publisher.enabled=true`
 - `app.audit.outbox.publisher.fixed-delay-ms=30000`
+- `app.audit.outbox.publisher.claim-lease-ms=300000`
 
 It can be disabled by setting `app.audit.outbox.publisher.enabled=false`.
 
 No public recovery endpoint, admin UI, public outbox API, or Kafka publication is added in FDP-122.
 
+`PUBLISHING` is a leased claim state, not a terminal state. A successful claim stores `claimedAt`, `claimOwner`, and
+`claimExpiresAt`; the default lease is five minutes. If a publisher process crashes after the claim and before
+`AuditService` publication or before marking the record published/failed, a later scheduler run can recover stale
+`PUBLISHING` records after `claimExpiresAt <= now`. The recovery is internal to the scheduled publisher. FDP-122 adds
+no public recovery endpoint and no manual recovery API for this outbox.
+
 The publisher:
 
-- finds `PENDING` and eligible `FAILED_RETRYABLE` records
+- finds `PENDING`, eligible `FAILED_RETRYABLE`, and stale `PUBLISHING` records whose claim lease expired
 - atomically claims each candidate with Mongo `findAndModify`
 - moves successfully claimed candidates to `PUBLISHING` before calling `AuditService`
 - skips records when claim fails, so concurrent publishers do not both call `AuditService` for the same record
-- skips already `PUBLISHING` records; FDP-122 does not add public/manual claim recovery
+- leaves fresh `PUBLISHING` records owned by another publisher unclaimed until their `claimExpiresAt` expires
 - skips `PUBLISHED` records
 - uses a bounded batch size of 50
 - uses an injected `Clock` for deterministic tests
 - calls `AuditService`
-- marks records `PUBLISHED` on success
+- marks records `PUBLISHED` on success and clears `claimedAt`, `claimOwner`, and `claimExpiresAt`
 - increments `attemptCount` on failure
 - sets `lastAttemptAt`, `nextAttemptAt`, and `lastErrorCode`
-- keeps failures `FAILED_RETRYABLE` while attempts remain
-- marks records `FAILED_PERMANENT` after `maxAttempts`
+- keeps failures `FAILED_RETRYABLE` while attempts remain and clears `claimedAt`, `claimOwner`, and `claimExpiresAt`
+- marks records `FAILED_PERMANENT` after `maxAttempts` and clears `claimedAt`, `claimOwner`, and `claimExpiresAt`
 - never retries forever
 - stores only safe bounded error codes and messages
 
-Publication is at-least-once. Exact-once audit effects require downstream `AuditService` idempotency or equivalent
-consumer-side deduplication. Metrics and stale-pending monitoring are not added in FDP-122; they remain future
-operational hardening scope.
+Publication is at-least-once. A crash after `AuditService.audit` but before marking the outbox record `PUBLISHED` can
+cause re-publication after lease expiry. Exact-once audit effects require downstream `AuditService` idempotency or
+equivalent consumer-side deduplication. Metrics and stale-pending monitoring are not added in FDP-122; they remain
+future operational hardening scope. Stale `PUBLISHING` recovery is implemented in FDP-122 and is not future scope.
