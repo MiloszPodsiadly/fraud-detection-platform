@@ -13,7 +13,7 @@ import org.springframework.data.mongodb.core.mapping.Field;
 import java.time.Instant;
 
 @Document(collection = "write_action_audit_outbox")
-@CompoundIndex(name = "write_action_audit_publishable_idx", def = "{'status': 1, 'next_attempt_at': 1, 'created_at': 1}")
+@CompoundIndex(name = "write_action_audit_publishable_v2_idx", def = "{'status': 1, 'next_attempt_at': 1, 'claim_expires_at': 1, 'created_at': 1}")
 public class WriteActionAuditOutboxRecord {
 
     @Id
@@ -67,6 +67,9 @@ public class WriteActionAuditOutboxRecord {
     @Field("claim_owner")
     private String claimOwner;
 
+    @Field("claim_expires_at")
+    private Instant claimExpiresAt;
+
     @Field("published_at")
     private Instant publishedAt;
 
@@ -112,6 +115,8 @@ public class WriteActionAuditOutboxRecord {
     public void setClaimedAt(Instant claimedAt) { this.claimedAt = claimedAt; }
     public String getClaimOwner() { return claimOwner; }
     public void setClaimOwner(String claimOwner) { this.claimOwner = claimOwner; }
+    public Instant getClaimExpiresAt() { return claimExpiresAt; }
+    public void setClaimExpiresAt(Instant claimExpiresAt) { this.claimExpiresAt = claimExpiresAt; }
     public Instant getPublishedAt() { return publishedAt; }
     public void setPublishedAt(Instant publishedAt) { this.publishedAt = publishedAt; }
     public String getLastErrorCode() { return lastErrorCode; }
