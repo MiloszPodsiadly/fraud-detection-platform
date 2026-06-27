@@ -61,6 +61,12 @@ public class WriteActionAuditOutboxRecord {
     @Field("last_attempt_at")
     private Instant lastAttemptAt;
 
+    @Field("claimed_at")
+    private Instant claimedAt;
+
+    @Field("claim_owner")
+    private String claimOwner;
+
     @Field("published_at")
     private Instant publishedAt;
 
@@ -102,6 +108,10 @@ public class WriteActionAuditOutboxRecord {
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getLastAttemptAt() { return lastAttemptAt; }
     public void setLastAttemptAt(Instant lastAttemptAt) { this.lastAttemptAt = lastAttemptAt; }
+    public Instant getClaimedAt() { return claimedAt; }
+    public void setClaimedAt(Instant claimedAt) { this.claimedAt = claimedAt; }
+    public String getClaimOwner() { return claimOwner; }
+    public void setClaimOwner(String claimOwner) { this.claimOwner = claimOwner; }
     public Instant getPublishedAt() { return publishedAt; }
     public void setPublishedAt(Instant publishedAt) { this.publishedAt = publishedAt; }
     public String getLastErrorCode() { return lastErrorCode; }

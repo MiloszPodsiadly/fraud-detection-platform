@@ -11,6 +11,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
 
 @Service
 public class WriteActionAuditOutboxPublisher {
@@ -19,25 +21,41 @@ public class WriteActionAuditOutboxPublisher {
     static final String AUDIT_SERVICE_UNAVAILABLE = "AUDIT_SERVICE_UNAVAILABLE";
 
     private final WriteActionAuditOutboxRepository repository;
+    private final WriteActionAuditOutboxClaimStore claimStore;
     private final AuditService auditService;
     private final Clock clock;
+    private final String claimOwner;
 
     @Autowired
     public WriteActionAuditOutboxPublisher(
             WriteActionAuditOutboxRepository repository,
+            WriteActionAuditOutboxClaimStore claimStore,
             AuditService auditService
     ) {
-        this(repository, auditService, Clock.systemUTC());
+        this(repository, claimStore, auditService, Clock.systemUTC(), "alert-service-" + UUID.randomUUID());
     }
 
     WriteActionAuditOutboxPublisher(
             WriteActionAuditOutboxRepository repository,
+            WriteActionAuditOutboxClaimStore claimStore,
             AuditService auditService,
             Clock clock
     ) {
+        this(repository, claimStore, auditService, clock, "test-publisher");
+    }
+
+    WriteActionAuditOutboxPublisher(
+            WriteActionAuditOutboxRepository repository,
+            WriteActionAuditOutboxClaimStore claimStore,
+            AuditService auditService,
+            Clock clock,
+            String claimOwner
+    ) {
         this.repository = Objects.requireNonNull(repository, "repository is required");
+        this.claimStore = Objects.requireNonNull(claimStore, "claimStore is required");
         this.auditService = Objects.requireNonNull(auditService, "auditService is required");
         this.clock = clock == null ? Clock.systemUTC() : clock;
+        this.claimOwner = (claimOwner == null || claimOwner.isBlank()) ? "alert-service" : claimOwner;
     }
 
     public int publishPending() {
@@ -54,24 +72,34 @@ public class WriteActionAuditOutboxPublisher {
         );
         int published = 0;
         for (WriteActionAuditOutboxRecord record : records) {
-            if (record.getStatus() == WriteActionAuditOutboxStatus.PUBLISHED) {
+            if (record.getStatus() == WriteActionAuditOutboxStatus.PUBLISHED
+                    || record.getStatus() == WriteActionAuditOutboxStatus.PUBLISHING) {
+                continue;
+            }
+            Optional<WriteActionAuditOutboxRecord> claimed = claimStore.claimForPublishing(
+                    record.getOutboxId(),
+                    now,
+                    claimOwner
+            );
+            if (claimed.isEmpty()) {
                 continue;
             }
             try {
+                WriteActionAuditOutboxRecord claimedRecord = claimed.get();
                 auditService.audit(
-                        record.getAction(),
-                        record.getResourceType(),
-                        record.getResourceId(),
-                        record.getCorrelationId(),
-                        record.getActor(),
-                        record.getOutcome(),
+                        claimedRecord.getAction(),
+                        claimedRecord.getResourceType(),
+                        claimedRecord.getResourceId(),
+                        claimedRecord.getCorrelationId(),
+                        claimedRecord.getActor(),
+                        claimedRecord.getOutcome(),
                         null,
-                        record.getMetadataSummary()
+                        claimedRecord.getMetadataSummary()
                 );
-                markPublished(record, now);
+                markPublished(claimedRecord, now);
                 published++;
             } catch (RuntimeException exception) {
-                markFailed(record, now);
+                markFailed(claimed.get(), now);
             }
         }
         return published;
@@ -82,6 +110,8 @@ public class WriteActionAuditOutboxPublisher {
         record.setPublishedAt(now);
         record.setLastAttemptAt(now);
         record.setNextAttemptAt(null);
+        record.setClaimedAt(null);
+        record.setClaimOwner(null);
         record.setLastErrorCode(null);
         record.setLastErrorMessage(null);
         repository.save(record);
@@ -100,6 +130,8 @@ public class WriteActionAuditOutboxPublisher {
             record.setStatus(WriteActionAuditOutboxStatus.FAILED_RETRYABLE);
             record.setNextAttemptAt(now.plus(Duration.ofMinutes(5L * nextAttemptCount)));
         }
+        record.setClaimedAt(null);
+        record.setClaimOwner(null);
         repository.save(record);
     }
 }

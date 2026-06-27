@@ -658,6 +658,7 @@ class PersistentAuditEventPublisherTest {
                     .filter(path -> path.toString().endsWith(".java"))
                     .filter(path -> !path.toString().contains("\\read\\"))
                     .filter(path -> !path.endsWith("AuditChainLockRepository.java"))
+                    .filter(path -> !path.endsWith("WriteActionAuditOutboxClaimStore.java"))
                     .filter(path -> {
                         try {
                             String content = Files.readString(path);
