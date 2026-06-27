@@ -2,6 +2,8 @@ package com.frauddetection.alert.feedback.governance;
 
 import com.frauddetection.alert.feedback.FraudFeedbackLabel;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
 
@@ -38,10 +40,46 @@ class FeedbackDatasetEligibilityPolicyTest {
                 .isTrue();
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "notes",
+            "rawNotes",
+            "rawNotesExport",
+            "groundTruth",
+            "trainingLabel",
+            "finalDecision",
+            "paymentDecision",
+            "paymentAuthorization",
+            "rawMlRequest",
+            "rawMlResponse",
+            "rawFeatureVector",
+            "rawEvidence",
+            "customerPayload",
+            "transactionPayload",
+            "token",
+            "secret",
+            "password"
+    })
+    void dangerousFieldsAreNotEligibleDatasetFields(String fieldName) {
+        assertThat(policy.eligibleDatasetField(fieldName)).isFalse();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "feedbackId",
+            "transactionId",
+            "feedbackLabel",
+            "decisionReasonCodes",
+            "riskLevel",
+            "analystRecommendationStatus"
+    })
+    void explicitlyAllowedFieldsAreEligibleDatasetFields(String fieldName) {
+        assertThat(policy.eligibleDatasetField(fieldName)).isTrue();
+    }
+
     @Test
-    void notesAreNotEligibleDatasetFields() {
-        assertThat(policy.eligibleDatasetField("notes")).isFalse();
-        assertThat(policy.eligibleDatasetField(" NOTES ")).isFalse();
-        assertThat(policy.eligibleDatasetField("feedbackLabel")).isTrue();
+    void blankDatasetFieldIsNotEligible() {
+        assertThat(policy.eligibleDatasetField(null)).isFalse();
+        assertThat(policy.eligibleDatasetField(" ")).isFalse();
     }
 }
