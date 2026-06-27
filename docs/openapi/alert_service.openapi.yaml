@@ -1271,7 +1271,7 @@ paths:
   /api/v1/transactions/scored/{transactionId}/feedback:
     post:
       summary: Record bounded analyst fraud feedback for one scored transaction
-      description: Records one active analyst review outcome for an existing scored transaction. Requires fraud-feedback:write. This feedback is an analyst review outcome and future evaluation signal only. It is not certified legal ground truth, payment authorization, automatic approve, automatic decline, automatic block, case creation, workflow execution, scoring mutation, recommendation mutation, model retraining, model promotion, threshold recommendation, dataset export, or ML evaluation. Duplicate POST for a transaction with existing active feedback returns 409 and does not overwrite the original record.
+      description: Records one active analyst review outcome for an existing scored transaction. Requires fraud-feedback:write. A 201 response means the feedback record and write-action audit outbox intent are durable; audit publication may occur later. This feedback is an analyst review outcome and future evaluation signal only. It is not certified legal ground truth, payment authorization, automatic approve, automatic decline, automatic block, case creation, workflow execution, scoring mutation, recommendation mutation, model retraining, model promotion, threshold recommendation, dataset export, or ML evaluation. Duplicate POST for a transaction with existing active feedback returns 409 and does not overwrite the original record.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1292,7 +1292,7 @@ paths:
               $ref: "#/components/schemas/CreateFraudFeedbackRequest"
       responses:
         "201":
-          description: Bounded analyst feedback record created and audited.
+          description: Bounded analyst feedback record and write-action audit intent created.
           content:
             application/json:
               schema:
@@ -1307,6 +1307,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "503":
+          description: Feedback could not be safely completed because durable write-action audit outbox intent could not be persisted. Reason code FRAUD_FEEDBACK_AUDIT_OUTBOX_UNAVAILABLE.
     get:
       summary: Read active bounded analyst fraud feedback for one scored transaction
       description: Returns the active feedback record for an existing scored transaction. Requires fraud-feedback:read. Existing transactions without feedback return 404 in FDP-121 v1. This endpoint is read-only and does not export datasets, invoke scoring, update recommendations, trigger workflows, create cases, authorize payments, train models, promote models, or change thresholds.

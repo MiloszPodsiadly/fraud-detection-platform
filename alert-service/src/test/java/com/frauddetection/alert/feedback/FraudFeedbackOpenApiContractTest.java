@@ -21,6 +21,12 @@ class FraudFeedbackOpenApiContractTest {
                 .contains("$ref: \"#/components/schemas/FraudFeedbackResponse\"")
                 .contains("\"409\":")
                 .contains("Duplicate POST for a transaction with existing active feedback returns 409")
+                .contains("\"503\":")
+                .contains("Feedback could not be safely completed because durable write-action audit outbox intent could not be persisted")
+                .contains("FRAUD_FEEDBACK_AUDIT_OUTBOX_UNAVAILABLE")
+                .contains("A 201 response means the feedback record and write-action audit outbox intent are durable")
+                .contains("audit publication may occur later")
+                .doesNotContain("201 response means AuditService publication is complete")
                 .contains("This feedback is an analyst review outcome and future evaluation signal only")
                 .contains("It is not certified legal ground truth")
                 .contains("FraudFeedbackLabel:")
@@ -47,7 +53,8 @@ class FraudFeedbackOpenApiContractTest {
                 .contains("NEEDS_MORE_INFO reason codes: NEEDS_CUSTOMER_CONTACT")
                 .contains("$ref: \"#/components/schemas/FraudFeedbackReasonCode\"")
                 .contains("notesPresent")
-                .contains("does not expose raw notes");
+                .contains("does not expose raw notes")
+                .contains("Bounded analyst feedback record and write-action audit intent created");
     }
 
     @Test
