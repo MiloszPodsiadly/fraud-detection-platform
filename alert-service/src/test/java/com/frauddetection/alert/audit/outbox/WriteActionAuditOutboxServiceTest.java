@@ -60,9 +60,7 @@ class WriteActionAuditOutboxServiceTest {
 
     @Test
     void duplicateIdempotencyKeyReturnsExistingRecordWithoutCreatingDuplicate() {
-        WriteActionAuditOutboxRecord existing = new WriteActionAuditOutboxRecord();
-        existing.setOutboxId("wao-existing");
-        existing.setIdempotencyKey("RECORD_FRAUD_FEEDBACK:FRAUD_FEEDBACK:ffb-1");
+        WriteActionAuditOutboxRecord existing = existing();
         when(repository.findByIdempotencyKey("RECORD_FRAUD_FEEDBACK:FRAUD_FEEDBACK:ffb-1")).thenReturn(Optional.of(existing));
 
         WriteActionAuditOutboxRecord record = service.createPendingAudit(
@@ -78,6 +76,48 @@ class WriteActionAuditOutboxServiceTest {
 
         assertThat(record).isSameAs(existing);
         verify(repository, never()).save(any());
+    }
+
+    @Test
+    void duplicateIdempotencyKeyWithDifferentActionThrowsConflict() {
+        WriteActionAuditOutboxRecord existing = existing();
+        existing.setAction(AuditAction.SUBMIT_ENGINE_INTELLIGENCE_FEEDBACK);
+        assertIdempotencyConflict(existing);
+    }
+
+    @Test
+    void duplicateIdempotencyKeyWithDifferentResourceTypeThrowsConflict() {
+        WriteActionAuditOutboxRecord existing = existing();
+        existing.setResourceType(AuditResourceType.ALERT);
+        assertIdempotencyConflict(existing);
+    }
+
+    @Test
+    void duplicateIdempotencyKeyWithDifferentResourceIdThrowsConflict() {
+        WriteActionAuditOutboxRecord existing = existing();
+        existing.setResourceId("ffb-2");
+        assertIdempotencyConflict(existing);
+    }
+
+    @Test
+    void duplicateIdempotencyKeyWithDifferentCorrelationIdThrowsConflict() {
+        WriteActionAuditOutboxRecord existing = existing();
+        existing.setCorrelationId("corr-2");
+        assertIdempotencyConflict(existing);
+    }
+
+    @Test
+    void duplicateIdempotencyKeyWithDifferentActorThrowsConflict() {
+        WriteActionAuditOutboxRecord existing = existing();
+        existing.setActor("analyst-2");
+        assertIdempotencyConflict(existing);
+    }
+
+    @Test
+    void duplicateIdempotencyKeyWithDifferentOutcomeThrowsConflict() {
+        WriteActionAuditOutboxRecord existing = existing();
+        existing.setOutcome(AuditOutcome.FAILED);
+        assertIdempotencyConflict(existing);
     }
 
     @Test
@@ -146,5 +186,37 @@ class WriteActionAuditOutboxServiceTest {
                 "transactionId=txn-1;feedbackLabel=CONFIRMED_FRAUD;status=RECORDED",
                 1
         );
+    }
+
+    private WriteActionAuditOutboxRecord existing() {
+        WriteActionAuditOutboxRecord existing = new WriteActionAuditOutboxRecord();
+        existing.setOutboxId("wao-existing");
+        existing.setIdempotencyKey("RECORD_FRAUD_FEEDBACK:FRAUD_FEEDBACK:ffb-1");
+        existing.setAction(AuditAction.RECORD_FRAUD_FEEDBACK);
+        existing.setResourceType(AuditResourceType.FRAUD_FEEDBACK);
+        existing.setResourceId("ffb-1");
+        existing.setCorrelationId("corr-1");
+        existing.setActor("analyst-1");
+        existing.setOutcome(AuditOutcome.SUCCESS);
+        return existing;
+    }
+
+    private void assertIdempotencyConflict(WriteActionAuditOutboxRecord existing) {
+        when(repository.findByIdempotencyKey("RECORD_FRAUD_FEEDBACK:FRAUD_FEEDBACK:ffb-1")).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> service.createPendingAudit(
+                "RECORD_FRAUD_FEEDBACK:FRAUD_FEEDBACK:ffb-1",
+                AuditAction.RECORD_FRAUD_FEEDBACK,
+                AuditResourceType.FRAUD_FEEDBACK,
+                "ffb-1",
+                "corr-1",
+                "analyst-1",
+                AuditOutcome.SUCCESS,
+                metadata()
+        ))
+                .isInstanceOf(WriteActionAuditOutboxException.class)
+                .hasMessage("WRITE_ACTION_AUDIT_OUTBOX_IDEMPOTENCY_CONFLICT");
+
+        verify(repository, never()).save(any());
     }
 }

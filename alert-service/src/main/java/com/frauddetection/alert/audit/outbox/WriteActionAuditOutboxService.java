@@ -20,6 +20,7 @@ public class WriteActionAuditOutboxService {
     static final String CONTRACT_VERSION = "write-action-audit-outbox-v1";
     static final int DEFAULT_MAX_ATTEMPTS = 5;
     static final String METADATA_UNSAFE = "WRITE_ACTION_AUDIT_OUTBOX_METADATA_UNSAFE";
+    static final String IDEMPOTENCY_CONFLICT = "WRITE_ACTION_AUDIT_OUTBOX_IDEMPOTENCY_CONFLICT";
 
     private static final int MAX_IDEMPOTENCY_KEY_LENGTH = 180;
     private static final int MAX_RESOURCE_ID_LENGTH = 160;
@@ -69,16 +70,31 @@ public class WriteActionAuditOutboxService {
             AuditEventMetadataSummary metadataSummary
     ) {
         String boundedIdempotencyKey = required(idempotencyKey, "idempotencyKey", MAX_IDEMPOTENCY_KEY_LENGTH);
+        AuditAction requiredAction = Objects.requireNonNull(action, "action is required");
+        AuditResourceType requiredResourceType = Objects.requireNonNull(resourceType, "resourceType is required");
+        String boundedResourceId = optional(resourceId, MAX_RESOURCE_ID_LENGTH);
+        String boundedCorrelationId = optional(correlationId, MAX_CORRELATION_ID_LENGTH);
+        String boundedActor = optional(actor, MAX_ACTOR_LENGTH);
+        AuditOutcome requiredOutcome = Objects.requireNonNull(outcome, "outcome is required");
         validateMetadata(metadataSummary);
         return repository.findByIdempotencyKey(boundedIdempotencyKey)
+                .map(existing -> validateExistingIntent(
+                        existing,
+                        requiredAction,
+                        requiredResourceType,
+                        boundedResourceId,
+                        boundedCorrelationId,
+                        boundedActor,
+                        requiredOutcome
+                ))
                 .orElseGet(() -> saveNew(
                         boundedIdempotencyKey,
-                        action,
-                        resourceType,
-                        resourceId,
-                        correlationId,
-                        actor,
-                        outcome,
+                        requiredAction,
+                        requiredResourceType,
+                        boundedResourceId,
+                        boundedCorrelationId,
+                        boundedActor,
+                        requiredOutcome,
                         metadataSummary
                 ));
     }
@@ -97,12 +113,12 @@ public class WriteActionAuditOutboxService {
         record.setOutboxId("wao-" + UUID.randomUUID());
         record.setIdempotencyKey(idempotencyKey);
         record.setContractVersion(CONTRACT_VERSION);
-        record.setAction(Objects.requireNonNull(action, "action is required"));
-        record.setResourceType(Objects.requireNonNull(resourceType, "resourceType is required"));
-        record.setResourceId(optional(resourceId, MAX_RESOURCE_ID_LENGTH));
-        record.setCorrelationId(optional(correlationId, MAX_CORRELATION_ID_LENGTH));
-        record.setActor(optional(actor, MAX_ACTOR_LENGTH));
-        record.setOutcome(Objects.requireNonNull(outcome, "outcome is required"));
+        record.setAction(action);
+        record.setResourceType(resourceType);
+        record.setResourceId(resourceId);
+        record.setCorrelationId(correlationId);
+        record.setActor(actor);
+        record.setOutcome(outcome);
         record.setMetadataSummary(metadataSummary);
         record.setStatus(WriteActionAuditOutboxStatus.PENDING);
         record.setAttemptCount(0);
@@ -112,8 +128,37 @@ public class WriteActionAuditOutboxService {
             return repository.save(record);
         } catch (DuplicateKeyException exception) {
             return repository.findByIdempotencyKey(idempotencyKey)
+                    .map(existing -> validateExistingIntent(
+                            existing,
+                            action,
+                            resourceType,
+                            resourceId,
+                            correlationId,
+                            actor,
+                            outcome
+                    ))
                     .orElseThrow(() -> new WriteActionAuditOutboxException("WRITE_ACTION_AUDIT_OUTBOX_DUPLICATE_UNAVAILABLE", exception));
         }
+    }
+
+    private WriteActionAuditOutboxRecord validateExistingIntent(
+            WriteActionAuditOutboxRecord existing,
+            AuditAction action,
+            AuditResourceType resourceType,
+            String resourceId,
+            String correlationId,
+            String actor,
+            AuditOutcome outcome
+    ) {
+        if (existing.getAction() != action
+                || existing.getResourceType() != resourceType
+                || !Objects.equals(existing.getResourceId(), resourceId)
+                || !Objects.equals(existing.getCorrelationId(), correlationId)
+                || !Objects.equals(existing.getActor(), actor)
+                || existing.getOutcome() != outcome) {
+            throw new WriteActionAuditOutboxException(IDEMPOTENCY_CONFLICT);
+        }
+        return existing;
     }
 
     private void validateMetadata(AuditEventMetadataSummary metadataSummary) {
