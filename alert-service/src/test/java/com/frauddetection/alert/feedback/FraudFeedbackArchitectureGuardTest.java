@@ -12,6 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class FraudFeedbackArchitectureGuardTest {
 
     private static final Path FEEDBACK_MAIN = Path.of("src/main/java/com/frauddetection/alert/feedback");
+    private static final Path AUDIT_OUTBOX_MAIN = Path.of("src/main/java/com/frauddetection/alert/audit/outbox");
     private static final List<String> FORBIDDEN_IMPLEMENTATION_TOKENS = List.of(
             "approvePayment",
             "declinePayment",
@@ -50,6 +51,25 @@ class FraudFeedbackArchitectureGuardTest {
     }
 
     @Test
+    void fraudFeedbackServicePersistsAuditIntentWithoutDirectAuditService() throws IOException {
+        String service = Files.readString(FEEDBACK_MAIN.resolve("FraudFeedbackService.java"));
+
+        assertThat(service)
+                .contains("WriteActionAuditOutboxService")
+                .contains("createPendingAudit")
+                .doesNotContain("AuditService", "auditService.audit");
+    }
+
+    @Test
+    void onlyWriteActionAuditOutboxPublisherCallsAuditServiceInOutboxPackage() throws IOException {
+        String publisher = Files.readString(AUDIT_OUTBOX_MAIN.resolve("WriteActionAuditOutboxPublisher.java"));
+        String nonPublisherSources = source(AUDIT_OUTBOX_MAIN, path -> !path.getFileName().toString().equals("WriteActionAuditOutboxPublisher.java"));
+
+        assertThat(publisher).contains("AuditService", "auditService.audit");
+        assertThat(nonPublisherSources).doesNotContain("AuditService", "auditService.audit");
+    }
+
+    @Test
     void feedbackEnumsUseNeutralAnalystReviewNamesOnly() throws IOException {
         String source = source();
 
@@ -62,7 +82,7 @@ class FraudFeedbackArchitectureGuardTest {
 
     @Test
     void feedbackDatasetAndEvaluationMisuseRulesStayDocumented() throws IOException {
-        String docs = Files.readString(architectureDoc());
+        String docs = Files.readString(architectureDoc("fraud_feedback_loop.md"));
 
         assertThat(docs)
                 .contains("evaluation candidates")
@@ -75,10 +95,24 @@ class FraudFeedbackArchitectureGuardTest {
                 .contains("bounded signals, not raw evidence");
     }
 
+    @Test
+    void feedbackDatasetGovernanceDoesNotAddExportOrPublicApi() throws IOException {
+        String governance = source(Path.of("src/main/java/com/frauddetection/alert/feedback/governance"), path -> true);
+
+        assertThat(governance)
+                .contains("eligibleForTrainingExport")
+                .doesNotContain("@RestController", "@Controller", "@RequestMapping", "export(", "Jsonl", "CSV", "KafkaTemplate");
+    }
+
     private String source() throws IOException {
+        return source(FEEDBACK_MAIN, path -> true);
+    }
+
+    private String source(Path root, java.util.function.Predicate<Path> included) throws IOException {
         StringBuilder source = new StringBuilder();
-        try (var files = Files.walk(FEEDBACK_MAIN)) {
+        try (var files = Files.walk(root)) {
             files.filter(path -> path.toString().endsWith(".java"))
+                    .filter(included)
                     .sorted()
                     .forEach(path -> source.append(read(path)).append('\n'));
         }
@@ -93,11 +127,11 @@ class FraudFeedbackArchitectureGuardTest {
         }
     }
 
-    private Path architectureDoc() {
-        Path fromModule = Path.of("..", "docs", "architecture", "fraud_feedback_loop.md");
+    private Path architectureDoc(String fileName) {
+        Path fromModule = Path.of("..", "docs", "architecture", fileName);
         if (Files.exists(fromModule)) {
             return fromModule;
         }
-        return Path.of("docs", "architecture", "fraud_feedback_loop.md");
+        return Path.of("docs", "architecture", fileName);
     }
 }

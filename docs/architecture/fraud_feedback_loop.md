@@ -1,6 +1,6 @@
 # Fraud Feedback Loop
 
-Status: FDP-121 backend/API and Analyst Console capture v1.
+Status: FDP-122 backend/API write-action audit outbox migration with FDP-121 Analyst Console capture v1.
 
 ## Scope
 
@@ -12,8 +12,9 @@ The active record can be read with:
 
 `GET /api/v1/transactions/scored/{transactionId}/feedback`
 
-The source of truth is the alert-service `fraud_feedback_records` repository. Recommendation generation remains owned
-by fraud-scoring-service. FDP-121 stores passive snapshots from the scored transaction projection, Engine Intelligence
+The source of truth is the alert-service `fraud_feedback_records` repository. Write-action audit intent is stored in
+the alert-service `write_action_audit_outbox` repository. Recommendation generation remains owned by
+fraud-scoring-service. FDP-121 stores passive snapshots from the scored transaction projection, Engine Intelligence
 projection, and already-projected Analyst Recommendation when safely available.
 
 ## Contract
@@ -89,24 +90,30 @@ Feedback read requires `fraud-feedback:read`.
 
 `transaction-monitor:read` is not sufficient to create or read feedback.
 
-Every successful feedback write emits a platform audit event with the actor, transaction id, transaction correlation,
-feedback id, feedback label, created timestamp, and recorded status. Audit metadata does not include raw notes, raw
-customer payloads, raw ML payloads, raw feature vectors, or raw evidence.
+Every successful feedback write persists a platform audit intent with the actor, transaction id, transaction
+correlation, feedback id, feedback label, created timestamp, and recorded status. Audit metadata does not include raw
+notes, raw customer payloads, raw ML payloads, raw feature vectors, or raw evidence.
 
-FDP-121 requires a successful audit for a successful feedback write response. If audit fails after persistence, the
-service performs best-effort cleanup of the saved feedback record and returns `FRAUD_FEEDBACK_AUDIT_UNAVAILABLE`.
-Full transactional or outbox-style audit hardening remains future scope for shared write-action infrastructure and is
-not implemented ad hoc in this feedback slice.
+FDP-122 requires durable feedback persistence and durable write-action audit outbox persistence before returning `201`.
+The response does not mean `AuditService` has already emitted the final audit event. `FraudFeedbackService` no longer
+calls `AuditService` directly on the normal success path; `WriteActionAuditOutboxPublisher` is responsible for later
+publication.
 
-## Future Dataset And Evaluation Rules
+Feedback write uses the existing `RegulatedMutationTransactionRunner`. In transaction mode `REQUIRED`, feedback and
+outbox writes participate in the configured local Mongo transaction. In default local mode `OFF`, outbox persistence
+failure returns `FRAUD_FEEDBACK_AUDIT_OUTBOX_UNAVAILABLE` and the service performs bounded local cleanup of the saved
+feedback record. That fallback is not claimed as full atomicity.
 
-`CONFIRMED_FRAUD` and `CONFIRMED_LEGITIMATE` are evaluation candidates only. They are not certified legal ground truth.
+## Dataset Governance Rules
+
+`CONFIRMED_FRAUD` and `CONFIRMED_LEGITIMATE` are evaluation candidates only. They are not certified legal ground truth
+and are not training labels in FDP-122.
 
 `INCONCLUSIVE` and `NEEDS_MORE_INFO` must not be used as positive or negative labels. They must be excluded from binary
 evaluation or handled as a separate unresolved bucket.
 
-Notes are analyst-readable context only; notes are not training input in FDP-121 and must not be exported to datasets
-without a future governance and sanitization scope.
+Notes are analyst-readable context only; notes are not training input in FDP-122 and must not be exported to datasets
+in FDP-122. Any future notes export requires a separate governance and sanitization scope.
 
 Feedback reason codes are bounded signals, not raw evidence. Feedback does not trigger training, retraining, model
 promotion, threshold change, or dataset export.
