@@ -5,13 +5,15 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditEventMetadataSummary;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
-import com.frauddetection.alert.audit.AuditService;
+import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceComparisonReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
 import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
+import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
+import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -36,6 +38,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -53,7 +56,8 @@ class FraudFeedbackServiceTest {
     private final TransactionMonitoringUseCase transactionMonitoringUseCase = mock(TransactionMonitoringUseCase.class);
     private final EngineIntelligenceReadService engineIntelligenceReadService = mock(EngineIntelligenceReadService.class);
     private final CurrentAnalystUser currentAnalystUser = mock(CurrentAnalystUser.class);
-    private final AuditService auditService = mock(AuditService.class);
+    private final WriteActionAuditOutboxService auditOutboxService = mock(WriteActionAuditOutboxService.class);
+    private final RegulatedMutationTransactionRunner transactionRunner = mock(RegulatedMutationTransactionRunner.class);
     private final List<FraudFeedbackRecord> savedRecords = new ArrayList<>();
 
     private FraudFeedbackService service;
@@ -67,9 +71,12 @@ class FraudFeedbackServiceTest {
                 engineIntelligenceReadService,
                 new EngineIntelligenceResponseMapper(),
                 currentAnalystUser,
-                auditService,
+                auditOutboxService,
+                transactionRunner,
                 Clock.fixed(Instant.parse("2026-06-25T10:15:30Z"), ZoneOffset.UTC)
         );
+        when(transactionRunner.runLocalCommit(any())).thenAnswer(invocation -> invocation.<Supplier<?>>getArgument(0).get());
+        when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.OFF);
         when(transactionMonitoringUseCase.getScoredTransaction("txn-1")).thenReturn(scoredTransaction());
         when(engineIntelligenceReadService.read("txn-1")).thenReturn(projectedEngineIntelligence());
         when(currentAnalystUser.get()).thenReturn(Optional.of(new com.frauddetection.alert.security.principal.AnalystPrincipal(
@@ -85,7 +92,7 @@ class FraudFeedbackServiceTest {
     }
 
     @Test
-    void createsFeedbackWithBoundedSnapshotsAndAudit() {
+    void createsFeedbackWithBoundedSnapshotsAndAuditOutboxRecord() {
         FraudFeedbackResponse response = service.create("txn-1", request());
 
         assertThat(response.transactionId()).isEqualTo("txn-1");
@@ -103,14 +110,14 @@ class FraudFeedbackServiceTest {
         assertThat(savedRecords).hasSize(1);
 
         ArgumentCaptor<AuditEventMetadataSummary> metadata = ArgumentCaptor.forClass(AuditEventMetadataSummary.class);
-        verify(auditService).audit(
+        verify(auditOutboxService).createPendingAudit(
+                eq("RECORD_FRAUD_FEEDBACK:FRAUD_FEEDBACK:" + response.feedbackId()),
                 eq(AuditAction.RECORD_FRAUD_FEEDBACK),
                 eq(AuditResourceType.FRAUD_FEEDBACK),
                 eq(response.feedbackId()),
                 eq("corr-1"),
                 eq("analyst-1"),
                 eq(AuditOutcome.SUCCESS),
-                eq(null),
                 metadata.capture()
         );
         assertThat(metadata.getValue().filtersSummary())
@@ -137,20 +144,20 @@ class FraudFeedbackServiceTest {
                 .isEqualTo(409);
 
         verify(repository, never()).save(any());
-        verify(auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(auditOutboxService, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
-    void auditFailureAfterSaveReturns503AndCompensatesSavedFeedback() {
-        doThrow(new IllegalStateException("audit unavailable"))
-                .when(auditService).audit(any(), any(), any(), any(), any(), any(), any(), any());
+    void auditOutboxFailureAfterSaveReturns503AndCompensatesSavedFeedback() {
+        doThrow(new IllegalStateException("outbox unavailable"))
+                .when(auditOutboxService).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
 
         assertThatThrownBy(() -> service.create("txn-1", request()))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(exception -> {
                     ResponseStatusException statusException = (ResponseStatusException) exception;
                     assertThat(statusException.getStatusCode().value()).isEqualTo(503);
-                    assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_AUDIT_UNAVAILABLE");
+                    assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_AUDIT_OUTBOX_UNAVAILABLE");
                     assertThat(statusException.getMessage()).doesNotContain("Customer confirmed fraud");
                 });
 
@@ -159,10 +166,27 @@ class FraudFeedbackServiceTest {
     }
 
     @Test
-    void auditFailureSuppressesCleanupFailureOnOriginalAuditException() {
-        IllegalStateException auditFailure = new IllegalStateException("audit unavailable");
+    void outboxFailureInTransactionModeDoesNotRunLocalCleanup() {
+        when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.REQUIRED);
+        doThrow(new IllegalStateException("outbox unavailable"))
+                .when(auditOutboxService).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+
+        assertThatThrownBy(() -> service.create("txn-1", request()))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException statusException = (ResponseStatusException) exception;
+                    assertThat(statusException.getStatusCode().value()).isEqualTo(503);
+                    assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_AUDIT_OUTBOX_UNAVAILABLE");
+                });
+
+        verify(repository, never()).deleteById(any());
+    }
+
+    @Test
+    void outboxFailureSuppressesCleanupFailureOnOriginalOutboxException() {
+        IllegalStateException outboxFailure = new IllegalStateException("outbox unavailable");
         IllegalStateException cleanupFailure = new IllegalStateException("cleanup unavailable");
-        doThrow(auditFailure).when(auditService).audit(any(), any(), any(), any(), any(), any(), any(), any());
+        doThrow(outboxFailure).when(auditOutboxService).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
         doThrow(cleanupFailure).when(repository).deleteById(any());
 
         assertThatThrownBy(() -> service.create("txn-1", request()))
@@ -170,8 +194,8 @@ class FraudFeedbackServiceTest {
                 .satisfies(exception -> {
                     ResponseStatusException statusException = (ResponseStatusException) exception;
                     assertThat(statusException.getStatusCode().value()).isEqualTo(503);
-                    assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_AUDIT_UNAVAILABLE");
-                    assertThat(statusException.getCause()).isSameAs(auditFailure);
+                    assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_AUDIT_OUTBOX_UNAVAILABLE");
+                    assertThat(statusException.getCause()).isSameAs(outboxFailure);
                     assertThat(statusException.getCause().getSuppressed()).containsExactly(cleanupFailure);
                     assertThat(statusException.getMessage()).doesNotContain("Customer confirmed fraud");
                 });
@@ -408,7 +432,8 @@ class FraudFeedbackServiceTest {
                 engineIntelligenceReadService,
                 mapper,
                 currentAnalystUser,
-                auditService,
+                auditOutboxService,
+                transactionRunner,
                 Clock.fixed(Instant.parse("2026-06-25T10:15:30Z"), ZoneOffset.UTC)
         );
 
@@ -433,7 +458,7 @@ class FraudFeedbackServiceTest {
                 });
 
         verify(repository, never()).save(any());
-        verify(auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(auditOutboxService, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -451,7 +476,7 @@ class FraudFeedbackServiceTest {
 
         verify(repository, never()).existsByTransactionId("txn-1");
         verify(repository, never()).save(any());
-        verify(auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(auditOutboxService, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -467,7 +492,7 @@ class FraudFeedbackServiceTest {
                     assertThat(statusException.getReason()).isEqualTo("FRAUD_FEEDBACK_ALREADY_RECORDED");
                 });
 
-        verify(auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(auditOutboxService, never()).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test

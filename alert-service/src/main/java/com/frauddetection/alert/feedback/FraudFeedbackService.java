@@ -5,12 +5,14 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditEventMetadataSummary;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
-import com.frauddetection.alert.audit.AuditService;
+import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
 import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
+import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
+import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
@@ -64,7 +66,8 @@ public class FraudFeedbackService {
     private final EngineIntelligenceReadService engineIntelligenceReadService;
     private final EngineIntelligenceResponseMapper engineIntelligenceResponseMapper;
     private final CurrentAnalystUser currentAnalystUser;
-    private final AuditService auditService;
+    private final WriteActionAuditOutboxService auditOutboxService;
+    private final RegulatedMutationTransactionRunner transactionRunner;
     private final Clock clock;
 
     @Autowired
@@ -75,7 +78,8 @@ public class FraudFeedbackService {
             EngineIntelligenceReadService engineIntelligenceReadService,
             EngineIntelligenceResponseMapper engineIntelligenceResponseMapper,
             CurrentAnalystUser currentAnalystUser,
-            AuditService auditService
+            WriteActionAuditOutboxService auditOutboxService,
+            RegulatedMutationTransactionRunner transactionRunner
     ) {
         this(
                 repository,
@@ -84,7 +88,8 @@ public class FraudFeedbackService {
                 engineIntelligenceReadService,
                 engineIntelligenceResponseMapper,
                 currentAnalystUser,
-                auditService,
+                auditOutboxService,
+                transactionRunner,
                 Clock.systemUTC()
         );
     }
@@ -96,7 +101,8 @@ public class FraudFeedbackService {
             EngineIntelligenceReadService engineIntelligenceReadService,
             EngineIntelligenceResponseMapper engineIntelligenceResponseMapper,
             CurrentAnalystUser currentAnalystUser,
-            AuditService auditService,
+            WriteActionAuditOutboxService auditOutboxService,
+            RegulatedMutationTransactionRunner transactionRunner,
             Clock clock
     ) {
         this.repository = repository;
@@ -105,7 +111,8 @@ public class FraudFeedbackService {
         this.engineIntelligenceReadService = engineIntelligenceReadService;
         this.engineIntelligenceResponseMapper = engineIntelligenceResponseMapper;
         this.currentAnalystUser = currentAnalystUser;
-        this.auditService = auditService;
+        this.auditOutboxService = auditOutboxService;
+        this.transactionRunner = transactionRunner;
         this.clock = clock;
     }
 
@@ -142,23 +149,11 @@ public class FraudFeedbackService {
         snapshotEngineIntelligence(record, transaction.transactionId());
         snapshotAnalystRecommendation(record, transaction.analystRecommendation());
 
-        FraudFeedbackRecord saved;
         try {
-            saved = repository.save(record);
+            return mapper.toResponse(transactionRunner.runLocalCommit(() -> persistFeedbackWithAuditIntent(record)));
         } catch (DuplicateKeyException exception) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "FRAUD_FEEDBACK_ALREADY_RECORDED", exception);
         }
-        try {
-            auditWrite(saved);
-        } catch (RuntimeException auditException) {
-            rollbackSavedFeedback(saved, auditException);
-            throw new ResponseStatusException(
-                    HttpStatus.SERVICE_UNAVAILABLE,
-                    "FRAUD_FEEDBACK_AUDIT_UNAVAILABLE",
-                    auditException
-            );
-        }
-        return mapper.toResponse(saved);
     }
 
     public FraudFeedbackResponse get(String transactionId) {
@@ -198,15 +193,15 @@ public class FraudFeedbackService {
         record.setAnalystRecommendationReasonCodes(recommendation.reasonCodes());
     }
 
-    private void auditWrite(FraudFeedbackRecord saved) {
-        auditService.audit(
+    private void persistAuditIntent(FraudFeedbackRecord saved) {
+        auditOutboxService.createPendingAudit(
+                "RECORD_FRAUD_FEEDBACK:FRAUD_FEEDBACK:" + saved.getFeedbackId(),
                 AuditAction.RECORD_FRAUD_FEEDBACK,
                 AuditResourceType.FRAUD_FEEDBACK,
                 saved.getFeedbackId(),
                 saved.getCorrelationId(),
                 saved.getCreatedBy(),
                 AuditOutcome.SUCCESS,
-                null,
                 new AuditEventMetadataSummary(
                         saved.getCorrelationId(),
                         null,
@@ -223,7 +218,25 @@ public class FraudFeedbackService {
         );
     }
 
+    private FraudFeedbackRecord persistFeedbackWithAuditIntent(FraudFeedbackRecord record) {
+        FraudFeedbackRecord saved = repository.save(record);
+        try {
+            persistAuditIntent(saved);
+        } catch (RuntimeException outboxException) {
+            rollbackSavedFeedback(saved, outboxException);
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "FRAUD_FEEDBACK_AUDIT_OUTBOX_UNAVAILABLE",
+                    outboxException
+            );
+        }
+        return saved;
+    }
+
     private void rollbackSavedFeedback(FraudFeedbackRecord saved, RuntimeException auditException) {
+        if (transactionRunner != null && transactionRunner.mode() != RegulatedMutationTransactionMode.OFF) {
+            return;
+        }
         try {
             repository.deleteById(saved.getFeedbackId());
         } catch (RuntimeException cleanupException) {
