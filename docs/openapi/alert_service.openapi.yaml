@@ -1307,6 +1307,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "503":
+          description: Feedback could not be safely completed because durable write-action audit outbox intent could not be persisted. Reason code FRAUD_FEEDBACK_AUDIT_OUTBOX_UNAVAILABLE.
     get:
       summary: Read active bounded analyst fraud feedback for one scored transaction
       description: Returns the active feedback record for an existing scored transaction. Requires fraud-feedback:read. Existing transactions without feedback return 404 in FDP-121 v1. This endpoint is read-only and does not export datasets, invoke scoring, update recommendations, trigger workflows, create cases, authorize payments, train models, promote models, or change thresholds.

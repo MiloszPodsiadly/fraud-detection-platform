@@ -37,3 +37,18 @@ Notes are analyst-readable context only. Notes are not training input and are no
 export would require separate governance and sanitization.
 
 Reason codes are bounded signals, not raw evidence.
+
+## Field Governance
+
+FDP-122 provides a conservative internal dataset-field allowlist only. This is not a dataset export schema and does not
+create a dataset export path.
+
+Allowed governance fields are limited to bounded review and diagnostic fields such as `feedbackId`, `transactionId`,
+`feedbackLabel`, `labelSource`, `feedbackStatus`, `createdAt`, `decisionReasonCodes`, `fraudScore`, `riskLevel`,
+`alertRecommended`, `engineIntelligenceStatus`, agreement/mismatch buckets, and bounded analyst recommendation fields.
+
+Dangerous or future-decision fields are not eligible, including notes, raw notes, raw notes export, raw customer payload,
+raw transaction payload, raw ML request/response, raw feature vector, raw evidence, ground truth, training label, final
+decision, payment decision, payment authorization, token, secret, and password.
+
+FDP-123 must define the actual export schema separately if a dataset builder is added later.

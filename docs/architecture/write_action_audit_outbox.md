@@ -7,7 +7,8 @@ Status: FDP-122 infrastructure foundation.
 FDP-122 adds an alert-service-owned write-action audit outbox for bounded business writes that must not return success
 unless the business record and durable audit intent are both persisted.
 
-This is not a public API, not a Kafka outbox, and not a replacement for the existing decision event outbox in
+This is not a public API, not a public recovery API, not an admin UI, not a Kafka outbox, not a dataset export, not ML
+evaluation, and not a training-label pipeline. It is not a replacement for the existing decision event outbox in
 `transactional_outbox_records`. The existing decision outbox remains owned by submit-decision publication and recovery.
 
 ## Model
@@ -32,6 +33,8 @@ Each record contains:
 - `nextAttemptAt`
 - `createdAt`
 - `lastAttemptAt`
+- `claimedAt`
+- `claimOwner`
 - `publishedAt`
 - `lastErrorCode`
 - `lastErrorMessage`
@@ -39,6 +42,7 @@ Each record contains:
 Allowed statuses are only:
 
 - `PENDING`
+- `PUBLISHING`
 - `PUBLISHED`
 - `FAILED_RETRYABLE`
 - `FAILED_PERMANENT`
@@ -53,6 +57,9 @@ For FDP-122 fraud feedback, `FraudFeedbackService` writes the feedback record an
 Mongo transaction. In default local mode `OFF`, outbox persistence failure returns `503` and the service performs the
 same bounded local cleanup style used by existing feedback writes. This fallback is not claimed as distributed or full
 atomicity.
+
+`503 FRAUD_FEEDBACK_AUDIT_OUTBOX_UNAVAILABLE` means feedback could not be safely completed because durable write-action
+audit outbox intent could not be persisted.
 
 ## Metadata Safety
 
@@ -69,12 +76,23 @@ Unsafe metadata is rejected before persistence with `WRITE_ACTION_AUDIT_OUTBOX_M
 
 ## Publisher
 
-`WriteActionAuditOutboxPublisher` is invokable only in FDP-122. No scheduler framework or public recovery endpoint is
-added.
+`WriteActionAuditOutboxPublisher` is invoked by an internal scheduled component,
+`WriteActionAuditOutboxScheduler`. The scheduler is enabled by default with:
+
+- `app.audit.outbox.publisher.enabled=true`
+- `app.audit.outbox.publisher.fixed-delay-ms=30000`
+
+It can be disabled by setting `app.audit.outbox.publisher.enabled=false`.
+
+No public recovery endpoint, admin UI, public outbox API, or Kafka publication is added in FDP-122.
 
 The publisher:
 
 - finds `PENDING` and eligible `FAILED_RETRYABLE` records
+- atomically claims each candidate with Mongo `findAndModify`
+- moves successfully claimed candidates to `PUBLISHING` before calling `AuditService`
+- skips records when claim fails, so concurrent publishers do not both call `AuditService` for the same record
+- skips already `PUBLISHING` records; FDP-122 does not add public/manual claim recovery
 - skips `PUBLISHED` records
 - uses a bounded batch size of 50
 - uses an injected `Clock` for deterministic tests
@@ -87,4 +105,6 @@ The publisher:
 - never retries forever
 - stores only safe bounded error codes and messages
 
-Metrics are not added in FDP-122. They remain future operational hardening scope.
+Publication is at-least-once. Exact-once audit effects require downstream `AuditService` idempotency or equivalent
+consumer-side deduplication. Metrics and stale-pending monitoring are not added in FDP-122; they remain future
+operational hardening scope.

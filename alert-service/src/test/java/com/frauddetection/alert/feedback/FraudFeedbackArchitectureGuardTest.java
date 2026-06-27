@@ -104,6 +104,57 @@ class FraudFeedbackArchitectureGuardTest {
                 .doesNotContain("@RestController", "@Controller", "@RequestMapping", "export(", "Jsonl", "CSV", "KafkaTemplate");
     }
 
+    @Test
+    void writeActionAuditOutboxHasAtomicClaimBoundary() throws IOException {
+        String outbox = source(AUDIT_OUTBOX_MAIN, path -> true);
+
+        assertThat(outbox)
+                .contains("PUBLISHING")
+                .contains("claimForPublishing")
+                .contains("findAndModify")
+                .contains("ConditionalOnProperty")
+                .contains("app.audit.outbox.publisher.fixed-delay-ms");
+    }
+
+    @Test
+    void fdp122DoesNotExposeOutboxOrDatasetPublicApiOrRuntimeExport() throws IOException {
+        String fdp122Main = source(FEEDBACK_MAIN, path -> true) + source(AUDIT_OUTBOX_MAIN, path -> true);
+
+        assertThat(fdp122Main)
+                .doesNotContain("WriteActionAuditOutboxController")
+                .doesNotContain("FeedbackDatasetController")
+                .doesNotContain("FraudFeedbackDatasetController")
+                .doesNotContain("exportTrainingDataset")
+                .doesNotContain("KafkaTemplate<String, FraudFeedback")
+                .doesNotContain("ModelTraining", "ModelPromotion", "ThresholdRecommendation");
+    }
+
+    @Test
+    void writeActionAuditOutboxDoesNotPersistRawSensitiveMetadata() throws IOException {
+        String outbox = source(AUDIT_OUTBOX_MAIN, path -> true);
+
+        assertThat(outbox)
+                .contains("WRITE_ACTION_AUDIT_OUTBOX_METADATA_UNSAFE")
+                .doesNotContain("notesBody", "rawNotes", "rawMlRequest", "rawMlResponse", "rawFeatureVector", "rawEvidence");
+    }
+
+    @Test
+    void feedbackGovernanceBlocksDangerousFutureDatasetFields() throws IOException {
+        String governanceTest = Files.readString(Path.of(
+                "src/test/java/com/frauddetection/alert/feedback/governance/FeedbackDatasetEligibilityPolicyTest.java"
+        ));
+
+        assertThat(governanceTest)
+                .contains("rawNotesExport")
+                .contains("groundTruth")
+                .contains("trainingLabel")
+                .contains("finalDecision")
+                .contains("paymentDecision")
+                .contains("rawMlRequest")
+                .contains("feedbackLabel")
+                .contains("decisionReasonCodes");
+    }
+
     private String source() throws IOException {
         return source(FEEDBACK_MAIN, path -> true);
     }

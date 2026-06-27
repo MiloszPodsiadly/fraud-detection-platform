@@ -104,6 +104,16 @@ outbox writes participate in the configured local Mongo transaction. In default 
 failure returns `FRAUD_FEEDBACK_AUDIT_OUTBOX_UNAVAILABLE` and the service performs bounded local cleanup of the saved
 feedback record. That fallback is not claimed as full atomicity.
 
+`FRAUD_FEEDBACK_AUDIT_OUTBOX_UNAVAILABLE` is exposed as `503` because the service cannot safely report success without
+the durable audit intent.
+
+The write-action audit outbox is published by an internal scheduled trigger. The scheduler is enabled by default with
+`app.audit.outbox.publisher.enabled=true` and uses `app.audit.outbox.publisher.fixed-delay-ms=30000`. The publisher
+atomically claims records with `PUBLISHING` before calling `AuditService`, so concurrent scheduler runs skip records
+they cannot claim. There is no public recovery endpoint, admin UI, public outbox API, public dataset API, Kafka feedback
+publishing, or manual recovery API in FDP-122. Audit publication is at-least-once unless downstream `AuditService`
+idempotency provides exactly-once effects.
+
 ## Dataset Governance Rules
 
 `CONFIRMED_FRAUD` and `CONFIRMED_LEGITIMATE` are evaluation candidates only. They are not certified legal ground truth
@@ -117,6 +127,9 @@ in FDP-122. Any future notes export requires a separate governance and sanitizat
 
 Feedback reason codes are bounded signals, not raw evidence. Feedback does not trigger training, retraining, model
 promotion, threshold change, or dataset export.
+
+FDP-122 includes a conservative internal dataset-field allowlist for governance checks only. It is not a dataset export
+schema. FDP-123 must define an export schema separately if a dataset builder is added later.
 
 ## Analyst Console Capture
 
