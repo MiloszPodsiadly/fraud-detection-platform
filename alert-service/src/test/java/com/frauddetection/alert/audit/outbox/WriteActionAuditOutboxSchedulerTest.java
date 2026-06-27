@@ -1,7 +1,9 @@
 package com.frauddetection.alert.audit.outbox;
 
+import com.frauddetection.alert.AlertServiceApplication;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -40,5 +42,10 @@ class WriteActionAuditOutboxSchedulerTest {
         assertThat(scheduled).isNotNull();
         assertThat(scheduled.fixedDelayString())
                 .isEqualTo("${app.audit.outbox.publisher.fixed-delay-ms:30000}");
+    }
+
+    @Test
+    void alertServiceRuntimeEnablesScheduling() {
+        assertThat(AlertServiceApplication.class.getAnnotation(EnableScheduling.class)).isNotNull();
     }
 }

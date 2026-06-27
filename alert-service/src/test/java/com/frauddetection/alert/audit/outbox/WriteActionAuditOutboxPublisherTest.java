@@ -10,6 +10,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.Pageable;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -27,6 +28,7 @@ import static org.mockito.Mockito.when;
 class WriteActionAuditOutboxPublisherTest {
 
     private static final Instant NOW = Instant.parse("2026-06-26T11:00:00Z");
+    private static final Duration CLAIM_LEASE = Duration.ofMinutes(5);
 
     private final WriteActionAuditOutboxRepository repository = mock(WriteActionAuditOutboxRepository.class);
     private final WriteActionAuditOutboxClaimStore claimStore = mock(WriteActionAuditOutboxClaimStore.class);
@@ -36,14 +38,15 @@ class WriteActionAuditOutboxPublisherTest {
             claimStore,
             auditService,
             Clock.fixed(NOW, ZoneOffset.UTC),
-            "publisher-1"
+            "publisher-1",
+            CLAIM_LEASE
     );
 
     @Test
     void pendingRecordPublishesSuccessfullyAndBecomesPublished() {
         WriteActionAuditOutboxRecord record = record(WriteActionAuditOutboxStatus.PENDING, 0, 5);
-        when(repository.findPublishable(any(), eq(NOW), any())).thenReturn(List.of(record));
-        when(claimStore.claimForPublishing("wao-1", NOW, "publisher-1")).thenReturn(Optional.of(record));
+        when(repository.findPublishable(eq(NOW), any())).thenReturn(List.of(record));
+        when(claimStore.claimForPublishing("wao-1", NOW, "publisher-1", CLAIM_LEASE)).thenReturn(Optional.of(record));
 
         int published = publisher.publishPending();
 
@@ -63,6 +66,7 @@ class WriteActionAuditOutboxPublisherTest {
         assertThat(record.getLastAttemptAt()).isEqualTo(NOW);
         assertThat(record.getClaimedAt()).isNull();
         assertThat(record.getClaimOwner()).isNull();
+        assertThat(record.getClaimExpiresAt()).isNull();
         assertThat(record.getLastErrorCode()).isNull();
         verify(repository).save(record);
     }
@@ -71,8 +75,8 @@ class WriteActionAuditOutboxPublisherTest {
     void failedRetryableEligibleRecordCanPublishSuccessfully() {
         WriteActionAuditOutboxRecord record = record(WriteActionAuditOutboxStatus.FAILED_RETRYABLE, 1, 5);
         record.setNextAttemptAt(NOW.minusSeconds(1));
-        when(repository.findPublishable(any(), eq(NOW), any())).thenReturn(List.of(record));
-        when(claimStore.claimForPublishing("wao-1", NOW, "publisher-1")).thenReturn(Optional.of(record));
+        when(repository.findPublishable(eq(NOW), any())).thenReturn(List.of(record));
+        when(claimStore.claimForPublishing("wao-1", NOW, "publisher-1", CLAIM_LEASE)).thenReturn(Optional.of(record));
 
         assertThat(publisher.publishPending()).isEqualTo(1);
 
@@ -83,32 +87,34 @@ class WriteActionAuditOutboxPublisherTest {
     @Test
     void publishedRecordIsSkippedDefensively() {
         WriteActionAuditOutboxRecord record = record(WriteActionAuditOutboxStatus.PUBLISHED, 0, 5);
-        when(repository.findPublishable(any(), eq(NOW), any())).thenReturn(List.of(record));
+        when(repository.findPublishable(eq(NOW), any())).thenReturn(List.of(record));
 
         assertThat(publisher.publishPending()).isZero();
 
         verify(auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any());
-        verify(claimStore, never()).claimForPublishing(any(), any(), any());
+        verify(claimStore, never()).claimForPublishing(any(), any(), any(), any());
         verify(repository, never()).save(any());
     }
 
     @Test
-    void publishingRecordIsSkippedDefensively() {
+    void freshPublishingRecordClaimFailureDoesNotCallAuditService() {
         WriteActionAuditOutboxRecord record = record(WriteActionAuditOutboxStatus.PUBLISHING, 0, 5);
-        when(repository.findPublishable(any(), eq(NOW), any())).thenReturn(List.of(record));
+        record.setClaimExpiresAt(NOW.plusSeconds(60));
+        when(repository.findPublishable(eq(NOW), any())).thenReturn(List.of(record));
+        when(claimStore.claimForPublishing("wao-1", NOW, "publisher-1", CLAIM_LEASE)).thenReturn(Optional.empty());
 
         assertThat(publisher.publishPending()).isZero();
 
         verify(auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any());
-        verify(claimStore, never()).claimForPublishing(any(), any(), any());
+        verify(claimStore).claimForPublishing("wao-1", NOW, "publisher-1", CLAIM_LEASE);
         verify(repository, never()).save(any());
     }
 
     @Test
     void claimFailureSkipsRecordAndDoesNotCallAuditService() {
         WriteActionAuditOutboxRecord record = record(WriteActionAuditOutboxStatus.PENDING, 0, 5);
-        when(repository.findPublishable(any(), eq(NOW), any())).thenReturn(List.of(record));
-        when(claimStore.claimForPublishing("wao-1", NOW, "publisher-1")).thenReturn(Optional.empty());
+        when(repository.findPublishable(eq(NOW), any())).thenReturn(List.of(record));
+        when(claimStore.claimForPublishing("wao-1", NOW, "publisher-1", CLAIM_LEASE)).thenReturn(Optional.empty());
 
         assertThat(publisher.publishPending()).isZero();
 
@@ -119,8 +125,8 @@ class WriteActionAuditOutboxPublisherTest {
     @Test
     void transientFailureIncrementsAttemptAndSchedulesBoundedRetry() {
         WriteActionAuditOutboxRecord record = record(WriteActionAuditOutboxStatus.PENDING, 0, 5);
-        when(repository.findPublishable(any(), eq(NOW), any())).thenReturn(List.of(record));
-        when(claimStore.claimForPublishing("wao-1", NOW, "publisher-1")).thenReturn(Optional.of(record));
+        when(repository.findPublishable(eq(NOW), any())).thenReturn(List.of(record));
+        when(claimStore.claimForPublishing("wao-1", NOW, "publisher-1", CLAIM_LEASE)).thenReturn(Optional.of(record));
         doThrow(new IllegalStateException("raw stack trace secret token"))
                 .when(auditService).audit(any(), any(), any(), any(), any(), any(), any(), any());
 
@@ -132,6 +138,7 @@ class WriteActionAuditOutboxPublisherTest {
         assertThat(record.getStatus()).isEqualTo(WriteActionAuditOutboxStatus.FAILED_RETRYABLE);
         assertThat(record.getClaimedAt()).isNull();
         assertThat(record.getClaimOwner()).isNull();
+        assertThat(record.getClaimExpiresAt()).isNull();
         assertThat(record.getLastErrorCode()).isEqualTo("AUDIT_SERVICE_UNAVAILABLE");
         assertThat(record.getLastErrorMessage())
                 .isEqualTo("Audit publication failed")
@@ -142,8 +149,8 @@ class WriteActionAuditOutboxPublisherTest {
     @Test
     void failureAtMaxAttemptsBecomesPermanentAndDoesNotRetryForever() {
         WriteActionAuditOutboxRecord record = record(WriteActionAuditOutboxStatus.FAILED_RETRYABLE, 4, 5);
-        when(repository.findPublishable(any(), eq(NOW), any())).thenReturn(List.of(record));
-        when(claimStore.claimForPublishing("wao-1", NOW, "publisher-1")).thenReturn(Optional.of(record));
+        when(repository.findPublishable(eq(NOW), any())).thenReturn(List.of(record));
+        when(claimStore.claimForPublishing("wao-1", NOW, "publisher-1", CLAIM_LEASE)).thenReturn(Optional.of(record));
         doThrow(new IllegalStateException("audit unavailable"))
                 .when(auditService).audit(any(), any(), any(), any(), any(), any(), any(), any());
 
@@ -152,26 +159,27 @@ class WriteActionAuditOutboxPublisherTest {
         assertThat(record.getAttemptCount()).isEqualTo(5);
         assertThat(record.getStatus()).isEqualTo(WriteActionAuditOutboxStatus.FAILED_PERMANENT);
         assertThat(record.getNextAttemptAt()).isNull();
+        assertThat(record.getClaimExpiresAt()).isNull();
     }
 
     @Test
     void batchSizeIsBoundedToFifty() {
-        when(repository.findPublishable(any(), eq(NOW), any())).thenReturn(List.of());
+        when(repository.findPublishable(eq(NOW), any())).thenReturn(List.of());
 
         publisher.publishPending(500);
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
-        verify(repository).findPublishable(any(), eq(NOW), pageable.capture());
+        verify(repository).findPublishable(eq(NOW), pageable.capture());
         assertThat(pageable.getValue().getPageSize()).isEqualTo(50);
     }
 
     @Test
     void repeatedRunDoesNotPublishAlreadyPublishedRecordAgain() {
         WriteActionAuditOutboxRecord record = record(WriteActionAuditOutboxStatus.PENDING, 0, 5);
-        when(repository.findPublishable(any(), eq(NOW), any()))
+        when(repository.findPublishable(eq(NOW), any()))
                 .thenReturn(List.of(record))
                 .thenReturn(List.of());
-        when(claimStore.claimForPublishing("wao-1", NOW, "publisher-1")).thenReturn(Optional.of(record));
+        when(claimStore.claimForPublishing("wao-1", NOW, "publisher-1", CLAIM_LEASE)).thenReturn(Optional.of(record));
 
         assertThat(publisher.publishPending()).isEqualTo(1);
         assertThat(publisher.publishPending()).isZero();
@@ -182,8 +190,8 @@ class WriteActionAuditOutboxPublisherTest {
     @Test
     void twoPublishAttemptsForSameCandidateCallAuditServiceOnceWhenSecondClaimFails() {
         WriteActionAuditOutboxRecord record = record(WriteActionAuditOutboxStatus.PENDING, 0, 5);
-        when(repository.findPublishable(any(), eq(NOW), any())).thenReturn(List.of(record));
-        when(claimStore.claimForPublishing("wao-1", NOW, "publisher-1"))
+        when(repository.findPublishable(eq(NOW), any())).thenReturn(List.of(record));
+        when(claimStore.claimForPublishing("wao-1", NOW, "publisher-1", CLAIM_LEASE))
                 .thenReturn(Optional.of(record))
                 .thenReturn(Optional.empty());
 
@@ -192,6 +200,58 @@ class WriteActionAuditOutboxPublisherTest {
         assertThat(publisher.publishPending()).isZero();
 
         verify(auditService).audit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void stalePublishingRecordCanBeRecoveredAndPublished() {
+        WriteActionAuditOutboxRecord record = record(WriteActionAuditOutboxStatus.PUBLISHING, 1, 5);
+        record.setClaimedAt(NOW.minusSeconds(600));
+        record.setClaimOwner("dead-publisher");
+        record.setClaimExpiresAt(NOW.minusSeconds(1));
+        when(repository.findPublishable(eq(NOW), any())).thenReturn(List.of(record));
+        when(claimStore.claimForPublishing("wao-1", NOW, "publisher-1", CLAIM_LEASE)).thenReturn(Optional.of(record));
+
+        assertThat(publisher.publishPending()).isEqualTo(1);
+
+        assertThat(record.getStatus()).isEqualTo(WriteActionAuditOutboxStatus.PUBLISHED);
+        assertThat(record.getClaimedAt()).isNull();
+        assertThat(record.getClaimOwner()).isNull();
+        assertThat(record.getClaimExpiresAt()).isNull();
+        verify(auditService).audit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void failureAfterStalePublishingRecoveryIncrementsAttemptAndSchedulesRetry() {
+        WriteActionAuditOutboxRecord record = record(WriteActionAuditOutboxStatus.PUBLISHING, 1, 5);
+        record.setClaimExpiresAt(NOW.minusSeconds(1));
+        when(repository.findPublishable(eq(NOW), any())).thenReturn(List.of(record));
+        when(claimStore.claimForPublishing("wao-1", NOW, "publisher-1", CLAIM_LEASE)).thenReturn(Optional.of(record));
+        doThrow(new IllegalStateException("secret token stack trace"))
+                .when(auditService).audit(any(), any(), any(), any(), any(), any(), any(), any());
+
+        assertThat(publisher.publishPending()).isZero();
+
+        assertThat(record.getAttemptCount()).isEqualTo(2);
+        assertThat(record.getStatus()).isEqualTo(WriteActionAuditOutboxStatus.FAILED_RETRYABLE);
+        assertThat(record.getNextAttemptAt()).isEqualTo(NOW.plusSeconds(600));
+        assertThat(record.getClaimExpiresAt()).isNull();
+    }
+
+    @Test
+    void publishingAtMaxAttemptsFailureBecomesFailedPermanent() {
+        WriteActionAuditOutboxRecord record = record(WriteActionAuditOutboxStatus.PUBLISHING, 4, 5);
+        record.setClaimExpiresAt(NOW.minusSeconds(1));
+        when(repository.findPublishable(eq(NOW), any())).thenReturn(List.of(record));
+        when(claimStore.claimForPublishing("wao-1", NOW, "publisher-1", CLAIM_LEASE)).thenReturn(Optional.of(record));
+        doThrow(new IllegalStateException("audit unavailable"))
+                .when(auditService).audit(any(), any(), any(), any(), any(), any(), any(), any());
+
+        publisher.publishPending();
+
+        assertThat(record.getAttemptCount()).isEqualTo(5);
+        assertThat(record.getStatus()).isEqualTo(WriteActionAuditOutboxStatus.FAILED_PERMANENT);
+        assertThat(record.getNextAttemptAt()).isNull();
+        assertThat(record.getClaimExpiresAt()).isNull();
     }
 
     private WriteActionAuditOutboxRecord record(WriteActionAuditOutboxStatus status, int attemptCount, int maxAttempts) {

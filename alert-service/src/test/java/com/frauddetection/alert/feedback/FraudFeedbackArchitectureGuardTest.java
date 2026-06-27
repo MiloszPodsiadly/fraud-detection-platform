@@ -110,10 +110,31 @@ class FraudFeedbackArchitectureGuardTest {
 
         assertThat(outbox)
                 .contains("PUBLISHING")
+                .contains("claimExpiresAt")
+                .contains("claim_expires_at")
                 .contains("claimForPublishing")
                 .contains("findAndModify")
                 .contains("ConditionalOnProperty")
-                .contains("app.audit.outbox.publisher.fixed-delay-ms");
+                .contains("app.audit.outbox.publisher.fixed-delay-ms")
+                .contains("app.audit.outbox.publisher.claim-lease-ms");
+    }
+
+    @Test
+    void writeActionAuditOutboxDocsDescribeLeasedPublishingRecovery() throws IOException {
+        String writeActionOutbox = Files.readString(architectureDoc("write_action_audit_outbox.md"));
+        String feedbackLoop = Files.readString(architectureDoc("fraud_feedback_loop.md"));
+        String docs = writeActionOutbox + "\n" + feedbackLoop;
+
+        assertThat(docs)
+                .contains("`PUBLISHING` is a leased claim state, not a terminal state")
+                .contains("claimExpiresAt")
+                .contains("stale PUBLISHING")
+                .contains("recover")
+                .contains("at-least-once")
+                .contains("downstream `AuditService` idempotency")
+                .contains("no public recovery endpoint")
+                .doesNotContain("stale PUBLISHING recovery is future")
+                .doesNotContain("exactly-once audit publication");
     }
 
     @Test
