@@ -9,7 +9,7 @@ import java.util.Set;
 
 final class FeedbackDatasetReasonCodePolicy {
 
-    private static final int MAX_DECISION_REASON_CODES = 10;
+    static final int MAX_DECISION_REASON_CODES = 10;
 
     private FeedbackDatasetReasonCodePolicy() {
     }

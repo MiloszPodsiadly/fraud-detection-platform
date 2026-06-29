@@ -45,7 +45,10 @@ public record FeedbackDatasetRecord(
         evaluationLabel = Objects.requireNonNull(evaluationLabel, "evaluationLabel is required");
         validateLabelConsistency(feedbackLabel, evaluationLabel);
         feedbackCreatedAt = Objects.requireNonNull(feedbackCreatedAt, "feedbackCreatedAt is required");
-        decisionReasonCodes = FeedbackDatasetSafety.copyRequiredMachineCodes(decisionReasonCodes, "decisionReasonCodes", 20);
+        decisionReasonCodes = FeedbackDatasetReasonCodePolicy.validatedDecisionReasonCodes(
+                feedbackLabel,
+                decisionReasonCodes
+        );
         analystRecommendationReasonCodes = FeedbackDatasetSafety.copyMachineCodes(
                 analystRecommendationReasonCodes,
                 "analystRecommendationReasonCodes",

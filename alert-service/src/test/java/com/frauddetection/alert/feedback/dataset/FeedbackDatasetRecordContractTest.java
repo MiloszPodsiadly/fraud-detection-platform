@@ -117,14 +117,91 @@ class FeedbackDatasetRecordContractTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void acceptsTenDecisionReasonCodesWhenTheyAreValidAndCompatible() {
+        assertThatCode(() -> record(
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                FeedbackEvaluationLabel.POSITIVE_FRAUD,
+                List.of(
+                        "ANALYST_CONFIRMED_FRAUD",
+                        "CUSTOMER_CONFIRMED_FRAUD",
+                        "DOCUMENTATION_CONFIRMED_FRAUD",
+                        "CHARGEBACK_SIGNAL",
+                        "ACCOUNT_TAKEOVER_INDICATOR",
+                        "ANALYST_CONFIRMED_FRAUD",
+                        "CUSTOMER_CONFIRMED_FRAUD",
+                        "DOCUMENTATION_CONFIRMED_FRAUD",
+                        "CHARGEBACK_SIGNAL",
+                        "ACCOUNT_TAKEOVER_INDICATOR"
+                )
+        )).doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectsElevenDecisionReasonCodes() {
+        assertThatThrownBy(() -> record(
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                FeedbackEvaluationLabel.POSITIVE_FRAUD,
+                List.of(
+                        "ANALYST_CONFIRMED_FRAUD",
+                        "CUSTOMER_CONFIRMED_FRAUD",
+                        "DOCUMENTATION_CONFIRMED_FRAUD",
+                        "CHARGEBACK_SIGNAL",
+                        "ACCOUNT_TAKEOVER_INDICATOR",
+                        "ANALYST_CONFIRMED_FRAUD",
+                        "CUSTOMER_CONFIRMED_FRAUD",
+                        "DOCUMENTATION_CONFIRMED_FRAUD",
+                        "CHARGEBACK_SIGNAL",
+                        "ACCOUNT_TAKEOVER_INDICATOR",
+                        "ANALYST_CONFIRMED_FRAUD"
+                )
+        )).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rejectsLabelIncompatibleDecisionReasonCodes() {
+        assertThatThrownBy(() -> record(
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                FeedbackEvaluationLabel.POSITIVE_FRAUD,
+                List.of("CUSTOMER_CONFIRMED_LEGITIMATE")
+        )).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> record(
+                FraudFeedbackLabel.CONFIRMED_LEGITIMATE,
+                FeedbackEvaluationLabel.NEGATIVE_LEGITIMATE,
+                List.of("CUSTOMER_CONFIRMED_FRAUD")
+        )).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rejectsUnknownOrUnsafeDecisionReasonCodes() {
+        assertThatThrownBy(() -> record(
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                FeedbackEvaluationLabel.POSITIVE_FRAUD,
+                List.of("RANDOM_REASON")
+        )).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> record(
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                FeedbackEvaluationLabel.POSITIVE_FRAUD,
+                List.of("TOKEN_SECRET")
+        )).isInstanceOf(IllegalArgumentException.class);
+    }
+
     private FeedbackDatasetRecord record(FraudFeedbackLabel feedbackLabel, FeedbackEvaluationLabel evaluationLabel) {
+        return record(feedbackLabel, evaluationLabel, List.of(reasonCode(feedbackLabel)));
+    }
+
+    private FeedbackDatasetRecord record(
+            FraudFeedbackLabel feedbackLabel,
+            FeedbackEvaluationLabel evaluationLabel,
+            List<String> decisionReasonCodes
+    ) {
         return new FeedbackDatasetRecord(
                 FeedbackDatasetBuilder.DATASET_VERSION,
                 FeedbackDatasetIdentifierHasher.evaluationRecordId("feedback-1"),
                 FeedbackDatasetIdentifierHasher.transactionReference("txn-1"),
                 feedbackLabel,
                 evaluationLabel,
-                List.of(reasonCode(feedbackLabel)),
+                decisionReasonCodes,
                 Instant.parse("2026-06-01T00:00:00Z"),
                 null,
                 null,
