@@ -1,9 +1,11 @@
 package com.frauddetection.alert.feedback.governance;
 
 import com.frauddetection.alert.feedback.FraudFeedbackLabel;
+import org.springframework.stereotype.Component;
 
 import java.util.Set;
 
+@Component
 public class FeedbackDatasetEligibilityPolicy {
 
     private static final Set<String> ELIGIBLE_DATASET_FIELDS = Set.of(

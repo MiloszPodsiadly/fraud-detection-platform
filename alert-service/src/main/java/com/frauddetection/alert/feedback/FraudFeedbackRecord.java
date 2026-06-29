@@ -8,6 +8,8 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDelt
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationStatus;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -15,6 +17,12 @@ import java.time.Instant;
 import java.util.List;
 
 @Document(collection = "fraud_feedback_records")
+@CompoundIndexes({
+        @CompoundIndex(
+                name = "fraud_feedback_dataset_created_label_id_idx",
+                def = "{'createdAt': 1, 'feedbackLabel': 1, 'feedbackId': 1}"
+        )
+})
 public class FraudFeedbackRecord {
 
     @Id
