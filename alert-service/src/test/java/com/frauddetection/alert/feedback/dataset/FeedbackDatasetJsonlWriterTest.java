@@ -21,7 +21,8 @@ class FeedbackDatasetJsonlWriterTest {
         assertThat(jsonl.lines().findFirst().orElseThrow())
                 .contains("\"type\":\"DATASET_METADATA\"")
                 .contains("\"datasetVersion\":\"feedback-dataset-v1\"")
-                .contains("\"timeBasis\":\"FEEDBACK_CREATED_AT\"");
+                .contains("\"timeBasis\":\"FEEDBACK_CREATED_AT\"")
+                .contains("\"skippedInvalidSourceRecordCount\":0");
     }
 
     @Test
@@ -61,6 +62,18 @@ class FeedbackDatasetJsonlWriterTest {
                 .contains("\"type\":\"DATASET_METADATA\"")
                 .contains("\"failureReason\":\"FEEDBACK_STORE_UNAVAILABLE\"")
                 .doesNotContain("\"type\":\"DATASET_RECORD\"");
+    }
+
+    @Test
+    void metadataLineIsNotDatasetRecordEvaluationRow() {
+        String jsonl = new FeedbackDatasetJsonlWriter().writeJsonl(result(List.of(record())));
+
+        List<String> lines = jsonl.lines().toList();
+
+        assertThat(lines.getFirst()).contains("\"type\":\"DATASET_METADATA\"");
+        assertThat(lines.getFirst()).doesNotContain("\"type\":\"DATASET_RECORD\"");
+        assertThat(lines.subList(1, lines.size()))
+                .allSatisfy(line -> assertThat(line).contains("\"type\":\"DATASET_RECORD\""));
     }
 
     @Test
@@ -115,6 +128,7 @@ class FeedbackDatasetJsonlWriterTest {
                 0,
                 0,
                 0,
+                0,
                 false,
                 FeedbackDatasetBuildFailureReason.NONE,
                 records
@@ -128,6 +142,7 @@ class FeedbackDatasetJsonlWriterTest {
                 FeedbackDatasetTimeBasis.FEEDBACK_CREATED_AT,
                 FROM,
                 TO,
+                0,
                 0,
                 0,
                 0,

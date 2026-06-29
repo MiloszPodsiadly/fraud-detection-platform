@@ -65,6 +65,7 @@ public class FeedbackDatasetBuilder {
         int excludedUnresolved = 0;
         int excludedGovernanceReview = 0;
         int skippedMissingRequired = 0;
+        int skippedInvalidSource = 0;
         List<FeedbackDatasetRecord> records = new ArrayList<>();
 
         for (FraudFeedbackRecord source : boundedRows) {
@@ -79,10 +80,12 @@ public class FeedbackDatasetBuilder {
             }
             try {
                 mappingPolicy.evaluationLabel(source.getFeedbackLabel())
-                        .map(label -> record(source, label))
+                        .map(label -> record(source, label, validatedDecisionReasonCodes(source)))
                         .ifPresent(records::add);
-            } catch (IllegalArgumentException exception) {
+            } catch (MissingRequiredSourceFieldException exception) {
                 skippedMissingRequired++;
+            } catch (IllegalArgumentException exception) {
+                skippedInvalidSource++;
             }
         }
 
@@ -94,6 +97,7 @@ public class FeedbackDatasetBuilder {
                 excludedUnresolved,
                 excludedGovernanceReview,
                 skippedMissingRequired,
+                skippedInvalidSource,
                 truncated,
                 records
         );
@@ -113,14 +117,18 @@ public class FeedbackDatasetBuilder {
         return request.maxRecords() == null || request.maxRecords() > 0;
     }
 
-    private FeedbackDatasetRecord record(FraudFeedbackRecord source, FeedbackEvaluationLabel evaluationLabel) {
+    private FeedbackDatasetRecord record(
+            FraudFeedbackRecord source,
+            FeedbackEvaluationLabel evaluationLabel,
+            List<String> validatedDecisionReasonCodes
+    ) {
         return new FeedbackDatasetRecord(
                 DATASET_VERSION,
-                FeedbackDatasetIdentifierHasher.evaluationRecordId(source.getFeedbackId()),
-                FeedbackDatasetIdentifierHasher.transactionReference(source.getTransactionId()),
+                FeedbackDatasetIdentifierHasher.evaluationRecordId(requireSourceText(source.getFeedbackId(), "feedbackId")),
+                FeedbackDatasetIdentifierHasher.transactionReference(requireSourceText(source.getTransactionId(), "transactionId")),
                 source.getFeedbackLabel(),
                 evaluationLabel,
-                source.getDecisionReasonCodes(),
+                validatedDecisionReasonCodes,
                 requireCreatedAt(source),
                 source.getFraudScore(),
                 source.getRiskLevel(),
@@ -139,10 +147,33 @@ public class FeedbackDatasetBuilder {
         );
     }
 
+    private List<String> validatedDecisionReasonCodes(FraudFeedbackRecord source) {
+        if (source.getDecisionReasonCodes() == null || source.getDecisionReasonCodes().isEmpty()) {
+            throw new MissingRequiredSourceFieldException();
+        }
+        return FeedbackDatasetReasonCodePolicy.validatedDecisionReasonCodes(
+                source.getFeedbackLabel(),
+                source.getDecisionReasonCodes()
+        );
+    }
+
     private Instant requireCreatedAt(FraudFeedbackRecord source) {
         if (source.getCreatedAt() == null) {
-            throw new IllegalArgumentException("createdAt is required");
+            throw new MissingRequiredSourceFieldException();
         }
         return source.getCreatedAt();
+    }
+
+    private String requireSourceText(String value, String fieldName) {
+        if (value == null || value.isBlank()) {
+            throw new MissingRequiredSourceFieldException();
+        }
+        if (value.chars().anyMatch(Character::isISOControl)) {
+            throw new IllegalArgumentException(fieldName + " contains control characters");
+        }
+        return value;
+    }
+
+    private static class MissingRequiredSourceFieldException extends RuntimeException {
     }
 }

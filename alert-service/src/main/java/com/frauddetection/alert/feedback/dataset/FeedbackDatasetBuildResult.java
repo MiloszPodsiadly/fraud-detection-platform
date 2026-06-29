@@ -15,6 +15,7 @@ public record FeedbackDatasetBuildResult(
         int excludedUnresolvedCount,
         int excludedGovernanceReviewCount,
         int skippedMissingRequiredFieldCount,
+        int skippedInvalidSourceRecordCount,
         boolean truncated,
         FeedbackDatasetBuildFailureReason failureReason,
         List<FeedbackDatasetRecord> records
@@ -27,7 +28,8 @@ public record FeedbackDatasetBuildResult(
         failureReason = failureReason == null ? FeedbackDatasetBuildFailureReason.NONE : failureReason;
         records = records == null ? List.of() : List.copyOf(records);
         if (rawRowsRead < 0 || recordsReturned < 0 || excludedUnresolvedCount < 0
-                || excludedGovernanceReviewCount < 0 || skippedMissingRequiredFieldCount < 0) {
+                || excludedGovernanceReviewCount < 0 || skippedMissingRequiredFieldCount < 0
+                || skippedInvalidSourceRecordCount < 0) {
             throw new IllegalArgumentException("dataset counts must not be negative");
         }
         if (failureReason != FeedbackDatasetBuildFailureReason.NONE) {
@@ -55,6 +57,7 @@ public record FeedbackDatasetBuildResult(
             int excludedUnresolvedCount,
             int excludedGovernanceReviewCount,
             int skippedMissingRequiredFieldCount,
+            int skippedInvalidSourceRecordCount,
             boolean truncated,
             List<FeedbackDatasetRecord> records
     ) {
@@ -69,6 +72,7 @@ public record FeedbackDatasetBuildResult(
                 excludedUnresolvedCount,
                 excludedGovernanceReviewCount,
                 skippedMissingRequiredFieldCount,
+                skippedInvalidSourceRecordCount,
                 truncated,
                 FeedbackDatasetBuildFailureReason.NONE,
                 records
@@ -86,6 +90,7 @@ public record FeedbackDatasetBuildResult(
                 FeedbackDatasetTimeBasis.FEEDBACK_CREATED_AT,
                 request == null ? null : request.fromInclusive(),
                 request == null ? null : request.toInclusive(),
+                0,
                 0,
                 0,
                 0,

@@ -46,6 +46,7 @@ public class FeedbackDatasetJsonlWriter {
         metadata.put("excludedUnresolvedCount", result.excludedUnresolvedCount());
         metadata.put("excludedGovernanceReviewCount", result.excludedGovernanceReviewCount());
         metadata.put("skippedMissingRequiredFieldCount", result.skippedMissingRequiredFieldCount());
+        metadata.put("skippedInvalidSourceRecordCount", result.skippedInvalidSourceRecordCount());
         metadata.put("truncated", result.truncated());
         metadata.put("failureReason", result.failureReason());
         return metadata;

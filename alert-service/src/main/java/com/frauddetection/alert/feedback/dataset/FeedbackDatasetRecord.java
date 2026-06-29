@@ -43,6 +43,7 @@ public record FeedbackDatasetRecord(
         transactionReference = FeedbackDatasetIdentifierHasher.requireTransactionReference(transactionReference);
         feedbackLabel = Objects.requireNonNull(feedbackLabel, "feedbackLabel is required");
         evaluationLabel = Objects.requireNonNull(evaluationLabel, "evaluationLabel is required");
+        validateLabelConsistency(feedbackLabel, evaluationLabel);
         feedbackCreatedAt = Objects.requireNonNull(feedbackCreatedAt, "feedbackCreatedAt is required");
         decisionReasonCodes = FeedbackDatasetSafety.copyRequiredMachineCodes(decisionReasonCodes, "decisionReasonCodes", 20);
         analystRecommendationReasonCodes = FeedbackDatasetSafety.copyMachineCodes(
@@ -61,5 +62,19 @@ public record FeedbackDatasetRecord(
             throw new IllegalArgumentException(fieldName + " is required");
         }
         return value;
+    }
+
+    private static void validateLabelConsistency(
+            FraudFeedbackLabel feedbackLabel,
+            FeedbackEvaluationLabel evaluationLabel
+    ) {
+        boolean consistent = switch (feedbackLabel) {
+            case CONFIRMED_FRAUD -> evaluationLabel == FeedbackEvaluationLabel.POSITIVE_FRAUD;
+            case CONFIRMED_LEGITIMATE -> evaluationLabel == FeedbackEvaluationLabel.NEGATIVE_LEGITIMATE;
+            case INCONCLUSIVE, NEEDS_MORE_INFO -> false;
+        };
+        if (!consistent) {
+            throw new IllegalArgumentException("feedbackLabel must match evaluationLabel");
+        }
     }
 }

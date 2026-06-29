@@ -102,12 +102,104 @@ class FeedbackDatasetBuilderTest {
         FraudFeedbackRecord missingTransaction = feedback("feedback-1", null, FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
         FraudFeedbackRecord missingReason = feedback("feedback-2", "txn-2", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM.plusSeconds(1));
         missingReason.setDecisionReasonCodes(List.of());
-        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(missingTransaction, missingReason));
+        FraudFeedbackRecord nullReason = feedback("feedback-3", "txn-3", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM.plusSeconds(2));
+        nullReason.setDecisionReasonCodes(null);
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(missingTransaction, missingReason, nullReason));
 
         FeedbackDatasetBuildResult result = builder.build(request(10));
 
         assertThat(result.records()).isEmpty();
-        assertThat(result.skippedMissingRequiredFieldCount()).isEqualTo(2);
+        assertThat(result.skippedMissingRequiredFieldCount()).isEqualTo(3);
+        assertThat(result.skippedInvalidSourceRecordCount()).isZero();
+    }
+
+    @Test
+    void validFraudCompatibleReasonCodeIsExported() {
+        FraudFeedbackRecord feedback = feedback(
+                "feedback-1",
+                "txn-1",
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                FROM
+        );
+        feedback.setDecisionReasonCodes(List.of("CUSTOMER_CONFIRMED_FRAUD"));
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(feedback));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.records()).hasSize(1);
+        assertThat(result.records().getFirst().decisionReasonCodes()).containsExactly("CUSTOMER_CONFIRMED_FRAUD");
+    }
+
+    @Test
+    void validLegitimateCompatibleReasonCodeIsExported() {
+        FraudFeedbackRecord feedback = feedback(
+                "feedback-1",
+                "txn-1",
+                FraudFeedbackLabel.CONFIRMED_LEGITIMATE,
+                FROM
+        );
+        feedback.setDecisionReasonCodes(List.of("CUSTOMER_CONFIRMED_LEGITIMATE"));
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(feedback));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.records()).hasSize(1);
+        assertThat(result.records().getFirst().decisionReasonCodes()).containsExactly("CUSTOMER_CONFIRMED_LEGITIMATE");
+    }
+
+    @Test
+    void fraudLabelWithLegitimateOnlyReasonCodeIsSkippedAsInvalidSource() {
+        FraudFeedbackRecord feedback = feedback("feedback-1", "txn-1", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        feedback.setDecisionReasonCodes(List.of("CUSTOMER_CONFIRMED_LEGITIMATE"));
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(feedback));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.failed()).isFalse();
+        assertThat(result.rawRowsRead()).isEqualTo(1);
+        assertThat(result.recordsReturned()).isZero();
+        assertThat(result.skippedMissingRequiredFieldCount()).isZero();
+        assertThat(result.skippedInvalidSourceRecordCount()).isEqualTo(1);
+    }
+
+    @Test
+    void legitimateLabelWithFraudOnlyReasonCodeIsSkippedAsInvalidSource() {
+        FraudFeedbackRecord feedback = feedback("feedback-1", "txn-1", FraudFeedbackLabel.CONFIRMED_LEGITIMATE, FROM);
+        feedback.setDecisionReasonCodes(List.of("CUSTOMER_CONFIRMED_FRAUD"));
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(feedback));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.records()).isEmpty();
+        assertThat(result.skippedInvalidSourceRecordCount()).isEqualTo(1);
+    }
+
+    @Test
+    void unknownReasonCodeIsSkippedAsInvalidSource() {
+        FraudFeedbackRecord feedback = feedback("feedback-1", "txn-1", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        feedback.setDecisionReasonCodes(List.of("RANDOM_REASON"));
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(feedback));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.records()).isEmpty();
+        assertThat(result.skippedInvalidSourceRecordCount()).isEqualTo(1);
+    }
+
+    @Test
+    void unsafeReasonCodeIsSkippedAsInvalidSourceAndNotSerialized() {
+        FraudFeedbackRecord feedback = feedback("feedback-1", "txn-1", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        feedback.setDecisionReasonCodes(List.of("TOKEN_SECRET"));
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(feedback));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+        String jsonl = new FeedbackDatasetJsonlWriter().writeJsonl(result);
+
+        assertThat(result.records()).isEmpty();
+        assertThat(result.skippedInvalidSourceRecordCount()).isEqualTo(1);
+        assertThat(jsonl)
+                .contains("\"skippedInvalidSourceRecordCount\":1")
+                .doesNotContain("TOKEN_SECRET");
     }
 
     @Test
@@ -220,9 +312,22 @@ class FeedbackDatasetBuilderTest {
         record.setTransactionId(transactionId);
         record.setFeedbackLabel(label);
         record.setCreatedAt(createdAt);
-        record.setDecisionReasonCodes(List.of("ANALYST_CONFIRMED_FRAUD"));
+        record.setDecisionReasonCodes(defaultReasonCodes(label));
         record.setFraudScore(0.91);
         record.setRiskLevel(RiskLevel.HIGH);
         return record;
+    }
+
+    private List<String> defaultReasonCodes(FraudFeedbackLabel label) {
+        if (label == FraudFeedbackLabel.CONFIRMED_LEGITIMATE) {
+            return List.of("ANALYST_CONFIRMED_LEGITIMATE");
+        }
+        if (label == FraudFeedbackLabel.INCONCLUSIVE) {
+            return List.of("ANALYST_INCONCLUSIVE");
+        }
+        if (label == FraudFeedbackLabel.NEEDS_MORE_INFO) {
+            return List.of("ANALYST_NEEDS_MORE_INFO");
+        }
+        return List.of("ANALYST_CONFIRMED_FRAUD");
     }
 }
