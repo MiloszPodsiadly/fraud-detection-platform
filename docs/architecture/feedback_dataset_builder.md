@@ -65,9 +65,9 @@ Unresolved labels are not written to JSONL v1.
 - `CONFIRMED_LEGITIMATE` + `NEGATIVE_LEGITIMATE`
 
 The dataset boundary validates `decisionReasonCodes` before serialization. Codes must be non-empty, known
-`FraudFeedbackReasonCode` values, and compatible with the feedback label using the fraud feedback write-path rules.
-Unknown, unsafe, or label-incompatible reason codes cause the source row to be skipped; no fake dataset record is
-emitted.
+`FraudFeedbackReasonCode` values, compatible with the feedback label using the fraud feedback write-path rules, and
+bounded to at most 10 values. Unknown, unsafe, or label-incompatible reason codes cause the source row to be skipped;
+no fake dataset record is emitted.
 
 ## Record Shape
 

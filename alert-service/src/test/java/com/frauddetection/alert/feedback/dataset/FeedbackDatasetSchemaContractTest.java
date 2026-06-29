@@ -53,6 +53,29 @@ class FeedbackDatasetSchemaContractTest {
     }
 
     @Test
+    void schemaDocumentsFeedbackLabelEvaluationLabelPairConstraints() throws Exception {
+        String schema = Files.readString(SCHEMA);
+
+        assertThat(schema)
+                .contains("\"allOf\"")
+                .contains("\"if\"")
+                .contains("\"then\"")
+                .contains("\"feedbackLabel\"")
+                .contains("\"evaluationLabel\"")
+                .contains("\"const\": \"CONFIRMED_FRAUD\"")
+                .contains("\"const\": \"POSITIVE_FRAUD\"")
+                .contains("\"const\": \"CONFIRMED_LEGITIMATE\"")
+                .contains("\"const\": \"NEGATIVE_LEGITIMATE\"");
+    }
+
+    @Test
+    void schemaKeepsDecisionReasonCodeLimitAtTen() throws Exception {
+        String schema = Files.readString(SCHEMA);
+
+        assertThat(schema).contains("\"maxItems\": 10");
+    }
+
+    @Test
     void schemaDoesNotAllowForbiddenDatasetFields() throws Exception {
         String schema = Files.readString(SCHEMA);
 
@@ -106,6 +129,55 @@ class FeedbackDatasetSchemaContractTest {
         assertThat(record.get("evaluationLabel").asString()).isEqualTo("POSITIVE_FRAUD");
         assertThat(record.get("decisionReasonCodes").get(0).asString()).isEqualTo("ANALYST_CONFIRMED_FRAUD");
         assertThat(record.get("feedbackCreatedAt").asString()).isEqualTo("2026-06-01T00:00:00Z");
+    }
+
+    @Test
+    void schemaEquivalentContractAcceptsValidEvaluationPairs() {
+        assertSchemaEquivalentRecordAccepted(
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                FeedbackEvaluationLabel.POSITIVE_FRAUD,
+                List.of("ANALYST_CONFIRMED_FRAUD")
+        );
+        assertSchemaEquivalentRecordAccepted(
+                FraudFeedbackLabel.CONFIRMED_LEGITIMATE,
+                FeedbackEvaluationLabel.NEGATIVE_LEGITIMATE,
+                List.of("ANALYST_CONFIRMED_LEGITIMATE")
+        );
+    }
+
+    @Test
+    void schemaEquivalentContractRejectsMismatchedEvaluationPairs() {
+        assertSchemaEquivalentRecordRejected(
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                FeedbackEvaluationLabel.NEGATIVE_LEGITIMATE,
+                List.of("ANALYST_CONFIRMED_FRAUD")
+        );
+        assertSchemaEquivalentRecordRejected(
+                FraudFeedbackLabel.CONFIRMED_LEGITIMATE,
+                FeedbackEvaluationLabel.POSITIVE_FRAUD,
+                List.of("ANALYST_CONFIRMED_LEGITIMATE")
+        );
+    }
+
+    @Test
+    void schemaEquivalentContractRejectsElevenDecisionReasonCodes() {
+        assertSchemaEquivalentRecordRejected(
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                FeedbackEvaluationLabel.POSITIVE_FRAUD,
+                List.of(
+                        "ANALYST_CONFIRMED_FRAUD",
+                        "CUSTOMER_CONFIRMED_FRAUD",
+                        "DOCUMENTATION_CONFIRMED_FRAUD",
+                        "CHARGEBACK_SIGNAL",
+                        "ACCOUNT_TAKEOVER_INDICATOR",
+                        "ANALYST_CONFIRMED_FRAUD",
+                        "CUSTOMER_CONFIRMED_FRAUD",
+                        "DOCUMENTATION_CONFIRMED_FRAUD",
+                        "CHARGEBACK_SIGNAL",
+                        "ACCOUNT_TAKEOVER_INDICATOR",
+                        "ANALYST_CONFIRMED_FRAUD"
+                )
+        );
     }
 
     @Test
@@ -186,13 +258,25 @@ class FeedbackDatasetSchemaContractTest {
     }
 
     private FeedbackDatasetRecord record() {
+        return record(
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                FeedbackEvaluationLabel.POSITIVE_FRAUD,
+                List.of("ANALYST_CONFIRMED_FRAUD")
+        );
+    }
+
+    private FeedbackDatasetRecord record(
+            FraudFeedbackLabel feedbackLabel,
+            FeedbackEvaluationLabel evaluationLabel,
+            List<String> decisionReasonCodes
+    ) {
         return new FeedbackDatasetRecord(
                 FeedbackDatasetBuilder.DATASET_VERSION,
                 FeedbackDatasetIdentifierHasher.evaluationRecordId("feedback-raw-1"),
                 FeedbackDatasetIdentifierHasher.transactionReference("txn-raw-1"),
-                FraudFeedbackLabel.CONFIRMED_FRAUD,
-                FeedbackEvaluationLabel.POSITIVE_FRAUD,
-                List.of("ANALYST_CONFIRMED_FRAUD"),
+                feedbackLabel,
+                evaluationLabel,
+                decisionReasonCodes,
                 FROM,
                 null,
                 null,
@@ -209,6 +293,31 @@ class FeedbackDatasetSchemaContractTest {
                 null,
                 null
         );
+    }
+
+    private void assertSchemaEquivalentRecordAccepted(
+            FraudFeedbackLabel feedbackLabel,
+            FeedbackEvaluationLabel evaluationLabel,
+            List<String> decisionReasonCodes
+    ) {
+        FeedbackDatasetRecord accepted = record(feedbackLabel, evaluationLabel, decisionReasonCodes);
+
+        assertThat(accepted.feedbackLabel()).isEqualTo(feedbackLabel);
+        assertThat(accepted.evaluationLabel()).isEqualTo(evaluationLabel);
+        assertThat(accepted.decisionReasonCodes()).hasSizeLessThanOrEqualTo(10);
+    }
+
+    private void assertSchemaEquivalentRecordRejected(
+            FraudFeedbackLabel feedbackLabel,
+            FeedbackEvaluationLabel evaluationLabel,
+            List<String> decisionReasonCodes
+    ) {
+        try {
+            record(feedbackLabel, evaluationLabel, decisionReasonCodes);
+        } catch (IllegalArgumentException exception) {
+            return;
+        }
+        throw new AssertionError("schema-equivalent record contract accepted invalid dataset record");
     }
 
     private static Path repositoryRoot() {
