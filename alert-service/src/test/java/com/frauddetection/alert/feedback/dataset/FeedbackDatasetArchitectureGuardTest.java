@@ -81,13 +81,26 @@ class FeedbackDatasetArchitectureGuardTest {
 
     @Test
     void documentationMentionsFdp123Boundary() throws IOException {
-        String docs = Files.readString(ROOT.resolve("docs/architecture/feedback_dataset_governance.md"));
+        String docs = Files.readString(ROOT.resolve("docs/architecture/feedback_dataset_governance.md"))
+                + "\n"
+                + Files.readString(ROOT.resolve("docs/architecture/feedback_dataset_builder.md"));
 
         assertThat(docs)
                 .contains("FDP-123")
                 .contains("FeedbackDatasetEligibilityPolicy")
                 .contains("not training")
-                .contains("separate bounded context");
+                .contains("separate bounded context")
+                .contains("DATASET_METADATA")
+                .contains("DATASET_RECORD")
+                .contains("Consumers must ignore or separately parse lines where `type != DATASET_RECORD`")
+                .contains("`rawRowsRead` is the bounded number of candidate rows fetched")
+                .contains("pseudonymous references are not anonymization")
+                .contains("identifier strategy must be reviewed separately");
+    }
+
+    @Test
+    void feedbackDatasetSchemaArtifactExists() {
+        assertThat(ROOT.resolve("docs/schemas/feedback_dataset_record.schema.json")).exists();
     }
 
     private String datasetProductionText() throws IOException {

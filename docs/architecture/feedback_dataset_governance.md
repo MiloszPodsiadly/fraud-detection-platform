@@ -56,3 +56,10 @@ decision, payment decision, payment authorization, token, secret, and password.
 
 FDP-123 JSONL uses pseudonymous `evaluationRecordId` and `transactionReference` values instead of raw feedback or
 transaction ids. These pseudonymous references are not anonymization and not a privacy boundary.
+
+If the FDP-123 dataset is ever exposed outside the internal service boundary, identifier strategy must be reviewed
+separately, potentially using keyed HMAC or another approved pseudonymization mechanism. FDP-123 does not implement
+that external export boundary.
+
+The machine-readable JSONL envelope contract lives at `docs/schemas/feedback_dataset_record.schema.json`. The metadata
+line is not an evaluation row; future consumers must build evaluation rows from `DATASET_RECORD` lines only.

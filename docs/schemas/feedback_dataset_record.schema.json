@@ -1,0 +1,245 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frauddetection.local/schemas/feedback_dataset_record.schema.json",
+  "title": "FDP-123 feedback dataset JSONL envelope line",
+  "description": "Schema for one line of the internal FDP-123 feedback dataset JSONL envelope. Line 1 is DATASET_METADATA; following evaluation rows are DATASET_RECORD lines.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "datasetVersion",
+        "builtAt",
+        "timeBasis",
+        "fromInclusive",
+        "toInclusive",
+        "rawRowsRead",
+        "recordsReturned",
+        "excludedUnresolvedCount",
+        "excludedGovernanceReviewCount",
+        "skippedMissingRequiredFieldCount",
+        "skippedInvalidSourceRecordCount",
+        "truncated",
+        "failureReason"
+      ],
+      "properties": {
+        "type": {
+          "const": "DATASET_METADATA"
+        },
+        "datasetVersion": {
+          "type": "string"
+        },
+        "builtAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "timeBasis": {
+          "const": "FEEDBACK_CREATED_AT"
+        },
+        "fromInclusive": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "toInclusive": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "rawRowsRead": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recordsReturned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "excludedUnresolvedCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "excludedGovernanceReviewCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skippedMissingRequiredFieldCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skippedInvalidSourceRecordCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "failureReason": {
+          "enum": [
+            "NONE",
+            "INVALID_REQUEST",
+            "FEEDBACK_STORE_UNAVAILABLE",
+            "DATASET_SERIALIZATION_FAILED"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "record"
+      ],
+      "properties": {
+        "type": {
+          "const": "DATASET_RECORD"
+        },
+        "record": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "datasetVersion",
+            "evaluationRecordId",
+            "transactionReference",
+            "feedbackLabel",
+            "evaluationLabel",
+            "decisionReasonCodes",
+            "feedbackCreatedAt"
+          ],
+          "properties": {
+            "datasetVersion": {
+              "type": "string"
+            },
+            "evaluationRecordId": {
+              "type": "string",
+              "pattern": "^eval_[a-f0-9]{32}$"
+            },
+            "transactionReference": {
+              "type": "string",
+              "pattern": "^txnref_[a-f0-9]{32}$"
+            },
+            "feedbackLabel": {
+              "enum": [
+                "CONFIRMED_FRAUD",
+                "CONFIRMED_LEGITIMATE"
+              ]
+            },
+            "evaluationLabel": {
+              "enum": [
+                "POSITIVE_FRAUD",
+                "NEGATIVE_LEGITIMATE"
+              ]
+            },
+            "decisionReasonCodes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 10,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Z0-9_]{1,64}$"
+              }
+            },
+            "feedbackCreatedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "fraudScore": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "riskLevel": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "alertRecommended": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "engineIntelligenceStatus": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "agreementStatus": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "riskMismatchStatus": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "scoreDeltaBucket": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "analystRecommendationStatus": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "analystRecommendation": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "analystRecommendationVersion": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "analystRecommendationGeneratedAt": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "analystRecommendationReasonCodes": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Z0-9_]{1,64}$"
+              }
+            },
+            "scoredAt": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "transactionTimestamp": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
