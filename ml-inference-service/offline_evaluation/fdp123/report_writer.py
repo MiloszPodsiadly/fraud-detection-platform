@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -73,8 +74,13 @@ def disagreement_jsonl(report: dict[str, Any]) -> str:
     return "\n".join(lines) + ("\n" if lines else "")
 
 
-def write_fdp123_reports(reports: dict[str, Any], output_dir: Path) -> dict[str, Path]:
-    output_dir.mkdir(parents=True, exist_ok=True)
+def write_fdp123_reports(
+        reports: dict[str, Any],
+        output_dir: Path,
+        allow_output_root: Path | None = None,
+) -> dict[str, Path]:
+    output_dir = Path(output_dir)
+    _prepare_output_dir(output_dir, allow_output_root)
     paths = {
         "evaluationSummary": output_dir / "evaluation_summary.json",
         "scoreBucketReport": output_dir / "score_bucket_report.json",
@@ -82,11 +88,14 @@ def write_fdp123_reports(reports: dict[str, Any], output_dir: Path) -> dict[str,
         "disagreementReport": output_dir / "disagreement_report.jsonl",
         "evaluationRunMarkdown": output_dir / "evaluation_run.md",
     }
-    paths["evaluationSummary"].write_text(report_json(reports["evaluationSummary"]), encoding="utf-8")
-    paths["scoreBucketReport"].write_text(report_json(reports["scoreBucketReport"]), encoding="utf-8")
-    paths["riskLevelReport"].write_text(report_json(reports["riskLevelReport"]), encoding="utf-8")
-    paths["disagreementReport"].write_text(disagreement_jsonl(reports["disagreementReport"]), encoding="utf-8")
-    paths["evaluationRunMarkdown"].write_text(evaluation_run_markdown(reports["evaluationSummary"]), encoding="utf-8")
+    payloads = {
+        paths["evaluationSummary"]: report_json(reports["evaluationSummary"]),
+        paths["scoreBucketReport"]: report_json(reports["scoreBucketReport"]),
+        paths["riskLevelReport"]: report_json(reports["riskLevelReport"]),
+        paths["disagreementReport"]: disagreement_jsonl(reports["disagreementReport"]),
+        paths["evaluationRunMarkdown"]: evaluation_run_markdown(reports["evaluationSummary"]),
+    }
+    _write_artifacts_atomically(payloads)
     return paths
 
 
@@ -136,6 +145,42 @@ def _reject_forbidden_report_payload(payload: str) -> None:
             raise ValueError(f"report contains forbidden term: {forbidden}")
 
 
+def _prepare_output_dir(output_dir: Path, allow_output_root: Path | None) -> None:
+    if output_dir.exists():
+        if output_dir.is_symlink():
+            raise ValueError("output directory must not be a symlink")
+        if not output_dir.is_dir():
+            raise ValueError("output path exists and is not a directory")
+    if allow_output_root is not None:
+        resolved_output = output_dir.resolve()
+        resolved_root = Path(allow_output_root).resolve()
+        if resolved_output != resolved_root and resolved_root not in resolved_output.parents:
+            raise ValueError("output directory is outside allowed output root")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if output_dir.is_symlink():
+        raise ValueError("output directory must not be a symlink")
+
+
+def _write_artifacts_atomically(payloads: dict[Path, str]) -> None:
+    temporary_paths = [path.with_name(path.name + ".tmp") for path in payloads]
+    try:
+        for final_path in payloads:
+            if final_path.is_symlink():
+                raise ValueError(f"final artifact path must not be a symlink: {final_path.name}")
+        for final_path, payload in payloads.items():
+            tmp_path = final_path.with_name(final_path.name + ".tmp")
+            if tmp_path.exists() or tmp_path.is_symlink():
+                tmp_path.unlink()
+            tmp_path.write_text(payload, encoding="utf-8")
+        for final_path in payloads:
+            tmp_path = final_path.with_name(final_path.name + ".tmp")
+            os.replace(tmp_path, final_path)
+    except Exception:
+        for tmp_path in temporary_paths:
+            if tmp_path.exists() or tmp_path.is_symlink():
+                tmp_path.unlink()
+        raise
+
+
 def _compact(value: str) -> str:
     return "".join(character for character in value.lower() if character.isalnum())
-

@@ -44,8 +44,13 @@ def build_fdp123_evaluation_reports(
     }
 
 
-def run_fdp123_evaluation(input_path: str | Path, output_dir: str | Path, generated_at: str | None = None) -> dict[str, Path]:
+def run_fdp123_evaluation(
+        input_path: str | Path,
+        output_dir: str | Path,
+        generated_at: str | None = None,
+        allow_output_root: str | Path | None = None,
+) -> dict[str, Path]:
     dataset = read_fdp123_feedback_dataset_jsonl(input_path)
     reports = build_fdp123_evaluation_reports(dataset, generated_at=generated_at)
-    return write_fdp123_reports(reports, Path(output_dir))
-
+    root = Path(allow_output_root) if allow_output_root is not None else None
+    return write_fdp123_reports(reports, Path(output_dir), allow_output_root=root)
