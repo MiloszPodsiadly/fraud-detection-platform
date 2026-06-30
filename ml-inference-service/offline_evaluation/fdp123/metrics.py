@@ -43,8 +43,8 @@ def build_fdp123_metrics(
         "classBalance": {
             "positiveClassCount": len(positives),
             "negativeClassCount": len(negatives),
-            "positiveClassShare": _share(len(positives), len(records)),
-            "negativeClassShare": _share(len(negatives), len(records)),
+            "positiveClassShare": _metric_value(len(positives), len(records), "EMPTY_DATASET"),
+            "negativeClassShare": _metric_value(len(negatives), len(records), "EMPTY_DATASET"),
         },
         "alertRecommendedConfusionMatrix": _alert_recommended_confusion_matrix(records),
         "riskLevelBreakdown": _risk_level_breakdown(records),
@@ -83,14 +83,23 @@ def _warnings(
     return sorted(warnings)
 
 
-def _alert_recommended_confusion_matrix(records: list[Fdp123DatasetRecord]) -> dict[str, int]:
+def _alert_recommended_confusion_matrix(records: list[Fdp123DatasetRecord]) -> dict[str, object]:
     evaluated = [record for record in records if record.alert_recommended is not None]
+    true_positive = sum(1 for record in evaluated if record.alert_recommended is True and record.is_positive_class)
+    false_positive = sum(1 for record in evaluated if record.alert_recommended is True and record.is_negative_class)
+    true_negative = sum(1 for record in evaluated if record.alert_recommended is False and record.is_negative_class)
+    false_negative = sum(1 for record in evaluated if record.alert_recommended is False and record.is_positive_class)
     return {
-        "truePositive": sum(1 for record in evaluated if record.alert_recommended is True and record.is_positive_class),
-        "falsePositive": sum(1 for record in evaluated if record.alert_recommended is True and record.is_negative_class),
-        "trueNegative": sum(1 for record in evaluated if record.alert_recommended is False and record.is_negative_class),
-        "falseNegative": sum(1 for record in evaluated if record.alert_recommended is False and record.is_positive_class),
+        "recordsWithSignal": len(evaluated),
+        "truePositive": true_positive,
+        "falsePositive": false_positive,
+        "trueNegative": true_negative,
+        "falseNegative": false_negative,
         "missingAlertRecommendedCount": sum(1 for record in records if record.alert_recommended is None),
+        "precision": _metric_value(true_positive, true_positive + false_positive, "NO_PREDICTED_POSITIVES"),
+        "recall": _metric_value(true_positive, true_positive + false_negative, "NO_ACTUAL_POSITIVES"),
+        "falsePositiveRate": _metric_value(false_positive, false_positive + true_negative, "NO_ACTUAL_NEGATIVES"),
+        "falseNegativeRate": _metric_value(false_negative, false_negative + true_positive, "NO_ACTUAL_POSITIVES"),
     }
 
 
@@ -127,7 +136,7 @@ def _fraud_score_bucket_analysis(records: list[Fdp123DatasetRecord], score_bucke
             "recordCount": len(in_bucket),
             "positiveClassCount": positive_count,
             "negativeClassCount": len(in_bucket) - positive_count,
-            "positiveClassShare": _share(positive_count, len(in_bucket)),
+            "positiveClassShare": _metric_value(positive_count, len(in_bucket), "NO_BUCKET_RECORDS"),
         })
     return rows
 
@@ -138,7 +147,7 @@ def _score_in_bucket(score: float, lower: float, upper: float, inclusive_upper: 
     return lower <= score < upper
 
 
-def _precision_at_k(scored: list[Fdp123DatasetRecord], top_k_values: tuple[int, ...]) -> dict[str, dict[str, int | float | None]]:
+def _precision_at_k(scored: list[Fdp123DatasetRecord], top_k_values: tuple[int, ...]) -> dict[str, dict[str, object]]:
     result = {}
     for top_k in top_k_values:
         if top_k < 1:
@@ -147,7 +156,7 @@ def _precision_at_k(scored: list[Fdp123DatasetRecord], top_k_values: tuple[int, 
         result[str(top_k)] = {
             "requestedK": top_k,
             "actualK": len(slice_),
-            "value": _share(sum(1 for record in slice_ if record.is_positive_class), len(slice_)),
+            "value": _metric_value(sum(1 for record in slice_ if record.is_positive_class), len(slice_), "NO_SCORED_RECORDS"),
         }
     return result
 
@@ -156,7 +165,7 @@ def _recall_at_k(
         scored: list[Fdp123DatasetRecord],
         total_positive: int,
         top_k_values: tuple[int, ...],
-) -> dict[str, dict[str, int | float | None]]:
+) -> dict[str, dict[str, object]]:
     result = {}
     for top_k in top_k_values:
         if top_k < 1:
@@ -165,13 +174,12 @@ def _recall_at_k(
         result[str(top_k)] = {
             "requestedK": top_k,
             "actualK": len(slice_),
-            "value": _share(sum(1 for record in slice_ if record.is_positive_class), total_positive),
+            "value": _metric_value(sum(1 for record in slice_ if record.is_positive_class), total_positive, "NO_POSITIVE_RECORDS"),
         }
     return result
 
 
-def _share(numerator: int, denominator: int) -> float | None:
+def _metric_value(numerator: int, denominator: int, unavailable_reason: str) -> dict[str, float | bool | str | None]:
     if denominator == 0:
-        return None
-    return round(numerator / denominator, 6)
-
+        return {"available": False, "reason": unavailable_reason, "value": None}
+    return {"available": True, "reason": None, "value": round(numerator / denominator, 6)}

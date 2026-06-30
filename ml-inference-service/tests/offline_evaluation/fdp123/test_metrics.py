@@ -27,7 +27,8 @@ class Fdp123MetricsTest(unittest.TestCase):
         metrics = self._metrics()
 
         self.assertIn("EMPTY_DATASET", metrics["warnings"])
-        self.assertIsNone(metrics["classBalance"]["positiveClassShare"])
+        self.assertFalse(metrics["classBalance"]["positiveClassShare"]["available"])
+        self.assertEqual("EMPTY_DATASET", metrics["classBalance"]["positiveClassShare"]["reason"])
 
     def test_singleClassDatasetWarning(self):
         metrics = self._metrics(record())
@@ -59,10 +60,24 @@ class Fdp123MetricsTest(unittest.TestCase):
         )
 
         matrix = metrics["alertRecommendedConfusionMatrix"]
+        self.assertEqual(4, matrix["recordsWithSignal"])
         self.assertEqual(1, matrix["truePositive"])
         self.assertEqual(1, matrix["falsePositive"])
         self.assertEqual(1, matrix["trueNegative"])
         self.assertEqual(1, matrix["falseNegative"])
+        self.assertEqual(0.5, matrix["precision"]["value"])
+        self.assertEqual(0.5, matrix["recall"]["value"])
+        self.assertEqual(0.5, matrix["falsePositiveRate"]["value"])
+        self.assertEqual(0.5, matrix["falseNegativeRate"]["value"])
+
+    def test_recordsWithSignalExcludesMissingAlertRecommended(self):
+        metrics = self._metrics(record(alertRecommended=None), record(
+            evaluationRecordId="eval_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            transactionReference="txnref_cccccccccccccccccccccccccccccccc",
+            alertRecommended=True,
+        ))
+
+        self.assertEqual(1, metrics["alertRecommendedConfusionMatrix"]["recordsWithSignal"])
 
     def test_missingAlertRecommendedCounted(self):
         metrics = self._metrics(record(alertRecommended=None))
@@ -89,18 +104,22 @@ class Fdp123MetricsTest(unittest.TestCase):
 
         self.assertEqual(1, metrics["missingFraudScoreCount"])
         self.assertEqual(1, metrics["fraudScoreBucketAnalysis"][0]["recordCount"])
+        self.assertTrue(metrics["fraudScoreBucketAnalysis"][0]["positiveClassShare"]["available"])
+        self.assertFalse(metrics["fraudScoreBucketAnalysis"][1]["positiveClassShare"]["available"])
+        self.assertEqual("NO_BUCKET_RECORDS", metrics["fraudScoreBucketAnalysis"][1]["positiveClassShare"]["reason"])
 
     def test_precisionAtKUsesActualK(self):
         metrics = self._metrics(record(fraudScore=0.9))
 
         self.assertEqual(1, metrics["precisionAtK"]["10"]["actualK"])
-        self.assertEqual(1.0, metrics["precisionAtK"]["10"]["value"])
+        self.assertEqual(1.0, metrics["precisionAtK"]["10"]["value"]["value"])
 
     def test_precisionAtKWithNoScoredRowsIsUnavailable(self):
         metrics = self._metrics(record(fraudScore=None))
 
         self.assertEqual(0, metrics["precisionAtK"]["10"]["actualK"])
-        self.assertIsNone(metrics["precisionAtK"]["10"]["value"])
+        self.assertFalse(metrics["precisionAtK"]["10"]["value"]["available"])
+        self.assertEqual("NO_SCORED_RECORDS", metrics["precisionAtK"]["10"]["value"]["reason"])
 
     def test_recallAtKWithNoPositiveIsUnavailable(self):
         metrics = self._metrics(record(
@@ -108,7 +127,43 @@ class Fdp123MetricsTest(unittest.TestCase):
             evaluationLabel="NEGATIVE_LEGITIMATE",
         ))
 
-        self.assertIsNone(metrics["recallAtK"]["10"]["value"])
+        self.assertFalse(metrics["recallAtK"]["10"]["value"]["available"])
+        self.assertEqual("NO_POSITIVE_RECORDS", metrics["recallAtK"]["10"]["value"]["reason"])
+
+    def test_alertPrecisionUnavailableWhenNoPredictedPositives(self):
+        metrics = self._metrics(record(alertRecommended=False))
+
+        precision = metrics["alertRecommendedConfusionMatrix"]["precision"]
+        self.assertFalse(precision["available"])
+        self.assertEqual("NO_PREDICTED_POSITIVES", precision["reason"])
+
+    def test_alertRecallUnavailableWhenNoActualPositives(self):
+        metrics = self._metrics(record(feedbackLabel="CONFIRMED_LEGITIMATE", evaluationLabel="NEGATIVE_LEGITIMATE"))
+
+        recall = metrics["alertRecommendedConfusionMatrix"]["recall"]
+        self.assertFalse(recall["available"])
+        self.assertEqual("NO_ACTUAL_POSITIVES", recall["reason"])
+
+    def test_falsePositiveRateUnavailableWhenNoActualNegatives(self):
+        metrics = self._metrics(record())
+
+        false_positive_rate = metrics["alertRecommendedConfusionMatrix"]["falsePositiveRate"]
+        self.assertFalse(false_positive_rate["available"])
+        self.assertEqual("NO_ACTUAL_NEGATIVES", false_positive_rate["reason"])
+
+    def test_falseNegativeRateUnavailableWhenNoActualPositives(self):
+        metrics = self._metrics(record(feedbackLabel="CONFIRMED_LEGITIMATE", evaluationLabel="NEGATIVE_LEGITIMATE"))
+
+        false_negative_rate = metrics["alertRecommendedConfusionMatrix"]["falseNegativeRate"]
+        self.assertFalse(false_negative_rate["available"])
+        self.assertEqual("NO_ACTUAL_POSITIVES", false_negative_rate["reason"])
+
+    def test_fixturesUseFdp123CompatibleReasonCodes(self):
+        self.assertEqual(["CUSTOMER_CONFIRMED_FRAUD"], record()["decisionReasonCodes"])
+        self.assertEqual(
+            ["CUSTOMER_CONFIRMED_LEGITIMATE"],
+            record(feedbackLabel="CONFIRMED_LEGITIMATE", evaluationLabel="NEGATIVE_LEGITIMATE")["decisionReasonCodes"],
+        )
 
     def _metrics(self, *records):
         with jsonl_file(jsonl(*records)) as path:

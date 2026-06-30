@@ -37,7 +37,7 @@ def record(**overrides: object) -> dict[str, object]:
         "transactionReference": "txnref_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "feedbackLabel": "CONFIRMED_FRAUD",
         "evaluationLabel": "POSITIVE_FRAUD",
-        "decisionReasonCodes": ["CUSTOMER_CONFIRMED"],
+        "decisionReasonCodes": ["CUSTOMER_CONFIRMED_FRAUD"],
         "feedbackCreatedAt": "2026-06-03T12:00:00Z",
         "fraudScore": 0.91,
         "riskLevel": "HIGH",
@@ -55,6 +55,8 @@ def record(**overrides: object) -> dict[str, object]:
         "transactionTimestamp": "2026-06-03T11:58:00Z",
     }
     payload.update(overrides)
+    if "decisionReasonCodes" not in overrides and payload["feedbackLabel"] == "CONFIRMED_LEGITIMATE":
+        payload["decisionReasonCodes"] = ["CUSTOMER_CONFIRMED_LEGITIMATE"]
     return payload
 
 
@@ -74,4 +76,3 @@ def jsonl_file(payload: str):
         path = Path(directory) / "fdp123.jsonl"
         path.write_text(payload, encoding="utf-8")
         yield path
-
