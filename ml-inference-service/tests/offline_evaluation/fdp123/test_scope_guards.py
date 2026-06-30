@@ -12,6 +12,7 @@ except ModuleNotFoundError:
 
 ROOT = Path(__file__).resolve().parents[4]
 FDP123_ROOT = ROOT / "ml-inference-service" / "offline_evaluation" / "fdp123"
+RUNNER = FDP123_ROOT / "run_fdp123_evaluation.py"
 DOC = ROOT / "docs" / "architecture" / "python_ml_evaluation_suite.md"
 
 
@@ -42,6 +43,17 @@ class Fdp123ScopeGuardTest(unittest.TestCase):
             "fraud_case_status",
         )
 
+    def test_manualRunnerRemainsLocalOfflineOnly(self):
+        source = RUNNER.read_text(encoding="utf-8")
+
+        self.assertIn("--input", source)
+        self.assertIn("--output-dir", source)
+        self.assertIn("--generated-at", source)
+        self.assertNotIn("FastAPI", source)
+        self.assertNotIn("APScheduler", source)
+        self.assertNotIn("requests", source)
+        self.assertNotIn("KafkaProducer", source)
+
     def test_noUiChangesForFdp123Evaluation(self):
         ui_root = ROOT / "analyst-console-ui"
         self.assertFalse(any("fdp123" in path.as_posix().lower() for path in ui_root.rglob("*") if path.is_file()))
@@ -53,6 +65,15 @@ class Fdp123ScopeGuardTest(unittest.TestCase):
         self.assertIn("`DATASET_METADATA` is not an evaluation row", doc)
         self.assertIn("Only FDP-123 `DATASET_RECORD` lines are metric rows", doc)
         self.assertIn("FDP-102 and FDP-123 are separate input contracts", doc)
+        self.assertIn("manual local offline runner", doc)
+        self.assertIn("not a scheduler", doc)
+        self.assertIn("not automatic report publishing", doc)
+        self.assertIn("not a public export endpoint", doc)
+        self.assertIn("External publishing requires a separate security and governance review", doc)
+        self.assertIn("decisionReasonCodes", doc)
+        self.assertIn("bounded machine-code", doc)
+        self.assertIn("not notes", doc)
+        self.assertIn("not raw evidence", doc)
         self.assertIn("Low sample size warnings are not model-quality conclusions", doc)
 
     def assertNotInAnyFdp123File(self, *terms: str):

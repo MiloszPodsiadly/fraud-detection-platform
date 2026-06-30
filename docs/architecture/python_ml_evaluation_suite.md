@@ -1,6 +1,6 @@
 # Python ML Evaluation Suite
 
-Status: FDP-103 offline evaluation foundation with FDP-124 FDP-123 feedback dataset evaluation path.
+Status: Offline evaluation foundation. FDP-103 covers FDP-102 inputs; FDP-124 adds a dedicated FDP-123 feedback dataset evaluation path.
 
 ## Scope
 
@@ -14,6 +14,9 @@ FDP-124 adds a separate offline/internal path for FDP-123 feedback dataset JSONL
 `DATASET_METADATA` is not an evaluation row. FDP-124 does not train models, does not promote models, does not
 recommend production threshold changes, does not alter scoring, payment, workflow, or case behavior, and does not
 publish reports automatically.
+
+`offline_evaluation.fdp123.run_fdp123_evaluation` is a manual local offline runner. It is not a scheduler, not automatic report publishing, not a public export endpoint, and not runtime server integration. Generated artifacts are
+local/internal diagnostic artifacts. External publishing requires a separate security and governance review.
 
 The package lives under `ml-inference-service/offline_evaluation`. It has no network calls, database connectors,
 Kafka clients, production service clients, scheduled jobs, endpoints, UI files, model artifact mutation, threshold
@@ -122,3 +125,7 @@ sizes are surfaced as warnings. Only FDP-123 `DATASET_RECORD` lines are metric r
 FDP-124 report artifacts are not external exports and do not expose raw source identifiers, raw notes, raw payloads,
 raw evidence, feature vectors, ground-truth fields, training labels, final decisions, payment authorization, model
 promotion signals, or production threshold recommendations.
+
+FDP-124 disagreement rows may include `decisionReasonCodes` because FDP-123 validates them as bounded machine-code
+values. They are allowed only in local/internal disagreement rows. They are not notes, not raw evidence, and must not
+contain raw IDs, free text, payloads, tokens, or secrets.
