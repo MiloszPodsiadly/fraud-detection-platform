@@ -11,8 +11,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--input", required=True, help="Path to FDP-123 feedback dataset JSONL.")
     parser.add_argument("--output-dir", required=True, help="Directory for local report artifacts.")
     parser.add_argument("--generated-at", help="Optional deterministic generatedAt timestamp for local review artifacts.")
+    parser.add_argument("--allow-output-root", help="Optional root directory that output-dir must stay within.")
     args = parser.parse_args(argv)
-    run_fdp123_evaluation(Path(args.input), Path(args.output_dir), generated_at=args.generated_at)
+    run_fdp123_evaluation(
+        Path(args.input),
+        Path(args.output_dir),
+        generated_at=args.generated_at,
+        allow_output_root=Path(args.allow_output_root) if args.allow_output_root else None,
+    )
     return 0
 
 

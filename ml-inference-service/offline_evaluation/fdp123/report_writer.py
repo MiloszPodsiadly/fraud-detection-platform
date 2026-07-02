@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
 from pathlib import Path
 from typing import Any
 
 
 MAX_WARNINGS = 10
 REPORT_TYPE = "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"
+ARTIFACT_SET_VERSION = "fdp123-report-artifact-set-v1"
 FORBIDDEN_REPORT_COMPACT_TERMS = {
     "rawfeedbackid",
     "feedbackid",
@@ -95,8 +97,32 @@ def write_fdp123_reports(
         paths["disagreementReport"]: disagreement_jsonl(reports["disagreementReport"]),
         paths["evaluationRunMarkdown"]: evaluation_run_markdown(reports["evaluationSummary"]),
     }
-    _write_artifacts_atomically(payloads)
+    manifest_path = output_dir / "manifest.json"
+    manifest_payload = build_artifact_manifest(payloads, reports["evaluationSummary"].get("generatedAt"))
+    _write_artifacts_atomically(payloads, manifest_path, manifest_payload)
+    paths["manifest"] = manifest_path
     return paths
+
+
+def build_artifact_manifest(payloads: dict[Path, str], generated_at: str | None) -> str:
+    files = []
+    for path, payload in sorted(payloads.items(), key=lambda item: item[0].name):
+        encoded = payload.encode("utf-8")
+        files.append({
+            "name": path.name,
+            "sha256": hashlib.sha256(encoded).hexdigest(),
+            "sizeBytes": len(encoded),
+        })
+    manifest = {
+        "artifactSetVersion": ARTIFACT_SET_VERSION,
+        "files": files,
+        "generatedAt": generated_at,
+        "reportType": REPORT_TYPE,
+    }
+    _reject_forbidden_report_fields(manifest)
+    payload = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
+    _reject_forbidden_report_payload(payload)
+    return payload + "\n"
 
 
 def evaluation_run_markdown(summary: dict[str, Any]) -> str:
@@ -161,20 +187,26 @@ def _prepare_output_dir(output_dir: Path, allow_output_root: Path | None) -> Non
         raise ValueError("output directory must not be a symlink")
 
 
-def _write_artifacts_atomically(payloads: dict[Path, str]) -> None:
+def _write_artifacts_atomically(payloads: dict[Path, str], manifest_path: Path, manifest_payload: str) -> None:
     temporary_paths = [path.with_name(path.name + ".tmp") for path in payloads]
+    manifest_tmp_path = manifest_path.with_name(manifest_path.name + ".tmp")
+    temporary_paths.append(manifest_tmp_path)
     try:
-        for final_path in payloads:
+        for final_path in tuple(payloads) + (manifest_path,):
             if final_path.is_symlink():
                 raise ValueError(f"final artifact path must not be a symlink: {final_path.name}")
         for final_path, payload in payloads.items():
             tmp_path = final_path.with_name(final_path.name + ".tmp")
             if tmp_path.exists() or tmp_path.is_symlink():
                 tmp_path.unlink()
-            tmp_path.write_text(payload, encoding="utf-8")
+            tmp_path.write_text(payload, encoding="utf-8", newline="\n")
+        if manifest_tmp_path.exists() or manifest_tmp_path.is_symlink():
+            manifest_tmp_path.unlink()
+        manifest_tmp_path.write_text(manifest_payload, encoding="utf-8", newline="\n")
         for final_path in payloads:
             tmp_path = final_path.with_name(final_path.name + ".tmp")
             os.replace(tmp_path, final_path)
+        os.replace(manifest_tmp_path, manifest_path)
     except Exception:
         for tmp_path in temporary_paths:
             if tmp_path.exists() or tmp_path.is_symlink():
