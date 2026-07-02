@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import tempfile
@@ -8,7 +9,13 @@ from unittest.mock import patch
 from offline_evaluation.fdp123.dataset_reader import read_fdp123_feedback_dataset_jsonl
 from offline_evaluation.fdp123.evaluation_runner import build_fdp123_evaluation_reports, run_fdp123_evaluation
 from offline_evaluation.fdp123.run_fdp123_evaluation import main
-from offline_evaluation.fdp123.report_writer import disagreement_jsonl, report_json, write_fdp123_reports
+from offline_evaluation.fdp123.report_writer import (
+    REPORT_TYPE,
+    build_artifact_manifest,
+    disagreement_jsonl,
+    report_json,
+    write_fdp123_reports,
+)
 try:
     from fdp123.fdp123_fixtures import GENERATED_AT, jsonl, jsonl_file, record
 except ModuleNotFoundError:
@@ -74,6 +81,7 @@ class Fdp123ReportWriterTest(unittest.TestCase):
             self.assertTrue(paths["riskLevelReport"].exists())
             self.assertTrue(paths["disagreementReport"].exists())
             self.assertTrue(paths["evaluationRunMarkdown"].exists())
+            self.assertTrue(paths["manifest"].exists())
 
     def test_writeReportsRejectsSymlinkOutputDirectory(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -103,6 +111,21 @@ class Fdp123ReportWriterTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 write_fdp123_reports(self._reports(), output)
 
+    def test_writeReportsRejectsSymlinkManifestPath(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+            output.mkdir()
+            target = Path(directory) / "target.json"
+            target.write_text("{}", encoding="utf-8")
+            link = output / "manifest.json"
+            try:
+                link.symlink_to(target)
+            except OSError as exception:
+                self.skipTest(f"symlink creation is unavailable: {exception}")
+
+            with self.assertRaises(ValueError):
+                write_fdp123_reports(self._reports(), output)
+
     def test_writeReportsUsesTempFilesThenFinalReplace(self):
         reports = self._reports(record(fraudScore=0.1))
         original_replace = os.replace
@@ -118,6 +141,44 @@ class Fdp123ReportWriterTest(unittest.TestCase):
 
         self.assertIn(("evaluation_summary.json.tmp", "evaluation_summary.json"), replace_calls)
         self.assertIn(("disagreement_report.jsonl.tmp", "disagreement_report.jsonl"), replace_calls)
+        self.assertEqual(("manifest.json.tmp", "manifest.json"), replace_calls[-1])
+
+    def test_manifestListsExpectedArtifactFiles(self):
+        reports = self._reports(record(fraudScore=0.1))
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            write_fdp123_reports(reports, output)
+
+            manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(REPORT_TYPE, manifest["reportType"])
+            self.assertEqual("fdp123-report-artifact-set-v1", manifest["artifactSetVersion"])
+            self.assertEqual(GENERATED_AT, manifest["generatedAt"])
+            self.assertEqual(
+                [
+                    "disagreement_report.jsonl",
+                    "evaluation_run.md",
+                    "evaluation_summary.json",
+                    "risk_level_report.json",
+                    "score_bucket_report.json",
+                ],
+                [item["name"] for item in manifest["files"]],
+            )
+
+    def test_manifestHashesMatchWrittenFiles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            write_fdp123_reports(self._reports(record(fraudScore=0.1)), output)
+
+            manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+            for item in manifest["files"]:
+                payload = (output / item["name"]).read_bytes()
+                self.assertEqual(len(payload), item["sizeBytes"])
+                self.assertEqual(hashlib.sha256(payload).hexdigest(), item["sha256"])
+
+    def test_manifestPayloadRejectsForbiddenTerms(self):
+        with self.assertRaises(ValueError):
+            build_artifact_manifest({Path("rawNotes.json"): "{}\n"}, GENERATED_AT)
 
     def test_writeReportsCleansTempFilesOnValidationFailure(self):
         reports = self._reports()
@@ -141,6 +202,41 @@ class Fdp123ReportWriterTest(unittest.TestCase):
 
             self.assertEqual([], list(output.iterdir()))
 
+    def test_replaceFailureBeforeManifestDoesNotCreateManifest(self):
+        def failing_replace(source, destination):
+            raise OSError("simulated replace failure")
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            with patch("offline_evaluation.fdp123.report_writer.os.replace", failing_replace):
+                with self.assertRaises(OSError):
+                    write_fdp123_reports(self._reports(record(fraudScore=0.1)), output)
+
+            self.assertFalse((output / "manifest.json").exists())
+            self.assertFalse((output / "manifest.json.tmp").exists())
+            self.assertEqual([], list(output.glob("*.tmp")))
+
+    def test_replaceFailureAfterArtifactReplaceDoesNotLeaveValidManifest(self):
+        original_replace = os.replace
+        replace_calls = []
+
+        def failing_second_replace(source, destination):
+            replace_calls.append(Path(destination).name)
+            if len(replace_calls) == 2:
+                raise OSError("simulated replace failure")
+            return original_replace(source, destination)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            with patch("offline_evaluation.fdp123.report_writer.os.replace", failing_second_replace):
+                with self.assertRaises(OSError):
+                    write_fdp123_reports(self._reports(record(fraudScore=0.1)), output)
+
+            self.assertTrue((output / replace_calls[0]).exists())
+            self.assertFalse((output / "manifest.json").exists())
+            self.assertFalse((output / "manifest.json.tmp").exists())
+            self.assertEqual([], list(output.glob("*.tmp")))
+
     def test_runRejectsOutputOutsideAllowedRoot(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "allowed"
@@ -148,6 +244,42 @@ class Fdp123ReportWriterTest(unittest.TestCase):
             with jsonl_file(jsonl(record())) as input_path:
                 with self.assertRaises(ValueError):
                     run_fdp123_evaluation(input_path, output, allow_output_root=root)
+
+    def test_runAcceptsOutputInsideAllowedRoot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "allowed"
+            output = root / "reports"
+            with jsonl_file(jsonl(record())) as input_path:
+                paths = run_fdp123_evaluation(input_path, output, allow_output_root=root)
+
+            self.assertTrue(paths["manifest"].exists())
+            self.assertTrue((output / "evaluation_summary.json").exists())
+
+    def test_cliAcceptsAllowOutputRootWhenInsideRoot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "allowed"
+            output = root / "reports"
+            with jsonl_file(jsonl(record())) as input_path:
+                result = main([
+                    "--input", str(input_path),
+                    "--output-dir", str(output),
+                    "--allow-output-root", str(root),
+                ])
+
+            self.assertEqual(0, result)
+            self.assertTrue((output / "manifest.json").exists())
+
+    def test_cliRejectsAllowOutputRootWhenOutsideRoot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "allowed"
+            output = Path(directory) / "outside"
+            with jsonl_file(jsonl(record())) as input_path:
+                with self.assertRaises(ValueError):
+                    main([
+                        "--input", str(input_path),
+                        "--output-dir", str(output),
+                        "--allow-output-root", str(root),
+                    ])
 
     def test_generatedAtCliOptionIsReflectedInOutput(self):
         generated_at = "2026-06-11T10:15:30Z"

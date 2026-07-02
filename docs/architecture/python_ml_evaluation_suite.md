@@ -122,6 +122,12 @@ bounded disagreement report. Division by zero produces unavailable values rather
 single-class datasets, missing scores, missing alert recommendations, missing risk levels, truncation, and small sample
 sizes are surfaced as warnings. Only FDP-123 `DATASET_RECORD` lines are metric rows. Low sample size warnings are not model-quality conclusions.
 
+FDP-124 report sets use a manifest-last local artifact pattern. The writer prepares report payloads in memory, writes
+temporary artifact files, writes `manifest.json.tmp`, replaces report artifacts, and replaces `manifest.json` last. A report set is considered complete only when `manifest.json` exists, has report type
+`FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1`, lists the expected artifact files, and each listed artifact matches
+the manifest `sha256` and `sizeBytes`. The manifest is not external publishing, and scheduled generation or external
+publication requires a separate security, governance, and observability review.
+
 FDP-124 report artifacts are not external exports and do not expose raw source identifiers, raw notes, raw payloads,
 raw evidence, feature vectors, ground-truth fields, training labels, final decisions, payment authorization, model
 promotion signals, or production threshold recommendations.
