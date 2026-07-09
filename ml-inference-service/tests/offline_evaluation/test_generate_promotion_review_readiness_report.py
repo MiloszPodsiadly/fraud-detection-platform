@@ -363,9 +363,34 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
         ):
             self.assertIn(text, doc)
 
-    def test_doesNotAddApiOpenApiOrUiSurface(self):
-        self.assertFalse(any("promotion-readiness" in path.read_text(encoding="utf-8") for path in OPENAPI_ROOT.rglob("*.yaml")))
-        self.assertFalse(any("PromotionReviewReadiness" in path.read_text(encoding="utf-8") for path in UI_ROOT.rglob("*.jsx") if path.is_file()))
+    def test_openApiSurfaceIsReadOnlyAndDoesNotGenerateReport(self):
+        openapi = "\n".join(path.read_text(encoding="utf-8") for path in OPENAPI_ROOT.rglob("*.yaml"))
+        ui_source = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in UI_ROOT.rglob("*.jsx")
+            if path.is_file() and ".test." not in path.name
+        )
+        ui_api_source = (UI_ROOT / "src" / "api" / "alertsApi.js").read_text(encoding="utf-8")
+        ui_doc = (ROOT / "docs" / "architecture" / "promotion_review_readiness_ui_panel.md").read_text(encoding="utf-8")
+
+        self.assertIn("/api/v1/governance/promotion-review-readiness/current:", openapi)
+        self.assertIn("This endpoint does not generate reports", openapi)
+        self.assertIn("not model promotion approval", openapi)
+        self.assertIn("not threshold recommendation", openapi)
+        self.assertIn("not payment authorization", openapi)
+        self.assertNotIn("/api/v1/governance/promotion-review-readiness/generate", openapi)
+        self.assertNotIn("promotion-review-readiness:\n    post:", openapi)
+        self.assertIn("PromotionReviewReadinessPanel", ui_source)
+        self.assertIn("does not generate reports", ui_doc)
+        self.assertIn("does not approve promotion", ui_doc)
+        self.assertIn("does not recommend thresholds", ui_doc)
+        self.assertIn("does not trigger workflow", ui_doc)
+        self.assertIn("does not authorize payments", ui_doc)
+        self.assertNotIn("generatePromotionReviewReadiness", ui_source)
+        self.assertNotIn("/generate", ui_api_source)
+        self.assertNotIn("/workflow", ui_api_source)
+        self.assertNotIn("/threshold", ui_api_source)
+        self.assertNotIn("/payment", ui_api_source)
 
     def assertPayloadDoesNotContain(self, *terms):
         payload = valid_payload()
