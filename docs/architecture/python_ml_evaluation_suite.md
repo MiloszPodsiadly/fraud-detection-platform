@@ -135,3 +135,11 @@ promotion signals, or production threshold recommendations.
 FDP-124 disagreement rows may include `decisionReasonCodes` because FDP-123 validates them as bounded machine-code
 values. They are allowed only in local/internal disagreement rows. They are not notes, not raw evidence, and must not
 contain raw IDs, free text, payloads, tokens, or secrets.
+
+FDP-123/FDP-124 Model Card v1 is a separate local/internal governance artifact generated from FDP-124 aggregate
+artifacts only. It validates the FDP-124 manifest before trusting `evaluation_summary.json`, does not read
+`disagreement_report.jsonl` in v1, does not read the raw FDP-123 dataset, and does not expose raw IDs or per-record
+data. It is not model promotion, not production approval, not threshold recommendation, not payment authorization,
+and not workflow or case automation. Its `allowedUsageModes` values are documentation semantics only, not runtime
+permissions. `productionApproval` remains `NOT_APPROVED`, and `promotionStatus` remains
+`NOT_EVALUATED_FOR_PROMOTION`.

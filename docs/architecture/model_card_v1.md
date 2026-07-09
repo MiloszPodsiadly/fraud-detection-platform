@@ -1,60 +1,119 @@
 # Model Card v1
 
-Status: FDP-104 offline governance artifact.
+Status: offline governance artifact.
 
 ## Scope
 
-Model Card v1 is an offline governance artifact. Model Card v1 consumes only FDP-103 aggregate evaluation report JSON
-and bounded model metadata fixtures or config supplied by the caller. It does not read production DBs, raw payloads,
-raw feature vectors, model binaries, model registry state, or raw dataset rows.
+Model Card v1 is an offline governance artifact.
 
-Model Card v1 does not mutate model artifacts, does not retrain models, does not promote models, does not recommend thresholds,
-does not change production scoring, does not expose API/UI, does not create dashboards, does not recommend
-analyst actions, does not approve, decline, or block transactions, and does not authorize payments.
+The repository has two separated model card paths:
+
+- The existing FDP-103/FDP-102 path uses `offline_evaluation/model_card_schema.py`,
+  `offline_evaluation/model_card_generator.py`, and `offline_evaluation/model_card_writer.py`.
+- The FDP-123/FDP-124 path uses `offline_evaluation/fdp123/model_card/` and is scoped only to FDP-124
+  aggregate offline evaluation artifacts.
+
+The FDP-123/FDP-124 model card path validates the FDP-124 `manifest.json` before trusting
+`evaluation_summary.json`. It does not read `disagreement_report.jsonl` in v1. It does not read the raw FDP-123
+dataset. It is aggregate-only and uses explicit local model metadata supplied by the caller.
+
+This model card support is governance documentation only. It is not model promotion, not production approval,
+not threshold recommendation, not payment authorization, not workflow or case automation, and not legal ground truth.
+It does not expose public API, admin API, UI, scheduler, database writes, Kafka events, network calls, or external
+publishing. External publishing requires a separate security and governance review.
+
+The existing FDP-103/FDP-102 Model Card v1 path does not promote models, does not recommend thresholds,
+does not approve, decline, or block transactions, and does not authorize payments. Dashboards and promotion workflows
+are future scopes and require separate architecture review.
+
+Dashboards and promotion workflows are future scopes.
 
 ## Inputs
 
-The model-card generator accepts:
+The FDP-123/FDP-124 model card generator accepts only:
 
-- one FDP-103 aggregate evaluation report,
-- one bounded model metadata object,
-- one caller-provided generation timestamp.
+- FDP-124 `manifest.json`,
+- FDP-124 `evaluation_summary.json`,
+- explicit local static model metadata.
 
-The FDP-103 report is consumed by allowlisted aggregate fields only: report type, report generation time, dataset time
-basis, dataset deduplication policy, aggregate input counts, diagnostic quality metrics, missing-signal counts, and
-rule-vs-ML disagreement counts. Model Card v1 validates FDP-103 report identity. Model Card v1 validates metric basis.
-Model Card v1 validates dataset time basis. Model Card v1 validates deduplication policy.
-Model Card v1 validates metric numeric types and ranges. Model Card v1 validates disagreementSummary with allowlisted keys. The generator does
-not pass through the raw report and does not copy per-record data.
+The generator fails closed if the manifest is missing, does not list `evaluation_summary.json`, has unsupported report
+identity, or has hash or size mismatches. It also fails closed when `evaluation_summary.json` has unsupported report
+identity, missing generated time, missing dataset summary, missing class balance, missing alert-recommended confusion
+matrix, invalid metric objects, forbidden fields, or raw identifiers.
 
-Bounded model metadata includes model name, model version, model family, feature contract version, intended use, and
-approvedFor values. Model identity fields are safe identifiers, not URLs, paths, bucket URIs, registry endpoints, artifact locations, or secrets.
-intendedUse is allowlisted, and required notIntendedUse non-goals cannot be omitted.
-It is not an arbitrary metadata map and it is not a model artifact.
+Required model metadata includes model name, model version, model family, training mode, feature contract version,
+reference quality, intended use, not intended use, allowed usage modes, limitations, and governance boundary. Identity
+values must be explicit safe identifiers, not URLs, file paths, bucket locations, registry locations, tokens, secrets,
+or guessed values such as `unknown` or `v1`.
+
+For the existing FDP-103/FDP-102 path, Model Card v1 validates FDP-103 report identity, validates metric basis,
+validates dataset time basis, validates deduplication policy, validates metric numeric types and ranges, and validates
+disagreementSummary with allowlisted keys. Model identity fields are safe identifiers, not URLs, paths, bucket URIs,
+registry endpoints, artifact locations, or secrets. intendedUse is allowlisted, and required notIntendedUse non-goals
+cannot be omitted.
+
+Model Card v1 validates FDP-103 report identity.
+Model Card v1 validates metric basis.
+Model Card v1 validates dataset time basis.
+Model Card v1 validates deduplication policy.
+Model Card v1 validates metric numeric types and ranges.
+Model Card v1 validates disagreementSummary with allowlisted keys.
+Model identity fields are safe identifiers, not URLs, paths, bucket URIs, registry endpoints, artifact locations, or secrets.
+intendedUse is allowlisted.
+required notIntendedUse non-goals cannot be omitted.
 
 ## Semantics
 
-Metrics are offline diagnostics only. Analyst labels are evaluation signals, not ground truth, model-training labels,
-final decisions, payment decisions, or automatic decisioning signals.
+The FDP-123/FDP-124 model card uses `allowedUsageModes`, not `approvedFor`.
 
-approvedFor is limited to SHADOW and COMPARE. OFFLINE_EVALUATION is not an approval target; offline evaluation is
-represented by diagnostic governance status, limitations, and report context. approvedFor does not mean production
-approval. Model Card v1 is not model promotion, Model Card v1 is not threshold recommendation, Model Card v1 is not
-dashboard, Model Card v1 is not API/UI, Model Card v1 is not payment authorization, and Model Card v1 is not automatic
-decisioning. approvedFor values do not approve production decisioning, model promotion, threshold changes, automatic
-approve/decline/block behavior, analyst recommendations, or payment authorization.
+The existing FDP-103/FDP-102 path keeps its older `approvedFor` contract. approvedFor is limited to SHADOW and
+COMPARE. OFFLINE_EVALUATION is not an approval target in that older contract.
 
-Required limitations explicitly state that the card is offline-only, diagnostic-only, bucket-ordered rather than
-calibrated probability based, not a promotion approval, not a threshold recommendation, not production decisioning
-approval, not payment authorization, and not automatic approve/decline/block permission.
+approvedFor is limited to SHADOW and COMPARE.
+OFFLINE_EVALUATION is not an approval target.
 
-## Output Boundary
+Allowed usage modes are limited to:
 
-Model Card v1 output is deterministic JSON. It rejects raw or unsafe terms including transaction references,
-evaluation record identifiers, raw payloads, raw feature vectors, customer/account/card/device/merchant identifiers,
-analyst or submitted-by identifiers, correlation or request hashes, endpoints, tokens, secrets, stack traces,
-exception messages, ground-truth or training-label terms, final decision terms, payment authorization terms,
-production approval terms, promotion-ready terms, threshold recommendation terms, deployment recommendation terms,
-and bank-certification wording.
+- `SHADOW`
+- `COMPARE`
+- `OFFLINE_EVALUATION`
 
-Dashboards and promotion workflows are future scopes and require separate architecture review.
+These usage modes are not runtime permissions. They do not approve production decisioning and do not authorize any
+runtime behavior.
+
+The card always keeps:
+
+- `productionApproval = NOT_APPROVED`
+- `promotionStatus = NOT_EVALUATED_FOR_PROMOTION`
+
+Evaluation labels are bounded analyst feedback signals, not legal ground truth, certified labels, model-training
+labels, final bank decisions, payment decisions, or automatic decisioning signals.
+
+## Output
+
+The FDP-123/FDP-124 writer produces local/internal artifacts:
+
+- `model_card.json`
+- `model_card.md`
+- `manifest.json`
+
+The output manifest uses:
+
+- `reportType = MODEL_CARD_V1`
+- `artifactSetVersion = model-card-artifact-set-v1`
+
+The writer uses a manifest-last pattern. It prepares payloads in memory, validates JSON and Markdown safety, writes
+temporary files, replaces `model_card.json`, replaces `model_card.md`, and replaces `manifest.json` last. A model card
+artifact set is complete only when `manifest.json` exists and all listed hashes and sizes match.
+
+The output does not include raw or per-record data such as evaluation record identifiers, transaction references,
+feedback identifiers, customer identifiers, correlation identifiers, notes, raw payloads, raw model requests or
+responses, raw feature vectors, raw evidence, per-record disagreement rows, tokens, secrets, or passwords.
+
+Unavailable metric objects preserve the FDP-124 shape:
+
+```json
+{"available":false,"reason":"NO_POSITIVE_RECORDS","value":null}
+```
+
+Unavailable metrics are not converted to zero, omitted, or flattened.
