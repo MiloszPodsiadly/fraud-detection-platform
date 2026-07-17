@@ -44,7 +44,7 @@
         <archunit.version>1.4.2</archunit.version>
         <bouncycastle.version>1.84</bouncycastle.version>
         <xz.version>1.12</xz.version>
-        <jackson.version>3.2.0</jackson.version>
+        <jackson.version>3.2.1</jackson.version>
         <jackson2.annotations.version>2.22</jackson2.annotations.version>
         <prometheus.version>1.8.0</prometheus.version>
         <caffeine.version>3.2.4</caffeine.version>
