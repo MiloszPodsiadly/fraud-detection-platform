@@ -46,6 +46,11 @@ class Fdp123EvaluationCardSchemaTest(unittest.TestCase):
     def test_unsupportedAllowedUsageModeRejected(self):
         self._assert_rejected(allowedUsageModes=["BANANA"])
 
+    def test_legacyIntendedUseValuesRejected(self):
+        for value in ("MODEL_GOVERNANCE_DOCUMENTATION", "RULE_VS_ML_REVIEW"):
+            with self.subTest(value=value):
+                self._assert_rejected(intendedUse=["SHADOW_FRAUD_RISK_REVIEW", value])
+
     def test_modelIdentityFieldsRejected(self):
         for field in ("modelName", "modelVersion", "modelFamily", "trainingMode", "featureContractVersion", "referenceQuality"):
             with self.subTest(field=field):

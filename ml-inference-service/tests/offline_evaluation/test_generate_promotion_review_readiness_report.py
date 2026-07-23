@@ -418,7 +418,11 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
 
 
 def valid_summary():
-    return build_shadow_performance_summary(valid_evaluation_card(), "2026-06-08T02:00:00Z")
+    return build_shadow_performance_summary(
+        valid_evaluation_card(),
+        "2026-06-13T02:00:00Z",
+        source_evaluation_card_manifest_sha256="b" * 64,
+    )
 
 
 def build_report(**kwargs):
@@ -458,7 +462,7 @@ def generate(paths):
 
 
 def generated_at():
-    return "2026-06-13T00:00:00Z"
+    return "2026-06-14T00:00:00Z"
 
 
 def fdp111_source():

@@ -7,6 +7,7 @@ from unittest.mock import patch
 from offline_evaluation.generate_current_shadow_summary import (
     CurrentSummaryGenerationError,
     DEFAULT_EVALUATION_CARD,
+    DEFAULT_EVALUATION_CARD_MANIFEST,
     DEFAULT_OUTPUT,
     DEFAULT_OUTPUT_ROOT,
     _assert_allowed_output_path,
@@ -17,10 +18,11 @@ from offline_evaluation.generate_current_shadow_summary import (
 )
 from offline_evaluation.shadow_performance_schema import REPORT_TYPE, SUMMARY_VERSION
 from offline_evaluation.shadow_performance_writer import write_shadow_performance_summary
+from offline_evaluation.fdp123.evaluation_card.writer import write_evaluation_card_artifacts
 from fdp123.evaluation_card.test_schema import valid_evaluation_card
 
 
-GENERATED_AT = "2026-06-08T02:00:00Z"
+GENERATED_AT = "2026-06-13T02:00:00Z"
 ROOT = Path(__file__).resolve().parents[3]
 GENERATOR_SOURCE = ROOT / "ml-inference-service" / "offline_evaluation" / "generate_current_shadow_summary.py"
 
@@ -95,10 +97,31 @@ class CurrentShadowSummaryGenerationTest(unittest.TestCase):
 
             self.assertFalse(paths.output.exists())
 
+    def test_missingEvaluationCardManifestDoesNotWriteSummary(self):
+        with workspace() as paths:
+            paths.manifest.unlink()
+
+            with self.assertRaises(CurrentSummaryGenerationError):
+                generate(paths)
+
+            self.assertFalse(paths.output.exists())
+
+    def test_hashMismatchDoesNotWriteSummary(self):
+        with workspace() as paths:
+            card = json.loads(paths.evaluation_card.read_text())
+            card["warnings"] = ["LOW_SAMPLE_SIZE", "NO_ACTUAL_POSITIVES"]
+            paths.evaluation_card.write_text(json.dumps(card, sort_keys=True), encoding="utf-8")
+
+            with self.assertRaises(CurrentSummaryGenerationError):
+                generate(paths)
+
+            self.assertFalse(paths.output.exists())
+
     def test_commandExitsNonZeroOnFailure(self):
         with workspace() as paths:
             code = main([
                 "--evaluation-card", str(paths.root / "missing.json"),
+                "--evaluation-card-manifest", str(paths.manifest),
                 "--output", str(paths.output),
                 "--allow-output-root", str(paths.output.parent),
             ])
@@ -129,6 +152,7 @@ class CurrentShadowSummaryGenerationTest(unittest.TestCase):
         self.assertEqual(DEFAULT_OUTPUT, _assert_allowed_output_path(DEFAULT_OUTPUT))
         self.assertEqual(DEFAULT_OUTPUT_ROOT, DEFAULT_OUTPUT.parent)
         self.assertIn("platform-recommendation-evaluation-card", str(DEFAULT_EVALUATION_CARD))
+        self.assertEqual("manifest.json", DEFAULT_EVALUATION_CARD_MANIFEST.name)
 
     def test_finalSummaryDoesNotLeakRawInputs(self):
         with workspace() as paths:
@@ -162,6 +186,7 @@ class CurrentShadowSummaryGenerationTest(unittest.TestCase):
 def generate(paths):
     generate_current_shadow_summary(
         paths.evaluation_card,
+        paths.manifest,
         paths.output,
         generated_at=GENERATED_AT,
         allowed_output_root=paths.output.parent,
@@ -189,9 +214,13 @@ class workspace:
             / "platform-recommendation-evaluation-card"
             / "platform_recommendation_evaluation_card.json"
         )
+        self.manifest = self.evaluation_card.with_name("manifest.json")
         self.output = self.root / "local-generated" / "shadow-performance" / "current-summary.json"
-        self.evaluation_card.parent.mkdir(parents=True)
-        self.evaluation_card.write_text(json.dumps(valid_evaluation_card(), sort_keys=True), encoding="utf-8")
+        write_evaluation_card_artifacts(
+            valid_evaluation_card(),
+            self.evaluation_card.parent,
+            allow_output_root=self.evaluation_card.parent,
+        )
         return self
 
     def __exit__(self, exc_type, exc, tb):

@@ -13,7 +13,12 @@ from offline_evaluation.shadow_performance_schema import (
 )
 
 
-def build_shadow_performance_summary(evaluation_card: dict[str, Any], generated_at: str) -> dict[str, Any]:
+def build_shadow_performance_summary(
+        evaluation_card: dict[str, Any],
+        generated_at: str,
+        *,
+        source_evaluation_card_manifest_sha256: str,
+) -> dict[str, Any]:
     safe_card = validate_evaluation_card_for_shadow_summary(evaluation_card)
     metrics = safe_card["metricsSummary"]
     evidence = safe_card["evaluationEvidence"]
@@ -38,10 +43,13 @@ def build_shadow_performance_summary(evaluation_card: dict[str, Any], generated_
             "evaluationPurpose": safe_card["evaluationPurpose"],
             "evaluationReportType": evidence["evaluationReportType"],
             "evaluationReportVersion": EXPECTED_EVALUATION_REPORT_VERSION,
+            "evaluationReportGeneratedAt": evidence["evaluationGeneratedAt"],
+            "evaluationCardGeneratedAt": safe_card["generatedAt"],
             "evaluationArtifactSetVersion": evidence["evaluationArtifactSetVersion"],
             "datasetVersion": evidence["datasetVersion"],
             "datasetTimeBasis": evidence["datasetTimeBasis"],
             "sourceManifestSha256": evidence["sourceManifestSha256"],
+            "sourceEvaluationCardManifestSha256": source_evaluation_card_manifest_sha256,
         },
         "evaluationPopulation": {
             "recordsEvaluated": evidence["recordsEvaluated"],

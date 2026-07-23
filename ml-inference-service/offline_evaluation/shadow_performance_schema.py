@@ -5,10 +5,13 @@ from typing import Any
 
 from offline_evaluation.fdp123.evaluation_card.schema import (
     EVALUATION_PURPOSE,
+    MAX_FDP123_DATASET_RECORDS,
     METRIC_BASIS as EXPECTED_METRIC_BASIS,
     METRICS_SUBJECT,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION,
+    normalize_rfc3339_timestamp,
+    _timestamp_instant,
     Fdp123EvaluationCardValidationError,
     validate_evaluation_card,
 )
@@ -27,7 +30,7 @@ EXPECTED_EVALUATION_REPORT_VERSION = "FDP-124"
 EXPECTED_GOVERNANCE_STATUS = "DIAGNOSTIC_ONLY"
 MAX_WARNINGS = 20
 MAX_LIMITATIONS = 30
-MAX_COUNT_VALUE = 10_000
+MAX_COUNT_VALUE = MAX_FDP123_DATASET_RECORDS
 BANNER = (
     "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, "
     "threshold recommendation, production decisioning approval, payment authorization, "
@@ -62,10 +65,13 @@ EVALUATION_FIELDS = {
     "evaluationPurpose",
     "evaluationReportType",
     "evaluationReportVersion",
+    "evaluationReportGeneratedAt",
+    "evaluationCardGeneratedAt",
     "evaluationArtifactSetVersion",
     "datasetVersion",
     "datasetTimeBasis",
     "sourceManifestSha256",
+    "sourceEvaluationCardManifestSha256",
 }
 EVALUATION_POPULATION_FIELDS = {
     "recordsEvaluated",
@@ -229,7 +235,7 @@ def validate_shadow_performance_summary(raw: dict[str, Any]) -> dict[str, Any]:
     normalized = {
         "reportType": _required_constant(raw, "reportType", REPORT_TYPE),
         "summaryVersion": _required_constant(raw, "summaryVersion", SUMMARY_VERSION),
-        "generatedAt": _bounded_string(raw, "generatedAt", 128),
+        "generatedAt": normalize_shadow_timestamp(raw.get("generatedAt"), "generatedAt"),
         "evaluationSubject": evaluation_subject,
         "metricBasis": _required_constant(raw, "metricBasis", EXPECTED_METRIC_BASIS),
         "governance": _governance(raw["governance"]),
@@ -240,7 +246,7 @@ def validate_shadow_performance_summary(raw: dict[str, Any]) -> dict[str, Any]:
         "limitations": _machine_code_list(raw, "limitations", MAX_LIMITATIONS),
         "banner": _required_constant(raw, "banner", BANNER),
     }
-    _validate_summary_consistency(evaluation_population)
+    _validate_summary_consistency(normalized)
     _reject_unsafe(normalized)
     return normalized
 
@@ -286,10 +292,17 @@ def _evaluation(raw: Any) -> dict[str, str]:
         "evaluationPurpose": _required_constant(raw, "evaluationPurpose", EVALUATION_PURPOSE),
         "evaluationReportType": _required_constant(raw, "evaluationReportType", EXPECTED_EVALUATION_REPORT_TYPE),
         "evaluationReportVersion": _required_constant(raw, "evaluationReportVersion", EXPECTED_EVALUATION_REPORT_VERSION),
+        "evaluationReportGeneratedAt": normalize_shadow_timestamp(
+            raw.get("evaluationReportGeneratedAt"), "evaluationReportGeneratedAt"
+        ),
+        "evaluationCardGeneratedAt": normalize_shadow_timestamp(
+            raw.get("evaluationCardGeneratedAt"), "evaluationCardGeneratedAt"
+        ),
         "evaluationArtifactSetVersion": _bounded_string(raw, "evaluationArtifactSetVersion", 128),
         "datasetVersion": _bounded_string(raw, "datasetVersion", 128),
         "datasetTimeBasis": _machine_code(raw, "datasetTimeBasis"),
         "sourceManifestSha256": _sha256(raw, "sourceManifestSha256"),
+        "sourceEvaluationCardManifestSha256": _sha256(raw, "sourceEvaluationCardManifestSha256"),
     }
 
 
@@ -342,9 +355,25 @@ def _metric_object(raw: dict[str, Any], field: str) -> dict[str, Any]:
     return {"available": False, "value": None, "reason": reason}
 
 
-def _validate_summary_consistency(evaluation_population: dict[str, int]) -> None:
+def normalize_shadow_timestamp(value: Any, field: str) -> str:
+    try:
+        return normalize_rfc3339_timestamp(value, field)
+    except Fdp123EvaluationCardValidationError as exc:
+        raise ShadowPerformanceValidationError(str(exc)) from exc
+
+
+def _validate_summary_consistency(summary: dict[str, Any]) -> None:
+    evaluation_population = summary["evaluationPopulation"]
     if evaluation_population["positiveClassCount"] + evaluation_population["negativeClassCount"] != evaluation_population["recordsEvaluated"]:
         raise ShadowPerformanceValidationError("positiveClassCount + negativeClassCount must equal recordsEvaluated")
+    evaluation = summary["evaluation"]
+    report_generated_at = _timestamp_instant(evaluation["evaluationReportGeneratedAt"])
+    card_generated_at = _timestamp_instant(evaluation["evaluationCardGeneratedAt"])
+    summary_generated_at = _timestamp_instant(summary["generatedAt"])
+    if card_generated_at < report_generated_at:
+        raise ShadowPerformanceValidationError("evaluationCardGeneratedAt must be greater than or equal to evaluationReportGeneratedAt")
+    if summary_generated_at < card_generated_at:
+        raise ShadowPerformanceValidationError("generatedAt must be greater than or equal to evaluationCardGeneratedAt")
 
 
 def _reject_unknown_or_missing(raw: dict[str, Any], allowed: set[str], label: str) -> None:

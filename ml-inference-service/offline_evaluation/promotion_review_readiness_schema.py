@@ -7,6 +7,9 @@ from typing import Any
 from offline_evaluation.fdp123.evaluation_card.schema import (
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION,
+    Fdp123EvaluationCardValidationError,
+    normalize_rfc3339_timestamp,
+    _timestamp_instant,
 )
 from offline_evaluation.shadow_performance_schema import (
     BANNER as SHADOW_PERFORMANCE_BANNER,
@@ -48,13 +51,10 @@ CHECK_NAMES = {
     "EVALUATION_REPORT_TYPE_SUPPORTED",
     "METRIC_BASIS_SUPPORTED",
     "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS",
-    "METRICS_PRESENT",
     "ALERT_RECOMMENDED_PRECISION_AVAILABLE",
     "ALERT_RECOMMENDED_RECALL_AVAILABLE",
     "FALSE_POSITIVE_RATE_AVAILABLE",
     "FALSE_NEGATIVE_RATE_AVAILABLE",
-    "WARNINGS_PRESENT",
-    "LIMITATIONS_PRESENT",
 }
 REQUIRED_FIELDS = {
     "reportType",
@@ -144,7 +144,7 @@ def build_promotion_review_readiness_report(
     report = {
         "reportType": REPORT_TYPE,
         "reportVersion": REPORT_VERSION,
-        "generatedAt": generated_at,
+        "generatedAt": normalize_readiness_timestamp(generated_at, "generatedAt"),
         "governanceStatus": GOVERNANCE_STATUS,
         "readinessStatus": readiness_status,
         "diagnosticOnly": True,
@@ -194,7 +194,7 @@ def validate_promotion_review_readiness_report(raw: dict[str, Any]) -> dict[str,
     normalized = {
         "reportType": _required_constant(raw, "reportType", REPORT_TYPE),
         "reportVersion": _required_constant(raw, "reportVersion", REPORT_VERSION),
-        "generatedAt": _required_string(raw, "generatedAt", 128),
+        "generatedAt": normalize_readiness_timestamp(raw.get("generatedAt"), "generatedAt"),
         "governanceStatus": _required_constant(raw, "governanceStatus", GOVERNANCE_STATUS),
         "readinessStatus": _readiness_status(raw),
         "diagnosticOnly": _required_true(raw, "diagnosticOnly"),
@@ -235,13 +235,10 @@ def _checks(summary: dict[str, Any], minimum_diagnostic_evidence_records: int) -
         _check("EVALUATION_REPORT_TYPE_SUPPORTED", _pass_fail(evaluation["evaluationReportType"] == EXPECTED_EVALUATION_REPORT_TYPE)),
         _check("METRIC_BASIS_SUPPORTED", _pass_fail(summary["metricBasis"] == EXPECTED_METRIC_BASIS)),
         _check("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", _pass_fail(records_evaluated >= minimum_diagnostic_evidence_records), "HIGH"),
-        _check("METRICS_PRESENT", _pass_fail(bool(metrics))),
         _metric_availability_check("ALERT_RECOMMENDED_PRECISION_AVAILABLE", metrics["alertRecommendedPrecision"]),
         _metric_availability_check("ALERT_RECOMMENDED_RECALL_AVAILABLE", metrics["alertRecommendedRecall"]),
         _metric_availability_check("FALSE_POSITIVE_RATE_AVAILABLE", metrics["falsePositiveRate"]),
         _metric_availability_check("FALSE_NEGATIVE_RATE_AVAILABLE", metrics["falseNegativeRate"]),
-        _check("WARNINGS_PRESENT", "PASS"),
-        _check("LIMITATIONS_PRESENT", "PASS"),
     ]
 
 
@@ -270,6 +267,19 @@ def _validate_status_consistency(report: dict[str, Any]) -> None:
         raise PromotionReviewReadinessValidationError("INCONCLUSIVE requires no failed checks")
     if report["readinessStatus"] == GOVERNANCE_STATUS:
         raise PromotionReviewReadinessValidationError("DIAGNOSTIC_ONLY is governanceStatus, not readinessStatus")
+    if _timestamp_instant(report["generatedAt"]) < _timestamp_instant(
+            report["inputs"]["shadowPerformanceSummary"]["generatedAt"]
+    ):
+        raise PromotionReviewReadinessValidationError(
+            "generatedAt must be greater than or equal to inputs.shadowPerformanceSummary.generatedAt"
+        )
+
+
+def normalize_readiness_timestamp(value: Any, field: str) -> str:
+    try:
+        return normalize_rfc3339_timestamp(value, field)
+    except Fdp123EvaluationCardValidationError as exc:
+        raise PromotionReviewReadinessValidationError(str(exc)) from exc
 
 
 def _inputs(raw: Any) -> dict[str, Any]:
@@ -288,7 +298,9 @@ def _inputs(raw: Any) -> dict[str, Any]:
         "present": _required_true(summary, "present"),
         "reportType": _required_constant(summary, "reportType", SHADOW_REPORT_TYPE),
         "summaryVersion": _required_constant(summary, "summaryVersion", SHADOW_SUMMARY_VERSION),
-        "generatedAt": _required_string(summary, "generatedAt", 128),
+        "generatedAt": normalize_readiness_timestamp(
+            summary.get("generatedAt"), "inputs.shadowPerformanceSummary.generatedAt"
+        ),
     }
     return {
         "shadowPerformanceSummary": normalized_summary,

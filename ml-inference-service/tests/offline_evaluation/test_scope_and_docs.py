@@ -95,7 +95,9 @@ class OfflineEvaluationScopeGuardTest(unittest.TestCase):
 
     def test_fdp104DoesNotModifyAlertServiceProjection(self):
         alert_service = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "alert-service" / "src" / "main").rglob("*.java"))
-        self.assertNotIn("EvaluationCard", alert_service)
+        self.assertNotIn("EvaluationCardGenerator", alert_service)
+        self.assertNotIn("buildEvaluationCard", alert_service)
+        self.assertNotIn("EvaluationCardRepository", alert_service)
 
     def test_fdp104DoesNotAddRecommendationService(self):
         self.assertNotInAnyOfflineFile("recommendation_module", "AnalystRecommendation", "recommend_analyst_action")

@@ -20,6 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SHADOW_SUMMARY = REPO_ROOT / "deployment/local-generated/shadow-performance/current-summary.json"
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "deployment/local-generated/promotion-readiness"
 DEFAULT_OUTPUT = DEFAULT_OUTPUT_ROOT / "promotion-review-readiness-report.json"
+MAX_PROMOTION_READINESS_INPUT_BYTES = 262_144
 
 
 class PromotionReviewReadinessGenerationError(RuntimeError):
@@ -69,7 +70,7 @@ def publish_promotion_review_readiness_report(
 
 
 def validate_promotion_review_readiness_report_file(path: Path) -> dict[str, Any]:
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw = _read_required_json_object(path, "promotion review readiness report", MAX_PROMOTION_READINESS_INPUT_BYTES)
     if not isinstance(raw, dict):
         raise PromotionReviewReadinessGenerationError("promotion review readiness report must be a JSON object")
     try:
@@ -108,10 +109,18 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _read_required_json_object(path: Path, label: str) -> dict[str, Any]:
+def _read_required_json_object(
+        path: Path,
+        label: str,
+        max_bytes: int = MAX_PROMOTION_READINESS_INPUT_BYTES,
+) -> dict[str, Any]:
     if not path.is_file():
         raise PromotionReviewReadinessGenerationError(f"{label} is missing")
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    with path.open("rb") as handle:
+        payload = handle.read(max_bytes + 1)
+    if len(payload) > max_bytes:
+        raise PromotionReviewReadinessGenerationError(f"{label} exceeds maximum byte size")
+    raw = json.loads(payload.decode("utf-8"))
     if not isinstance(raw, dict):
         raise PromotionReviewReadinessGenerationError(f"{label} must be a JSON object")
     return raw

@@ -40,8 +40,8 @@ check-python:
 
 shadow-performance-summary: check-python
 	cd ml-inference-service && PYTHONPATH=. python -m offline_evaluation.generate_current_shadow_summary \
-		--dataset-jsonl ../deployment/local-demo-inputs/shadow-performance/fdp102-feedback-dataset.synthetic.jsonl \
-		--model-metadata ../deployment/local-demo-inputs/shadow-performance/model-metadata.synthetic.json \
+		--evaluation-card ../deployment/local-generated/platform-recommendation-evaluation-card/platform_recommendation_evaluation_card.json \
+		--evaluation-card-manifest ../deployment/local-generated/platform-recommendation-evaluation-card/manifest.json \
 		--output ../deployment/local-generated/shadow-performance/current-summary.json
 
 promotion-readiness-report: check-python

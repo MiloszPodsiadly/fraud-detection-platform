@@ -12,7 +12,8 @@ from offline_evaluation.shadow_performance_writer import write_shadow_performanc
 from fdp123.evaluation_card.test_schema import valid_evaluation_card, valid_evaluation_evidence, valid_metrics
 
 
-GENERATED_AT = "2026-06-08T02:00:00Z"
+GENERATED_AT = "2026-06-13T02:00:00Z"
+CARD_MANIFEST_SHA256 = "b" * 64
 
 
 class ShadowPerformanceSummaryTest(unittest.TestCase):
@@ -22,6 +23,9 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
         self.assertEqual(REPORT_TYPE, summary["reportType"])
         self.assertEqual(SUMMARY_VERSION, summary["summaryVersion"])
         self.assertEqual("PLATFORM_RECOMMENDATION", summary["evaluationSubject"]["subjectType"])
+        self.assertEqual("2026-06-10T00:00:00Z", summary["evaluation"]["evaluationReportGeneratedAt"])
+        self.assertEqual("2026-06-12T00:00:00Z", summary["evaluation"]["evaluationCardGeneratedAt"])
+        self.assertEqual(CARD_MANIFEST_SHA256, summary["evaluation"]["sourceEvaluationCardManifestSha256"])
         self.assertNotIn("model", summary)
         self.assertNotIn("summaryType", summary)
 
@@ -34,7 +38,11 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
         }
         card["metricsSummary"]["falsePositiveRate"] = {"available": True, "value": 0.0, "reason": None}
 
-        metrics = build_shadow_performance_summary(card, GENERATED_AT)["metrics"]
+        metrics = build_shadow_performance_summary(
+            card,
+            GENERATED_AT,
+            source_evaluation_card_manifest_sha256=CARD_MANIFEST_SHA256,
+        )["metrics"]
 
         self.assertEqual(
             {"available": False, "value": None, "reason": "NO_PREDICTED_POSITIVES"},
@@ -170,7 +178,11 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
         return valid_evaluation_card()
 
     def summary(self):
-        return build_shadow_performance_summary(self.evaluation_card(), GENERATED_AT)
+        return build_shadow_performance_summary(
+            self.evaluation_card(),
+            GENERATED_AT,
+            source_evaluation_card_manifest_sha256=CARD_MANIFEST_SHA256,
+        )
 
     def small_excellent_evaluation_card(self):
         card = self.evaluation_card()

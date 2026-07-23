@@ -8,7 +8,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from offline_evaluation.fdp123.evaluation_card.schema import validate_evaluation_card
+from offline_evaluation.fdp123.evaluation_card.artifact_reader import read_validated_evaluation_card_artifact_set
+from offline_evaluation.fdp123.evaluation_card.schema import Fdp123EvaluationCardValidationError
 from offline_evaluation.shadow_performance_summary import build_shadow_performance_summary
 from offline_evaluation.shadow_performance_writer import write_shadow_performance_summary
 
@@ -18,9 +19,11 @@ DEFAULT_EVALUATION_CARD = (
     REPO_ROOT
     / "deployment/local-generated/platform-recommendation-evaluation-card/platform_recommendation_evaluation_card.json"
 )
+DEFAULT_EVALUATION_CARD_MANIFEST = DEFAULT_EVALUATION_CARD.with_name("manifest.json")
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "deployment/local-generated/shadow-performance"
 DEFAULT_OUTPUT = DEFAULT_OUTPUT_ROOT / "current-summary.json"
 FORBIDDEN_GENERATION_INPUT_SEGMENTS = ("deployment", "local-fixtures")
+MAX_CURRENT_SUMMARY_BYTES = 262_144
 
 
 class CurrentSummaryGenerationError(RuntimeError):
@@ -29,15 +32,27 @@ class CurrentSummaryGenerationError(RuntimeError):
 
 def generate_current_shadow_summary(
         evaluation_card_path: Path,
+        evaluation_card_manifest_path: Path,
         output_path: Path,
         *,
         generated_at: str | None = None,
         allowed_output_root: Path | None = None,
 ) -> Path:
-    evaluation_card = _read_required_json_object(evaluation_card_path, "Platform Recommendation Evaluation Card")
-    safe_card = validate_evaluation_card(evaluation_card)
+    _reject_forbidden_generation_input(evaluation_card_path)
+    _reject_forbidden_generation_input(evaluation_card_manifest_path)
+    try:
+        safe_card, card_manifest_sha256 = read_validated_evaluation_card_artifact_set(
+            evaluation_card_path,
+            evaluation_card_manifest_path,
+        )
+    except Fdp123EvaluationCardValidationError as exc:
+        raise CurrentSummaryGenerationError(str(exc)) from exc
     timestamp = generated_at or _utc_now()
-    summary = build_shadow_performance_summary(safe_card, timestamp)
+    summary = build_shadow_performance_summary(
+        safe_card,
+        timestamp,
+        source_evaluation_card_manifest_sha256=card_manifest_sha256,
+    )
     payload = write_shadow_performance_summary(summary)
     publish_current_summary(payload, output_path, allowed_output_root=allowed_output_root)
     return output_path
@@ -61,7 +76,7 @@ def publish_current_summary(payload: str, output_path: Path, *, allowed_output_r
 
 
 def validate_current_summary_file(path: Path) -> dict[str, Any]:
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw = _read_required_json_object(path, "current summary", MAX_CURRENT_SUMMARY_BYTES)
     if not isinstance(raw, dict):
         raise CurrentSummaryGenerationError("current summary must be a JSON object")
     from offline_evaluation.shadow_performance_schema import validate_shadow_performance_summary
@@ -75,6 +90,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         output_path = generate_current_shadow_summary(
             Path(args.evaluation_card),
+            Path(args.evaluation_card_manifest),
             Path(args.output),
             generated_at=args.generated_at,
             allowed_output_root=Path(args.allow_output_root) if args.allow_output_root else None,
@@ -91,17 +107,21 @@ def _parser() -> argparse.ArgumentParser:
         description="Generate a validated Shadow Performance Summary v2 current artifact for FDP-126."
     )
     parser.add_argument("--evaluation-card", default=str(DEFAULT_EVALUATION_CARD))
+    parser.add_argument("--evaluation-card-manifest", default=str(DEFAULT_EVALUATION_CARD_MANIFEST))
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
     parser.add_argument("--allow-output-root")
     parser.add_argument("--generated-at")
     return parser
 
 
-def _read_required_json_object(path: Path, label: str) -> dict[str, Any]:
-    _reject_forbidden_generation_input(path)
+def _read_required_json_object(path: Path, label: str, max_bytes: int) -> dict[str, Any]:
     if not path.is_file():
         raise CurrentSummaryGenerationError(f"{label} is missing")
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    with path.open("rb") as handle:
+        payload = handle.read(max_bytes + 1)
+    if len(payload) > max_bytes:
+        raise CurrentSummaryGenerationError(f"{label} exceeds maximum byte size")
+    raw = json.loads(payload.decode("utf-8"))
     if not isinstance(raw, dict):
         raise CurrentSummaryGenerationError(f"{label} must be a JSON object")
     return raw
