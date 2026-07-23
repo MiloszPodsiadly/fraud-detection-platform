@@ -82,6 +82,111 @@ class Fdp123ModelCardSchemaTest(unittest.TestCase):
         metrics["alertRecommendedRecall"] = {"available": True, "value": None, "reason": "NO_ACTUAL_POSITIVES"}
         self._assert_rejected(metricsSummary=metrics)
 
+    def test_classCountsMustEqualRecordsEvaluated(self):
+        card = valid_model_card(evaluationEvidence=valid_evaluation_evidence(
+            recordsEvaluated=2,
+            positiveClassCount=1,
+            negativeClassCount=1,
+        ))
+
+        self.assertEqual(2, validate_model_card(card)["evaluationEvidence"]["recordsEvaluated"])
+
+    def test_classCountSumBelowRecordsEvaluatedRejected(self):
+        self._assert_rejected(evaluationEvidence=valid_evaluation_evidence(
+            recordsEvaluated=100,
+            positiveClassCount=10,
+            negativeClassCount=10,
+        ))
+
+    def test_classCountSumAboveRecordsEvaluatedRejected(self):
+        self._assert_rejected(evaluationEvidence=valid_evaluation_evidence(
+            recordsEvaluated=1,
+            positiveClassCount=1,
+            negativeClassCount=1,
+        ))
+
+    def test_zeroClassCountsAcceptedForEmptyEvaluation(self):
+        card = valid_model_card(evaluationEvidence=valid_evaluation_evidence(
+            recordsEvaluated=0,
+            positiveClassCount=0,
+            negativeClassCount=0,
+        ))
+
+        self.assertEqual(0, validate_model_card(card)["evaluationEvidence"]["recordsEvaluated"])
+
+    def test_booleanClassCountRejected(self):
+        self._assert_rejected(evaluationEvidence=valid_evaluation_evidence(
+            recordsEvaluated=1,
+            positiveClassCount=True,
+            negativeClassCount=0,
+        ))
+
+    def test_disagreementSummaryRejectedFromFdp126ModelCardV1(self):
+        metrics = valid_metrics(disagreementSummary={"totalDisagreementRows": 1})
+
+        self._assert_rejected(metricsSummary=metrics)
+
+    def test_validZTimestampAccepted(self):
+        card = validate_model_card(valid_model_card(generatedAt="2026-06-12T00:00:00Z"))
+
+        self.assertEqual("2026-06-12T00:00:00Z", card["generatedAt"])
+
+    def test_validExplicitOffsetTimestampAcceptedAndNormalized(self):
+        card = validate_model_card(valid_model_card(
+            generatedAt="2026-06-12T02:00:00+02:00",
+            evaluationEvidence=valid_evaluation_evidence(evaluationGeneratedAt="2026-06-10T02:00:00+02:00"),
+        ))
+
+        self.assertEqual("2026-06-12T00:00:00Z", card["generatedAt"])
+        self.assertEqual("2026-06-10T00:00:00Z", card["evaluationEvidence"]["evaluationGeneratedAt"])
+
+    def test_arbitraryTimestampTextRejected(self):
+        for value in ("yesterday", "banana", "not-a-date"):
+            with self.subTest(value=value):
+                self._assert_rejected(generatedAt=value)
+
+    def test_dateOnlyTimestampRejected(self):
+        self._assert_rejected(generatedAt="2026-06-12")
+
+    def test_naiveTimestampRejected(self):
+        self._assert_rejected(generatedAt="2026-06-12T00:00:00")
+
+    def test_malformedCalendarTimestampRejected(self):
+        self._assert_rejected(generatedAt="2026-13-40T00:00:00Z")
+
+    def test_modelCardGeneratedBeforeEvaluationRejected(self):
+        self._assert_rejected(
+            generatedAt="2026-06-09T23:59:59Z",
+            evaluationEvidence=valid_evaluation_evidence(evaluationGeneratedAt="2026-06-10T00:00:00Z"),
+        )
+
+    def test_modelCardGeneratedAtSameInstantAsEvaluationAccepted(self):
+        card = validate_model_card(valid_model_card(
+            generatedAt="2026-06-10T00:00:00Z",
+            evaluationEvidence=valid_evaluation_evidence(evaluationGeneratedAt="2026-06-10T00:00:00Z"),
+        ))
+
+        self.assertEqual("2026-06-10T00:00:00Z", card["generatedAt"])
+
+    def test_modelCardGeneratedAfterEvaluationAccepted(self):
+        card = validate_model_card(valid_model_card(
+            generatedAt="2026-06-10T00:00:01Z",
+            evaluationEvidence=valid_evaluation_evidence(evaluationGeneratedAt="2026-06-10T00:00:00Z"),
+        ))
+
+        self.assertEqual("2026-06-10T00:00:01Z", card["generatedAt"])
+
+    def test_unknownModelMetadataRequiresExplicitDisclosure(self):
+        self._assert_rejected(modelFamily="UNKNOWN")
+        self._assert_rejected(trainingMode="UNKNOWN_OFFLINE")
+
+        card = validate_model_card(valid_model_card(
+            modelFamily="UNKNOWN",
+            limitations=sorted(REQUIRED_LIMITATIONS | {"MODEL_IDENTITY_METADATA_UNAVAILABLE"}),
+        ))
+
+        self.assertEqual("UNKNOWN", card["modelFamily"])
+
     def test_rawIdsRejected(self):
         for field in ("evaluationRecordId", "transactionReference", "feedbackId", "customerId"):
             with self.subTest(field=field):
@@ -158,7 +263,6 @@ def valid_metrics(**overrides):
         "alertRecommendedRecall": {"available": True, "value": 0.5, "reason": None},
         "falsePositiveRate": {"available": True, "value": 0.5, "reason": None},
         "falseNegativeRate": {"available": True, "value": 0.5, "reason": None},
-        "disagreementSummary": {"enginesAgree": 1, "enginesDisagree": 1},
     }
     metrics.update(overrides)
     return metrics

@@ -20,8 +20,12 @@ try:
     from fdp123.model_card.test_generator import MODEL_CARD_GENERATED_AT, fdp124_artifacts, model_metadata
     from fdp123.model_card.test_schema import valid_model_card
 except ModuleNotFoundError:
-    from test_generator import MODEL_CARD_GENERATED_AT, fdp124_artifacts, model_metadata
-    from test_schema import valid_model_card
+    try:
+        from .test_generator import MODEL_CARD_GENERATED_AT, fdp124_artifacts, model_metadata
+        from .test_schema import valid_model_card
+    except ImportError:
+        from test_generator import MODEL_CARD_GENERATED_AT, fdp124_artifacts, model_metadata
+        from test_schema import valid_model_card
 
 
 class Fdp123ModelCardWriterTest(unittest.TestCase):

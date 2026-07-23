@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sys
 import tempfile
@@ -8,6 +9,8 @@ from offline_evaluation.fdp123.dataset_reader import read_fdp123_feedback_datase
 from offline_evaluation.fdp123.evaluation_runner import build_fdp123_evaluation_reports
 from offline_evaluation.fdp123.model_card.generator import generate_model_card_from_fdp124_artifacts
 from offline_evaluation.fdp123.model_card.schema import (
+    MAX_EVALUATION_MANIFEST_BYTES,
+    MAX_EVALUATION_SUMMARY_BYTES,
     REQUIRED_GOVERNANCE_BOUNDARY,
     REQUIRED_LIMITATIONS,
     REQUIRED_NOT_INTENDED_USE,
@@ -37,6 +40,13 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
         self.assertEqual("NOT_EVALUATED_FOR_PROMOTION", card["promotionStatus"])
         self.assertIn("allowedUsageModes", card)
         self.assertNotIn("approvedFor", card)
+        self.assertNotIn("disagreementSummary", card["metricsSummary"])
+
+    def test_acceptsCanonicalSummaryAndManifestFilenames(self):
+        with self.artifacts() as paths:
+            card = self.generate(paths)
+
+        self.assertEqual("MODEL_CARD_V1", card["cardType"])
 
     def test_validatesManifestBeforeSummaryIsTrusted(self):
         with self.artifacts() as paths:
@@ -71,6 +81,73 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             with self.assertRaises(Fdp123ModelCardValidationError):
                 self.generate(paths)
 
+    def test_renamedSummaryRejectedEvenWithMatchingManifestHashAndSize(self):
+        with self.artifacts() as paths:
+            renamed = paths["evaluationSummary"].with_name("foo.json")
+            payload = paths["evaluationSummary"].read_bytes()
+            renamed.write_bytes(payload)
+            manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+            for item in manifest["files"]:
+                if item["name"] == "evaluation_summary.json":
+                    item["name"] = "foo.json"
+                    item["sha256"] = hashlib.sha256(payload).hexdigest()
+                    item["sizeBytes"] = len(payload)
+            paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
+
+            with self.assertRaises(Fdp123ModelCardValidationError):
+                generate_model_card_from_fdp124_artifacts(
+                    renamed,
+                    paths["manifest"],
+                    model_metadata(),
+                    MODEL_CARD_GENERATED_AT,
+                )
+
+    def test_renamedManifestRejectedEvenWithValidContent(self):
+        with self.artifacts() as paths:
+            renamed = paths["manifest"].with_name("random-manifest.json")
+            renamed.write_bytes(paths["manifest"].read_bytes())
+
+            with self.assertRaises(Fdp123ModelCardValidationError):
+                generate_model_card_from_fdp124_artifacts(
+                    paths["evaluationSummary"],
+                    renamed,
+                    model_metadata(),
+                    MODEL_CARD_GENERATED_AT,
+                )
+
+    def test_manifestListingOtherJsonDoesNotSatisfyEvaluationSummaryContract(self):
+        with self.artifacts() as paths:
+            payload = paths["evaluationSummary"].read_bytes()
+            manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+            for item in manifest["files"]:
+                if item["name"] == "evaluation_summary.json":
+                    item["name"] = "other.json"
+                    item["sha256"] = hashlib.sha256(payload).hexdigest()
+                    item["sizeBytes"] = len(payload)
+            paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
+
+            with self.assertRaises(Fdp123ModelCardValidationError):
+                self.generate(paths)
+
+    def test_manifestWithZeroEvaluationSummaryEntriesRejected(self):
+        with self.artifacts() as paths:
+            manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+            manifest["files"] = [item for item in manifest["files"] if item["name"] != "evaluation_summary.json"]
+            paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
+
+            with self.assertRaises(Fdp123ModelCardValidationError):
+                self.generate(paths)
+
+    def test_manifestWithMultipleEvaluationSummaryEntriesRejected(self):
+        with self.artifacts() as paths:
+            manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+            summary_entry = next(item for item in manifest["files"] if item["name"] == "evaluation_summary.json")
+            manifest["files"].append(dict(summary_entry))
+            paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
+
+            with self.assertRaises(Fdp123ModelCardValidationError):
+                self.generate(paths)
+
     def test_failsIfManifestReportTypeUnsupported(self):
         with self.artifacts() as paths:
             self._mutate_manifest(paths, reportType="OTHER")
@@ -92,6 +169,39 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
 
     def test_failsIfSummaryMissingGeneratedAt(self):
         self._assert_summary_missing("generatedAt")
+
+    def test_failsIfEvaluationSummaryGeneratedAtIsNotRealTimestamp(self):
+        for value in ("banana", "2026-06-12", "2026-06-12T00:00:00", "2026-13-40T00:00:00Z"):
+            with self.subTest(value=value):
+                with self.artifacts() as paths:
+                    self._mutate_summary(paths, generatedAt=value)
+                    with self.assertRaises(Fdp123ModelCardValidationError):
+                        self.generate(paths)
+
+    def test_acceptsAndNormalizesExplicitOffsetEvaluationTimestamp(self):
+        with self.artifacts() as paths:
+            self._mutate_summary(paths, generatedAt="2026-06-10T02:00:00+02:00")
+            card = self.generate(paths)
+
+        self.assertEqual("2026-06-10T00:00:00Z", card["evaluationEvidence"]["evaluationGeneratedAt"])
+
+    def test_failsIfModelCardGeneratedBeforeEvaluationEvidence(self):
+        with self.artifacts() as paths:
+            with self.assertRaises(Fdp123ModelCardValidationError):
+                self.generate(paths, generated_at="2026-06-09T23:59:59Z")
+
+    def test_acceptsModelCardGeneratedAtSameInstantAsEvaluationEvidence(self):
+        with self.artifacts() as paths:
+            self._mutate_summary(paths, generatedAt=MODEL_CARD_GENERATED_AT)
+            card = self.generate(paths)
+
+        self.assertEqual(MODEL_CARD_GENERATED_AT, card["generatedAt"])
+
+    def test_acceptsModelCardGeneratedAfterEvaluationEvidence(self):
+        with self.artifacts() as paths:
+            card = self.generate(paths, generated_at="2026-06-12T00:00:01Z")
+
+        self.assertEqual("2026-06-12T00:00:01Z", card["generatedAt"])
 
     def test_failsIfQualityMetricsMissing(self):
         self._assert_summary_missing("qualityMetrics")
@@ -125,6 +235,92 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             summary = self._summary(paths)
             summary["qualityMetrics"]["alertRecommendedConfusionMatrix"]["precision"] = {"value": 0.5}
             self._write_summary(paths, summary)
+            with self.assertRaises(Fdp123ModelCardValidationError):
+                self.generate(paths)
+
+    def test_failsIfSourceWarningsContainNonStringEvidence(self):
+        with self.artifacts() as paths:
+            summary = self._summary(paths)
+            summary["warnings"] = ["LOW_SAMPLE_SIZE", 123]
+            self._write_summary(paths, summary)
+
+            with self.assertRaises(Fdp123ModelCardValidationError):
+                self.generate(paths)
+
+    def test_failsIfClassCountSumBelowRecordsEvaluated(self):
+        with self.artifacts() as paths:
+            summary = self._summary(paths)
+            summary["qualityMetrics"]["datasetSummary"]["recordsEvaluated"] = 100
+            summary["qualityMetrics"]["classBalance"]["positiveClassCount"] = 10
+            summary["qualityMetrics"]["classBalance"]["negativeClassCount"] = 10
+            self._write_summary(paths, summary)
+
+            with self.assertRaises(Fdp123ModelCardValidationError):
+                self.generate(paths)
+
+    def test_failsIfClassCountSumAboveRecordsEvaluated(self):
+        with self.artifacts() as paths:
+            summary = self._summary(paths)
+            summary["qualityMetrics"]["datasetSummary"]["recordsEvaluated"] = 1
+            summary["qualityMetrics"]["classBalance"]["positiveClassCount"] = 1
+            summary["qualityMetrics"]["classBalance"]["negativeClassCount"] = 1
+            self._write_summary(paths, summary)
+
+            with self.assertRaises(Fdp123ModelCardValidationError):
+                self.generate(paths)
+
+    def test_acceptsZeroClassCountsForEmptyEvaluation(self):
+        with self.artifacts() as paths:
+            summary = self._summary(paths)
+            summary["qualityMetrics"]["datasetSummary"]["recordsEvaluated"] = 0
+            summary["qualityMetrics"]["classBalance"]["positiveClassCount"] = 0
+            summary["qualityMetrics"]["classBalance"]["negativeClassCount"] = 0
+            self._write_summary(paths, summary)
+            card = self.generate(paths)
+
+        self.assertEqual(0, card["evaluationEvidence"]["recordsEvaluated"])
+
+    def test_malformedSourceDisagreementSummaryIsNotConsumedOrEmitted(self):
+        with self.artifacts() as paths:
+            summary = self._summary(paths)
+            summary["disagreementSummary"] = {"unexpected": {"nested": "not-count"}}
+            self._write_summary(paths, summary)
+            card = self.generate(paths)
+
+        self.assertNotIn("disagreementSummary", card["metricsSummary"])
+
+    def test_summaryFileExactlyAtLimitUsesNormalParsing(self):
+        with self.artifacts() as paths:
+            payload = paths["evaluationSummary"].read_bytes()
+            padding = b" " * (MAX_EVALUATION_SUMMARY_BYTES - len(payload))
+            paths["evaluationSummary"].write_bytes(payload + padding)
+            self._rewrite_manifest(paths)
+
+            card = self.generate(paths)
+
+        self.assertEqual("MODEL_CARD_V1", card["cardType"])
+
+    def test_summaryFileAboveLimitRejectedBeforeTrustingManifestSize(self):
+        with self.artifacts() as paths:
+            paths["evaluationSummary"].write_bytes(b" " * (MAX_EVALUATION_SUMMARY_BYTES + 1))
+
+            with self.assertRaises(Fdp123ModelCardValidationError):
+                self.generate(paths)
+
+    def test_manifestFileExactlyAtLimitUsesNormalParsing(self):
+        with self.artifacts() as paths:
+            payload = paths["manifest"].read_bytes()
+            padding = b" " * (MAX_EVALUATION_MANIFEST_BYTES - len(payload))
+            paths["manifest"].write_bytes(payload + padding)
+
+            card = self.generate(paths)
+
+        self.assertEqual("MODEL_CARD_V1", card["cardType"])
+
+    def test_manifestFileAboveLimitRejectedBeforeJsonParsing(self):
+        with self.artifacts() as paths:
+            paths["manifest"].write_bytes(b" " * (MAX_EVALUATION_MANIFEST_BYTES + 1))
+
             with self.assertRaises(Fdp123ModelCardValidationError):
                 self.generate(paths)
 
@@ -171,12 +367,12 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
         self.assertIsNone(precision["value"])
         self.assertEqual("NO_PREDICTED_POSITIVES", precision["reason"])
 
-    def generate(self, paths, metadata=None):
+    def generate(self, paths, metadata=None, generated_at=MODEL_CARD_GENERATED_AT):
         return generate_model_card_from_fdp124_artifacts(
             paths["evaluationSummary"],
             paths["manifest"],
             metadata or model_metadata(),
-            MODEL_CARD_GENERATED_AT,
+            generated_at,
         )
 
     def _assert_summary_missing(self, field):
@@ -199,7 +395,6 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
         manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
         for item in manifest["files"]:
             if item["name"] == "evaluation_summary.json":
-                import hashlib
                 item["sha256"] = hashlib.sha256(payload).hexdigest()
                 item["sizeBytes"] = len(payload)
         paths["manifest"].write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")

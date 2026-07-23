@@ -62,6 +62,17 @@ class Fdp123ModelCardScopeGuardTest(unittest.TestCase):
         self.assertIn("not threshold recommendation", text)
         self.assertIn("not payment authorization", text)
 
+    def test_docsDescribeFailClosedFdp126SourceBoundary(self):
+        text = "\n".join(path.read_text(encoding="utf-8") for path in DOC_PATHS if path.exists())
+        compact_text = " ".join(text.split())
+
+        self.assertIn("`evaluation_summary.json`", text)
+        self.assertIn("`manifest.json`", text)
+        self.assertIn("positiveClassCount + negativeClassCount == recordsEvaluated", text)
+        self.assertIn("real RFC3339 date-times with explicit timezone", text)
+        self.assertIn("does not copy FDP-124 `disagreementSummary` into Model Card v1", compact_text)
+        self.assertIn("not a signature, notarization, external attestation", text)
+
     def _package_text(self):
         return "\n".join(path.read_text(encoding="utf-8") for path in PACKAGE_ROOT.glob("*.py"))
 
