@@ -17,8 +17,8 @@ them explicitly.
 ## Source Of Truth
 
 The API exposes only validated FDP-105 Shadow Performance Summary fields through bounded response DTOs. It does not
-recompute metrics, rebuild the summary, generate FDP-104 Model Cards, read FDP-102 JSONL exports, read FDP-103 raw
-evaluation reports, read raw FDP-104 Model Cards, inspect raw dataset rows, read production scoring DBs, call scoring
+recompute metrics, rebuild the summary, generate Model Cards, read dataset JSONL exports, read raw offline
+evaluation reports, read raw Model Card payloads, inspect raw dataset rows, read production scoring DBs, call scoring
 services, call Kafka, read model registry state, or read model artifact stores.
 
 The endpoint does not recompute metrics. The endpoint does not read FDP-102 JSONL exports. The endpoint does not expose raw Model Cards.
@@ -28,7 +28,7 @@ The source chain remains:
 ```text
 FDP-102 dataset export
 -> FDP-103 offline evaluation report
--> FDP-104 Model Card v1
+-> FDP-126 Model Card v1
 -> FDP-105 Shadow Performance Summary v1
 -> FDP-106 read API DTO
 ```

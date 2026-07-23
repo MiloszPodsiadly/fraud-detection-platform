@@ -86,7 +86,7 @@ FDP-111 does not authorize payments.
 FDP-111 does not recommend analyst action.
 FDP-111 does not add API, OpenAPI, UI, workflow, scheduler, or Kafka triggers.
 FDP-111 does not mutate model registry or model artifacts.
-FDP-111 does not read raw FDP-102 JSONL, raw FDP-103 evaluation reports, raw FDP-104 displays, raw transaction records,
+FDP-111 does not read raw dataset JSONL, raw offline evaluation reports, raw Model Card displays, raw transaction records,
 MongoDB, Kafka, payment data, alert database, fraud case database, model registry, or raw model outputs.
 
 ## Local Command

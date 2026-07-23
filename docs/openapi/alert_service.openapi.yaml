@@ -1626,7 +1626,7 @@ paths:
   /api/v1/governance/shadow-performance/summary/current:
     get:
       summary: Read current Shadow Performance Summary
-      description: Returns the current validated FDP-105 Shadow Performance Summary as a bounded read-only DTO. Requires shadow-performance:read. The response is diagnostic-only and is not model promotion approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic approve/decline/block logic, and not analyst recommendation logic. This endpoint does not expose raw FDP-102 JSONL, raw FDP-103 reports, raw FDP-104 Model Cards, per-record examples, model registry data, model artifacts, scoring data, promotion fields, threshold recommendation fields, or decisioning fields.
+      description: Returns the current validated FDP-105 Shadow Performance Summary as a bounded read-only DTO. Requires shadow-performance:read. The response is diagnostic-only and is not model promotion approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic approve/decline/block logic, and not analyst recommendation logic. This endpoint does not expose raw dataset JSONL, raw offline evaluation reports, raw Model Card payloads, per-record examples, model registry data, model artifacts, scoring data, promotion fields, threshold recommendation fields, or decisioning fields.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -5273,15 +5273,18 @@ components:
       properties:
         modelName:
           type: string
+          enum: [NOT_AVAILABLE]
           maxLength: 128
         modelVersion:
           type: string
+          enum: [NOT_AVAILABLE]
           maxLength: 128
         modelFamily:
           type: string
-          enum: [LOGISTIC_REGRESSION]
+          enum: [PLATFORM_RECOMMENDATION]
         featureContractVersion:
           type: string
+          enum: [NOT_APPLICABLE]
           maxLength: 128
     ShadowPerformanceGovernanceResponse:
       type: object
@@ -5318,19 +5321,19 @@ components:
       properties:
         evaluationReportType:
           type: string
-          enum: [PYTHON_ML_EVALUATION_FOUNDATION]
+          enum: [FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1]
         evaluationReportVersion:
           type: string
-          enum: [FDP-103]
+          enum: [FDP-124]
         metricBasis:
           type: string
-          enum: [bucket_ordered_offline_diagnostic]
+          enum: [ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK]
         datasetTimeBasis:
           type: string
-          enum: [FEEDBACK_SUBMITTED_AT]
+          enum: [FEEDBACK_CREATED_AT]
         datasetDeduplicationPolicy:
           type: string
-          enum: [TRANSACTION_REFERENCE_NEWEST_SUBMITTED_AT_FEEDBACK_ID_ASC]
+          enum: [FDP123_RECORD_COUNT_MATCHES_METADATA_RECORDS_RETURNED]
     ShadowPerformancePopulationResponse:
       type: object
       additionalProperties: false
@@ -5339,15 +5342,15 @@ components:
         datasetRecordsRead:
           type: integer
           minimum: 0
-          maximum: 500
+          maximum: 1000
         recordsAcceptedForEvaluation:
           type: integer
           minimum: 0
-          maximum: 500
+          maximum: 1000
         recordsExcludedNotEvaluationEligible:
           type: integer
           minimum: 0
-          maximum: 500
+          maximum: 1000
     ShadowPerformanceMetricsResponse:
       type: object
       additionalProperties: false
@@ -5371,27 +5374,27 @@ components:
         mlCaughtRulesMissedCount:
           type: integer
           minimum: 0
-          maximum: 500
+          maximum: 1000
         rulesCaughtMlMissedCount:
           type: integer
           minimum: 0
-          maximum: 500
+          maximum: 1000
         missingMlCount:
           type: integer
           minimum: 0
-          maximum: 500
+          maximum: 1000
         missingRulesCount:
           type: integer
           minimum: 0
-          maximum: 500
+          maximum: 1000
         missingProjectionCount:
           type: integer
           minimum: 0
-          maximum: 500
+          maximum: 1000
         notEvaluationEligibleCount:
           type: integer
           minimum: 0
-          maximum: 500
+          maximum: 1000
     ShadowPerformanceDisagreementResponse:
       type: object
       additionalProperties: false
@@ -5400,35 +5403,35 @@ components:
         rulesHighMlHigh:
           type: integer
           minimum: 0
-          maximum: 500
+          maximum: 1000
         rulesHighMlLowOrMedium:
           type: integer
           minimum: 0
-          maximum: 500
+          maximum: 1000
         rulesLowOrMediumMlHigh:
           type: integer
           minimum: 0
-          maximum: 500
+          maximum: 1000
         rulesLowOrMediumMlLowOrMedium:
           type: integer
           minimum: 0
-          maximum: 500
+          maximum: 1000
         rulesMissingMlPresent:
           type: integer
           minimum: 0
-          maximum: 500
+          maximum: 1000
         mlMissingRulesPresent:
           type: integer
           minimum: 0
-          maximum: 500
+          maximum: 1000
         bothMissing:
           type: integer
           minimum: 0
-          maximum: 500
+          maximum: 1000
         notEvaluationEligibleExcluded:
           type: integer
           minimum: 0
-          maximum: 500
+          maximum: 1000
   responses:
     BadRequest:
       description: Request validation failed.

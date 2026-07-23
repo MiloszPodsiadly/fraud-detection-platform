@@ -28,7 +28,7 @@ The generated file is compatible with the FDP-108 artifact-backed provider when 
 
 ## Input And Reuse
 
-The job consumes explicit FDP-102 bounded JSONL export input and model metadata supplied by the caller:
+The job consumes explicit FDP-102 bounded JSONL export input and local governance metadata supplied by the caller:
 
 - `deployment/local-demo-inputs/shadow-performance/fdp102-feedback-dataset.synthetic.jsonl`
 - `deployment/local-demo-inputs/shadow-performance/model-metadata.synthetic.json`
@@ -36,14 +36,14 @@ The job consumes explicit FDP-102 bounded JSONL export input and model metadata 
 The local input files are synthetic demo/local inputs only. They are not production data, not current runtime data,
 and not exported from real transactions. FDP-109 consumes explicit local/offline FDP-102-format input. FDP-109 does not connect to Mongo/Kafka directly. The generated summary must not contain raw transaction references or evaluation record IDs.
 
-The job reuses the existing governed chain:
+The job reuses the existing governed chain without rebuilding the removed legacy Model Card implementation:
 
 - FDP-102 bounded feedback dataset export contract as JSONL input.
 - FDP-103 offline evaluation builder for aggregate diagnostic metrics and disagreement counts.
-- FDP-104 Model Card v1 builder and writer for validated model governance context.
 - FDP-105 Shadow Performance Summary v1 builder and writer for validated current summary output.
 
-It does not duplicate metric calculation logic, does not independently recompute precision, recall, false-positive rate, disagreement counts, or evaluation population, and does not read raw Mongo or Kafka directly.
+It does not independently recompute precision, recall, false-positive rate, disagreement counts, or evaluation
+population outside the offline evaluation report, and does not read raw Mongo or Kafka directly.
 
 ## Publish Semantics
 
@@ -64,7 +64,7 @@ FDP-109 is not production scheduler. FDP-109 is not promotion readiness. FDP-109
 
 FDP-109 does not mutate model registry state, model artifacts, threshold configuration, online scoring, alert state, fraud-case state, or payment authorization state. It does not emit Kafka events, add a cron job, add a scheduler, expose an API, expose OpenAPI, or add dashboard filters, search, history, charts, model comparison, or UI behavior.
 
-The final generated summary must not contain raw FDP-102 JSONL, raw FDP-103 evaluation report, raw FDP-104 Model Card, per-record examples, raw transaction references or evaluation record IDs, transaction references, evaluation record identifiers, customer/account/card/device/merchant identifiers, analyst identifiers, raw payloads, raw feature vectors, raw ML requests or responses, tokens, secrets, stack traces, endpoints, ground truth, training labels, or final decisions.
+The final generated summary must not contain raw FDP-102 JSONL, raw FDP-103 evaluation report, raw Model Card payloads, per-record examples, raw transaction references or evaluation record IDs, transaction references, evaluation record identifiers, customer/account/card/device/merchant identifiers, analyst identifiers, raw payloads, raw feature vectors, raw ML requests or responses, tokens, secrets, stack traces, endpoints, ground truth, training labels, or final decisions.
 
 The final summary must not contain promotion readiness score, promotion approval, promotion workflow, threshold recommendation, threshold switching, recommended threshold, champion/challenger status, champion candidate, deploy recommendation, production approval, payment authorization, automatic approve/decline/block, or analyst recommendation logic.
 

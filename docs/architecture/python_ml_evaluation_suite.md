@@ -102,9 +102,8 @@ Generated reports are aggregate-first and include:
 - exclusions,
 - bounded warnings.
 
-FDP-104 Model Card v1 consumes FDP-103 aggregate reports only. It validates FDP-103 report identity, metric basis,
-dataset time basis, deduplication policy, numeric metric ranges, and allowlisted disagreementSummary keys. It does not
-consume raw dataset rows, per-record identifiers, raw payloads, raw feature vectors, or raw reports.
+The previous FDP-102/FDP-103 Model Card path has been removed. Model Card v1 is now implemented only by the
+FDP-123/FDP-124/FDP-126 path described below.
 
 The report writer does not emit per-record output by default and does not emit raw transaction IDs, customer/account/
 card/device/merchant identifiers, analyst IDs, submitted-by values, correlation IDs, idempotency keys, request hashes,
@@ -136,13 +135,17 @@ FDP-124 disagreement rows may include `decisionReasonCodes` because FDP-123 vali
 values. They are allowed only in local/internal disagreement rows. They are not notes, not raw evidence, and must not
 contain raw IDs, free text, payloads, tokens, or secrets.
 
-FDP-123/FDP-124 Model Card v1 is a separate local/internal governance artifact generated from FDP-124 aggregate
-artifacts only. It accepts only canonical `manifest.json` and `evaluation_summary.json` inputs from the FDP-124
-artifact set, validates `reportType = FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1` and
+FDP-123/FDP-124 Model Card v1 is the single executable Model Card implementation. It is a local/internal governance
+artifact generated from FDP-124 aggregate artifacts only. It accepts only canonical `manifest.json` and
+`evaluation_summary.json` inputs from the FDP-124 artifact set, validates
+`reportType = FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1` and
 `artifactSetVersion = fdp123-report-artifact-set-v1`, bounds input size before full read, and preserves manifest
-`sha256` and `sizeBytes` checks. It does not read `disagreement_report.jsonl` in v1, does not copy FDP-124
-`disagreementSummary` into Model Card v1, does not read the raw FDP-123 dataset, and does not expose raw IDs or
-per-record data. Its binary class-count invariant is
+`sha256` and `sizeBytes` checks. FDP-124 owns `evaluationSubject`, `metricsSubject`, and `metricBasis`; Model Card v1
+copies those values and rejects caller-controlled model identity. Its `metricBasis` is
+`ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK`, so `alertRecommendedConfusionMatrix` is a platform recommendation
+diagnostic rather than direct model performance. It does not read `disagreement_report.jsonl` in v1, does not copy
+FDP-124 `disagreementSummary` into Model Card v1, does not read the raw FDP-123 dataset, and does not expose raw IDs
+or per-record data. Its evidence counts use the FDP-123 `MAX_DATASET_RECORDS = 1000` limit. Its binary class-count invariant is
 `positiveClassCount + negativeClassCount == recordsEvaluated`. Its timestamps are real RFC3339 date-times with
 explicit timezone, normalized to UTC `Z`, and checked so the Model Card `generatedAt` instant is not earlier than the
 evaluation evidence instant. `sourceManifestSha256` is only a local lineage and integrity fingerprint, not a

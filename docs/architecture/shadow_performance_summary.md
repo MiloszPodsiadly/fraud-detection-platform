@@ -4,9 +4,10 @@ Status: FDP-105 offline diagnostic summary foundation.
 
 ## Scope
 
-Shadow Performance Summary v1 is an offline diagnostic artifact. It consumes only validated FDP-104 Model Card v1
-objects and caller-provided generation timestamps. It does not recompute metrics, does not read FDP-102 JSONL exports,
-does not read FDP-103 raw evaluation reports, and does not inspect per-record data.
+Shadow Performance Summary v1 is an offline diagnostic artifact. Its Model Card consumer path accepts only validated
+FDP-123/FDP-124/FDP-126 Model Card v1 objects and caller-provided generation timestamps. The local FDP-109 generator
+builds a summary directly from explicit offline evaluation inputs and does not recreate the removed FDP-102/FDP-103
+Model Card path.
 
 Shadow Performance Summary v1 carries evaluation population and sample-size context with its diagnostic metrics. This
 context is required so precision, recall, and false-positive-rate values cannot be interpreted without knowing the
@@ -19,17 +20,20 @@ scheduled jobs, DB writes, Kafka messages, scoring changes, registry writes, or 
 
 ## Input
 
-The only supported source of truth is a validated Model Card v1:
+For Model Card input, the only supported source of truth is a validated FDP-126 Model Card v1:
 
-- `cardType = OFFLINE_MODEL_CARD_V1`
-- `modelCardVersion = 1.0`
-- `governanceStatus = DIAGNOSTIC_ONLY`
-- `approvedFor` limited to `SHADOW` and `COMPARE`
-- FDP-103 report identity and metric basis already validated by FDP-104
-- FDP-102 dataset time basis and deduplication policy already validated by FDP-104
+- `cardType = MODEL_CARD_V1`
+- `modelCardVersion = model-card-v1`
+- `productionApproval = NOT_APPROVED`
+- `promotionStatus = NOT_EVALUATED_FOR_PROMOTION`
+- `allowedUsageModes` includes `SHADOW` and `COMPARE`
+- `metricsSubject = PLATFORM_RECOMMENDATION`
+- `metricBasis = ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK`
+- FDP-124 report identity and dataset time basis already validated by Model Card v1
 
-The summary builder copies only allowlisted aggregate and governance fields from the validated model card. It does not
-accept raw model cards as output fields and does not pass through raw reports, raw dataset rows, pseudonymous
+The summary builder copies only allowlisted aggregate and governance fields from the validated model card or local
+offline evaluation report. It does not accept raw model cards as output fields and does not pass through raw reports,
+raw dataset rows, pseudonymous
 references, raw payloads, raw feature vectors, identifiers, endpoints, tokens, secrets, exception text, or stack traces.
 
 ## Output
