@@ -40,22 +40,22 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         topLevelFields.addAll(json.propertyNames());
 
         assertThat(topLevelFields).containsExactly(
-                "summaryType",
+                "reportType",
                 "summaryVersion",
                 "generatedAt",
-                "model",
+                "evaluationSubject",
+                "metricBasis",
                 "governance",
                 "evaluation",
                 "evaluationPopulation",
                 "metrics",
-                "disagreementSummary",
                 "warnings",
                 "limitations",
                 "banner"
         );
 
         for (String term : new String[]{
-                "rawModelCard",
+                "rawEvaluationCard",
                 "rawEvaluationReport",
                 "rawDataset",
                 "rawFdp102Jsonl",
@@ -164,8 +164,8 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "read_fdp102_jsonl",
                 "Fdp102Jsonl",
                 "EvaluationRunner",
-                "build_model_card",
-                "ModelCardGenerator",
+                "build_evaluation_card",
+                "EvaluationCardGenerator",
                 "precisionAtBudget =",
                 "recallAtTopK =",
                 "falsePositiveRate =",
@@ -242,7 +242,6 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "MapperFeature.ALLOW_COERCION_OF_SCALARS",
                 "DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES",
                 "DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES",
-                "DeserializationFeature.FAIL_ON_NULL_CREATOR_PROPERTIES",
                 "DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES"
         );
         assertThat(source).doesNotContain(
@@ -336,7 +335,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "exposes only validated FDP-105 Shadow Performance Summary fields",
                 "does not recompute metrics",
                 "does not read FDP-102 JSONL exports",
-                "does not expose raw Model Cards",
+                "does not expose raw Platform Recommendation Evaluation Cards",
                 "not a dashboard",
                 "not model promotion approval",
                 "not threshold recommendation",

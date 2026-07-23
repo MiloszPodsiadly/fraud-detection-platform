@@ -122,12 +122,10 @@ class ShadowPerformanceSummaryControllerAuthorizationTest {
 
         mockMvc.perform(get(PATH).with(authentication(auth(AnalystAuthority.SHADOW_PERFORMANCE_READ))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.summaryType").value("SHADOW_PERFORMANCE_SUMMARY_V1"))
+                .andExpect(jsonPath("$.reportType").value("SHADOW_PERFORMANCE_SUMMARY_V2"))
                 .andExpect(jsonPath("$.governance.diagnosticOnly").value(true))
-                .andExpect(jsonPath("$.governance.approvedFor[0]").value("COMPARE"))
-                .andExpect(jsonPath("$.governance.approvedFor[1]").value("SHADOW"))
-                .andExpect(jsonPath("$.evaluationPopulation.datasetRecordsRead").value(5))
-                .andExpect(jsonPath("$.metrics.precisionAtBudget").value(0.666667))
+                .andExpect(jsonPath("$.evaluationPopulation.recordsEvaluated").value(5))
+                .andExpect(jsonPath("$.metrics.alertRecommendedPrecision.value").value(0.666667))
                 .andExpect(jsonPath("$.banner").value(ShadowPerformanceSummaryContract.REQUIRED_BANNER));
 
         verify(readAccessAuditService).audit(

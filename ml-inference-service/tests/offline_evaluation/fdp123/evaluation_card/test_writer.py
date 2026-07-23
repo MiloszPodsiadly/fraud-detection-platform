@@ -8,33 +8,33 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import patch
 
-from offline_evaluation.fdp123.model_card.run_model_card_generation import main
-from offline_evaluation.fdp123.model_card.schema import Fdp123ModelCardValidationError
-from offline_evaluation.fdp123.model_card.writer import (
-    build_model_card_manifest,
-    model_card_json,
-    model_card_markdown,
-    write_model_card_artifacts,
+from offline_evaluation.fdp123.evaluation_card.run_evaluation_card_generation import main
+from offline_evaluation.fdp123.evaluation_card.schema import Fdp123EvaluationCardValidationError
+from offline_evaluation.fdp123.evaluation_card.writer import (
+    build_evaluation_card_manifest,
+    evaluation_card_json,
+    evaluation_card_markdown,
+    write_evaluation_card_artifacts,
 )
 try:
-    from fdp123.model_card.test_generator import MODEL_CARD_GENERATED_AT, fdp124_artifacts, model_metadata
-    from fdp123.model_card.test_schema import valid_model_card
+    from fdp123.evaluation_card.test_generator import PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT, fdp124_artifacts, model_metadata
+    from fdp123.evaluation_card.test_schema import valid_evaluation_card
 except ModuleNotFoundError:
     try:
-        from .test_generator import MODEL_CARD_GENERATED_AT, fdp124_artifacts, model_metadata
-        from .test_schema import valid_model_card
+        from .test_generator import PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT, fdp124_artifacts, model_metadata
+        from .test_schema import valid_evaluation_card
     except ImportError:
-        from test_generator import MODEL_CARD_GENERATED_AT, fdp124_artifacts, model_metadata
-        from test_schema import valid_model_card
+        from test_generator import PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT, fdp124_artifacts, model_metadata
+        from test_schema import valid_evaluation_card
 
 
-class Fdp123ModelCardWriterTest(unittest.TestCase):
-    def test_writesModelCardJsonMarkdownAndManifest(self):
+class Fdp123EvaluationCardWriterTest(unittest.TestCase):
+    def test_writesEvaluationCardJsonMarkdownAndManifest(self):
         with tempfile.TemporaryDirectory() as directory:
-            paths = write_model_card_artifacts(valid_model_card(), Path(directory))
+            paths = write_evaluation_card_artifacts(valid_evaluation_card(), Path(directory))
 
-            self.assertTrue(paths["modelCardJson"].exists())
-            self.assertTrue(paths["modelCardMarkdown"].exists())
+            self.assertTrue(paths["evaluationCardJson"].exists())
+            self.assertTrue(paths["evaluationCardMarkdown"].exists())
             self.assertTrue(paths["manifest"].exists())
 
     def test_manifestIsWrittenLast(self):
@@ -46,20 +46,23 @@ class Fdp123ModelCardWriterTest(unittest.TestCase):
             return original_replace(source, destination)
 
         with tempfile.TemporaryDirectory() as directory:
-            with patch("offline_evaluation.fdp123.model_card.writer.os.replace", recording_replace):
-                write_model_card_artifacts(valid_model_card(), Path(directory))
+            with patch("offline_evaluation.fdp123.evaluation_card.writer.os.replace", recording_replace):
+                write_evaluation_card_artifacts(valid_evaluation_card(), Path(directory))
 
         self.assertEqual(("manifest.json.tmp", "manifest.json"), replace_calls[-1])
 
     def test_manifestHashesAndSizesMatchWrittenFiles(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
-            write_model_card_artifacts(valid_model_card(), output)
+            write_evaluation_card_artifacts(valid_evaluation_card(), output)
             manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
 
-            self.assertEqual("MODEL_CARD_V1", manifest["reportType"])
-            self.assertEqual("model-card-artifact-set-v1", manifest["artifactSetVersion"])
-            self.assertEqual(["model_card.json", "model_card.md"], sorted(item["name"] for item in manifest["files"]))
+            self.assertEqual("PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1", manifest["reportType"])
+            self.assertEqual("platform-recommendation-evaluation-card-artifact-set-v1", manifest["artifactSetVersion"])
+            self.assertEqual(
+                ["platform_recommendation_evaluation_card.json", "platform_recommendation_evaluation_card.md"],
+                sorted(item["name"] for item in manifest["files"]),
+            )
             for item in manifest["files"]:
                 payload = (output / item["name"]).read_bytes()
                 self.assertEqual(len(payload), item["sizeBytes"])
@@ -75,8 +78,8 @@ class Fdp123ModelCardWriterTest(unittest.TestCase):
             except OSError as exception:
                 self.skipTest(f"symlink creation unavailable: {exception}")
 
-            with self.assertRaises(Fdp123ModelCardValidationError):
-                write_model_card_artifacts(valid_model_card(), link)
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
+                write_evaluation_card_artifacts(valid_evaluation_card(), link)
 
     def test_rejectsSymlinkFinalArtifactPath(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -84,14 +87,14 @@ class Fdp123ModelCardWriterTest(unittest.TestCase):
             output.mkdir()
             target = Path(directory) / "target.json"
             target.write_text("{}", encoding="utf-8")
-            link = output / "model_card.json"
+            link = output / "platform_recommendation_evaluation_card.json"
             try:
                 link.symlink_to(target)
             except OSError as exception:
                 self.skipTest(f"symlink creation unavailable: {exception}")
 
-            with self.assertRaises(Fdp123ModelCardValidationError):
-                write_model_card_artifacts(valid_model_card(), output)
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
+                write_evaluation_card_artifacts(valid_evaluation_card(), output)
 
     def test_rejectsSymlinkManifestPath(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -105,16 +108,16 @@ class Fdp123ModelCardWriterTest(unittest.TestCase):
             except OSError as exception:
                 self.skipTest(f"symlink creation unavailable: {exception}")
 
-            with self.assertRaises(Fdp123ModelCardValidationError):
-                write_model_card_artifacts(valid_model_card(), output)
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
+                write_evaluation_card_artifacts(valid_evaluation_card(), output)
 
     def test_rejectsOutputOutsideAllowOutputRoot(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "allowed"
             output = Path(directory) / "outside"
 
-            with self.assertRaises(Fdp123ModelCardValidationError):
-                write_model_card_artifacts(valid_model_card(), output, allow_output_root=root)
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
+                write_evaluation_card_artifacts(valid_evaluation_card(), output, allow_output_root=root)
 
     def test_cleansTempFilesOnFailure(self):
         def failing_replace(source, destination):
@@ -122,9 +125,9 @@ class Fdp123ModelCardWriterTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
-            with patch("offline_evaluation.fdp123.model_card.writer.os.replace", failing_replace):
+            with patch("offline_evaluation.fdp123.evaluation_card.writer.os.replace", failing_replace):
                 with self.assertRaises(OSError):
-                    write_model_card_artifacts(valid_model_card(), output)
+                    write_evaluation_card_artifacts(valid_evaluation_card(), output)
 
             self.assertFalse((output / "manifest.json").exists())
             self.assertEqual([], list(output.glob("*.tmp")))
@@ -132,35 +135,35 @@ class Fdp123ModelCardWriterTest(unittest.TestCase):
     def test_failureBeforeManifestDoesNotCreateValidArtifactSet(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
-            with self.assertRaises(Fdp123ModelCardValidationError):
-                write_model_card_artifacts(valid_model_card(rawPayload="unsafe"), output)
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
+                write_evaluation_card_artifacts(valid_evaluation_card(rawPayload="unsafe"), output)
 
             self.assertFalse((output / "manifest.json").exists())
 
     def test_markdownSafetyFilterRejectsForbiddenTerms(self):
-        with self.assertRaises(Fdp123ModelCardValidationError):
-            model_card_markdown(valid_model_card(warnings=["TOKEN"]))
+        with self.assertRaises(Fdp123EvaluationCardValidationError):
+            evaluation_card_markdown(valid_evaluation_card(warnings=["TOKEN"]))
 
     def test_jsonSafetyFilterRejectsForbiddenTerms(self):
-        with self.assertRaises(Fdp123ModelCardValidationError):
-            model_card_json(valid_model_card(rawPayload="unsafe"))
+        with self.assertRaises(Fdp123EvaluationCardValidationError):
+            evaluation_card_json(valid_evaluation_card(rawPayload="unsafe"))
 
     def test_buildManifestRejectsUnsafePayload(self):
-        with self.assertRaises(Fdp123ModelCardValidationError):
-            build_model_card_manifest({Path("rawPayload.json"): "{}\n"}, MODEL_CARD_GENERATED_AT)
+        with self.assertRaises(Fdp123EvaluationCardValidationError):
+            build_evaluation_card_manifest({Path("rawPayload.json"): "{}\n"}, PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT)
 
 
-class Fdp123ModelCardCliTest(unittest.TestCase):
+class Fdp123EvaluationCardCliTest(unittest.TestCase):
     def test_cliGeneratesArtifactsFromValidInputs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            output = root / "model-card"
+            output = root / "platform-recommendation-evaluation-card"
             with fdp124_artifacts() as paths:
                 result = main(cli_args(paths, output, root))
 
             self.assertEqual(0, result)
-            self.assertTrue((output / "model_card.json").exists())
-            self.assertTrue((output / "model_card.md").exists())
+            self.assertTrue((output / "platform_recommendation_evaluation_card.json").exists())
+            self.assertTrue((output / "platform_recommendation_evaluation_card.md").exists())
             self.assertTrue((output / "manifest.json").exists())
 
     def test_cliRejectsOutputOutsideAllowOutputRoot(self):
@@ -168,18 +171,18 @@ class Fdp123ModelCardCliTest(unittest.TestCase):
             root = Path(directory) / "allowed"
             output = Path(directory) / "outside"
             with fdp124_artifacts() as paths:
-                with self.assertRaises(Fdp123ModelCardValidationError):
+                with self.assertRaises(Fdp123EvaluationCardValidationError):
                     main(cli_args(paths, output, root))
 
     def test_cliPassesGeneratedAtIntoOutput(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            output = root / "model-card"
+            output = root / "platform-recommendation-evaluation-card"
             with fdp124_artifacts() as paths:
                 main(cli_args(paths, output, root))
 
-            card = json.loads((output / "model_card.json").read_text(encoding="utf-8"))
-            self.assertEqual(MODEL_CARD_GENERATED_AT, card["generatedAt"])
+            card = json.loads((output / "platform_recommendation_evaluation_card.json").read_text(encoding="utf-8"))
+            self.assertEqual(PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT, card["generatedAt"])
 
     def test_cliRequiresAllowOutputRoot(self):
         with fdp124_artifacts() as paths:
@@ -193,7 +196,7 @@ class Fdp123ModelCardCliTest(unittest.TestCase):
     def test_cliRejectsOldCallerControlledIdentityArgs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            output = root / "model-card"
+            output = root / "platform-recommendation-evaluation-card"
             with fdp124_artifacts() as paths:
                 args = cli_args(paths, output, root)
                 args.extend(["--model-version", "2026.06.12-offline"])
@@ -204,11 +207,11 @@ class Fdp123ModelCardCliTest(unittest.TestCase):
     def test_cliRejectsGovernanceMetadataWithCallerControlledIdentity(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            output = root / "model-card"
+            output = root / "platform-recommendation-evaluation-card"
             with fdp124_artifacts() as paths:
                 args = cli_args(paths, output, root)
                 args.extend(["--limitation", "modelName"])
-                with self.assertRaises(Fdp123ModelCardValidationError):
+                with self.assertRaises(Fdp123EvaluationCardValidationError):
                     main(args)
 
 
@@ -219,7 +222,7 @@ def cli_args(paths, output, root):
         "--evaluation-manifest", str(paths["manifest"]),
         "--output-dir", str(output),
         "--allow-output-root", str(root),
-        "--generated-at", MODEL_CARD_GENERATED_AT,
+        "--generated-at", PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT,
     ]
     for value in metadata["allowedUsageModes"]:
         args.extend(["--allowed-usage-mode", value])

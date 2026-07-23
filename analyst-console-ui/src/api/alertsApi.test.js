@@ -185,8 +185,8 @@ describe("alertsApi auth headers", () => {
     const summary = await getCurrentShadowPerformanceSummary();
 
     expect(summary).toMatchObject({
-      summaryType: "SHADOW_PERFORMANCE_SUMMARY_V1",
-      model: { modelName: "python-logistic-fraud-model" }
+      reportType: "SHADOW_PERFORMANCE_SUMMARY_V2",
+      evaluationSubject: { subjectType: "PLATFORM_RECOMMENDATION" }
     });
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/governance/shadow-performance/summary/current",
@@ -325,14 +325,14 @@ describe("alertsApi auth headers", () => {
     ["oversizedBanner", (report) => { report.banner = "A".repeat(513); }],
     ["missingInputs", (report) => { delete report.inputs; }],
     ["missingShadowPerformanceSummaryInput", (report) => { delete report.inputs.shadowPerformanceSummary; }],
-    ["rawShadowSummaryType", (report) => { report.inputs.shadowPerformanceSummary.summaryType = "rawPayload"; }],
+    ["rawShadowReportType", (report) => { report.inputs.shadowPerformanceSummary.reportType = "rawPayload"; }],
     ["unsafeShadowSummaryVersion", (report) => { report.inputs.shadowPerformanceSummary.summaryVersion = "approved"; }],
     ["invalidShadowSummaryGeneratedAt", (report) => { report.inputs.shadowPerformanceSummary.generatedAt = "not-a-date"; }],
     ["missingMinimumDiagnosticEvidenceRecords", (report) => { delete report.inputs.minimumDiagnosticEvidenceRecords; }],
     ["zeroMinimumDiagnosticEvidenceRecords", (report) => { report.inputs.minimumDiagnosticEvidenceRecords = 0; }],
-    ["oversizedMinimumDiagnosticEvidenceRecords", (report) => { report.inputs.minimumDiagnosticEvidenceRecords = 501; }],
-    ["negativeRecordsAcceptedForEvaluation", (report) => { report.inputs.recordsAcceptedForEvaluation = -1; }],
-    ["oversizedRecordsAcceptedForEvaluation", (report) => { report.inputs.recordsAcceptedForEvaluation = 501; }],
+    ["oversizedMinimumDiagnosticEvidenceRecords", (report) => { report.inputs.minimumDiagnosticEvidenceRecords = 1001; }],
+    ["negativeRecordsEvaluated", (report) => { report.inputs.recordsEvaluated = -1; }],
+    ["oversizedRecordsEvaluated", (report) => { report.inputs.recordsEvaluated = 1001; }],
     ["missingChecks", (report) => { delete report.checks; }],
     ["checksNotArray", (report) => { report.checks = {}; }],
     ["emptyChecks", (report) => { report.checks = []; }],
@@ -416,7 +416,7 @@ describe("alertsApi auth headers", () => {
   });
 
   it.each([
-    ["doesNotCallRawModelCardEndpoint", "/model-card"],
+    ["doesNotCallRawEvaluationCardEndpoint", "/platform-recommendation-evaluation-card"],
     ["doesNotCallRawEvaluationReportEndpoint", "/evaluation-report"],
     ["doesNotCallDatasetExportEndpoint", "/dataset"],
     ["doesNotCallPromotionEndpoint", "/promotion"],
@@ -442,7 +442,7 @@ describe("alertsApi auth headers", () => {
   });
 
   it.each([
-    ["doesNotCallRawModelCardEndpointOn404", "/model-card"],
+    ["doesNotCallRawEvaluationCardEndpointOn404", "/platform-recommendation-evaluation-card"],
     ["doesNotCallRawEvaluationReportEndpointOn404", "/evaluation-report"],
     ["doesNotCallDatasetExportEndpointOn404", "/dataset"],
     ["doesNotCallPromotionEndpointOn404", "/promotion"],
@@ -1984,18 +1984,21 @@ function engineIntelligenceAvailable(overrides = {}) {
 
 function shadowPerformanceSummary(overrides = {}) {
   return {
-    summaryType: "SHADOW_PERFORMANCE_SUMMARY_V1",
-    summaryVersion: "1.0",
+    reportType: "SHADOW_PERFORMANCE_SUMMARY_V2",
+    summaryVersion: "shadow-performance-summary-v2",
     generatedAt: "2026-06-08T02:00:00Z",
-    model: {
-      modelName: "python-logistic-fraud-model",
-      modelVersion: "2026-04-21.trained.v1",
-      modelFamily: "LOGISTIC_REGRESSION",
-      featureContractVersion: "2026-04-22.v1"
+    evaluationSubject: {
+      subjectType: "PLATFORM_RECOMMENDATION",
+      sourceComponent: "ENGINE_INTELLIGENCE_PROJECTION",
+      sourceVersion: "ENGINE_INTELLIGENCE_PROJECTION_V1",
+      featureContractVersion: "NOT_APPLICABLE",
+      modelIdentity: "NOT_AVAILABLE",
+      modelArtifactSha256: "NOT_AVAILABLE",
+      identityCompleteness: "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
     },
+    metricBasis: "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK",
     governance: {
       governanceStatus: "DIAGNOSTIC_ONLY",
-      approvedFor: ["COMPARE", "SHADOW"],
       diagnosticOnly: true,
       notProductionApproval: true,
       notPromotionApproval: true,
@@ -2004,37 +2007,26 @@ function shadowPerformanceSummary(overrides = {}) {
       notAutomaticDecisioning: true
     },
     evaluation: {
-      evaluationReportType: "PYTHON_ML_EVALUATION_FOUNDATION",
-      evaluationReportVersion: "FDP-103",
-      metricBasis: "bucket_ordered_offline_diagnostic",
-      datasetTimeBasis: "FEEDBACK_SUBMITTED_AT",
-      datasetDeduplicationPolicy: "TRANSACTION_REFERENCE_NEWEST_SUBMITTED_AT_FEEDBACK_ID_ASC"
+      evaluationCardType: "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
+      evaluationCardVersion: "platform-recommendation-evaluation-card-v1",
+      evaluationPurpose: "OFFLINE_DIAGNOSTIC",
+      evaluationReportType: "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+      evaluationReportVersion: "FDP-124",
+      evaluationArtifactSetVersion: "fdp123-report-artifact-set-v1",
+      datasetVersion: "feedback-dataset-v1",
+      datasetTimeBasis: "FEEDBACK_CREATED_AT",
+      sourceManifestSha256: "a".repeat(64)
     },
     evaluationPopulation: {
-      datasetRecordsRead: 5,
-      recordsAcceptedForEvaluation: 3,
-      recordsExcludedNotEvaluationEligible: 1
+      recordsEvaluated: 5,
+      positiveClassCount: 3,
+      negativeClassCount: 2
     },
     metrics: {
-      precisionAtBudget: 0.666667,
-      recallAtTopK: 0.5,
-      falsePositiveRate: 0.25,
-      mlCaughtRulesMissedCount: 1,
-      rulesCaughtMlMissedCount: 1,
-      missingMlCount: 1,
-      missingRulesCount: 1,
-      missingProjectionCount: 1,
-      notEvaluationEligibleCount: 1
-    },
-    disagreementSummary: {
-      rulesHighMlHigh: 1,
-      rulesHighMlLowOrMedium: 0,
-      rulesLowOrMediumMlHigh: 1,
-      rulesLowOrMediumMlLowOrMedium: 1,
-      rulesMissingMlPresent: 0,
-      mlMissingRulesPresent: 1,
-      bothMissing: 0,
-      notEvaluationEligibleExcluded: 1
+      alertRecommendedPrecision: metric(0.666667),
+      alertRecommendedRecall: metric(0.5),
+      falsePositiveRate: metric(0.25),
+      falseNegativeRate: metric(0.2)
     },
     warnings: ["MISSING_ML_SIGNAL_PRESENT"],
     limitations: ["DIAGNOSTIC_ONLY"],
@@ -2060,12 +2052,12 @@ function promotionReviewReadinessReport(overrides = {}) {
     inputs: {
       shadowPerformanceSummary: {
         present: true,
-        summaryType: "SHADOW_PERFORMANCE_SUMMARY_V1",
-        summaryVersion: "1.0",
+        reportType: "SHADOW_PERFORMANCE_SUMMARY_V2",
+        summaryVersion: "shadow-performance-summary-v2",
         generatedAt: "2026-06-08T02:00:00Z"
       },
       minimumDiagnosticEvidenceRecords: 1,
-      recordsAcceptedForEvaluation: 3
+      recordsEvaluated: 3
     },
     checks: [
       { name: "CURRENT_SUMMARY_PRESENT", status: "PASS", severity: "INFO" }
@@ -2076,6 +2068,10 @@ function promotionReviewReadinessReport(overrides = {}) {
     banner: "Promotion review readiness is an offline diagnostic aid only. It is not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.",
     ...overrides
   };
+}
+
+function metric(value) {
+  return { available: true, value, reason: null };
 }
 
 function comparison() {

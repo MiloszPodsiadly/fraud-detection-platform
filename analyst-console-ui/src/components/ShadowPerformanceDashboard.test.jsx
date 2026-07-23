@@ -18,13 +18,13 @@ describe("ShadowPerformanceDashboard", () => {
     expect(screen.getByText("Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.")).toBeInTheDocument();
   });
 
-  it("rendersModelIdentity", () => {
+  it("rendersEvaluationSubject", () => {
     renderDashboard();
 
-    expect(screen.getByText("python-logistic-fraud-model")).toBeInTheDocument();
-    expect(screen.getByText("2026-04-21.trained.v1")).toBeInTheDocument();
-    expect(screen.getByText("LOGISTIC_REGRESSION")).toBeInTheDocument();
-    expect(screen.getByText("2026-04-22.v1")).toBeInTheDocument();
+    expect(screen.getByText("PLATFORM_RECOMMENDATION")).toBeInTheDocument();
+    expect(screen.getByText("ENGINE_INTELLIGENCE_PROJECTION")).toBeInTheDocument();
+    expect(screen.getByText("ENGINE_INTELLIGENCE_PROJECTION_V1")).toBeInTheDocument();
+    expect(screen.getByText("NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE")).toBeInTheDocument();
   });
 
   it("rendersGovernanceStatus", () => {
@@ -34,27 +34,27 @@ describe("ShadowPerformanceDashboard", () => {
     expect(screen.getByText("DIAGNOSTIC_ONLY")).toBeInTheDocument();
   });
 
-  it("rendersAllowedDiagnosticModesShadowCompareOnly", () => {
+  it("doesNotRenderLegacyApprovedForModes", () => {
     renderDashboard();
 
-    expect(screen.getByText("Allowed diagnostic modes")).toBeInTheDocument();
-    expect(screen.getByText("COMPARE, SHADOW")).toBeInTheDocument();
+    expect(screen.queryByText("Allowed diagnostic modes")).not.toBeInTheDocument();
+    expect(screen.queryByText("COMPARE, SHADOW")).not.toBeInTheDocument();
   });
 
   it("rendersEvaluationContext", () => {
     renderDashboard();
 
-    expect(screen.getByText("PYTHON_ML_EVALUATION_FOUNDATION")).toBeInTheDocument();
-    expect(screen.getByText("FDP-103")).toBeInTheDocument();
-    expect(screen.getByText("bucket_ordered_offline_diagnostic")).toBeInTheDocument();
+    expect(screen.getByText("PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1")).toBeInTheDocument();
+    expect(screen.getByText("FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1")).toBeInTheDocument();
+    expect(screen.getByText("FDP-124")).toBeInTheDocument();
   });
 
   it("rendersEvaluationPopulation", () => {
     renderDashboard();
 
-    expect(screen.getByText("Dataset records read")).toBeInTheDocument();
-    expect(screen.getByText("Records accepted for evaluation")).toBeInTheDocument();
-    expect(screen.getByText("Records excluded not evaluation eligible")).toBeInTheDocument();
+    expect(screen.getByText("Records evaluated")).toBeInTheDocument();
+    expect(screen.getByText("Positive class count")).toBeInTheDocument();
+    expect(screen.getByText("Negative class count")).toBeInTheDocument();
   });
 
   it("rendersPopulationContextNearMetrics", () => {
@@ -66,18 +66,18 @@ describe("ShadowPerformanceDashboard", () => {
     expect(text.indexOf("Metrics") - text.indexOf("Evaluation population")).toBeLessThan(400);
   });
 
-  it("rendersPrecisionAtBudgetWithPopulationContext", () => {
+  it("rendersAlertRecommendedPrecisionWithPopulationContext", () => {
     renderDashboard();
 
-    expect(screen.getByText("Offline precision at budget")).toBeInTheDocument();
+    expect(screen.getByText("Alert-recommended precision")).toBeInTheDocument();
     expect(screen.getByText("66.7%")).toBeInTheDocument();
     expect(screen.getByText("Metrics are shown with evaluation population context to avoid overclaiming performance on small samples.")).toBeInTheDocument();
   });
 
-  it("rendersRecallAtTopKWithPopulationContext", () => {
+  it("rendersAlertRecommendedRecallWithPopulationContext", () => {
     renderDashboard();
 
-    expect(screen.getByText("Offline recall at top K")).toBeInTheDocument();
+    expect(screen.getByText("Alert-recommended recall")).toBeInTheDocument();
     expect(screen.getByText("50.0%")).toBeInTheDocument();
   });
 
@@ -88,32 +88,11 @@ describe("ShadowPerformanceDashboard", () => {
     expect(screen.getByText("25.0%")).toBeInTheDocument();
   });
 
-  it("rendersMlCaughtRulesMissedCount", () => {
+  it("rendersFalseNegativeRateWithPopulationContext", () => {
     renderDashboard();
 
-    expect(screen.getByText("ML caught / rules missed")).toBeInTheDocument();
-  });
-
-  it("rendersRulesCaughtMlMissedCount", () => {
-    renderDashboard();
-
-    expect(screen.getByText("Rules caught / ML missed")).toBeInTheDocument();
-  });
-
-  it("rendersMissingSignalCounts", () => {
-    renderDashboard();
-
-    expect(screen.getByText("Missing ML count")).toBeInTheDocument();
-    expect(screen.getByText("Missing rules count")).toBeInTheDocument();
-    expect(screen.getByText("Missing projection count")).toBeInTheDocument();
-  });
-
-  it("rendersDisagreementSummary", () => {
-    renderDashboard();
-
-    expect(screen.getByRole("heading", { name: "Rule vs ML diagnostic disagreement" })).toBeInTheDocument();
-    expect(screen.getByText("Rules high / ML high")).toBeInTheDocument();
-    expect(screen.getByText("ML missing / rules present")).toBeInTheDocument();
+    expect(screen.getByText("Offline false-negative rate")).toBeInTheDocument();
+    expect(screen.getByText("20.0%")).toBeInTheDocument();
   });
 
   it("rendersWarnings", () => {
@@ -134,7 +113,7 @@ describe("ShadowPerformanceDashboard", () => {
     render(<ShadowPerformanceDashboard isLoading canReadShadowPerformance />);
 
     expect(screen.getByText("Loading Shadow Performance Summary...")).toBeInTheDocument();
-    expect(screen.queryByText("Offline precision at budget")).not.toBeInTheDocument();
+    expect(screen.queryByText("Alert-recommended precision")).not.toBeInTheDocument();
   });
 
   it("rendersUnauthenticatedStateFor401", () => {
@@ -274,12 +253,12 @@ describe("ShadowPerformanceDashboard", () => {
     renderDashboard({ summary: { ...shadowSummary(), metrics: null } });
 
     expect(screen.getByText(MALFORMED_MESSAGE)).toBeInTheDocument();
-    expect(screen.queryByText("Offline precision at budget")).not.toBeInTheDocument();
+    expect(screen.queryByText("Alert-recommended precision")).not.toBeInTheDocument();
   });
 
   it("rejectsWrongSummaryType", () => {
     expectMalformedSummary((summary) => {
-      summary.summaryType = "MODEL_CARD";
+      summary.summaryType = "PLATFORM_RECOMMENDATION_EVALUATION_CARD";
     });
   });
 
@@ -345,114 +324,75 @@ describe("ShadowPerformanceDashboard", () => {
   });
 
   it.each([
-    ["rejectsWrongEvaluationReportType", "evaluationReportType", "MODEL_CARD"],
-    ["rejectsWrongEvaluationReportVersion", "evaluationReportVersion", "FDP-104"],
-    ["rejectsWrongMetricBasis", "metricBasis", "production_threshold"],
+    ["rejectsWrongEvaluationCardType", "evaluationCardType", "MODEL_CARD_V1"],
+    ["rejectsWrongEvaluationReportType", "evaluationReportType", "PLATFORM_RECOMMENDATION_EVALUATION_CARD"],
+    ["rejectsWrongEvaluationReportVersion", "evaluationReportVersion", "FDP-103"],
     ["rejectsWrongDatasetTimeBasis", "datasetTimeBasis", "TRANSACTION_CREATED_AT"],
-    ["rejectsWrongDatasetDeduplicationPolicy", "datasetDeduplicationPolicy", "LATEST_ONLY"]
+    ["rejectsWrongEvaluationPurpose", "evaluationPurpose", "PRODUCTION_APPROVAL"]
   ])("%s", (_name, field, value) => {
     expectMalformedSummary((summary) => {
       summary.evaluation[field] = value;
     });
   });
 
-  it("rejectsNumericStringRates", () => {
+  it("rejectsWrongMetricBasis", () => {
     expectMalformedSummary((summary) => {
-      summary.metrics.precisionAtBudget = "0.9";
+      summary.metricBasis = "production_threshold";
     });
   });
 
-  it("rejectsNumericStringCounts", () => {
+  it("rejectsNumericStringRates", () => {
     expectMalformedSummary((summary) => {
-      summary.metrics.mlCaughtRulesMissedCount = "1";
+      summary.metrics.alertRecommendedPrecision.value = "0.9";
+    });
+  });
+
+  it("rejectsUnavailableMetricWithNumericValue", () => {
+    expectMalformedSummary((summary) => {
+      summary.metrics.alertRecommendedPrecision = { available: false, value: 0, reason: "NO_POSITIVE_CLASS" };
     });
   });
 
   it("rejectsNaNMetricValues", () => {
     expectMalformedSummary((summary) => {
-      summary.metrics.recallAtTopK = Number.NaN;
+      summary.metrics.alertRecommendedRecall.value = Number.NaN;
     });
   });
 
   it("rejectsInfiniteMetricValues", () => {
     expectMalformedSummary((summary) => {
-      summary.metrics.falsePositiveRate = Number.POSITIVE_INFINITY;
+      summary.metrics.falsePositiveRate.value = Number.POSITIVE_INFINITY;
     });
   });
 
   it.each([
-    ["rejectsPrecisionGreaterThanOne", "precisionAtBudget", 1.1],
-    ["rejectsPrecisionBelowZero", "precisionAtBudget", -0.1],
-    ["rejectsRecallGreaterThanOne", "recallAtTopK", 1.1],
-    ["rejectsRecallBelowZero", "recallAtTopK", -0.1],
+    ["rejectsPrecisionGreaterThanOne", "alertRecommendedPrecision", 1.1],
+    ["rejectsPrecisionBelowZero", "alertRecommendedPrecision", -0.1],
+    ["rejectsRecallGreaterThanOne", "alertRecommendedRecall", 1.1],
+    ["rejectsRecallBelowZero", "alertRecommendedRecall", -0.1],
     ["rejectsFalsePositiveRateGreaterThanOne", "falsePositiveRate", 1.1],
     ["rejectsFalsePositiveRateBelowZero", "falsePositiveRate", -0.1]
   ])("%s", (_name, field, value) => {
     expectMalformedSummary((summary) => {
-      summary.metrics[field] = value;
+      summary.metrics[field].value = value;
     });
   });
 
   it("rejectsNegativePopulationCounts", () => {
     expectMalformedSummary((summary) => {
-      summary.evaluationPopulation.datasetRecordsRead = -1;
+      summary.evaluationPopulation.recordsEvaluated = -1;
     });
   });
 
   it("rejectsPopulationCountsAboveMax", () => {
     expectMalformedSummary((summary) => {
-      summary.evaluationPopulation.datasetRecordsRead = 501;
+      summary.evaluationPopulation.recordsEvaluated = 1001;
     });
   });
 
-  it("rejectsAcceptedGreaterThanDatasetRecordsRead", () => {
+  it("rejectsPositivePlusNegativeNotEqualRecordsEvaluated", () => {
     expectMalformedSummary((summary) => {
-      summary.evaluationPopulation.recordsAcceptedForEvaluation = 6;
-    });
-  });
-
-  it("rejectsExcludedGreaterThanDatasetRecordsRead", () => {
-    expectMalformedSummary((summary) => {
-      summary.evaluationPopulation.recordsExcludedNotEvaluationEligible = 6;
-      summary.metrics.notEvaluationEligibleCount = 6;
-    });
-  });
-
-  it("rejectsAcceptedPlusExcludedGreaterThanDatasetRecordsRead", () => {
-    expectMalformedSummary((summary) => {
-      summary.evaluationPopulation.recordsAcceptedForEvaluation = 4;
-      summary.evaluationPopulation.recordsExcludedNotEvaluationEligible = 2;
-      summary.metrics.notEvaluationEligibleCount = 2;
-    });
-  });
-
-  it("rejectsMetricCountGreaterThanDatasetRecordsRead", () => {
-    expectMalformedSummary((summary) => {
-      summary.metrics.mlCaughtRulesMissedCount = 6;
-    });
-  });
-
-  it("rejectsNotEvaluationEligibleMismatch", () => {
-    expectMalformedSummary((summary) => {
-      summary.metrics.notEvaluationEligibleCount = 2;
-    });
-  });
-
-  it("rejectsDisagreementTotalGreaterThanDatasetRecordsRead", () => {
-    expectMalformedSummary((summary) => {
-      summary.disagreementSummary.rulesHighMlHigh = 6;
-    });
-  });
-
-  it("rejectsNegativeDisagreementCount", () => {
-    expectMalformedSummary((summary) => {
-      summary.disagreementSummary.rulesHighMlHigh = -1;
-    });
-  });
-
-  it("rejectsNonIntegerDisagreementCount", () => {
-    expectMalformedSummary((summary) => {
-      summary.disagreementSummary.rulesHighMlHigh = 1.5;
+      summary.evaluationPopulation.positiveClassCount = 4;
     });
   });
 
@@ -478,14 +418,14 @@ describe("ShadowPerformanceDashboard", () => {
   ])("%s", (_name, error) => {
     renderDashboard({ error, summary: null });
 
-    expect(screen.queryByText("Offline precision at budget")).not.toBeInTheDocument();
+    expect(screen.queryByText("Alert-recommended precision")).not.toBeInTheDocument();
     expect(screen.queryByText("0.0%")).not.toBeInTheDocument();
   });
 
   it("doesNotTreat404AsHealthyModel", () => {
     renderDashboard404();
 
-    expect(screen.queryByText("Model identity")).not.toBeInTheDocument();
+    expect(screen.queryByText("Evaluation subject")).not.toBeInTheDocument();
     expect(screen.getByText(/This is not a model quality result/)).toBeInTheDocument();
   });
 
@@ -496,8 +436,8 @@ describe("ShadowPerformanceDashboard", () => {
   });
 
   it.each([
-    ["doesNotRenderPrecisionOn404", "Offline precision at budget"],
-    ["doesNotRenderRecallOn404", "Offline recall at top K"],
+    ["doesNotRenderPrecisionOn404", "Alert-recommended precision"],
+    ["doesNotRenderRecallOn404", "Alert-recommended recall"],
     ["doesNotRenderFalsePositiveRateOn404", "Offline false-positive rate"],
     ["doesNotRenderSampleSummaryOn404", "sample summary"],
     ["doesNotRenderStaleMetricsOn404", "last known summary"],
@@ -564,8 +504,8 @@ describe("ShadowPerformanceDashboard", () => {
     expect(screen.queryByRole("button", { name: buttonName })).not.toBeInTheDocument();
   });
 
-  it("doesNotRenderRawModelCard", () => {
-    expect(renderDashboardWithRawFields()).not.toContain("raw-model-card-secret");
+  it("doesNotRenderRawEvaluationCard", () => {
+    expect(renderDashboardWithRawFields()).not.toContain("raw-platform-recommendation-evaluation-card-secret");
   });
 
   it("doesNotRenderRawEvaluationReport", () => {
@@ -667,9 +607,9 @@ function expectMalformedSummary(mutateSummary) {
   const { container } = renderDashboard({ summary });
 
   expect(screen.getByText(MALFORMED_MESSAGE)).toBeInTheDocument();
-  expect(screen.queryByText("Offline precision at budget")).not.toBeInTheDocument();
+  expect(screen.queryByText("Alert-recommended precision")).not.toBeInTheDocument();
   expect(container.querySelector(".metricCard")).not.toBeInTheDocument();
-  expect(screen.queryByText("Model identity")).not.toBeInTheDocument();
+  expect(screen.queryByText("Evaluation subject")).not.toBeInTheDocument();
   expect(screen.queryByText("Governance context")).not.toBeInTheDocument();
   expect(screen.queryByText("Evaluation context")).not.toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Warnings" })).not.toBeInTheDocument();
@@ -683,7 +623,7 @@ function cloneSummary() {
 
 function rawFields() {
   return {
-    rawModelCard: "raw-model-card-secret",
+    rawEvaluationCard: "raw-platform-recommendation-evaluation-card-secret",
     rawEvaluationReport: "raw-evaluation-report-secret",
     rawDataset: "raw-dataset-secret",
     transactionReference: "transaction-reference-secret",
@@ -703,32 +643,30 @@ function rawFields() {
 
 function excellentMetrics() {
   return {
-    precisionAtBudget: 1,
-    recallAtTopK: 1,
-    falsePositiveRate: 0,
-    mlCaughtRulesMissedCount: 0,
-    rulesCaughtMlMissedCount: 0,
-    missingMlCount: 0,
-    missingRulesCount: 0,
-    missingProjectionCount: 0,
-    notEvaluationEligibleCount: 0
+    alertRecommendedPrecision: metric(1),
+    alertRecommendedRecall: metric(1),
+    falsePositiveRate: metric(0),
+    falseNegativeRate: metric(0)
   };
 }
 
 function shadowSummary(overrides = {}) {
   return {
-    summaryType: "SHADOW_PERFORMANCE_SUMMARY_V1",
-    summaryVersion: "1.0",
+    reportType: "SHADOW_PERFORMANCE_SUMMARY_V2",
+    summaryVersion: "shadow-performance-summary-v2",
     generatedAt: "2026-06-08T02:00:00Z",
-    model: {
-      modelName: "python-logistic-fraud-model",
-      modelVersion: "2026-04-21.trained.v1",
-      modelFamily: "LOGISTIC_REGRESSION",
-      featureContractVersion: "2026-04-22.v1"
+    evaluationSubject: {
+      subjectType: "PLATFORM_RECOMMENDATION",
+      sourceComponent: "ENGINE_INTELLIGENCE_PROJECTION",
+      sourceVersion: "ENGINE_INTELLIGENCE_PROJECTION_V1",
+      featureContractVersion: "NOT_APPLICABLE",
+      modelIdentity: "NOT_AVAILABLE",
+      modelArtifactSha256: "NOT_AVAILABLE",
+      identityCompleteness: "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
     },
+    metricBasis: "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK",
     governance: {
       governanceStatus: "DIAGNOSTIC_ONLY",
-      approvedFor: ["COMPARE", "SHADOW"],
       diagnosticOnly: true,
       notProductionApproval: true,
       notPromotionApproval: true,
@@ -737,41 +675,34 @@ function shadowSummary(overrides = {}) {
       notAutomaticDecisioning: true
     },
     evaluation: {
-      evaluationReportType: "PYTHON_ML_EVALUATION_FOUNDATION",
-      evaluationReportVersion: "FDP-103",
-      metricBasis: "bucket_ordered_offline_diagnostic",
-      datasetTimeBasis: "FEEDBACK_SUBMITTED_AT",
-      datasetDeduplicationPolicy: "TRANSACTION_REFERENCE_NEWEST_SUBMITTED_AT_FEEDBACK_ID_ASC"
+      evaluationCardType: "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
+      evaluationCardVersion: "platform-recommendation-evaluation-card-v1",
+      evaluationPurpose: "OFFLINE_DIAGNOSTIC",
+      evaluationReportType: "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+      evaluationReportVersion: "FDP-124",
+      evaluationArtifactSetVersion: "fdp123-report-artifact-set-v1",
+      datasetVersion: "feedback-dataset-v1",
+      datasetTimeBasis: "FEEDBACK_CREATED_AT",
+      sourceManifestSha256: "a".repeat(64)
     },
     evaluationPopulation: {
-      datasetRecordsRead: 5,
-      recordsAcceptedForEvaluation: 3,
-      recordsExcludedNotEvaluationEligible: 1
+      recordsEvaluated: 5,
+      positiveClassCount: 3,
+      negativeClassCount: 2
     },
     metrics: {
-      precisionAtBudget: 0.666667,
-      recallAtTopK: 0.5,
-      falsePositiveRate: 0.25,
-      mlCaughtRulesMissedCount: 1,
-      rulesCaughtMlMissedCount: 1,
-      missingMlCount: 1,
-      missingRulesCount: 1,
-      missingProjectionCount: 1,
-      notEvaluationEligibleCount: 1
-    },
-    disagreementSummary: {
-      rulesHighMlHigh: 1,
-      rulesHighMlLowOrMedium: 0,
-      rulesLowOrMediumMlHigh: 1,
-      rulesLowOrMediumMlLowOrMedium: 1,
-      rulesMissingMlPresent: 0,
-      mlMissingRulesPresent: 1,
-      bothMissing: 0,
-      notEvaluationEligibleExcluded: 1
+      alertRecommendedPrecision: metric(0.666667),
+      alertRecommendedRecall: metric(0.5),
+      falsePositiveRate: metric(0.25),
+      falseNegativeRate: metric(0.2)
     },
     warnings: ["MISSING_ML_SIGNAL_PRESENT"],
     limitations: ["OFFLINE_ONLY"],
     banner: REQUIRED_BANNER,
     ...overrides
   };
+}
+
+function metric(value) {
+  return { available: true, value, reason: null };
 }

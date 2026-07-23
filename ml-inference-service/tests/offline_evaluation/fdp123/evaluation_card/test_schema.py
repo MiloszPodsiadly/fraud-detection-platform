@@ -1,6 +1,6 @@
 import unittest
 
-from offline_evaluation.fdp123.model_card.schema import (
+from offline_evaluation.fdp123.evaluation_card.schema import (
     EVALUATION_SUBJECT,
     MAX_COUNT_VALUE,
     MAX_FDP123_DATASET_RECORDS,
@@ -9,33 +9,33 @@ from offline_evaluation.fdp123.model_card.schema import (
     REQUIRED_GOVERNANCE_BOUNDARY,
     REQUIRED_LIMITATIONS,
     REQUIRED_NOT_INTENDED_USE,
-    Fdp123ModelCardValidationError,
-    validate_model_card,
+    Fdp123EvaluationCardValidationError,
+    validate_evaluation_card,
 )
 
 
-class Fdp123ModelCardSchemaTest(unittest.TestCase):
-    def test_validModelCardAccepted(self):
-        self.assertEqual("model-card-v1", validate_model_card(valid_model_card())["modelCardVersion"])
+class Fdp123EvaluationCardSchemaTest(unittest.TestCase):
+    def test_validEvaluationCardAccepted(self):
+        self.assertEqual("platform-recommendation-evaluation-card-v1", validate_evaluation_card(valid_evaluation_card())["cardVersion"])
 
     def test_missingRequiredFieldRejected(self):
-        card = valid_model_card()
+        card = valid_evaluation_card()
         card.pop("evaluationSubject")
 
-        with self.assertRaises(Fdp123ModelCardValidationError):
-            validate_model_card(card)
+        with self.assertRaises(Fdp123EvaluationCardValidationError):
+            validate_evaluation_card(card)
 
     def test_unknownFieldRejected(self):
         self._assert_rejected(extra="unsafe")
 
-    def test_unsupportedModelCardVersionRejected(self):
-        self._assert_rejected(modelCardVersion="1.0")
+    def test_unsupportedEvaluationCardVersionRejected(self):
+        self._assert_rejected(cardVersion="1.0")
 
-    def test_oldFdp103ModelCardShapeRejected(self):
-        with self.assertRaises(Fdp123ModelCardValidationError):
-            validate_model_card({
-                "modelCardVersion": "1.0",
-                "cardType": "OFFLINE_MODEL_CARD_V1",
+    def test_oldFdp103EvaluationCardShapeRejected(self):
+        with self.assertRaises(Fdp123EvaluationCardValidationError):
+            validate_evaluation_card({
+                "cardVersion": "1.0",
+                "cardType": "OFFLINE_PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
                 "approvedFor": ["SHADOW"],
                 "evaluationReportType": "PYTHON_ML_EVALUATION_FOUNDATION",
             })
@@ -74,11 +74,11 @@ class Fdp123ModelCardSchemaTest(unittest.TestCase):
             with self.subTest(value=value):
                 self._assert_rejected(allowedUsageModes=[value])
 
-    def test_productionApprovalMustRemainNotApproved(self):
-        self._assert_rejected(productionApproval="PRODUCTION_APPROVED")
+    def test_runtimeDecisionAuthorityMustRemainNone(self):
+        self._assert_rejected(runtimeDecisionAuthority="PRODUCTION_DECISIONING")
 
-    def test_promotionStatusMustRemainNotEvaluated(self):
-        self._assert_rejected(promotionStatus="PROMOTION_READY")
+    def test_promotionAuthorityMustRemainNone(self):
+        self._assert_rejected(promotionAuthority="MODEL_PROMOTION")
 
     def test_missingRequiredNotIntendedUseRejected(self):
         self._assert_rejected(notIntendedUse=["NO_PAYMENT_AUTHORIZATION"])
@@ -111,13 +111,13 @@ class Fdp123ModelCardSchemaTest(unittest.TestCase):
         self._assert_rejected(metricsSummary=metrics)
 
     def test_classCountsMustEqualRecordsEvaluated(self):
-        card = valid_model_card(evaluationEvidence=valid_evaluation_evidence(
+        card = valid_evaluation_card(evaluationEvidence=valid_evaluation_evidence(
             recordsEvaluated=2,
             positiveClassCount=1,
             negativeClassCount=1,
         ))
 
-        self.assertEqual(2, validate_model_card(card)["evaluationEvidence"]["recordsEvaluated"])
+        self.assertEqual(2, validate_evaluation_card(card)["evaluationEvidence"]["recordsEvaluated"])
 
     def test_classCountSumBelowRecordsEvaluatedRejected(self):
         self._assert_rejected(evaluationEvidence=valid_evaluation_evidence(
@@ -134,13 +134,13 @@ class Fdp123ModelCardSchemaTest(unittest.TestCase):
         ))
 
     def test_zeroClassCountsAcceptedForEmptyEvaluation(self):
-        card = valid_model_card(evaluationEvidence=valid_evaluation_evidence(
+        card = valid_evaluation_card(evaluationEvidence=valid_evaluation_evidence(
             recordsEvaluated=0,
             positiveClassCount=0,
             negativeClassCount=0,
         ))
 
-        self.assertEqual(0, validate_model_card(card)["evaluationEvidence"]["recordsEvaluated"])
+        self.assertEqual(0, validate_evaluation_card(card)["evaluationEvidence"]["recordsEvaluated"])
 
     def test_booleanClassCountRejected(self):
         self._assert_rejected(evaluationEvidence=valid_evaluation_evidence(
@@ -149,18 +149,18 @@ class Fdp123ModelCardSchemaTest(unittest.TestCase):
             negativeClassCount=0,
         ))
 
-    def test_disagreementSummaryRejectedFromFdp126ModelCardV1(self):
+    def test_disagreementSummaryRejectedFromFdp126EvaluationCardV1(self):
         metrics = valid_metrics(disagreementSummary={"totalDisagreementRows": 1})
 
         self._assert_rejected(metricsSummary=metrics)
 
     def test_validZTimestampAccepted(self):
-        card = validate_model_card(valid_model_card(generatedAt="2026-06-12T00:00:00Z"))
+        card = validate_evaluation_card(valid_evaluation_card(generatedAt="2026-06-12T00:00:00Z"))
 
         self.assertEqual("2026-06-12T00:00:00Z", card["generatedAt"])
 
     def test_validExplicitOffsetTimestampAcceptedAndNormalized(self):
-        card = validate_model_card(valid_model_card(
+        card = validate_evaluation_card(valid_evaluation_card(
             generatedAt="2026-06-12T02:00:00+02:00",
             evaluationEvidence=valid_evaluation_evidence(evaluationGeneratedAt="2026-06-10T02:00:00+02:00"),
         ))
@@ -182,22 +182,22 @@ class Fdp123ModelCardSchemaTest(unittest.TestCase):
     def test_malformedCalendarTimestampRejected(self):
         self._assert_rejected(generatedAt="2026-13-40T00:00:00Z")
 
-    def test_modelCardGeneratedBeforeEvaluationRejected(self):
+    def test_evaluationCardGeneratedBeforeEvaluationRejected(self):
         self._assert_rejected(
             generatedAt="2026-06-09T23:59:59Z",
             evaluationEvidence=valid_evaluation_evidence(evaluationGeneratedAt="2026-06-10T00:00:00Z"),
         )
 
-    def test_modelCardGeneratedAtSameInstantAsEvaluationAccepted(self):
-        card = validate_model_card(valid_model_card(
+    def test_evaluationCardGeneratedAtSameInstantAsEvaluationAccepted(self):
+        card = validate_evaluation_card(valid_evaluation_card(
             generatedAt="2026-06-10T00:00:00Z",
             evaluationEvidence=valid_evaluation_evidence(evaluationGeneratedAt="2026-06-10T00:00:00Z"),
         ))
 
         self.assertEqual("2026-06-10T00:00:00Z", card["generatedAt"])
 
-    def test_modelCardGeneratedAfterEvaluationAccepted(self):
-        card = validate_model_card(valid_model_card(
+    def test_evaluationCardGeneratedAfterEvaluationAccepted(self):
+        card = validate_evaluation_card(valid_evaluation_card(
             generatedAt="2026-06-10T00:00:01Z",
             evaluationEvidence=valid_evaluation_evidence(evaluationGeneratedAt="2026-06-10T00:00:00Z"),
         ))
@@ -215,21 +215,25 @@ class Fdp123ModelCardSchemaTest(unittest.TestCase):
                 self._assert_rejected(**{field: "unsafe"})
 
     def _assert_rejected(self, **overrides):
-        with self.assertRaises(Fdp123ModelCardValidationError):
-            validate_model_card(valid_model_card(**overrides))
+        with self.assertRaises(Fdp123EvaluationCardValidationError):
+            validate_evaluation_card(valid_evaluation_card(**overrides))
 
 
-def valid_model_card(**overrides):
+def valid_evaluation_card(**overrides):
     card = {
-        "modelCardVersion": "model-card-v1",
-        "cardType": "MODEL_CARD_V1",
+        "cardVersion": "platform-recommendation-evaluation-card-v1",
+        "cardType": "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
         "generatedAt": "2026-06-12T00:00:00Z",
         "evaluationSubject": dict(EVALUATION_SUBJECT),
         "metricsSubject": METRICS_SUBJECT,
         "metricBasis": METRIC_BASIS,
         "allowedUsageModes": ["SHADOW", "COMPARE", "OFFLINE_EVALUATION"],
-        "productionApproval": "NOT_APPROVED",
-        "promotionStatus": "NOT_EVALUATED_FOR_PROMOTION",
+        "evaluationPurpose": "OFFLINE_DIAGNOSTIC",
+        "runtimeDecisionAuthority": "NONE",
+        "promotionAuthority": "NONE",
+        "thresholdChangeAuthority": "NONE",
+        "paymentAuthorizationAuthority": "NONE",
+        "workflowAuthority": "NONE",
         "intendedUse": ["SHADOW_FRAUD_RISK_REVIEW", "OFFLINE_DIAGNOSTIC_ANALYSIS"],
         "notIntendedUse": sorted(REQUIRED_NOT_INTENDED_USE),
         "evaluationEvidence": valid_evaluation_evidence(),

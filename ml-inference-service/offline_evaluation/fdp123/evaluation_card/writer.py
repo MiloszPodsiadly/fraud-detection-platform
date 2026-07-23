@@ -6,13 +6,13 @@ import os
 from pathlib import Path
 from typing import Any
 
-from offline_evaluation.fdp123.model_card.schema import (
+from offline_evaluation.fdp123.evaluation_card.schema import (
     ARTIFACT_SET_VERSION,
-    MODEL_CARD_REPORT_TYPE,
+    PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
     SAFE_CONTRACT_VALUES,
     SAFE_NEGATED_MACHINE_CODES,
-    Fdp123ModelCardValidationError,
-    validate_model_card,
+    Fdp123EvaluationCardValidationError,
+    validate_evaluation_card,
 )
 
 
@@ -47,20 +47,20 @@ FORBIDDEN_OUTPUT_TERMS = {
 }
 
 
-def model_card_json(model_card: dict[str, Any]) -> str:
-    safe_model_card = validate_model_card(model_card)
-    payload = json.dumps(safe_model_card, sort_keys=True, separators=(",", ":"))
+def evaluation_card_json(evaluation_card: dict[str, Any]) -> str:
+    safe_evaluation_card = validate_evaluation_card(evaluation_card)
+    payload = json.dumps(safe_evaluation_card, sort_keys=True, separators=(",", ":"))
     _reject_forbidden_output(payload)
     return payload + "\n"
 
 
-def model_card_markdown(model_card: dict[str, Any]) -> str:
-    safe = validate_model_card(model_card)
+def evaluation_card_markdown(evaluation_card: dict[str, Any]) -> str:
+    safe = validate_evaluation_card(evaluation_card)
     evidence = safe["evaluationEvidence"]
     subject = safe["evaluationSubject"]
     metrics = safe["metricsSummary"]
     lines = [
-        f"# Model Card - {subject['subjectType']}",
+        f"# Platform Recommendation Evaluation Card - {subject['subjectType']}",
         "",
         "## Evaluation subject",
         "",
@@ -73,8 +73,12 @@ def model_card_markdown(model_card: dict[str, Any]) -> str:
         f"- identityCompleteness: {subject['identityCompleteness']}",
         f"- metricsSubject: {safe['metricsSubject']}",
         f"- metricBasis: {safe['metricBasis']}",
-        f"- productionApproval: {safe['productionApproval']}",
-        f"- promotionStatus: {safe['promotionStatus']}",
+        f"- evaluationPurpose: {safe['evaluationPurpose']}",
+        f"- runtimeDecisionAuthority: {safe['runtimeDecisionAuthority']}",
+        f"- promotionAuthority: {safe['promotionAuthority']}",
+        f"- thresholdChangeAuthority: {safe['thresholdChangeAuthority']}",
+        f"- paymentAuthorizationAuthority: {safe['paymentAuthorizationAuthority']}",
+        f"- workflowAuthority: {safe['workflowAuthority']}",
         "",
         "## Allowed usage modes",
         "",
@@ -119,11 +123,11 @@ def model_card_markdown(model_card: dict[str, Any]) -> str:
         "",
         _bullets(safe["governanceBoundary"]),
         "",
-        "This model card does not approve model promotion.",
-        "This model card does not approve production decisioning.",
-        "This model card does not recommend threshold changes.",
-        "This model card does not authorize payments.",
-        "This model card does not trigger workflow or case automation.",
+        "This evaluation card does not approve model promotion.",
+        "This evaluation card does not approve production decisioning.",
+        "This evaluation card does not recommend threshold changes.",
+        "This evaluation card does not authorize payments.",
+        "This evaluation card does not trigger workflow or case automation.",
         "",
     ]
     payload = "\n".join(lines)
@@ -131,29 +135,29 @@ def model_card_markdown(model_card: dict[str, Any]) -> str:
     return payload
 
 
-def write_model_card_artifacts(
-        model_card: dict[str, Any],
+def write_evaluation_card_artifacts(
+        evaluation_card: dict[str, Any],
         output_dir: Path,
         allow_output_root: Path | None = None,
 ) -> dict[str, Path]:
     output_dir = Path(output_dir)
     _prepare_output_dir(output_dir, allow_output_root)
     paths = {
-        "modelCardJson": output_dir / "model_card.json",
-        "modelCardMarkdown": output_dir / "model_card.md",
+        "evaluationCardJson": output_dir / "platform_recommendation_evaluation_card.json",
+        "evaluationCardMarkdown": output_dir / "platform_recommendation_evaluation_card.md",
     }
     payloads = {
-        paths["modelCardJson"]: model_card_json(model_card),
-        paths["modelCardMarkdown"]: model_card_markdown(model_card),
+        paths["evaluationCardJson"]: evaluation_card_json(evaluation_card),
+        paths["evaluationCardMarkdown"]: evaluation_card_markdown(evaluation_card),
     }
     manifest_path = output_dir / "manifest.json"
-    manifest_payload = build_model_card_manifest(payloads, validate_model_card(model_card)["generatedAt"])
+    manifest_payload = build_evaluation_card_manifest(payloads, validate_evaluation_card(evaluation_card)["generatedAt"])
     _write_artifacts_atomically(payloads, manifest_path, manifest_payload)
     paths["manifest"] = manifest_path
     return paths
 
 
-def build_model_card_manifest(payloads: dict[Path, str], generated_at: str) -> str:
+def build_evaluation_card_manifest(payloads: dict[Path, str], generated_at: str) -> str:
     files = []
     for path, payload in sorted(payloads.items(), key=lambda item: item[0].name):
         encoded = payload.encode("utf-8")
@@ -166,7 +170,7 @@ def build_model_card_manifest(payloads: dict[Path, str], generated_at: str) -> s
         "artifactSetVersion": ARTIFACT_SET_VERSION,
         "files": files,
         "generatedAt": generated_at,
-        "reportType": MODEL_CARD_REPORT_TYPE,
+        "reportType": PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
     }
     payload = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
     _reject_forbidden_output(payload)
@@ -176,17 +180,17 @@ def build_model_card_manifest(payloads: dict[Path, str], generated_at: str) -> s
 def _prepare_output_dir(output_dir: Path, allow_output_root: Path | None) -> None:
     if output_dir.exists():
         if output_dir.is_symlink():
-            raise Fdp123ModelCardValidationError("output directory must not be a symlink")
+            raise Fdp123EvaluationCardValidationError("output directory must not be a symlink")
         if not output_dir.is_dir():
-            raise Fdp123ModelCardValidationError("output path exists and is not a directory")
+            raise Fdp123EvaluationCardValidationError("output path exists and is not a directory")
     if allow_output_root is not None:
         resolved_output = output_dir.resolve()
         resolved_root = Path(allow_output_root).resolve()
         if resolved_output != resolved_root and resolved_root not in resolved_output.parents:
-            raise Fdp123ModelCardValidationError("output directory is outside allowed output root")
+            raise Fdp123EvaluationCardValidationError("output directory is outside allowed output root")
     output_dir.mkdir(parents=True, exist_ok=True)
     if output_dir.is_symlink():
-        raise Fdp123ModelCardValidationError("output directory must not be a symlink")
+        raise Fdp123EvaluationCardValidationError("output directory must not be a symlink")
 
 
 def _write_artifacts_atomically(payloads: dict[Path, str], manifest_path: Path, manifest_payload: str) -> None:
@@ -196,7 +200,7 @@ def _write_artifacts_atomically(payloads: dict[Path, str], manifest_path: Path, 
     try:
         for final_path in tuple(payloads) + (manifest_path,):
             if final_path.is_symlink():
-                raise Fdp123ModelCardValidationError(f"final artifact path must not be a symlink: {final_path.name}")
+                raise Fdp123EvaluationCardValidationError(f"final artifact path must not be a symlink: {final_path.name}")
         for final_path, payload in payloads.items():
             tmp_path = final_path.with_name(final_path.name + ".tmp")
             if tmp_path.exists() or tmp_path.is_symlink():
@@ -229,14 +233,22 @@ def _bullets(values: list[str]) -> str:
 def _reject_forbidden_output(payload: str) -> None:
     lowered = payload.lower()
     if "eval_" in lowered or "txnref_" in lowered or "eval-" in lowered or "txnref-" in lowered:
-        raise Fdp123ModelCardValidationError("model card contains forbidden pseudonymous identifier prefix")
+        raise Fdp123EvaluationCardValidationError("evaluation card contains forbidden pseudonymous identifier prefix")
     masked = payload
     for safe_value in sorted(SAFE_CONTRACT_VALUES | SAFE_NEGATED_MACHINE_CODES, key=len, reverse=True):
         masked = masked.replace(safe_value, "")
+    for safe_field in (
+        "paymentAuthorizationAuthority",
+        "runtimeDecisionAuthority",
+        "promotionAuthority",
+        "thresholdChangeAuthority",
+        "workflowAuthority",
+    ):
+        masked = masked.replace(safe_field, "")
     compact_payload = _compact(masked)
     for forbidden in FORBIDDEN_OUTPUT_TERMS:
         if forbidden in compact_payload:
-            raise Fdp123ModelCardValidationError(f"model card contains forbidden term: {forbidden}")
+            raise Fdp123EvaluationCardValidationError(f"evaluation card contains forbidden term: {forbidden}")
 
 
 def _compact(value: str) -> str:

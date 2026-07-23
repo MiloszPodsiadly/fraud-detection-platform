@@ -47,6 +47,11 @@ FORBIDDEN_OUTPUT_TERMS = {
     "recommendedthreshold",
     "championcandidate",
     "deployrecommendation",
+    "precisionatbudget",
+    "recallattopk",
+    "modelfamily",
+    "modelname",
+    "modelversion",
 }
 
 

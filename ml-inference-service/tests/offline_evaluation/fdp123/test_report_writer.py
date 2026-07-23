@@ -44,7 +44,8 @@ class Fdp123ReportWriterTest(unittest.TestCase):
         report = self._reports()["evaluationSummary"]
         report["warnings"] = [f"W{index}" for index in range(20)]
 
-        self.assertLessEqual(len(json.loads(report_json(report))["warnings"]), 10)
+        with self.assertRaisesRegex(ValueError, "warnings exceeds maximum item count"):
+            report_json(report)
 
     def test_summaryDoesNotContainPseudonymousIdentifiers(self):
         payload = report_json(self._reports()["evaluationSummary"])

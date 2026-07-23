@@ -4,7 +4,7 @@ Status: FDP-106 authorized read API foundation.
 
 ## Scope
 
-FDP-106 adds one authorized, read-only API boundary for the current validated FDP-105 Shadow Performance Summary:
+FDP-106 adds one authorized, read-only API boundary for the current validated FDP-105 Shadow Performance Summary v2:
 
 ```text
 GET /api/v1/governance/shadow-performance/summary/current
@@ -17,19 +17,19 @@ them explicitly.
 ## Source Of Truth
 
 The API exposes only validated FDP-105 Shadow Performance Summary fields through bounded response DTOs. It does not
-recompute metrics, rebuild the summary, generate Model Cards, read dataset JSONL exports, read raw offline
-evaluation reports, read raw Model Card payloads, inspect raw dataset rows, read production scoring DBs, call scoring
+recompute metrics, rebuild the summary, generate Platform Recommendation Evaluation Cards, read dataset JSONL exports, read raw offline
+evaluation reports, read raw Platform Recommendation Evaluation Card payloads, inspect raw dataset rows, read production scoring DBs, call scoring
 services, call Kafka, read model registry state, or read model artifact stores.
 
-The endpoint does not recompute metrics. The endpoint does not read FDP-102 JSONL exports. The endpoint does not expose raw Model Cards.
+The endpoint does not recompute metrics. The endpoint does not read FDP-102 JSONL exports. The endpoint does not expose raw Platform Recommendation Evaluation Cards.
 
 The source chain remains:
 
 ```text
 FDP-102 dataset export
 -> FDP-103 offline evaluation report
--> FDP-126 Model Card v1
--> FDP-105 Shadow Performance Summary v1
+-> FDP-126 Platform Recommendation Evaluation Card v1
+-> FDP-105 Shadow Performance Summary v2
 -> FDP-106 read API DTO
 ```
 
@@ -39,9 +39,9 @@ configured/current summary source exists, the production-safe provider returns e
 
 ## Response Boundary
 
-The response includes summary identity, model identity, diagnostic governance, evaluation context, evaluation
-population, metrics, disagreement summary, warnings, limitations, and the diagnostic-only banner. It does not expose
-raw Model Cards, raw FDP-103 reports, raw FDP-102 JSONL, per-record examples, pseudonymous evaluation references,
+The response includes report identity, platform recommendation evaluation subject, metric basis, diagnostic governance, evaluation context, evaluation
+population, metric availability objects, warnings, limitations, and the diagnostic-only banner. It does not expose
+raw Platform Recommendation Evaluation Cards, raw FDP-103 reports, raw FDP-102 JSONL, per-record examples, pseudonymous evaluation references,
 transaction references, raw payloads, raw feature vectors, tokens, secrets, stack traces, exception messages, payment
 authorization fields, promotion fields, threshold recommendation fields, decisioning fields, or analyst recommendation
 fields.
@@ -66,7 +66,7 @@ message, stack trace, file path, or raw artifact content.
 
 FDP-106 uses the existing sensitive-read audit boundary with endpoint category `SHADOW_PERFORMANCE_SUMMARY` and resource
 type `SHADOW_PERFORMANCE_SUMMARY`. Audit metadata is bounded and low-cardinality. It does not store the raw response
-body, raw metrics blob, raw Model Card, raw FDP-103 report, raw FDP-102 data, per-record identifiers, tokens, secrets,
+body, raw metrics blob, raw Platform Recommendation Evaluation Card, raw FDP-103 report, raw FDP-102 data, per-record identifiers, tokens, secrets,
 stack traces, or raw exception messages.
 
 Production/operator-facing exposure must keep this endpoint aligned with the platform sensitive-read audit policy.

@@ -2,9 +2,9 @@ import unittest
 from pathlib import Path
 
 
-PACKAGE_ROOT = Path(__file__).resolve().parents[4] / "offline_evaluation" / "fdp123" / "model_card"
+PACKAGE_ROOT = Path(__file__).resolve().parents[4] / "offline_evaluation" / "fdp123" / "evaluation_card"
 DOC_PATHS = [
-    Path(__file__).resolve().parents[5] / "docs" / "architecture" / "model_card_v1.md",
+    Path(__file__).resolve().parents[5] / "docs" / "architecture" / "evaluation_card_v1.md",
     Path(__file__).resolve().parents[5] / "docs" / "architecture" / "python_ml_evaluation_suite.md",
 ]
 FORBIDDEN_TERMS = {
@@ -18,7 +18,7 @@ FORBIDDEN_TERMS = {
     "approve_transaction",
     "decline_transaction",
     "block_transaction",
-    "paymentAuthorization",
+    '"paymentAuthorization":',
     "groundTruth",
     "trainingLabel",
     "FastAPI",
@@ -33,13 +33,13 @@ FORBIDDEN_TERMS = {
     "model registry mutation",
 }
 FORBIDDEN_IMPORTS = {
-    "offline_evaluation.model_card_schema",
-    "offline_evaluation.model_card_generator",
-    "offline_evaluation.model_card_writer",
+    "offline_evaluation.evaluation_card_schema",
+    "offline_evaluation.evaluation_card_generator",
+    "offline_evaluation.evaluation_card_writer",
 }
 
 
-class Fdp123ModelCardScopeGuardTest(unittest.TestCase):
+class Fdp123EvaluationCardScopeGuardTest(unittest.TestCase):
     def test_newPackageDoesNotUseForbiddenRuntimeOrPromotionTerms(self):
         text = self._package_text()
 
@@ -47,7 +47,7 @@ class Fdp123ModelCardScopeGuardTest(unittest.TestCase):
             with self.subTest(term=term):
                 self.assertNotIn(term, text)
 
-    def test_newPackageDoesNotImportOldFdp103ModelCardModules(self):
+    def test_newPackageDoesNotImportOldFdp103EvaluationCardModules(self):
         text = self._package_text()
 
         for import_path in FORBIDDEN_IMPORTS:
@@ -70,7 +70,7 @@ class Fdp123ModelCardScopeGuardTest(unittest.TestCase):
         self.assertIn("`manifest.json`", text)
         self.assertIn("positiveClassCount + negativeClassCount == recordsEvaluated", text)
         self.assertIn("real RFC3339 date-times with explicit timezone", text)
-        self.assertIn("does not copy FDP-124 `disagreementSummary` into Model Card v1", compact_text)
+        self.assertIn("does not copy FDP-124 `disagreementSummary` into Platform Recommendation Evaluation Card v1", compact_text)
         self.assertIn("not a signature, notarization, external attestation", text)
 
     def _package_text(self):

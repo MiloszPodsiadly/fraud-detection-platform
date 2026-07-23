@@ -27,7 +27,7 @@ from offline_evaluation.promotion_review_readiness_schema import (
     validate_promotion_review_readiness_report,
 )
 from offline_evaluation.shadow_performance_summary import build_shadow_performance_summary
-from fdp123.model_card.test_schema import valid_model_card
+from fdp123.evaluation_card.test_schema import valid_evaluation_card
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -234,7 +234,7 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
         self.assertIn("current-summary.json", str(DEFAULT_SHADOW_SUMMARY))
 
     def test_readinessStatusAllowsOnlyReviewStatuses(self):
-        self.assertEqual({"INSUFFICIENT_DATA", "NOT_REVIEWABLE", "REVIEWABLE"}, READINESS_STATUSES)
+        self.assertEqual({"INSUFFICIENT_DATA", "INCONCLUSIVE", "NOT_REVIEWABLE", "REVIEWABLE"}, READINESS_STATUSES)
         report = build_report()
         for status in ("DIAGNOSTIC_ONLY", "APPROVED", "PROMOTED", "READY_FOR_PRODUCTION", "DEPLOYABLE"):
             broken = dict(report)
@@ -257,12 +257,25 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
         with self.assertRaises(PromotionReviewReadinessValidationError):
             validate_promotion_review_readiness_report(missing)
 
-    def test_governanceModesCheckReplacesApprovalLanguageCheckName(self):
+    def test_evaluationCardCheckReplacesApprovalLanguageCheckName(self):
         payload = valid_payload()
         legacy_check_name = "APPROVED" + "_FOR_COMPARE_AND_SHADOW"
 
-        self.assertIn("GOVERNANCE_MODES_COMPARE_AND_SHADOW", payload)
+        self.assertIn("EVALUATION_CARD_VERSION_SUPPORTED", payload)
         self.assertNotIn(legacy_check_name, payload)
+
+    def test_unavailableMetricProducesInconclusiveReadiness(self):
+        summary = valid_summary()
+        summary["metrics"]["alertRecommendedRecall"] = {
+            "available": False,
+            "value": None,
+            "reason": "NO_ACTUAL_POSITIVES",
+        }
+
+        report = build_promotion_review_readiness_report(summary, generated_at=generated_at())
+
+        self.assertEqual("INCONCLUSIVE", report["readinessStatus"])
+        self.assertIn("ALERT_RECOMMENDED_RECALL_AVAILABLE_INCONCLUSIVE", report["reasonCodes"])
 
     def test_reportDoesNotContainPromotionApprovalLanguage(self):
         self.assertMaskedPayloadDoesNotContain("APPROVED", "PROMOTED", "READY_FOR_PRODUCTION", "DEPLOYABLE")
@@ -359,8 +372,8 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
             "FDP-111 does not add API, OpenAPI, UI, workflow, scheduler, or Kafka triggers.",
             "Minimum diagnostic evidence is a review sufficiency check, not a model threshold and not a promotion threshold.",
             "FDP-111 v1 primarily consumes the FDP-109 generated Shadow Performance Summary artifact.",
-            "GOVERNANCE_MODES_COMPARE_AND_SHADOW",
-            "This check validates that the consumed summary is governed for COMPARE and SHADOW diagnostic use only. It is not promotion approval.",
+            "EVALUATION_CARD_VERSION_SUPPORTED",
+            "This check validates that the consumed summary was derived from the current Platform Recommendation Evaluation Card contract.",
         ):
             self.assertIn(text, doc)
 
@@ -405,7 +418,7 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
 
 
 def valid_summary():
-    return build_shadow_performance_summary(valid_model_card(), "2026-06-08T02:00:00Z")
+    return build_shadow_performance_summary(valid_evaluation_card(), "2026-06-08T02:00:00Z")
 
 
 def build_report(**kwargs):
@@ -418,7 +431,7 @@ def valid_payload(**kwargs):
 
 def masked_payload(payload):
     allowed_terms = (
-        "GOVERNANCE_MODES_COMPARE_AND_SHADOW",
+        "EVALUATION_CARD_VERSION_SUPPORTED",
         "NOT_PRODUCTION_APPROVAL_TRUE",
         "NOT_PROMOTION_APPROVAL_TRUE",
         "NOT_THRESHOLD_RECOMMENDATION_TRUE",

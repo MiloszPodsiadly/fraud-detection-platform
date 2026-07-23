@@ -70,7 +70,7 @@ describe("FDP-107 shadow performance UI scope guards", () => {
   });
 
   it("doesNotAddRawArtifactViews", () => {
-    expect(shadowSources).not.toMatch(/raw Model Card view|rawEvaluationReport|rawDataset|FDP-102 JSONL/i);
+    expect(shadowSources).not.toMatch(/raw Platform Recommendation Evaluation Card view|rawEvaluationReport|rawDataset|FDP-102 JSONL/i);
   });
 
   it("documentsFdp107ArchitectureBoundaries", () => {

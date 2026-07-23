@@ -24,8 +24,8 @@ final class PromotionReviewReadinessReportTestFixtures {
                 new PromotionReviewReadinessReport.PromotionReviewReadinessInputs(
                         new PromotionReviewReadinessReport.ShadowPerformanceSummaryInput(
                                 true,
-                                "SHADOW_PERFORMANCE_SUMMARY_V1",
-                                "1.0",
+                                "SHADOW_PERFORMANCE_SUMMARY_V2",
+                                "shadow-performance-summary-v2",
                                 "2026-06-08T02:00:00Z"
                         ),
                         1,
@@ -34,10 +34,9 @@ final class PromotionReviewReadinessReportTestFixtures {
                 List.of(
                         check("CURRENT_SUMMARY_PRESENT"),
                         check("CURRENT_SUMMARY_VERSION_SUPPORTED"),
-                        check("MODEL_CARD_PRESENT"),
-                        check("MODEL_CARD_VERSION_SUPPORTED"),
+                        check("EVALUATION_CARD_PRESENT"),
+                        check("EVALUATION_CARD_VERSION_SUPPORTED"),
                         check("GOVERNANCE_STATUS_DIAGNOSTIC_ONLY"),
-                        check("GOVERNANCE_MODES_COMPARE_AND_SHADOW"),
                         check("NOT_PRODUCTION_APPROVAL_TRUE"),
                         check("NOT_PROMOTION_APPROVAL_TRUE"),
                         check("NOT_THRESHOLD_RECOMMENDATION_TRUE"),
@@ -45,11 +44,12 @@ final class PromotionReviewReadinessReportTestFixtures {
                         check("NOT_AUTOMATIC_DECISIONING_TRUE"),
                         check("EVALUATION_REPORT_TYPE_SUPPORTED"),
                         check("METRIC_BASIS_SUPPORTED"),
-                        check("DATASET_TIME_BASIS_SUPPORTED"),
-                        check("DEDUPLICATION_POLICY_SUPPORTED"),
                         check("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS"),
                         check("METRICS_PRESENT"),
-                        check("DISAGREEMENT_SUMMARY_PRESENT"),
+                        check("ALERT_RECOMMENDED_PRECISION_AVAILABLE"),
+                        check("ALERT_RECOMMENDED_RECALL_AVAILABLE"),
+                        check("FALSE_POSITIVE_RATE_AVAILABLE"),
+                        check("FALSE_NEGATIVE_RATE_AVAILABLE"),
                         check("WARNINGS_PRESENT"),
                         check("LIMITATIONS_PRESENT")
                 ),

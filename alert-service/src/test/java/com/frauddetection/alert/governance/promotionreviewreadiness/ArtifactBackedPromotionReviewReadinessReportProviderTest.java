@@ -99,7 +99,7 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
     @Test
     void configuredNullPrimitiveMapsToUnavailable() throws Exception {
         assertUnavailable(provider(writeJson(withNullField(validReportJson(), "notAnalystRecommendation"))));
-        assertUnavailable(provider(writeJson(withNullField(validReportJson(), "recordsAcceptedForEvaluation"))));
+        assertUnavailable(provider(writeJson(withNullField(validReportJson(), "recordsEvaluated"))));
     }
 
     @Test
@@ -174,15 +174,15 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
     }
 
     @Test
-    void acceptsValidFdp111ReportWithRecordsAcceptedForEvaluationAbove500() throws Exception {
+    void acceptsValidFdp111ReportWithRecordsEvaluatedAbove500() throws Exception {
         JsonNode root = objectMapper.readTree(validReportJson());
-        ((ObjectNode) root.get("inputs")).put("recordsAcceptedForEvaluation", 501);
+        ((ObjectNode) root.get("inputs")).put("recordsEvaluated", 501);
 
         Optional<PromotionReviewReadinessReport> result =
                 provider(writeJson(objectMapper.writeValueAsString(root))).currentReport();
 
         assertThat(result).isPresent();
-        assertThat(result.orElseThrow().inputs().recordsAcceptedForEvaluation()).isEqualTo(501);
+        assertThat(result.orElseThrow().inputs().recordsEvaluated()).isEqualTo(501);
     }
 
     @Test

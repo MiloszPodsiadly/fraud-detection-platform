@@ -53,8 +53,18 @@ ALLOWED_PSEUDONYM_FIELDS = {"evaluationrecordid", "transactionreference"}
 
 def report_json(report: dict[str, Any]) -> str:
     safe_report = dict(report)
-    safe_report["reportType"] = REPORT_TYPE
-    safe_report["warnings"] = sorted(str(item) for item in safe_report.get("warnings", []))[:MAX_WARNINGS]
+    if safe_report.get("reportType") != REPORT_TYPE:
+        raise ValueError(f"reportType must be {REPORT_TYPE}")
+    if "warnings" not in safe_report:
+        raise ValueError("warnings must be present")
+    warnings = safe_report["warnings"]
+    if not isinstance(warnings, list):
+        raise ValueError("warnings must be a list")
+    if len(warnings) > MAX_WARNINGS:
+        raise ValueError("warnings exceeds maximum item count")
+    if not all(isinstance(item, str) for item in warnings):
+        raise ValueError("warnings must contain strings")
+    safe_report["warnings"] = sorted(warnings)
     _reject_forbidden_report_fields(safe_report)
     payload = json.dumps(safe_report, sort_keys=True, separators=(",", ":"))
     _reject_forbidden_report_payload(payload)
@@ -126,19 +136,25 @@ def build_artifact_manifest(payloads: dict[Path, str], generated_at: str | None)
 
 
 def evaluation_run_markdown(summary: dict[str, Any]) -> str:
+    if summary.get("reportType") != REPORT_TYPE:
+        raise ValueError(f"reportType must be {REPORT_TYPE}")
     _reject_forbidden_report_fields(summary)
     metrics = summary.get("qualityMetrics", {})
     dataset_summary = metrics.get("datasetSummary", {}) if isinstance(metrics, dict) else {}
     warnings = summary.get("warnings", [])
+    if not isinstance(dataset_summary, dict):
+        raise ValueError("qualityMetrics.datasetSummary must be an object")
+    if not isinstance(warnings, list) or not all(isinstance(item, str) for item in warnings):
+        raise ValueError("warnings must contain strings")
     lines = [
         "# FDP-123 Offline Evaluation Run",
         "",
         "Status: offline/internal diagnostic artifact.",
         "",
         f"- reportType: {REPORT_TYPE}",
-        f"- recordsEvaluated: {dataset_summary.get('recordsEvaluated', 0)}",
-        f"- recordsReturned: {dataset_summary.get('recordsReturned', 0)}",
-        f"- truncated: {dataset_summary.get('truncated', False)}",
+        f"- recordsEvaluated: {_required_markdown_field(dataset_summary, 'recordsEvaluated')}",
+        f"- recordsReturned: {_required_markdown_field(dataset_summary, 'recordsReturned')}",
+        f"- truncated: {_required_markdown_field(dataset_summary, 'truncated')}",
         f"- warnings: {', '.join(warnings) if warnings else 'none'}",
         "",
         "This artifact does not train models, approve deployment, change scoring, change workflow, or authorize payments.",
@@ -147,6 +163,12 @@ def evaluation_run_markdown(summary: dict[str, Any]) -> str:
     payload = "\n".join(lines)
     _reject_forbidden_report_payload(payload)
     return payload
+
+
+def _required_markdown_field(raw: dict[str, Any], field: str) -> Any:
+    if field not in raw:
+        raise ValueError(f"{field} must be present")
+    return raw[field]
 
 
 def _reject_forbidden_report_fields(value: Any) -> None:

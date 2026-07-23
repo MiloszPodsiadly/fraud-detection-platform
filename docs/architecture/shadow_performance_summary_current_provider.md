@@ -23,11 +23,11 @@ There is no default sample path, classpath fixture, hardcoded summary, directory
 
 ## Source Boundary
 
-The only allowed source is the configured current Shadow Performance Summary v1 JSON artifact under the configured safe base directory. The default base directory is `/run/shadow-performance`. The source is bounded to the configured safe directory and does not allow symlink artifacts.
+The only allowed source is the configured current Shadow Performance Summary v2 JSON artifact under the configured safe base directory. The default base directory is `/run/shadow-performance`. The source is bounded to the configured safe directory and does not allow symlink artifacts.
 
 The configured path is normalized and must resolve under the safe base directory. The provider rejects path traversal, paths outside the base directory, symlink artifacts, directories, non-regular files, unsupported file extensions, and artifacts larger than the configured maximum size.
 
-The provider does not read raw FDP-102/FDP-103/FDP-104 artifacts, raw Model Cards, FDP-102 JSONL exports, model registry data, model artifact binaries, scoring databases, Kafka topics, transaction stores, alert stores, fraud-case stores, or payment authorization services.
+The provider does not read raw FDP-102/FDP-103/FDP-104 artifacts, raw Platform Recommendation Evaluation Cards, FDP-102 JSONL exports, model registry data, model artifact binaries, scoring databases, Kafka topics, transaction stores, alert stores, fraud-case stores, or payment authorization services.
 
 The provider does not expose raw artifacts, configured filesystem paths, parser exceptions, validation exceptions, or stack traces through the API.
 
@@ -103,7 +103,7 @@ If the base Compose file is run without a configured current summary source, the
 
 ## Non-Goals
 
-The provider is read-only. It does not compute metrics, does not recompute shadow performance, repair invalid metrics, coerce invalid fields, enrich summaries, generate Model Cards, write files, emit Kafka messages, mutate model registry state, mutate model artifacts, mutate alert severity, mutate fraud-case status, trigger retraining, change scoring, authorize payments, or create analyst recommendations.
+The provider is read-only. It does not compute metrics, does not recompute shadow performance, repair invalid metrics, coerce invalid fields, enrich summaries, generate Platform Recommendation Evaluation Cards, write files, emit Kafka messages, mutate model registry state, mutate model artifacts, mutate alert severity, mutate fraud-case status, trigger retraining, change scoring, authorize payments, or create analyst recommendations.
 
 Static/sample summary data is test/demo fixture only. Production/main provider source is artifact-backed or empty fail-closed. Default runtime never uses hardcoded summary.
 

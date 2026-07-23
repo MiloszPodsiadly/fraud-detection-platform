@@ -3,12 +3,14 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from offline_evaluation.fdp123.model_card.generator import generate_model_card_from_fdp124_artifacts
-from offline_evaluation.fdp123.model_card.writer import write_model_card_artifacts
+from offline_evaluation.fdp123.evaluation_card.generator import generate_evaluation_card_from_fdp124_artifacts
+from offline_evaluation.fdp123.evaluation_card.writer import write_evaluation_card_artifacts
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate a local FDP-123/FDP-124 Model Card v1 artifact set.")
+    parser = argparse.ArgumentParser(
+        description="Generate a local FDP-123/FDP-124 Platform Recommendation Evaluation Card v1 artifact set."
+    )
     parser.add_argument("--evaluation-summary", required=True)
     parser.add_argument("--evaluation-manifest", required=True)
     parser.add_argument("--output-dir", required=True)
@@ -28,13 +30,13 @@ def main(argv: list[str] | None = None) -> int:
         "limitations": _list_arg(args.limitation),
         "governanceBoundary": _list_arg(args.governance_boundary),
     }
-    model_card = generate_model_card_from_fdp124_artifacts(
+    evaluation_card = generate_evaluation_card_from_fdp124_artifacts(
         Path(args.evaluation_summary),
         Path(args.evaluation_manifest),
         metadata,
         args.generated_at,
     )
-    write_model_card_artifacts(model_card, Path(args.output_dir), allow_output_root=Path(args.allow_output_root))
+    write_evaluation_card_artifacts(evaluation_card, Path(args.output_dir), allow_output_root=Path(args.allow_output_root))
     return 0
 
 

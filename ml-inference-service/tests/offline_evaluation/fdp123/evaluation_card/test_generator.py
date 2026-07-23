@@ -7,8 +7,8 @@ from pathlib import Path
 
 from offline_evaluation.fdp123.dataset_reader import read_fdp123_feedback_dataset_jsonl
 from offline_evaluation.fdp123.evaluation_runner import build_fdp123_evaluation_reports
-from offline_evaluation.fdp123.model_card.generator import generate_model_card_from_fdp124_artifacts
-from offline_evaluation.fdp123.model_card.schema import (
+from offline_evaluation.fdp123.evaluation_card.generator import generate_evaluation_card_from_fdp124_artifacts
+from offline_evaluation.fdp123.evaluation_card.schema import (
     EVALUATION_SUBJECT,
     METRIC_BASIS,
     METRICS_SUBJECT,
@@ -17,7 +17,7 @@ from offline_evaluation.fdp123.model_card.schema import (
     REQUIRED_GOVERNANCE_BOUNDARY,
     REQUIRED_LIMITATIONS,
     REQUIRED_NOT_INTENDED_USE,
-    Fdp123ModelCardValidationError,
+    Fdp123EvaluationCardValidationError,
 )
 from offline_evaluation.fdp123.report_writer import write_fdp123_reports
 
@@ -29,21 +29,25 @@ except ModuleNotFoundError:
     from fdp123_fixtures import GENERATED_AT, jsonl, jsonl_file, record
 
 
-MODEL_CARD_GENERATED_AT = "2026-06-12T00:00:00Z"
+PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT = "2026-06-12T00:00:00Z"
 
 
-class Fdp123ModelCardGeneratorTest(unittest.TestCase):
-    def test_generatesModelCardFromValidFdp124Artifacts(self):
+class Fdp123EvaluationCardGeneratorTest(unittest.TestCase):
+    def test_generatesEvaluationCardFromValidFdp124Artifacts(self):
         with self.artifacts() as paths:
             card = self.generate(paths)
 
-        self.assertEqual("MODEL_CARD_V1", card["cardType"])
+        self.assertEqual("PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1", card["cardType"])
         self.assertEqual("FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1", card["evaluationEvidence"]["evaluationReportType"])
         self.assertEqual(EVALUATION_SUBJECT, card["evaluationSubject"])
         self.assertEqual(METRICS_SUBJECT, card["metricsSubject"])
         self.assertEqual(METRIC_BASIS, card["metricBasis"])
-        self.assertEqual("NOT_APPROVED", card["productionApproval"])
-        self.assertEqual("NOT_EVALUATED_FOR_PROMOTION", card["promotionStatus"])
+        self.assertEqual("OFFLINE_DIAGNOSTIC", card["evaluationPurpose"])
+        self.assertEqual("NONE", card["runtimeDecisionAuthority"])
+        self.assertEqual("NONE", card["promotionAuthority"])
+        self.assertEqual("NONE", card["thresholdChangeAuthority"])
+        self.assertEqual("NONE", card["paymentAuthorizationAuthority"])
+        self.assertEqual("NONE", card["workflowAuthority"])
         self.assertIn("allowedUsageModes", card)
         self.assertNotIn("approvedFor", card)
         self.assertNotIn("disagreementSummary", card["metricsSummary"])
@@ -52,7 +56,7 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
         with self.artifacts() as paths:
             card = self.generate(paths)
 
-        self.assertEqual("MODEL_CARD_V1", card["cardType"])
+        self.assertEqual("PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1", card["cardType"])
 
     def test_validatesManifestBeforeSummaryIsTrusted(self):
         with self.artifacts() as paths:
@@ -60,31 +64,31 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             manifest["files"] = []
             paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
 
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_failsIfManifestMissing(self):
         with self.artifacts() as paths:
             paths["manifest"].unlink()
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_failsIfEvaluationSummaryMissing(self):
         with self.artifacts() as paths:
             paths["evaluationSummary"].unlink()
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_failsIfManifestHashMismatch(self):
         with self.artifacts() as paths:
             self._mutate_manifest_entry(paths, sha256="b" * 64)
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_failsIfManifestSizeMismatch(self):
         with self.artifacts() as paths:
             self._mutate_manifest_entry(paths, sizeBytes=1)
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_renamedSummaryRejectedEvenWithMatchingManifestHashAndSize(self):
@@ -100,12 +104,12 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
                     item["sizeBytes"] = len(payload)
             paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
 
-            with self.assertRaises(Fdp123ModelCardValidationError):
-                generate_model_card_from_fdp124_artifacts(
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
+                generate_evaluation_card_from_fdp124_artifacts(
                     renamed,
                     paths["manifest"],
                     model_metadata(),
-                    MODEL_CARD_GENERATED_AT,
+                    PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT,
                 )
 
     def test_renamedManifestRejectedEvenWithValidContent(self):
@@ -113,12 +117,12 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             renamed = paths["manifest"].with_name("random-manifest.json")
             renamed.write_bytes(paths["manifest"].read_bytes())
 
-            with self.assertRaises(Fdp123ModelCardValidationError):
-                generate_model_card_from_fdp124_artifacts(
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
+                generate_evaluation_card_from_fdp124_artifacts(
                     paths["evaluationSummary"],
                     renamed,
                     model_metadata(),
-                    MODEL_CARD_GENERATED_AT,
+                    PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT,
                 )
 
     def test_manifestListingOtherJsonDoesNotSatisfyEvaluationSummaryContract(self):
@@ -132,7 +136,7 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
                     item["sizeBytes"] = len(payload)
             paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
 
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_manifestWithZeroEvaluationSummaryEntriesRejected(self):
@@ -141,7 +145,7 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             manifest["files"] = [item for item in manifest["files"] if item["name"] != "evaluation_summary.json"]
             paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
 
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_manifestWithMultipleEvaluationSummaryEntriesRejected(self):
@@ -151,26 +155,26 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             manifest["files"].append(dict(summary_entry))
             paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
 
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_failsIfManifestReportTypeUnsupported(self):
         with self.artifacts() as paths:
             self._mutate_manifest(paths, reportType="OTHER")
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_failsIfManifestArtifactSetVersionUnsupported(self):
         with self.artifacts() as paths:
             self._mutate_manifest(paths, artifactSetVersion="other")
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_failsIfEvaluationSummaryReportTypeUnsupported(self):
         with self.artifacts() as paths:
             self._mutate_summary(paths, reportType="OTHER")
             self._rewrite_manifest(paths)
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_failsIfSummaryMissingGeneratedAt(self):
@@ -181,7 +185,7 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             with self.subTest(value=value):
                 with self.artifacts() as paths:
                     self._mutate_summary(paths, generatedAt=value)
-                    with self.assertRaises(Fdp123ModelCardValidationError):
+                    with self.assertRaises(Fdp123EvaluationCardValidationError):
                         self.generate(paths)
 
     def test_acceptsAndNormalizesExplicitOffsetEvaluationTimestamp(self):
@@ -191,19 +195,19 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
 
         self.assertEqual("2026-06-10T00:00:00Z", card["evaluationEvidence"]["evaluationGeneratedAt"])
 
-    def test_failsIfModelCardGeneratedBeforeEvaluationEvidence(self):
+    def test_failsIfEvaluationCardGeneratedBeforeEvaluationEvidence(self):
         with self.artifacts() as paths:
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths, generated_at="2026-06-09T23:59:59Z")
 
-    def test_acceptsModelCardGeneratedAtSameInstantAsEvaluationEvidence(self):
+    def test_acceptsEvaluationCardGeneratedAtSameInstantAsEvaluationEvidence(self):
         with self.artifacts() as paths:
-            self._mutate_summary(paths, generatedAt=MODEL_CARD_GENERATED_AT)
+            self._mutate_summary(paths, generatedAt=PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT)
             card = self.generate(paths)
 
-        self.assertEqual(MODEL_CARD_GENERATED_AT, card["generatedAt"])
+        self.assertEqual(PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT, card["generatedAt"])
 
-    def test_acceptsModelCardGeneratedAfterEvaluationEvidence(self):
+    def test_acceptsEvaluationCardGeneratedAfterEvaluationEvidence(self):
         with self.artifacts() as paths:
             card = self.generate(paths, generated_at="2026-06-12T00:00:01Z")
 
@@ -217,7 +221,7 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             summary = self._summary(paths)
             summary["qualityMetrics"].pop("datasetSummary")
             self._write_summary(paths, summary)
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_failsIfClassBalanceMissing(self):
@@ -225,7 +229,7 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             summary = self._summary(paths)
             summary["qualityMetrics"].pop("classBalance")
             self._write_summary(paths, summary)
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_failsIfAlertRecommendedConfusionMatrixMissing(self):
@@ -233,7 +237,7 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             summary = self._summary(paths)
             summary["qualityMetrics"].pop("alertRecommendedConfusionMatrix")
             self._write_summary(paths, summary)
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_failsIfMetricObjectShapeInvalid(self):
@@ -241,7 +245,7 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             summary = self._summary(paths)
             summary["qualityMetrics"]["alertRecommendedConfusionMatrix"]["precision"] = {"value": 0.5}
             self._write_summary(paths, summary)
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_failsIfEvaluationSummarySubjectUnsupported(self):
@@ -250,7 +254,7 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             summary["evaluationSubject"] = dict(EVALUATION_SUBJECT)
             summary["evaluationSubject"]["sourceVersion"] = "OTHER"
             self._write_summary(paths, summary)
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_failsIfEvaluationSummaryMetricBasisUnsupported(self):
@@ -258,7 +262,7 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             summary = self._summary(paths)
             summary["metricBasis"] = "MODEL_PERFORMANCE"
             self._write_summary(paths, summary)
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_failsIfQualityMetricsMetricBasisUnsupported(self):
@@ -266,7 +270,7 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             summary = self._summary(paths)
             summary["qualityMetrics"]["metricBasis"] = "MODEL_PERFORMANCE"
             self._write_summary(paths, summary)
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_failsIfSourceWarningsContainNonStringEvidence(self):
@@ -275,7 +279,7 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             summary["warnings"] = ["LOW_SAMPLE_SIZE", 123]
             self._write_summary(paths, summary)
 
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_failsIfClassCountSumBelowRecordsEvaluated(self):
@@ -286,7 +290,7 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             summary["qualityMetrics"]["classBalance"]["negativeClassCount"] = 10
             self._write_summary(paths, summary)
 
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_failsIfClassCountSumAboveRecordsEvaluated(self):
@@ -297,13 +301,15 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             summary["qualityMetrics"]["classBalance"]["negativeClassCount"] = 1
             self._write_summary(paths, summary)
 
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_acceptsZeroClassCountsForEmptyEvaluation(self):
         with self.artifacts() as paths:
             summary = self._summary(paths)
+            summary["datasetMetadata"]["recordsReturned"] = 0
             summary["qualityMetrics"]["datasetSummary"]["recordsEvaluated"] = 0
+            summary["qualityMetrics"]["datasetSummary"]["recordsReturned"] = 0
             summary["qualityMetrics"]["classBalance"]["positiveClassCount"] = 0
             summary["qualityMetrics"]["classBalance"]["negativeClassCount"] = 0
             self._write_summary(paths, summary)
@@ -329,13 +335,13 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
 
             card = self.generate(paths)
 
-        self.assertEqual("MODEL_CARD_V1", card["cardType"])
+        self.assertEqual("PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1", card["cardType"])
 
     def test_summaryFileAboveLimitRejectedBeforeTrustingManifestSize(self):
         with self.artifacts() as paths:
             paths["evaluationSummary"].write_bytes(b" " * (MAX_EVALUATION_SUMMARY_BYTES + 1))
 
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_manifestFileExactlyAtLimitUsesNormalParsing(self):
@@ -346,26 +352,26 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
 
             card = self.generate(paths)
 
-        self.assertEqual("MODEL_CARD_V1", card["cardType"])
+        self.assertEqual("PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1", card["cardType"])
 
     def test_manifestFileAboveLimitRejectedBeforeJsonParsing(self):
         with self.artifacts() as paths:
             paths["manifest"].write_bytes(b" " * (MAX_EVALUATION_MANIFEST_BYTES + 1))
 
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def test_failsIfGovernanceMetadataMissingRequiredFields(self):
         with self.artifacts() as paths:
             metadata = model_metadata()
             metadata.pop("allowedUsageModes")
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths, metadata=metadata)
 
     def test_failsIfGovernanceMetadataContainsCallerControlledIdentity(self):
         with self.artifacts() as paths:
             metadata = model_metadata(modelName="caller-controlled")
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths, metadata=metadata)
 
     def test_doesNotReadDisagreementJsonl(self):
@@ -373,7 +379,7 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             paths["disagreementReport"].write_text("transactionId unsafe\n", encoding="utf-8")
             card = self.generate(paths)
 
-        self.assertEqual("MODEL_CARD_V1", card["cardType"])
+        self.assertEqual("PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1", card["cardType"])
 
     def test_doesNotIncludeRawIdsOrDecisionReasonCodes(self):
         with self.artifacts() as paths:
@@ -392,8 +398,8 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
         self.assertIsNone(precision["value"])
         self.assertEqual("NO_PREDICTED_POSITIVES", precision["reason"])
 
-    def generate(self, paths, metadata=None, generated_at=MODEL_CARD_GENERATED_AT):
-        return generate_model_card_from_fdp124_artifacts(
+    def generate(self, paths, metadata=None, generated_at=PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT):
+        return generate_evaluation_card_from_fdp124_artifacts(
             paths["evaluationSummary"],
             paths["manifest"],
             metadata or model_metadata(),
@@ -405,7 +411,7 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             summary = self._summary(paths)
             summary.pop(field)
             self._write_summary(paths, summary)
-            with self.assertRaises(Fdp123ModelCardValidationError):
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
     def _summary(self, paths):

@@ -4,22 +4,23 @@ import json
 import re
 from typing import Any
 
+from offline_evaluation.fdp123.evaluation_card.schema import (
+    PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
+    PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION,
+)
 from offline_evaluation.shadow_performance_schema import (
-    ALLOWED_APPROVED_FOR,
     BANNER as SHADOW_PERFORMANCE_BANNER,
-    EXPECTED_DATASET_DEDUPLICATION_POLICY,
-    EXPECTED_DATASET_TIME_BASIS,
     EXPECTED_EVALUATION_REPORT_TYPE,
     EXPECTED_GOVERNANCE_STATUS,
     EXPECTED_METRIC_BASIS,
-    SUMMARY_TYPE as SHADOW_SUMMARY_TYPE,
+    REPORT_TYPE as SHADOW_REPORT_TYPE,
     SUMMARY_VERSION as SHADOW_SUMMARY_VERSION,
     validate_shadow_performance_summary,
 )
 
 
 class PromotionReviewReadinessValidationError(ValueError):
-    """Raised when PromotionReviewReadinessReport v1 is unsafe or outside FDP-111 bounds."""
+    """Raised when PromotionReviewReadinessReport v1 is unsafe or outside FDP-126 bounds."""
 
 
 REPORT_TYPE = "PROMOTION_REVIEW_READINESS_REPORT_V1"
@@ -30,16 +31,15 @@ BANNER = (
     "threshold recommendation, production decisioning approval, payment authorization, "
     "automatic approve / decline / block logic, or analyst recommendation logic."
 )
-READINESS_STATUSES = {"INSUFFICIENT_DATA", "NOT_REVIEWABLE", "REVIEWABLE"}
-CHECK_STATUSES = {"PASS", "WARN", "FAIL", "NOT_APPLICABLE"}
+READINESS_STATUSES = {"INSUFFICIENT_DATA", "INCONCLUSIVE", "NOT_REVIEWABLE", "REVIEWABLE"}
+CHECK_STATUSES = {"PASS", "WARN", "FAIL", "INCONCLUSIVE", "NOT_APPLICABLE"}
 SEVERITIES = {"INFO", "LOW", "MEDIUM", "HIGH"}
 CHECK_NAMES = {
     "CURRENT_SUMMARY_PRESENT",
     "CURRENT_SUMMARY_VERSION_SUPPORTED",
-    "MODEL_CARD_PRESENT",
-    "MODEL_CARD_VERSION_SUPPORTED",
+    "EVALUATION_CARD_PRESENT",
+    "EVALUATION_CARD_VERSION_SUPPORTED",
     "GOVERNANCE_STATUS_DIAGNOSTIC_ONLY",
-    "GOVERNANCE_MODES_COMPARE_AND_SHADOW",
     "NOT_PRODUCTION_APPROVAL_TRUE",
     "NOT_PROMOTION_APPROVAL_TRUE",
     "NOT_THRESHOLD_RECOMMENDATION_TRUE",
@@ -47,11 +47,12 @@ CHECK_NAMES = {
     "NOT_AUTOMATIC_DECISIONING_TRUE",
     "EVALUATION_REPORT_TYPE_SUPPORTED",
     "METRIC_BASIS_SUPPORTED",
-    "DATASET_TIME_BASIS_SUPPORTED",
-    "DEDUPLICATION_POLICY_SUPPORTED",
     "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS",
     "METRICS_PRESENT",
-    "DISAGREEMENT_SUMMARY_PRESENT",
+    "ALERT_RECOMMENDED_PRECISION_AVAILABLE",
+    "ALERT_RECOMMENDED_RECALL_AVAILABLE",
+    "FALSE_POSITIVE_RATE_AVAILABLE",
+    "FALSE_NEGATIVE_RATE_AVAILABLE",
     "WARNINGS_PRESENT",
     "LIMITATIONS_PRESENT",
 }
@@ -127,14 +128,18 @@ def build_promotion_review_readiness_report(
     if minimum_diagnostic_evidence_records < 1:
         raise PromotionReviewReadinessValidationError("minimumDiagnosticEvidenceRecords must be positive")
 
-    accepted_records = summary["evaluationPopulation"]["recordsAcceptedForEvaluation"]
+    records_evaluated = summary["evaluationPopulation"]["recordsEvaluated"]
     checks = _checks(summary, minimum_diagnostic_evidence_records)
     failed_checks = [check for check in checks if check["status"] == "FAIL"]
+    inconclusive_checks = [check for check in checks if check["status"] == "INCONCLUSIVE"]
     readiness_status = "REVIEWABLE"
     reason_codes: list[str] = []
     if failed_checks:
         readiness_status = "INSUFFICIENT_DATA" if _minimum_evidence_failed(failed_checks) else "NOT_REVIEWABLE"
         reason_codes = [f"{check['name']}_FAILED" for check in failed_checks]
+    elif inconclusive_checks:
+        readiness_status = "INCONCLUSIVE"
+        reason_codes = [f"{check['name']}_INCONCLUSIVE" for check in inconclusive_checks]
 
     report = {
         "reportType": REPORT_TYPE,
@@ -152,12 +157,12 @@ def build_promotion_review_readiness_report(
         "inputs": {
             "shadowPerformanceSummary": {
                 "present": True,
-                "summaryType": summary["summaryType"],
+                "reportType": summary["reportType"],
                 "summaryVersion": summary["summaryVersion"],
                 "generatedAt": summary["generatedAt"],
             },
             "minimumDiagnosticEvidenceRecords": minimum_diagnostic_evidence_records,
-            "recordsAcceptedForEvaluation": accepted_records,
+            "recordsEvaluated": records_evaluated,
         },
         "checks": checks,
         "reasonCodes": reason_codes,
@@ -214,33 +219,30 @@ def validate_promotion_review_readiness_report(raw: dict[str, Any]) -> dict[str,
 def _checks(summary: dict[str, Any], minimum_diagnostic_evidence_records: int) -> list[dict[str, str]]:
     governance = summary["governance"]
     evaluation = summary["evaluation"]
-    accepted = summary["evaluationPopulation"]["recordsAcceptedForEvaluation"]
-    checks = [
+    records_evaluated = summary["evaluationPopulation"]["recordsEvaluated"]
+    metrics = summary["metrics"]
+    return [
         _check("CURRENT_SUMMARY_PRESENT", "PASS"),
         _check("CURRENT_SUMMARY_VERSION_SUPPORTED", "PASS"),
-        _check("MODEL_CARD_PRESENT", "NOT_APPLICABLE", "LOW"),
-        _check("MODEL_CARD_VERSION_SUPPORTED", "NOT_APPLICABLE", "LOW"),
+        _check("EVALUATION_CARD_PRESENT", _pass_fail(evaluation["evaluationCardType"] == PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE)),
+        _check("EVALUATION_CARD_VERSION_SUPPORTED", _pass_fail(evaluation["evaluationCardVersion"] == PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION)),
         _check("GOVERNANCE_STATUS_DIAGNOSTIC_ONLY", _pass_fail(governance["governanceStatus"] == GOVERNANCE_STATUS)),
-        _check("GOVERNANCE_MODES_COMPARE_AND_SHADOW", _pass_fail(set(governance["approvedFor"]) == ALLOWED_APPROVED_FOR)),
         _check("NOT_PRODUCTION_APPROVAL_TRUE", _pass_fail(governance["notProductionApproval"] is True)),
         _check("NOT_PROMOTION_APPROVAL_TRUE", _pass_fail(governance["notPromotionApproval"] is True)),
         _check("NOT_THRESHOLD_RECOMMENDATION_TRUE", _pass_fail(governance["notThresholdRecommendation"] is True)),
         _check("NOT_PAYMENT_AUTHORIZATION_TRUE", _pass_fail(governance["notPaymentAuthorization"] is True)),
         _check("NOT_AUTOMATIC_DECISIONING_TRUE", _pass_fail(governance["notAutomaticDecisioning"] is True)),
         _check("EVALUATION_REPORT_TYPE_SUPPORTED", _pass_fail(evaluation["evaluationReportType"] == EXPECTED_EVALUATION_REPORT_TYPE)),
-        _check("METRIC_BASIS_SUPPORTED", _pass_fail(evaluation["metricBasis"] == EXPECTED_METRIC_BASIS)),
-        _check("DATASET_TIME_BASIS_SUPPORTED", _pass_fail(evaluation["datasetTimeBasis"] == EXPECTED_DATASET_TIME_BASIS)),
-        _check(
-            "DEDUPLICATION_POLICY_SUPPORTED",
-            _pass_fail(evaluation["datasetDeduplicationPolicy"] == EXPECTED_DATASET_DEDUPLICATION_POLICY),
-        ),
-        _check("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", _pass_fail(accepted >= minimum_diagnostic_evidence_records), "HIGH"),
-        _check("METRICS_PRESENT", _pass_fail(bool(summary["metrics"]))),
-        _check("DISAGREEMENT_SUMMARY_PRESENT", _pass_fail(bool(summary["disagreementSummary"]))),
+        _check("METRIC_BASIS_SUPPORTED", _pass_fail(summary["metricBasis"] == EXPECTED_METRIC_BASIS)),
+        _check("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", _pass_fail(records_evaluated >= minimum_diagnostic_evidence_records), "HIGH"),
+        _check("METRICS_PRESENT", _pass_fail(bool(metrics))),
+        _metric_availability_check("ALERT_RECOMMENDED_PRECISION_AVAILABLE", metrics["alertRecommendedPrecision"]),
+        _metric_availability_check("ALERT_RECOMMENDED_RECALL_AVAILABLE", metrics["alertRecommendedRecall"]),
+        _metric_availability_check("FALSE_POSITIVE_RATE_AVAILABLE", metrics["falsePositiveRate"]),
+        _metric_availability_check("FALSE_NEGATIVE_RATE_AVAILABLE", metrics["falseNegativeRate"]),
         _check("WARNINGS_PRESENT", "PASS"),
         _check("LIMITATIONS_PRESENT", "PASS"),
     ]
-    return checks
 
 
 def _check(name: str, status: str, severity: str = "INFO") -> dict[str, str]:
@@ -251,14 +253,21 @@ def _pass_fail(condition: bool) -> str:
     return "PASS" if condition else "FAIL"
 
 
+def _metric_availability_check(name: str, metric: dict[str, Any]) -> dict[str, str]:
+    return _check(name, "PASS" if metric["available"] is True else "INCONCLUSIVE", "MEDIUM")
+
+
 def _minimum_evidence_failed(checks: list[dict[str, str]]) -> bool:
     return any(check["name"] == "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS" for check in checks)
 
 
 def _validate_status_consistency(report: dict[str, Any]) -> None:
     failed_checks = [check for check in report["checks"] if check["status"] == "FAIL"]
-    if report["readinessStatus"] == "REVIEWABLE" and failed_checks:
+    inconclusive_checks = [check for check in report["checks"] if check["status"] == "INCONCLUSIVE"]
+    if report["readinessStatus"] == "REVIEWABLE" and (failed_checks or inconclusive_checks):
         raise PromotionReviewReadinessValidationError("REVIEWABLE requires all required checks to pass")
+    if report["readinessStatus"] == "INCONCLUSIVE" and failed_checks:
+        raise PromotionReviewReadinessValidationError("INCONCLUSIVE requires no failed checks")
     if report["readinessStatus"] == GOVERNANCE_STATUS:
         raise PromotionReviewReadinessValidationError("DIAGNOSTIC_ONLY is governanceStatus, not readinessStatus")
 
@@ -270,21 +279,21 @@ def _inputs(raw: Any) -> dict[str, Any]:
     if not isinstance(summary, dict):
         raise PromotionReviewReadinessValidationError("inputs.shadowPerformanceSummary must be an object")
     minimum = raw.get("minimumDiagnosticEvidenceRecords")
-    accepted = raw.get("recordsAcceptedForEvaluation")
+    records_evaluated = raw.get("recordsEvaluated")
     if isinstance(minimum, bool) or not isinstance(minimum, int) or minimum < 1:
         raise PromotionReviewReadinessValidationError("minimumDiagnosticEvidenceRecords must be positive")
-    if isinstance(accepted, bool) or not isinstance(accepted, int) or accepted < 0:
-        raise PromotionReviewReadinessValidationError("recordsAcceptedForEvaluation must be non-negative")
+    if isinstance(records_evaluated, bool) or not isinstance(records_evaluated, int) or records_evaluated < 0:
+        raise PromotionReviewReadinessValidationError("recordsEvaluated must be non-negative")
     normalized_summary = {
         "present": _required_true(summary, "present"),
-        "summaryType": _required_constant(summary, "summaryType", SHADOW_SUMMARY_TYPE),
+        "reportType": _required_constant(summary, "reportType", SHADOW_REPORT_TYPE),
         "summaryVersion": _required_constant(summary, "summaryVersion", SHADOW_SUMMARY_VERSION),
         "generatedAt": _required_string(summary, "generatedAt", 128),
     }
     return {
         "shadowPerformanceSummary": normalized_summary,
         "minimumDiagnosticEvidenceRecords": minimum,
-        "recordsAcceptedForEvaluation": accepted,
+        "recordsEvaluated": records_evaluated,
     }
 
 
@@ -377,6 +386,7 @@ def _reject_forbidden_payload(payload: str) -> None:
     for check_name in CHECK_NAMES:
         masked = masked.replace(check_name, "")
         masked = masked.replace(f"{check_name}_FAILED", "")
+        masked = masked.replace(f"{check_name}_INCONCLUSIVE", "")
     compact = "".join(character for character in masked.lower() if character.isalnum())
     for term in FORBIDDEN_OUTPUT_TERMS:
         if term in compact:

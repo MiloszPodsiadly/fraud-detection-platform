@@ -3,18 +3,18 @@ const PROMOTION_REVIEW_READINESS_REPORT_VERSION = "1.0";
 const PROMOTION_REVIEW_READINESS_GOVERNANCE_STATUS = "DIAGNOSTIC_ONLY";
 const PROMOTION_REVIEW_READINESS_STATUSES = new Set([
   "INSUFFICIENT_DATA",
+  "INCONCLUSIVE",
   "NOT_REVIEWABLE",
   "REVIEWABLE"
 ]);
-const CHECK_STATUSES = new Set(["PASS", "WARN", "FAIL", "NOT_APPLICABLE"]);
+const CHECK_STATUSES = new Set(["PASS", "WARN", "FAIL", "INCONCLUSIVE", "NOT_APPLICABLE"]);
 const CHECK_SEVERITIES = new Set(["INFO", "LOW", "MEDIUM", "HIGH"]);
-const MAX_DIAGNOSTIC_RECORDS = 500;
+const MAX_DIAGNOSTIC_RECORDS = 1000;
 const MAX_BANNER_LENGTH = 512;
 const MAX_CHECKS = 50;
 const MAX_MACHINE_CODE_ITEMS = 20;
 const MAX_CHECK_NAME_LENGTH = 128;
 const MAX_MACHINE_CODE_LENGTH = 128;
-const MAX_SUMMARY_TYPE_LENGTH = 128;
 const MAX_SUMMARY_VERSION_LENGTH = 32;
 const MACHINE_CODE_PATTERN = /^[A-Z0-9_-]+$/;
 const FORBIDDEN_RAW_TERMS = [
@@ -91,13 +91,14 @@ function isValidInputs(inputs) {
   return isPlainObject(inputs)
     && isPlainObject(shadowPerformanceSummary)
     && typeof shadowPerformanceSummary.present === "boolean"
-    && isBoundedString(shadowPerformanceSummary.summaryType, MAX_SUMMARY_TYPE_LENGTH)
+    && shadowPerformanceSummary.reportType === "SHADOW_PERFORMANCE_SUMMARY_V2"
     && isBoundedString(shadowPerformanceSummary.summaryVersion, MAX_SUMMARY_VERSION_LENGTH)
-    && !containsForbiddenTerm(shadowPerformanceSummary.summaryType)
+    && shadowPerformanceSummary.summaryVersion === "shadow-performance-summary-v2"
+    && !containsForbiddenTerm(shadowPerformanceSummary.reportType)
     && !containsForbiddenTerm(shadowPerformanceSummary.summaryVersion)
     && isOptionalParseableDateString(shadowPerformanceSummary.generatedAt)
     && isBoundedInteger(inputs.minimumDiagnosticEvidenceRecords, 1, MAX_DIAGNOSTIC_RECORDS)
-    && isBoundedInteger(inputs.recordsAcceptedForEvaluation, 0, MAX_DIAGNOSTIC_RECORDS);
+    && isBoundedInteger(inputs.recordsEvaluated, 0, MAX_DIAGNOSTIC_RECORDS);
 }
 
 function isValidChecks(checks, readinessStatus) {

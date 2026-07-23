@@ -14,20 +14,19 @@
   "inputs": {
     "shadowPerformanceSummary": {
       "present": true,
-      "summaryType": "SHADOW_PERFORMANCE_SUMMARY_V1",
-      "summaryVersion": "1.0",
+      "reportType": "SHADOW_PERFORMANCE_SUMMARY_V2",
+      "summaryVersion": "shadow-performance-summary-v2",
       "generatedAt": "2026-06-08T02:00:00Z"
     },
     "minimumDiagnosticEvidenceRecords": 1,
-    "recordsAcceptedForEvaluation": 3
+    "recordsEvaluated": 3
   },
   "checks": [
     {"name": "CURRENT_SUMMARY_PRESENT", "status": "PASS", "severity": "INFO"},
     {"name": "CURRENT_SUMMARY_VERSION_SUPPORTED", "status": "PASS", "severity": "INFO"},
-    {"name": "MODEL_CARD_PRESENT", "status": "PASS", "severity": "INFO"},
-    {"name": "MODEL_CARD_VERSION_SUPPORTED", "status": "PASS", "severity": "INFO"},
+    {"name": "EVALUATION_CARD_PRESENT", "status": "PASS", "severity": "INFO"},
+    {"name": "EVALUATION_CARD_VERSION_SUPPORTED", "status": "PASS", "severity": "INFO"},
     {"name": "GOVERNANCE_STATUS_DIAGNOSTIC_ONLY", "status": "PASS", "severity": "INFO"},
-    {"name": "GOVERNANCE_MODES_COMPARE_AND_SHADOW", "status": "PASS", "severity": "INFO"},
     {"name": "NOT_PRODUCTION_APPROVAL_TRUE", "status": "PASS", "severity": "INFO"},
     {"name": "NOT_PROMOTION_APPROVAL_TRUE", "status": "PASS", "severity": "INFO"},
     {"name": "NOT_THRESHOLD_RECOMMENDATION_TRUE", "status": "PASS", "severity": "INFO"},
@@ -35,11 +34,12 @@
     {"name": "NOT_AUTOMATIC_DECISIONING_TRUE", "status": "PASS", "severity": "INFO"},
     {"name": "EVALUATION_REPORT_TYPE_SUPPORTED", "status": "PASS", "severity": "INFO"},
     {"name": "METRIC_BASIS_SUPPORTED", "status": "PASS", "severity": "INFO"},
-    {"name": "DATASET_TIME_BASIS_SUPPORTED", "status": "PASS", "severity": "INFO"},
-    {"name": "DEDUPLICATION_POLICY_SUPPORTED", "status": "PASS", "severity": "INFO"},
     {"name": "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", "status": "PASS", "severity": "INFO"},
     {"name": "METRICS_PRESENT", "status": "PASS", "severity": "INFO"},
-    {"name": "DISAGREEMENT_SUMMARY_PRESENT", "status": "PASS", "severity": "INFO"},
+    {"name": "ALERT_RECOMMENDED_PRECISION_AVAILABLE", "status": "PASS", "severity": "INFO"},
+    {"name": "ALERT_RECOMMENDED_RECALL_AVAILABLE", "status": "PASS", "severity": "INFO"},
+    {"name": "FALSE_POSITIVE_RATE_AVAILABLE", "status": "PASS", "severity": "INFO"},
+    {"name": "FALSE_NEGATIVE_RATE_AVAILABLE", "status": "PASS", "severity": "INFO"},
     {"name": "WARNINGS_PRESENT", "status": "PASS", "severity": "INFO"},
     {"name": "LIMITATIONS_PRESENT", "status": "PASS", "severity": "INFO"}
   ],

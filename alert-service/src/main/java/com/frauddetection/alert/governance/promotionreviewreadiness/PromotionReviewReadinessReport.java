@@ -25,13 +25,13 @@ public record PromotionReviewReadinessReport(
     public record PromotionReviewReadinessInputs(
             ShadowPerformanceSummaryInput shadowPerformanceSummary,
             int minimumDiagnosticEvidenceRecords,
-            int recordsAcceptedForEvaluation
+            int recordsEvaluated
     ) {
     }
 
     public record ShadowPerformanceSummaryInput(
             boolean present,
-            String summaryType,
+            String reportType,
             String summaryVersion,
             String generatedAt
     ) {

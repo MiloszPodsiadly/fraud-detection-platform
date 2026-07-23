@@ -62,10 +62,10 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
 
         ShadowPerformanceSummary result = provider(artifact).currentSummary().orElseThrow();
 
-        assertThat(result.metrics().precisionAtBudget()).isEqualTo(1.0);
-        assertThat(result.metrics().recallAtTopK()).isEqualTo(1.0);
-        assertThat(result.metrics().falsePositiveRate()).isEqualTo(0.0);
-        assertThat(result.disagreementSummary()).isEqualTo(summary.disagreementSummary());
+        assertThat(result.metrics().alertRecommendedPrecision().value()).isEqualTo(1.0);
+        assertThat(result.metrics().alertRecommendedRecall().value()).isEqualTo(1.0);
+        assertThat(result.metrics().falsePositiveRate().value()).isEqualTo(0.0);
+        assertThat(result.metrics().falseNegativeRate()).isEqualTo(summary.metrics().falseNegativeRate());
     }
 
     @Test
@@ -78,7 +78,10 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
     @Test
     void doesNotCoerceInvalidMetrics() throws Exception {
         Path artifact = tempDir.resolve("current-summary.json");
-        Files.writeString(artifact, validSummaryJson().replace("\"precisionAtBudget\":0.666667", "\"precisionAtBudget\":\"0.666667\""));
+        Files.writeString(artifact, validSummaryJson().replace(
+                "\"value\":0.666667",
+                "\"value\":\"0.666667\""
+        ));
 
         assertUnavailable(provider(artifact));
     }
@@ -86,30 +89,30 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
     @Test
     void doesNotDropInvalidFieldsSilently() throws Exception {
         Path artifact = tempDir.resolve("current-summary.json");
-        Files.writeString(artifact, validSummaryJson().replace("\"summaryType\":\"SHADOW_PERFORMANCE_SUMMARY_V1\"",
-                "\"summaryType\":\"SHADOW_PERFORMANCE_SUMMARY_V1\",\"rawPayload\":\"secret\""));
+        Files.writeString(artifact, validSummaryJson().replace("\"reportType\":\"SHADOW_PERFORMANCE_SUMMARY_V2\"",
+                "\"reportType\":\"SHADOW_PERFORMANCE_SUMMARY_V2\",\"rawPayload\":\"secret\""));
 
         assertUnavailable(provider(artifact));
     }
 
     @Test
-    void throwsUnavailableWhenPrecisionAtBudgetMissing() throws Exception {
-        assertUnavailableWithMissingField("precisionAtBudget");
+    void throwsUnavailableWhenAlertRecommendedPrecisionMissing() throws Exception {
+        assertUnavailableWithMissingField("alertRecommendedPrecision");
     }
 
     @Test
-    void throwsUnavailableWhenPrecisionAtBudgetNull() throws Exception {
-        assertUnavailableWithNullField("precisionAtBudget");
+    void throwsUnavailableWhenAlertRecommendedPrecisionNull() throws Exception {
+        assertUnavailableWithNullField("alertRecommendedPrecision");
     }
 
     @Test
-    void throwsUnavailableWhenRecallAtTopKMissing() throws Exception {
-        assertUnavailableWithMissingField("recallAtTopK");
+    void throwsUnavailableWhenAlertRecommendedRecallMissing() throws Exception {
+        assertUnavailableWithMissingField("alertRecommendedRecall");
     }
 
     @Test
-    void throwsUnavailableWhenRecallAtTopKNull() throws Exception {
-        assertUnavailableWithNullField("recallAtTopK");
+    void throwsUnavailableWhenAlertRecommendedRecallNull() throws Exception {
+        assertUnavailableWithNullField("alertRecommendedRecall");
     }
 
     @Test
@@ -123,93 +126,53 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
     }
 
     @Test
-    void throwsUnavailableWhenMetricCountMissing() throws Exception {
+    void throwsUnavailableWhenMetricObjectFieldMissing() throws Exception {
         for (String fieldName : new String[]{
-                "mlCaughtRulesMissedCount",
-                "rulesCaughtMlMissedCount",
-                "missingMlCount",
-                "missingRulesCount",
-                "missingProjectionCount",
-                "notEvaluationEligibleCount"
+                "available",
+                "value"
         }) {
             assertUnavailableWithMissingField(fieldName);
         }
     }
 
     @Test
-    void throwsUnavailableWhenMetricCountNull() throws Exception {
+    void throwsUnavailableWhenMetricObjectFieldNull() throws Exception {
         for (String fieldName : new String[]{
-                "mlCaughtRulesMissedCount",
-                "rulesCaughtMlMissedCount",
-                "missingMlCount",
-                "missingRulesCount",
-                "missingProjectionCount",
-                "notEvaluationEligibleCount"
+                "available",
+                "value"
         }) {
             assertUnavailableWithNullField(fieldName);
         }
     }
 
     @Test
-    void throwsUnavailableWhenDatasetRecordsReadMissing() throws Exception {
-        assertUnavailableWithMissingField("datasetRecordsRead");
+    void throwsUnavailableWhenRecordsEvaluatedMissing() throws Exception {
+        assertUnavailableWithMissingField("recordsEvaluated");
     }
 
     @Test
-    void throwsUnavailableWhenDatasetRecordsReadNull() throws Exception {
-        assertUnavailableWithNullField("datasetRecordsRead");
+    void throwsUnavailableWhenRecordsEvaluatedNull() throws Exception {
+        assertUnavailableWithNullField("recordsEvaluated");
     }
 
     @Test
-    void throwsUnavailableWhenRecordsAcceptedForEvaluationMissing() throws Exception {
-        assertUnavailableWithMissingField("recordsAcceptedForEvaluation");
+    void throwsUnavailableWhenPositiveClassCountMissing() throws Exception {
+        assertUnavailableWithMissingField("positiveClassCount");
     }
 
     @Test
-    void throwsUnavailableWhenRecordsAcceptedForEvaluationNull() throws Exception {
-        assertUnavailableWithNullField("recordsAcceptedForEvaluation");
+    void throwsUnavailableWhenPositiveClassCountNull() throws Exception {
+        assertUnavailableWithNullField("positiveClassCount");
     }
 
     @Test
-    void throwsUnavailableWhenRecordsExcludedNotEvaluationEligibleMissing() throws Exception {
-        assertUnavailableWithMissingField("recordsExcludedNotEvaluationEligible");
+    void throwsUnavailableWhenNegativeClassCountMissing() throws Exception {
+        assertUnavailableWithMissingField("negativeClassCount");
     }
 
     @Test
-    void throwsUnavailableWhenRecordsExcludedNotEvaluationEligibleNull() throws Exception {
-        assertUnavailableWithNullField("recordsExcludedNotEvaluationEligible");
-    }
-
-    @Test
-    void throwsUnavailableWhenDisagreementCountMissing() throws Exception {
-        for (String fieldName : new String[]{
-                "rulesHighMlHigh",
-                "rulesHighMlLowOrMedium",
-                "rulesLowOrMediumMlHigh",
-                "rulesLowOrMediumMlLowOrMedium",
-                "rulesMissingMlPresent",
-                "mlMissingRulesPresent",
-                "bothMissing",
-                "notEvaluationEligibleExcluded"
-        }) {
-            assertUnavailableWithMissingField(fieldName);
-        }
-    }
-
-    @Test
-    void throwsUnavailableWhenDisagreementCountNull() throws Exception {
-        for (String fieldName : new String[]{
-                "rulesHighMlHigh",
-                "rulesHighMlLowOrMedium",
-                "rulesLowOrMediumMlHigh",
-                "rulesLowOrMediumMlLowOrMedium",
-                "rulesMissingMlPresent",
-                "mlMissingRulesPresent",
-                "bothMissing",
-                "notEvaluationEligibleExcluded"
-        }) {
-            assertUnavailableWithNullField(fieldName);
-        }
+    void throwsUnavailableWhenNegativeClassCountNull() throws Exception {
+        assertUnavailableWithNullField("negativeClassCount");
     }
 
     @Test
@@ -357,7 +320,7 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
     @Test
     void throwsUnavailableWhenUnsupportedSummaryType() throws Exception {
         Path artifact = tempDir.resolve("current-summary.json");
-        Files.writeString(artifact, validSummaryJson().replace("SHADOW_PERFORMANCE_SUMMARY_V1", "MODEL_CARD"));
+        Files.writeString(artifact, validSummaryJson().replace("SHADOW_PERFORMANCE_SUMMARY_V2", "PLATFORM_RECOMMENDATION_EVALUATION_CARD"));
 
         assertUnavailable(provider(artifact));
     }
@@ -365,7 +328,7 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
     @Test
     void throwsUnavailableWhenUnsupportedSummaryVersion() throws Exception {
         Path artifact = tempDir.resolve("current-summary.json");
-        Files.writeString(artifact, validSummaryJson().replace("\"summaryVersion\":\"1.0\"", "\"summaryVersion\":\"2.0\""));
+        Files.writeString(artifact, validSummaryJson().replace("\"summaryVersion\":\"shadow-performance-summary-v2\"", "\"summaryVersion\":\"2.0\""));
 
         assertUnavailable(provider(artifact));
     }
@@ -373,7 +336,7 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
     @Test
     void throwsUnavailableWhenRawIdentifiersPresent() throws Exception {
         Path artifact = tempDir.resolve("current-summary.json");
-        Files.writeString(artifact, validSummaryJson().replace("python-logistic-fraud-model", "txnref-secret"));
+        Files.writeString(artifact, validSummaryJson().replace("ENGINE_INTELLIGENCE_PROJECTION", "txnref-secret"));
 
         assertUnavailable(provider(artifact));
     }
@@ -670,25 +633,20 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
     private ShadowPerformanceSummary summaryWithMetrics(double precision, double recall, double falsePositiveRate) {
         ShadowPerformanceSummary summary = validSummary();
         return new ShadowPerformanceSummary(
-                summary.summaryType(),
+                summary.reportType(),
                 summary.summaryVersion(),
                 summary.generatedAt(),
-                summary.model(),
+                summary.evaluationSubject(),
+                summary.metricBasis(),
                 summary.governance(),
                 summary.evaluation(),
                 summary.evaluationPopulation(),
                 new ShadowPerformanceSummary.ShadowPerformanceMetrics(
-                        precision,
-                        recall,
-                        falsePositiveRate,
-                        summary.metrics().mlCaughtRulesMissedCount(),
-                        summary.metrics().rulesCaughtMlMissedCount(),
-                        summary.metrics().missingMlCount(),
-                        summary.metrics().missingRulesCount(),
-                        summary.metrics().missingProjectionCount(),
-                        summary.metrics().notEvaluationEligibleCount()
+                        ShadowPerformanceSummaryTestFixtures.metric(precision),
+                        ShadowPerformanceSummaryTestFixtures.metric(recall),
+                        ShadowPerformanceSummaryTestFixtures.metric(falsePositiveRate),
+                        summary.metrics().falseNegativeRate()
                 ),
-                summary.disagreementSummary(),
                 summary.warnings(),
                 summary.limitations(),
                 summary.banner()

@@ -3,30 +3,30 @@ package com.frauddetection.alert.governance.shadowperformance;
 import java.util.List;
 
 public record ShadowPerformanceSummaryResponse(
-        String summaryType,
+        String reportType,
         String summaryVersion,
         String generatedAt,
-        ShadowPerformanceModelResponse model,
-        ShadowPerformanceGovernanceResponse governance,
-        ShadowPerformanceEvaluationResponse evaluation,
-        ShadowPerformancePopulationResponse evaluationPopulation,
-        ShadowPerformanceMetricsResponse metrics,
-        ShadowPerformanceDisagreementResponse disagreementSummary,
+        ShadowPerformanceSummary.EvaluationSubject evaluationSubject,
+        String metricBasis,
+        ShadowPerformanceSummary.ShadowPerformanceGovernance governance,
+        ShadowPerformanceSummary.ShadowPerformanceEvaluation evaluation,
+        ShadowPerformanceSummary.ShadowPerformancePopulation evaluationPopulation,
+        ShadowPerformanceSummary.ShadowPerformanceMetrics metrics,
         List<String> warnings,
         List<String> limitations,
         String banner
 ) {
     static ShadowPerformanceSummaryResponse from(ShadowPerformanceSummary summary) {
         return new ShadowPerformanceSummaryResponse(
-                summary.summaryType(),
+                summary.reportType(),
                 summary.summaryVersion(),
                 summary.generatedAt(),
-                ShadowPerformanceModelResponse.from(summary.model()),
-                ShadowPerformanceGovernanceResponse.from(summary.governance()),
-                ShadowPerformanceEvaluationResponse.from(summary.evaluation()),
-                ShadowPerformancePopulationResponse.from(summary.evaluationPopulation()),
-                ShadowPerformanceMetricsResponse.from(summary.metrics()),
-                ShadowPerformanceDisagreementResponse.from(summary.disagreementSummary()),
+                summary.evaluationSubject(),
+                summary.metricBasis(),
+                summary.governance(),
+                summary.evaluation(),
+                summary.evaluationPopulation(),
+                summary.metrics(),
                 List.copyOf(summary.warnings()),
                 List.copyOf(summary.limitations()),
                 summary.banner()

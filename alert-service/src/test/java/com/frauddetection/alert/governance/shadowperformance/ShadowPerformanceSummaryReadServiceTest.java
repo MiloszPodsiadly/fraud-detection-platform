@@ -36,9 +36,9 @@ class ShadowPerformanceSummaryReadServiceTest {
 
         ShadowPerformanceSummaryResponse response = service.currentSummary();
 
-        assertThat(response.summaryType()).isEqualTo("SHADOW_PERFORMANCE_SUMMARY_V1");
-        assertThat(response.evaluationPopulation().datasetRecordsRead()).isEqualTo(5);
-        assertThat(response.metrics().precisionAtBudget()).isEqualTo(0.666667);
+        assertThat(response.reportType()).isEqualTo("SHADOW_PERFORMANCE_SUMMARY_V2");
+        assertThat(response.evaluationPopulation().recordsEvaluated()).isEqualTo(5);
+        assertThat(response.metrics().alertRecommendedPrecision().value()).isEqualTo(0.666667);
         verify(validator).validate(summary);
     }
 
@@ -102,15 +102,20 @@ class ShadowPerformanceSummaryReadServiceTest {
     void mapsOnlyFromShadowPerformanceSummaryWithoutRecomputation() {
         ShadowPerformanceSummary summary = validSummary();
         ShadowPerformanceSummary changedMetrics = new ShadowPerformanceSummary(
-                summary.summaryType(),
+                summary.reportType(),
                 summary.summaryVersion(),
                 summary.generatedAt(),
-                summary.model(),
+                summary.evaluationSubject(),
+                summary.metricBasis(),
                 summary.governance(),
                 summary.evaluation(),
                 summary.evaluationPopulation(),
-                new ShadowPerformanceSummary.ShadowPerformanceMetrics(1.0, 1.0, 0.0, 1, 1, 1, 1, 1, 1),
-                summary.disagreementSummary(),
+                new ShadowPerformanceSummary.ShadowPerformanceMetrics(
+                        ShadowPerformanceSummaryTestFixtures.metric(1.0),
+                        ShadowPerformanceSummaryTestFixtures.metric(1.0),
+                        ShadowPerformanceSummaryTestFixtures.metric(0.0),
+                        summary.metrics().falseNegativeRate()
+                ),
                 summary.warnings(),
                 summary.limitations(),
                 summary.banner()
@@ -119,9 +124,9 @@ class ShadowPerformanceSummaryReadServiceTest {
 
         ShadowPerformanceSummaryResponse response = service.currentSummary();
 
-        assertThat(response.metrics().precisionAtBudget()).isEqualTo(1.0);
-        assertThat(response.metrics().recallAtTopK()).isEqualTo(1.0);
-        assertThat(response.metrics().falsePositiveRate()).isEqualTo(0.0);
+        assertThat(response.metrics().alertRecommendedPrecision().value()).isEqualTo(1.0);
+        assertThat(response.metrics().alertRecommendedRecall().value()).isEqualTo(1.0);
+        assertThat(response.metrics().falsePositiveRate().value()).isEqualTo(0.0);
     }
 
     private ShadowPerformanceSummary validSummary() {
@@ -131,15 +136,20 @@ class ShadowPerformanceSummaryReadServiceTest {
     private ShadowPerformanceSummary invalidSummary() {
         ShadowPerformanceSummary summary = validSummary();
         return new ShadowPerformanceSummary(
-                summary.summaryType(),
+                summary.reportType(),
                 summary.summaryVersion(),
                 summary.generatedAt(),
-                summary.model(),
+                summary.evaluationSubject(),
+                summary.metricBasis(),
                 summary.governance(),
                 summary.evaluation(),
                 summary.evaluationPopulation(),
-                new ShadowPerformanceSummary.ShadowPerformanceMetrics(2.0, 0.5, 0.25, 1, 1, 1, 1, 1, 1),
-                summary.disagreementSummary(),
+                new ShadowPerformanceSummary.ShadowPerformanceMetrics(
+                        ShadowPerformanceSummaryTestFixtures.metric(2.0),
+                        ShadowPerformanceSummaryTestFixtures.metric(0.5),
+                        ShadowPerformanceSummaryTestFixtures.metric(0.25),
+                        summary.metrics().falseNegativeRate()
+                ),
                 summary.warnings(),
                 summary.limitations(),
                 summary.banner()

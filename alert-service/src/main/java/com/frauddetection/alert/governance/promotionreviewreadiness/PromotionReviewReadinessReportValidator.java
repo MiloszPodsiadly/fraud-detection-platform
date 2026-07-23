@@ -12,16 +12,15 @@ import java.util.regex.Pattern;
 class PromotionReviewReadinessReportValidator {
 
     private static final Pattern MACHINE_CODE_PATTERN = Pattern.compile("^[A-Z][A-Z0-9_]{0,127}$");
-    private static final Set<String> READINESS_STATUSES = Set.of("INSUFFICIENT_DATA", "NOT_REVIEWABLE", "REVIEWABLE");
-    private static final Set<String> CHECK_STATUSES = Set.of("PASS", "WARN", "FAIL", "NOT_APPLICABLE");
+    private static final Set<String> READINESS_STATUSES = Set.of("INSUFFICIENT_DATA", "INCONCLUSIVE", "NOT_REVIEWABLE", "REVIEWABLE");
+    private static final Set<String> CHECK_STATUSES = Set.of("PASS", "WARN", "FAIL", "INCONCLUSIVE", "NOT_APPLICABLE");
     private static final Set<String> SEVERITIES = Set.of("INFO", "LOW", "MEDIUM", "HIGH");
     private static final Set<String> CHECK_NAMES = Set.of(
             "CURRENT_SUMMARY_PRESENT",
             "CURRENT_SUMMARY_VERSION_SUPPORTED",
-            "MODEL_CARD_PRESENT",
-            "MODEL_CARD_VERSION_SUPPORTED",
+            "EVALUATION_CARD_PRESENT",
+            "EVALUATION_CARD_VERSION_SUPPORTED",
             "GOVERNANCE_STATUS_DIAGNOSTIC_ONLY",
-            "GOVERNANCE_MODES_COMPARE_AND_SHADOW",
             "NOT_PRODUCTION_APPROVAL_TRUE",
             "NOT_PROMOTION_APPROVAL_TRUE",
             "NOT_THRESHOLD_RECOMMENDATION_TRUE",
@@ -29,11 +28,12 @@ class PromotionReviewReadinessReportValidator {
             "NOT_AUTOMATIC_DECISIONING_TRUE",
             "EVALUATION_REPORT_TYPE_SUPPORTED",
             "METRIC_BASIS_SUPPORTED",
-            "DATASET_TIME_BASIS_SUPPORTED",
-            "DEDUPLICATION_POLICY_SUPPORTED",
             "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS",
             "METRICS_PRESENT",
-            "DISAGREEMENT_SUMMARY_PRESENT",
+            "ALERT_RECOMMENDED_PRECISION_AVAILABLE",
+            "ALERT_RECOMMENDED_RECALL_AVAILABLE",
+            "FALSE_POSITIVE_RATE_AVAILABLE",
+            "FALSE_NEGATIVE_RATE_AVAILABLE",
             "WARNINGS_PRESENT",
             "LIMITATIONS_PRESENT"
     );
@@ -104,14 +104,14 @@ class PromotionReviewReadinessReportValidator {
         validateSummaryInput(inputs.shadowPerformanceSummary());
         boundedCount(inputs.minimumDiagnosticEvidenceRecords(), "minimumDiagnosticEvidenceRecords");
         require(inputs.minimumDiagnosticEvidenceRecords() > 0, "minimumDiagnosticEvidenceRecords must be positive");
-        boundedCount(inputs.recordsAcceptedForEvaluation(), "recordsAcceptedForEvaluation");
+        boundedCount(inputs.recordsEvaluated(), "recordsEvaluated");
     }
 
     private void validateSummaryInput(PromotionReviewReadinessReport.ShadowPerformanceSummaryInput input) {
         require(input != null, "shadowPerformanceSummary input is missing");
         require(input.present(), "shadowPerformanceSummary.present must be true");
-        require("SHADOW_PERFORMANCE_SUMMARY_V1".equals(input.summaryType()), "summaryType is unsupported");
-        require("1.0".equals(input.summaryVersion()), "summaryVersion is unsupported");
+        require("SHADOW_PERFORMANCE_SUMMARY_V2".equals(input.reportType()), "reportType is unsupported");
+        require("shadow-performance-summary-v2".equals(input.summaryVersion()), "summaryVersion is unsupported");
         instant(input.generatedAt(), "shadowPerformanceSummary.generatedAt");
     }
 

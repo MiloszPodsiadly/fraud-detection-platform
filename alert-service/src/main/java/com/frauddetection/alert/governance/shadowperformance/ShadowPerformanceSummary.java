@@ -3,30 +3,32 @@ package com.frauddetection.alert.governance.shadowperformance;
 import java.util.List;
 
 public record ShadowPerformanceSummary(
-        String summaryType,
+        String reportType,
         String summaryVersion,
         String generatedAt,
-        ShadowPerformanceModel model,
+        EvaluationSubject evaluationSubject,
+        String metricBasis,
         ShadowPerformanceGovernance governance,
         ShadowPerformanceEvaluation evaluation,
         ShadowPerformancePopulation evaluationPopulation,
         ShadowPerformanceMetrics metrics,
-        ShadowPerformanceDisagreement disagreementSummary,
         List<String> warnings,
         List<String> limitations,
         String banner
 ) {
-    public record ShadowPerformanceModel(
-            String modelName,
-            String modelVersion,
-            String modelFamily,
-            String featureContractVersion
+    public record EvaluationSubject(
+            String subjectType,
+            String sourceComponent,
+            String sourceVersion,
+            String featureContractVersion,
+            String modelIdentity,
+            String modelArtifactSha256,
+            String identityCompleteness
     ) {
     }
 
     public record ShadowPerformanceGovernance(
             String governanceStatus,
-            List<String> approvedFor,
             boolean diagnosticOnly,
             boolean notProductionApproval,
             boolean notPromotionApproval,
@@ -37,43 +39,37 @@ public record ShadowPerformanceSummary(
     }
 
     public record ShadowPerformanceEvaluation(
+            String evaluationCardType,
+            String evaluationCardVersion,
+            String evaluationPurpose,
             String evaluationReportType,
             String evaluationReportVersion,
-            String metricBasis,
+            String evaluationArtifactSetVersion,
+            String datasetVersion,
             String datasetTimeBasis,
-            String datasetDeduplicationPolicy
+            String sourceManifestSha256
     ) {
     }
 
     public record ShadowPerformancePopulation(
-            int datasetRecordsRead,
-            int recordsAcceptedForEvaluation,
-            int recordsExcludedNotEvaluationEligible
+            int recordsEvaluated,
+            int positiveClassCount,
+            int negativeClassCount
     ) {
     }
 
     public record ShadowPerformanceMetrics(
-            double precisionAtBudget,
-            double recallAtTopK,
-            double falsePositiveRate,
-            int mlCaughtRulesMissedCount,
-            int rulesCaughtMlMissedCount,
-            int missingMlCount,
-            int missingRulesCount,
-            int missingProjectionCount,
-            int notEvaluationEligibleCount
+            MetricValue alertRecommendedPrecision,
+            MetricValue alertRecommendedRecall,
+            MetricValue falsePositiveRate,
+            MetricValue falseNegativeRate
     ) {
     }
 
-    public record ShadowPerformanceDisagreement(
-            int rulesHighMlHigh,
-            int rulesHighMlLowOrMedium,
-            int rulesLowOrMediumMlHigh,
-            int rulesLowOrMediumMlLowOrMedium,
-            int rulesMissingMlPresent,
-            int mlMissingRulesPresent,
-            int bothMissing,
-            int notEvaluationEligibleExcluded
+    public record MetricValue(
+            Boolean available,
+            Double value,
+            String reason
     ) {
     }
 }

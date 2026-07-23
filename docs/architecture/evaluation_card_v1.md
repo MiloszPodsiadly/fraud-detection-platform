@@ -1,14 +1,14 @@
-# Model Card v1
+# Platform Recommendation Evaluation Card v1
 
-Status: offline governance artifact. Model Card v1 is an offline governance artifact.
+Status: offline governance artifact. Platform Recommendation Evaluation Card v1 is an offline governance artifact.
 
 ## Scope
 
-Model Card v1 has one executable implementation in this repository:
+Platform Recommendation Evaluation Card v1 has one executable implementation in this repository:
 
-- `ml-inference-service/offline_evaluation/fdp123/model_card/`
+- `ml-inference-service/offline_evaluation/fdp123/evaluation_card/`
 
-The previous FDP-102/FDP-103 Model Card modules were removed. Model Card v1 now consumes only FDP-124 aggregate
+The previous FDP-102/FDP-103 Platform Recommendation Evaluation Card modules were removed. Platform Recommendation Evaluation Card v1 now consumes only FDP-124 aggregate
 artifacts generated from the FDP-123 feedback dataset path. It validates the canonical FDP-124 `manifest.json` before
 trusting the canonical `evaluation_summary.json`. It does not read `disagreement_report.jsonl` in v1 and does not
 read the raw FDP-123 dataset.
@@ -52,7 +52,7 @@ FDP-124 `evaluation_summary.json` is the only source of evaluation identity. It 
 - `modelArtifactSha256 = NOT_AVAILABLE`
 - `identityCompleteness = NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE`
 
-The Model Card generator copies that subject from FDP-124 and rejects unsupported subject, `metricsSubject`, or
+The Platform Recommendation Evaluation Card generator copies that subject from FDP-124 and rejects unsupported subject, `metricsSubject`, or
 `metricBasis` values. CLI callers cannot set model name, model version, model family, training mode, feature contract,
 reference quality, or artifact identity.
 
@@ -70,11 +70,11 @@ For the binary FDP-123/FDP-124 evaluation contract, class-count integrity is str
 positiveClassCount + negativeClassCount == recordsEvaluated
 ```
 
-The invariant is enforced at the FDP-124 source boundary and again when validating final Model Card
+The invariant is enforced at the FDP-124 source boundary and again when validating final Platform Recommendation Evaluation Card
 `evaluationEvidence`. Evidence counts use the single FDP-123 hard limit, `MAX_DATASET_RECORDS = 1000`.
 
 Timestamps must be real RFC3339 date-times with explicit timezone. Accepted timestamps are normalized to UTC `Z`.
-The final Model Card `generatedAt` instant must be greater than or equal to
+The final Platform Recommendation Evaluation Card `generatedAt` instant must be greater than or equal to
 `evaluationEvidence.evaluationGeneratedAt`.
 
 ## Semantics
@@ -100,7 +100,7 @@ feedback signals, not legal ground truth, certified labels, model-training label
 decisions, or automatic decisioning signals.
 `intendedUse` is allowlisted, and required `notIntendedUse` non-goals cannot be omitted.
 
-FDP-124 `disagreementSummary` is not part of the Model Card v1 contract. The v1 generator does not copy it into
+FDP-124 `disagreementSummary` is not part of the Platform Recommendation Evaluation Card v1 contract. The v1 generator does not copy it into
 `metricsSummary`, does not silently filter malformed members, and does not transform it into a valid-looking Model
 Card field.
 
@@ -108,16 +108,16 @@ Card field.
 
 The writer produces local/internal artifacts:
 
-- `model_card.json`
-- `model_card.md`
+- `evaluation_card.json`
+- `evaluation_card.md`
 - `manifest.json`
 
 The output manifest uses:
 
-- `reportType = MODEL_CARD_V1`
-- `artifactSetVersion = model-card-artifact-set-v1`
+- `reportType = PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1`
+- `artifactSetVersion = platform-recommendation-evaluation-card-artifact-set-v1`
 
-The writer uses a manifest-last pattern. A model card artifact set is complete only when `manifest.json` exists and
+The writer uses a manifest-last pattern. A evaluation card artifact set is complete only when `manifest.json` exists and
 all listed hashes and sizes match. The CLI requires `--allow-output-root`.
 
 The output does not include raw or per-record data such as evaluation record identifiers, transaction references,

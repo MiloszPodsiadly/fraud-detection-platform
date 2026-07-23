@@ -1626,7 +1626,7 @@ paths:
   /api/v1/governance/shadow-performance/summary/current:
     get:
       summary: Read current Shadow Performance Summary
-      description: Returns the current validated FDP-105 Shadow Performance Summary as a bounded read-only DTO. Requires shadow-performance:read. The response is diagnostic-only and is not model promotion approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic approve/decline/block logic, and not analyst recommendation logic. This endpoint does not expose raw dataset JSONL, raw offline evaluation reports, raw Model Card payloads, per-record examples, model registry data, model artifacts, scoring data, promotion fields, threshold recommendation fields, or decisioning fields.
+      description: Returns the current validated FDP-105 Shadow Performance Summary as a bounded read-only DTO. Requires shadow-performance:read. The response is diagnostic-only and is not model promotion approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic approve/decline/block logic, and not analyst recommendation logic. This endpoint does not expose raw dataset JSONL, raw offline evaluation reports, raw Platform Recommendation Evaluation Card payloads, per-record examples, model registry data, model artifacts, scoring data, promotion fields, threshold recommendation fields, or decisioning fields.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1652,7 +1652,7 @@ paths:
   /api/v1/governance/promotion-review-readiness/current:
     get:
       summary: Read current Promotion Review Readiness Report
-      description: Returns the current validated FDP-111 Promotion Review Readiness Report as a bounded read-only DTO. Requires promotion-readiness:read. The response is diagnostic-only and is not model promotion approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic approve/decline/block logic, and not analyst recommendation logic. This endpoint does not generate reports, mutate state, change scoring, trigger workflows, run schedulers, emit Kafka events, expose raw FDP-102 records, raw model cards, raw evaluation reports, transaction references, customer identifiers, model registry data, secrets, paths, promotion fields, threshold recommendation fields, or decisioning fields.
+      description: Returns the current validated FDP-111 Promotion Review Readiness Report as a bounded read-only DTO. Requires promotion-readiness:read. The response is diagnostic-only and is not model promotion approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic approve/decline/block logic, and not analyst recommendation logic. This endpoint does not generate reports, mutate state, change scoring, trigger workflows, run schedulers, emit Kafka events, expose raw FDP-102 records, raw evaluation cards, raw evaluation reports, transaction references, customer identifiers, model registry data, secrets, paths, promotion fields, threshold recommendation fields, or decisioning fields.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -5122,19 +5122,22 @@ components:
     ShadowPerformanceSummaryResponse:
       type: object
       additionalProperties: false
-      required: [summaryType, summaryVersion, generatedAt, model, governance, evaluation, evaluationPopulation, metrics, disagreementSummary, warnings, limitations, banner]
+      required: [reportType, summaryVersion, generatedAt, evaluationSubject, metricBasis, governance, evaluation, evaluationPopulation, metrics, warnings, limitations, banner]
       properties:
-        summaryType:
+        reportType:
           type: string
-          enum: [SHADOW_PERFORMANCE_SUMMARY_V1]
+          enum: [SHADOW_PERFORMANCE_SUMMARY_V2]
         summaryVersion:
           type: string
-          enum: ["1.0"]
+          enum: [shadow-performance-summary-v2]
         generatedAt:
           type: string
           format: date-time
-        model:
-          $ref: "#/components/schemas/ShadowPerformanceModelResponse"
+        evaluationSubject:
+          $ref: "#/components/schemas/ShadowPerformanceEvaluationSubjectResponse"
+        metricBasis:
+          type: string
+          enum: [ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK]
         governance:
           $ref: "#/components/schemas/ShadowPerformanceGovernanceResponse"
         evaluation:
@@ -5143,11 +5146,9 @@ components:
           $ref: "#/components/schemas/ShadowPerformancePopulationResponse"
         metrics:
           $ref: "#/components/schemas/ShadowPerformanceMetricsResponse"
-        disagreementSummary:
-          $ref: "#/components/schemas/ShadowPerformanceDisagreementResponse"
         warnings:
           type: array
-          maxItems: 10
+          maxItems: 20
           items:
             type: string
             minLength: 1
@@ -5181,7 +5182,7 @@ components:
           enum: [DIAGNOSTIC_ONLY]
         readinessStatus:
           type: string
-          enum: [INSUFFICIENT_DATA, NOT_REVIEWABLE, REVIEWABLE]
+          enum: [INSUFFICIENT_DATA, INCONCLUSIVE, NOT_REVIEWABLE, REVIEWABLE]
         diagnosticOnly:
           type: boolean
         notPromotionApproval:
@@ -5199,28 +5200,28 @@ components:
         inputs:
           type: object
           additionalProperties: false
-          required: [shadowPerformanceSummary, minimumDiagnosticEvidenceRecords, recordsAcceptedForEvaluation]
+          required: [shadowPerformanceSummary, minimumDiagnosticEvidenceRecords, recordsEvaluated]
           properties:
             shadowPerformanceSummary:
               type: object
               additionalProperties: false
-              required: [present, summaryType, summaryVersion, generatedAt]
+              required: [present, reportType, summaryVersion, generatedAt]
               properties:
                 present:
                   type: boolean
-                summaryType:
+                reportType:
                   type: string
-                  enum: [SHADOW_PERFORMANCE_SUMMARY_V1]
+                  enum: [SHADOW_PERFORMANCE_SUMMARY_V2]
                 summaryVersion:
                   type: string
-                  enum: ["1.0"]
+                  enum: [shadow-performance-summary-v2]
                 generatedAt:
                   type: string
                   format: date-time
             minimumDiagnosticEvidenceRecords:
               type: integer
               minimum: 1
-            recordsAcceptedForEvaluation:
+            recordsEvaluated:
               type: integer
               minimum: 0
         checks:
@@ -5238,7 +5239,7 @@ components:
                 maxLength: 128
               status:
                 type: string
-                enum: [PASS, WARN, FAIL, NOT_APPLICABLE]
+                enum: [PASS, WARN, FAIL, INCONCLUSIVE, NOT_APPLICABLE]
               severity:
                 type: string
                 enum: [INFO, LOW, MEDIUM, HIGH]
@@ -5266,42 +5267,43 @@ components:
         banner:
           type: string
           description: Offline diagnostic aid only. No promotion approval, threshold recommendation, production decisioning, payment authorization, automatic operational action, or analyst recommendation authority is granted.
-    ShadowPerformanceModelResponse:
+    ShadowPerformanceEvaluationSubjectResponse:
       type: object
       additionalProperties: false
-      required: [modelName, modelVersion, modelFamily, featureContractVersion]
+      required: [subjectType, sourceComponent, sourceVersion, featureContractVersion, modelIdentity, modelArtifactSha256, identityCompleteness]
       properties:
-        modelName:
-          type: string
-          enum: [NOT_AVAILABLE]
-          maxLength: 128
-        modelVersion:
-          type: string
-          enum: [NOT_AVAILABLE]
-          maxLength: 128
-        modelFamily:
+        subjectType:
           type: string
           enum: [PLATFORM_RECOMMENDATION]
+        sourceComponent:
+          type: string
+          enum: [ENGINE_INTELLIGENCE_PROJECTION]
+        sourceVersion:
+          type: string
+          enum: [ENGINE_INTELLIGENCE_PROJECTION_V1]
         featureContractVersion:
           type: string
           enum: [NOT_APPLICABLE]
           maxLength: 128
+        modelIdentity:
+          type: string
+          enum: [NOT_AVAILABLE]
+          maxLength: 128
+        modelArtifactSha256:
+          type: string
+          enum: [NOT_AVAILABLE]
+          maxLength: 128
+        identityCompleteness:
+          type: string
+          enum: [NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE]
     ShadowPerformanceGovernanceResponse:
       type: object
       additionalProperties: false
-      required: [governanceStatus, approvedFor, diagnosticOnly, notProductionApproval, notPromotionApproval, notThresholdRecommendation, notPaymentAuthorization, notAutomaticDecisioning]
+      required: [governanceStatus, diagnosticOnly, notProductionApproval, notPromotionApproval, notThresholdRecommendation, notPaymentAuthorization, notAutomaticDecisioning]
       properties:
         governanceStatus:
           type: string
           enum: [DIAGNOSTIC_ONLY]
-        approvedFor:
-          type: array
-          minItems: 2
-          maxItems: 2
-          uniqueItems: true
-          items:
-            type: string
-            enum: [COMPARE, SHADOW]
         diagnosticOnly:
           type: boolean
         notProductionApproval:
@@ -5317,121 +5319,85 @@ components:
     ShadowPerformanceEvaluationResponse:
       type: object
       additionalProperties: false
-      required: [evaluationReportType, evaluationReportVersion, metricBasis, datasetTimeBasis, datasetDeduplicationPolicy]
+      required: [evaluationCardType, evaluationCardVersion, evaluationPurpose, evaluationReportType, evaluationReportVersion, evaluationArtifactSetVersion, datasetVersion, datasetTimeBasis, sourceManifestSha256]
       properties:
+        evaluationCardType:
+          type: string
+          enum: [PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1]
+        evaluationCardVersion:
+          type: string
+          enum: [platform-recommendation-evaluation-card-v1]
+        evaluationPurpose:
+          type: string
+          enum: [OFFLINE_DIAGNOSTIC]
         evaluationReportType:
           type: string
           enum: [FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1]
         evaluationReportVersion:
           type: string
           enum: [FDP-124]
-        metricBasis:
+        evaluationArtifactSetVersion:
           type: string
-          enum: [ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK]
+          minLength: 1
+          maxLength: 256
+        datasetVersion:
+          type: string
+          minLength: 1
+          maxLength: 256
         datasetTimeBasis:
           type: string
           enum: [FEEDBACK_CREATED_AT]
-        datasetDeduplicationPolicy:
+        sourceManifestSha256:
           type: string
-          enum: [FDP123_RECORD_COUNT_MATCHES_METADATA_RECORDS_RETURNED]
+          pattern: "^[a-f0-9]{64}$"
     ShadowPerformancePopulationResponse:
       type: object
       additionalProperties: false
-      required: [datasetRecordsRead, recordsAcceptedForEvaluation, recordsExcludedNotEvaluationEligible]
+      required: [recordsEvaluated, positiveClassCount, negativeClassCount]
       properties:
-        datasetRecordsRead:
+        recordsEvaluated:
           type: integer
           minimum: 0
           maximum: 1000
-        recordsAcceptedForEvaluation:
+        positiveClassCount:
           type: integer
           minimum: 0
           maximum: 1000
-        recordsExcludedNotEvaluationEligible:
+        negativeClassCount:
           type: integer
           minimum: 0
           maximum: 1000
     ShadowPerformanceMetricsResponse:
       type: object
       additionalProperties: false
-      required: [precisionAtBudget, recallAtTopK, falsePositiveRate, mlCaughtRulesMissedCount, rulesCaughtMlMissedCount, missingMlCount, missingRulesCount, missingProjectionCount, notEvaluationEligibleCount]
+      required: [alertRecommendedPrecision, alertRecommendedRecall, falsePositiveRate, falseNegativeRate]
       properties:
-        precisionAtBudget:
-          type: number
-          format: double
-          minimum: 0
-          maximum: 1
-        recallAtTopK:
-          type: number
-          format: double
-          minimum: 0
-          maximum: 1
+        alertRecommendedPrecision:
+          $ref: "#/components/schemas/ShadowPerformanceMetricValueResponse"
+        alertRecommendedRecall:
+          $ref: "#/components/schemas/ShadowPerformanceMetricValueResponse"
         falsePositiveRate:
-          type: number
-          format: double
-          minimum: 0
-          maximum: 1
-        mlCaughtRulesMissedCount:
-          type: integer
-          minimum: 0
-          maximum: 1000
-        rulesCaughtMlMissedCount:
-          type: integer
-          minimum: 0
-          maximum: 1000
-        missingMlCount:
-          type: integer
-          minimum: 0
-          maximum: 1000
-        missingRulesCount:
-          type: integer
-          minimum: 0
-          maximum: 1000
-        missingProjectionCount:
-          type: integer
-          minimum: 0
-          maximum: 1000
-        notEvaluationEligibleCount:
-          type: integer
-          minimum: 0
-          maximum: 1000
-    ShadowPerformanceDisagreementResponse:
+          $ref: "#/components/schemas/ShadowPerformanceMetricValueResponse"
+        falseNegativeRate:
+          $ref: "#/components/schemas/ShadowPerformanceMetricValueResponse"
+    ShadowPerformanceMetricValueResponse:
       type: object
       additionalProperties: false
-      required: [rulesHighMlHigh, rulesHighMlLowOrMedium, rulesLowOrMediumMlHigh, rulesLowOrMediumMlLowOrMedium, rulesMissingMlPresent, mlMissingRulesPresent, bothMissing, notEvaluationEligibleExcluded]
+      required: [available, value, reason]
       properties:
-        rulesHighMlHigh:
-          type: integer
+        available:
+          type: boolean
+        value:
+          type: number
+          format: double
+          nullable: true
           minimum: 0
-          maximum: 1000
-        rulesHighMlLowOrMedium:
-          type: integer
-          minimum: 0
-          maximum: 1000
-        rulesLowOrMediumMlHigh:
-          type: integer
-          minimum: 0
-          maximum: 1000
-        rulesLowOrMediumMlLowOrMedium:
-          type: integer
-          minimum: 0
-          maximum: 1000
-        rulesMissingMlPresent:
-          type: integer
-          minimum: 0
-          maximum: 1000
-        mlMissingRulesPresent:
-          type: integer
-          minimum: 0
-          maximum: 1000
-        bothMissing:
-          type: integer
-          minimum: 0
-          maximum: 1000
-        notEvaluationEligibleExcluded:
-          type: integer
-          minimum: 0
-          maximum: 1000
+          maximum: 1
+        reason:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 128
   responses:
     BadRequest:
       description: Request validation failed.

@@ -14,7 +14,7 @@ The UI requires the existing `shadow-performance:read` authority as a frontend v
 - The Shadow Performance workspace does not render global transaction, alert, suspicious-transaction, or fraud-case counters as part of Shadow Performance diagnostics.
 - FDP-107 does not compute metrics.
 - FDP-107 does not recompute shadow performance.
-- FDP-107 does not read raw artifacts, raw Model Card data, raw FDP-103 reports, or FDP-102 JSONL datasets.
+- FDP-107 does not read raw artifacts, raw Platform Recommendation Evaluation Card data, raw FDP-103 reports, or FDP-102 JSONL datasets.
 - FDP-107 does not recommend promotion.
 - FDP-107 does not recommend thresholds.
 - FDP-107 does not approve production decisioning.

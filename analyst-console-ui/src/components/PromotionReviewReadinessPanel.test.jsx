@@ -47,6 +47,13 @@ describe("PromotionReviewReadinessPanel", () => {
     expect(screen.getByText("Diagnostic checks failed. Human review should not begin yet.")).toBeInTheDocument();
   });
 
+  it("renders INCONCLUSIVE", () => {
+    renderPanel({ report: report({ readinessStatus: "INCONCLUSIVE" }) });
+
+    expect(screen.getAllByText("INCONCLUSIVE").length).toBeGreaterThan(0);
+    expect(screen.getByText("Diagnostic evidence is present but one or more metrics are unavailable.")).toBeInTheDocument();
+  });
+
   it("renders diagnostic banner", () => {
     renderPanel();
 
@@ -69,9 +76,9 @@ describe("PromotionReviewReadinessPanel", () => {
     renderPanel();
 
     expect(screen.getByText("Shadow summary present")).toBeInTheDocument();
-    expect(screen.getByText("SHADOW_PERFORMANCE_SUMMARY_V1")).toBeInTheDocument();
+    expect(screen.getByText("SHADOW_PERFORMANCE_SUMMARY_V2")).toBeInTheDocument();
     expect(screen.getByText("Minimum diagnostic evidence records")).toBeInTheDocument();
-    expect(screen.getByText("Records accepted for evaluation")).toBeInTheDocument();
+    expect(screen.getByText("Records evaluated")).toBeInTheDocument();
   });
 
   it("renders checks table", () => {
@@ -253,12 +260,12 @@ function report(overrides = {}) {
     inputs: {
       shadowPerformanceSummary: {
         present: true,
-        summaryType: "SHADOW_PERFORMANCE_SUMMARY_V1",
-        summaryVersion: "1.0",
+        reportType: "SHADOW_PERFORMANCE_SUMMARY_V2",
+        summaryVersion: "shadow-performance-summary-v2",
         generatedAt: "2026-06-08T02:00:00Z"
       },
       minimumDiagnosticEvidenceRecords: 1,
-      recordsAcceptedForEvaluation: 3
+      recordsEvaluated: 3
     },
     checks: [
       { name: "CURRENT_SUMMARY_PRESENT", status: "PASS", severity: "INFO" }

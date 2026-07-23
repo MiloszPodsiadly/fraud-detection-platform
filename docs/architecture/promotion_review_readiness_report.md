@@ -36,8 +36,8 @@ consumes the FDP-109 generated `deployment/local-generated/shadow-performance/cu
 
 FDP-111 v1 primarily consumes the FDP-109 generated Shadow Performance Summary artifact.
 
-Model Card checks are included as bounded checklist placeholders and are currently NOT_APPLICABLE until a bounded Model
-Card artifact input is wired in a later scope.
+Platform Recommendation Evaluation Card checks validate that the consumed Shadow Performance Summary V2 was derived
+from the current Platform Recommendation Evaluation Card contract.
 
 ## Output
 
@@ -55,11 +55,13 @@ Allowed `readinessStatus` values:
 
 ```text
 INSUFFICIENT_DATA
+INCONCLUSIVE
 NOT_REVIEWABLE
 REVIEWABLE
 ```
 
 `REVIEWABLE` means human review may begin. `REVIEWABLE` does not mean model promotion approval.
+`INCONCLUSIVE` means at least one required diagnostic metric is unavailable and must not be treated as zero, pass, or fail.
 
 `DIAGNOSTIC_ONLY` is governanceStatus, not readinessStatus.
 
@@ -71,9 +73,9 @@ Minimum diagnostic evidence is a review sufficiency check, not a model threshold
 
 ## Diagnostic Checks
 
-`GOVERNANCE_MODES_COMPARE_AND_SHADOW` is the governance-mode diagnostic check.
+`EVALUATION_CARD_VERSION_SUPPORTED` is the current evaluation-card contract diagnostic check.
 
-This check validates that the consumed summary is governed for COMPARE and SHADOW diagnostic use only. It is not promotion approval.
+This check validates that the consumed summary was derived from the current Platform Recommendation Evaluation Card contract.
 
 The report also includes explicit non-decisioning flags, including `notAnalystRecommendation`.
 
@@ -86,7 +88,7 @@ FDP-111 does not authorize payments.
 FDP-111 does not recommend analyst action.
 FDP-111 does not add API, OpenAPI, UI, workflow, scheduler, or Kafka triggers.
 FDP-111 does not mutate model registry or model artifacts.
-FDP-111 does not read raw dataset JSONL, raw offline evaluation reports, raw Model Card displays, raw transaction records,
+FDP-111 does not read raw dataset JSONL, raw offline evaluation reports, raw Platform Recommendation Evaluation Card displays, raw transaction records,
 MongoDB, Kafka, payment data, alert database, fraud case database, model registry, or raw model outputs.
 
 ## Local Command
@@ -137,7 +139,7 @@ It does not approve promotion, recommend thresholds, mutate registries, change s
 FDP-111 consumes bounded diagnostic artifacts only, primarily:
 
 - FDP-109 generated `current-summary.json`;
-- existing Model Card / Shadow Performance Summary artifacts where available.
+- existing Platform Recommendation Evaluation Card / Shadow Performance Summary artifacts where available.
 
 FDP-111 does not read raw transaction records, MongoDB, Kafka, payment data, alert database, fraud case database, or model registry.
 
@@ -146,6 +148,7 @@ FDP-111 does not read raw transaction records, MongoDB, Kafka, payment data, ale
 Allowed readiness statuses:
 
 - `INSUFFICIENT_DATA`
+- `INCONCLUSIVE`
 - `NOT_REVIEWABLE`
 - `REVIEWABLE`
 

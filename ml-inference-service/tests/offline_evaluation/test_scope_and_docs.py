@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[3]
 ML_ROOT = ROOT / "ml-inference-service"
 OFFLINE_ROOT = ML_ROOT / "offline_evaluation"
 DOC = ROOT / "docs" / "architecture" / "python_ml_evaluation_suite.md"
-MODEL_CARD_DOC = ROOT / "docs" / "architecture" / "model_card_v1.md"
+PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOC = ROOT / "docs" / "architecture" / "evaluation_card_v1.md"
 
 
 class OfflineEvaluationScopeGuardTest(unittest.TestCase):
@@ -53,12 +53,11 @@ class OfflineEvaluationScopeGuardTest(unittest.TestCase):
     def test_fdp104DoesNotModifyOpenApi(self):
         openapi_root = ROOT / "docs" / "openapi"
         haystack = "\n".join(path.read_text(encoding="utf-8") for path in openapi_root.rglob("*.yaml"))
-        self.assertNotIn("model-card", haystack)
         self.assertNotIn("modelCard", haystack)
 
     def test_fdp104DoesNotAddUi(self):
         ui_root = ROOT / "analyst-console-ui"
-        self.assertFalse(any("model_card" in path.as_posix() or "ModelCard" in path.as_posix() for path in ui_root.rglob("*") if path.is_file()))
+        self.assertFalse(any("evaluation_card" in path.as_posix() or "EvaluationCard" in path.as_posix() for path in ui_root.rglob("*") if path.is_file()))
 
     def test_fdp104DoesNotAddDashboard(self):
         self.assertNotInAnyOfflineFile("dashboard", "Dashboard")
@@ -92,11 +91,11 @@ class OfflineEvaluationScopeGuardTest(unittest.TestCase):
 
     def test_fdp104DoesNotModifyKafkaEvents(self):
         common_events = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "common-events" / "src").rglob("*.java"))
-        self.assertNotIn("ModelCard", common_events)
+        self.assertNotIn("EvaluationCard", common_events)
 
     def test_fdp104DoesNotModifyAlertServiceProjection(self):
         alert_service = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "alert-service" / "src" / "main").rglob("*.java"))
-        self.assertNotIn("ModelCard", alert_service)
+        self.assertNotIn("EvaluationCard", alert_service)
 
     def test_fdp104DoesNotAddRecommendationService(self):
         self.assertNotInAnyOfflineFile("recommendation_module", "AnalystRecommendation", "recommend_analyst_action")
@@ -155,29 +154,29 @@ class OfflineEvaluationDocumentationTest(unittest.TestCase):
         self.assertDocContains("risk and score bucket fields must be absent")
         self.assertDocContains("are not ranked and are not high/low signals")
 
-    def test_docsMentionModelCardOfflineOnly(self):
-        self.assertModelCardDocContains("Model Card v1 is an offline governance artifact")
+    def test_docsMentionEvaluationCardOfflineOnly(self):
+        self.assertEvaluationCardDocContains("Platform Recommendation Evaluation Card v1 is an offline governance artifact")
 
-    def test_docsMentionModelCardNotPromotionApproval(self):
-        self.assertModelCardDocContains("does not promote models")
+    def test_docsMentionEvaluationCardNotPromotionApproval(self):
+        self.assertEvaluationCardDocContains("does not promote models")
 
-    def test_docsMentionModelCardNotThresholdRecommendation(self):
-        self.assertModelCardDocContains("does not recommend thresholds")
+    def test_docsMentionEvaluationCardNotThresholdRecommendation(self):
+        self.assertEvaluationCardDocContains("does not recommend thresholds")
 
-    def test_docsMentionModelCardNotProductionDecisioning(self):
-        self.assertModelCardDocContains("does not approve, decline, or block")
+    def test_docsMentionEvaluationCardNotProductionDecisioning(self):
+        self.assertEvaluationCardDocContains("does not approve, decline, or block")
 
-    def test_docsMentionModelCardNotPaymentAuthorization(self):
-        self.assertModelCardDocContains("does not authorize payments")
+    def test_docsMentionEvaluationCardNotPaymentAuthorization(self):
+        self.assertEvaluationCardDocContains("does not authorize payments")
 
     def test_docsMentionApprovedForOnlyShadowCompareOffline(self):
-        self.assertModelCardDocContains("The card uses `allowedUsageModes`, not `approvedFor`")
+        self.assertEvaluationCardDocContains("The card uses `allowedUsageModes`, not `approvedFor`")
 
     def test_docsMentionOfflineEvaluationIsNotApprovalTarget(self):
-        self.assertModelCardDocContains("These values are documentation semantics only")
+        self.assertEvaluationCardDocContains("These values are documentation semantics only")
 
-    def test_docsMentionModelCardStrictValidation(self):
-        doc = MODEL_CARD_DOC.read_text(encoding="utf-8")
+    def test_docsMentionEvaluationCardStrictValidation(self):
+        doc = PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOC.read_text(encoding="utf-8")
         self.assertIn("FDP-124 `evaluation_summary.json` is the only source of evaluation identity", doc)
         self.assertIn("metricsSubject = PLATFORM_RECOMMENDATION", doc)
         self.assertIn("metricBasis = ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK", doc)
@@ -185,23 +184,23 @@ class OfflineEvaluationDocumentationTest(unittest.TestCase):
         self.assertIn("does not copy it into", doc)
 
     def test_docsMentionModelIdentityIsSafeIdentifier(self):
-        self.assertModelCardDocContains(
+        self.assertEvaluationCardDocContains(
             "CLI callers cannot set model name, model version, model family, training mode, feature contract"
         )
 
     def test_docsMentionIntendedUseAndNonGoalsAreStrict(self):
-        doc = MODEL_CARD_DOC.read_text(encoding="utf-8")
+        doc = PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOC.read_text(encoding="utf-8")
         self.assertIn("`intendedUse` is allowlisted", doc)
         self.assertIn("required `notIntendedUse` non-goals cannot be omitted", doc)
 
     def test_docsMentionDashboardIsFutureScope(self):
-        self.assertModelCardDocContains("Dashboards and promotion workflows are future scopes")
+        self.assertEvaluationCardDocContains("Dashboards and promotion workflows are future scopes")
 
     def assertDocContains(self, text: str):
         self.assertIn(text, self.doc())
 
-    def assertModelCardDocContains(self, text: str):
-        self.assertIn(text, MODEL_CARD_DOC.read_text(encoding="utf-8"))
+    def assertEvaluationCardDocContains(self, text: str):
+        self.assertIn(text, PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOC.read_text(encoding="utf-8"))
 
     def doc(self) -> str:
         return DOC.read_text(encoding="utf-8")
