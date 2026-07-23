@@ -8,8 +8,12 @@ from typing import Any
 from offline_evaluation.fdp123.model_card.schema import (
     EXPECTED_DATASET_TIME_BASIS,
     EXPECTED_DATASET_VERSION,
+    EXPECTED_EVALUATION_MANIFEST_FILENAME,
     EXPECTED_EVALUATION_REPORT_TYPE,
+    EXPECTED_EVALUATION_SUMMARY_FILENAME,
     EXPECTED_SOURCE_ARTIFACT_SET_VERSION,
+    MAX_EVALUATION_MANIFEST_BYTES,
+    MAX_EVALUATION_SUMMARY_BYTES,
     MODEL_CARD_REPORT_TYPE,
     MODEL_CARD_VERSION,
     PRODUCTION_APPROVAL,
@@ -17,6 +21,8 @@ from offline_evaluation.fdp123.model_card.schema import (
     SAFE_CONTRACT_VALUES,
     SAFE_NEGATED_MACHINE_CODES,
     Fdp123ModelCardValidationError,
+    normalize_rfc3339_timestamp,
+    validate_class_count_integrity,
     validate_model_card,
 )
 
@@ -93,10 +99,12 @@ def generate_model_card_from_fdp124_artifacts(
 ) -> dict[str, Any]:
     summary_path = Path(evaluation_summary_path)
     manifest_path = Path(evaluation_manifest_path)
-    manifest_bytes = _read_required_bytes(manifest_path, "manifest")
-    summary_bytes = _read_required_bytes(summary_path, "evaluation_summary")
+    _require_canonical_filename(summary_path, EXPECTED_EVALUATION_SUMMARY_FILENAME, "evaluation summary")
+    _require_canonical_filename(manifest_path, EXPECTED_EVALUATION_MANIFEST_FILENAME, "manifest")
+    manifest_bytes = _read_required_bytes(manifest_path, "manifest", MAX_EVALUATION_MANIFEST_BYTES)
+    summary_bytes = _read_required_bytes(summary_path, "evaluation_summary", MAX_EVALUATION_SUMMARY_BYTES)
     manifest = _load_json_bytes(manifest_bytes, "manifest")
-    _validate_manifest(manifest, summary_path, summary_bytes)
+    _validate_manifest(manifest, summary_bytes)
     summary = _load_json_bytes(summary_bytes, "evaluation_summary")
     _reject_forbidden_input(summary)
     _validate_summary(summary)
@@ -126,7 +134,7 @@ def generate_model_card_from_fdp124_artifacts(
         "notIntendedUse": metadata["notIntendedUse"],
         "evaluationEvidence": {
             "evaluationReportType": summary["reportType"],
-            "evaluationGeneratedAt": summary["generatedAt"],
+            "evaluationGeneratedAt": normalize_rfc3339_timestamp(summary["generatedAt"], "evaluation summary generatedAt"),
             "evaluationArtifactSetVersion": manifest["artifactSetVersion"],
             "datasetVersion": dataset_metadata["datasetVersion"],
             "datasetTimeBasis": dataset_metadata["timeBasis"],
@@ -146,13 +154,10 @@ def generate_model_card_from_fdp124_artifacts(
         "limitations": metadata["limitations"],
         "governanceBoundary": metadata["governanceBoundary"],
     }
-    disagreement_summary = _safe_disagreement_summary(summary.get("disagreementSummary"))
-    if disagreement_summary:
-        model_card["metricsSummary"]["disagreementSummary"] = disagreement_summary
     return validate_model_card(model_card)
 
 
-def _validate_manifest(manifest: dict[str, Any], summary_path: Path, summary_bytes: bytes) -> None:
+def _validate_manifest(manifest: dict[str, Any], summary_bytes: bytes) -> None:
     _reject_forbidden_input(manifest)
     if manifest.get("reportType") != EXPECTED_EVALUATION_REPORT_TYPE:
         raise Fdp123ModelCardValidationError("manifest reportType unsupported")
@@ -161,7 +166,7 @@ def _validate_manifest(manifest: dict[str, Any], summary_path: Path, summary_byt
     files = manifest.get("files")
     if not isinstance(files, list) or not files:
         raise Fdp123ModelCardValidationError("manifest files must be a non-empty list")
-    matching = [item for item in files if isinstance(item, dict) and item.get("name") == summary_path.name]
+    matching = [item for item in files if isinstance(item, dict) and item.get("name") == EXPECTED_EVALUATION_SUMMARY_FILENAME]
     if len(matching) != 1:
         raise Fdp123ModelCardValidationError("manifest must list evaluation_summary.json")
     summary_entry = matching[0]
@@ -178,8 +183,7 @@ def _validate_summary(summary: dict[str, Any]) -> None:
         raise Fdp123ModelCardValidationError(f"evaluation summary missing required fields: {', '.join(extra_missing)}")
     if summary.get("reportType") != EXPECTED_EVALUATION_REPORT_TYPE:
         raise Fdp123ModelCardValidationError("evaluation summary reportType unsupported")
-    if not isinstance(summary.get("generatedAt"), str) or not summary["generatedAt"]:
-        raise Fdp123ModelCardValidationError("evaluation summary missing generatedAt")
+    normalize_rfc3339_timestamp(summary.get("generatedAt"), "evaluation summary generatedAt")
     dataset_metadata = _required_object(summary, "datasetMetadata")
     if dataset_metadata.get("datasetVersion") != EXPECTED_DATASET_VERSION:
         raise Fdp123ModelCardValidationError("datasetVersion unsupported")
@@ -202,7 +206,12 @@ def _validate_summary(summary: dict[str, Any]) -> None:
     for field in sorted(REQUIRED_ALERT_MATRIX_FIELDS):
         _metric_object(matrix, field)
     dataset_summary = _required_object(quality_metrics, "datasetSummary")
-    _required_non_negative_int(dataset_summary, "recordsEvaluated")
+    records_evaluated = _required_non_negative_int(dataset_summary, "recordsEvaluated")
+    validate_class_count_integrity(
+        _required_non_negative_int(class_balance, "positiveClassCount"),
+        _required_non_negative_int(class_balance, "negativeClassCount"),
+        records_evaluated,
+    )
     if not isinstance(summary.get("warnings"), list):
         raise Fdp123ModelCardValidationError("warnings must be a list")
 
@@ -251,17 +260,9 @@ def _warnings(summary: dict[str, Any]) -> list[str]:
         return []
     if not isinstance(value, list):
         raise Fdp123ModelCardValidationError("warnings must be a list")
-    return sorted(str(item) for item in value)
-
-
-def _safe_disagreement_summary(value: Any) -> dict[str, int]:
-    if not isinstance(value, dict):
-        return {}
-    return {
-        key: nested
-        for key, nested in sorted(value.items())
-        if isinstance(key, str) and isinstance(nested, int) and not isinstance(nested, bool)
-    }
+    if not all(isinstance(item, str) for item in value):
+        raise Fdp123ModelCardValidationError("warnings must contain strings")
+    return sorted(value)
 
 
 def _required_object(raw: dict[str, Any], field: str) -> dict[str, Any]:
@@ -278,11 +279,19 @@ def _required_non_negative_int(raw: dict[str, Any], field: str) -> int:
     return value
 
 
-def _read_required_bytes(path: Path, label: str) -> bytes:
+def _require_canonical_filename(path: Path, expected_name: str, label: str) -> None:
+    if path.name != expected_name:
+        raise Fdp123ModelCardValidationError(f"{label} filename must be {expected_name}")
+
+
+def _read_required_bytes(path: Path, label: str, max_bytes: int) -> bytes:
     if not path.exists():
         raise Fdp123ModelCardValidationError(f"{label} missing")
     if not path.is_file():
         raise Fdp123ModelCardValidationError(f"{label} must be a file")
+    size = path.stat().st_size
+    if size > max_bytes:
+        raise Fdp123ModelCardValidationError(f"{label} exceeds maximum byte size")
     return path.read_bytes()
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import re
 from typing import Any
 
@@ -14,6 +15,10 @@ ARTIFACT_SET_VERSION = "model-card-artifact-set-v1"
 
 EXPECTED_EVALUATION_REPORT_TYPE = "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"
 EXPECTED_SOURCE_ARTIFACT_SET_VERSION = "fdp123-report-artifact-set-v1"
+EXPECTED_EVALUATION_SUMMARY_FILENAME = "evaluation_summary.json"
+EXPECTED_EVALUATION_MANIFEST_FILENAME = "manifest.json"
+MAX_EVALUATION_SUMMARY_BYTES = 262_144
+MAX_EVALUATION_MANIFEST_BYTES = 65_536
 EXPECTED_DATASET_VERSION = "feedback-dataset-v1"
 EXPECTED_DATASET_TIME_BASIS = "FEEDBACK_CREATED_AT"
 
@@ -109,6 +114,7 @@ REQUIRED_GOVERNANCE_BOUNDARY = {
     "NO_EXTERNAL_PUBLISHING",
     "NO_PRODUCTION_APPROVAL",
 }
+MODEL_IDENTITY_METADATA_UNAVAILABLE_LIMITATION = "MODEL_IDENTITY_METADATA_UNAVAILABLE"
 REQUIRED_MODEL_CARD_FIELDS = {
     "modelCardVersion",
     "cardType",
@@ -148,10 +154,7 @@ REQUIRED_METRICS_SUMMARY_FIELDS = {
     "falsePositiveRate",
     "falseNegativeRate",
 }
-OPTIONAL_METRICS_SUMMARY_FIELDS = {
-    "disagreementSummary",
-}
-ALLOWED_METRICS_SUMMARY_FIELDS = REQUIRED_METRICS_SUMMARY_FIELDS | OPTIONAL_METRICS_SUMMARY_FIELDS
+ALLOWED_METRICS_SUMMARY_FIELDS = REQUIRED_METRICS_SUMMARY_FIELDS
 
 FORBIDDEN_FIELD_NAMES = {
     "transactionid",
@@ -208,6 +211,9 @@ SAFE_NEGATED_MACHINE_CODES = REQUIRED_NOT_INTENDED_USE | REQUIRED_LIMITATIONS | 
 
 MACHINE_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
 SAFE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+RFC3339_DATETIME_PATTERN = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$"
+)
 IDENTITY_FORBIDDEN_COMPACT_TERMS = {
     "http",
     "https",
@@ -238,7 +244,7 @@ def validate_model_card(raw: dict[str, Any]) -> dict[str, Any]:
     normalized = {
         "modelCardVersion": _required_constant(raw, "modelCardVersion", MODEL_CARD_VERSION),
         "cardType": _required_constant(raw, "cardType", MODEL_CARD_REPORT_TYPE),
-        "generatedAt": _bounded_string(raw, "generatedAt", 128),
+        "generatedAt": normalize_rfc3339_timestamp(raw.get("generatedAt"), "generatedAt"),
         "modelName": _safe_identifier(raw, "modelName"),
         "modelVersion": _safe_identifier(raw, "modelVersion"),
         "modelFamily": _bounded_enum(raw, "modelFamily", ALLOWED_MODEL_FAMILIES),
@@ -256,6 +262,11 @@ def validate_model_card(raw: dict[str, Any]) -> dict[str, Any]:
         "limitations": _required_machine_code_superset(raw, "limitations", REQUIRED_LIMITATIONS),
         "governanceBoundary": _required_machine_code_superset(raw, "governanceBoundary", REQUIRED_GOVERNANCE_BOUNDARY),
     }
+    if _timestamp_instant(normalized["generatedAt"]) < _timestamp_instant(
+            normalized["evaluationEvidence"]["evaluationGeneratedAt"]
+    ):
+        raise Fdp123ModelCardValidationError("generatedAt must be greater than or equal to evaluationGeneratedAt")
+    _validate_unknown_metadata_disclosure(normalized)
     _reject_unsafe(normalized)
     return normalized
 
@@ -273,7 +284,7 @@ def _evaluation_evidence(raw: dict[str, Any]) -> dict[str, Any]:
     warnings = _optional_machine_code_list(value, "warnings", MAX_WARNINGS)
     evidence = {
         "evaluationReportType": _required_constant(value, "evaluationReportType", EXPECTED_EVALUATION_REPORT_TYPE),
-        "evaluationGeneratedAt": _bounded_string(value, "evaluationGeneratedAt", 128),
+        "evaluationGeneratedAt": normalize_rfc3339_timestamp(value.get("evaluationGeneratedAt"), "evaluationGeneratedAt"),
         "evaluationArtifactSetVersion": _required_constant(
             value,
             "evaluationArtifactSetVersion",
@@ -287,8 +298,11 @@ def _evaluation_evidence(raw: dict[str, Any]) -> dict[str, Any]:
         "warnings": warnings,
         "sourceManifestSha256": _sha256(value, "sourceManifestSha256"),
     }
-    if evidence["positiveClassCount"] + evidence["negativeClassCount"] > evidence["recordsEvaluated"]:
-        raise Fdp123ModelCardValidationError("class counts must not exceed recordsEvaluated")
+    validate_class_count_integrity(
+        evidence["positiveClassCount"],
+        evidence["negativeClassCount"],
+        evidence["recordsEvaluated"],
+    )
     return evidence
 
 
@@ -308,8 +322,6 @@ def _metrics_summary(raw: dict[str, Any]) -> dict[str, Any]:
         "falsePositiveRate": _metric_object(value, "falsePositiveRate"),
         "falseNegativeRate": _metric_object(value, "falseNegativeRate"),
     }
-    if "disagreementSummary" in value:
-        summary["disagreementSummary"] = _count_object(value["disagreementSummary"], "disagreementSummary")
     return summary
 
 
@@ -343,18 +355,46 @@ def _metric_object(raw: dict[str, Any], field: str) -> dict[str, float | bool | 
     return {"available": False, "value": None, "reason": reason}
 
 
-def _count_object(value: Any, field: str) -> dict[str, int]:
-    if not isinstance(value, dict) or not value:
-        raise Fdp123ModelCardValidationError(f"{field} must be a non-empty object")
-    result: dict[str, int] = {}
-    for key, nested in value.items():
-        if not isinstance(key, str) or not key:
-            raise Fdp123ModelCardValidationError(f"{field} keys must be strings")
-        _reject_unsafe_value(key)
-        if isinstance(nested, bool) or not isinstance(nested, int) or nested < 0 or nested > MAX_COUNT_VALUE:
-            raise Fdp123ModelCardValidationError(f"{field}.{key} must be a non-negative integer")
-        result[key] = nested
-    return dict(sorted(result.items()))
+def validate_class_count_integrity(positive_class_count: int, negative_class_count: int, records_evaluated: int) -> None:
+    if positive_class_count + negative_class_count != records_evaluated:
+        raise Fdp123ModelCardValidationError("positiveClassCount + negativeClassCount must equal recordsEvaluated")
+
+
+def normalize_rfc3339_timestamp(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise Fdp123ModelCardValidationError(f"{field} must be a non-empty timestamp")
+    if len(value) > 128:
+        raise Fdp123ModelCardValidationError(f"{field} exceeds maximum length")
+    _reject_unsafe_value(value)
+    if RFC3339_DATETIME_PATTERN.fullmatch(value) is None:
+        raise Fdp123ModelCardValidationError(f"{field} must be an RFC3339 date-time with timezone")
+    return _format_utc_timestamp(_timestamp_instant(value))
+
+
+def _timestamp_instant(value: str) -> datetime:
+    parseable = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(parseable)
+    except ValueError as exception:
+        raise Fdp123ModelCardValidationError("timestamp must be a valid calendar date-time") from exception
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise Fdp123ModelCardValidationError("timestamp must include timezone")
+    return parsed.astimezone(timezone.utc)
+
+
+def _format_utc_timestamp(value: datetime) -> str:
+    timespec = "microseconds" if value.microsecond else "seconds"
+    return value.astimezone(timezone.utc).isoformat(timespec=timespec).replace("+00:00", "Z")
+
+
+def _validate_unknown_metadata_disclosure(card: dict[str, Any]) -> None:
+    if card["modelFamily"] != "UNKNOWN" and card["trainingMode"] != "UNKNOWN_OFFLINE":
+        return
+    disclosures = set(card["warnings"]) | set(card["limitations"])
+    if MODEL_IDENTITY_METADATA_UNAVAILABLE_LIMITATION not in disclosures:
+        raise Fdp123ModelCardValidationError(
+            "UNKNOWN model metadata requires MODEL_IDENTITY_METADATA_UNAVAILABLE disclosure"
+        )
 
 
 def _required_constant(raw: dict[str, Any], field: str, expected: str) -> str:
