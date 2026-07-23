@@ -1,6 +1,11 @@
 import unittest
 
 from offline_evaluation.fdp123.model_card.schema import (
+    EVALUATION_SUBJECT,
+    MAX_COUNT_VALUE,
+    MAX_FDP123_DATASET_RECORDS,
+    METRIC_BASIS,
+    METRICS_SUBJECT,
     REQUIRED_GOVERNANCE_BOUNDARY,
     REQUIRED_LIMITATIONS,
     REQUIRED_NOT_INTENDED_USE,
@@ -15,7 +20,7 @@ class Fdp123ModelCardSchemaTest(unittest.TestCase):
 
     def test_missingRequiredFieldRejected(self):
         card = valid_model_card()
-        card.pop("modelName")
+        card.pop("evaluationSubject")
 
         with self.assertRaises(Fdp123ModelCardValidationError):
             validate_model_card(card)
@@ -40,6 +45,29 @@ class Fdp123ModelCardSchemaTest(unittest.TestCase):
 
     def test_unsupportedAllowedUsageModeRejected(self):
         self._assert_rejected(allowedUsageModes=["BANANA"])
+
+    def test_modelIdentityFieldsRejected(self):
+        for field in ("modelName", "modelVersion", "modelFamily", "trainingMode", "featureContractVersion", "referenceQuality"):
+            with self.subTest(field=field):
+                self._assert_rejected(**{field: "caller-controlled"})
+
+    def test_evaluationSubjectMustMatchFdp124Contract(self):
+        subject = dict(EVALUATION_SUBJECT)
+        subject["sourceVersion"] = "OTHER"
+
+        self._assert_rejected(evaluationSubject=subject)
+
+    def test_metricsSubjectAndBasisMustMatchFdp124Contract(self):
+        self._assert_rejected(metricsSubject="MODEL")
+        self._assert_rejected(metricBasis="MODEL_PERFORMANCE")
+
+    def test_recordLimitUsesFdp123DatasetMaximum(self):
+        self.assertEqual(MAX_FDP123_DATASET_RECORDS, MAX_COUNT_VALUE)
+        self._assert_rejected(evaluationEvidence=valid_evaluation_evidence(
+            recordsEvaluated=MAX_FDP123_DATASET_RECORDS + 1,
+            positiveClassCount=MAX_FDP123_DATASET_RECORDS + 1,
+            negativeClassCount=0,
+        ))
 
     def test_productionChampionAutoDeclinePaymentAuthorizationRejected(self):
         for value in ("PRODUCTION", "CHAMPION", "AUTO_DECLINE", "PAYMENT_AUTHORIZATION"):
@@ -176,17 +204,6 @@ class Fdp123ModelCardSchemaTest(unittest.TestCase):
 
         self.assertEqual("2026-06-10T00:00:01Z", card["generatedAt"])
 
-    def test_unknownModelMetadataRequiresExplicitDisclosure(self):
-        self._assert_rejected(modelFamily="UNKNOWN")
-        self._assert_rejected(trainingMode="UNKNOWN_OFFLINE")
-
-        card = validate_model_card(valid_model_card(
-            modelFamily="UNKNOWN",
-            limitations=sorted(REQUIRED_LIMITATIONS | {"MODEL_IDENTITY_METADATA_UNAVAILABLE"}),
-        ))
-
-        self.assertEqual("UNKNOWN", card["modelFamily"])
-
     def test_rawIdsRejected(self):
         for field in ("evaluationRecordId", "transactionReference", "feedbackId", "customerId"):
             with self.subTest(field=field):
@@ -196,18 +213,6 @@ class Fdp123ModelCardSchemaTest(unittest.TestCase):
         for field in ("groundTruth", "trainingLabel", "finalDecision", "paymentDecision"):
             with self.subTest(field=field):
                 self._assert_rejected(**{field: "unsafe"})
-
-    def test_metadataCannotBeGuessedEmptyPathOrUrl(self):
-        for field, value in (
-            ("modelName", ""),
-            ("modelName", "https://example.test/model"),
-            ("modelVersion", "v1"),
-            ("modelVersion", "../model"),
-            ("featureContractVersion", "unknown"),
-            ("featureContractVersion", "s3://bucket/contract"),
-        ):
-            with self.subTest(field=field, value=value):
-                self._assert_rejected(**{field: value})
 
     def _assert_rejected(self, **overrides):
         with self.assertRaises(Fdp123ModelCardValidationError):
@@ -219,12 +224,9 @@ def valid_model_card(**overrides):
         "modelCardVersion": "model-card-v1",
         "cardType": "MODEL_CARD_V1",
         "generatedAt": "2026-06-12T00:00:00Z",
-        "modelName": "python-logistic-fraud-model",
-        "modelVersion": "2026.06.12-offline",
-        "modelFamily": "LOGISTIC_REGRESSION",
-        "trainingMode": "OFFLINE_TRAINED",
-        "featureContractVersion": "feature-contract-2026.06",
-        "referenceQuality": "BOUNDED_ANALYST_FEEDBACK",
+        "evaluationSubject": dict(EVALUATION_SUBJECT),
+        "metricsSubject": METRICS_SUBJECT,
+        "metricBasis": METRIC_BASIS,
         "allowedUsageModes": ["SHADOW", "COMPARE", "OFFLINE_EVALUATION"],
         "productionApproval": "NOT_APPROVED",
         "promotionStatus": "NOT_EVALUATED_FOR_PROMOTION",

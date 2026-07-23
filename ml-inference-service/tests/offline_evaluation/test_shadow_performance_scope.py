@@ -54,10 +54,9 @@ class ShadowPerformanceScopeGuardTest(unittest.TestCase):
         doc = SUMMARY_DOC.read_text(encoding="utf-8")
 
         self.assertIn("Shadow Performance Summary v1 is an offline diagnostic artifact", doc)
-        self.assertIn("consumes only validated FDP-104 Model Card v1", doc)
-        self.assertIn("does not recompute metrics", doc)
-        self.assertIn("does not read FDP-102 JSONL exports", doc)
-        self.assertIn("does not read FDP-103 raw evaluation reports", doc)
+        self.assertIn("accepts only validated", doc)
+        self.assertIn("FDP-123/FDP-124/FDP-126 Model Card v1", doc)
+        self.assertIn("does not recreate the removed FDP-102/FDP-103 Model Card path", " ".join(doc.split()))
         self.assertIn("evaluation population and sample-size context", doc)
 
     def test_docsDescribeNonGoalsAndNoRuntimeSurface(self):
@@ -87,7 +86,7 @@ class ShadowPerformanceScopeGuardTest(unittest.TestCase):
 
         self.assertIn("Shadow Performance Summary v1", glossary)
         self.assertIn("includes population context for offline diagnostic metrics", glossary)
-        self.assertIn("does not recompute metrics", glossary)
+        self.assertIn("explicit local offline evaluation output", glossary)
 
     def assertNotInAnyOfflineFile(self, *terms: str):
         haystack = "\n".join(path.read_text(encoding="utf-8") for path in OFFLINE_ROOT.rglob("*.py"))

@@ -168,7 +168,7 @@ class CurrentShadowSummaryGenerationTest(unittest.TestCase):
     def test_invalidShadowSummaryDoesNotWriteSummary(self):
         with workspace() as paths:
             with patch(
-                    "offline_evaluation.generate_current_shadow_summary.build_shadow_performance_summary",
+                    "offline_evaluation.generate_current_shadow_summary.build_shadow_performance_summary_from_evaluation_report",
                     return_value={"summaryType": "BROKEN"},
             ):
                 with self.assertRaises(Exception):

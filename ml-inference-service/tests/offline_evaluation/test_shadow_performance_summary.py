@@ -5,6 +5,7 @@ from pathlib import Path
 from offline_evaluation.shadow_performance_schema import BANNER, ShadowPerformanceValidationError
 from offline_evaluation.shadow_performance_summary import build_shadow_performance_summary
 from offline_evaluation.shadow_performance_writer import write_shadow_performance_summary
+from fdp123.model_card.test_schema import valid_model_card, valid_evaluation_evidence, valid_metrics
 
 
 GENERATED_AT = "2026-06-08T02:00:00Z"
@@ -17,41 +18,38 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
 
     def test_sourceOfTruthIsValidatedModelCardV1(self):
         card = self.model_card()
-        card["metricsSummary"]["precisionAtBudget"] = 0.75
+        card["metricsSummary"]["alertRecommendedPrecision"] = {"available": True, "value": 0.75, "reason": None}
 
         self.assertEqual(0.75, build_shadow_performance_summary(card, GENERATED_AT)["metrics"]["precisionAtBudget"])
 
-    def test_preservesModelIdentityFromModelCard(self):
+    def test_modelIdentityIsUnavailableForPlatformRecommendationSubject(self):
         summary = self.summary()
 
-        self.assertEqual("python-logistic-fraud-model", summary["model"]["modelName"])
-        self.assertEqual("2026-04-21.trained.v1", summary["model"]["modelVersion"])
-        self.assertEqual("LOGISTIC_REGRESSION", summary["model"]["modelFamily"])
-        self.assertEqual("2026-04-22.v1", summary["model"]["featureContractVersion"])
+        self.assertEqual("NOT_AVAILABLE", summary["model"]["modelName"])
+        self.assertEqual("NOT_AVAILABLE", summary["model"]["modelVersion"])
+        self.assertEqual("PLATFORM_RECOMMENDATION", summary["model"]["modelFamily"])
+        self.assertEqual("NOT_APPLICABLE", summary["model"]["featureContractVersion"])
 
     def test_preservesEvaluationContextFromModelCard(self):
         summary = self.summary()
 
-        self.assertEqual("PYTHON_ML_EVALUATION_FOUNDATION", summary["evaluation"]["evaluationReportType"])
-        self.assertEqual("FDP-103", summary["evaluation"]["evaluationReportVersion"])
-        self.assertEqual("bucket_ordered_offline_diagnostic", summary["evaluation"]["metricBasis"])
-        self.assertEqual("FEEDBACK_SUBMITTED_AT", summary["evaluation"]["datasetTimeBasis"])
+        self.assertEqual("FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1", summary["evaluation"]["evaluationReportType"])
+        self.assertEqual("FDP-124", summary["evaluation"]["evaluationReportVersion"])
+        self.assertEqual("ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK", summary["evaluation"]["metricBasis"])
+        self.assertEqual("FEEDBACK_CREATED_AT", summary["evaluation"]["datasetTimeBasis"])
         self.assertEqual(
-            "TRANSACTION_REFERENCE_NEWEST_SUBMITTED_AT_FEEDBACK_ID_ASC",
+            "FDP123_RECORD_COUNT_MATCHES_METADATA_RECORDS_RETURNED",
             summary["evaluation"]["datasetDeduplicationPolicy"],
         )
 
     def test_preservesEvaluationPopulationFromModelCard(self):
         model_card = self.model_card()
         population = self.summary()["evaluationPopulation"]
-        metrics = model_card["metricsSummary"]
+        evidence = model_card["evaluationEvidence"]
 
-        self.assertEqual(metrics["datasetRecordsRead"], population["datasetRecordsRead"])
-        self.assertEqual(metrics["recordsAcceptedForEvaluation"], population["recordsAcceptedForEvaluation"])
-        self.assertEqual(
-            metrics["recordsExcludedNotEvaluationEligible"],
-            population["recordsExcludedNotEvaluationEligible"],
-        )
+        self.assertEqual(evidence["recordsEvaluated"], population["datasetRecordsRead"])
+        self.assertEqual(evidence["recordsEvaluated"], population["recordsAcceptedForEvaluation"])
+        self.assertEqual(0, population["recordsExcludedNotEvaluationEligible"])
 
     def test_highPrecisionStillShowsSampleSize(self):
         summary = build_shadow_performance_summary(self.small_excellent_model_card(), GENERATED_AT)
@@ -60,8 +58,8 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
         self.assertEqual(
             {
                 "datasetRecordsRead": 3,
-                "recordsAcceptedForEvaluation": 2,
-                "recordsExcludedNotEvaluationEligible": 1,
+                "recordsAcceptedForEvaluation": 3,
+                "recordsExcludedNotEvaluationEligible": 0,
             },
             summary["evaluationPopulation"],
         )
@@ -140,9 +138,9 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
         with self.assertRaises(ShadowPerformanceValidationError):
             build_shadow_performance_summary(card, GENERATED_AT)
 
-    def test_rejectsUnsupportedApprovedForValue(self):
+    def test_rejectsUnsupportedAllowedUsageModeValue(self):
         card = self.model_card()
-        card["approvedFor"] = ["SHADOW", "PRODUCTION_DECISIONING"]
+        card["allowedUsageModes"] = ["SHADOW", "PRODUCTION_DECISIONING"]
 
         with self.assertRaises(ShadowPerformanceValidationError):
             build_shadow_performance_summary(card, GENERATED_AT)
@@ -195,7 +193,7 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
 
     def test_rejectsNotEvaluationEligibleMismatch(self):
         summary = self.summary()
-        summary["metrics"]["notEvaluationEligibleCount"] = 0
+        summary["metrics"]["notEvaluationEligibleCount"] = 1
 
         with self.assertRaises(ShadowPerformanceValidationError):
             write_shadow_performance_summary(summary)
@@ -289,10 +287,10 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
     def test_acceptsSafeModelIdentifiers(self):
         summary = self.summary()
         summary["model"] = {
-            "modelName": "python-logistic-fraud-model",
-            "modelVersion": "2026-04-21.trained.v1",
-            "modelFamily": "LOGISTIC_REGRESSION",
-            "featureContractVersion": "2026-04-22.v1",
+            "modelName": "NOT_AVAILABLE",
+            "modelVersion": "NOT_AVAILABLE",
+            "modelFamily": "PLATFORM_RECOMMENDATION",
+            "featureContractVersion": "NOT_APPLICABLE",
         }
 
         self.assertEqual(summary, json.loads(write_shadow_performance_summary(summary)))
@@ -319,41 +317,23 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
                         write_shadow_performance_summary(summary)
 
     def model_card(self):
-        return load_json("model_card", "expected_model_card_v1.json")
+        return valid_model_card()
 
     def expected_summary(self):
-        return load_json("shadow_performance", "expected_shadow_performance_summary_v1.json")
+        return build_shadow_performance_summary(self.model_card(), GENERATED_AT)
 
     def summary(self):
         return build_shadow_performance_summary(self.model_card(), GENERATED_AT)
 
     def small_excellent_model_card(self):
         card = self.model_card()
-        metrics = card["metricsSummary"]
-        metrics.update({
-            "datasetRecordsRead": 3,
-            "recordsAcceptedForEvaluation": 2,
-            "recordsExcludedNotEvaluationEligible": 1,
-            "missingMlCount": 0,
-            "missingRulesCount": 0,
-            "missingProjectionCount": 0,
-            "notEvaluationEligibleCount": 1,
-            "precisionAtBudget": 1.0,
-            "recallAtTopK": 1.0,
-            "falsePositiveRate": 0.0,
-            "mlCaughtRulesMissedCount": 2,
-            "rulesCaughtMlMissedCount": 0,
-            "disagreementSummary": {
-                "rulesHighMlHigh": 2,
-                "rulesHighMlLowOrMedium": 0,
-                "rulesLowOrMediumMlHigh": 0,
-                "rulesLowOrMediumMlLowOrMedium": 0,
-                "rulesMissingMlPresent": 0,
-                "mlMissingRulesPresent": 0,
-                "bothMissing": 0,
-                "notEvaluationEligibleExcluded": 1,
-            },
-        })
+        card["evaluationEvidence"] = valid_evaluation_evidence(recordsEvaluated=3, positiveClassCount=2, negativeClassCount=1)
+        card["metricsSummary"] = valid_metrics(
+            alertRecommendedPrecision={"available": True, "value": 1.0, "reason": None},
+            alertRecommendedRecall={"available": True, "value": 1.0, "reason": None},
+            falsePositiveRate={"available": True, "value": 0.0, "reason": None},
+            falseNegativeRate={"available": True, "value": 0.0, "reason": None},
+        )
         return card
 
     def assertNoApprovalRecommendationOrRuntimeTerms(self, payload):

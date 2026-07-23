@@ -26,10 +26,11 @@ from offline_evaluation.promotion_review_readiness_schema import (
     promotion_review_readiness_report_json,
     validate_promotion_review_readiness_report,
 )
+from offline_evaluation.shadow_performance_summary import build_shadow_performance_summary
+from fdp123.model_card.test_schema import valid_model_card
 
 
 ROOT = Path(__file__).resolve().parents[3]
-FIXTURE = ROOT / "ml-inference-service" / "tests" / "offline_evaluation" / "fixtures" / "shadow_performance" / "expected_shadow_performance_summary_v1.json"
 GENERATOR_SOURCE = ROOT / "ml-inference-service" / "offline_evaluation" / "generate_promotion_review_readiness_report.py"
 SCHEMA_SOURCE = ROOT / "ml-inference-service" / "offline_evaluation" / "promotion_review_readiness_schema.py"
 MAKEFILE = ROOT / "Makefile"
@@ -404,7 +405,7 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
 
 
 def valid_summary():
-    return json.loads(FIXTURE.read_text(encoding="utf-8"))
+    return build_shadow_performance_summary(valid_model_card(), "2026-06-08T02:00:00Z")
 
 
 def build_report(**kwargs):

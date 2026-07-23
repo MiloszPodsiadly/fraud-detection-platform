@@ -171,29 +171,28 @@ class OfflineEvaluationDocumentationTest(unittest.TestCase):
         self.assertModelCardDocContains("does not authorize payments")
 
     def test_docsMentionApprovedForOnlyShadowCompareOffline(self):
-        self.assertModelCardDocContains("approvedFor is limited to SHADOW and COMPARE")
+        self.assertModelCardDocContains("The card uses `allowedUsageModes`, not `approvedFor`")
 
     def test_docsMentionOfflineEvaluationIsNotApprovalTarget(self):
-        self.assertModelCardDocContains("OFFLINE_EVALUATION is not an approval target")
+        self.assertModelCardDocContains("These values are documentation semantics only")
 
     def test_docsMentionModelCardStrictValidation(self):
         doc = MODEL_CARD_DOC.read_text(encoding="utf-8")
-        self.assertIn("Model Card v1 validates FDP-103 report identity", doc)
-        self.assertIn("validates metric basis", doc)
-        self.assertIn("validates dataset time basis", doc)
-        self.assertIn("validates deduplication policy", doc)
-        self.assertIn("validates metric numeric types and ranges", doc)
-        self.assertIn("validates disagreementSummary with allowlisted keys", doc)
+        self.assertIn("FDP-124 `evaluation_summary.json` is the only source of evaluation identity", doc)
+        self.assertIn("metricsSubject = PLATFORM_RECOMMENDATION", doc)
+        self.assertIn("metricBasis = ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK", doc)
+        self.assertIn("positiveClassCount + negativeClassCount == recordsEvaluated", doc)
+        self.assertIn("does not copy it into", doc)
 
     def test_docsMentionModelIdentityIsSafeIdentifier(self):
         self.assertModelCardDocContains(
-            "Model identity fields are safe identifiers, not URLs, paths, bucket URIs, registry endpoints, artifact locations, or secrets"
+            "CLI callers cannot set model name, model version, model family, training mode, feature contract"
         )
 
     def test_docsMentionIntendedUseAndNonGoalsAreStrict(self):
         doc = MODEL_CARD_DOC.read_text(encoding="utf-8")
-        self.assertIn("intendedUse is allowlisted", doc)
-        self.assertIn("required notIntendedUse non-goals cannot be omitted", doc)
+        self.assertIn("`intendedUse` is allowlisted", doc)
+        self.assertIn("required `notIntendedUse` non-goals cannot be omitted", doc)
 
     def test_docsMentionDashboardIsFutureScope(self):
         self.assertModelCardDocContains("Dashboards and promotion workflows are future scopes")

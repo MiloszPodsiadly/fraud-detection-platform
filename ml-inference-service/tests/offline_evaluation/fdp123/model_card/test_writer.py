@@ -59,6 +59,7 @@ class Fdp123ModelCardWriterTest(unittest.TestCase):
 
             self.assertEqual("MODEL_CARD_V1", manifest["reportType"])
             self.assertEqual("model-card-artifact-set-v1", manifest["artifactSetVersion"])
+            self.assertEqual(["model_card.json", "model_card.md"], sorted(item["name"] for item in manifest["files"]))
             for item in manifest["files"]:
                 payload = (output / item["name"]).read_bytes()
                 self.assertEqual(len(payload), item["sizeBytes"])
@@ -180,22 +181,33 @@ class Fdp123ModelCardCliTest(unittest.TestCase):
             card = json.loads((output / "model_card.json").read_text(encoding="utf-8"))
             self.assertEqual(MODEL_CARD_GENERATED_AT, card["generatedAt"])
 
-    def test_cliFailsIfRequiredModelMetadataMissing(self):
+    def test_cliRequiresAllowOutputRoot(self):
         with fdp124_artifacts() as paths:
             args = cli_args(paths, Path("out"), Path("."))
-            args.remove("--model-version")
-            args.remove("2026.06.12-offline")
+            root_index = args.index("--allow-output-root")
+            del args[root_index:root_index + 2]
             with self.assertRaises(SystemExit):
                 with redirect_stderr(io.StringIO()):
                     main(args)
 
-    def test_cliDoesNotAcceptDefaultModelVersion(self):
+    def test_cliRejectsOldCallerControlledIdentityArgs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             output = root / "model-card"
             with fdp124_artifacts() as paths:
                 args = cli_args(paths, output, root)
-                args[args.index("2026.06.12-offline")] = "v1"
+                args.extend(["--model-version", "2026.06.12-offline"])
+                with self.assertRaises(SystemExit):
+                    with redirect_stderr(io.StringIO()):
+                        main(args)
+
+    def test_cliRejectsGovernanceMetadataWithCallerControlledIdentity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "model-card"
+            with fdp124_artifacts() as paths:
+                args = cli_args(paths, output, root)
+                args.extend(["--limitation", "modelName"])
                 with self.assertRaises(Fdp123ModelCardValidationError):
                     main(args)
 
@@ -205,12 +217,6 @@ def cli_args(paths, output, root):
     args = [
         "--evaluation-summary", str(paths["evaluationSummary"]),
         "--evaluation-manifest", str(paths["manifest"]),
-        "--model-name", metadata["modelName"],
-        "--model-version", metadata["modelVersion"],
-        "--model-family", metadata["modelFamily"],
-        "--training-mode", metadata["trainingMode"],
-        "--feature-contract-version", metadata["featureContractVersion"],
-        "--reference-quality", metadata["referenceQuality"],
         "--output-dir", str(output),
         "--allow-output-root", str(root),
         "--generated-at", MODEL_CARD_GENERATED_AT,

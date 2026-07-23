@@ -9,6 +9,9 @@ from offline_evaluation.fdp123.dataset_reader import read_fdp123_feedback_datase
 from offline_evaluation.fdp123.evaluation_runner import build_fdp123_evaluation_reports
 from offline_evaluation.fdp123.model_card.generator import generate_model_card_from_fdp124_artifacts
 from offline_evaluation.fdp123.model_card.schema import (
+    EVALUATION_SUBJECT,
+    METRIC_BASIS,
+    METRICS_SUBJECT,
     MAX_EVALUATION_MANIFEST_BYTES,
     MAX_EVALUATION_SUMMARY_BYTES,
     REQUIRED_GOVERNANCE_BOUNDARY,
@@ -36,6 +39,9 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
 
         self.assertEqual("MODEL_CARD_V1", card["cardType"])
         self.assertEqual("FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1", card["evaluationEvidence"]["evaluationReportType"])
+        self.assertEqual(EVALUATION_SUBJECT, card["evaluationSubject"])
+        self.assertEqual(METRICS_SUBJECT, card["metricsSubject"])
+        self.assertEqual(METRIC_BASIS, card["metricBasis"])
         self.assertEqual("NOT_APPROVED", card["productionApproval"])
         self.assertEqual("NOT_EVALUATED_FOR_PROMOTION", card["promotionStatus"])
         self.assertIn("allowedUsageModes", card)
@@ -238,6 +244,31 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             with self.assertRaises(Fdp123ModelCardValidationError):
                 self.generate(paths)
 
+    def test_failsIfEvaluationSummarySubjectUnsupported(self):
+        with self.artifacts() as paths:
+            summary = self._summary(paths)
+            summary["evaluationSubject"] = dict(EVALUATION_SUBJECT)
+            summary["evaluationSubject"]["sourceVersion"] = "OTHER"
+            self._write_summary(paths, summary)
+            with self.assertRaises(Fdp123ModelCardValidationError):
+                self.generate(paths)
+
+    def test_failsIfEvaluationSummaryMetricBasisUnsupported(self):
+        with self.artifacts() as paths:
+            summary = self._summary(paths)
+            summary["metricBasis"] = "MODEL_PERFORMANCE"
+            self._write_summary(paths, summary)
+            with self.assertRaises(Fdp123ModelCardValidationError):
+                self.generate(paths)
+
+    def test_failsIfQualityMetricsMetricBasisUnsupported(self):
+        with self.artifacts() as paths:
+            summary = self._summary(paths)
+            summary["qualityMetrics"]["metricBasis"] = "MODEL_PERFORMANCE"
+            self._write_summary(paths, summary)
+            with self.assertRaises(Fdp123ModelCardValidationError):
+                self.generate(paths)
+
     def test_failsIfSourceWarningsContainNonStringEvidence(self):
         with self.artifacts() as paths:
             summary = self._summary(paths)
@@ -324,24 +355,18 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
             with self.assertRaises(Fdp123ModelCardValidationError):
                 self.generate(paths)
 
-    def test_failsIfModelMetadataMissingRequiredFields(self):
+    def test_failsIfGovernanceMetadataMissingRequiredFields(self):
         with self.artifacts() as paths:
             metadata = model_metadata()
-            metadata.pop("modelVersion")
+            metadata.pop("allowedUsageModes")
             with self.assertRaises(Fdp123ModelCardValidationError):
                 self.generate(paths, metadata=metadata)
 
-    def test_failsIfModelMetadataContainsUrlTokenOrUnknown(self):
-        for field, value in (
-            ("modelName", "https://example.test/model"),
-            ("modelVersion", "unknown"),
-            ("featureContractVersion", "token-contract"),
-        ):
-            with self.subTest(field=field):
-                with self.artifacts() as paths:
-                    metadata = model_metadata(**{field: value})
-                    with self.assertRaises(Fdp123ModelCardValidationError):
-                        self.generate(paths, metadata=metadata)
+    def test_failsIfGovernanceMetadataContainsCallerControlledIdentity(self):
+        with self.artifacts() as paths:
+            metadata = model_metadata(modelName="caller-controlled")
+            with self.assertRaises(Fdp123ModelCardValidationError):
+                self.generate(paths, metadata=metadata)
 
     def test_doesNotReadDisagreementJsonl(self):
         with self.artifacts() as paths:
@@ -422,12 +447,6 @@ class Fdp123ModelCardGeneratorTest(unittest.TestCase):
 
 def model_metadata(**overrides):
     metadata = {
-        "modelName": "python-logistic-fraud-model",
-        "modelVersion": "2026.06.12-offline",
-        "modelFamily": "LOGISTIC_REGRESSION",
-        "trainingMode": "OFFLINE_TRAINED",
-        "featureContractVersion": "feature-contract-2026.06",
-        "referenceQuality": "BOUNDED_ANALYST_FEEDBACK",
         "allowedUsageModes": ["SHADOW", "COMPARE", "OFFLINE_EVALUATION"],
         "intendedUse": ["SHADOW_FRAUD_RISK_REVIEW", "OFFLINE_DIAGNOSTIC_ANALYSIS"],
         "notIntendedUse": sorted(REQUIRED_NOT_INTENDED_USE),

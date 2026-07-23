@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from offline_evaluation.fdp123.dataset_reader import read_fdp123_feedback_dataset_jsonl
+from offline_evaluation.fdp123.evaluation_contract import EVALUATION_SUBJECT, METRIC_BASIS, METRICS_SUBJECT
 from offline_evaluation.fdp123.evaluation_runner import build_fdp123_evaluation_reports, run_fdp123_evaluation
 from offline_evaluation.fdp123.run_fdp123_evaluation import main
 from offline_evaluation.fdp123.report_writer import (
@@ -34,6 +35,10 @@ class Fdp123ReportWriterTest(unittest.TestCase):
         self.assertIn("qualityMetrics", payload)
         self.assertIn("disagreementSummary", payload)
         self.assertIn("datasetMetadata", payload)
+        self.assertEqual(EVALUATION_SUBJECT, payload["evaluationSubject"])
+        self.assertEqual(METRICS_SUBJECT, payload["metricsSubject"])
+        self.assertEqual(METRIC_BASIS, payload["metricBasis"])
+        self.assertEqual(METRIC_BASIS, payload["qualityMetrics"]["metricBasis"])
 
     def test_reportWarningsAreBounded(self):
         report = self._reports()["evaluationSummary"]
