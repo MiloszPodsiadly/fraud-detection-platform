@@ -4,7 +4,7 @@ FDP-108 provides the current summary source for FDP-106.
 
 The provider is an artifact-backed Current Provider Foundation for:
 
-`GET /api/v1/governance/shadow-performance/summary/current`
+`GET /api/v2/governance/shadow-performance/summary/current`
 
 It reads one explicitly configured current `ShadowPerformanceSummary` JSON artifact, validates it with the existing FDP-105/FDP-106 validator, and returns it through the existing authorized read path.
 
@@ -27,7 +27,7 @@ The only allowed source is the configured current Shadow Performance Summary v2 
 
 The configured path is normalized and must resolve under the safe base directory. The provider rejects path traversal, paths outside the base directory, symlink artifacts, directories, non-regular files, unsupported file extensions, and artifacts larger than the configured maximum size.
 
-The provider does not read raw FDP-102/FDP-103/FDP-104 artifacts, raw Platform Recommendation Evaluation Cards, FDP-102 JSONL exports, model registry data, model artifact binaries, scoring databases, Kafka topics, transaction stores, alert stores, fraud-case stores, or payment authorization services.
+The provider does not read raw dataset exports, raw evaluation reports, raw Platform Recommendation Evaluation Cards, model registry data, model artifact binaries, scoring databases, Kafka topics, transaction stores, alert stores, fraud-case stores, or payment authorization services.
 
 The provider does not expose raw artifacts, configured filesystem paths, parser exceptions, validation exceptions, or stack traces through the API.
 

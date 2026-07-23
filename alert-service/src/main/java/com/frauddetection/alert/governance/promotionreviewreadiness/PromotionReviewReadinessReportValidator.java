@@ -29,13 +29,10 @@ class PromotionReviewReadinessReportValidator {
             "EVALUATION_REPORT_TYPE_SUPPORTED",
             "METRIC_BASIS_SUPPORTED",
             "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS",
-            "METRICS_PRESENT",
             "ALERT_RECOMMENDED_PRECISION_AVAILABLE",
             "ALERT_RECOMMENDED_RECALL_AVAILABLE",
             "FALSE_POSITIVE_RATE_AVAILABLE",
-            "FALSE_NEGATIVE_RATE_AVAILABLE",
-            "WARNINGS_PRESENT",
-            "LIMITATIONS_PRESENT"
+            "FALSE_NEGATIVE_RATE_AVAILABLE"
     );
     private static final Set<String> SAFE_LIMITATIONS = Set.of(
             "OFFLINE_DIAGNOSTIC_AID_ONLY",
@@ -78,7 +75,7 @@ class PromotionReviewReadinessReportValidator {
         require(report != null, "report is missing");
         require(PromotionReviewReadinessReportContract.REPORT_TYPE.equals(report.reportType()), "reportType is unsupported");
         require(PromotionReviewReadinessReportContract.REPORT_VERSION.equals(report.reportVersion()), "reportVersion is unsupported");
-        instant(report.generatedAt(), "generatedAt");
+        Instant reportGeneratedAt = instant(report.generatedAt(), "generatedAt");
         require(PromotionReviewReadinessReportContract.GOVERNANCE_STATUS.equals(report.governanceStatus()), "governanceStatus is unsupported");
         require(READINESS_STATUSES.contains(report.readinessStatus()), "readinessStatus is unsupported");
         require(!PromotionReviewReadinessReportContract.GOVERNANCE_STATUS.equals(report.readinessStatus()),
@@ -90,7 +87,7 @@ class PromotionReviewReadinessReportValidator {
         require(report.notPaymentAuthorization(), "notPaymentAuthorization must be true");
         require(report.notAutomaticDecisioning(), "notAutomaticDecisioning must be true");
         require(report.notAnalystRecommendation(), "notAnalystRecommendation must be true");
-        validateInputs(report.inputs());
+        validateInputs(report.inputs(), reportGeneratedAt);
         validateChecks(report.checks());
         validateMachineCodes(report.reasonCodes(), 20, "reasonCodes");
         validateMachineCodes(report.warnings(), 20, "warnings");
@@ -99,20 +96,21 @@ class PromotionReviewReadinessReportValidator {
         require(PromotionReviewReadinessReportContract.REQUIRED_BANNER.equals(report.banner()), "banner is unsupported");
     }
 
-    private void validateInputs(PromotionReviewReadinessReport.PromotionReviewReadinessInputs inputs) {
+    private void validateInputs(PromotionReviewReadinessReport.PromotionReviewReadinessInputs inputs, Instant reportGeneratedAt) {
         require(inputs != null, "inputs is missing");
-        validateSummaryInput(inputs.shadowPerformanceSummary());
+        Instant summaryGeneratedAt = validateSummaryInput(inputs.shadowPerformanceSummary());
+        require(!reportGeneratedAt.isBefore(summaryGeneratedAt), "generatedAt must be >= shadowPerformanceSummary.generatedAt");
         boundedCount(inputs.minimumDiagnosticEvidenceRecords(), "minimumDiagnosticEvidenceRecords");
         require(inputs.minimumDiagnosticEvidenceRecords() > 0, "minimumDiagnosticEvidenceRecords must be positive");
         boundedCount(inputs.recordsEvaluated(), "recordsEvaluated");
     }
 
-    private void validateSummaryInput(PromotionReviewReadinessReport.ShadowPerformanceSummaryInput input) {
+    private Instant validateSummaryInput(PromotionReviewReadinessReport.ShadowPerformanceSummaryInput input) {
         require(input != null, "shadowPerformanceSummary input is missing");
         require(input.present(), "shadowPerformanceSummary.present must be true");
         require("SHADOW_PERFORMANCE_SUMMARY_V2".equals(input.reportType()), "reportType is unsupported");
         require("shadow-performance-summary-v2".equals(input.summaryVersion()), "summaryVersion is unsupported");
-        instant(input.generatedAt(), "shadowPerformanceSummary.generatedAt");
+        return instant(input.generatedAt(), "shadowPerformanceSummary.generatedAt");
     }
 
     private void validateChecks(List<PromotionReviewReadinessReport.PromotionReviewReadinessCheck> checks) {
@@ -149,10 +147,10 @@ class PromotionReviewReadinessReportValidator {
         rejectForbidden(value, field);
     }
 
-    private void instant(String value, String field) {
+    private Instant instant(String value, String field) {
         safeString(value, field);
         try {
-            Instant.parse(value);
+            return Instant.parse(value);
         } catch (DateTimeParseException exception) {
             throw new PromotionReviewReadinessReportValidationException(field + " must be an ISO-8601 instant");
         }

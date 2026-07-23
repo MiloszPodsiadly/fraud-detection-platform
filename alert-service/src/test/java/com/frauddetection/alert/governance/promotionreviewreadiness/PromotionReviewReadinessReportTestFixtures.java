@@ -45,13 +45,10 @@ final class PromotionReviewReadinessReportTestFixtures {
                         check("EVALUATION_REPORT_TYPE_SUPPORTED"),
                         check("METRIC_BASIS_SUPPORTED"),
                         check("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS"),
-                        check("METRICS_PRESENT"),
                         check("ALERT_RECOMMENDED_PRECISION_AVAILABLE"),
                         check("ALERT_RECOMMENDED_RECALL_AVAILABLE"),
                         check("FALSE_POSITIVE_RATE_AVAILABLE"),
-                        check("FALSE_NEGATIVE_RATE_AVAILABLE"),
-                        check("WARNINGS_PRESENT"),
-                        check("LIMITATIONS_PRESENT")
+                        check("FALSE_NEGATIVE_RATE_AVAILABLE")
                 ),
                 List.of(),
                 List.of("MISSING_ML_SIGNAL_PRESENT", "MISSING_PROJECTION_PRESENT", "MISSING_RULES_SIGNAL_PRESENT"),

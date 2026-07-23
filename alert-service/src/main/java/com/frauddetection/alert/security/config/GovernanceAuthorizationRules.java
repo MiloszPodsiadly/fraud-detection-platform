@@ -9,7 +9,7 @@ class GovernanceAuthorizationRules implements EndpointAuthorizationRuleGroup {
 
     public void configure(AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry authorize) {
         authorize
-                .requestMatchers(HttpMethod.GET, "/api/v1/governance/shadow-performance/summary/current")
+                .requestMatchers(HttpMethod.GET, "/api/v2/governance/shadow-performance/summary/current")
                 .hasAuthority(AnalystAuthority.SHADOW_PERFORMANCE_READ)
                 .requestMatchers(HttpMethod.GET, "/api/v1/governance/promotion-review-readiness/current")
                 .hasAuthority(AnalystAuthority.PROMOTION_READINESS_READ)

@@ -35,13 +35,10 @@
     {"name": "EVALUATION_REPORT_TYPE_SUPPORTED", "status": "PASS", "severity": "INFO"},
     {"name": "METRIC_BASIS_SUPPORTED", "status": "PASS", "severity": "INFO"},
     {"name": "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", "status": "PASS", "severity": "INFO"},
-    {"name": "METRICS_PRESENT", "status": "PASS", "severity": "INFO"},
     {"name": "ALERT_RECOMMENDED_PRECISION_AVAILABLE", "status": "PASS", "severity": "INFO"},
     {"name": "ALERT_RECOMMENDED_RECALL_AVAILABLE", "status": "PASS", "severity": "INFO"},
     {"name": "FALSE_POSITIVE_RATE_AVAILABLE", "status": "PASS", "severity": "INFO"},
-    {"name": "FALSE_NEGATIVE_RATE_AVAILABLE", "status": "PASS", "severity": "INFO"},
-    {"name": "WARNINGS_PRESENT", "status": "PASS", "severity": "INFO"},
-    {"name": "LIMITATIONS_PRESENT", "status": "PASS", "severity": "INFO"}
+    {"name": "FALSE_NEGATIVE_RATE_AVAILABLE", "status": "PASS", "severity": "INFO"}
   ],
   "reasonCodes": [],
   "warnings": ["MISSING_ML_SIGNAL_PRESENT", "MISSING_PROJECTION_PRESENT", "MISSING_RULES_SIGNAL_PRESENT"],

@@ -60,7 +60,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @TestPropertySource(properties = "app.security.demo-auth.enabled=true")
 class ShadowPerformanceSummaryControllerAuthorizationTest {
 
-    private static final String PATH = "/api/v1/governance/shadow-performance/summary/current";
+    private static final String PATH = "/api/v2/governance/shadow-performance/summary/current";
 
     @jakarta.annotation.Resource
     private MockMvc mockMvc;

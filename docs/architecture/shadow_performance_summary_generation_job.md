@@ -1,8 +1,8 @@
 # Shadow Performance Summary Generation Job
 
-Status: FDP-109 local/offline generation foundation.
+Status: Shadow Performance Summary v2 local/offline generation foundation.
 
-FDP-109 generates current summary. FDP-108 reads current summary. FDP-106 exposes current summary. FDP-107 displays current summary.
+The local generator produces the current summary. The artifact-backed provider reads it. The v2 read API exposes it. The Analyst Console displays it.
 
 ## Scope
 
@@ -18,27 +18,30 @@ On Windows, the equivalent manual wrapper is:
 scripts\shadow-performance-summary.cmd
 ```
 
-The command builds a candidate `ShadowPerformanceSummary v2` from the current Platform Recommendation Evaluation Card artifact and publishes it to:
+The command builds a candidate `ShadowPerformanceSummary v2` from the current Platform Recommendation Evaluation Card artifact set and publishes it to:
 
 ```text
 deployment/local-generated/shadow-performance/current-summary.json
 ```
 
-The generated file is compatible with the FDP-108 artifact-backed provider when mounted under the configured safe base directory.
+The generated file is compatible with the artifact-backed provider when mounted under the configured safe base directory.
 
 ## Input And Reuse
 
-The job consumes the current Platform Recommendation Evaluation Card artifact supplied by the caller:
+The job consumes the current Platform Recommendation Evaluation Card artifact set supplied by the caller:
 
 - `deployment/local-generated/platform-recommendation-evaluation-card/platform_recommendation_evaluation_card.json`
+- `deployment/local-generated/platform-recommendation-evaluation-card/manifest.json`
 
 The local input file is a generated/local governance artifact only. It is not production data, not current runtime data,
 and not exported from real transactions. FDP-109 does not connect to Mongo/Kafka directly. The generated summary must not contain raw transaction references or evaluation record IDs.
 
-The job reuses the existing governed chain without rebuilding the removed legacy Platform Recommendation Evaluation Card implementation:
+The job reuses the existing governed chain without rebuilding legacy model-card flow:
 
-- FDP-123/FDP-124/FDP-126 Platform Recommendation Evaluation Card v1 artifact as the only executable source.
-- FDP-105 Shadow Performance Summary v2 builder and writer for validated current summary output.
+- FDP-123 bounded feedback dataset.
+- FDP-124 evaluation artifact set.
+- Platform Recommendation Evaluation Card v1 artifact set as the only executable source for summary generation.
+- Shadow Performance Summary v2 builder and writer for validated current summary output.
 
 It does not independently recompute precision, recall, false-positive rate, false-negative rate, disagreement counts, or evaluation
 population outside the validated evaluation card, and does not read raw Mongo or Kafka directly.
@@ -62,7 +65,7 @@ FDP-109 is not production scheduler. FDP-109 is not promotion readiness. FDP-109
 
 FDP-109 does not mutate model registry state, model artifacts, threshold configuration, online scoring, alert state, fraud-case state, or payment authorization state. It does not emit Kafka events, add a cron job, add a scheduler, expose an API, expose OpenAPI, or add dashboard filters, search, history, charts, model comparison, or UI behavior.
 
-The final generated summary must not contain raw FDP-102 JSONL, raw FDP-103 evaluation report, raw Platform Recommendation Evaluation Card payloads, per-record examples, raw transaction references or evaluation record IDs, transaction references, evaluation record identifiers, customer/account/card/device/merchant identifiers, analyst identifiers, raw payloads, raw feature vectors, raw ML requests or responses, tokens, secrets, stack traces, endpoints, ground truth, training labels, or final decisions.
+The final generated summary must not contain raw dataset exports, raw evaluation reports, raw Platform Recommendation Evaluation Card payloads, per-record examples, raw transaction references or evaluation record IDs, transaction references, evaluation record identifiers, customer/account/card/device/merchant identifiers, analyst identifiers, raw payloads, raw feature vectors, raw ML requests or responses, tokens, secrets, stack traces, endpoints, ground truth, training labels, or final decisions.
 
 The final summary must not contain promotion readiness score, promotion approval, promotion workflow, threshold recommendation, threshold switching, recommended threshold, champion/challenger status, champion candidate, deploy recommendation, production approval, payment authorization, automatic approve/decline/block, or analyst recommendation logic.
 

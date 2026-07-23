@@ -1623,10 +1623,10 @@ paths:
           $ref: "#/components/responses/NotFound"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
-  /api/v1/governance/shadow-performance/summary/current:
+  /api/v2/governance/shadow-performance/summary/current:
     get:
       summary: Read current Shadow Performance Summary
-      description: Returns the current validated FDP-105 Shadow Performance Summary as a bounded read-only DTO. Requires shadow-performance:read. The response is diagnostic-only and is not model promotion approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic approve/decline/block logic, and not analyst recommendation logic. This endpoint does not expose raw dataset JSONL, raw offline evaluation reports, raw Platform Recommendation Evaluation Card payloads, per-record examples, model registry data, model artifacts, scoring data, promotion fields, threshold recommendation fields, or decisioning fields.
+      description: Returns the current validated Shadow Performance Summary v2 as a bounded read-only DTO. Requires shadow-performance:read. The response is diagnostic-only and is not model promotion approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic approve/decline/block logic, and not analyst recommendation logic. This endpoint does not expose raw dataset JSONL, raw offline evaluation reports, raw Platform Recommendation Evaluation Card payloads, per-record examples, model registry data, model artifacts, scoring data, promotion fields, threshold recommendation fields, or decisioning fields.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -5319,7 +5319,7 @@ components:
     ShadowPerformanceEvaluationResponse:
       type: object
       additionalProperties: false
-      required: [evaluationCardType, evaluationCardVersion, evaluationPurpose, evaluationReportType, evaluationReportVersion, evaluationArtifactSetVersion, datasetVersion, datasetTimeBasis, sourceManifestSha256]
+      required: [evaluationCardType, evaluationCardVersion, evaluationPurpose, evaluationReportType, evaluationReportVersion, evaluationReportGeneratedAt, evaluationCardGeneratedAt, evaluationArtifactSetVersion, datasetVersion, datasetTimeBasis, sourceManifestSha256, sourceEvaluationCardManifestSha256]
       properties:
         evaluationCardType:
           type: string
@@ -5336,6 +5336,14 @@ components:
         evaluationReportVersion:
           type: string
           enum: [FDP-124]
+        evaluationReportGeneratedAt:
+          type: string
+          format: date-time
+          description: UTC-normalized timestamp from the source FDP-123/FDP-124 evaluation report. Must be less than or equal to evaluationCardGeneratedAt.
+        evaluationCardGeneratedAt:
+          type: string
+          format: date-time
+          description: UTC-normalized timestamp from the Platform Recommendation Evaluation Card. Must be greater than or equal to evaluationReportGeneratedAt and less than or equal to the summary generatedAt.
         evaluationArtifactSetVersion:
           type: string
           minLength: 1
@@ -5348,6 +5356,9 @@ components:
           type: string
           enum: [FEEDBACK_CREATED_AT]
         sourceManifestSha256:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+        sourceEvaluationCardManifestSha256:
           type: string
           pattern: "^[a-f0-9]{64}$"
     ShadowPerformancePopulationResponse:
@@ -5381,23 +5392,36 @@ components:
         falseNegativeRate:
           $ref: "#/components/schemas/ShadowPerformanceMetricValueResponse"
     ShadowPerformanceMetricValueResponse:
-      type: object
-      additionalProperties: false
-      required: [available, value, reason]
-      properties:
-        available:
-          type: boolean
-        value:
-          type: number
-          format: double
-          nullable: true
-          minimum: 0
-          maximum: 1
-        reason:
-          type: string
-          nullable: true
-          minLength: 1
-          maxLength: 128
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [available, value, reason]
+          properties:
+            available:
+              type: boolean
+              enum: [true]
+            value:
+              type: number
+              format: double
+              minimum: 0
+              maximum: 1
+            reason:
+              nullable: true
+              enum: [null]
+        - type: object
+          additionalProperties: false
+          required: [available, value, reason]
+          properties:
+            available:
+              type: boolean
+              enum: [false]
+            value:
+              nullable: true
+              enum: [null]
+            reason:
+              type: string
+              minLength: 1
+              maxLength: 128
   responses:
     BadRequest:
       description: Request validation failed.

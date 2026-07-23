@@ -35,7 +35,7 @@ class ShadowPerformanceSummaryValidatorTest {
 
     @Test
     void acceptsIsoInstantGeneratedAt() {
-        assertThatCode(() -> validator.validate(replaceGeneratedAt("2026-06-08T02:00:00Z")))
+        assertThatCode(() -> validator.validate(replaceGeneratedAt("2026-06-13T02:00:00Z")))
                 .doesNotThrowAnyException();
     }
 
@@ -54,6 +54,12 @@ class ShadowPerformanceSummaryValidatorTest {
     @Test
     void rejectsUnsafeGeneratedAt() {
         assertThatThrownBy(() -> validator.validate(replaceGeneratedAt("token://2026-06-08T02:00:00Z")))
+                .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
+    }
+
+    @Test
+    void rejectsSummaryGeneratedBeforeEvaluationCard() {
+        assertThatThrownBy(() -> validator.validate(replaceGeneratedAt("2026-06-11T23:59:59Z")))
                 .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
     }
 

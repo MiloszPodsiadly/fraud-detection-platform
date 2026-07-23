@@ -143,10 +143,10 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
 
     @Test
     void readAccessClassifierRecognizesShadowPerformanceSummary() {
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/governance/shadow-performance/summary/current");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v2/governance/shadow-performance/summary/current");
         request.setAttribute(
                 HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE,
-                "/api/v1/governance/shadow-performance/summary/current"
+                "/api/v2/governance/shadow-performance/summary/current"
         );
 
         var target = new ReadAccessAuditClassifier().classify(request).orElseThrow();
@@ -282,7 +282,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         String openApi = Files.readString(OPENAPI);
 
         assertThat(openApi).contains(
-                "/api/v1/governance/shadow-performance/summary/current",
+                "/api/v2/governance/shadow-performance/summary/current",
                 "shadow-performance:read",
                 "diagnostic-only",
                 "not model promotion approval",
@@ -310,7 +310,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         String uiSource = uiSource();
 
         assertThat(uiSource).contains(
-                "/api/v1/governance/shadow-performance/summary/current",
+                "/api/v2/governance/shadow-performance/summary/current",
                 "shadowPerformance",
                 "ShadowPerformance"
         );
@@ -332,9 +332,9 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         assertThat(doc).contains(
                 "read-only API boundary",
                 "requires the explicit `shadow-performance:read` authority",
-                "exposes only validated FDP-105 Shadow Performance Summary fields",
+                "exposes only validated Shadow Performance Summary v2 fields",
                 "does not recompute metrics",
-                "does not read FDP-102 JSONL exports",
+                "does not read raw dataset exports",
                 "does not expose raw Platform Recommendation Evaluation Cards",
                 "not a dashboard",
                 "not model promotion approval",
@@ -356,7 +356,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "base runtime is fail-closed by default",
                 "does not compute metrics",
                 "does not recompute shadow performance",
-                "does not read raw FDP-102/FDP-103/FDP-104 artifacts",
+                "does not read raw dataset exports",
                 "does not expose raw artifacts",
                 "Disabled provider or no configured path returns 404",
                 "Configured missing artifact returns 503",
@@ -573,7 +573,13 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         assertThat(makefile).contains(
                 "check-python:",
                 "shadow-performance-summary: check-python",
+                "--evaluation-card ../deployment/local-generated/platform-recommendation-evaluation-card/platform_recommendation_evaluation_card.json",
+                "--evaluation-card-manifest ../deployment/local-generated/platform-recommendation-evaluation-card/manifest.json",
                 "Python 3.12+ is required to generate the local Shadow Performance Summary"
+        );
+        assertThat(makeTarget(makefile, "shadow-performance-summary")).doesNotContain(
+                "--dataset-jsonl",
+                "--model-metadata"
         );
         assertThat(generatedTarget).contains(
                 "app-up-shadow-performance-generated: deployment/.env shadow-performance-summary",

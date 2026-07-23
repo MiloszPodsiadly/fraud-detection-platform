@@ -44,10 +44,13 @@ public record ShadowPerformanceSummary(
             String evaluationPurpose,
             String evaluationReportType,
             String evaluationReportVersion,
+            String evaluationReportGeneratedAt,
+            String evaluationCardGeneratedAt,
             String evaluationArtifactSetVersion,
             String datasetVersion,
             String datasetTimeBasis,
-            String sourceManifestSha256
+            String sourceManifestSha256,
+            String sourceEvaluationCardManifestSha256
     ) {
     }
 

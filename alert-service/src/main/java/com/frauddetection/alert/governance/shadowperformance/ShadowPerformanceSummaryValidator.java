@@ -73,11 +73,11 @@ class ShadowPerformanceSummaryValidator {
         }
         require("SHADOW_PERFORMANCE_SUMMARY_V2".equals(summary.reportType()), "reportType is unsupported");
         require("shadow-performance-summary-v2".equals(summary.summaryVersion()), "summaryVersion is unsupported");
-        instant(summary.generatedAt(), "generatedAt");
+        Instant summaryGeneratedAt = instant(summary.generatedAt(), "generatedAt");
         validateSubject(summary.evaluationSubject());
         require("ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK".equals(summary.metricBasis()), "metricBasis is unsupported");
         validateGovernance(summary.governance());
-        validateEvaluation(summary.evaluation());
+        validateEvaluation(summary.evaluation(), summaryGeneratedAt);
         validatePopulation(summary.evaluationPopulation());
         validateMetrics(summary.metrics());
         validateMachineCodes(summary.warnings(), 20, "warnings");
@@ -112,7 +112,7 @@ class ShadowPerformanceSummaryValidator {
         require(governance.notAutomaticDecisioning(), "notAutomaticDecisioning must be true");
     }
 
-    private void validateEvaluation(ShadowPerformanceSummary.ShadowPerformanceEvaluation evaluation) {
+    private void validateEvaluation(ShadowPerformanceSummary.ShadowPerformanceEvaluation evaluation, Instant summaryGeneratedAt) {
         require(evaluation != null, "evaluation is missing");
         require(
                 "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1".equals(evaluation.evaluationCardType()),
@@ -128,10 +128,15 @@ class ShadowPerformanceSummaryValidator {
                 "evaluationReportType is unsupported"
         );
         require("FDP-124".equals(evaluation.evaluationReportVersion()), "evaluationReportVersion is unsupported");
+        Instant reportGeneratedAt = instant(evaluation.evaluationReportGeneratedAt(), "evaluationReportGeneratedAt");
+        Instant cardGeneratedAt = instant(evaluation.evaluationCardGeneratedAt(), "evaluationCardGeneratedAt");
+        require(!cardGeneratedAt.isBefore(reportGeneratedAt), "evaluationCardGeneratedAt must be >= evaluationReportGeneratedAt");
+        require(!summaryGeneratedAt.isBefore(cardGeneratedAt), "generatedAt must be >= evaluationCardGeneratedAt");
         safeString(evaluation.evaluationArtifactSetVersion(), "evaluationArtifactSetVersion");
         safeString(evaluation.datasetVersion(), "datasetVersion");
         machineCode(evaluation.datasetTimeBasis(), "datasetTimeBasis");
         sha256(evaluation.sourceManifestSha256(), "sourceManifestSha256");
+        sha256(evaluation.sourceEvaluationCardManifestSha256(), "sourceEvaluationCardManifestSha256");
     }
 
     private void validatePopulation(ShadowPerformanceSummary.ShadowPerformancePopulation population) {
@@ -190,10 +195,10 @@ class ShadowPerformanceSummaryValidator {
         require(SHA256_PATTERN.matcher(value).matches(), field + " must be sha256 hex");
     }
 
-    private void instant(String value, String field) {
+    private Instant instant(String value, String field) {
         safeString(value, field);
         try {
-            Instant.parse(value);
+            return Instant.parse(value);
         } catch (DateTimeParseException exception) {
             throw new ShadowPerformanceSummaryValidationException(field + " must be an ISO-8601 instant");
         }
