@@ -11,14 +11,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate a local FDP-123/FDP-124 Model Card v1 artifact set.")
     parser.add_argument("--evaluation-summary", required=True)
     parser.add_argument("--evaluation-manifest", required=True)
-    parser.add_argument("--model-name", required=True)
-    parser.add_argument("--model-version", required=True)
-    parser.add_argument("--model-family", required=True)
-    parser.add_argument("--training-mode", required=True)
-    parser.add_argument("--feature-contract-version", required=True)
-    parser.add_argument("--reference-quality", required=True)
     parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--allow-output-root")
+    parser.add_argument("--allow-output-root", required=True)
     parser.add_argument("--generated-at", required=True)
     parser.add_argument("--intended-use", action="append", default=[])
     parser.add_argument("--not-intended-use", action="append", default=[])
@@ -28,12 +22,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     metadata = {
-        "modelName": args.model_name,
-        "modelVersion": args.model_version,
-        "modelFamily": args.model_family,
-        "trainingMode": args.training_mode,
-        "featureContractVersion": args.feature_contract_version,
-        "referenceQuality": args.reference_quality,
         "allowedUsageModes": _list_arg(args.allowed_usage_mode),
         "intendedUse": _list_arg(args.intended_use),
         "notIntendedUse": _list_arg(args.not_intended_use),
@@ -46,8 +34,7 @@ def main(argv: list[str] | None = None) -> int:
         metadata,
         args.generated_at,
     )
-    root = Path(args.allow_output_root) if args.allow_output_root is not None else None
-    write_model_card_artifacts(model_card, Path(args.output_dir), allow_output_root=root)
+    write_model_card_artifacts(model_card, Path(args.output_dir), allow_output_root=Path(args.allow_output_root))
     return 0
 
 

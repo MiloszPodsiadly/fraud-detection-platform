@@ -3,16 +3,17 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from offline_evaluation.model_card_schema import (
-    EXPECTED_DATASET_DEDUPLICATION_POLICY,
+from offline_evaluation.fdp123.model_card.schema import (
     EXPECTED_DATASET_TIME_BASIS,
     EXPECTED_EVALUATION_REPORT_TYPE,
-    EXPECTED_EVALUATION_REPORT_VERSION,
-    EXPECTED_METRIC_BASIS,
-    GOVERNANCE_STATUS,
-    MODEL_CARD_TYPE,
+    METRIC_BASIS as EXPECTED_METRIC_BASIS,
+    METRICS_SUBJECT,
+    MAX_FDP123_DATASET_RECORDS,
+    MODEL_CARD_REPORT_TYPE,
     MODEL_CARD_VERSION,
-    ModelCardValidationError,
+    PRODUCTION_APPROVAL,
+    PROMOTION_STATUS,
+    Fdp123ModelCardValidationError,
     validate_model_card,
 )
 
@@ -23,13 +24,15 @@ class ShadowPerformanceValidationError(ValueError):
 
 SUMMARY_TYPE = "SHADOW_PERFORMANCE_SUMMARY_V1"
 SUMMARY_VERSION = "1.0"
-EXPECTED_MODEL_CARD_TYPE = MODEL_CARD_TYPE
+EXPECTED_MODEL_CARD_TYPE = MODEL_CARD_REPORT_TYPE
 EXPECTED_MODEL_CARD_VERSION = MODEL_CARD_VERSION
-EXPECTED_GOVERNANCE_STATUS = GOVERNANCE_STATUS
+EXPECTED_EVALUATION_REPORT_VERSION = "FDP-124"
+EXPECTED_DATASET_DEDUPLICATION_POLICY = "FDP123_RECORD_COUNT_MATCHES_METADATA_RECORDS_RETURNED"
+EXPECTED_GOVERNANCE_STATUS = "DIAGNOSTIC_ONLY"
 ALLOWED_APPROVED_FOR = {"SHADOW", "COMPARE"}
 MAX_WARNINGS = 10
 MAX_LIMITATIONS = 20
-MAX_COUNT_VALUE = 500
+MAX_COUNT_VALUE = MAX_FDP123_DATASET_RECORDS
 BANNER = (
     "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, "
     "threshold recommendation, production decisioning approval, payment authorization, "
@@ -127,14 +130,45 @@ SAFE_CONTRACT_VALUES = {
     "SHADOW",
     "COMPARE",
     "ANALYST_LABELS_ARE_EVALUATION_SIGNALS_NOT_GROUND_TRUTH",
+    "ANALYST_FEEDBACK_LABELS_ARE_NOT_LEGAL_GROUND_TRUTH",
     "NOT_EVALUATION_ELIGIBLE_EXCLUDED_FROM_QUALITY_METRICS",
     "NO_MODEL_PROMOTION_APPROVAL",
+    "NO_AUTOMATIC_TRANSACTION_DECLINE",
+    "NO_FINAL_BANK_DECISION",
+    "NO_AUTOMATIC_CUSTOMER_BLOCKING",
+    "NO_PRODUCTION_THRESHOLD_MUTATION",
+    "NO_CASE_WORKFLOW_AUTOMATION",
+    "NO_REGULATORY_CERTIFICATION_CLAIM",
     "NO_THRESHOLD_RECOMMENDATION",
     "NO_PRODUCTION_DECISIONING_APPROVAL",
+    "NO_FINAL_DECISIONING",
     "NO_PAYMENT_AUTHORIZATION",
     "NO_AUTOMATIC_APPROVE_DECLINE_BLOCK",
+    "NO_MODEL_PROMOTION",
+    "NO_CASE_CREATION",
+    "NO_EXTERNAL_PUBLISHING",
+    "NO_PRODUCTION_APPROVAL",
+    "MODEL_CARD_DOES_NOT_APPROVE_PROMOTION",
+    "MODEL_CARD_DOES_NOT_AUTHORIZE_AUTOMATIC_DECLINE",
+    "MODEL_CARD_DOES_NOT_CHANGE_SCORING_THRESHOLDS",
+    "OFFLINE_DIAGNOSTIC_METRICS_ARE_NOT_PRODUCTION_APPROVAL",
+    "PSEUDONYMOUS_REFERENCES_ARE_NOT_ANONYMIZATION",
+    "SMALL_SAMPLE_SIZE_MAY_BE_INCONCLUSIVE",
+    "METRICS_ARE_PLATFORM_RECOMMENDATION_DIAGNOSTICS",
     "BUCKET_ORDERED_METRICS_NOT_CALIBRATED_PROBABILITIES",
+    "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK",
+    "ENGINE_INTELLIGENCE_PROJECTION",
+    "ENGINE_INTELLIGENCE_PROJECTION_V1",
+    "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
+    "NOT_APPLICABLE",
+    "NOT_AVAILABLE",
+    "NOT_APPROVED",
+    "NOT_EVALUATED_FOR_PROMOTION",
+    "PLATFORM_RECOMMENDATION",
+    "FDP123_RECORD_COUNT_MATCHES_METADATA_RECORDS_RETURNED",
+    "FDP-124",
     "OFFLINE_ONLY",
+    "OFFLINE_EVALUATION",
     "DIAGNOSTIC_ONLY",
 }
 SAFE_NEGATED_FIELDS = {
@@ -202,23 +236,26 @@ FORBIDDEN_VALUE_TERMS = FORBIDDEN_FIELD_NAMES | {
 def validate_model_card_for_shadow_summary(model_card: dict[str, Any]) -> dict[str, Any]:
     try:
         safe_model_card = validate_model_card(model_card)
-    except ModelCardValidationError as exc:
+    except Fdp123ModelCardValidationError as exc:
         raise ShadowPerformanceValidationError(str(exc)) from exc
     if safe_model_card["cardType"] != EXPECTED_MODEL_CARD_TYPE:
         raise ShadowPerformanceValidationError("model card type is unsupported")
     if safe_model_card["modelCardVersion"] != EXPECTED_MODEL_CARD_VERSION:
         raise ShadowPerformanceValidationError("model card version is unsupported")
-    if safe_model_card["governanceStatus"] != EXPECTED_GOVERNANCE_STATUS:
-        raise ShadowPerformanceValidationError("governanceStatus must be DIAGNOSTIC_ONLY")
-    if set(safe_model_card["approvedFor"]) - ALLOWED_APPROVED_FOR:
-        raise ShadowPerformanceValidationError("approvedFor contains unsupported value")
-    metrics = safe_model_card["metricsSummary"]
-    if metrics["metricBasis"] != EXPECTED_METRIC_BASIS:
+    if safe_model_card["productionApproval"] != PRODUCTION_APPROVAL:
+        raise ShadowPerformanceValidationError("productionApproval must be NOT_APPROVED")
+    if safe_model_card["promotionStatus"] != PROMOTION_STATUS:
+        raise ShadowPerformanceValidationError("promotionStatus must be NOT_EVALUATED_FOR_PROMOTION")
+    if not ALLOWED_APPROVED_FOR.issubset(set(safe_model_card["allowedUsageModes"])):
+        raise ShadowPerformanceValidationError("allowedUsageModes must include SHADOW and COMPARE")
+    if safe_model_card["metricsSubject"] != METRICS_SUBJECT:
+        raise ShadowPerformanceValidationError("metricsSubject is unsupported")
+    if safe_model_card["metricBasis"] != EXPECTED_METRIC_BASIS:
         raise ShadowPerformanceValidationError("metricBasis is unsupported")
-    if safe_model_card["datasetTimeBasis"] != EXPECTED_DATASET_TIME_BASIS:
+    metrics = safe_model_card["metricsSummary"]
+    evidence = safe_model_card["evaluationEvidence"]
+    if evidence["datasetTimeBasis"] != EXPECTED_DATASET_TIME_BASIS:
         raise ShadowPerformanceValidationError("datasetTimeBasis is unsupported")
-    if safe_model_card["datasetDeduplicationPolicy"] != EXPECTED_DATASET_DEDUPLICATION_POLICY:
-        raise ShadowPerformanceValidationError("datasetDeduplicationPolicy is unsupported")
     _reject_unsafe(safe_model_card)
     return safe_model_card
 

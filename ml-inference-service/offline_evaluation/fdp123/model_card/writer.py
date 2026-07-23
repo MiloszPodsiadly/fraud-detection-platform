@@ -57,17 +57,22 @@ def model_card_json(model_card: dict[str, Any]) -> str:
 def model_card_markdown(model_card: dict[str, Any]) -> str:
     safe = validate_model_card(model_card)
     evidence = safe["evaluationEvidence"]
+    subject = safe["evaluationSubject"]
     metrics = safe["metricsSummary"]
     lines = [
-        f"# Model Card - {safe['modelName']}",
+        f"# Model Card - {subject['subjectType']}",
         "",
-        "## Model identity",
+        "## Evaluation subject",
         "",
-        f"- modelVersion: {safe['modelVersion']}",
-        f"- modelFamily: {safe['modelFamily']}",
-        f"- trainingMode: {safe['trainingMode']}",
-        f"- featureContractVersion: {safe['featureContractVersion']}",
-        f"- referenceQuality: {safe['referenceQuality']}",
+        f"- subjectType: {subject['subjectType']}",
+        f"- sourceComponent: {subject['sourceComponent']}",
+        f"- sourceVersion: {subject['sourceVersion']}",
+        f"- featureContractVersion: {subject['featureContractVersion']}",
+        f"- modelIdentity: {subject['modelIdentity']}",
+        f"- modelArtifactSha256: {subject['modelArtifactSha256']}",
+        f"- identityCompleteness: {subject['identityCompleteness']}",
+        f"- metricsSubject: {safe['metricsSubject']}",
+        f"- metricBasis: {safe['metricBasis']}",
         f"- productionApproval: {safe['productionApproval']}",
         f"- promotionStatus: {safe['promotionStatus']}",
         "",

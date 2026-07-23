@@ -9,10 +9,18 @@ from pathlib import Path
 from typing import Any
 
 from offline_evaluation.evaluation_runner import build_evaluation_report
-from offline_evaluation.model_card_generator import build_model_card
-from offline_evaluation.model_card_writer import model_card_json
-from offline_evaluation.shadow_performance_schema import validate_shadow_performance_summary
-from offline_evaluation.shadow_performance_summary import build_shadow_performance_summary
+from offline_evaluation.shadow_performance_schema import (
+    BANNER,
+    EXPECTED_DATASET_DEDUPLICATION_POLICY,
+    EXPECTED_DATASET_TIME_BASIS,
+    EXPECTED_EVALUATION_REPORT_TYPE,
+    EXPECTED_EVALUATION_REPORT_VERSION,
+    EXPECTED_GOVERNANCE_STATUS,
+    EXPECTED_METRIC_BASIS,
+    SUMMARY_TYPE,
+    SUMMARY_VERSION,
+    validate_shadow_performance_summary,
+)
 from offline_evaluation.shadow_performance_writer import write_shadow_performance_summary
 
 
@@ -48,13 +56,92 @@ def generate_current_shadow_summary(
         top_k=top_k,
         generated_at=timestamp,
     )
-    model_card = build_model_card(evaluation_report, model_metadata, timestamp)
-    safe_model_card = json.loads(model_card_json(model_card))
-    summary = build_shadow_performance_summary(safe_model_card, timestamp)
+    summary = build_shadow_performance_summary_from_evaluation_report(evaluation_report, model_metadata, timestamp)
     payload = write_shadow_performance_summary(summary)
 
     publish_current_summary(payload, output_path, allowed_output_root=allowed_output_root)
     return output_path
+
+
+def build_shadow_performance_summary_from_evaluation_report(
+        evaluation_report: dict[str, Any],
+        governance_metadata: dict[str, Any],
+        generated_at: str,
+) -> dict[str, Any]:
+    input_summary = _required_object(evaluation_report, "inputSummary")
+    quality_metrics = _required_object(evaluation_report, "qualityMetrics")
+    disagreement_summary = _required_object(evaluation_report, "disagreementSummary")
+    approved_for = _approved_for(governance_metadata)
+    summary = {
+        "summaryType": SUMMARY_TYPE,
+        "summaryVersion": SUMMARY_VERSION,
+        "generatedAt": generated_at,
+        "model": {
+            "modelName": "NOT_AVAILABLE",
+            "modelVersion": "NOT_AVAILABLE",
+            "modelFamily": "PLATFORM_RECOMMENDATION",
+            "featureContractVersion": "NOT_APPLICABLE",
+        },
+        "governance": {
+            "governanceStatus": EXPECTED_GOVERNANCE_STATUS,
+            "approvedFor": approved_for,
+            "diagnosticOnly": True,
+            "notProductionApproval": True,
+            "notPromotionApproval": True,
+            "notThresholdRecommendation": True,
+            "notPaymentAuthorization": True,
+            "notAutomaticDecisioning": True,
+        },
+        "evaluation": {
+            "evaluationReportType": EXPECTED_EVALUATION_REPORT_TYPE,
+            "evaluationReportVersion": EXPECTED_EVALUATION_REPORT_VERSION,
+            "metricBasis": EXPECTED_METRIC_BASIS,
+            "datasetTimeBasis": EXPECTED_DATASET_TIME_BASIS,
+            "datasetDeduplicationPolicy": EXPECTED_DATASET_DEDUPLICATION_POLICY,
+        },
+        "evaluationPopulation": {
+            "datasetRecordsRead": input_summary.get("datasetRecordsRead"),
+            "recordsAcceptedForEvaluation": input_summary.get("recordsAcceptedForEvaluation"),
+            "recordsExcludedNotEvaluationEligible": input_summary.get("recordsExcludedNotEvaluationEligible"),
+        },
+        "metrics": {
+            "precisionAtBudget": quality_metrics.get("precisionAtBudget"),
+            "recallAtTopK": quality_metrics.get("recallAtTopK"),
+            "falsePositiveRate": quality_metrics.get("falsePositiveRate"),
+            "mlCaughtRulesMissedCount": quality_metrics.get("mlCaughtRulesMissedCount"),
+            "rulesCaughtMlMissedCount": quality_metrics.get("rulesCaughtMlMissedCount"),
+            "missingMlCount": quality_metrics.get("missingMlCount"),
+            "missingRulesCount": quality_metrics.get("missingRulesCount"),
+            "missingProjectionCount": input_summary.get("recordsWithMissingProjection"),
+            "notEvaluationEligibleCount": quality_metrics.get("notEvaluationEligibleCount"),
+        },
+        "disagreementSummary": {
+            "rulesHighMlHigh": disagreement_summary.get("rulesHighMlHigh"),
+            "rulesHighMlLowOrMedium": disagreement_summary.get("rulesHighMlLowOrMedium"),
+            "rulesLowOrMediumMlHigh": disagreement_summary.get("rulesLowOrMediumMlHigh"),
+            "rulesLowOrMediumMlLowOrMedium": disagreement_summary.get("rulesLowOrMediumMlLowOrMedium"),
+            "rulesMissingMlPresent": disagreement_summary.get("rulesMissingMlPresent"),
+            "mlMissingRulesPresent": disagreement_summary.get("mlMissingRulesPresent"),
+            "bothMissing": disagreement_summary.get("bothMissing"),
+            "notEvaluationEligibleExcluded": disagreement_summary.get("notEvaluationEligibleExcluded"),
+        },
+        "warnings": _machine_code_list(evaluation_report.get("warnings", [])),
+        "limitations": [
+            "ANALYST_LABELS_ARE_EVALUATION_SIGNALS_NOT_GROUND_TRUTH",
+            "BUCKET_ORDERED_METRICS_NOT_CALIBRATED_PROBABILITIES",
+            "DIAGNOSTIC_ONLY",
+            "METRICS_ARE_PLATFORM_RECOMMENDATION_DIAGNOSTICS",
+            "NO_AUTOMATIC_APPROVE_DECLINE_BLOCK",
+            "NO_MODEL_PROMOTION_APPROVAL",
+            "NO_PAYMENT_AUTHORIZATION",
+            "NO_PRODUCTION_DECISIONING_APPROVAL",
+            "NO_THRESHOLD_RECOMMENDATION",
+            "NOT_EVALUATION_ELIGIBLE_EXCLUDED_FROM_QUALITY_METRICS",
+            "OFFLINE_ONLY",
+        ],
+        "banner": BANNER,
+    }
+    return validate_shadow_performance_summary(summary)
 
 
 def publish_current_summary(payload: str, output_path: Path, *, allowed_output_root: Path | None = None) -> Path:
@@ -79,6 +166,28 @@ def validate_current_summary_file(path: Path) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise CurrentSummaryGenerationError("current summary must be a JSON object")
     return validate_shadow_performance_summary(raw)
+
+
+def _required_object(raw: dict[str, Any], field: str) -> dict[str, Any]:
+    value = raw.get(field)
+    if not isinstance(value, dict):
+        raise CurrentSummaryGenerationError(f"{field} must be an object")
+    return value
+
+
+def _approved_for(governance_metadata: dict[str, Any]) -> list[str]:
+    values = governance_metadata.get("approvedFor")
+    if not isinstance(values, list) or not values:
+        raise CurrentSummaryGenerationError("approvedFor must be a non-empty list")
+    return sorted(str(item) for item in values)
+
+
+def _machine_code_list(raw: Any) -> list[str]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise CurrentSummaryGenerationError("warnings must be a list")
+    return sorted(str(item) for item in raw)
 
 
 def main(argv: list[str] | None = None) -> int:

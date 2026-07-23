@@ -4,6 +4,28 @@ from datetime import datetime, timezone
 import re
 from typing import Any
 
+from offline_evaluation.fdp123.dataset_schema import (
+    DATASET_TIME_BASIS as EXPECTED_DATASET_TIME_BASIS,
+    DATASET_VERSION as EXPECTED_DATASET_VERSION,
+    MAX_DATASET_RECORDS as MAX_FDP123_DATASET_RECORDS,
+)
+from offline_evaluation.fdp123.evaluation_contract import (
+    EVALUATION_FEATURE_CONTRACT_VERSION,
+    EVALUATION_IDENTITY_COMPLETENESS,
+    EVALUATION_MODEL_ARTIFACT_SHA256,
+    EVALUATION_MODEL_IDENTITY,
+    EVALUATION_SOURCE_COMPONENT,
+    EVALUATION_SOURCE_VERSION,
+    EVALUATION_SUBJECT,
+    EVALUATION_SUBJECT_TYPE,
+    METRIC_BASIS,
+    METRICS_SUBJECT,
+)
+from offline_evaluation.fdp123.report_writer import (
+    ARTIFACT_SET_VERSION as EXPECTED_SOURCE_ARTIFACT_SET_VERSION,
+    REPORT_TYPE as EXPECTED_EVALUATION_REPORT_TYPE,
+)
+
 
 class Fdp123ModelCardValidationError(ValueError):
     """Raised when FDP-123/FDP-124 Model Card v1 content is invalid or unsafe."""
@@ -13,19 +35,15 @@ MODEL_CARD_VERSION = "model-card-v1"
 MODEL_CARD_REPORT_TYPE = "MODEL_CARD_V1"
 ARTIFACT_SET_VERSION = "model-card-artifact-set-v1"
 
-EXPECTED_EVALUATION_REPORT_TYPE = "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"
-EXPECTED_SOURCE_ARTIFACT_SET_VERSION = "fdp123-report-artifact-set-v1"
 EXPECTED_EVALUATION_SUMMARY_FILENAME = "evaluation_summary.json"
 EXPECTED_EVALUATION_MANIFEST_FILENAME = "manifest.json"
 MAX_EVALUATION_SUMMARY_BYTES = 262_144
 MAX_EVALUATION_MANIFEST_BYTES = 65_536
-EXPECTED_DATASET_VERSION = "feedback-dataset-v1"
-EXPECTED_DATASET_TIME_BASIS = "FEEDBACK_CREATED_AT"
 
 PRODUCTION_APPROVAL = "NOT_APPROVED"
 PROMOTION_STATUS = "NOT_EVALUATED_FOR_PROMOTION"
 
-MAX_COUNT_VALUE = 1_000_000
+MAX_COUNT_VALUE = MAX_FDP123_DATASET_RECORDS
 MAX_WARNINGS = 20
 MAX_LIST_ITEMS = 30
 
@@ -44,39 +62,6 @@ FORBIDDEN_USAGE_VALUES = {
     "PROMOTION_APPROVED",
     "PROMOTION_READY",
     "PRODUCTION_APPROVED",
-}
-ALLOWED_MODEL_FAMILIES = {
-    "LOGISTIC_REGRESSION",
-    "RANDOM_FOREST",
-    "GRADIENT_BOOSTING",
-    "XGBOOST",
-    "LIGHTGBM",
-    "NEURAL_NETWORK",
-    "RULE_BASELINE",
-    "UNKNOWN",
-}
-ALLOWED_TRAINING_MODES = {
-    "OFFLINE_TRAINED",
-    "SYNTHETIC_BASELINE",
-    "REFERENCE_MODEL",
-    "UNKNOWN_OFFLINE",
-}
-FORBIDDEN_TRAINING_MODES = {
-    "PRODUCTION_APPROVED",
-    "LIVE_TRAINING",
-    "AUTO_RETRAINED",
-}
-ALLOWED_REFERENCE_QUALITY = {
-    "BOUNDED_ANALYST_FEEDBACK",
-    "SYNTHETIC",
-    "MIXED",
-    "LIMITED_EVIDENCE",
-}
-FORBIDDEN_REFERENCE_QUALITY = {
-    "GROUND_TRUTH",
-    "LEGAL_TRUTH",
-    "CERTIFIED_LABELS",
-    "TRAINING_LABELS",
 }
 ALLOWED_INTENDED_USE = {
     "SHADOW_FRAUD_RISK_REVIEW",
@@ -98,6 +83,7 @@ REQUIRED_NOT_INTENDED_USE = {
 REQUIRED_LIMITATIONS = {
     "ANALYST_FEEDBACK_LABELS_ARE_NOT_LEGAL_GROUND_TRUTH",
     "OFFLINE_DIAGNOSTIC_METRICS_ARE_NOT_PRODUCTION_APPROVAL",
+    "METRICS_ARE_PLATFORM_RECOMMENDATION_DIAGNOSTICS",
     "SMALL_SAMPLE_SIZE_MAY_BE_INCONCLUSIVE",
     "PSEUDONYMOUS_REFERENCES_ARE_NOT_ANONYMIZATION",
     "MODEL_CARD_DOES_NOT_APPROVE_PROMOTION",
@@ -114,17 +100,14 @@ REQUIRED_GOVERNANCE_BOUNDARY = {
     "NO_EXTERNAL_PUBLISHING",
     "NO_PRODUCTION_APPROVAL",
 }
-MODEL_IDENTITY_METADATA_UNAVAILABLE_LIMITATION = "MODEL_IDENTITY_METADATA_UNAVAILABLE"
+REQUIRED_EVALUATION_SUBJECT_FIELDS = set(EVALUATION_SUBJECT)
 REQUIRED_MODEL_CARD_FIELDS = {
     "modelCardVersion",
     "cardType",
     "generatedAt",
-    "modelName",
-    "modelVersion",
-    "modelFamily",
-    "trainingMode",
-    "featureContractVersion",
-    "referenceQuality",
+    "evaluationSubject",
+    "metricsSubject",
+    "metricBasis",
     "allowedUsageModes",
     "productionApproval",
     "promotionStatus",
@@ -204,32 +187,24 @@ SAFE_CONTRACT_VALUES = {
     EXPECTED_SOURCE_ARTIFACT_SET_VERSION,
     EXPECTED_DATASET_VERSION,
     EXPECTED_DATASET_TIME_BASIS,
+    EVALUATION_SUBJECT_TYPE,
+    EVALUATION_SOURCE_COMPONENT,
+    EVALUATION_SOURCE_VERSION,
+    EVALUATION_FEATURE_CONTRACT_VERSION,
+    EVALUATION_MODEL_IDENTITY,
+    EVALUATION_MODEL_ARTIFACT_SHA256,
+    EVALUATION_IDENTITY_COMPLETENESS,
+    METRICS_SUBJECT,
+    METRIC_BASIS,
     PRODUCTION_APPROVAL,
     PROMOTION_STATUS,
-} | ALLOWED_USAGE_MODES | ALLOWED_MODEL_FAMILIES | ALLOWED_TRAINING_MODES | ALLOWED_REFERENCE_QUALITY
+} | ALLOWED_USAGE_MODES
 SAFE_NEGATED_MACHINE_CODES = REQUIRED_NOT_INTENDED_USE | REQUIRED_LIMITATIONS | REQUIRED_GOVERNANCE_BOUNDARY
 
 MACHINE_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
-SAFE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 RFC3339_DATETIME_PATTERN = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$"
 )
-IDENTITY_FORBIDDEN_COMPACT_TERMS = {
-    "http",
-    "https",
-    "s3",
-    "gs",
-    "file",
-    "registry",
-    "bucket",
-    "secret",
-    "token",
-    "password",
-}
-IDENTITY_FORBIDDEN_CHARS = {"/", "\\", ":", "?", "&", "=", "@", "$", "{", "}", "[", "]", "(", ")"}
-FORBIDDEN_DEFAULT_IDENTIFIERS = {"unknown", "v1", "none", "null", "na", "n/a"}
-
-
 def validate_model_card(raw: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise Fdp123ModelCardValidationError("model card must be an object")
@@ -245,12 +220,9 @@ def validate_model_card(raw: dict[str, Any]) -> dict[str, Any]:
         "modelCardVersion": _required_constant(raw, "modelCardVersion", MODEL_CARD_VERSION),
         "cardType": _required_constant(raw, "cardType", MODEL_CARD_REPORT_TYPE),
         "generatedAt": normalize_rfc3339_timestamp(raw.get("generatedAt"), "generatedAt"),
-        "modelName": _safe_identifier(raw, "modelName"),
-        "modelVersion": _safe_identifier(raw, "modelVersion"),
-        "modelFamily": _bounded_enum(raw, "modelFamily", ALLOWED_MODEL_FAMILIES),
-        "trainingMode": _bounded_enum(raw, "trainingMode", ALLOWED_TRAINING_MODES, FORBIDDEN_TRAINING_MODES),
-        "featureContractVersion": _safe_identifier(raw, "featureContractVersion"),
-        "referenceQuality": _bounded_enum(raw, "referenceQuality", ALLOWED_REFERENCE_QUALITY, FORBIDDEN_REFERENCE_QUALITY),
+        "evaluationSubject": _evaluation_subject(raw),
+        "metricsSubject": _required_constant(raw, "metricsSubject", METRICS_SUBJECT),
+        "metricBasis": _required_constant(raw, "metricBasis", METRIC_BASIS),
         "allowedUsageModes": _allowed_usage_modes(raw),
         "productionApproval": _required_constant(raw, "productionApproval", PRODUCTION_APPROVAL),
         "promotionStatus": _required_constant(raw, "promotionStatus", PROMOTION_STATUS),
@@ -266,9 +238,24 @@ def validate_model_card(raw: dict[str, Any]) -> dict[str, Any]:
             normalized["evaluationEvidence"]["evaluationGeneratedAt"]
     ):
         raise Fdp123ModelCardValidationError("generatedAt must be greater than or equal to evaluationGeneratedAt")
-    _validate_unknown_metadata_disclosure(normalized)
     _reject_unsafe(normalized)
     return normalized
+
+
+def _evaluation_subject(raw: dict[str, Any]) -> dict[str, str]:
+    value = raw.get("evaluationSubject")
+    if not isinstance(value, dict):
+        raise Fdp123ModelCardValidationError("evaluationSubject must be an object")
+    extra = sorted(set(value) - REQUIRED_EVALUATION_SUBJECT_FIELDS)
+    if extra:
+        raise Fdp123ModelCardValidationError(f"evaluationSubject contains unsupported fields: {', '.join(extra)}")
+    missing = sorted(REQUIRED_EVALUATION_SUBJECT_FIELDS - set(value))
+    if missing:
+        raise Fdp123ModelCardValidationError(f"evaluationSubject missing required fields: {', '.join(missing)}")
+    return {
+        field: _required_constant(value, field, expected)
+        for field, expected in EVALUATION_SUBJECT.items()
+    }
 
 
 def _evaluation_evidence(raw: dict[str, Any]) -> dict[str, Any]:
@@ -387,36 +374,10 @@ def _format_utc_timestamp(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat(timespec=timespec).replace("+00:00", "Z")
 
 
-def _validate_unknown_metadata_disclosure(card: dict[str, Any]) -> None:
-    if card["modelFamily"] != "UNKNOWN" and card["trainingMode"] != "UNKNOWN_OFFLINE":
-        return
-    disclosures = set(card["warnings"]) | set(card["limitations"])
-    if MODEL_IDENTITY_METADATA_UNAVAILABLE_LIMITATION not in disclosures:
-        raise Fdp123ModelCardValidationError(
-            "UNKNOWN model metadata requires MODEL_IDENTITY_METADATA_UNAVAILABLE disclosure"
-        )
-
-
 def _required_constant(raw: dict[str, Any], field: str, expected: str) -> str:
     value = _bounded_string(raw, field, len(expected))
     if value != expected:
         raise Fdp123ModelCardValidationError(f"{field} must be {expected}")
-    return value
-
-
-def _bounded_enum(
-        raw: dict[str, Any],
-        field: str,
-        allowed: set[str],
-        forbidden: set[str] | None = None,
-) -> str:
-    value = _bounded_string(raw, field, 128)
-    if MACHINE_CODE_PATTERN.fullmatch(value) is None:
-        raise Fdp123ModelCardValidationError(f"{field} must be a machine-code string")
-    if forbidden and value in forbidden:
-        raise Fdp123ModelCardValidationError(f"{field} has forbidden value")
-    if value not in allowed:
-        raise Fdp123ModelCardValidationError(f"{field} has unsupported value")
     return value
 
 
@@ -478,22 +439,6 @@ def _optional_machine_code_list(raw: dict[str, Any], field: str, max_items: int)
         _reject_unsafe_value(item)
         result.append(item)
     return sorted(set(result))
-
-
-def _safe_identifier(raw: dict[str, Any], field: str) -> str:
-    value = _bounded_string(raw, field, 128)
-    compact = _compact(value)
-    if compact in FORBIDDEN_DEFAULT_IDENTIFIERS:
-        raise Fdp123ModelCardValidationError(f"{field} must be explicit")
-    if SAFE_IDENTIFIER_PATTERN.fullmatch(value) is None or ".." in value:
-        raise Fdp123ModelCardValidationError(f"{field} must be a safe identifier")
-    if any(character in value for character in IDENTITY_FORBIDDEN_CHARS):
-        raise Fdp123ModelCardValidationError(f"{field} must not be an artifact location")
-    if any(character.isspace() for character in value):
-        raise Fdp123ModelCardValidationError(f"{field} must not contain whitespace")
-    if any(term in compact for term in IDENTITY_FORBIDDEN_COMPACT_TERMS):
-        raise Fdp123ModelCardValidationError(f"{field} must not contain operational location details")
-    return value
 
 
 def _required_count(raw: dict[str, Any], field: str) -> int:

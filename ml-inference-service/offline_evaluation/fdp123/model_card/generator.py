@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from offline_evaluation.fdp123.model_card.schema import (
+    EVALUATION_SUBJECT,
     EXPECTED_DATASET_TIME_BASIS,
     EXPECTED_DATASET_VERSION,
     EXPECTED_EVALUATION_MANIFEST_FILENAME,
@@ -16,6 +17,8 @@ from offline_evaluation.fdp123.model_card.schema import (
     MAX_EVALUATION_SUMMARY_BYTES,
     MODEL_CARD_REPORT_TYPE,
     MODEL_CARD_VERSION,
+    METRIC_BASIS,
+    METRICS_SUBJECT,
     PRODUCTION_APPROVAL,
     PROMOTION_STATUS,
     SAFE_CONTRACT_VALUES,
@@ -27,24 +30,21 @@ from offline_evaluation.fdp123.model_card.schema import (
 )
 
 
-REQUIRED_MODEL_METADATA_FIELDS = {
-    "modelName",
-    "modelVersion",
-    "modelFamily",
-    "trainingMode",
-    "featureContractVersion",
-    "referenceQuality",
+REQUIRED_GOVERNANCE_METADATA_FIELDS = {
     "allowedUsageModes",
     "intendedUse",
     "notIntendedUse",
     "limitations",
     "governanceBoundary",
 }
-ALLOWED_MODEL_METADATA_FIELDS = set(REQUIRED_MODEL_METADATA_FIELDS)
+ALLOWED_GOVERNANCE_METADATA_FIELDS = set(REQUIRED_GOVERNANCE_METADATA_FIELDS)
 
 REQUIRED_SUMMARY_FIELDS = {
     "datasetMetadata",
+    "evaluationSubject",
     "generatedAt",
+    "metricBasis",
+    "metricsSubject",
     "qualityMetrics",
     "reportType",
     "warnings",
@@ -94,7 +94,7 @@ FORBIDDEN_INPUT_COMPACT_TERMS = {
 def generate_model_card_from_fdp124_artifacts(
         evaluation_summary_path: Path,
         evaluation_manifest_path: Path,
-        model_metadata: dict[str, Any],
+        governance_metadata: dict[str, Any],
         generated_at: str,
 ) -> dict[str, Any]:
     summary_path = Path(evaluation_summary_path)
@@ -108,7 +108,7 @@ def generate_model_card_from_fdp124_artifacts(
     summary = _load_json_bytes(summary_bytes, "evaluation_summary")
     _reject_forbidden_input(summary)
     _validate_summary(summary)
-    metadata = _model_metadata(model_metadata)
+    metadata = _governance_metadata(governance_metadata)
 
     quality_metrics = summary["qualityMetrics"]
     dataset_summary = quality_metrics["datasetSummary"]
@@ -121,12 +121,9 @@ def generate_model_card_from_fdp124_artifacts(
         "modelCardVersion": MODEL_CARD_VERSION,
         "cardType": MODEL_CARD_REPORT_TYPE,
         "generatedAt": generated_at,
-        "modelName": metadata["modelName"],
-        "modelVersion": metadata["modelVersion"],
-        "modelFamily": metadata["modelFamily"],
-        "trainingMode": metadata["trainingMode"],
-        "featureContractVersion": metadata["featureContractVersion"],
-        "referenceQuality": metadata["referenceQuality"],
+        "evaluationSubject": dict(summary["evaluationSubject"]),
+        "metricsSubject": summary["metricsSubject"],
+        "metricBasis": summary["metricBasis"],
         "allowedUsageModes": metadata["allowedUsageModes"],
         "productionApproval": PRODUCTION_APPROVAL,
         "promotionStatus": PROMOTION_STATUS,
@@ -183,6 +180,11 @@ def _validate_summary(summary: dict[str, Any]) -> None:
         raise Fdp123ModelCardValidationError(f"evaluation summary missing required fields: {', '.join(extra_missing)}")
     if summary.get("reportType") != EXPECTED_EVALUATION_REPORT_TYPE:
         raise Fdp123ModelCardValidationError("evaluation summary reportType unsupported")
+    _validate_evaluation_subject(summary.get("evaluationSubject"))
+    if summary.get("metricsSubject") != METRICS_SUBJECT:
+        raise Fdp123ModelCardValidationError("evaluation summary metricsSubject unsupported")
+    if summary.get("metricBasis") != METRIC_BASIS:
+        raise Fdp123ModelCardValidationError("evaluation summary metricBasis unsupported")
     normalize_rfc3339_timestamp(summary.get("generatedAt"), "evaluation summary generatedAt")
     dataset_metadata = _required_object(summary, "datasetMetadata")
     if dataset_metadata.get("datasetVersion") != EXPECTED_DATASET_VERSION:
@@ -205,6 +207,8 @@ def _validate_summary(summary: dict[str, Any]) -> None:
         )
     for field in sorted(REQUIRED_ALERT_MATRIX_FIELDS):
         _metric_object(matrix, field)
+    if quality_metrics.get("metricBasis") != METRIC_BASIS:
+        raise Fdp123ModelCardValidationError("qualityMetrics metricBasis unsupported")
     dataset_summary = _required_object(quality_metrics, "datasetSummary")
     records_evaluated = _required_non_negative_int(dataset_summary, "recordsEvaluated")
     validate_class_count_integrity(
@@ -214,6 +218,11 @@ def _validate_summary(summary: dict[str, Any]) -> None:
     )
     if not isinstance(summary.get("warnings"), list):
         raise Fdp123ModelCardValidationError("warnings must be a list")
+
+
+def _validate_evaluation_subject(raw: Any) -> None:
+    if raw != EVALUATION_SUBJECT:
+        raise Fdp123ModelCardValidationError("evaluation summary evaluationSubject unsupported")
 
 
 def _metric_object(raw: dict[str, Any], field: str) -> None:
@@ -241,16 +250,16 @@ def _metric_object(raw: dict[str, Any], field: str) -> None:
             raise Fdp123ModelCardValidationError(f"{field}.reason required when unavailable")
 
 
-def _model_metadata(raw: dict[str, Any]) -> dict[str, Any]:
+def _governance_metadata(raw: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, dict):
-        raise Fdp123ModelCardValidationError("model metadata must be an object")
+        raise Fdp123ModelCardValidationError("governance metadata must be an object")
     _reject_forbidden_input(raw)
-    extra = sorted(set(raw) - ALLOWED_MODEL_METADATA_FIELDS)
+    extra = sorted(set(raw) - ALLOWED_GOVERNANCE_METADATA_FIELDS)
     if extra:
-        raise Fdp123ModelCardValidationError(f"model metadata contains unsupported fields: {', '.join(extra)}")
-    missing = sorted(REQUIRED_MODEL_METADATA_FIELDS - set(raw))
+        raise Fdp123ModelCardValidationError(f"governance metadata contains unsupported fields: {', '.join(extra)}")
+    missing = sorted(REQUIRED_GOVERNANCE_METADATA_FIELDS - set(raw))
     if missing:
-        raise Fdp123ModelCardValidationError(f"model metadata missing required fields: {', '.join(missing)}")
+        raise Fdp123ModelCardValidationError(f"governance metadata missing required fields: {', '.join(missing)}")
     return dict(raw)
 
 
@@ -289,10 +298,11 @@ def _read_required_bytes(path: Path, label: str, max_bytes: int) -> bytes:
         raise Fdp123ModelCardValidationError(f"{label} missing")
     if not path.is_file():
         raise Fdp123ModelCardValidationError(f"{label} must be a file")
-    size = path.stat().st_size
-    if size > max_bytes:
+    with path.open("rb") as handle:
+        payload = handle.read(max_bytes + 1)
+    if len(payload) > max_bytes:
         raise Fdp123ModelCardValidationError(f"{label} exceeds maximum byte size")
-    return path.read_bytes()
+    return payload
 
 
 def _load_json_bytes(payload: bytes, label: str) -> dict[str, Any]:

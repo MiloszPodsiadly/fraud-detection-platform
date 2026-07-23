@@ -6,6 +6,7 @@ from typing import Any
 
 from offline_evaluation.fdp123.dataset_reader import read_fdp123_feedback_dataset_jsonl
 from offline_evaluation.fdp123.disagreement_report import build_fdp123_disagreement_report
+from offline_evaluation.fdp123.evaluation_contract import EVALUATION_SUBJECT, METRIC_BASIS, METRICS_SUBJECT
 from offline_evaluation.fdp123.metrics import build_fdp123_metrics
 from offline_evaluation.fdp123.models import Fdp123Dataset
 from offline_evaluation.fdp123.report_writer import REPORT_TYPE, write_fdp123_reports
@@ -23,7 +24,10 @@ def build_fdp123_evaluation_reports(
         "evaluationSummary": {
             "datasetMetadata": dataset.metadata.as_report_dict(),
             "disagreementSummary": disagreement["summary"],
+            "evaluationSubject": dict(EVALUATION_SUBJECT),
             "generatedAt": generated,
+            "metricBasis": METRIC_BASIS,
+            "metricsSubject": METRICS_SUBJECT,
             "qualityMetrics": metrics,
             "reportType": REPORT_TYPE,
             "warnings": warnings,
