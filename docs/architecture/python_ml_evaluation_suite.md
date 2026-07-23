@@ -137,9 +137,16 @@ values. They are allowed only in local/internal disagreement rows. They are not 
 contain raw IDs, free text, payloads, tokens, or secrets.
 
 FDP-123/FDP-124 Model Card v1 is a separate local/internal governance artifact generated from FDP-124 aggregate
-artifacts only. It validates the FDP-124 manifest before trusting `evaluation_summary.json`, does not read
-`disagreement_report.jsonl` in v1, does not read the raw FDP-123 dataset, and does not expose raw IDs or per-record
-data. It is not model promotion, not production approval, not threshold recommendation, not payment authorization,
-and not workflow or case automation. Its `allowedUsageModes` values are documentation semantics only, not runtime
-permissions. `productionApproval` remains `NOT_APPROVED`, and `promotionStatus` remains
-`NOT_EVALUATED_FOR_PROMOTION`.
+artifacts only. It accepts only canonical `manifest.json` and `evaluation_summary.json` inputs from the FDP-124
+artifact set, validates `reportType = FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1` and
+`artifactSetVersion = fdp123-report-artifact-set-v1`, bounds input size before full read, and preserves manifest
+`sha256` and `sizeBytes` checks. It does not read `disagreement_report.jsonl` in v1, does not copy FDP-124
+`disagreementSummary` into Model Card v1, does not read the raw FDP-123 dataset, and does not expose raw IDs or
+per-record data. Its binary class-count invariant is
+`positiveClassCount + negativeClassCount == recordsEvaluated`. Its timestamps are real RFC3339 date-times with
+explicit timezone, normalized to UTC `Z`, and checked so the Model Card `generatedAt` instant is not earlier than the
+evaluation evidence instant. `sourceManifestSha256` is only a local lineage and integrity fingerprint, not a
+signature, notarization, external attestation, immutability guarantee, or independent trust anchor. It is not model
+promotion, not production approval, not threshold recommendation, not payment authorization, and not workflow or case
+automation. Its `allowedUsageModes` values are documentation semantics only, not runtime permissions.
+`productionApproval` remains `NOT_APPROVED`, and `promotionStatus` remains `NOT_EVALUATED_FOR_PROMOTION`.
