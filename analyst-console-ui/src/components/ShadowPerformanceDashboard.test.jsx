@@ -132,9 +132,9 @@ describe("ShadowPerformanceDashboard", () => {
     renderDashboard404();
 
     expect(screen.getByRole("heading", { name: "No current Shadow Performance Summary" })).toBeInTheDocument();
-    expect(screen.getByText("The dashboard reached the authorized FDP-106 read API, but no current validated Shadow Performance Summary is available.")).toBeInTheDocument();
+    expect(screen.getByText("The dashboard reached the authorized v2 read API, but no current validated Shadow Performance Summary is available.")).toBeInTheDocument();
     expect(screen.getByText("This is not a model quality result and it is not a failure of the dashboard. The UI does not display fake, zero, sample, fallback, or stale metrics when the API returns 404.")).toBeInTheDocument();
-    expect(screen.getByText("Shadow performance metrics will appear here only after a valid FDP-105 Shadow Performance Summary is available through the FDP-106 endpoint.")).toBeInTheDocument();
+    expect(screen.getByText("Shadow performance metrics will appear here only after a valid Shadow Performance Summary v2 is available through the v2 endpoint.")).toBeInTheDocument();
   });
 
   it("rendersRichEmptyStateOn404", () => {
@@ -149,7 +149,7 @@ describe("ShadowPerformanceDashboard", () => {
   it("showsEndpointNameOn404", () => {
     renderDashboard404();
 
-    expect(screen.getByText("GET /api/v1/governance/shadow-performance/summary/current")).toBeInTheDocument();
+    expect(screen.getByText("GET /api/v2/governance/shadow-performance/summary/current")).toBeInTheDocument();
   });
 
   it("showsStatusCodeOn404", () => {
@@ -173,7 +173,7 @@ describe("ShadowPerformanceDashboard", () => {
   it("showsFdp106DataSourceOn404", () => {
     renderDashboard404();
 
-    expect(screen.getByText("FDP-106 Authorized Read API")).toBeInTheDocument();
+    expect(screen.getByText("Authorized Shadow Performance Summary v2 read API")).toBeInTheDocument();
   });
 
   it("showsFallbackMetricsDisabledOn404", () => {
@@ -654,7 +654,7 @@ function shadowSummary(overrides = {}) {
   return {
     reportType: "SHADOW_PERFORMANCE_SUMMARY_V2",
     summaryVersion: "shadow-performance-summary-v2",
-    generatedAt: "2026-06-08T02:00:00Z",
+    generatedAt: "2026-06-13T02:00:00Z",
     evaluationSubject: {
       subjectType: "PLATFORM_RECOMMENDATION",
       sourceComponent: "ENGINE_INTELLIGENCE_PROJECTION",
@@ -680,10 +680,13 @@ function shadowSummary(overrides = {}) {
       evaluationPurpose: "OFFLINE_DIAGNOSTIC",
       evaluationReportType: "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
       evaluationReportVersion: "FDP-124",
+      evaluationReportGeneratedAt: "2026-06-10T00:00:00Z",
+      evaluationCardGeneratedAt: "2026-06-12T00:00:00Z",
       evaluationArtifactSetVersion: "fdp123-report-artifact-set-v1",
       datasetVersion: "feedback-dataset-v1",
       datasetTimeBasis: "FEEDBACK_CREATED_AT",
-      sourceManifestSha256: "a".repeat(64)
+      sourceManifestSha256: "a".repeat(64),
+      sourceEvaluationCardManifestSha256: "b".repeat(64)
     },
     evaluationPopulation: {
       recordsEvaluated: 5,

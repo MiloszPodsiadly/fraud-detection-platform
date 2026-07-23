@@ -309,7 +309,7 @@ function shadowSummary() {
   return {
     reportType: "SHADOW_PERFORMANCE_SUMMARY_V2",
     summaryVersion: "shadow-performance-summary-v2",
-    generatedAt: "2026-06-08T02:00:00Z",
+    generatedAt: "2026-06-13T02:00:00Z",
     evaluationSubject: {
       subjectType: "PLATFORM_RECOMMENDATION",
       sourceComponent: "ENGINE_INTELLIGENCE_PROJECTION",
@@ -335,10 +335,13 @@ function shadowSummary() {
       evaluationPurpose: "OFFLINE_DIAGNOSTIC",
       evaluationReportType: "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
       evaluationReportVersion: "FDP-124",
+      evaluationReportGeneratedAt: "2026-06-10T00:00:00Z",
+      evaluationCardGeneratedAt: "2026-06-12T00:00:00Z",
       evaluationArtifactSetVersion: "fdp123-report-artifact-set-v1",
       datasetVersion: "feedback-dataset-v1",
       datasetTimeBasis: "FEEDBACK_CREATED_AT",
-      sourceManifestSha256: "a".repeat(64)
+      sourceManifestSha256: "a".repeat(64),
+      sourceEvaluationCardManifestSha256: "b".repeat(64)
     },
     evaluationPopulation: {
       recordsEvaluated: 5,
@@ -376,7 +379,7 @@ function promotionReadinessReport() {
         present: true,
         reportType: "SHADOW_PERFORMANCE_SUMMARY_V2",
         summaryVersion: "shadow-performance-summary-v2",
-        generatedAt: "2026-06-08T02:00:00Z"
+        generatedAt: "2026-06-13T02:00:00Z"
       },
       minimumDiagnosticEvidenceRecords: 1,
       recordsEvaluated: 3

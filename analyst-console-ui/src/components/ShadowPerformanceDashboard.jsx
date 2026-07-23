@@ -55,7 +55,7 @@ export function ShadowPerformanceDashboard({
           <p className="eyebrow">Shadow diagnostics</p>
           <h2 {...headingProps}>Shadow Performance Summary</h2>
           <p className="sectionCopy">
-            Current read-only diagnostic summary from the FDP-106 governance endpoint.
+          Current read-only diagnostic summary from the v2 governance endpoint.
           </p>
         </div>
       </div>
@@ -162,10 +162,13 @@ function ShadowPerformanceEvaluationPanel({ evaluation }) {
         ["Evaluation purpose", evaluation.evaluationPurpose],
         ["Evaluation report type", evaluation.evaluationReportType],
         ["Evaluation report version", evaluation.evaluationReportVersion],
+        ["Evaluation report generated", evaluation.evaluationReportGeneratedAt],
+        ["Evaluation card generated", evaluation.evaluationCardGeneratedAt],
         ["Metric basis", summaryMetricBasis(evaluation)],
         ["Dataset time basis", evaluation.datasetTimeBasis],
         ["Dataset version", evaluation.datasetVersion],
-        ["Source manifest SHA-256", evaluation.sourceManifestSha256]
+        ["Source manifest SHA-256", evaluation.sourceManifestSha256],
+        ["Evaluation card manifest SHA-256", evaluation.sourceEvaluationCardManifestSha256]
       ]} />
     </ShadowSection>
   );
@@ -268,16 +271,16 @@ function ShadowPerformanceNoCurrentSummary({ onRetry }) {
     <div className="statePanel warningPanel shadowPerformanceEmptyState" role="alert">
       <ShadowPerformanceDiagnosticBanner />
       <div className="shadowPerformanceEmptyIntro">
-        <p className="eyebrow">FDP-106 current summary</p>
+        <p className="eyebrow">v2 current summary</p>
         <h3>No current Shadow Performance Summary</h3>
         <p>
-          The dashboard reached the authorized FDP-106 read API, but no current validated Shadow Performance Summary is available.
+          The dashboard reached the authorized v2 read API, but no current validated Shadow Performance Summary is available.
         </p>
         <p>
           This is not a model quality result and it is not a failure of the dashboard. The UI does not display fake, zero, sample, fallback, or stale metrics when the API returns 404.
         </p>
         <p>
-          Shadow performance metrics will appear here only after a valid FDP-105 Shadow Performance Summary is available through the FDP-106 endpoint.
+          Shadow performance metrics will appear here only after a valid Shadow Performance Summary v2 is available through the v2 endpoint.
         </p>
         <p>
           This 404 state is not production approval, not promotion readiness, not threshold recommendation, not payment authorization, not automatic decisioning, and not analyst recommendation logic.
@@ -285,9 +288,9 @@ function ShadowPerformanceNoCurrentSummary({ onRetry }) {
       </div>
       <ShadowSection title="Technical context">
         <DefinitionList rows={[
-          ["Endpoint", "GET /api/v1/governance/shadow-performance/summary/current"],
+          ["Endpoint", "GET /api/v2/governance/shadow-performance/summary/current"],
           ["Status", "404 Not Found"],
-          ["Data source", "FDP-106 Authorized Read API"],
+          ["Data source", "Authorized Shadow Performance Summary v2 read API"],
           ["Current summary", "Unavailable"],
           ["Fallback metrics", "Disabled"],
           ["Demo/sample metrics", "Disabled"],
@@ -297,7 +300,7 @@ function ShadowPerformanceNoCurrentSummary({ onRetry }) {
       <ShadowSection title="What this means">
         <ul className="shadowPerformanceList">
           <li>The Shadow Performance dashboard route is working.</li>
-          <li>The FDP-106 endpoint was reached.</li>
+          <li>The authorized v2 endpoint was reached.</li>
           <li>No current validated Shadow Performance Summary is configured yet.</li>
           <li>No metrics are shown because showing fake or zero metrics would be misleading.</li>
           <li>Missing summary does not mean the model is approved, rejected, production-ready, or unsafe.</li>
@@ -308,12 +311,12 @@ function ShadowPerformanceNoCurrentSummary({ onRetry }) {
           To display metrics, the backend environment must provide a current validated Shadow Performance Summary produced from the governed artifact chain:
         </p>
         <ol className="shadowPerformanceChain">
-          <li>FDP-102 feedback dataset export</li>
-          <li>FDP-103 offline evaluation report</li>
-          <li>FDP-104 Platform Recommendation Evaluation Card v1</li>
-          <li>FDP-105 Shadow Performance Summary v2</li>
-          <li>FDP-106 authorized read API</li>
-          <li>FDP-107 dashboard</li>
+          <li>FDP-123 bounded feedback dataset</li>
+          <li>FDP-124 evaluation artifact set</li>
+          <li>Platform Recommendation Evaluation Card v1 artifact set</li>
+          <li>Shadow Performance Summary v2</li>
+          <li>Authorized v2 read API</li>
+          <li>Analyst Console diagnostic dashboard</li>
         </ol>
       </ShadowSection>
       {onRetry && <button className="secondaryButton" type="button" onClick={onRetry}>Try again</button>}
@@ -384,7 +387,7 @@ function isValidSummary(summary) {
   if (!RATE_METRIC_FIELDS.every((field) => isMetricValue(summary.metrics[field]))) {
     return false;
   }
-  return true;
+  return isOrderedTimestamp(summary.evaluation.evaluationCardGeneratedAt, summary.generatedAt);
 }
 
 function isObject(value) {
@@ -409,9 +412,13 @@ function isValidGovernance(governance) {
 function isValidEvaluation(evaluation) {
   return isObject(evaluation)
     && Object.entries(REQUIRED_EVALUATION).every(([field, value]) => evaluation[field] === value)
+    && isString(evaluation.evaluationReportGeneratedAt)
+    && isString(evaluation.evaluationCardGeneratedAt)
+    && isOrderedTimestamp(evaluation.evaluationReportGeneratedAt, evaluation.evaluationCardGeneratedAt)
     && isString(evaluation.evaluationArtifactSetVersion)
     && isString(evaluation.datasetVersion)
-    && /^[a-f0-9]{64}$/.test(evaluation.sourceManifestSha256);
+    && /^[a-f0-9]{64}$/.test(evaluation.sourceManifestSha256)
+    && /^[a-f0-9]{64}$/.test(evaluation.sourceEvaluationCardManifestSha256);
 }
 
 function isMetricValue(metric) {
@@ -430,6 +437,12 @@ function isMetricValue(metric) {
 
 function isDiagnosticCount(value) {
   return Number.isInteger(value) && value >= 0 && value <= MAX_DIAGNOSTIC_COUNT;
+}
+
+function isOrderedTimestamp(earlier, later) {
+  const earlierTime = Date.parse(earlier);
+  const laterTime = Date.parse(later);
+  return Number.isFinite(earlierTime) && Number.isFinite(laterTime) && earlierTime <= laterTime;
 }
 
 function isSafeStringArray(value) {
