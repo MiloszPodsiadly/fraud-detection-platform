@@ -5133,7 +5133,7 @@ components:
         generatedAt:
           type: string
           format: date-time
-          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$'
+          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$'
         evaluationSubject:
           $ref: "#/components/schemas/ShadowPerformanceEvaluationSubjectResponse"
         metricBasis:
@@ -5185,7 +5185,7 @@ components:
         generatedAt:
           type: string
           format: date-time
-          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$'
+          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$'
         governanceStatus:
           type: string
           enum: [DIAGNOSTIC_ONLY]
@@ -5234,7 +5234,7 @@ components:
                 generatedAt:
                   type: string
                   format: date-time
-                  pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$'
+                  pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$'
             minimumDiagnosticEvidenceRecords:
               type: integer
               minimum: 1
@@ -5268,7 +5268,7 @@ components:
                 generatedAt:
                   type: string
                   format: date-time
-                  pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$'
+                  pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$'
                 sourceEvaluationCardManifestSha256:
                   type: string
                   pattern: '^[a-f0-9]{64}$'
@@ -5461,12 +5461,12 @@ components:
         evaluationReportGeneratedAt:
           type: string
           format: date-time
-          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$'
+          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$'
           description: UTC-normalized timestamp from the source FDP-123/FDP-124 evaluation report. Must be less than or equal to evaluationCardGeneratedAt.
         evaluationCardGeneratedAt:
           type: string
           format: date-time
-          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$'
+          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$'
           description: UTC-normalized timestamp from the Platform Recommendation Evaluation Card. Must be greater than or equal to evaluationReportGeneratedAt and less than or equal to the summary generatedAt.
         evaluationArtifactSetVersion:
           type: string

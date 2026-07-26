@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PromotionReviewReadinessReportValidatorTest {
 
@@ -15,6 +16,31 @@ class PromotionReviewReadinessReportValidatorTest {
     void acceptsCanonicalValidReport() {
         assertThatCode(() -> validator.validate(PromotionReviewReadinessReportTestFixtures.validReport()))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    void acceptsCanonicalTimestampPrecision() {
+        for (String generatedAt : List.of(
+                "2026-06-14T00:00:00Z",
+                "2026-06-14T00:00:00.1Z",
+                "2026-06-14T00:00:00.123456Z"
+        )) {
+            assertThatCode(() -> validator.validate(withGeneratedAt(generatedAt)))
+                    .doesNotThrowAnyException();
+        }
+    }
+
+    @Test
+    void rejectsNonCanonicalTimestampEncodings() {
+        for (String generatedAt : List.of(
+                "2026-06-14T00:00:00+00:00",
+                "2026-06-14T00:00:00.1234567Z",
+                "2026-06-14T00:00:00",
+                "2026-13-14T00:00:00Z"
+        )) {
+            assertThatThrownBy(() -> validator.validate(withGeneratedAt(generatedAt)))
+                    .isInstanceOf(PromotionReviewReadinessReportValidationException.class);
+        }
     }
 
     @Test
@@ -88,6 +114,31 @@ class PromotionReviewReadinessReportValidatorTest {
             List<PromotionReviewReadinessReport.PromotionReviewReadinessCheck> checks
     ) {
         return report(source, source.readinessStatus(), source.inputs(), source.checkInputs(), checks, source.reasonCodes());
+    }
+
+    private PromotionReviewReadinessReport withGeneratedAt(String generatedAt) {
+        PromotionReviewReadinessReport source = PromotionReviewReadinessReportTestFixtures.validReport();
+        return new PromotionReviewReadinessReport(
+                source.reportType(),
+                source.reportVersion(),
+                generatedAt,
+                source.governanceStatus(),
+                source.readinessStatus(),
+                source.diagnosticOnly(),
+                source.notPromotionApproval(),
+                source.notThresholdRecommendation(),
+                source.notProductionDecisioning(),
+                source.notPaymentAuthorization(),
+                source.notAutomaticDecisioning(),
+                source.notAnalystRecommendation(),
+                source.inputs(),
+                source.checkInputs(),
+                source.checks(),
+                source.reasonCodes(),
+                source.warnings(),
+                source.limitations(),
+                source.banner()
+        );
     }
 
     private PromotionReviewReadinessReport report(

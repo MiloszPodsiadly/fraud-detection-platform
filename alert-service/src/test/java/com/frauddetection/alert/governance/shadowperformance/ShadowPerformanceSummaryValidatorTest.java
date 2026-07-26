@@ -35,14 +35,28 @@ class ShadowPerformanceSummaryValidatorTest {
 
     @Test
     void acceptsIsoInstantGeneratedAt() {
-        assertThatCode(() -> validator.validate(replaceGeneratedAt("2026-06-13T02:00:00Z")))
-                .doesNotThrowAnyException();
+        for (String generatedAt : List.of(
+                "2026-06-13T02:00:00Z",
+                "2026-06-13T02:00:00.1Z",
+                "2026-06-13T02:00:00.123456Z"
+        )) {
+            assertThatCode(() -> validator.validate(replaceGeneratedAt(generatedAt)))
+                    .doesNotThrowAnyException();
+        }
     }
 
     @Test
     void rejectsNonIsoGeneratedAt() {
-        assertThatThrownBy(() -> validator.validate(replaceGeneratedAt("2026-06-08 02:00:00")))
-                .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
+        for (String generatedAt : List.of(
+                "2026-06-08 02:00:00",
+                "2026-06-13T02:00:00.1234567Z",
+                "2026-06-13T02:00:00+00:00",
+                "2026-06-13T02:00:00",
+                "2026-13-13T02:00:00Z"
+        )) {
+            assertThatThrownBy(() -> validator.validate(replaceGeneratedAt(generatedAt)))
+                    .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
+        }
     }
 
     @Test

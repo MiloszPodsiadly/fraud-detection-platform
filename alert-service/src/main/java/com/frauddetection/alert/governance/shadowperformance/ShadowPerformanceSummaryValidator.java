@@ -15,7 +15,7 @@ class ShadowPerformanceSummaryValidator {
     private static final Pattern MACHINE_CODE_PATTERN = Pattern.compile("^[A-Z][A-Z0-9_]{0,127}$");
     private static final Pattern SHA256_PATTERN = Pattern.compile("^[a-f0-9]{64}$");
     private static final Pattern RFC3339_TIMESTAMP_PATTERN = Pattern.compile(
-            "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|[+-]\\d{2}:\\d{2})$"
+            "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
     );
     private static final Set<String> SAFE_LIMITATIONS = Set.of(
             "ANALYST_FEEDBACK_LABELS_ARE_NOT_LEGAL_GROUND_TRUTH",

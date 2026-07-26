@@ -109,6 +109,26 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
     }
 
     @Test
+    void throwsUnavailableWhenManifestGeneratedAtUsesEquivalentOffsetEncoding() throws Exception {
+        Path artifact = writeSummary(validSummary());
+        String json = Files.readString(artifact);
+        Files.writeString(artifact.resolveSibling("manifest.json"), manifestFor(json, "2026-06-13T02:00:00+00:00"));
+
+        assertUnavailable(provider(artifact));
+    }
+
+    @Test
+    void acceptsManifestGeneratedAtWithMatchingSixFractionalDigits() throws Exception {
+        String json = validSummaryJson().replace("2026-06-13T02:00:00Z", "2026-06-13T02:00:00.123456Z");
+        Path artifact = writeJson(json);
+
+        Optional<ShadowPerformanceSummary> result = provider(artifact).currentSummary();
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().generatedAt()).isEqualTo("2026-06-13T02:00:00.123456Z");
+    }
+
+    @Test
     void throwsUnavailableWhenSummaryOrManifestContainsDuplicateJsonKeys() throws Exception {
         String duplicateSummary = validSummaryJson().replaceFirst(
                 "\\{",
@@ -618,9 +638,26 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
     }
 
     private String manifestFor(String summaryPayload) {
+        return manifestFor(summaryPayload, generatedAt(summaryPayload));
+    }
+
+    private String manifestFor(String summaryPayload, String generatedAt) {
         return """
                 {"artifactSetVersion":"shadow-performance-artifact-set-v1","files":[{"path":"current-summary.json","sha256":"%s","sizeBytes":%d}],"generatedAt":"2026-06-13T02:00:00Z","reportType":"SHADOW_PERFORMANCE_ARTIFACT_SET_V1"}
-                """.formatted(sha256(summaryPayload), summaryPayload.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
+                """.replace("2026-06-13T02:00:00Z", generatedAt)
+                .formatted(sha256(summaryPayload), summaryPayload.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
+    }
+
+    private String generatedAt(String json) {
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            JsonNode generatedAt = node.get("generatedAt");
+            return generatedAt != null && generatedAt.isTextual()
+                    ? generatedAt.textValue()
+                    : "2026-06-13T02:00:00Z";
+        } catch (Exception exception) {
+            return "2026-06-13T02:00:00Z";
+        }
     }
 
     private String sha256(String payload) {

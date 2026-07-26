@@ -242,6 +242,30 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
     }
 
     @Test
+    void configuredManifestGeneratedAtWithEquivalentOffsetMapsToUnavailable() throws Exception {
+        Path artifact = writeReport(PromotionReviewReadinessReportTestFixtures.validReport());
+        Files.writeString(
+                artifact.resolveSibling("manifest.json"),
+                manifestFor(Files.readString(artifact), null, null, "2026-06-14T00:00:00+00:00")
+        );
+
+        assertUnavailable(provider(artifact));
+    }
+
+    @Test
+    void configuredManifestGeneratedAtWithMatchingSixFractionalDigitsIsAccepted() throws Exception {
+        JsonNode root = objectMapper.readTree(validReportJson());
+        ((ObjectNode) root).put("generatedAt", "2026-06-14T00:00:00.123456Z");
+        String json = objectMapper.writeValueAsString(root);
+        Path artifact = writeJson(json);
+
+        Optional<PromotionReviewReadinessReport> result = provider(artifact).currentReport();
+
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().generatedAt()).isEqualTo("2026-06-14T00:00:00.123456Z");
+    }
+
+    @Test
     void configuredDuplicateJsonKeysMapToUnavailable() throws Exception {
         String duplicateRoot = validReportJson().replaceFirst(
                 "\\{",
@@ -353,14 +377,30 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
     }
 
     private String manifestFor(String json, String sha256, Long sizeBytes) {
+        return manifestFor(json, sha256, sizeBytes, generatedAt(json));
+    }
+
+    private String manifestFor(String json, String sha256, Long sizeBytes, String generatedAt) {
         return """
                 {"artifactSetVersion":"promotion-review-readiness-artifact-set-v1","files":[{"path":"%s","sha256":"%s","sizeBytes":%d}],"generatedAt":"%s","reportType":"PROMOTION_REVIEW_READINESS_ARTIFACT_SET_V1"}
                 """.formatted(
                 REPORT_FILENAME,
                 sha256 == null ? sha256(json) : sha256,
                 sizeBytes == null ? json.getBytes(java.nio.charset.StandardCharsets.UTF_8).length : sizeBytes,
-                PromotionReviewReadinessReportTestFixtures.validReport().generatedAt()
+                generatedAt
         );
+    }
+
+    private String generatedAt(String json) {
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            JsonNode generatedAt = node.get("generatedAt");
+            return generatedAt != null && generatedAt.isTextual()
+                    ? generatedAt.textValue()
+                    : PromotionReviewReadinessReportTestFixtures.validReport().generatedAt();
+        } catch (Exception exception) {
+            return PromotionReviewReadinessReportTestFixtures.validReport().generatedAt();
+        }
     }
 
     private String sha256(String json) {

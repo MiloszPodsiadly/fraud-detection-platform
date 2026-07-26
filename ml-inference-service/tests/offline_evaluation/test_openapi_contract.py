@@ -13,6 +13,7 @@ OPENAPI = ROOT / "docs" / "openapi" / "alert_service.openapi.yaml"
 PROMOTION_READINESS_UI_VALIDATOR = (
     ROOT / "analyst-console-ui" / "src" / "governance" / "promotionReviewReadinessReportValidation.js"
 )
+SHADOW_GOLDEN_FIXTURE = ROOT / "deployment" / "local-fixtures" / "shadow-performance" / "current-summary.json"
 
 
 class OpenApiContractTest(unittest.TestCase):
@@ -73,7 +74,7 @@ class OpenApiContractTest(unittest.TestCase):
     def test_governanceTimestampFieldsUseBoundedFractionalPrecisionPattern(self):
         document = yaml.safe_load(OPENAPI.read_text(encoding="utf-8"))
         schemas = document["components"]["schemas"]
-        expected_pattern = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$"
+        expected_pattern = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$"
         fields = [
             schemas["ShadowPerformanceSummaryResponse"]["properties"]["generatedAt"],
             schemas["ShadowPerformanceEvaluationResponse"]["properties"]["evaluationReportGeneratedAt"],
@@ -86,6 +87,24 @@ class OpenApiContractTest(unittest.TestCase):
         for field in fields:
             self.assertEqual("date-time", field["format"])
             self.assertEqual(expected_pattern, field["pattern"])
+
+    def test_shadowGoldenFixtureIdentityMatchesOpenApiClosedEnums(self):
+        document = yaml.safe_load(OPENAPI.read_text(encoding="utf-8"))
+        schemas = document["components"]["schemas"]
+        fixture = yaml.safe_load(SHADOW_GOLDEN_FIXTURE.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            schemas["ShadowPerformanceSummaryResponse"]["properties"]["reportType"]["enum"],
+            [fixture["reportType"]],
+        )
+        self.assertEqual(
+            schemas["ShadowPerformanceSummaryResponse"]["properties"]["summaryVersion"]["enum"],
+            [fixture["summaryVersion"]],
+        )
+        self.assertEqual(
+            schemas["ShadowPerformanceSummaryResponse"]["properties"]["banner"]["enum"],
+            [fixture["banner"]],
+        )
 
 
 if __name__ == "__main__":
