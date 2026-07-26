@@ -141,8 +141,8 @@ copies those values and rejects caller-controlled model identity. Its `metricBas
 diagnostic rather than direct model performance. It does not read `disagreement_report.jsonl` in v1, does not copy
 FDP-124 `disagreementSummary` into Platform Recommendation Evaluation Card v1, does not read the raw FDP-123 dataset, and does not expose raw IDs
 or per-record data. Its evidence counts use the FDP-123 `MAX_DATASET_RECORDS = 1000` limit. Its binary class-count invariant is
-`positiveClassCount + negativeClassCount == recordsEvaluated`. Its timestamps are real RFC3339 date-times with explicit timezone,
-normalized to UTC `Z`, and checked so the Platform Recommendation Evaluation Card `generatedAt` instant is not earlier than the
+`positiveClassCount + negativeClassCount == recordsEvaluated`. Its published governance timestamps are real RFC3339
+UTC `Z` date-times with optional 1-6 digit fractional seconds, and checked so the Platform Recommendation Evaluation Card `generatedAt` instant is not earlier than the
 evaluation evidence instant. `sourceManifestSha256` is only a local lineage and integrity fingerprint, not a
 signature, notarization, external attestation, immutability guarantee, or independent trust anchor. The source manifest
 SHA-256 is not a signature, notarization, external attestation, immutability guarantee, or independent trust anchor. It is

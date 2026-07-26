@@ -85,7 +85,7 @@ This check validates that the consumed summary was derived from the current Plat
 
 The report also includes explicit non-decisioning flags, including `notAnalystRecommendation`.
 
-The report carries immutable `checkInputs`, including the source Shadow Performance manifest SHA-256. Validators derive
+The report carries stored `checkInputs`, including the source Shadow Performance manifest SHA-256. Validators derive
 checks, reason codes, and readiness status from those inputs and reject reports where stored checks have been edited.
 The SHA-256 values are local integrity and lineage fingerprints over exact local bytes. They are not signatures, producer
 authentication, independent attestation, legal proof, or protection against a privileged deployment writer replacing both
@@ -96,6 +96,10 @@ and manifest files, validates the temporary artifact set, removes the old final 
 replaces the fresh manifest last. Symlink checks and `O_NOFOLLOW` are misuse hardening; local TOCTOU is not advertised as
 fully eliminated on every platform. Atomic replacement alone is not power-loss durability unless files and directories are
 explicitly synchronized, which is outside this local generator scope.
+
+Published report and manifest timestamps must be RFC3339 UTC `Z` strings with optional 1-6 digit fractional seconds.
+The manifest `generatedAt` must exactly equal the report `generatedAt`; equivalent offset encodings such as `+00:00`
+are rejected rather than normalized while reading a published artifact set.
 
 ## Non-Decisioning Boundary
 

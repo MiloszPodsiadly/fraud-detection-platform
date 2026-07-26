@@ -56,7 +56,7 @@ The current summary is not consumed as a standalone file. The configured `curren
 
 - `reportType = SHADOW_PERFORMANCE_ARTIFACT_SET_V1`.
 - `artifactSetVersion = shadow-performance-artifact-set-v1`.
-- `generatedAt` equal to the summary `generatedAt`.
+- `generatedAt` exactly equal to the summary `generatedAt`.
 - exactly one file entry for `current-summary.json`.
 - lowercase SHA-256 for the exact summary bytes consumed by the provider.
 - `sizeBytes` equal to the exact byte length consumed by the provider.
@@ -64,6 +64,9 @@ The current summary is not consumed as a standalone file. The configured `curren
 The manifest is validated before the summary can be returned. Missing, malformed, unsupported, oversized, symlinked, or semantically invalid manifests result in 503. A hash mismatch, size mismatch, timestamp mismatch, wrong filename, extra file entry, wrong report type, or wrong artifact-set version also results in 503.
 
 The SHA-256 value is a local integrity fingerprint for the deployment-controlled artifact set. It is not a digital signature, producer identity, external attestation, or protection against a privileged writer replacing both `current-summary.json` and `manifest.json`.
+
+Published summary and manifest timestamps must be RFC3339 UTC `Z` strings with optional 1-6 digit fractional seconds.
+Equivalent offset encodings such as `+00:00` are rejected instead of normalized while reading a configured artifact set.
 
 ## Failure Semantics
 

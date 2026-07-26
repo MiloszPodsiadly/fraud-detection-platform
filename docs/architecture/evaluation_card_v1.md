@@ -73,7 +73,8 @@ positiveClassCount + negativeClassCount == recordsEvaluated
 The invariant is enforced at the FDP-124 source boundary and again when validating final Platform Recommendation Evaluation Card
 `evaluationEvidence`. Evidence counts use the single FDP-123 hard limit, `MAX_DATASET_RECORDS = 1000`.
 
-Timestamps must be real RFC3339 date-times with explicit timezone. Accepted timestamps are normalized to UTC `Z`.
+Published governance timestamps must be real RFC3339 UTC date-times ending in `Z`, with optional 1-6 digit fractional
+seconds. Offset encodings such as `+00:00` are rejected at artifact-set boundaries instead of being silently rewritten.
 The final Platform Recommendation Evaluation Card `generatedAt` instant must be greater than or equal to
 `evaluationEvidence.evaluationGeneratedAt`.
 
@@ -108,17 +109,20 @@ Card field.
 
 The writer produces local/internal artifacts:
 
-- `evaluation_card.json`
-- `evaluation_card.md`
+- `platform_recommendation_evaluation_card.json`
+- `platform_recommendation_evaluation_card.md`
 - `manifest.json`
 
 The output manifest uses:
 
 - `reportType = PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1`
 - `artifactSetVersion = platform-recommendation-evaluation-card-artifact-set-v1`
+- `generatedAt` exactly equal to the card `generatedAt`
+- `sha256` and `sizeBytes` for the exact local bytes of both listed artifacts
 
-The writer uses a manifest-last pattern. A evaluation card artifact set is complete only when `manifest.json` exists and
-all listed hashes and sizes match. The CLI requires `--allow-output-root`.
+The writer uses a manifest-last pattern: invalidate the old final manifest, replace the final artifacts, then publish a
+fresh final manifest last. An evaluation card artifact set is complete only when `manifest.json` exists and all listed
+hashes and sizes match. The CLI requires `--allow-output-root`.
 
 The output does not include raw or per-record data such as evaluation record identifiers, transaction references,
 feedback identifiers, customer identifiers, correlation identifiers, notes, raw payloads, raw model requests or
