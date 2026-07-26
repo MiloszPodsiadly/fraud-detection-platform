@@ -1,4 +1,5 @@
 import json
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -134,6 +135,14 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
                 )
 
             self.assertFalse(paths.output.exists())
+
+    def test_nonStandardJsonNaNInReportFileRejected(self):
+        with workspace() as paths:
+            paths.output.parent.mkdir(parents=True, exist_ok=True)
+            paths.output.write_text('{"reportType":"PROMOTION_REVIEW_READINESS_REPORT_V1","generatedAt":NaN}', encoding="utf-8")
+
+            with self.assertRaises(PromotionReviewReadinessGenerationError):
+                validate_promotion_review_readiness_report_file(paths.output)
 
     def test_missingDiagnosticOnlyFlagsDoesNotPublishReport(self):
         with workspace() as paths:
@@ -304,6 +313,36 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
 
         self.assertEqual("INCONCLUSIVE", report["readinessStatus"])
         self.assertIn("ALERT_RECOMMENDED_RECALL_AVAILABLE_INCONCLUSIVE", report["reasonCodes"])
+
+    def test_checkInputsRejectNonFiniteMetricValues(self):
+        for value in (math.nan, math.inf, -math.inf):
+            with self.subTest(value=value):
+                report = build_report()
+                report["checkInputs"]["metrics"]["alertRecommendedRecall"] = {
+                    "available": True,
+                    "value": value,
+                    "reason": None,
+                }
+                report["checks"] = [
+                    {"name": check["name"], "status": "PASS", "severity": check["severity"]}
+                    for check in report["checks"]
+                ]
+                report["readinessStatus"] = "REVIEWABLE"
+                report["reasonCodes"] = []
+
+                with self.assertRaises(PromotionReviewReadinessValidationError):
+                    validate_promotion_review_readiness_report(report)
+
+    def test_reportSerializationRejectsNonFiniteNumbers(self):
+        report = build_report()
+        report["checkInputs"]["metrics"]["alertRecommendedRecall"] = {
+            "available": True,
+            "value": math.nan,
+            "reason": None,
+        }
+
+        with self.assertRaises(PromotionReviewReadinessValidationError):
+            promotion_review_readiness_report_json(report)
 
     def test_rejectsReportContainingOnlyOnePassCheck(self):
         report = build_report()

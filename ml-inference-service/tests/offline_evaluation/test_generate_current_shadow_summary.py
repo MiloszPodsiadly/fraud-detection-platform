@@ -75,6 +75,18 @@ class CurrentShadowSummaryGenerationTest(unittest.TestCase):
 
             self.assertFalse(paths.output.exists())
 
+    def test_nonStandardJsonNaNInEvaluationCardDoesNotWriteSummary(self):
+        with workspace() as paths:
+            paths.evaluation_card.write_text(
+                '{"cardVersion":"platform-recommendation-evaluation-card-v1","metricsSummary":{"alertRecommendedRecall":{"available":true,"value":NaN,"reason":null}}}',
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(CurrentSummaryGenerationError):
+                generate(paths)
+
+            self.assertFalse(paths.output.exists())
+
     def test_writesTempFileBeforeFinalPath(self):
         with workspace() as paths:
             payload = valid_payload(paths)

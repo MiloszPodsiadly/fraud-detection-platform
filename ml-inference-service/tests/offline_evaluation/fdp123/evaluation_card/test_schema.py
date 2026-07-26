@@ -1,3 +1,4 @@
+import math
 import unittest
 
 from offline_evaluation.fdp123.evaluation_card.schema import (
@@ -91,6 +92,11 @@ class Fdp123EvaluationCardSchemaTest(unittest.TestCase):
     def test_missingLimitationsRejected(self):
         self._assert_rejected(limitations=["SMALL_SAMPLE_SIZE_MAY_BE_INCONCLUSIVE"])
 
+    def test_duplicateLimitationsRejected(self):
+        limitations = sorted(REQUIRED_LIMITATIONS)
+        limitations.append(limitations[0])
+        self._assert_rejected(limitations=limitations)
+
     def test_missingGovernanceBoundaryRejected(self):
         self._assert_rejected(governanceBoundary=["NO_MODEL_PROMOTION"])
 
@@ -114,6 +120,21 @@ class Fdp123EvaluationCardSchemaTest(unittest.TestCase):
         metrics = valid_metrics()
         metrics["alertRecommendedRecall"] = {"available": True, "value": None, "reason": "NO_ACTUAL_POSITIVES"}
         self._assert_rejected(metricsSummary=metrics)
+
+    def test_metricAvailableRejectsNonFiniteNumbers(self):
+        for value in (math.nan, math.inf, -math.inf):
+            with self.subTest(value=value):
+                metrics = valid_metrics()
+                metrics["alertRecommendedRecall"] = {"available": True, "value": value, "reason": None}
+                self._assert_rejected(metricsSummary=metrics)
+
+    def test_metricAvailableAcceptsRealBounds(self):
+        for value in (0.0, 1.0):
+            with self.subTest(value=value):
+                metrics = valid_metrics()
+                metrics["alertRecommendedRecall"] = {"available": True, "value": value, "reason": None}
+                card = validate_evaluation_card(valid_evaluation_card(metricsSummary=metrics))
+                self.assertEqual(value, card["metricsSummary"]["alertRecommendedRecall"]["value"])
 
     def test_classCountsMustEqualRecordsEvaluated(self):
         card = valid_evaluation_card(evaluationEvidence=valid_evaluation_evidence(

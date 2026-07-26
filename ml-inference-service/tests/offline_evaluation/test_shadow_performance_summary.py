@@ -1,4 +1,5 @@
 import json
+import math
 import unittest
 
 from offline_evaluation.shadow_performance_schema import (
@@ -147,6 +148,25 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
         with self.assertRaises(ShadowPerformanceValidationError):
             write_shadow_performance_summary(summary)
 
+    def test_rejectsAvailableMetricWithNonFiniteValue(self):
+        for value in (math.nan, math.inf, -math.inf):
+            with self.subTest(value=value):
+                summary = self.summary()
+                summary["metrics"]["alertRecommendedRecall"] = {"available": True, "value": value, "reason": None}
+
+                with self.assertRaises(ShadowPerformanceValidationError):
+                    write_shadow_performance_summary(summary)
+
+    def test_acceptsAvailableMetricRealBounds(self):
+        for value in (0.0, 1.0):
+            with self.subTest(value=value):
+                summary = self.summary()
+                summary["metrics"]["alertRecommendedRecall"] = {"available": True, "value": value, "reason": None}
+
+                payload = write_shadow_performance_summary(summary)
+
+                self.assertEqual(value, json.loads(payload)["metrics"]["alertRecommendedRecall"]["value"])
+
     def test_rejectsAvailableMetricWithReason(self):
         summary = self.summary()
         summary["metrics"]["falseNegativeRate"] = {
@@ -190,6 +210,17 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
 
         with self.assertRaises(ShadowPerformanceValidationError):
             write_shadow_performance_summary(summary)
+
+    def test_rejectsEmptyOrDuplicateLimitations(self):
+        summary = self.summary()
+        summary["limitations"] = []
+        with self.assertRaises(ShadowPerformanceValidationError):
+            write_shadow_performance_summary(summary)
+
+        duplicate = self.summary()
+        duplicate["limitations"].append(duplicate["limitations"][0])
+        with self.assertRaises(ShadowPerformanceValidationError):
+            write_shadow_performance_summary(duplicate)
 
     def test_rejectsWrongPopulationArithmetic(self):
         summary = self.summary()

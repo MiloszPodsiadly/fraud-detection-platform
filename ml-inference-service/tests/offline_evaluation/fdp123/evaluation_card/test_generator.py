@@ -361,6 +361,41 @@ class Fdp123EvaluationCardGeneratorTest(unittest.TestCase):
             with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths)
 
+    def test_directSymlinkEvaluationSummaryRejected(self):
+        with self.artifacts() as paths:
+            target = paths["evaluationSummary"].with_name("target-evaluation_summary.json")
+            target.write_bytes(paths["evaluationSummary"].read_bytes())
+            paths["evaluationSummary"].unlink()
+            try:
+                paths["evaluationSummary"].symlink_to(target)
+            except OSError as exception:
+                self.skipTest(f"symlink creation unavailable: {exception}")
+
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
+                self.generate(paths)
+
+    def test_symlinkedParentDirectoryRejected(self):
+        with self.artifacts() as paths:
+            root = paths["evaluationSummary"].parent
+            target = root / "target"
+            target.mkdir()
+            for path in paths.values():
+                if path.is_file():
+                    (target / path.name).write_bytes(path.read_bytes())
+            link = root / "link"
+            try:
+                link.symlink_to(target, target_is_directory=True)
+            except OSError as exception:
+                self.skipTest(f"symlink creation unavailable: {exception}")
+
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
+                generate_evaluation_card_from_fdp124_artifacts(
+                    link / "evaluation_summary.json",
+                    link / "manifest.json",
+                    model_metadata(),
+                    PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT,
+                )
+
     def test_failsIfGovernanceMetadataMissingRequiredFields(self):
         with self.artifacts() as paths:
             metadata = model_metadata()

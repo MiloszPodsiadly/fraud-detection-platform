@@ -5322,13 +5322,13 @@ components:
               required: [alertRecommendedPrecision, alertRecommendedRecall, falsePositiveRate, falseNegativeRate]
               properties:
                 alertRecommendedPrecision:
-                  $ref: '#/components/schemas/ShadowPerformanceMetricResponse'
+                  $ref: '#/components/schemas/ShadowPerformanceMetricValueResponse'
                 alertRecommendedRecall:
-                  $ref: '#/components/schemas/ShadowPerformanceMetricResponse'
+                  $ref: '#/components/schemas/ShadowPerformanceMetricValueResponse'
                 falsePositiveRate:
-                  $ref: '#/components/schemas/ShadowPerformanceMetricResponse'
+                  $ref: '#/components/schemas/ShadowPerformanceMetricValueResponse'
                 falseNegativeRate:
-                  $ref: '#/components/schemas/ShadowPerformanceMetricResponse'
+                  $ref: '#/components/schemas/ShadowPerformanceMetricValueResponse'
         checks:
           type: array
           minItems: 17
