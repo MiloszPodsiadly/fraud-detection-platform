@@ -384,6 +384,7 @@ function promotionReadinessReport() {
       minimumDiagnosticEvidenceRecords: 1,
       recordsEvaluated: 3
     },
+    checkInputs: promotionReadinessCheckInputs(),
     checks: promotionReadinessChecks(),
     reasonCodes: [],
     warnings: [],
@@ -395,6 +396,42 @@ function promotionReadinessReport() {
       "OFFLINE_DIAGNOSTIC_AID_ONLY"
     ],
     banner: "Promotion review readiness is an offline diagnostic aid only. It is not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic."
+  };
+}
+
+function promotionReadinessCheckInputs() {
+  return {
+    sourceShadowSummaryManifestSha256: "a".repeat(64),
+    shadowPerformanceSummary: {
+      present: true,
+      reportType: "SHADOW_PERFORMANCE_SUMMARY_V2",
+      summaryVersion: "shadow-performance-summary-v2",
+      generatedAt: "2026-06-13T02:00:00Z",
+      sourceEvaluationCardManifestSha256: "b".repeat(64)
+    },
+    governance: {
+      governanceStatus: "DIAGNOSTIC_ONLY",
+      diagnosticOnly: true,
+      notProductionApproval: true,
+      notPromotionApproval: true,
+      notThresholdRecommendation: true,
+      notPaymentAuthorization: true,
+      notAutomaticDecisioning: true
+    },
+    evaluation: {
+      evaluationCardType: "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
+      evaluationCardVersion: "platform-recommendation-evaluation-card-v1",
+      evaluationReportType: "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"
+    },
+    metricBasis: "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK",
+    minimumDiagnosticEvidenceRecords: 1,
+    recordsEvaluated: 3,
+    metrics: {
+      alertRecommendedPrecision: metric(0.8),
+      alertRecommendedRecall: metric(0.75),
+      falsePositiveRate: metric(0.1),
+      falseNegativeRate: metric(0.2)
+    }
   };
 }
 

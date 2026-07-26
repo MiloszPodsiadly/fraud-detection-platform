@@ -7,7 +7,7 @@ const PROMOTION_REVIEW_READINESS_STATUSES = new Set([
   "NOT_REVIEWABLE",
   "REVIEWABLE"
 ]);
-const CHECK_STATUSES = new Set(["PASS", "WARN", "FAIL", "INCONCLUSIVE", "NOT_APPLICABLE"]);
+const CHECK_STATUSES = new Set(["PASS", "FAIL", "INCONCLUSIVE"]);
 const CHECK_SEVERITY_VALUES = new Set(["INFO", "LOW", "MEDIUM", "HIGH"]);
 const MAX_DIAGNOSTIC_RECORDS = 1000;
 const MAX_BANNER_LENGTH = 512;
@@ -18,6 +18,7 @@ const MAX_MACHINE_CODE_LENGTH = 128;
 const MAX_SUMMARY_VERSION_LENGTH = 32;
 const MACHINE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
 const RFC3339_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const REQUIRED_CHECK_NAMES = [
   "CURRENT_SUMMARY_PRESENT",
   "CURRENT_SUMMARY_VERSION_SUPPORTED",
@@ -123,6 +124,7 @@ export function isValidPromotionReviewReadinessReport(report) {
       "notAutomaticDecisioning",
       "notAnalystRecommendation",
       "inputs",
+      "checkInputs",
       "checks",
       "reasonCodes",
       "warnings",
@@ -143,7 +145,10 @@ export function isValidPromotionReviewReadinessReport(report) {
     && report.notAnalystRecommendation === true
     && isBoundedNonEmptyString(report.banner, MAX_BANNER_LENGTH)
     && isValidInputs(report.inputs, report.generatedAt)
+    && isValidCheckInputs(report.checkInputs)
+    && inputsMatchCheckInputs(report.inputs, report.checkInputs)
     && isValidChecks(report.checks)
+    && isSameCheckList(report.checks, checksFromInputs(report.checkInputs))
     && report.readinessStatus === deriveReadinessStatus(report.checks)
     && isExactReasonCodes(report.reasonCodes, report.checks)
     && isValidMachineCodeList(report.warnings)
@@ -173,6 +178,79 @@ function isValidInputs(inputs, reportGeneratedAt) {
     && isBoundedInteger(inputs.recordsEvaluated, 0, MAX_DIAGNOSTIC_RECORDS);
 }
 
+function isValidCheckInputs(inputs) {
+  const summary = inputs?.shadowPerformanceSummary;
+  const governance = inputs?.governance;
+  const evaluation = inputs?.evaluation;
+  const metrics = inputs?.metrics;
+  return isPlainObject(inputs)
+    && hasExactKeys(inputs, [
+      "sourceShadowSummaryManifestSha256",
+      "shadowPerformanceSummary",
+      "governance",
+      "evaluation",
+      "metricBasis",
+      "minimumDiagnosticEvidenceRecords",
+      "recordsEvaluated",
+      "metrics"
+    ])
+    && typeof inputs.sourceShadowSummaryManifestSha256 === "string"
+    && SHA256_PATTERN.test(inputs.sourceShadowSummaryManifestSha256)
+    && isPlainObject(summary)
+    && hasExactKeys(summary, ["present", "reportType", "summaryVersion", "generatedAt", "sourceEvaluationCardManifestSha256"])
+    && summary.present === true
+    && summary.reportType === "SHADOW_PERFORMANCE_SUMMARY_V2"
+    && summary.summaryVersion === "shadow-performance-summary-v2"
+    && isStrictRfc3339Timestamp(summary.generatedAt)
+    && typeof summary.sourceEvaluationCardManifestSha256 === "string"
+    && SHA256_PATTERN.test(summary.sourceEvaluationCardManifestSha256)
+    && isPlainObject(governance)
+    && hasExactKeys(governance, [
+      "governanceStatus",
+      "diagnosticOnly",
+      "notProductionApproval",
+      "notPromotionApproval",
+      "notThresholdRecommendation",
+      "notPaymentAuthorization",
+      "notAutomaticDecisioning"
+    ])
+    && governance.governanceStatus === PROMOTION_REVIEW_READINESS_GOVERNANCE_STATUS
+    && governance.diagnosticOnly === true
+    && governance.notProductionApproval === true
+    && governance.notPromotionApproval === true
+    && governance.notThresholdRecommendation === true
+    && governance.notPaymentAuthorization === true
+    && governance.notAutomaticDecisioning === true
+    && isPlainObject(evaluation)
+    && hasExactKeys(evaluation, ["evaluationCardType", "evaluationCardVersion", "evaluationReportType"])
+    && isBoundedNonEmptyString(evaluation.evaluationCardType, 128)
+    && isBoundedNonEmptyString(evaluation.evaluationCardVersion, 128)
+    && isBoundedNonEmptyString(evaluation.evaluationReportType, 128)
+    && inputs.metricBasis === "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK"
+    && isBoundedInteger(inputs.minimumDiagnosticEvidenceRecords, 1, MAX_DIAGNOSTIC_RECORDS)
+    && isBoundedInteger(inputs.recordsEvaluated, 0, MAX_DIAGNOSTIC_RECORDS)
+    && isPlainObject(metrics)
+    && hasExactKeys(metrics, [
+      "alertRecommendedPrecision",
+      "alertRecommendedRecall",
+      "falsePositiveRate",
+      "falseNegativeRate"
+    ])
+    && isMetric(metrics.alertRecommendedPrecision)
+    && isMetric(metrics.alertRecommendedRecall)
+    && isMetric(metrics.falsePositiveRate)
+    && isMetric(metrics.falseNegativeRate);
+}
+
+function inputsMatchCheckInputs(inputs, checkInputs) {
+  return inputs.shadowPerformanceSummary.present === checkInputs.shadowPerformanceSummary.present
+    && inputs.shadowPerformanceSummary.reportType === checkInputs.shadowPerformanceSummary.reportType
+    && inputs.shadowPerformanceSummary.summaryVersion === checkInputs.shadowPerformanceSummary.summaryVersion
+    && inputs.shadowPerformanceSummary.generatedAt === checkInputs.shadowPerformanceSummary.generatedAt
+    && inputs.minimumDiagnosticEvidenceRecords === checkInputs.minimumDiagnosticEvidenceRecords
+    && inputs.recordsEvaluated === checkInputs.recordsEvaluated;
+}
+
 function isValidChecks(checks) {
   if (!Array.isArray(checks) || checks.length !== REQUIRED_CHECK_NAMES.length || checks.length > MAX_CHECKS) {
     return false;
@@ -184,6 +262,7 @@ function isValidChecks(checks) {
         || !isBoundedNonEmptyString(check.name, MAX_CHECK_NAME_LENGTH)
         || !REQUIRED_CHECK_NAME_SET.has(check.name)
         || !CHECK_STATUSES.has(check.status)
+        || (check.status === "INCONCLUSIVE" && !check.name.endsWith("_AVAILABLE"))
         || !CHECK_SEVERITY_VALUES.has(check.severity)
         || CHECK_SEVERITIES.get(check.name) !== check.severity) {
       return false;
@@ -230,6 +309,64 @@ function isStrictRfc3339Timestamp(value) {
   return Number.isFinite(time) && new Date(time).toISOString() === new Date(value).toISOString();
 }
 
+function checksFromInputs(inputs) {
+  return [
+    check("CURRENT_SUMMARY_PRESENT", passFail(inputs.shadowPerformanceSummary.present === true)),
+    check("CURRENT_SUMMARY_VERSION_SUPPORTED", passFail(inputs.shadowPerformanceSummary.summaryVersion === "shadow-performance-summary-v2")),
+    check("EVALUATION_CARD_PRESENT", passFail(inputs.evaluation.evaluationCardType === "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1")),
+    check("EVALUATION_CARD_VERSION_SUPPORTED", passFail(inputs.evaluation.evaluationCardVersion === "platform-recommendation-evaluation-card-v1")),
+    check("GOVERNANCE_STATUS_DIAGNOSTIC_ONLY", passFail(inputs.governance.governanceStatus === PROMOTION_REVIEW_READINESS_GOVERNANCE_STATUS)),
+    check("NOT_PRODUCTION_APPROVAL_TRUE", passFail(inputs.governance.notProductionApproval === true)),
+    check("NOT_PROMOTION_APPROVAL_TRUE", passFail(inputs.governance.notPromotionApproval === true)),
+    check("NOT_THRESHOLD_RECOMMENDATION_TRUE", passFail(inputs.governance.notThresholdRecommendation === true)),
+    check("NOT_PAYMENT_AUTHORIZATION_TRUE", passFail(inputs.governance.notPaymentAuthorization === true)),
+    check("NOT_AUTOMATIC_DECISIONING_TRUE", passFail(inputs.governance.notAutomaticDecisioning === true)),
+    check("EVALUATION_REPORT_TYPE_SUPPORTED", passFail(inputs.evaluation.evaluationReportType === "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1")),
+    check("METRIC_BASIS_SUPPORTED", passFail(inputs.metricBasis === "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK")),
+    check("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", passFail(inputs.recordsEvaluated >= inputs.minimumDiagnosticEvidenceRecords), "HIGH"),
+    metricCheck("ALERT_RECOMMENDED_PRECISION_AVAILABLE", inputs.metrics.alertRecommendedPrecision),
+    metricCheck("ALERT_RECOMMENDED_RECALL_AVAILABLE", inputs.metrics.alertRecommendedRecall),
+    metricCheck("FALSE_POSITIVE_RATE_AVAILABLE", inputs.metrics.falsePositiveRate),
+    metricCheck("FALSE_NEGATIVE_RATE_AVAILABLE", inputs.metrics.falseNegativeRate)
+  ];
+}
+
+function isSameCheckList(actual, expected) {
+  return Array.isArray(actual)
+    && actual.length === expected.length
+    && actual.every((check, index) => (
+      check.name === expected[index].name
+      && check.status === expected[index].status
+      && check.severity === expected[index].severity
+    ));
+}
+
+function check(name, status, severity = "INFO") {
+  return { name, status, severity };
+}
+
+function metricCheck(name, metric) {
+  return check(name, metric.available === true ? "PASS" : "INCONCLUSIVE", "MEDIUM");
+}
+
+function passFail(condition) {
+  return condition ? "PASS" : "FAIL";
+}
+
+function isMetric(metric) {
+  if (!isPlainObject(metric) || !hasExactKeys(metric, ["available", "value", "reason"]) || typeof metric.available !== "boolean") {
+    return false;
+  }
+  if (metric.available) {
+    return typeof metric.value === "number"
+      && Number.isFinite(metric.value)
+      && metric.value >= 0
+      && metric.value <= 1
+      && metric.reason === null;
+  }
+  return metric.value === null && isMachineCode(metric.reason);
+}
+
 function isOrderedTimestamp(earlier, later) {
   if (!isStrictRfc3339Timestamp(earlier) || !isStrictRfc3339Timestamp(later)) {
     return false;
@@ -257,10 +394,11 @@ function hasExactKeys(value, expectedKeys) {
 
 function deriveReadinessStatus(checks) {
   const failedChecks = checks.filter((check) => check.status === "FAIL");
-  if (failedChecks.length > 0) {
-    return failedChecks.some((check) => check.name === "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS")
-      ? "INSUFFICIENT_DATA"
-      : "NOT_REVIEWABLE";
+  if (failedChecks.some((check) => check.name !== "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS")) {
+    return "NOT_REVIEWABLE";
+  }
+  if (failedChecks.some((check) => check.name === "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS")) {
+    return "INSUFFICIENT_DATA";
   }
   return checks.some((check) => check.status === "INCONCLUSIVE") ? "INCONCLUSIVE" : "REVIEWABLE";
 }

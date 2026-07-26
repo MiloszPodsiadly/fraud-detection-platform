@@ -272,6 +272,7 @@ function report(overrides = {}) {
       minimumDiagnosticEvidenceRecords: 1,
       recordsEvaluated: 3
     },
+    checkInputs: promotionReadinessCheckInputs(),
     checks: promotionReadinessChecks(),
     reasonCodes: [],
     warnings: ["MISSING_ML_SIGNAL_PRESENT"],
@@ -288,14 +289,73 @@ function report(overrides = {}) {
 }
 
 function reportWithCheckStatus(checkName, status) {
+  let inputs = report().inputs;
+  let checkInputs = promotionReadinessCheckInputs();
+  if (checkName === "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS" && status === "FAIL") {
+    inputs = { ...inputs, minimumDiagnosticEvidenceRecords: 4 };
+    checkInputs = { ...checkInputs, minimumDiagnosticEvidenceRecords: 4 };
+  }
+  if (checkName === "EVALUATION_CARD_PRESENT" && status === "FAIL") {
+    checkInputs = {
+      ...checkInputs,
+      evaluation: { ...checkInputs.evaluation, evaluationCardType: "LEGACY_EVALUATION_CARD" }
+    };
+  }
+  if (checkName === "ALERT_RECOMMENDED_RECALL_AVAILABLE" && status === "INCONCLUSIVE") {
+    checkInputs = {
+      ...checkInputs,
+      metrics: {
+        ...checkInputs.metrics,
+        alertRecommendedRecall: { available: false, value: null, reason: "NO_ACTUAL_POSITIVES" }
+      }
+    };
+  }
   const checks = promotionReadinessChecks().map((item) => (
     item.name === checkName ? { ...item, status } : item
   ));
   return report({
     readinessStatus: deriveReadinessStatus(checks),
+    inputs,
+    checkInputs,
     checks,
     reasonCodes: derivedReasonCodes(checks)
   });
+}
+
+function promotionReadinessCheckInputs() {
+  return {
+    sourceShadowSummaryManifestSha256: "a".repeat(64),
+    shadowPerformanceSummary: {
+      present: true,
+      reportType: "SHADOW_PERFORMANCE_SUMMARY_V2",
+      summaryVersion: "shadow-performance-summary-v2",
+      generatedAt: "2026-06-08T02:00:00Z",
+      sourceEvaluationCardManifestSha256: "b".repeat(64)
+    },
+    governance: {
+      governanceStatus: "DIAGNOSTIC_ONLY",
+      diagnosticOnly: true,
+      notProductionApproval: true,
+      notPromotionApproval: true,
+      notThresholdRecommendation: true,
+      notPaymentAuthorization: true,
+      notAutomaticDecisioning: true
+    },
+    evaluation: {
+      evaluationCardType: "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
+      evaluationCardVersion: "platform-recommendation-evaluation-card-v1",
+      evaluationReportType: "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"
+    },
+    metricBasis: "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK",
+    minimumDiagnosticEvidenceRecords: 1,
+    recordsEvaluated: 3,
+    metrics: {
+      alertRecommendedPrecision: metric(0.8),
+      alertRecommendedRecall: metric(0.75),
+      falsePositiveRate: metric(0.1),
+      falseNegativeRate: metric(0.2)
+    }
+  };
 }
 
 function promotionReadinessChecks() {
@@ -324,12 +384,17 @@ function check(name, status = "PASS", severity = "INFO") {
   return { name, status, severity };
 }
 
+function metric(value) {
+  return { available: true, value, reason: null };
+}
+
 function deriveReadinessStatus(checks) {
   const failedChecks = checks.filter((item) => item.status === "FAIL");
-  if (failedChecks.length > 0) {
-    return failedChecks.some((item) => item.name === "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS")
-      ? "INSUFFICIENT_DATA"
-      : "NOT_REVIEWABLE";
+  if (failedChecks.some((item) => item.name !== "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS")) {
+    return "NOT_REVIEWABLE";
+  }
+  if (failedChecks.some((item) => item.name === "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS")) {
+    return "INSUFFICIENT_DATA";
   }
   return checks.some((item) => item.status === "INCONCLUSIVE") ? "INCONCLUSIVE" : "REVIEWABLE";
 }
