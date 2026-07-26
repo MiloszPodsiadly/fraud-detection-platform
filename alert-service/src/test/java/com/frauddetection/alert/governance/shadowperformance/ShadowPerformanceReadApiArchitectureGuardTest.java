@@ -20,6 +20,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
     private static final Path ROOT = Path.of("..").toAbsolutePath().normalize();
     private static final Path PRODUCTION_ROOT = Path.of("src/main/java/com/frauddetection/alert");
     private static final Path DOC = ROOT.resolve("docs/architecture/shadow_performance_read_api.md");
+    private static final Path SECURITY_ENDPOINT_MAP = ROOT.resolve("docs/security/endpoint_authorization_map.md");
     private static final Path OPENAPI = ROOT.resolve("docs/openapi/alert_service.openapi.yaml");
     private static final Path UI_ROOT = ROOT.resolve("analyst-console-ui/src");
     private static final Path DOCKER_COMPOSE = ROOT.resolve("deployment/docker-compose.yml");
@@ -324,6 +325,27 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "/api/v1/governance/shadow-performance/decisioning",
                 "/api/v1/governance/shadow-performance/dashboard"
         );
+    }
+
+    @Test
+    void shadowCurrentEndpointPathMatchesControllerSecurityAuditOpenApiUiAndSecurityMap() throws Exception {
+        String expected = "/api/v2/governance/shadow-performance/summary/current";
+        String legacy = "/api/v" + "1/governance/shadow-performance/summary/current";
+        String controller = Files.readString(PRODUCTION_ROOT.resolve("governance/shadowperformance/ShadowPerformanceSummaryController.java"));
+        String security = Files.readString(PRODUCTION_ROOT.resolve("security/config/GovernanceAuthorizationRules.java"));
+        String audit = Files.readString(PRODUCTION_ROOT.resolve("audit/read/ReadAccessAuditClassifier.java"));
+        String openApi = Files.readString(OPENAPI);
+        String uiSource = uiSource();
+        String endpointMap = Files.readString(SECURITY_ENDPOINT_MAP);
+
+        assertThat(controller).contains("@RequestMapping(\"/api/v2/governance/shadow-performance/summary\")");
+        assertThat(security).contains(expected);
+        assertThat(audit).contains(expected);
+        assertThat(openApi).contains(expected);
+        assertThat(uiSource).contains(expected);
+        assertThat(endpointMap).contains("`GET " + expected + "`");
+
+        assertThat(controller + security + audit + openApi + uiSource + endpointMap).doesNotContain(legacy);
     }
 
     @Test
