@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from offline_evaluation.json_contract import JsonContractError, loads_strict_json
 from offline_evaluation.promotion_review_readiness_schema import (
     PromotionReviewReadinessValidationError,
     build_promotion_review_readiness_report,
@@ -129,7 +130,10 @@ def _read_required_json_object(
         payload = handle.read(max_bytes + 1)
     if len(payload) > max_bytes:
         raise PromotionReviewReadinessGenerationError(f"{label} exceeds maximum byte size")
-    raw = json.loads(payload.decode("utf-8"))
+    try:
+        raw = loads_strict_json(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError, JsonContractError) as exc:
+        raise PromotionReviewReadinessGenerationError(f"{label} must be valid JSON") from exc
     if not isinstance(raw, dict):
         raise PromotionReviewReadinessGenerationError(f"{label} must be a JSON object")
     return raw

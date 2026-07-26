@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from offline_evaluation.json_contract import JsonContractError, loads_strict_json
 from offline_evaluation.fdp123.evaluation_card.artifact_reader import read_validated_evaluation_card_artifact_set
 from offline_evaluation.fdp123.evaluation_card.schema import Fdp123EvaluationCardValidationError
 from offline_evaluation.shadow_performance_summary import build_shadow_performance_summary
@@ -123,7 +124,10 @@ def _read_required_json_object(path: Path, label: str, max_bytes: int) -> dict[s
         payload = handle.read(max_bytes + 1)
     if len(payload) > max_bytes:
         raise CurrentSummaryGenerationError(f"{label} exceeds maximum byte size")
-    raw = json.loads(payload.decode("utf-8"))
+    try:
+        raw = loads_strict_json(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError, JsonContractError) as exc:
+        raise CurrentSummaryGenerationError(f"{label} must be valid JSON") from exc
     if not isinstance(raw, dict):
         raise CurrentSummaryGenerationError(f"{label} must be a JSON object")
     return raw

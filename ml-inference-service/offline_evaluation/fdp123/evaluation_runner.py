@@ -9,7 +9,8 @@ from offline_evaluation.fdp123.disagreement_report import build_fdp123_disagreem
 from offline_evaluation.fdp123.evaluation_contract import EVALUATION_SUBJECT, METRIC_BASIS, METRICS_SUBJECT
 from offline_evaluation.fdp123.metrics import build_fdp123_metrics
 from offline_evaluation.fdp123.models import Fdp123Dataset
-from offline_evaluation.fdp123.report_writer import REPORT_TYPE, write_fdp123_reports
+from offline_evaluation.fdp123.report_contract import REPORT_TYPE
+from offline_evaluation.fdp123.report_writer import write_fdp123_reports
 
 
 def build_fdp123_evaluation_reports(
@@ -19,7 +20,10 @@ def build_fdp123_evaluation_reports(
     generated = generated_at or datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     metrics = build_fdp123_metrics(dataset)
     disagreement = build_fdp123_disagreement_report(dataset.records)
-    warnings = sorted(set(metrics["warnings"]))
+    warnings = list(metrics["warnings"])
+    if len(set(warnings)) != len(warnings):
+        raise ValueError("metrics warnings contains duplicate values")
+    warnings = sorted(warnings)
     return {
         "evaluationSummary": {
             "datasetMetadata": dataset.metadata.as_report_dict(),

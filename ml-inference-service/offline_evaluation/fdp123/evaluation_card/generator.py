@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 from pathlib import Path
 from typing import Any
 
+from offline_evaluation.json_contract import JsonContractError, loads_strict_json, require_finite_number
 from offline_evaluation.fdp123.evaluation_card.schema import (
     EVALUATION_SUBJECT,
     EXPECTED_DATASET_TIME_BASIS,
@@ -324,8 +327,10 @@ def _metric_object(raw: dict[str, Any], field: str) -> None:
     if not isinstance(available, bool):
         raise Fdp123EvaluationCardValidationError(f"{field}.available must be boolean")
     if available:
-        if isinstance(metric_value, bool) or not isinstance(metric_value, (int, float)):
-            raise Fdp123EvaluationCardValidationError(f"{field}.value must be numeric")
+        try:
+            metric_value = require_finite_number(metric_value, f"{field}.value")
+        except JsonContractError as exc:
+            raise Fdp123EvaluationCardValidationError(f"{field}.value must be numeric") from exc
         if metric_value < 0.0 or metric_value > 1.0:
             raise Fdp123EvaluationCardValidationError(f"{field}.value out of range")
         if reason is not None:
@@ -358,6 +363,8 @@ def _warnings(summary: dict[str, Any]) -> list[str]:
         raise Fdp123EvaluationCardValidationError("warnings must be a list")
     if not all(isinstance(item, str) for item in value):
         raise Fdp123EvaluationCardValidationError("warnings must contain strings")
+    if len(set(value)) != len(value):
+        raise Fdp123EvaluationCardValidationError("warnings contains duplicate values")
     return sorted(value)
 
 
@@ -387,21 +394,42 @@ def _require_canonical_filename(path: Path, expected_name: str, label: str) -> N
 
 
 def _read_required_bytes(path: Path, label: str, max_bytes: int) -> bytes:
-    if not path.exists():
-        raise Fdp123EvaluationCardValidationError(f"{label} missing")
+    _reject_symlink_path(path, label)
     if not path.is_file():
-        raise Fdp123EvaluationCardValidationError(f"{label} must be a file")
-    with path.open("rb") as handle:
-        payload = handle.read(max_bytes + 1)
+        raise Fdp123EvaluationCardValidationError(f"{label} missing")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise Fdp123EvaluationCardValidationError(f"{label} missing") from exc
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise Fdp123EvaluationCardValidationError(f"{label} must be a file")
+        with os.fdopen(fd, "rb") as handle:
+            fd = -1
+            payload = handle.read(max_bytes + 1)
+    finally:
+        if fd >= 0:
+            os.close(fd)
     if len(payload) > max_bytes:
         raise Fdp123EvaluationCardValidationError(f"{label} exceeds maximum byte size")
     return payload
 
 
+def _reject_symlink_path(path: Path, label: str) -> None:
+    if path.is_symlink():
+        raise Fdp123EvaluationCardValidationError(f"{label} must not be a symlink")
+    parent = path.parent
+    while parent != parent.parent:
+        if parent.is_symlink():
+            raise Fdp123EvaluationCardValidationError(f"{label} parent must not be a symlink")
+        parent = parent.parent
+
+
 def _load_json_bytes(payload: bytes, label: str) -> dict[str, Any]:
     try:
-        value = json.loads(payload.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exception:
+        value = loads_strict_json(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError, JsonContractError) as exception:
         raise Fdp123EvaluationCardValidationError(f"{label} must be valid JSON") from exception
     if not isinstance(value, dict):
         raise Fdp123EvaluationCardValidationError(f"{label} must be a JSON object")

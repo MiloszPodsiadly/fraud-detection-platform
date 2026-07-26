@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 from pathlib import Path
 from typing import Any
 
+from offline_evaluation.json_contract import dumps_strict_json
 from offline_evaluation.fdp123.evaluation_card.schema import (
     ARTIFACT_SET_VERSION,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
@@ -19,7 +19,7 @@ from offline_evaluation.fdp123.evaluation_card.safety_policy import FORBIDDEN_OU
 
 def evaluation_card_json(evaluation_card: dict[str, Any]) -> str:
     safe_evaluation_card = validate_evaluation_card(evaluation_card)
-    payload = json.dumps(safe_evaluation_card, sort_keys=True, separators=(",", ":"))
+    payload = dumps_strict_json(safe_evaluation_card, sort_keys=True, separators=(",", ":"))
     _reject_forbidden_output(payload)
     return payload + "\n"
 
@@ -142,7 +142,7 @@ def build_evaluation_card_manifest(payloads: dict[Path, str], generated_at: str)
         "generatedAt": generated_at,
         "reportType": PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
     }
-    payload = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
+    payload = dumps_strict_json(manifest, sort_keys=True, separators=(",", ":"))
     _reject_forbidden_output(payload)
     return payload + "\n"
 

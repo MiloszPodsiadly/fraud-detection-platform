@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from offline_evaluation.json_contract import JsonContractError, loads_strict_json
 from offline_evaluation.fdp123.dataset_schema import (
     Fdp123DatasetFormatError,
     Fdp123DatasetValidationError,
@@ -37,8 +38,8 @@ def read_fdp123_feedback_dataset_jsonl(path: str | Path) -> Fdp123Dataset:
             if len(line) > MAX_JSONL_LINE_LENGTH:
                 raise Fdp123DatasetValidationError("FDP-123 JSONL line exceeds maximum length")
             try:
-                payload = json.loads(line)
-            except json.JSONDecodeError as exception:
+                payload = loads_strict_json(line)
+            except (json.JSONDecodeError, JsonContractError) as exception:
                 raise Fdp123DatasetFormatError(f"malformed JSONL at line {line_number}") from exception
             if not isinstance(payload, dict):
                 raise Fdp123DatasetFormatError(f"line {line_number} must be a JSON object")

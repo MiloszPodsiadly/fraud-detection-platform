@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from offline_evaluation.json_contract import JsonContractError, require_finite_number
 from offline_evaluation.fdp123.evaluation_card.schema import (
     EVALUATION_PURPOSE,
     MAX_FDP123_DATASET_RECORDS,
@@ -11,6 +12,7 @@ from offline_evaluation.fdp123.evaluation_card.schema import (
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION,
     Fdp123EvaluationCardValidationError,
+    REQUIRED_LIMITATIONS as REQUIRED_SHADOW_LIMITATIONS,
     validate_evaluation_card,
 )
 from offline_evaluation.fdp123.dataset_schema import (
@@ -18,7 +20,7 @@ from offline_evaluation.fdp123.dataset_schema import (
     DATASET_VERSION as EXPECTED_DATASET_VERSION,
 )
 from offline_evaluation.fdp123.evaluation_contract import EVALUATION_SUBJECT
-from offline_evaluation.fdp123.report_writer import (
+from offline_evaluation.fdp123.report_contract import (
     ARTIFACT_SET_VERSION as EXPECTED_EVALUATION_ARTIFACT_SET_VERSION,
     REPORT_TYPE as EXPECTED_EVALUATION_REPORT_TYPE,
 )
@@ -239,7 +241,7 @@ def validate_shadow_performance_summary(raw: dict[str, Any]) -> dict[str, Any]:
         "evaluationPopulation": evaluation_population,
         "metrics": metrics,
         "warnings": _machine_code_list(raw, "warnings", MAX_WARNINGS),
-        "limitations": _machine_code_list(raw, "limitations", MAX_LIMITATIONS),
+        "limitations": _required_machine_code_superset(raw, "limitations", MAX_LIMITATIONS, REQUIRED_SHADOW_LIMITATIONS),
         "banner": _required_constant(raw, "banner", BANNER),
     }
     _validate_summary_consistency(normalized)
@@ -338,13 +340,15 @@ def _metric_object(raw: dict[str, Any], field: str) -> dict[str, Any]:
     if not isinstance(available, bool):
         raise ShadowPerformanceValidationError(f"metrics.{field}.available must be boolean")
     if available:
-        if isinstance(metric_value, bool) or not isinstance(metric_value, (int, float)):
-            raise ShadowPerformanceValidationError(f"metrics.{field}.value must be numeric when available")
+        try:
+            metric_value = require_finite_number(metric_value, f"metrics.{field}.value")
+        except JsonContractError as exc:
+            raise ShadowPerformanceValidationError(f"metrics.{field}.value must be numeric when available") from exc
         if metric_value < 0.0 or metric_value > 1.0:
             raise ShadowPerformanceValidationError(f"metrics.{field}.value must be in range 0.0..1.0")
         if reason is not None:
             raise ShadowPerformanceValidationError(f"metrics.{field}.reason must be null when available")
-        return {"available": True, "value": float(metric_value), "reason": None}
+        return {"available": True, "value": metric_value, "reason": None}
     if metric_value is not None:
         raise ShadowPerformanceValidationError(f"metrics.{field}.value must be null when unavailable")
     if not isinstance(reason, str) or MACHINE_CODE_PATTERN.fullmatch(reason) is None:
@@ -434,6 +438,19 @@ def _machine_code_list(raw: dict[str, Any], field: str, max_items: int) -> list[
     if len(set(result)) != len(result):
         raise ShadowPerformanceValidationError(f"{field} contains duplicate values")
     return sorted(result)
+
+
+def _required_machine_code_superset(
+        raw: dict[str, Any],
+        field: str,
+        max_items: int,
+        required: set[str],
+) -> list[str]:
+    values = _machine_code_list(raw, field, max_items)
+    missing = sorted(required - set(values))
+    if missing:
+        raise ShadowPerformanceValidationError(f"{field} missing required values: {', '.join(missing)}")
+    return values
 
 
 def _sha256(raw: dict[str, Any], field: str) -> str:

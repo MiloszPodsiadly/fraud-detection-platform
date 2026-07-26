@@ -7,6 +7,7 @@ import stat
 from pathlib import Path
 from typing import Any
 
+from offline_evaluation.json_contract import JsonContractError, dumps_strict_json, loads_strict_json
 from offline_evaluation.fdp123.timestamp_contract import (
     TimestampContractError,
     normalize_rfc3339_timestamp,
@@ -34,7 +35,10 @@ class ShadowPerformanceArtifactSetError(ValueError):
 
 
 def build_shadow_performance_manifest(summary_payload: str) -> str:
-    summary = validate_shadow_performance_summary(json.loads(summary_payload))
+    try:
+        summary = validate_shadow_performance_summary(loads_strict_json(summary_payload))
+    except JsonContractError as exc:
+        raise ShadowPerformanceArtifactSetError(str(exc)) from exc
     summary_bytes = summary_payload.encode("utf-8")
     manifest = {
         "artifactSetVersion": ARTIFACT_SET_VERSION,
@@ -48,7 +52,7 @@ def build_shadow_performance_manifest(summary_payload: str) -> str:
         "generatedAt": summary["generatedAt"],
         "reportType": ARTIFACT_SET_REPORT_TYPE,
     }
-    return json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n"
+    return dumps_strict_json(manifest, sort_keys=True, separators=(",", ":")) + "\n"
 
 
 def publish_shadow_performance_artifact_set(summary_payload: str, summary_path: Path) -> Path:
@@ -91,9 +95,9 @@ def read_validated_shadow_performance_artifact_set(
     manifest_bytes = _read_required_bytes(manifest_file, "shadow manifest", MAX_MANIFEST_BYTES)
     summary_bytes = _read_required_bytes(summary_file, "shadow summary", MAX_SUMMARY_BYTES)
     try:
-        manifest = json.loads(manifest_bytes.decode("utf-8"))
-        summary = json.loads(summary_bytes.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        manifest = loads_strict_json(manifest_bytes)
+        summary = loads_strict_json(summary_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError, JsonContractError) as exc:
         raise ShadowPerformanceArtifactSetError("shadow artifact set contains malformed JSON") from exc
     validated_summary = validate_shadow_performance_summary(summary)
     _validate_manifest(manifest, validated_summary, summary_bytes)

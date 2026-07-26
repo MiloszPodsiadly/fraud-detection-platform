@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
+from offline_evaluation.json_contract import JsonContractError, dumps_strict_json, require_finite_number
 from offline_evaluation.fdp123.evaluation_card.schema import (
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION,
@@ -206,7 +206,7 @@ def build_promotion_review_readiness_report(
 
 def promotion_review_readiness_report_json(report: dict[str, Any]) -> str:
     safe_report = validate_promotion_review_readiness_report(report)
-    payload = json.dumps(safe_report, sort_keys=True, separators=(",", ":"))
+    payload = dumps_strict_json(safe_report, sort_keys=True, separators=(",", ":"))
     _reject_forbidden_payload(payload)
     return payload + "\n"
 
@@ -239,7 +239,7 @@ def validate_promotion_review_readiness_report(raw: dict[str, Any]) -> dict[str,
         "banner": _required_constant(raw, "banner", BANNER),
     }
     _validate_status_consistency(normalized)
-    _reject_forbidden_payload(json.dumps(normalized, sort_keys=True, separators=(",", ":")))
+    _reject_forbidden_payload(dumps_strict_json(normalized, sort_keys=True, separators=(",", ":")))
     return normalized
 
 
@@ -525,13 +525,15 @@ def _metric_object(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(available, bool):
         raise PromotionReviewReadinessValidationError(f"{label}.available must be boolean")
     if available:
-        if isinstance(metric_value, bool) or not isinstance(metric_value, (int, float)):
-            raise PromotionReviewReadinessValidationError(f"{label}.value must be numeric when available")
+        try:
+            metric_value = require_finite_number(metric_value, f"{label}.value")
+        except JsonContractError as exc:
+            raise PromotionReviewReadinessValidationError(f"{label}.value must be numeric when available") from exc
         if metric_value < 0.0 or metric_value > 1.0:
             raise PromotionReviewReadinessValidationError(f"{label}.value must be in range 0.0..1.0")
         if reason is not None:
             raise PromotionReviewReadinessValidationError(f"{label}.reason must be null when available")
-        return {"available": True, "value": float(metric_value), "reason": None}
+        return {"available": True, "value": metric_value, "reason": None}
     if metric_value is not None:
         raise PromotionReviewReadinessValidationError(f"{label}.value must be null when unavailable")
     if not isinstance(reason, str) or MACHINE_CODE_PATTERN.fullmatch(reason) is None:
@@ -580,7 +582,9 @@ def _machine_codes(values: list[str]) -> list[str]:
     for value in values:
         if isinstance(value, str) and MACHINE_CODE_PATTERN.fullmatch(value):
             result.append(value)
-    return sorted(set(result))
+    if len(set(result)) != len(result):
+        raise PromotionReviewReadinessValidationError("machine-code list contains duplicate values")
+    return sorted(result)
 
 
 def _derive_readiness_status(checks: list[dict[str, str]]) -> str:

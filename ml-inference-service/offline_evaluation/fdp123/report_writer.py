@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-import json
 import os
 import hashlib
 from pathlib import Path
 from typing import Any
 
+from offline_evaluation.json_contract import dumps_strict_json
+from offline_evaluation.fdp123.report_contract import ARTIFACT_SET_VERSION, REPORT_TYPE
 
 MAX_WARNINGS = 10
-REPORT_TYPE = "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"
-ARTIFACT_SET_VERSION = "fdp123-report-artifact-set-v1"
 FORBIDDEN_REPORT_COMPACT_TERMS = {
     "rawfeedbackid",
     "feedbackid",
@@ -64,9 +63,11 @@ def report_json(report: dict[str, Any]) -> str:
         raise ValueError("warnings exceeds maximum item count")
     if not all(isinstance(item, str) for item in warnings):
         raise ValueError("warnings must contain strings")
+    if len(set(warnings)) != len(warnings):
+        raise ValueError("warnings contains duplicate values")
     safe_report["warnings"] = sorted(warnings)
     _reject_forbidden_report_fields(safe_report)
-    payload = json.dumps(safe_report, sort_keys=True, separators=(",", ":"))
+    payload = dumps_strict_json(safe_report, sort_keys=True, separators=(",", ":"))
     _reject_forbidden_report_payload(payload)
     return payload + "\n"
 
@@ -80,7 +81,7 @@ def disagreement_jsonl(report: dict[str, Any]) -> str:
         if not isinstance(row, dict):
             raise ValueError("disagreement row must be an object")
         _reject_forbidden_report_fields(row)
-        payload = json.dumps(row, sort_keys=True, separators=(",", ":"))
+        payload = dumps_strict_json(row, sort_keys=True, separators=(",", ":"))
         _reject_forbidden_report_payload(payload)
         lines.append(payload)
     return "\n".join(lines) + ("\n" if lines else "")
@@ -130,7 +131,7 @@ def build_artifact_manifest(payloads: dict[Path, str], generated_at: str | None)
         "reportType": REPORT_TYPE,
     }
     _reject_forbidden_report_fields(manifest)
-    payload = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
+    payload = dumps_strict_json(manifest, sort_keys=True, separators=(",", ":"))
     _reject_forbidden_report_payload(payload)
     return payload + "\n"
 

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import re
 from typing import Any
 
+from offline_evaluation.json_contract import JsonContractError, require_finite_number
 from offline_evaluation.fdp123.dataset_schema import (
     DATASET_TIME_BASIS as EXPECTED_DATASET_TIME_BASIS,
     DATASET_VERSION as EXPECTED_DATASET_VERSION,
@@ -21,7 +22,7 @@ from offline_evaluation.fdp123.evaluation_contract import (
     METRIC_BASIS,
     METRICS_SUBJECT,
 )
-from offline_evaluation.fdp123.report_writer import (
+from offline_evaluation.fdp123.report_contract import (
     ARTIFACT_SET_VERSION as EXPECTED_SOURCE_ARTIFACT_SET_VERSION,
     REPORT_TYPE as EXPECTED_EVALUATION_REPORT_TYPE,
 )
@@ -297,13 +298,17 @@ def _metric_object(raw: dict[str, Any], field: str) -> dict[str, float | bool | 
     if not isinstance(available, bool):
         raise Fdp123EvaluationCardValidationError(f"metricsSummary.{field}.available must be boolean")
     if available:
-        if isinstance(metric_value, bool) or not isinstance(metric_value, (int, float)):
-            raise Fdp123EvaluationCardValidationError(f"metricsSummary.{field}.value must be numeric when available")
+        try:
+            metric_value = require_finite_number(metric_value, f"metricsSummary.{field}.value")
+        except JsonContractError as exc:
+            raise Fdp123EvaluationCardValidationError(
+                f"metricsSummary.{field}.value must be numeric when available"
+            ) from exc
         if metric_value < 0.0 or metric_value > 1.0:
             raise Fdp123EvaluationCardValidationError(f"metricsSummary.{field}.value must be in range 0.0..1.0")
         if reason is not None:
             raise Fdp123EvaluationCardValidationError(f"metricsSummary.{field}.reason must be null when available")
-        return {"available": True, "value": float(metric_value), "reason": None}
+        return {"available": True, "value": metric_value, "reason": None}
     if metric_value is not None:
         raise Fdp123EvaluationCardValidationError(f"metricsSummary.{field}.value must be null when unavailable")
     if not isinstance(reason, str) or MACHINE_CODE_PATTERN.fullmatch(reason) is None:
@@ -389,7 +394,9 @@ def _machine_code_list(raw: dict[str, Any], field: str, max_items: int) -> list[
             raise Fdp123EvaluationCardValidationError(f"{field} contains oversized item")
         _reject_unsafe_value(item)
         result.append(item)
-    return sorted(set(result))
+    if len(set(result)) != len(result):
+        raise Fdp123EvaluationCardValidationError(f"{field} contains duplicate values")
+    return sorted(result)
 
 
 def _optional_machine_code_list(raw: dict[str, Any], field: str, max_items: int) -> list[str]:
@@ -408,7 +415,9 @@ def _optional_machine_code_list(raw: dict[str, Any], field: str, max_items: int)
             raise Fdp123EvaluationCardValidationError(f"{field} contains oversized item")
         _reject_unsafe_value(item)
         result.append(item)
-    return sorted(set(result))
+    if len(set(result)) != len(result):
+        raise Fdp123EvaluationCardValidationError(f"{field} contains duplicate values")
+    return sorted(result)
 
 
 def _required_count(raw: dict[str, Any], field: str) -> int:

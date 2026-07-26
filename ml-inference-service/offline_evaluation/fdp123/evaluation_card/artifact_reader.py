@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from offline_evaluation.json_contract import JsonContractError, loads_strict_json
 from offline_evaluation.fdp123.evaluation_card.schema import (
     ARTIFACT_SET_VERSION,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
@@ -139,8 +140,8 @@ def _reject_unknown_or_missing(raw: dict[str, Any], allowed: set[str], label: st
 
 def _load_json_bytes(payload: bytes, label: str) -> dict[str, Any]:
     try:
-        value = json.loads(payload.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exception:
+        value = loads_strict_json(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError, JsonContractError) as exception:
         raise Fdp123EvaluationCardValidationError(f"{label} must be valid JSON") from exception
     if not isinstance(value, dict):
         raise Fdp123EvaluationCardValidationError(f"{label} must be a JSON object")
