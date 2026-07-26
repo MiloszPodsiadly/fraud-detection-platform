@@ -4,6 +4,11 @@ import java.util.List;
 
 final class PromotionReviewReadinessReportTestFixtures {
 
+    private static final String SOURCE_SHADOW_MANIFEST_SHA256 =
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    private static final String SOURCE_EVALUATION_CARD_MANIFEST_SHA256 =
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
     private PromotionReviewReadinessReportTestFixtures() {
     }
 
@@ -30,6 +35,39 @@ final class PromotionReviewReadinessReportTestFixtures {
                         ),
                         1,
                         3
+                ),
+                new PromotionReviewReadinessReport.PromotionReviewReadinessCheckInputs(
+                        SOURCE_SHADOW_MANIFEST_SHA256,
+                        new PromotionReviewReadinessReport.ShadowPerformanceSummaryCheckInput(
+                                true,
+                                "SHADOW_PERFORMANCE_SUMMARY_V2",
+                                "shadow-performance-summary-v2",
+                                "2026-06-08T02:00:00Z",
+                                SOURCE_EVALUATION_CARD_MANIFEST_SHA256
+                        ),
+                        new PromotionReviewReadinessReport.PromotionReadinessGovernanceCheckInput(
+                                PromotionReviewReadinessReportContract.GOVERNANCE_STATUS,
+                                true,
+                                true,
+                                true,
+                                true,
+                                true,
+                                true
+                        ),
+                        new PromotionReviewReadinessReport.PromotionReadinessEvaluationCheckInput(
+                                "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
+                                "platform-recommendation-evaluation-card-v1",
+                                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"
+                        ),
+                        "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK",
+                        1,
+                        3,
+                        new PromotionReviewReadinessReport.PromotionReadinessMetricsCheckInput(
+                                metric(0.8d),
+                                metric(0.75d),
+                                metric(0.1d),
+                                metric(0.2d)
+                        )
                 ),
                 List.of(
                         check("CURRENT_SUMMARY_PRESENT"),
@@ -69,5 +107,9 @@ final class PromotionReviewReadinessReportTestFixtures {
 
     private static PromotionReviewReadinessReport.PromotionReviewReadinessCheck check(String name, String severity) {
         return new PromotionReviewReadinessReport.PromotionReviewReadinessCheck(name, "PASS", severity);
+    }
+
+    private static PromotionReviewReadinessReport.PromotionReadinessMetricCheckInput metric(double value) {
+        return new PromotionReviewReadinessReport.PromotionReadinessMetricCheckInput(true, value, null);
     }
 }

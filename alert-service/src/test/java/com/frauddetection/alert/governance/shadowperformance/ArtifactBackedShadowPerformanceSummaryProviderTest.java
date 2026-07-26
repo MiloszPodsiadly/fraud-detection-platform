@@ -10,6 +10,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -71,6 +74,22 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
     @Test
     void doesNotRepairInvalidSummary() throws Exception {
         Path artifact = writeSummary(summaryWithMetrics(2.0, 0.25, 0.0));
+
+        assertUnavailable(provider(artifact));
+    }
+
+    @Test
+    void throwsUnavailableWhenManifestMissing() throws Exception {
+        Path artifact = writeSummary(validSummary());
+        Files.delete(artifact.resolveSibling("manifest.json"));
+
+        assertUnavailable(provider(artifact));
+    }
+
+    @Test
+    void throwsUnavailableWhenManifestHashDoesNotMatchSummary() throws Exception {
+        Path artifact = writeSummary(validSummary());
+        Files.writeString(artifact.resolveSibling("manifest.json"), manifestFor("{}\n"));
 
         assertUnavailable(provider(artifact));
     }
@@ -554,14 +573,33 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
 
     private Path writeSummary(ShadowPerformanceSummary summary) throws Exception {
         Path artifact = tempDir.resolve("current-summary.json");
-        objectMapper.writeValue(artifact.toFile(), summary);
+        String payload = objectMapper.writeValueAsString(summary);
+        Files.writeString(artifact, payload);
+        Files.writeString(artifact.resolveSibling("manifest.json"), manifestFor(payload));
         return artifact;
     }
 
     private Path writeJson(String json) throws IOException {
         Path artifact = tempDir.resolve("current-summary.json");
         Files.writeString(artifact, json);
+        Files.writeString(artifact.resolveSibling("manifest.json"), manifestFor(json));
         return artifact;
+    }
+
+    private String manifestFor(String summaryPayload) {
+        return """
+                {"artifactSetVersion":"shadow-performance-artifact-set-v1","files":[{"path":"current-summary.json","sha256":"%s","sizeBytes":%d}],"generatedAt":"2026-06-13T02:00:00Z","reportType":"SHADOW_PERFORMANCE_ARTIFACT_SET_V1"}
+                """.formatted(sha256(summaryPayload), summaryPayload.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
+    }
+
+    private String sha256(String payload) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(
+                    payload.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+            ));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     private String validSummaryJson() throws Exception {

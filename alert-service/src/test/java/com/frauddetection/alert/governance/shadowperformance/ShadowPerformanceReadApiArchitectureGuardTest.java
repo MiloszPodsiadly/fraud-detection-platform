@@ -209,7 +209,9 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "LinkOption.NOFOLLOW_LINKS",
                 "Files.isSymbolicLink",
                 "startsWith(baseDir)",
-                "readBoundedArtifact(artifactPath)",
+                "readBoundedArtifact(manifestPath, MAX_MANIFEST_SIZE_BYTES)",
+                "readBoundedArtifact(artifactPath, properties.maxSizeBytes())",
+                "validateManifest(manifestPayload, summaryPayload, summary)",
                 "objectMapper.readValue(payload, ShadowPerformanceSummary.class)",
                 "validator.validate(summary)"
         );

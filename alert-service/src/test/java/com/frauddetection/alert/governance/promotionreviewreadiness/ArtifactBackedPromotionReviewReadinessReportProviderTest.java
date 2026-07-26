@@ -223,6 +223,7 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
     void acceptsValidFdp111ReportWithRecordsEvaluatedAbove500() throws Exception {
         JsonNode root = objectMapper.readTree(validReportJson());
         ((ObjectNode) root.get("inputs")).put("recordsEvaluated", 501);
+        ((ObjectNode) root.get("checkInputs")).put("recordsEvaluated", 501);
 
         Optional<PromotionReviewReadinessReport> result =
                 provider(writeJson(objectMapper.writeValueAsString(root))).currentReport();
@@ -235,6 +236,9 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
     void acceptsValidFdp111ReportWithMinimumDiagnosticEvidenceRecordsAbove500() throws Exception {
         JsonNode root = objectMapper.readTree(validReportJson());
         ((ObjectNode) root.get("inputs")).put("minimumDiagnosticEvidenceRecords", 501);
+        ((ObjectNode) root.get("inputs")).put("recordsEvaluated", 501);
+        ((ObjectNode) root.get("checkInputs")).put("minimumDiagnosticEvidenceRecords", 501);
+        ((ObjectNode) root.get("checkInputs")).put("recordsEvaluated", 501);
 
         Optional<PromotionReviewReadinessReport> result =
                 provider(writeJson(objectMapper.writeValueAsString(root))).currentReport();

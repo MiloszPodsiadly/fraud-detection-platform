@@ -5170,7 +5170,7 @@ components:
     PromotionReviewReadinessReportResponse:
       type: object
       additionalProperties: false
-      required: [reportType, reportVersion, generatedAt, governanceStatus, readinessStatus, diagnosticOnly, notPromotionApproval, notThresholdRecommendation, notProductionDecisioning, notPaymentAuthorization, notAutomaticDecisioning, notAnalystRecommendation, inputs, checks, reasonCodes, warnings, limitations, banner]
+      required: [reportType, reportVersion, generatedAt, governanceStatus, readinessStatus, diagnosticOnly, notPromotionApproval, notThresholdRecommendation, notProductionDecisioning, notPaymentAuthorization, notAutomaticDecisioning, notAnalystRecommendation, inputs, checkInputs, checks, reasonCodes, warnings, limitations, banner]
       properties:
         reportType:
           type: string
@@ -5189,18 +5189,25 @@ components:
           enum: [INSUFFICIENT_DATA, INCONCLUSIVE, NOT_REVIEWABLE, REVIEWABLE]
         diagnosticOnly:
           type: boolean
+          enum: [true]
         notPromotionApproval:
           type: boolean
+          enum: [true]
         notThresholdRecommendation:
           type: boolean
+          enum: [true]
         notProductionDecisioning:
           type: boolean
+          enum: [true]
         notPaymentAuthorization:
           type: boolean
+          enum: [true]
         notAutomaticDecisioning:
           type: boolean
+          enum: [true]
         notAnalystRecommendation:
           type: boolean
+          enum: [true]
         inputs:
           type: object
           additionalProperties: false
@@ -5230,6 +5237,98 @@ components:
               type: integer
               minimum: 0
               maximum: 1000
+        checkInputs:
+          type: object
+          additionalProperties: false
+          required: [sourceShadowSummaryManifestSha256, shadowPerformanceSummary, governance, evaluation, metricBasis, minimumDiagnosticEvidenceRecords, recordsEvaluated, metrics]
+          properties:
+            sourceShadowSummaryManifestSha256:
+              type: string
+              pattern: '^[a-f0-9]{64}$'
+            shadowPerformanceSummary:
+              type: object
+              additionalProperties: false
+              required: [present, reportType, summaryVersion, generatedAt, sourceEvaluationCardManifestSha256]
+              properties:
+                present:
+                  type: boolean
+                  enum: [true]
+                reportType:
+                  type: string
+                  enum: [SHADOW_PERFORMANCE_SUMMARY_V2]
+                summaryVersion:
+                  type: string
+                  enum: [shadow-performance-summary-v2]
+                generatedAt:
+                  type: string
+                  format: date-time
+                sourceEvaluationCardManifestSha256:
+                  type: string
+                  pattern: '^[a-f0-9]{64}$'
+            governance:
+              type: object
+              additionalProperties: false
+              required: [governanceStatus, diagnosticOnly, notProductionApproval, notPromotionApproval, notThresholdRecommendation, notPaymentAuthorization, notAutomaticDecisioning]
+              properties:
+                governanceStatus:
+                  type: string
+                  enum: [DIAGNOSTIC_ONLY]
+                diagnosticOnly:
+                  type: boolean
+                  enum: [true]
+                notProductionApproval:
+                  type: boolean
+                  enum: [true]
+                notPromotionApproval:
+                  type: boolean
+                  enum: [true]
+                notThresholdRecommendation:
+                  type: boolean
+                  enum: [true]
+                notPaymentAuthorization:
+                  type: boolean
+                  enum: [true]
+                notAutomaticDecisioning:
+                  type: boolean
+                  enum: [true]
+            evaluation:
+              type: object
+              additionalProperties: false
+              required: [evaluationCardType, evaluationCardVersion, evaluationReportType]
+              properties:
+                evaluationCardType:
+                  type: string
+                  maxLength: 128
+                evaluationCardVersion:
+                  type: string
+                  maxLength: 128
+                evaluationReportType:
+                  type: string
+                  maxLength: 128
+            metricBasis:
+              type: string
+              enum: [ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK]
+            minimumDiagnosticEvidenceRecords:
+              type: integer
+              minimum: 1
+              maximum: 1000
+            recordsEvaluated:
+              type: integer
+              minimum: 0
+              maximum: 1000
+            metrics:
+              type: object
+              additionalProperties: false
+              required: [alertRecommendedPrecision, alertRecommendedRecall, falsePositiveRate, falseNegativeRate]
+              properties:
+                alertRecommendedPrecision:
+                  $ref: '#/components/schemas/ShadowPerformanceMetricResponse'
+                alertRecommendedRecall:
+                  $ref: '#/components/schemas/ShadowPerformanceMetricResponse'
+                falsePositiveRate:
+                  $ref: '#/components/schemas/ShadowPerformanceMetricResponse'
+                falseNegativeRate:
+                  $ref: '#/components/schemas/ShadowPerformanceMetricResponse'
         checks:
           type: array
           minItems: 17
@@ -5246,7 +5345,7 @@ components:
                 enum: [CURRENT_SUMMARY_PRESENT, CURRENT_SUMMARY_VERSION_SUPPORTED, EVALUATION_CARD_PRESENT, EVALUATION_CARD_VERSION_SUPPORTED, GOVERNANCE_STATUS_DIAGNOSTIC_ONLY, NOT_PRODUCTION_APPROVAL_TRUE, NOT_PROMOTION_APPROVAL_TRUE, NOT_THRESHOLD_RECOMMENDATION_TRUE, NOT_PAYMENT_AUTHORIZATION_TRUE, NOT_AUTOMATIC_DECISIONING_TRUE, EVALUATION_REPORT_TYPE_SUPPORTED, METRIC_BASIS_SUPPORTED, MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS, ALERT_RECOMMENDED_PRECISION_AVAILABLE, ALERT_RECOMMENDED_RECALL_AVAILABLE, FALSE_POSITIVE_RATE_AVAILABLE, FALSE_NEGATIVE_RATE_AVAILABLE]
               status:
                 type: string
-                enum: [PASS, WARN, FAIL, INCONCLUSIVE, NOT_APPLICABLE]
+                enum: [PASS, FAIL, INCONCLUSIVE]
               severity:
                 type: string
                 enum: [INFO, LOW, MEDIUM, HIGH]

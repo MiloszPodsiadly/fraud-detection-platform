@@ -37,7 +37,7 @@ Configured-but-broken sources return `503`, not `404`, so local and operational 
 
 ## Validation Boundary
 
-The Java validator validates the public report contract only. It does not recompute readiness, metrics, checks, thresholds, promotion status, production decisioning approval, payment authorization, automatic approve/decline/block logic, or analyst recommendation logic.
+The Java validator validates the public report contract and recomputes readiness from immutable `checkInputs`. It does not recompute metrics, thresholds, promotion status, production decisioning approval, payment authorization, automatic approve/decline/block logic, or analyst recommendation logic.
 
 The response intentionally exposes only bounded diagnostic fields, including explicit non-goal booleans such as `notAnalystRecommendation`. It never exposes raw FDP-102 records, raw evaluation cards, raw evaluation reports, transaction references, customer identifiers, feature vectors, model registry data, secrets, stack traces, or filesystem paths.
 

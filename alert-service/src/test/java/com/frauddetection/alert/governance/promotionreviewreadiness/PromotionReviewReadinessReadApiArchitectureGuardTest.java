@@ -48,6 +48,7 @@ class PromotionReviewReadinessReadApiArchitectureGuardTest {
                 "notAutomaticDecisioning",
                 "notAnalystRecommendation",
                 "inputs",
+                "checkInputs",
                 "checks",
                 "reasonCodes",
                 "warnings",
@@ -227,8 +228,7 @@ class PromotionReviewReadinessReadApiArchitectureGuardTest {
                 "`GET /api/v1/governance/promotion-review-readiness/current`",
                 "`promotion-readiness:read`",
                 "Configured-but-broken sources return `503`, not `404`",
-                "The Java validator validates the public report contract only.",
-                "It does not recompute readiness",
+                "The Java validator validates the public report contract and recomputes readiness from immutable `checkInputs`.",
                 "not analyst recommendation logic"
         );
     }
