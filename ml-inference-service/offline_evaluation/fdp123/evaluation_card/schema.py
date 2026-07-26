@@ -27,8 +27,10 @@ from offline_evaluation.fdp123.report_contract import (
     REPORT_TYPE as EXPECTED_EVALUATION_REPORT_TYPE,
 )
 from offline_evaluation.fdp123.evaluation_card.safety_policy import (
-    FORBIDDEN_FIELD_NAMES,
-    FORBIDDEN_VALUE_TERMS,
+    EvaluationCardSafetyPolicyError,
+    compact_policy_token,
+    reject_unsafe_policy_value,
+    reject_unsafe_structure,
 )
 
 
@@ -170,7 +172,7 @@ SAFE_NEGATED_MACHINE_CODES = REQUIRED_NOT_INTENDED_USE | REQUIRED_LIMITATIONS | 
 
 MACHINE_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
 RFC3339_DATETIME_PATTERN = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$"
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$"
 )
 def validate_evaluation_card(raw: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, dict):
@@ -449,31 +451,19 @@ def _bounded_string(raw: dict[str, Any], field: str, max_length: int) -> str:
 
 
 def _reject_unsafe(value: Any) -> None:
-    if isinstance(value, dict):
-        for key, nested in value.items():
-            compact_key = _compact(str(key))
-            if compact_key in FORBIDDEN_FIELD_NAMES:
-                raise Fdp123EvaluationCardValidationError(f"forbidden field: {key}")
-            _reject_unsafe(nested)
-    elif isinstance(value, list):
-        for item in value:
-            _reject_unsafe(item)
-    elif isinstance(value, str):
-        _reject_unsafe_value(value)
+    try:
+        reject_unsafe_structure(value, safe_values=SAFE_CONTRACT_VALUES | SAFE_NEGATED_MACHINE_CODES)
+    except EvaluationCardSafetyPolicyError as exc:
+        raise Fdp123EvaluationCardValidationError(str(exc)) from exc
 
 
 def _reject_unsafe_value(value: str) -> None:
-    if value in SAFE_CONTRACT_VALUES or value in SAFE_NEGATED_MACHINE_CODES:
-        return
-    lowered = value.lower()
-    if "eval_" in lowered or "txnref_" in lowered or "eval-" in lowered or "txnref-" in lowered:
-        raise Fdp123EvaluationCardValidationError("forbidden pseudonymous identifier prefix")
-    compact = _compact(value)
-    for term in FORBIDDEN_VALUE_TERMS:
-        if term in compact:
-            raise Fdp123EvaluationCardValidationError(f"forbidden value: {value}")
+    try:
+        reject_unsafe_policy_value(value, safe_values=SAFE_CONTRACT_VALUES | SAFE_NEGATED_MACHINE_CODES)
+    except EvaluationCardSafetyPolicyError as exc:
+        raise Fdp123EvaluationCardValidationError(str(exc)) from exc
 
 
 def _compact(value: str) -> str:
-    return "".join(character for character in value.lower() if character.isalnum())
+    return compact_policy_token(value)
 

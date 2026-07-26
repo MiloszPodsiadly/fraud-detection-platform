@@ -16,7 +16,9 @@ from offline_evaluation.generate_current_shadow_summary import (
     publish_current_summary,
     validate_current_summary_file,
 )
+import offline_evaluation.shadow_performance_artifact_set as shadow_artifact_set
 from offline_evaluation.shadow_performance_artifact_set import read_validated_shadow_performance_artifact_set
+from offline_evaluation.shadow_performance_artifact_set import build_shadow_performance_manifest
 from offline_evaluation.shadow_performance_schema import REPORT_TYPE, SUMMARY_VERSION
 from offline_evaluation.shadow_performance_writer import write_shadow_performance_summary
 from offline_evaluation.fdp123.evaluation_card.writer import write_evaluation_card_artifacts
@@ -188,6 +190,41 @@ class CurrentShadowSummaryGenerationTest(unittest.TestCase):
 
             self.assertFalse(paths.output.exists())
 
+    def test_shadowArtifactSetManifestGeneratedAtUsesExactCanonicalString(self):
+        with workspace() as paths:
+            payload = valid_payload(paths)
+            paths.output.parent.mkdir(parents=True, exist_ok=True)
+            paths.output.write_text(payload, encoding="utf-8", newline="\n")
+            manifest = paths.output.with_name("manifest.json")
+            manifest.write_text(build_shadow_performance_manifest(payload), encoding="utf-8", newline="\n")
+
+            read_validated_shadow_performance_artifact_set(paths.output, manifest)
+
+            for value in (
+                    "2026-06-13T02:00:00+00:00",
+                    "2026-06-13T03:00:00+01:00",
+                    "2026-06-13T02:00:01Z",
+                    "2026-06-13T02:00:00.1234567Z",
+                    "2026-06-13T02:00:00",
+                    "2026-13-13T02:00:00Z",
+            ):
+                with self.subTest(value=value):
+                    manifest_payload = json.loads(build_shadow_performance_manifest(payload))
+                    manifest_payload["generatedAt"] = value
+                    manifest.write_text(json.dumps(manifest_payload, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+
+                    with self.assertRaises(Exception):
+                        read_validated_shadow_performance_artifact_set(paths.output, manifest)
+
+            six_fraction_summary = json.loads(payload)
+            six_fraction_summary["generatedAt"] = "2026-06-13T02:00:00.123456Z"
+            six_fraction_payload = write_shadow_performance_summary(six_fraction_summary)
+            paths.output.write_text(six_fraction_payload, encoding="utf-8", newline="\n")
+            manifest.write_text(build_shadow_performance_manifest(six_fraction_payload), encoding="utf-8", newline="\n")
+
+            validated, _manifest_sha = read_validated_shadow_performance_artifact_set(paths.output, manifest)
+            self.assertEqual("2026-06-13T02:00:00.123456Z", validated["generatedAt"])
+
     def test_commandExitsNonZeroOnFailure(self):
         with workspace() as paths:
             code = main([
@@ -252,6 +289,42 @@ class CurrentShadowSummaryGenerationTest(unittest.TestCase):
                     "finalDecision",
             ):
                 self.assertNotIn(term, payload)
+
+    def test_interruptedOverwriteRemovesFinalManifestAndRejectsMixedDirectory(self):
+        with workspace() as paths:
+            payload_a = valid_payload(paths)
+            summary_b = json.loads(payload_a)
+            summary_b["warnings"] = ["LOW_SAMPLE_SIZE", "CURRENT_SUMMARY_REGENERATED"]
+            payload_b = write_shadow_performance_summary(summary_b)
+            publish_current_summary(payload_a, paths.output, allowed_output_root=paths.output.parent)
+            validated_a, _manifest_sha = read_validated_shadow_performance_artifact_set(
+                paths.output,
+                paths.output.with_name("manifest.json"),
+            )
+            self.assertEqual(["LOW_SAMPLE_SIZE"], validated_a["warnings"])
+            real_replace = shadow_artifact_set.os.replace
+
+            def fail_after_summary_replace(source, target):
+                real_replace(source, target)
+                if Path(target).name == "current-summary.json":
+                    raise OSError("injected after summary replace")
+
+            with patch("offline_evaluation.shadow_performance_artifact_set.os.replace", fail_after_summary_replace):
+                with self.assertRaises(OSError):
+                    publish_current_summary(payload_b, paths.output, allowed_output_root=paths.output.parent)
+
+            self.assertFalse(paths.output.with_name("manifest.json").exists())
+            self.assertFalse(paths.output.with_name("current-summary.json.tmp").exists())
+            self.assertFalse(paths.output.with_name("manifest.json.tmp").exists())
+            with self.assertRaises(Exception):
+                read_validated_shadow_performance_artifact_set(paths.output, paths.output.with_name("manifest.json"))
+
+            publish_current_summary(payload_b, paths.output, allowed_output_root=paths.output.parent)
+            validated_b, _manifest_sha = read_validated_shadow_performance_artifact_set(
+                paths.output,
+                paths.output.with_name("manifest.json"),
+            )
+            self.assertEqual(["CURRENT_SUMMARY_REGENERATED", "LOW_SAMPLE_SIZE"], validated_b["warnings"])
 
 
 def generate(paths):

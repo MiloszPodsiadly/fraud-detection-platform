@@ -69,9 +69,25 @@ class Fdp123EvaluationCardScopeGuardTest(unittest.TestCase):
         self.assertIn("`evaluation_summary.json`", text)
         self.assertIn("`manifest.json`", text)
         self.assertIn("positiveClassCount + negativeClassCount == recordsEvaluated", text)
-        self.assertIn("real RFC3339 date-times with explicit timezone", text)
+        self.assertIn("real RFC3339 UTC", text)
+        self.assertIn("`Z` date-times", text)
         self.assertIn("does not copy FDP-124 `disagreementSummary` into Platform Recommendation Evaluation Card v1", compact_text)
         self.assertIn("not a signature, notarization, external attestation", text)
+
+    def test_safetyPolicyHasSingleExecutableOwner(self):
+        policy = (PACKAGE_ROOT / "safety_policy.py").read_text(encoding="utf-8")
+        schema = (PACKAGE_ROOT / "schema.py").read_text(encoding="utf-8")
+        generator = (PACKAGE_ROOT / "generator.py").read_text(encoding="utf-8")
+        writer = (PACKAGE_ROOT / "writer.py").read_text(encoding="utf-8")
+
+        self.assertIn("def compact_policy_token", policy)
+        self.assertIn("def reject_unsafe_structure", policy)
+        self.assertIn("def reject_unsafe_serialized_payload", policy)
+        for source in (schema, generator, writer):
+            self.assertNotIn("character.isalnum()", source)
+        self.assertIn("reject_unsafe_structure", schema)
+        self.assertIn("reject_unsafe_structure", generator)
+        self.assertIn("reject_unsafe_serialized_payload", writer)
 
     def _package_text(self):
         return "\n".join(path.read_text(encoding="utf-8") for path in PACKAGE_ROOT.glob("*.py"))

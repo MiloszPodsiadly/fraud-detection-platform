@@ -13,6 +13,12 @@ from offline_evaluation.fdp123.evaluation_card.schema import (
     Fdp123EvaluationCardValidationError,
     validate_evaluation_card,
 )
+from offline_evaluation.fdp123.evaluation_card.safety_policy import (
+    EvaluationCardSafetyPolicyError,
+    compact_policy_token,
+    reject_unsafe_serialized_payload,
+    reject_unsafe_structure,
+)
 
 
 class Fdp123EvaluationCardSchemaTest(unittest.TestCase):
@@ -121,6 +127,27 @@ class Fdp123EvaluationCardSchemaTest(unittest.TestCase):
         metrics["alertRecommendedRecall"] = {"available": True, "value": None, "reason": "NO_ACTUAL_POSITIVES"}
         self._assert_rejected(metricsSummary=metrics)
 
+    def test_safetyPolicyRejectsUnsafeNestedFieldAndValue(self):
+        with self.assertRaises(EvaluationCardSafetyPolicyError):
+            reject_unsafe_structure({"safe": {"rawPayload": "x"}})
+        with self.assertRaises(EvaluationCardSafetyPolicyError):
+            reject_unsafe_structure({"safe": ["payment authorization"]})
+
+    def test_safetyPolicyRejectsUnsafeSerializedPayload(self):
+        with self.assertRaises(EvaluationCardSafetyPolicyError):
+            reject_unsafe_serialized_payload('{"safe":"raw payload"}')
+
+    def test_safetyPolicyAcceptsExactSafeNegatedCodeButRejectsNearMatch(self):
+        safe = {"NO_PAYMENT_AUTHORIZATION"}
+
+        reject_unsafe_structure("NO_PAYMENT_AUTHORIZATION", safe_values=safe)
+        with self.assertRaises(EvaluationCardSafetyPolicyError):
+            reject_unsafe_structure("NO_PAYMENT_AUTHORIZATION_NOW", safe_values=safe)
+
+    def test_safetyPolicyCompactsTokensConsistently(self):
+        self.assertEqual("paymentauthorization", compact_policy_token("Payment Authorization"))
+        self.assertEqual("paymentauthorization", compact_policy_token("payment_authorization"))
+
     def test_metricAvailableRejectsNonFiniteNumbers(self):
         for value in (math.nan, math.inf, -math.inf):
             with self.subTest(value=value):
@@ -185,14 +212,11 @@ class Fdp123EvaluationCardSchemaTest(unittest.TestCase):
 
         self.assertEqual("2026-06-12T00:00:00Z", card["generatedAt"])
 
-    def test_validExplicitOffsetTimestampAcceptedAndNormalized(self):
-        card = validate_evaluation_card(valid_evaluation_card(
+    def test_explicitOffsetTimestampRejectedInsteadOfNormalized(self):
+        self._assert_rejected(
             generatedAt="2026-06-12T02:00:00+02:00",
             evaluationEvidence=valid_evaluation_evidence(evaluationGeneratedAt="2026-06-10T02:00:00+02:00"),
-        ))
-
-        self.assertEqual("2026-06-12T00:00:00Z", card["generatedAt"])
-        self.assertEqual("2026-06-10T00:00:00Z", card["evaluationEvidence"]["evaluationGeneratedAt"])
+        )
 
     def test_arbitraryTimestampTextRejected(self):
         for value in ("yesterday", "banana", "not-a-date"):

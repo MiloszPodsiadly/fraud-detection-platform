@@ -32,7 +32,12 @@ from offline_evaluation.fdp123.evaluation_card.schema import (
     validate_class_count_integrity,
     validate_evaluation_card,
 )
-from offline_evaluation.fdp123.evaluation_card.safety_policy import FORBIDDEN_INPUT_COMPACT_TERMS
+from offline_evaluation.fdp123.evaluation_card.safety_policy import (
+    EvaluationCardSafetyPolicyError,
+    FORBIDDEN_INPUT_COMPACT_TERMS,
+    compact_policy_token,
+    reject_unsafe_structure,
+)
 
 
 REQUIRED_GOVERNANCE_METADATA_FIELDS = {
@@ -204,9 +209,9 @@ def _validate_manifest(manifest: dict[str, Any], summary: dict[str, Any], artifa
         raise Fdp123EvaluationCardValidationError("manifest reportType unsupported")
     if manifest.get("artifactSetVersion") != EXPECTED_SOURCE_ARTIFACT_SET_VERSION:
         raise Fdp123EvaluationCardValidationError("manifest artifactSetVersion unsupported")
-    if normalize_rfc3339_timestamp(manifest.get("generatedAt"), "manifest generatedAt") != normalize_rfc3339_timestamp(
-            summary.get("generatedAt"), "evaluation summary generatedAt"
-    ):
+    normalize_rfc3339_timestamp(manifest.get("generatedAt"), "manifest generatedAt")
+    normalize_rfc3339_timestamp(summary.get("generatedAt"), "evaluation summary generatedAt")
+    if manifest.get("generatedAt") != summary.get("generatedAt"):
         raise Fdp123EvaluationCardValidationError("manifest generatedAt must match evaluation summary generatedAt")
     files = manifest.get("files")
     if not isinstance(files, list) or len(files) != len(EXPECTED_EVALUATION_ARTIFACT_FILENAMES):
@@ -437,23 +442,18 @@ def _load_json_bytes(payload: bytes, label: str) -> dict[str, Any]:
 
 
 def _reject_forbidden_input(value: Any) -> None:
-    if isinstance(value, dict):
-        for key, nested in value.items():
-            compact_key = _compact(str(key))
-            if compact_key in FORBIDDEN_INPUT_COMPACT_TERMS:
-                raise Fdp123EvaluationCardValidationError(f"forbidden input field: {key}")
-            _reject_forbidden_input(nested)
-    elif isinstance(value, list):
-        for item in value:
-            _reject_forbidden_input(item)
-    elif isinstance(value, str):
-        if value in SAFE_CONTRACT_VALUES or value in SAFE_NEGATED_MACHINE_CODES:
-            return
-        compact = _compact(value)
-        for term in FORBIDDEN_INPUT_COMPACT_TERMS:
-            if term in compact:
-                raise Fdp123EvaluationCardValidationError(f"forbidden input value: {value}")
+    try:
+        reject_unsafe_structure(
+            value,
+            safe_values=SAFE_CONTRACT_VALUES | SAFE_NEGATED_MACHINE_CODES,
+            forbidden_field_names=FORBIDDEN_INPUT_COMPACT_TERMS,
+            forbidden_value_terms=FORBIDDEN_INPUT_COMPACT_TERMS,
+            field_message="forbidden input field",
+            value_message="forbidden input value",
+        )
+    except EvaluationCardSafetyPolicyError as exc:
+        raise Fdp123EvaluationCardValidationError(str(exc)) from exc
 
 
 def _compact(value: str) -> str:
-    return "".join(character for character in value.lower() if character.isalnum())
+    return compact_policy_token(value)

@@ -188,12 +188,12 @@ class Fdp123EvaluationCardGeneratorTest(unittest.TestCase):
                     with self.assertRaises(Fdp123EvaluationCardValidationError):
                         self.generate(paths)
 
-    def test_acceptsAndNormalizesExplicitOffsetEvaluationTimestamp(self):
+    def test_rejectsExplicitOffsetEvaluationTimestampInsteadOfNormalizing(self):
         with self.artifacts() as paths:
             self._mutate_summary(paths, generatedAt="2026-06-10T02:00:00+02:00")
-            card = self.generate(paths)
 
-        self.assertEqual("2026-06-10T00:00:00Z", card["evaluationEvidence"]["evaluationGeneratedAt"])
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
+                self.generate(paths)
 
     def test_failsIfEvaluationCardGeneratedBeforeEvaluationEvidence(self):
         with self.artifacts() as paths:

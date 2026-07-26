@@ -1,7 +1,9 @@
 import json
 import math
 import unittest
+from pathlib import Path
 
+from offline_evaluation.shadow_performance_artifact_set import read_validated_shadow_performance_artifact_set
 from offline_evaluation.shadow_performance_schema import (
     BANNER,
     REPORT_TYPE,
@@ -15,6 +17,7 @@ from fdp123.evaluation_card.test_schema import valid_evaluation_card, valid_eval
 
 GENERATED_AT = "2026-06-13T02:00:00Z"
 CARD_MANIFEST_SHA256 = "b" * 64
+ROOT = Path(__file__).resolve().parents[3]
 
 
 class ShadowPerformanceSummaryTest(unittest.TestCase):
@@ -29,6 +32,19 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
         self.assertEqual(CARD_MANIFEST_SHA256, summary["evaluation"]["sourceEvaluationCardManifestSha256"])
         self.assertNotIn("model", summary)
         self.assertNotIn("summaryType", summary)
+
+    def test_canonicalDeploymentFixturePassesPythonSchemaAndArtifactReader(self):
+        fixture_dir = ROOT / "deployment" / "local-fixtures" / "shadow-performance"
+        summary_path = fixture_dir / "current-summary.json"
+        manifest_path = fixture_dir / "manifest.json"
+
+        summary, manifest_sha256 = read_validated_shadow_performance_artifact_set(summary_path, manifest_path)
+
+        self.assertEqual(REPORT_TYPE, summary["reportType"])
+        self.assertEqual(SUMMARY_VERSION, summary["summaryVersion"])
+        self.assertEqual("2026-06-13T02:00:00Z", summary["generatedAt"])
+        self.assertEqual("shadow-performance-artifact-set-v1", json.loads(manifest_path.read_text())["artifactSetVersion"])
+        self.assertEqual(64, len(manifest_sha256))
 
     def test_preservesMetricObjectsWithoutZeroFallback(self):
         card = self.evaluation_card()

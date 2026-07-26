@@ -36,7 +36,8 @@ class PromotionReviewReadinessArtifactSetError(ValueError):
 
 def build_promotion_review_readiness_manifest(report_payload: str) -> str:
     try:
-        report = validate_promotion_review_readiness_report(loads_strict_json(report_payload))
+        raw_report = loads_strict_json(report_payload)
+        validate_promotion_review_readiness_report(raw_report)
     except (JsonContractError, PromotionReviewReadinessValidationError) as exc:
         raise PromotionReviewReadinessArtifactSetError(str(exc)) from exc
     report_bytes = report_payload.encode("utf-8")
@@ -49,7 +50,7 @@ def build_promotion_review_readiness_manifest(report_payload: str) -> str:
                 "sizeBytes": len(report_bytes),
             }
         ],
-        "generatedAt": report["generatedAt"],
+        "generatedAt": raw_report["generatedAt"],
         "reportType": ARTIFACT_SET_REPORT_TYPE,
     }
     return dumps_strict_json(manifest, sort_keys=True, separators=(",", ":")) + "\n"
@@ -107,15 +108,16 @@ def read_validated_promotion_review_readiness_artifact_set(
         report = loads_strict_json(report_bytes)
     except (UnicodeDecodeError, json.JSONDecodeError, JsonContractError) as exc:
         raise PromotionReviewReadinessArtifactSetError("promotion readiness artifact set contains malformed JSON") from exc
+    raw_report_generated_at = report.get("generatedAt") if isinstance(report, dict) else None
     try:
         validated_report = validate_promotion_review_readiness_report(report)
     except PromotionReviewReadinessValidationError as exc:
         raise PromotionReviewReadinessArtifactSetError(str(exc)) from exc
-    _validate_manifest(manifest, validated_report, report_bytes)
+    _validate_manifest(manifest, raw_report_generated_at, report_bytes)
     return validated_report
 
 
-def _validate_manifest(manifest: Any, report: dict[str, Any], report_bytes: bytes) -> None:
+def _validate_manifest(manifest: Any, report_generated_at: Any, report_bytes: bytes) -> None:
     if not isinstance(manifest, dict):
         raise PromotionReviewReadinessArtifactSetError("promotion readiness manifest must be an object")
     _reject_unknown_or_missing(manifest, MANIFEST_FIELDS, "promotion readiness manifest")
@@ -124,10 +126,10 @@ def _validate_manifest(manifest: Any, report: dict[str, Any], report_bytes: byte
     if manifest["artifactSetVersion"] != ARTIFACT_SET_VERSION:
         raise PromotionReviewReadinessArtifactSetError("promotion readiness manifest artifactSetVersion unsupported")
     try:
-        generated_at = normalize_rfc3339_timestamp(manifest["generatedAt"], "promotion readiness manifest generatedAt")
+        normalize_rfc3339_timestamp(manifest["generatedAt"], "promotion readiness manifest generatedAt")
     except TimestampContractError as exc:
         raise PromotionReviewReadinessArtifactSetError(str(exc)) from exc
-    if generated_at != report["generatedAt"]:
+    if manifest["generatedAt"] != report_generated_at:
         raise PromotionReviewReadinessArtifactSetError("promotion readiness manifest generatedAt must match report generatedAt")
     files = manifest["files"]
     if not isinstance(files, list) or len(files) != 1:

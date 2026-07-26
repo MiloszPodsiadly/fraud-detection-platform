@@ -14,7 +14,10 @@ from offline_evaluation.fdp123.evaluation_card.schema import (
     Fdp123EvaluationCardValidationError,
     validate_evaluation_card,
 )
-from offline_evaluation.fdp123.evaluation_card.safety_policy import FORBIDDEN_OUTPUT_TERMS
+from offline_evaluation.fdp123.evaluation_card.safety_policy import (
+    EvaluationCardSafetyPolicyError,
+    reject_unsafe_serialized_payload,
+)
 
 
 def evaluation_card_json(evaluation_card: dict[str, Any]) -> str:
@@ -203,26 +206,18 @@ def _bullets(values: list[str]) -> str:
 
 
 def _reject_forbidden_output(payload: str) -> None:
-    lowered = payload.lower()
-    if "eval_" in lowered or "txnref_" in lowered or "eval-" in lowered or "txnref-" in lowered:
-        raise Fdp123EvaluationCardValidationError("evaluation card contains forbidden pseudonymous identifier prefix")
-    masked = payload
-    for safe_value in sorted(SAFE_CONTRACT_VALUES | SAFE_NEGATED_MACHINE_CODES, key=len, reverse=True):
-        masked = masked.replace(safe_value, "")
-    for safe_field in (
-        "paymentAuthorizationAuthority",
-        "runtimeDecisionAuthority",
-        "promotionAuthority",
-        "thresholdChangeAuthority",
-        "workflowAuthority",
-    ):
-        masked = masked.replace(safe_field, "")
-    compact_payload = _compact(masked)
-    for forbidden in FORBIDDEN_OUTPUT_TERMS:
-        if forbidden in compact_payload:
-            raise Fdp123EvaluationCardValidationError(f"evaluation card contains forbidden term: {forbidden}")
-
-
-def _compact(value: str) -> str:
-    return "".join(character for character in value.lower() if character.isalnum())
+    try:
+        reject_unsafe_serialized_payload(
+            payload,
+            safe_values=SAFE_CONTRACT_VALUES | SAFE_NEGATED_MACHINE_CODES,
+            safe_fields=(
+                "paymentAuthorizationAuthority",
+                "runtimeDecisionAuthority",
+                "promotionAuthority",
+                "thresholdChangeAuthority",
+                "workflowAuthority",
+            ),
+        )
+    except EvaluationCardSafetyPolicyError as exc:
+        raise Fdp123EvaluationCardValidationError(str(exc)) from exc
 

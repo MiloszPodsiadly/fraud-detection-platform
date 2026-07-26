@@ -36,7 +36,8 @@ class ShadowPerformanceArtifactSetError(ValueError):
 
 def build_shadow_performance_manifest(summary_payload: str) -> str:
     try:
-        summary = validate_shadow_performance_summary(loads_strict_json(summary_payload))
+        raw_summary = loads_strict_json(summary_payload)
+        validate_shadow_performance_summary(raw_summary)
     except JsonContractError as exc:
         raise ShadowPerformanceArtifactSetError(str(exc)) from exc
     summary_bytes = summary_payload.encode("utf-8")
@@ -49,7 +50,7 @@ def build_shadow_performance_manifest(summary_payload: str) -> str:
                 "sizeBytes": len(summary_bytes),
             }
         ],
-        "generatedAt": summary["generatedAt"],
+        "generatedAt": raw_summary["generatedAt"],
         "reportType": ARTIFACT_SET_REPORT_TYPE,
     }
     return dumps_strict_json(manifest, sort_keys=True, separators=(",", ":")) + "\n"
@@ -99,12 +100,13 @@ def read_validated_shadow_performance_artifact_set(
         summary = loads_strict_json(summary_bytes)
     except (UnicodeDecodeError, json.JSONDecodeError, JsonContractError) as exc:
         raise ShadowPerformanceArtifactSetError("shadow artifact set contains malformed JSON") from exc
+    raw_summary_generated_at = summary.get("generatedAt") if isinstance(summary, dict) else None
     validated_summary = validate_shadow_performance_summary(summary)
-    _validate_manifest(manifest, validated_summary, summary_bytes)
+    _validate_manifest(manifest, raw_summary_generated_at, summary_bytes)
     return validated_summary, hashlib.sha256(manifest_bytes).hexdigest()
 
 
-def _validate_manifest(manifest: Any, summary: dict[str, Any], summary_bytes: bytes) -> None:
+def _validate_manifest(manifest: Any, summary_generated_at: Any, summary_bytes: bytes) -> None:
     if not isinstance(manifest, dict):
         raise ShadowPerformanceArtifactSetError("shadow manifest must be an object")
     _reject_unknown_or_missing(manifest, MANIFEST_FIELDS, "shadow manifest")
@@ -113,10 +115,10 @@ def _validate_manifest(manifest: Any, summary: dict[str, Any], summary_bytes: by
     if manifest["artifactSetVersion"] != ARTIFACT_SET_VERSION:
         raise ShadowPerformanceArtifactSetError("shadow manifest artifactSetVersion unsupported")
     try:
-        generated_at = normalize_rfc3339_timestamp(manifest["generatedAt"], "shadow manifest generatedAt")
+        normalize_rfc3339_timestamp(manifest["generatedAt"], "shadow manifest generatedAt")
     except TimestampContractError as exc:
         raise ShadowPerformanceArtifactSetError(str(exc)) from exc
-    if generated_at != summary["generatedAt"]:
+    if manifest["generatedAt"] != summary_generated_at:
         raise ShadowPerformanceArtifactSetError("shadow manifest generatedAt must match summary generatedAt")
     files = manifest["files"]
     if not isinstance(files, list) or len(files) != 1:

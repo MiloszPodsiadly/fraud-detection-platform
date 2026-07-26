@@ -91,6 +91,49 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
             with self.assertRaises(PromotionReviewReadinessGenerationError):
                 validate_promotion_review_readiness_artifact_set(paths.output, manifest)
 
+    def test_promotionReadinessManifestGeneratedAtUsesExactCanonicalString(self):
+        with workspace() as paths:
+            payload = valid_payload()
+            paths.output.parent.mkdir(parents=True, exist_ok=True)
+            paths.output.write_text(payload, encoding="utf-8", newline="\n")
+            manifest = paths.output.with_name("manifest.json")
+            manifest.write_text(
+                readiness_artifact_set.build_promotion_review_readiness_manifest(payload),
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            validate_promotion_review_readiness_artifact_set(paths.output, manifest)
+
+            for value in (
+                    "2026-06-14T00:00:00+00:00",
+                    "2026-06-14T01:00:00+01:00",
+                    "2026-06-14T00:00:01Z",
+                    "2026-06-14T00:00:00.1234567Z",
+                    "2026-06-14T00:00:00",
+                    "2026-13-14T00:00:00Z",
+            ):
+                with self.subTest(value=value):
+                    manifest_payload = json.loads(readiness_artifact_set.build_promotion_review_readiness_manifest(payload))
+                    manifest_payload["generatedAt"] = value
+                    manifest.write_text(json.dumps(manifest_payload, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+
+                    with self.assertRaises(PromotionReviewReadinessGenerationError):
+                        validate_promotion_review_readiness_artifact_set(paths.output, manifest)
+
+            report = build_report()
+            report["generatedAt"] = "2026-06-14T00:00:00.123456Z"
+            six_fraction_payload = promotion_review_readiness_report_json(report)
+            paths.output.write_text(six_fraction_payload, encoding="utf-8", newline="\n")
+            manifest.write_text(
+                readiness_artifact_set.build_promotion_review_readiness_manifest(six_fraction_payload),
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            validated = validate_promotion_review_readiness_artifact_set(paths.output, manifest)
+            self.assertEqual("2026-06-14T00:00:00.123456Z", validated["generatedAt"])
+
             generate(paths)
             manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
             manifest_payload["files"][0]["sizeBytes"] = 1

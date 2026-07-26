@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from offline_evaluation.fdp123.evaluation_card.run_evaluation_card_generation import main
 from offline_evaluation.fdp123.evaluation_card.schema import Fdp123EvaluationCardValidationError
+from offline_evaluation.fdp123.evaluation_card.artifact_reader import read_validated_evaluation_card_artifact_set
 from offline_evaluation.fdp123.evaluation_card.writer import (
     build_evaluation_card_manifest,
     evaluation_card_json,
@@ -151,6 +152,45 @@ class Fdp123EvaluationCardWriterTest(unittest.TestCase):
     def test_buildManifestRejectsUnsafePayload(self):
         with self.assertRaises(Fdp123EvaluationCardValidationError):
             build_evaluation_card_manifest({Path("rawPayload.json"): "{}\n"}, PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT)
+
+    def test_interruptedOverwriteRemovesFinalManifestAndRejectsMixedDirectory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            card_a = valid_evaluation_card()
+            card_b = valid_evaluation_card(generatedAt="2026-06-12T00:00:01Z")
+            write_evaluation_card_artifacts(card_a, output)
+            validated_a, _manifest_sha = read_validated_evaluation_card_artifact_set(
+                output / "platform_recommendation_evaluation_card.json",
+                output / "manifest.json",
+            )
+            self.assertEqual("2026-06-12T00:00:00Z", validated_a["generatedAt"])
+            real_replace = os.replace
+
+            def fail_after_json_replace(source, destination):
+                real_replace(source, destination)
+                if Path(destination).name == "platform_recommendation_evaluation_card.json":
+                    raise OSError("injected after card json replace")
+
+            with patch("offline_evaluation.fdp123.evaluation_card.writer.os.replace", fail_after_json_replace):
+                with self.assertRaises(OSError):
+                    write_evaluation_card_artifacts(card_b, output)
+
+            self.assertFalse((output / "manifest.json").exists())
+            self.assertFalse((output / "platform_recommendation_evaluation_card.json.tmp").exists())
+            self.assertFalse((output / "platform_recommendation_evaluation_card.md.tmp").exists())
+            self.assertFalse((output / "manifest.json.tmp").exists())
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
+                read_validated_evaluation_card_artifact_set(
+                    output / "platform_recommendation_evaluation_card.json",
+                    output / "manifest.json",
+                )
+
+            write_evaluation_card_artifacts(card_b, output)
+            validated_b, _manifest_sha = read_validated_evaluation_card_artifact_set(
+                output / "platform_recommendation_evaluation_card.json",
+                output / "manifest.json",
+            )
+            self.assertEqual("2026-06-12T00:00:01Z", validated_b["generatedAt"])
 
 
 class Fdp123EvaluationCardCliTest(unittest.TestCase):

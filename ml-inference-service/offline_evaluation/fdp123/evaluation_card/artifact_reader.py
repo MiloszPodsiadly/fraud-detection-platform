@@ -46,11 +46,12 @@ def read_validated_evaluation_card_artifact_set(
     markdown_bytes = _read_required_bytes(markdown_path, "evaluation card markdown", MAX_EVALUATION_CARD_MARKDOWN_BYTES)
     manifest = _load_json_bytes(manifest_bytes, "evaluation card manifest")
     card = _load_json_bytes(card_bytes, "evaluation card")
+    raw_card_generated_at = card.get("generatedAt")
     validated_card = validate_evaluation_card(card)
     _validate_manifest(manifest, validated_card, {
         EXPECTED_EVALUATION_CARD_FILENAME: card_bytes,
         EXPECTED_EVALUATION_CARD_MARKDOWN_FILENAME: markdown_bytes,
-    })
+    }, raw_card_generated_at)
     return validated_card, hashlib.sha256(manifest_bytes).hexdigest()
 
 
@@ -58,6 +59,7 @@ def _validate_manifest(
         manifest: dict[str, Any],
         validated_card: dict[str, Any],
         artifact_bytes: dict[str, bytes],
+        card_generated_at: Any,
 ) -> None:
     _reject_unknown_or_missing(manifest, MANIFEST_FIELDS, "evaluation card manifest")
     if manifest.get("reportType") != PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE:
@@ -65,12 +67,10 @@ def _validate_manifest(
     if manifest.get("artifactSetVersion") != ARTIFACT_SET_VERSION:
         raise Fdp123EvaluationCardValidationError("evaluation card manifest artifactSetVersion unsupported")
     try:
-        manifest_generated_at = normalize_rfc3339_timestamp(
-            manifest.get("generatedAt"), "evaluation card manifest generatedAt"
-        )
+        normalize_rfc3339_timestamp(manifest.get("generatedAt"), "evaluation card manifest generatedAt")
     except TimestampContractError as exc:
         raise Fdp123EvaluationCardValidationError(str(exc)) from exc
-    if manifest_generated_at != validated_card["generatedAt"]:
+    if manifest.get("generatedAt") != card_generated_at:
         raise Fdp123EvaluationCardValidationError("evaluation card manifest generatedAt must match card generatedAt")
     files = manifest.get("files")
     if not isinstance(files, list) or len(files) != len(EXPECTED_ARTIFACT_FILENAMES):
