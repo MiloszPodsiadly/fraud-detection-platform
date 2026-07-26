@@ -109,6 +109,23 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
     }
 
     @Test
+    void throwsUnavailableWhenSummaryOrManifestContainsDuplicateJsonKeys() throws Exception {
+        String duplicateSummary = validSummaryJson().replaceFirst(
+                "\\{",
+                "{\"reportType\":\"SHADOW_PERFORMANCE_SUMMARY_V2\","
+        );
+        assertUnavailable(provider(writeJson(duplicateSummary)));
+
+        String json = validSummaryJson();
+        Path artifact = writeJson(json);
+        Files.writeString(artifact.resolveSibling("manifest.json"), manifestFor(json).replaceFirst(
+                "\"sha256\":\"[a-f0-9]{64}\"",
+                "\"sha256\":\"" + sha256(json) + "\",\"sha256\":\"" + sha256(json) + "\""
+        ));
+        assertUnavailable(provider(artifact));
+    }
+
+    @Test
     void doesNotCoerceInvalidMetrics() throws Exception {
         Path artifact = tempDir.resolve("current-summary.json");
         Files.writeString(artifact, validSummaryJson().replace(

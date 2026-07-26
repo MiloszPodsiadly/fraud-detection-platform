@@ -5,7 +5,10 @@ import {
   createAlertsApiClient,
   toUtcInstantParam,
 } from "./alertsApi.js";
-import { isValidPromotionReviewReadinessReport } from "../governance/promotionReviewReadinessReportValidation.js";
+import {
+  REQUIRED_PROMOTION_REVIEW_READINESS_BANNER,
+  isValidPromotionReviewReadinessReport
+} from "../governance/promotionReviewReadinessReportValidation.js";
 import { normalizeSession } from "../auth/session.js";
 import { createBffAuthProvider, createDemoAuthProvider, createOidcAuthProvider } from "../auth/authProvider.js";
 import { createInMemoryOidcSessionSource } from "../auth/oidcSessionSource.js";
@@ -305,6 +308,7 @@ describe("alertsApi auth headers", () => {
     ["invalidReportVersion", (report) => { report.reportVersion = "2.0"; }],
     ["missingGeneratedAt", (report) => { delete report.generatedAt; }],
     ["invalidGeneratedAt", (report) => { report.generatedAt = "not-a-date"; }],
+    ["sevenDigitFractionGeneratedAt", (report) => { report.generatedAt = "2026-06-13T03:00:00.1234567Z"; }],
     ["invalidGovernanceStatus", (report) => { report.governanceStatus = "PRODUCTION"; }],
     ["invalidReadinessStatus", (report) => { report.readinessStatus = "APPROVED"; }],
     ["missingDiagnosticOnly", (report) => { delete report.diagnosticOnly; }],
@@ -322,7 +326,17 @@ describe("alertsApi auth headers", () => {
     ["missingNotAnalystRecommendation", (report) => { delete report.notAnalystRecommendation; }],
     ["notAnalystRecommendationFalse", (report) => { report.notAnalystRecommendation = false; }],
     ["missingBanner", (report) => { delete report.banner; }],
-    ["oversizedBanner", (report) => { report.banner = "A".repeat(513); }],
+    ["nullBanner", (report) => { report.banner = null; }],
+    ["emptyBanner", (report) => { report.banner = ""; }],
+    ["whitespaceBanner", (report) => { report.banner = " "; }],
+    ["approvalBanner", (report) => { report.banner = "APPROVED FOR PRODUCTION"; }],
+    ["automaticPromotionBanner", (report) => { report.banner = "READY FOR AUTOMATIC PROMOTION"; }],
+    ["deployBanner", (report) => { report.banner = "SAFE TO DEPLOY"; }],
+    ["thresholdBanner", (report) => { report.banner = "THRESHOLD CHANGE APPROVED"; }],
+    ["paymentBanner", (report) => { report.banner = "PAYMENT ACTION AUTHORIZED"; }],
+    ["truncatedBanner", (report) => { report.banner = "Promotion review readiness is an offline diagnostic aid only."; }],
+    ["bannerWithSuffix", (report) => { report.banner = `${REQUIRED_PROMOTION_REVIEW_READINESS_BANNER} Extra.`; }],
+    ["bannerChangedCase", (report) => { report.banner = REQUIRED_PROMOTION_REVIEW_READINESS_BANNER.toUpperCase(); }],
     ["missingInputs", (report) => { delete report.inputs; }],
     ["missingShadowPerformanceSummaryInput", (report) => { delete report.inputs.shadowPerformanceSummary; }],
     ["shadowPerformanceSummaryNotPresent", (report) => { report.inputs.shadowPerformanceSummary.present = false; }],
@@ -330,6 +344,7 @@ describe("alertsApi auth headers", () => {
     ["unsafeShadowSummaryVersion", (report) => { report.inputs.shadowPerformanceSummary.summaryVersion = "approved"; }],
     ["missingShadowSummaryGeneratedAt", (report) => { delete report.inputs.shadowPerformanceSummary.generatedAt; }],
     ["invalidShadowSummaryGeneratedAt", (report) => { report.inputs.shadowPerformanceSummary.generatedAt = "not-a-date"; }],
+    ["sevenDigitFractionShadowSummaryGeneratedAt", (report) => { report.inputs.shadowPerformanceSummary.generatedAt = "2026-06-13T02:00:00.1234567Z"; }],
     ["reportGeneratedBeforeSourceSummary", (report) => { report.generatedAt = "2026-06-13T01:00:00Z"; }],
     ["missingMinimumDiagnosticEvidenceRecords", (report) => { delete report.inputs.minimumDiagnosticEvidenceRecords; }],
     ["zeroMinimumDiagnosticEvidenceRecords", (report) => { report.inputs.minimumDiagnosticEvidenceRecords = 0; }],
@@ -395,6 +410,14 @@ describe("alertsApi auth headers", () => {
   it("promotionReviewReadinessInvalidResponseReturnsSafeState", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(promotionReviewReadinessReport({
       notPaymentAuthorization: false
+    })));
+
+    await expect(getCurrentPromotionReviewReadinessReport()).resolves.toEqual({ state: "invalid-response" });
+  });
+
+  it("promotionReviewReadinessForgedBannerReturnsSafeInvalidResponse", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(promotionReviewReadinessReport({
+      banner: "APPROVED FOR PRODUCTION"
     })));
 
     await expect(getCurrentPromotionReviewReadinessReport()).resolves.toEqual({ state: "invalid-response" });
@@ -2080,7 +2103,7 @@ function promotionReviewReadinessReport(overrides = {}) {
       "HUMAN_REVIEW_START_ONLY",
       "OFFLINE_DIAGNOSTIC_AID_ONLY"
     ],
-    banner: "Promotion review readiness is an offline diagnostic aid only. It is not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.",
+    banner: REQUIRED_PROMOTION_REVIEW_READINESS_BANNER,
     ...overrides
   };
 }

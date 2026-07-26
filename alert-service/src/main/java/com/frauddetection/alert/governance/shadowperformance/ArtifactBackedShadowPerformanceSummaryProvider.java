@@ -1,6 +1,7 @@
 package com.frauddetection.alert.governance.shadowperformance;
 
 import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.MapperFeature;
@@ -40,6 +41,7 @@ public class ArtifactBackedShadowPerformanceSummaryProvider implements ShadowPer
         this.properties = properties;
         this.objectMapper = objectMapper.rebuild()
                 .configure(MapperFeature.ALLOW_COERCION_OF_SCALARS, false)
+                .configure(StreamReadFeature.STRICT_DUPLICATE_DETECTION, true)
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true)
                 .configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true)
                 .configure(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES, true)

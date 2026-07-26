@@ -5133,6 +5133,7 @@ components:
         generatedAt:
           type: string
           format: date-time
+          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$'
         evaluationSubject:
           $ref: "#/components/schemas/ShadowPerformanceEvaluationSubjectResponse"
         metricBasis:
@@ -5157,6 +5158,7 @@ components:
             pattern: '^[A-Z][A-Z0-9_]{0,127}$'
         limitations:
           type: array
+          description: Must include ANALYST_FEEDBACK_LABELS_ARE_NOT_LEGAL_GROUND_TRUTH, OFFLINE_DIAGNOSTIC_METRICS_ARE_NOT_PRODUCTION_APPROVAL, METRICS_ARE_PLATFORM_RECOMMENDATION_DIAGNOSTICS, SMALL_SAMPLE_SIZE_MAY_BE_INCONCLUSIVE, PSEUDONYMOUS_REFERENCES_ARE_NOT_ANONYMIZATION, PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_APPROVE_PROMOTION, PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_AUTHORIZE_AUTOMATIC_DECLINE, and PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_CHANGE_SCORING_THRESHOLDS; bounded extension machine codes are allowed.
           maxItems: 20
           uniqueItems: true
           items:
@@ -5166,7 +5168,9 @@ components:
             pattern: '^[A-Z][A-Z0-9_]{0,127}$'
         banner:
           type: string
-          description: Offline diagnostics only. No promotion, threshold, production decisioning, payment authorization, automatic operational action, or analyst recommendation authority is granted.
+          enum:
+            - Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.
+          description: Exact offline diagnostics-only safety banner. No promotion, threshold, production decisioning, payment authorization, automatic operational action, or analyst recommendation authority is granted.
     PromotionReviewReadinessReportResponse:
       type: object
       additionalProperties: false
@@ -5181,6 +5185,7 @@ components:
         generatedAt:
           type: string
           format: date-time
+          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$'
         governanceStatus:
           type: string
           enum: [DIAGNOSTIC_ONLY]
@@ -5229,6 +5234,7 @@ components:
                 generatedAt:
                   type: string
                   format: date-time
+                  pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$'
             minimumDiagnosticEvidenceRecords:
               type: integer
               minimum: 1
@@ -5262,6 +5268,7 @@ components:
                 generatedAt:
                   type: string
                   format: date-time
+                  pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$'
                 sourceEvaluationCardManifestSha256:
                   type: string
                   pattern: '^[a-f0-9]{64}$'
@@ -5369,6 +5376,7 @@ components:
             pattern: '^[A-Z][A-Z0-9_]{0,127}$'
         limitations:
           type: array
+          description: Must include OFFLINE_DIAGNOSTIC_AID_ONLY, HUMAN_REVIEW_START_ONLY, DOES_NOT_RECOMMEND_THRESHOLDS, DOES_NOT_AUTHORIZE_PAYMENTS, and DOES_NOT_CHANGE_SCORING; bounded extension machine codes are allowed.
           maxItems: 20
           uniqueItems: true
           items:
@@ -5378,7 +5386,9 @@ components:
             pattern: '^[A-Z][A-Z0-9_]{0,127}$'
         banner:
           type: string
-          description: Offline diagnostic aid only. No promotion approval, threshold recommendation, production decisioning, payment authorization, automatic operational action, or analyst recommendation authority is granted.
+          enum:
+            - Promotion review readiness is an offline diagnostic aid only. It is not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.
+          description: Exact offline diagnostic aid safety banner. No promotion approval, threshold recommendation, production decisioning, payment authorization, automatic operational action, or analyst recommendation authority is granted.
     ShadowPerformanceEvaluationSubjectResponse:
       type: object
       additionalProperties: false
@@ -5451,10 +5461,12 @@ components:
         evaluationReportGeneratedAt:
           type: string
           format: date-time
+          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$'
           description: UTC-normalized timestamp from the source FDP-123/FDP-124 evaluation report. Must be less than or equal to evaluationCardGeneratedAt.
         evaluationCardGeneratedAt:
           type: string
           format: date-time
+          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$'
           description: UTC-normalized timestamp from the Platform Recommendation Evaluation Card. Must be greater than or equal to evaluationReportGeneratedAt and less than or equal to the summary generatedAt.
         evaluationArtifactSetVersion:
           type: string

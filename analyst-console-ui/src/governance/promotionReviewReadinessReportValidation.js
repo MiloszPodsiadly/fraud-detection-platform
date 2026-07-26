@@ -1,6 +1,8 @@
 const PROMOTION_REVIEW_READINESS_REPORT_TYPE = "PROMOTION_REVIEW_READINESS_REPORT_V1";
 const PROMOTION_REVIEW_READINESS_REPORT_VERSION = "1.0";
 const PROMOTION_REVIEW_READINESS_GOVERNANCE_STATUS = "DIAGNOSTIC_ONLY";
+export const REQUIRED_PROMOTION_REVIEW_READINESS_BANNER =
+  "Promotion review readiness is an offline diagnostic aid only. It is not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.";
 const PROMOTION_REVIEW_READINESS_STATUSES = new Set([
   "INSUFFICIENT_DATA",
   "INCONCLUSIVE",
@@ -10,14 +12,13 @@ const PROMOTION_REVIEW_READINESS_STATUSES = new Set([
 const CHECK_STATUSES = new Set(["PASS", "FAIL", "INCONCLUSIVE"]);
 const CHECK_SEVERITY_VALUES = new Set(["INFO", "LOW", "MEDIUM", "HIGH"]);
 const MAX_DIAGNOSTIC_RECORDS = 1000;
-const MAX_BANNER_LENGTH = 512;
 const MAX_CHECKS = 50;
 const MAX_MACHINE_CODE_ITEMS = 20;
 const MAX_CHECK_NAME_LENGTH = 128;
 const MAX_MACHINE_CODE_LENGTH = 128;
 const MAX_SUMMARY_VERSION_LENGTH = 32;
 const MACHINE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
-const RFC3339_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const RFC3339_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const REQUIRED_CHECK_NAMES = [
   "CURRENT_SUMMARY_PRESENT",
@@ -143,7 +144,7 @@ export function isValidPromotionReviewReadinessReport(report) {
     && report.notPaymentAuthorization === true
     && report.notAutomaticDecisioning === true
     && report.notAnalystRecommendation === true
-    && isBoundedNonEmptyString(report.banner, MAX_BANNER_LENGTH)
+    && report.banner === REQUIRED_PROMOTION_REVIEW_READINESS_BANNER
     && isValidInputs(report.inputs, report.generatedAt)
     && isValidCheckInputs(report.checkInputs)
     && inputsMatchCheckInputs(report.inputs, report.checkInputs)
