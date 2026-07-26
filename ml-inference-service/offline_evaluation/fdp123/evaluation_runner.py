@@ -11,13 +11,20 @@ from offline_evaluation.fdp123.metrics import build_fdp123_metrics
 from offline_evaluation.fdp123.models import Fdp123Dataset
 from offline_evaluation.fdp123.report_contract import REPORT_TYPE
 from offline_evaluation.fdp123.report_writer import write_fdp123_reports
+from offline_evaluation.fdp123.timestamp_contract import normalize_rfc3339_timestamp
 
 
 def build_fdp123_evaluation_reports(
         dataset: Fdp123Dataset,
         generated_at: str | None = None,
 ) -> dict[str, Any]:
-    generated = generated_at or datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    raw_generated = generated_at
+    if raw_generated is None:
+        raw_generated = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    generated = normalize_rfc3339_timestamp(
+        raw_generated,
+        "generated_at",
+    )
     metrics = build_fdp123_metrics(dataset)
     disagreement = build_fdp123_disagreement_report(dataset.records)
     warnings = list(metrics["warnings"])

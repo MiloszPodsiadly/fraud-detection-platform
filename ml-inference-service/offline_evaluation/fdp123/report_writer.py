@@ -7,6 +7,7 @@ from typing import Any
 
 from offline_evaluation.json_contract import dumps_strict_json
 from offline_evaluation.fdp123.report_contract import ARTIFACT_SET_VERSION, REPORT_TYPE
+from offline_evaluation.fdp123.timestamp_contract import normalize_rfc3339_timestamp
 
 MAX_WARNINGS = 10
 FORBIDDEN_REPORT_COMPACT_TERMS = {
@@ -54,6 +55,7 @@ def report_json(report: dict[str, Any]) -> str:
     safe_report = dict(report)
     if safe_report.get("reportType") != REPORT_TYPE:
         raise ValueError(f"reportType must be {REPORT_TYPE}")
+    safe_report["generatedAt"] = normalize_rfc3339_timestamp(safe_report.get("generatedAt"), "generatedAt")
     if "warnings" not in safe_report:
         raise ValueError("warnings must be present")
     warnings = safe_report["warnings"]
@@ -93,7 +95,6 @@ def write_fdp123_reports(
         allow_output_root: Path | None = None,
 ) -> dict[str, Path]:
     output_dir = Path(output_dir)
-    _prepare_output_dir(output_dir, allow_output_root)
     paths = {
         "evaluationSummary": output_dir / "evaluation_summary.json",
         "scoreBucketReport": output_dir / "score_bucket_report.json",
@@ -110,12 +111,14 @@ def write_fdp123_reports(
     }
     manifest_path = output_dir / "manifest.json"
     manifest_payload = build_artifact_manifest(payloads, reports["evaluationSummary"].get("generatedAt"))
+    _prepare_output_dir(output_dir, allow_output_root)
     _write_artifacts_atomically(payloads, manifest_path, manifest_payload)
     paths["manifest"] = manifest_path
     return paths
 
 
 def build_artifact_manifest(payloads: dict[Path, str], generated_at: str | None) -> str:
+    generated_at = normalize_rfc3339_timestamp(generated_at, "generatedAt")
     files = []
     for path, payload in sorted(payloads.items(), key=lambda item: item[0].name):
         encoded = payload.encode("utf-8")

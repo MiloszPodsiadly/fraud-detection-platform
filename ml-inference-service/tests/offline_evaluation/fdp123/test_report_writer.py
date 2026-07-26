@@ -17,6 +17,7 @@ from offline_evaluation.fdp123.report_writer import (
     report_json,
     write_fdp123_reports,
 )
+from fdp123.evaluation_card.test_schema import INVALID_CANONICAL_TIMESTAMPS, VALID_CANONICAL_TIMESTAMPS
 try:
     from fdp123.fdp123_fixtures import GENERATED_AT, jsonl, jsonl_file, record
 except ModuleNotFoundError:
@@ -298,6 +299,32 @@ class Fdp123ReportWriterTest(unittest.TestCase):
             summary = json.loads((output / "evaluation_summary.json").read_text(encoding="utf-8"))
             self.assertEqual(0, result)
             self.assertEqual(generated_at, summary["generatedAt"])
+
+    def test_fdp124WriterConsumesCanonicalTimestampFixture(self):
+        for generated_at in VALID_CANONICAL_TIMESTAMPS:
+            with self.subTest(generated_at=generated_at):
+                reports = self._reports()
+                for key in ("evaluationSummary", "scoreBucketReport", "riskLevelReport"):
+                    reports[key]["generatedAt"] = generated_at
+
+                self.assertIn(generated_at, build_artifact_manifest({
+                    Path("evaluation_summary.json"): report_json(reports["evaluationSummary"]),
+                }, generated_at))
+
+    def test_invalidGeneratedAtCreatesNoFdp124ArtifactsOrTemps(self):
+        for generated_at in INVALID_CANONICAL_TIMESTAMPS:
+            if generated_at is None:
+                continue
+            with self.subTest(generated_at=generated_at):
+                with tempfile.TemporaryDirectory() as directory:
+                    output = Path(directory) / "out"
+                    with jsonl_file(jsonl(record())) as input_path:
+                        with self.assertRaises(ValueError):
+                            run_fdp123_evaluation(input_path, output, generated_at=generated_at)
+
+                    self.assertFalse((output / "evaluation_summary.json").exists())
+                    self.assertFalse((output / "manifest.json").exists())
+                    self.assertEqual([], list(output.glob("*.tmp")) if output.exists() else [])
 
     def _reports(self, *records):
         records = records or (record(),)
