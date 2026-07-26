@@ -201,12 +201,20 @@ class CurrentShadowSummaryGenerationTest(unittest.TestCase):
             read_validated_shadow_performance_artifact_set(paths.output, manifest)
 
             for value in (
+                    "0000-01-01T00:00:00Z",
+                    "2026-06-13T24:00:00Z",
+                    "2026-06-13T23:60:00Z",
+                    "2016-12-31T23:59:60Z",
+                    "2026-02-29T00:00:00Z",
                     "2026-06-13T02:00:00+00:00",
                     "2026-06-13T03:00:00+01:00",
                     "2026-06-13T02:00:01Z",
                     "2026-06-13T02:00:00.1234567Z",
                     "2026-06-13T02:00:00",
                     "2026-13-13T02:00:00Z",
+                    123,
+                    True,
+                    "2" * 129,
             ):
                 with self.subTest(value=value):
                     manifest_payload = json.loads(build_shadow_performance_manifest(payload))

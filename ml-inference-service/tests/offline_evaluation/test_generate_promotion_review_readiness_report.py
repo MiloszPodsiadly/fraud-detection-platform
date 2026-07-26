@@ -1,5 +1,7 @@
 import json
+import hashlib
 import math
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,9 +32,14 @@ from offline_evaluation.promotion_review_readiness_schema import (
     promotion_review_readiness_report_json,
     validate_promotion_review_readiness_report,
 )
-from offline_evaluation.shadow_performance_artifact_set import build_shadow_performance_manifest
+from offline_evaluation.fdp123.timestamp_contract import timestamp_instant
+from offline_evaluation.shadow_performance_artifact_set import (
+    ShadowPerformanceArtifactSetError,
+    build_shadow_performance_manifest,
+    read_validated_shadow_performance_artifact_set,
+)
 from offline_evaluation.shadow_performance_summary import build_shadow_performance_summary
-from fdp123.evaluation_card.test_schema import valid_evaluation_card
+from fdp123.evaluation_card.test_schema import valid_evaluation_card, valid_evaluation_evidence
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -42,6 +49,8 @@ MAKEFILE = ROOT / "Makefile"
 DOC = ROOT / "docs" / "architecture" / "promotion_review_readiness_report.md"
 OPENAPI_ROOT = ROOT / "docs" / "openapi"
 UI_ROOT = ROOT / "analyst-console-ui"
+CANONICAL_SHADOW_FIXTURE = ROOT / "deployment" / "local-fixtures" / "shadow-performance" / "current-summary.json"
+CANONICAL_SHADOW_FIXTURE_MANIFEST = CANONICAL_SHADOW_FIXTURE.with_name("manifest.json")
 
 
 class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
@@ -72,6 +81,125 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
             self.assertEqual(64, len(report["checkInputs"]["sourceShadowSummaryManifestSha256"]))
             self.assertTrue(paths.output.with_name("manifest.json").exists())
 
+    def test_canonicalTimestampMatrixAcceptedByPromotionReadinessValidation(self):
+        for value in (
+                "2024-02-29T00:00:00Z",
+                "2026-06-13T23:59:59Z",
+                "2026-06-13T23:59:59.1Z",
+                "2026-06-13T23:59:59.123456Z",
+        ):
+            with self.subTest(value=value):
+                summary = build_shadow_performance_summary(
+                    valid_evaluation_card(
+                        generatedAt="2024-02-29T00:00:00Z",
+                        evaluationEvidence=valid_evaluation_evidence(evaluationGeneratedAt="2024-02-29T00:00:00Z"),
+                    ),
+                    value,
+                    source_evaluation_card_manifest_sha256="b" * 64,
+                )
+                report = build_promotion_review_readiness_report(
+                    summary,
+                    generated_at=value,
+                    source_shadow_summary_manifest_sha256="a" * 64,
+                )
+
+                self.assertEqual(value, validate_promotion_review_readiness_report(report)["generatedAt"])
+
+    def test_canonicalTimestampMatrixRejectedByPromotionReadinessValidation(self):
+        for value in (
+                "0000-01-01T00:00:00Z",
+                "2026-06-13T24:00:00Z",
+                "2026-06-13T23:60:00Z",
+                "2016-12-31T23:59:60Z",
+                "2026-02-29T00:00:00Z",
+                "2026-06-13T00:00:00+00:00",
+                "2026-06-13T00:00:00.1234567Z",
+                "2026-06-13T00:00:00",
+                123,
+                True,
+                "2" * 129,
+        ):
+            with self.subTest(value=value):
+                report = build_report()
+                report["generatedAt"] = value
+                with self.assertRaises(PromotionReviewReadinessValidationError):
+                    validate_promotion_review_readiness_report(report)
+
+    def test_canonicalShadowFixtureGeneratesValidatedPromotionReadinessArtifactSet(self):
+        summary_before = CANONICAL_SHADOW_FIXTURE.read_bytes()
+        manifest_before = CANONICAL_SHADOW_FIXTURE_MANIFEST.read_bytes()
+        source_summary, source_manifest_sha256 = read_validated_shadow_performance_artifact_set(
+            CANONICAL_SHADOW_FIXTURE,
+            CANONICAL_SHADOW_FIXTURE_MANIFEST,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "promotion-readiness" / "promotion-review-readiness-report.json"
+
+            generate_promotion_review_readiness_report(
+                CANONICAL_SHADOW_FIXTURE,
+                CANONICAL_SHADOW_FIXTURE_MANIFEST,
+                output,
+                generated_at="2026-06-14T00:00:00Z",
+                allowed_output_root=output.parent,
+            )
+
+            manifest = output.with_name("manifest.json")
+            self.assertTrue(manifest.exists())
+            report = validate_promotion_review_readiness_artifact_set(output, manifest)
+            self.assertEqual(REPORT_TYPE, report["reportType"])
+            self.assertTrue(report["diagnosticOnly"])
+            self.assertTrue(report["notPromotionApproval"])
+            self.assertTrue(report["notThresholdRecommendation"])
+            self.assertTrue(report["notProductionDecisioning"])
+            self.assertTrue(report["notPaymentAuthorization"])
+            self.assertTrue(report["notAutomaticDecisioning"])
+            self.assertTrue(report["notAnalystRecommendation"])
+            self.assertEqual(source_manifest_sha256, report["checkInputs"]["sourceShadowSummaryManifestSha256"])
+            self.assertEqual(hashlib.sha256(manifest_before).hexdigest(), source_manifest_sha256)
+            self.assertEqual(
+                source_summary["generatedAt"],
+                report["inputs"]["shadowPerformanceSummary"]["generatedAt"],
+            )
+            self.assertGreaterEqual(
+                timestamp_instant(report["generatedAt"]),
+                timestamp_instant(source_summary["generatedAt"]),
+            )
+
+        self.assertEqual(summary_before, CANONICAL_SHADOW_FIXTURE.read_bytes())
+        self.assertEqual(manifest_before, CANONICAL_SHADOW_FIXTURE_MANIFEST.read_bytes())
+
+    def test_tamperedCanonicalShadowFixtureCopyDoesNotPublishPromotionReadinessArtifactSet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            summary = root / "shadow-performance" / "current-summary.json"
+            manifest = summary.with_name("manifest.json")
+            output = root / "promotion-readiness" / "promotion-review-readiness-report.json"
+            summary.parent.mkdir(parents=True)
+            shutil.copyfile(CANONICAL_SHADOW_FIXTURE, summary)
+            shutil.copyfile(CANONICAL_SHADOW_FIXTURE_MANIFEST, manifest)
+            payload = summary.read_bytes()
+            summary.write_bytes(payload.replace(b"LOW_SAMPLE_SIZE", b"LOW_SAMPLE_SIZF", 1))
+
+            with self.assertRaises(ShadowPerformanceArtifactSetError):
+                generate_promotion_review_readiness_report(
+                    summary,
+                    manifest,
+                    output,
+                    generated_at="2026-06-14T00:00:00Z",
+                    allowed_output_root=output.parent,
+                )
+
+            self.assertFalse(output.exists())
+            self.assertFalse(output.with_name("manifest.json").exists())
+
+    def test_canonicalShadowV2CrossLayerFixtureHasSingleOwner(self):
+        self.assertEqual(
+            ROOT / "deployment" / "local-fixtures" / "shadow-performance" / "current-summary.json",
+            CANONICAL_SHADOW_FIXTURE,
+        )
+        fixture_files = sorted((ROOT / "deployment" / "local-fixtures").rglob("current-summary.json"))
+        self.assertEqual([CANONICAL_SHADOW_FIXTURE], fixture_files)
+
     def test_missingPromotionReadinessManifestRejected(self):
         with workspace() as paths:
             generate(paths)
@@ -80,7 +208,7 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
             with self.assertRaises(PromotionReviewReadinessGenerationError):
                 validate_promotion_review_readiness_artifact_set(paths.output, paths.output.with_name("manifest.json"))
 
-    def test_promotionReadinessManifestHashAndSizeMismatchRejected(self):
+    def test_promotionReadinessManifestHashMismatchRejected(self):
         with workspace() as paths:
             generate(paths)
             manifest = paths.output.with_name("manifest.json")
@@ -88,43 +216,58 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
 
             manifest_payload["files"][0]["sha256"] = "b" * 64
             manifest.write_text(json.dumps(manifest_payload, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
-            with self.assertRaises(PromotionReviewReadinessGenerationError):
-                validate_promotion_review_readiness_artifact_set(paths.output, manifest)
+            self.assertPromotionArtifactRejected(paths.output, manifest, "sha256", paths.root)
 
-    def test_promotionReadinessManifestGeneratedAtUsesExactCanonicalString(self):
-        with workspace() as paths:
-            payload = valid_payload()
-            paths.output.parent.mkdir(parents=True, exist_ok=True)
-            paths.output.write_text(payload, encoding="utf-8", newline="\n")
-            manifest = paths.output.with_name("manifest.json")
-            manifest.write_text(
-                readiness_artifact_set.build_promotion_review_readiness_manifest(payload),
-                encoding="utf-8",
-                newline="\n",
-            )
+    def test_promotionReadinessManifestSizeMismatchRejected(self):
+        for value in (1, 1_000_000, -1, True):
+            with self.subTest(value=value):
+                with workspace() as paths:
+                    generate(paths)
+                    manifest = paths.output.with_name("manifest.json")
+                    manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
 
-            validate_promotion_review_readiness_artifact_set(paths.output, manifest)
+                    manifest_payload["files"][0]["sizeBytes"] = value
+                    manifest.write_text(
+                        json.dumps(manifest_payload, sort_keys=True, separators=(",", ":")) + "\n",
+                        encoding="utf-8",
+                    )
+                    self.assertPromotionArtifactRejected(paths.output, manifest, "size", paths.root)
 
-            for value in (
-                    "2026-06-14T00:00:00+00:00",
-                    "2026-06-14T01:00:00+01:00",
-                    "2026-06-14T00:00:01Z",
-                    "2026-06-14T00:00:00.1234567Z",
-                    "2026-06-14T00:00:00",
-                    "2026-13-14T00:00:00Z",
-            ):
-                with self.subTest(value=value):
+    def test_promotionReadinessManifestGeneratedAtMustExactlyMatchReport(self):
+        for value in (
+                "0000-01-01T00:00:00Z",
+                "2026-06-13T24:00:00Z",
+                "2026-06-13T23:60:00Z",
+                "2016-12-31T23:59:60Z",
+                "2026-02-29T00:00:00Z",
+                "2026-06-14T00:00:00+00:00",
+                "2026-06-14T01:00:00+01:00",
+                "2026-06-14T00:00:01Z",
+                "2026-06-14T00:00:00.1234567Z",
+                "2026-06-14T00:00:00",
+                "2026-13-14T00:00:00Z",
+                123,
+                True,
+                "2" * 129,
+        ):
+            with self.subTest(value=value):
+                with workspace() as paths:
+                    payload = valid_payload()
+                    paths.output.parent.mkdir(parents=True, exist_ok=True)
+                    paths.output.write_text(payload, encoding="utf-8", newline="\n")
+                    manifest = paths.output.with_name("manifest.json")
                     manifest_payload = json.loads(readiness_artifact_set.build_promotion_review_readiness_manifest(payload))
                     manifest_payload["generatedAt"] = value
                     manifest.write_text(json.dumps(manifest_payload, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+                    self.assertPromotionArtifactRejected(paths.output, manifest, "generatedAt", paths.root)
 
-                    with self.assertRaises(PromotionReviewReadinessGenerationError):
-                        validate_promotion_review_readiness_artifact_set(paths.output, manifest)
-
+        with workspace() as paths:
             report = build_report()
             report["generatedAt"] = "2026-06-14T00:00:00.123456Z"
             six_fraction_payload = promotion_review_readiness_report_json(report)
+            paths.output.parent.mkdir(parents=True, exist_ok=True)
             paths.output.write_text(six_fraction_payload, encoding="utf-8", newline="\n")
+            manifest = paths.output.with_name("manifest.json")
             manifest.write_text(
                 readiness_artifact_set.build_promotion_review_readiness_manifest(six_fraction_payload),
                 encoding="utf-8",
@@ -133,13 +276,6 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
 
             validated = validate_promotion_review_readiness_artifact_set(paths.output, manifest)
             self.assertEqual("2026-06-14T00:00:00.123456Z", validated["generatedAt"])
-
-            generate(paths)
-            manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
-            manifest_payload["files"][0]["sizeBytes"] = 1
-            manifest.write_text(json.dumps(manifest_payload, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
-            with self.assertRaises(PromotionReviewReadinessGenerationError):
-                validate_promotion_review_readiness_artifact_set(paths.output, manifest)
 
     def test_rejectsLegacyWarnAndNotApplicableCheckStatuses(self):
         for status in ("WARN", "NOT_APPLICABLE"):
@@ -646,6 +782,13 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
         payload = masked_payload(valid_payload())
         for term in terms:
             self.assertNotIn(term, payload)
+
+    def assertPromotionArtifactRejected(self, report, manifest, expected_category, root):
+        with self.assertRaises(PromotionReviewReadinessGenerationError) as caught:
+            validate_promotion_review_readiness_artifact_set(report, manifest)
+        message = str(caught.exception)
+        self.assertIn(expected_category, message)
+        self.assertNotIn(str(root), message)
 
 
 def valid_summary():

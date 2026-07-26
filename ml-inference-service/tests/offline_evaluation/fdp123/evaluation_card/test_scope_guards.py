@@ -89,6 +89,21 @@ class Fdp123EvaluationCardScopeGuardTest(unittest.TestCase):
         self.assertIn("reject_unsafe_structure", generator)
         self.assertIn("reject_unsafe_serialized_payload", writer)
 
+    def test_timestampContractHasSingleExecutableOwner(self):
+        schema = (PACKAGE_ROOT / "schema.py").read_text(encoding="utf-8")
+        shared = (PACKAGE_ROOT.parent / "timestamp_contract.py").read_text(encoding="utf-8")
+
+        self.assertIn("RFC3339_DATETIME_PATTERN", shared)
+        self.assertIn("def normalize_rfc3339_timestamp", shared)
+        self.assertIn("def timestamp_instant", shared)
+        self.assertIn("fromisoformat", shared)
+        self.assertIn("normalize_rfc3339_timestamp as _normalize_rfc3339_timestamp", schema)
+        self.assertIn("timestamp_instant as _timestamp_instant", schema)
+        self.assertNotIn("RFC3339_DATETIME_PATTERN", schema)
+        self.assertNotIn("def normalize_rfc3339_timestamp", schema)
+        self.assertNotIn("fromisoformat", schema)
+        self.assertNotIn("isoformat(timespec=", schema)
+
     def _package_text(self):
         return "\n".join(path.read_text(encoding="utf-8") for path in PACKAGE_ROOT.glob("*.py"))
 

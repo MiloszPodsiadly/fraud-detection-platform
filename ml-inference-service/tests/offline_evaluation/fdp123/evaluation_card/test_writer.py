@@ -69,6 +69,47 @@ class Fdp123EvaluationCardWriterTest(unittest.TestCase):
                 self.assertEqual(len(payload), item["sizeBytes"])
                 self.assertEqual(hashlib.sha256(payload).hexdigest(), item["sha256"])
 
+    def test_manifestGeneratedAtMustExactlyMatchEvaluationCard(self):
+        for value in (
+                "0000-01-01T00:00:00Z",
+                "2026-06-13T24:00:00Z",
+                "2026-06-13T23:60:00Z",
+                "2016-12-31T23:59:60Z",
+                "2026-02-29T00:00:00Z",
+                "2026-06-12T00:00:00+00:00",
+                "2026-06-12T00:00:01Z",
+                "2026-06-12T00:00:00.1234567Z",
+                "2026-06-12T00:00:00",
+                123,
+                True,
+                "2" * 129,
+        ):
+            with self.subTest(value=value):
+                with tempfile.TemporaryDirectory() as directory:
+                    output = Path(directory)
+                    write_evaluation_card_artifacts(valid_evaluation_card(), output)
+                    manifest = output / "manifest.json"
+                    payload = json.loads(manifest.read_text(encoding="utf-8"))
+                    payload["generatedAt"] = value
+                    manifest.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+
+                    with self.assertRaises(Fdp123EvaluationCardValidationError):
+                        read_validated_evaluation_card_artifact_set(
+                            output / "platform_recommendation_evaluation_card.json",
+                            manifest,
+                        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            card = valid_evaluation_card(generatedAt="2026-06-12T00:00:00.123456Z")
+            write_evaluation_card_artifacts(card, output)
+
+            validated, _manifest_sha = read_validated_evaluation_card_artifact_set(
+                output / "platform_recommendation_evaluation_card.json",
+                output / "manifest.json",
+            )
+            self.assertEqual("2026-06-12T00:00:00.123456Z", validated["generatedAt"])
+
     def test_rejectsSymlinkOutputDirectory(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "target"

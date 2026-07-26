@@ -19,6 +19,48 @@ from offline_evaluation.fdp123.evaluation_card.safety_policy import (
     reject_unsafe_serialized_payload,
     reject_unsafe_structure,
 )
+from offline_evaluation.fdp123.timestamp_contract import (
+    TimestampContractError,
+    normalize_rfc3339_timestamp,
+    timestamp_instant,
+)
+
+
+VALID_CANONICAL_TIMESTAMPS = (
+    "2024-02-29T00:00:00Z",
+    "2026-06-13T23:59:59Z",
+    "2026-06-13T23:59:59.1Z",
+    "2026-06-13T23:59:59.123456Z",
+)
+INVALID_CANONICAL_TIMESTAMPS = (
+    "0000-01-01T00:00:00Z",
+    "2026-06-13T24:00:00Z",
+    "2026-06-13T23:60:00Z",
+    "2016-12-31T23:59:60Z",
+    "2026-02-29T00:00:00Z",
+    "2026-06-13T00:00:00+00:00",
+    "2026-06-13T00:00:00.1234567Z",
+    "2026-06-13T00:00:00",
+    123,
+    True,
+    "2" * 129,
+)
+
+
+class SharedTimestampContractTest(unittest.TestCase):
+    def test_canonicalTimestampMatrixAccepted(self):
+        for value in VALID_CANONICAL_TIMESTAMPS:
+            with self.subTest(value=value):
+                self.assertEqual(value, normalize_rfc3339_timestamp(value, "generatedAt"))
+                self.assertIsNotNone(timestamp_instant(value).tzinfo)
+
+    def test_canonicalTimestampMatrixRejected(self):
+        for value in INVALID_CANONICAL_TIMESTAMPS:
+            with self.subTest(value=value):
+                with self.assertRaises(TimestampContractError):
+                    normalize_rfc3339_timestamp(value, "generatedAt")
+                with self.assertRaises(TimestampContractError):
+                    timestamp_instant(value)
 
 
 class Fdp123EvaluationCardSchemaTest(unittest.TestCase):
@@ -211,6 +253,22 @@ class Fdp123EvaluationCardSchemaTest(unittest.TestCase):
         card = validate_evaluation_card(valid_evaluation_card(generatedAt="2026-06-12T00:00:00Z"))
 
         self.assertEqual("2026-06-12T00:00:00Z", card["generatedAt"])
+
+    def test_canonicalTimestampMatrixAcceptedByEvaluationCard(self):
+        for value in VALID_CANONICAL_TIMESTAMPS:
+            with self.subTest(value=value):
+                card = validate_evaluation_card(valid_evaluation_card(
+                    generatedAt=value,
+                    evaluationEvidence=valid_evaluation_evidence(evaluationGeneratedAt="2024-02-29T00:00:00Z"),
+                ))
+                self.assertEqual(value, card["generatedAt"])
+
+    def test_canonicalTimestampMatrixRejectedWithDomainException(self):
+        for value in INVALID_CANONICAL_TIMESTAMPS:
+            with self.subTest(value=value):
+                with self.assertRaises(Fdp123EvaluationCardValidationError) as caught:
+                    validate_evaluation_card(valid_evaluation_card(generatedAt=value))
+                self.assertIsInstance(caught.exception.__cause__, TimestampContractError)
 
     def test_explicitOffsetTimestampRejectedInsteadOfNormalized(self):
         self._assert_rejected(
