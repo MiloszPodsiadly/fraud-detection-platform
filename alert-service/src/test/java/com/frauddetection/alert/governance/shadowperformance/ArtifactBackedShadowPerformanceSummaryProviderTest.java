@@ -584,6 +584,30 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
     }
 
     @Test
+    void rejectsArtifactReplacedBetweenAttributeCheckAndReadEvenWhenPayloadBytesMatch() throws Exception {
+        Path artifact = writeSummary(validSummary());
+        ArtifactBackedShadowPerformanceSummaryProvider.PortableArtifactReader reader =
+                new ArtifactBackedShadowPerformanceSummaryProvider.PortableArtifactReader(path -> {
+                    if (path.getFileName().toString().equals("current-summary.json")) {
+                        try {
+                            Files.delete(path);
+                            Files.writeString(path, validSummaryJson());
+                        } catch (Exception exception) {
+                            throw new IllegalStateException(exception);
+                        }
+                    }
+                });
+        ArtifactBackedShadowPerformanceSummaryProvider provider = new ArtifactBackedShadowPerformanceSummaryProvider(
+                new ShadowPerformanceSummaryCurrentProperties(true, tempDir.toString(), artifact.toString(), 1_048_576L),
+                objectMapper,
+                validator,
+                reader
+        );
+
+        assertUnavailable(provider);
+    }
+
+    @Test
     void doesNotConvertInvalidSummaryToZeroMetrics() throws Exception {
         Path artifact = writeSummary(summaryWithMetrics(2.0, 0.25, 0.0));
 

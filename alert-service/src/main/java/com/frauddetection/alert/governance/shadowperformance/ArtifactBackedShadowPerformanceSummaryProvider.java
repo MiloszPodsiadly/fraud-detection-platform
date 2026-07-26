@@ -7,17 +7,23 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.ObjectMapper;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 
 public class ArtifactBackedShadowPerformanceSummaryProvider implements ShadowPerformanceSummaryProvider {
 
@@ -32,11 +38,21 @@ public class ArtifactBackedShadowPerformanceSummaryProvider implements ShadowPer
     private final ShadowPerformanceSummaryCurrentProperties properties;
     private final ObjectMapper objectMapper;
     private final ShadowPerformanceSummaryValidator validator;
+    private final ArtifactReader artifactReader;
 
     public ArtifactBackedShadowPerformanceSummaryProvider(
             ShadowPerformanceSummaryCurrentProperties properties,
             ObjectMapper objectMapper,
             ShadowPerformanceSummaryValidator validator
+    ) {
+        this(properties, objectMapper, validator, new PortableArtifactReader());
+    }
+
+    ArtifactBackedShadowPerformanceSummaryProvider(
+            ShadowPerformanceSummaryCurrentProperties properties,
+            ObjectMapper objectMapper,
+            ShadowPerformanceSummaryValidator validator,
+            ArtifactReader artifactReader
     ) {
         this.properties = properties;
         this.objectMapper = objectMapper.rebuild()
@@ -47,6 +63,7 @@ public class ArtifactBackedShadowPerformanceSummaryProvider implements ShadowPer
                 .configure(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES, true)
                 .build();
         this.validator = validator;
+        this.artifactReader = artifactReader;
     }
 
     @Override
@@ -134,14 +151,8 @@ public class ArtifactBackedShadowPerformanceSummaryProvider implements ShadowPer
             throw unavailable();
         }
         try {
-            try (InputStream stream = Files.newInputStream(artifactPath)) {
-                byte[] payload = stream.readNBytes((int) maxSizeBytes + 1);
-                if (payload.length > maxSizeBytes) {
-                    throw unavailable();
-                }
-                return payload;
-            }
-        } catch (IOException exception) {
+            return artifactReader.read(artifactPath, maxSizeBytes);
+        } catch (IOException | SecurityException exception) {
             throw unavailable();
         }
     }
@@ -210,5 +221,82 @@ public class ArtifactBackedShadowPerformanceSummaryProvider implements ShadowPer
 
     private ShadowPerformanceSummaryProviderUnavailableException unavailable() {
         return new ShadowPerformanceSummaryProviderUnavailableException("Current shadow performance summary artifact unavailable.");
+    }
+
+    @FunctionalInterface
+    interface ArtifactReader {
+        byte[] read(Path artifactPath, long maxSizeBytes) throws IOException;
+    }
+
+    static final class PortableArtifactReader implements ArtifactReader {
+
+        private static final int BUFFER_SIZE = 8_192;
+
+        private final Consumer<Path> afterPreReadAttributes;
+
+        PortableArtifactReader() {
+            this(path -> {
+            });
+        }
+
+        PortableArtifactReader(Consumer<Path> afterPreReadAttributes) {
+            this.afterPreReadAttributes = afterPreReadAttributes;
+        }
+
+        @Override
+        public byte[] read(Path artifactPath, long maxSizeBytes) throws IOException {
+            /*
+             * Portable mitigation: this is not race-free on filesystems without descriptor-relative secure directory
+             * APIs, but it avoids symlink following and rejects observable fileKey/size/mtime changes around the read.
+             */
+            BasicFileAttributes before = regularAttributes(artifactPath);
+            if (before.size() > maxSizeBytes) {
+                throw new IOException("artifact exceeds maximum size");
+            }
+            afterPreReadAttributes.accept(artifactPath);
+            byte[] payload;
+            try (FileChannel channel = FileChannel.open(artifactPath, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
+                payload = readBounded(channel, maxSizeBytes);
+            }
+            BasicFileAttributes after = regularAttributes(artifactPath);
+            if (changed(before, after) || payload.length != after.size()) {
+                throw new IOException("artifact changed while being read");
+            }
+            return payload;
+        }
+
+        private BasicFileAttributes regularAttributes(Path artifactPath) throws IOException {
+            BasicFileAttributes attributes = Files.readAttributes(
+                    artifactPath,
+                    BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS
+            );
+            if (!attributes.isRegularFile()) {
+                throw new IOException("artifact must be a regular file");
+            }
+            return attributes;
+        }
+
+        private byte[] readBounded(FileChannel channel, long maxSizeBytes) throws IOException {
+            ByteArrayOutputStream payload = new ByteArrayOutputStream((int) Math.min(channel.size(), BUFFER_SIZE));
+            ByteBuffer buffer = ByteBuffer.allocate(BUFFER_SIZE);
+            long total = 0;
+            while (channel.read(buffer) != -1) {
+                buffer.flip();
+                total += buffer.remaining();
+                if (total > maxSizeBytes) {
+                    throw new IOException("artifact exceeds maximum size");
+                }
+                payload.write(buffer.array(), buffer.arrayOffset(), buffer.remaining());
+                buffer.clear();
+            }
+            return payload.toByteArray();
+        }
+
+        private boolean changed(BasicFileAttributes before, BasicFileAttributes after) {
+            return !Objects.equals(before.fileKey(), after.fileKey())
+                    || before.size() != after.size()
+                    || !before.lastModifiedTime().equals(after.lastModifiedTime());
+        }
     }
 }
