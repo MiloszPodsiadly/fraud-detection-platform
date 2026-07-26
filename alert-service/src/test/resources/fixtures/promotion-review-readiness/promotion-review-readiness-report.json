@@ -14,20 +14,52 @@
   "inputs": {
     "shadowPerformanceSummary": {
       "present": true,
-      "summaryType": "SHADOW_PERFORMANCE_SUMMARY_V1",
-      "summaryVersion": "1.0",
+      "reportType": "SHADOW_PERFORMANCE_SUMMARY_V2",
+      "summaryVersion": "shadow-performance-summary-v2",
       "generatedAt": "2026-06-08T02:00:00Z"
     },
     "minimumDiagnosticEvidenceRecords": 1,
-    "recordsAcceptedForEvaluation": 3
+    "recordsEvaluated": 3
+  },
+  "checkInputs": {
+    "sourceShadowSummaryManifestSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "shadowPerformanceSummary": {
+      "present": true,
+      "reportType": "SHADOW_PERFORMANCE_SUMMARY_V2",
+      "summaryVersion": "shadow-performance-summary-v2",
+      "generatedAt": "2026-06-08T02:00:00Z",
+      "sourceEvaluationCardManifestSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "governance": {
+      "governanceStatus": "DIAGNOSTIC_ONLY",
+      "diagnosticOnly": true,
+      "notProductionApproval": true,
+      "notPromotionApproval": true,
+      "notThresholdRecommendation": true,
+      "notPaymentAuthorization": true,
+      "notAutomaticDecisioning": true
+    },
+    "evaluation": {
+      "evaluationCardType": "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
+      "evaluationCardVersion": "platform-recommendation-evaluation-card-v1",
+      "evaluationReportType": "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"
+    },
+    "metricBasis": "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK",
+    "minimumDiagnosticEvidenceRecords": 1,
+    "recordsEvaluated": 3,
+    "metrics": {
+      "alertRecommendedPrecision": {"available": true, "value": 0.8, "reason": null},
+      "alertRecommendedRecall": {"available": true, "value": 0.75, "reason": null},
+      "falsePositiveRate": {"available": true, "value": 0.1, "reason": null},
+      "falseNegativeRate": {"available": true, "value": 0.2, "reason": null}
+    }
   },
   "checks": [
     {"name": "CURRENT_SUMMARY_PRESENT", "status": "PASS", "severity": "INFO"},
     {"name": "CURRENT_SUMMARY_VERSION_SUPPORTED", "status": "PASS", "severity": "INFO"},
-    {"name": "MODEL_CARD_PRESENT", "status": "PASS", "severity": "INFO"},
-    {"name": "MODEL_CARD_VERSION_SUPPORTED", "status": "PASS", "severity": "INFO"},
+    {"name": "EVALUATION_CARD_PRESENT", "status": "PASS", "severity": "INFO"},
+    {"name": "EVALUATION_CARD_VERSION_SUPPORTED", "status": "PASS", "severity": "INFO"},
     {"name": "GOVERNANCE_STATUS_DIAGNOSTIC_ONLY", "status": "PASS", "severity": "INFO"},
-    {"name": "GOVERNANCE_MODES_COMPARE_AND_SHADOW", "status": "PASS", "severity": "INFO"},
     {"name": "NOT_PRODUCTION_APPROVAL_TRUE", "status": "PASS", "severity": "INFO"},
     {"name": "NOT_PROMOTION_APPROVAL_TRUE", "status": "PASS", "severity": "INFO"},
     {"name": "NOT_THRESHOLD_RECOMMENDATION_TRUE", "status": "PASS", "severity": "INFO"},
@@ -35,13 +67,11 @@
     {"name": "NOT_AUTOMATIC_DECISIONING_TRUE", "status": "PASS", "severity": "INFO"},
     {"name": "EVALUATION_REPORT_TYPE_SUPPORTED", "status": "PASS", "severity": "INFO"},
     {"name": "METRIC_BASIS_SUPPORTED", "status": "PASS", "severity": "INFO"},
-    {"name": "DATASET_TIME_BASIS_SUPPORTED", "status": "PASS", "severity": "INFO"},
-    {"name": "DEDUPLICATION_POLICY_SUPPORTED", "status": "PASS", "severity": "INFO"},
-    {"name": "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", "status": "PASS", "severity": "INFO"},
-    {"name": "METRICS_PRESENT", "status": "PASS", "severity": "INFO"},
-    {"name": "DISAGREEMENT_SUMMARY_PRESENT", "status": "PASS", "severity": "INFO"},
-    {"name": "WARNINGS_PRESENT", "status": "PASS", "severity": "INFO"},
-    {"name": "LIMITATIONS_PRESENT", "status": "PASS", "severity": "INFO"}
+    {"name": "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", "status": "PASS", "severity": "HIGH"},
+    {"name": "ALERT_RECOMMENDED_PRECISION_AVAILABLE", "status": "PASS", "severity": "MEDIUM"},
+    {"name": "ALERT_RECOMMENDED_RECALL_AVAILABLE", "status": "PASS", "severity": "MEDIUM"},
+    {"name": "FALSE_POSITIVE_RATE_AVAILABLE", "status": "PASS", "severity": "MEDIUM"},
+    {"name": "FALSE_NEGATIVE_RATE_AVAILABLE", "status": "PASS", "severity": "MEDIUM"}
   ],
   "reasonCodes": [],
   "warnings": ["MISSING_ML_SIGNAL_PRESENT", "MISSING_PROJECTION_PRESENT", "MISSING_RULES_SIGNAL_PRESENT"],

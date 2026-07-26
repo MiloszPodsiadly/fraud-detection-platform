@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Iterable
 
+from offline_evaluation.fdp123.evaluation_contract import METRIC_BASIS
 from offline_evaluation.fdp123.models import Fdp123Dataset, Fdp123DatasetRecord
 
 
@@ -28,7 +29,7 @@ def build_fdp123_metrics(
     )
     warnings = _warnings(dataset, records, positives, negatives, min_sample_size_warning_threshold)
     return {
-        "metricBasis": "fdp123_feedback_dataset_offline_diagnostic_v1",
+        "metricBasis": METRIC_BASIS,
         "datasetSummary": {
             "datasetVersion": dataset.metadata.dataset_version,
             "recordsReturned": dataset.metadata.records_returned,

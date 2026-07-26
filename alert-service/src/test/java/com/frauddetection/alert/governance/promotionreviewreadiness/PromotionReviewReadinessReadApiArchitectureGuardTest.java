@@ -48,6 +48,7 @@ class PromotionReviewReadinessReadApiArchitectureGuardTest {
                 "notAutomaticDecisioning",
                 "notAnalystRecommendation",
                 "inputs",
+                "checkInputs",
                 "checks",
                 "reasonCodes",
                 "warnings",
@@ -125,13 +126,20 @@ class PromotionReviewReadinessReadApiArchitectureGuardTest {
 
         assertThat(source).contains(
                 "PromotionReviewReadinessReportCurrentProperties",
+                "manifest.json",
+                "PROMOTION_REVIEW_READINESS_ARTIFACT_SET_V1",
+                "promotion-review-readiness-artifact-set-v1",
                 "LinkOption.NOFOLLOW_LINKS",
                 "startsWith(baseDir)",
-                "objectMapper.readValue",
+                "readBoundedArtifact(manifestPath, MAX_MANIFEST_SIZE_BYTES)",
+                "readBoundedArtifact(artifactPath, properties.maxSizeBytes())",
+                "validateManifest(manifestPayload, reportPayload, report)",
+                "objectMapper.readValue(payload, PromotionReviewReadinessReport.class)",
                 "validator.validate(report)",
                 "Files.isSymbolicLink"
         );
         assertThat(source).doesNotContain(
+                "Files.size",
                 "DirectoryStream",
                 "Files.list",
                 "Files.walk",
@@ -225,8 +233,7 @@ class PromotionReviewReadinessReadApiArchitectureGuardTest {
                 "`GET /api/v1/governance/promotion-review-readiness/current`",
                 "`promotion-readiness:read`",
                 "Configured-but-broken sources return `503`, not `404`",
-                "The Java validator validates the public report contract only.",
-                "It does not recompute readiness",
+                "The Java validator validates the public report contract and recomputes readiness from immutable `checkInputs`.",
                 "not analyst recommendation logic"
         );
     }

@@ -70,11 +70,11 @@ describe("FDP-107 shadow performance UI scope guards", () => {
   });
 
   it("doesNotAddRawArtifactViews", () => {
-    expect(shadowSources).not.toMatch(/raw Model Card view|rawEvaluationReport|rawDataset|FDP-102 JSONL/i);
+    expect(shadowSources).not.toMatch(/raw Platform Recommendation Evaluation Card view|rawEvaluationReport|rawDataset|FDP-102 JSONL/i);
   });
 
   it("documentsFdp107ArchitectureBoundaries", () => {
-    expect(docs).toContain("FDP-107 consumes only the FDP-106 current Shadow Performance Summary endpoint");
+    expect(docs).toContain("dashboard consumes only the v2 current Shadow Performance Summary endpoint");
     expect(docs).toContain("FDP-107 does not compute metrics");
     expect(docs).toContain("FDP-107 does not recompute shadow performance");
     expect(docs).toContain("FDP-107 does not read raw artifacts");
@@ -86,10 +86,10 @@ describe("FDP-107 shadow performance UI scope guards", () => {
     expect(docs).toContain("FDP-107 is not automatic decisioning");
     expect(docs).toContain("FDP-107 does not mutate alert state or fraud-case state");
     expect(docs).toContain("FDP-107 does not add filters, search, history, export");
-    expect(docs).toContain("404 for `GET /api/v1/governance/shadow-performance/summary/current`, it means no current validated Shadow Performance Summary exists");
+    expect(docs).toContain("404 for `GET /api/v2/governance/shadow-performance/summary/current`, it means no current validated Shadow Performance Summary exists");
     expect(docs).toContain("This 404 state is not a model quality result");
     expect(docs).toContain("fake, zero, sample, fallback, stale, or cached metrics on 404");
-    expect(docs).toContain("Metrics appear only after FDP-106 exposes a current validated summary");
+    expect(docs).toContain("Metrics appear only after the v2 read API exposes a current validated summary");
   });
 });
 

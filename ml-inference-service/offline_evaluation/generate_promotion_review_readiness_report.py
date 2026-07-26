@@ -2,24 +2,32 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from offline_evaluation.json_contract import JsonContractError, loads_strict_json
 from offline_evaluation.promotion_review_readiness_schema import (
     PromotionReviewReadinessValidationError,
     build_promotion_review_readiness_report,
     promotion_review_readiness_report_json,
     validate_promotion_review_readiness_report,
 )
+from offline_evaluation.promotion_review_readiness_artifact_set import (
+    PromotionReviewReadinessArtifactSetError,
+    publish_promotion_review_readiness_artifact_set,
+    read_validated_promotion_review_readiness_artifact_set,
+)
+from offline_evaluation.shadow_performance_artifact_set import read_validated_shadow_performance_artifact_set
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SHADOW_SUMMARY = REPO_ROOT / "deployment/local-generated/shadow-performance/current-summary.json"
+DEFAULT_SHADOW_SUMMARY_MANIFEST = DEFAULT_SHADOW_SUMMARY.with_name("manifest.json")
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "deployment/local-generated/promotion-readiness"
 DEFAULT_OUTPUT = DEFAULT_OUTPUT_ROOT / "promotion-review-readiness-report.json"
+MAX_PROMOTION_READINESS_INPUT_BYTES = 262_144
 
 
 class PromotionReviewReadinessGenerationError(RuntimeError):
@@ -28,18 +36,23 @@ class PromotionReviewReadinessGenerationError(RuntimeError):
 
 def generate_promotion_review_readiness_report(
         shadow_summary_path: Path,
+        shadow_summary_manifest_path: Path,
         output_path: Path,
         *,
         generated_at: str | None = None,
         minimum_diagnostic_evidence_records: int = 1,
         allowed_output_root: Path | None = None,
 ) -> Path:
-    current_summary = _read_required_json_object(shadow_summary_path, "Shadow Performance Summary")
+    current_summary, shadow_manifest_sha256 = read_validated_shadow_performance_artifact_set(
+        shadow_summary_path,
+        shadow_summary_manifest_path,
+    )
     timestamp = generated_at or _utc_now()
     report = build_promotion_review_readiness_report(
         current_summary,
         generated_at=timestamp,
         minimum_diagnostic_evidence_records=minimum_diagnostic_evidence_records,
+        source_shadow_summary_manifest_sha256=shadow_manifest_sha256,
     )
     payload = promotion_review_readiness_report_json(report)
     publish_promotion_review_readiness_report(payload, output_path, allowed_output_root=allowed_output_root)
@@ -54,22 +67,22 @@ def publish_promotion_review_readiness_report(
 ) -> Path:
     final_path = _assert_allowed_output_path(output_path, allowed_output_root=allowed_output_root)
     final_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = final_path.with_name(f"{final_path.name}.tmp")
-    if temp_path.is_symlink():
-        raise PromotionReviewReadinessGenerationError("temporary output path must not be a symlink")
-
-    temp_path.write_text(payload, encoding="utf-8")
     try:
-        validate_promotion_review_readiness_report_file(temp_path)
-        os.replace(temp_path, final_path)
-    except Exception:
-        temp_path.unlink(missing_ok=True)
-        raise
+        publish_promotion_review_readiness_artifact_set(payload, final_path)
+    except Exception as exc:
+        raise PromotionReviewReadinessGenerationError(str(exc)) from exc
     return final_path
 
 
+def validate_promotion_review_readiness_artifact_set(report_path: Path, manifest_path: Path) -> dict[str, Any]:
+    try:
+        return read_validated_promotion_review_readiness_artifact_set(report_path, manifest_path)
+    except PromotionReviewReadinessArtifactSetError as exc:
+        raise PromotionReviewReadinessGenerationError(str(exc)) from exc
+
+
 def validate_promotion_review_readiness_report_file(path: Path) -> dict[str, Any]:
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw = _read_required_json_object(path, "promotion review readiness report", MAX_PROMOTION_READINESS_INPUT_BYTES)
     if not isinstance(raw, dict):
         raise PromotionReviewReadinessGenerationError("promotion review readiness report must be a JSON object")
     try:
@@ -84,6 +97,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         output_path = generate_promotion_review_readiness_report(
             Path(args.shadow_summary),
+            Path(args.shadow_summary_manifest),
             Path(args.output),
             generated_at=args.generated_at,
             minimum_diagnostic_evidence_records=args.minimum_diagnostic_evidence_records,
@@ -101,6 +115,7 @@ def _parser() -> argparse.ArgumentParser:
         description="Generate a non-decisioning PromotionReviewReadinessReport v1 artifact for FDP-111."
     )
     parser.add_argument("--shadow-summary", default=str(DEFAULT_SHADOW_SUMMARY))
+    parser.add_argument("--shadow-summary-manifest", default=str(DEFAULT_SHADOW_SUMMARY_MANIFEST))
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
     parser.add_argument("--allow-output-root")
     parser.add_argument("--generated-at")
@@ -108,10 +123,21 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _read_required_json_object(path: Path, label: str) -> dict[str, Any]:
+def _read_required_json_object(
+        path: Path,
+        label: str,
+        max_bytes: int = MAX_PROMOTION_READINESS_INPUT_BYTES,
+) -> dict[str, Any]:
     if not path.is_file():
         raise PromotionReviewReadinessGenerationError(f"{label} is missing")
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    with path.open("rb") as handle:
+        payload = handle.read(max_bytes + 1)
+    if len(payload) > max_bytes:
+        raise PromotionReviewReadinessGenerationError(f"{label} exceeds maximum byte size")
+    try:
+        raw = loads_strict_json(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError, JsonContractError) as exc:
+        raise PromotionReviewReadinessGenerationError(f"{label} must be valid JSON") from exc
     if not isinstance(raw, dict):
         raise PromotionReviewReadinessGenerationError(f"{label} must be a JSON object")
     return raw

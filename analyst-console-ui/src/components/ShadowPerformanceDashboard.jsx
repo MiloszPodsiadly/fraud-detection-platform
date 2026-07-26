@@ -1,9 +1,18 @@
 import { LoadingPanel } from "./LoadingPanel.jsx";
+import { isCanonicalUtcTimestamp, isOrderedCanonicalUtcTimestamp } from "../governance/canonicalUtcTimestamp.js";
 
 const REQUIRED_PERMISSION = "shadow-performance:read";
 const REQUIRED_BANNER = "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.";
-const MAX_DIAGNOSTIC_COUNT = 500;
-const REQUIRED_APPROVED_FOR = ["COMPARE", "SHADOW"];
+const MAX_DIAGNOSTIC_COUNT = 1000;
+const REQUIRED_EVALUATION_SUBJECT = {
+  subjectType: "PLATFORM_RECOMMENDATION",
+  sourceComponent: "ENGINE_INTELLIGENCE_PROJECTION",
+  sourceVersion: "ENGINE_INTELLIGENCE_PROJECTION_V1",
+  featureContractVersion: "NOT_APPLICABLE",
+  modelIdentity: "NOT_AVAILABLE",
+  modelArtifactSha256: "NOT_AVAILABLE",
+  identityCompleteness: "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
+};
 const REQUIRED_GOVERNANCE = {
   governanceStatus: "DIAGNOSTIC_ONLY",
   diagnosticOnly: true,
@@ -14,37 +23,34 @@ const REQUIRED_GOVERNANCE = {
   notAutomaticDecisioning: true
 };
 const REQUIRED_EVALUATION = {
-  evaluationReportType: "PYTHON_ML_EVALUATION_FOUNDATION",
-  evaluationReportVersion: "FDP-103",
-  metricBasis: "bucket_ordered_offline_diagnostic",
-  datasetTimeBasis: "FEEDBACK_SUBMITTED_AT",
-  datasetDeduplicationPolicy: "TRANSACTION_REFERENCE_NEWEST_SUBMITTED_AT_FEEDBACK_ID_ASC"
+  evaluationCardType: "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
+  evaluationCardVersion: "platform-recommendation-evaluation-card-v1",
+  evaluationPurpose: "OFFLINE_DIAGNOSTIC",
+  evaluationReportType: "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+  evaluationReportVersion: "FDP-124",
+  evaluationArtifactSetVersion: "fdp123-report-artifact-set-v1",
+  datasetVersion: "feedback-dataset-v1",
+  datasetTimeBasis: "FEEDBACK_CREATED_AT"
 };
+const REQUIRED_LIMITATIONS = new Set([
+  "ANALYST_FEEDBACK_LABELS_ARE_NOT_LEGAL_GROUND_TRUTH",
+  "OFFLINE_DIAGNOSTIC_METRICS_ARE_NOT_PRODUCTION_APPROVAL",
+  "METRICS_ARE_PLATFORM_RECOMMENDATION_DIAGNOSTICS",
+  "SMALL_SAMPLE_SIZE_MAY_BE_INCONCLUSIVE",
+  "PSEUDONYMOUS_REFERENCES_ARE_NOT_ANONYMIZATION",
+  "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_APPROVE_PROMOTION",
+  "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_AUTHORIZE_AUTOMATIC_DECLINE",
+  "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_CHANGE_SCORING_THRESHOLDS"
+]);
+const MACHINE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
 
 const METRIC_FIELDS = [
-  ["precisionAtBudget", "Offline precision at budget", "percent"],
-  ["recallAtTopK", "Offline recall at top K", "percent"],
+  ["alertRecommendedPrecision", "Alert-recommended precision", "percent"],
+  ["alertRecommendedRecall", "Alert-recommended recall", "percent"],
   ["falsePositiveRate", "Offline false-positive rate", "percent"],
-  ["mlCaughtRulesMissedCount", "ML caught / rules missed", "count"],
-  ["rulesCaughtMlMissedCount", "Rules caught / ML missed", "count"],
-  ["missingMlCount", "Missing ML count", "count"],
-  ["missingRulesCount", "Missing rules count", "count"],
-  ["missingProjectionCount", "Missing projection count", "count"],
-  ["notEvaluationEligibleCount", "Not evaluation eligible count", "count"]
+  ["falseNegativeRate", "Offline false-negative rate", "percent"]
 ];
-
-const DISAGREEMENT_FIELDS = [
-  ["rulesHighMlHigh", "Rules high / ML high"],
-  ["rulesHighMlLowOrMedium", "Rules high / ML low or medium"],
-  ["rulesLowOrMediumMlHigh", "Rules low or medium / ML high"],
-  ["rulesLowOrMediumMlLowOrMedium", "Rules low or medium / ML low or medium"],
-  ["rulesMissingMlPresent", "Rules missing / ML present"],
-  ["mlMissingRulesPresent", "ML missing / rules present"],
-  ["bothMissing", "Both missing"],
-  ["notEvaluationEligibleExcluded", "Not evaluation eligible excluded"]
-];
-const RATE_METRIC_FIELDS = METRIC_FIELDS.filter(([, , format]) => format === "percent").map(([field]) => field);
-const COUNT_METRIC_FIELDS = METRIC_FIELDS.filter(([, , format]) => format === "count").map(([field]) => field);
+const RATE_METRIC_FIELDS = METRIC_FIELDS.map(([field]) => field);
 
 export function ShadowPerformanceDashboard({
   summary,
@@ -63,7 +69,7 @@ export function ShadowPerformanceDashboard({
           <p className="eyebrow">Shadow diagnostics</p>
           <h2 {...headingProps}>Shadow Performance Summary</h2>
           <p className="sectionCopy">
-            Current read-only diagnostic summary from the FDP-106 governance endpoint.
+          Current read-only diagnostic summary from the v2 governance endpoint.
           </p>
         </div>
       </div>
@@ -100,12 +106,12 @@ function ShadowPerformanceSuccess({ summary }) {
     <div className="shadowPerformanceStack">
       <ShadowPerformanceDiagnosticBanner banner={summary.banner} />
       <div className="shadowPerformanceMeta" aria-label="Shadow summary context">
-        <span>Summary type {displayValue(summary.summaryType)}</span>
+        <span>Report type {displayValue(summary.reportType)}</span>
         <span>Version {displayValue(summary.summaryVersion)}</span>
         <span>Generated {formatTimestamp(summary.generatedAt)}</span>
       </div>
       <div className="shadowPerformanceGrid">
-        <ShadowPerformanceModelPanel model={summary.model} />
+        <ShadowPerformanceSubjectPanel subject={summary.evaluationSubject} />
         <ShadowPerformanceGovernancePanel governance={summary.governance} />
         <ShadowPerformanceEvaluationPanel evaluation={summary.evaluation} />
       </div>
@@ -113,7 +119,6 @@ function ShadowPerformanceSuccess({ summary }) {
         <ShadowPerformancePopulationPanel population={summary.evaluationPopulation} />
         <ShadowPerformanceMetricsPanel metrics={summary.metrics} />
       </div>
-      <ShadowPerformanceDisagreementPanel disagreementSummary={summary.disagreementSummary} />
       <div className="shadowPerformanceGrid">
         <ShadowPerformanceWarningsPanel warnings={summary.warnings} />
         <ShadowPerformanceLimitationsPanel limitations={summary.limitations} />
@@ -130,14 +135,17 @@ function ShadowPerformanceDiagnosticBanner({ banner }) {
   );
 }
 
-function ShadowPerformanceModelPanel({ model }) {
+function ShadowPerformanceSubjectPanel({ subject }) {
   return (
-    <ShadowSection title="Model identity">
+    <ShadowSection title="Evaluation subject">
       <DefinitionList rows={[
-        ["Model name", model.modelName],
-        ["Model version", model.modelVersion],
-        ["Model family", model.modelFamily],
-        ["Feature contract version", model.featureContractVersion]
+        ["Subject type", subject.subjectType],
+        ["Source component", subject.sourceComponent],
+        ["Source version", subject.sourceVersion],
+        ["Feature contract version", subject.featureContractVersion],
+        ["Model identity", subject.modelIdentity],
+        ["Model artifact SHA-256", subject.modelArtifactSha256],
+        ["Identity completeness", subject.identityCompleteness]
       ]} />
     </ShadowSection>
   );
@@ -148,7 +156,6 @@ function ShadowPerformanceGovernancePanel({ governance }) {
     <ShadowSection title="Governance context">
       <DefinitionList rows={[
         ["Governance status", governance.governanceStatus],
-        ["Allowed diagnostic modes", listValue(governance.approvedFor)],
         ["Diagnostic only", booleanValue(governance.diagnosticOnly)],
         ["Not production approval", booleanValue(governance.notProductionApproval)],
         ["Not promotion approval", booleanValue(governance.notPromotionApproval)],
@@ -164,11 +171,18 @@ function ShadowPerformanceEvaluationPanel({ evaluation }) {
   return (
     <ShadowSection title="Evaluation context">
       <DefinitionList rows={[
+        ["Evaluation card type", evaluation.evaluationCardType],
+        ["Evaluation card version", evaluation.evaluationCardVersion],
+        ["Evaluation purpose", evaluation.evaluationPurpose],
         ["Evaluation report type", evaluation.evaluationReportType],
         ["Evaluation report version", evaluation.evaluationReportVersion],
-        ["Metric basis", evaluation.metricBasis],
+        ["Evaluation report generated", evaluation.evaluationReportGeneratedAt],
+        ["Evaluation card generated", evaluation.evaluationCardGeneratedAt],
+        ["Metric basis", summaryMetricBasis(evaluation)],
         ["Dataset time basis", evaluation.datasetTimeBasis],
-        ["Dataset deduplication policy", evaluation.datasetDeduplicationPolicy]
+        ["Dataset version", evaluation.datasetVersion],
+        ["Source manifest SHA-256", evaluation.sourceManifestSha256],
+        ["Evaluation card manifest SHA-256", evaluation.sourceEvaluationCardManifestSha256]
       ]} />
     </ShadowSection>
   );
@@ -182,9 +196,9 @@ function ShadowPerformancePopulationPanel({ population }) {
         Metrics are shown with evaluation population context to avoid overclaiming performance on small samples.
       </p>
       <div className="analyticsGrid shadowPerformancePopulationGrid">
-        <MetricCard label="Dataset records read" value={population.datasetRecordsRead} />
-        <MetricCard label="Records accepted for evaluation" value={population.recordsAcceptedForEvaluation} />
-        <MetricCard label="Records excluded not evaluation eligible" value={population.recordsExcludedNotEvaluationEligible} />
+        <MetricCard label="Records evaluated" value={population.recordsEvaluated} />
+        <MetricCard label="Positive class count" value={population.positiveClassCount} />
+        <MetricCard label="Negative class count" value={population.negativeClassCount} />
       </div>
     </section>
   );
@@ -200,18 +214,6 @@ function ShadowPerformanceMetricsPanel({ metrics }) {
         ))}
       </div>
     </section>
-  );
-}
-
-function ShadowPerformanceDisagreementPanel({ disagreementSummary }) {
-  return (
-    <ShadowSection title="Rule vs ML diagnostic disagreement">
-      <div className="analyticsGrid">
-        {DISAGREEMENT_FIELDS.map(([field, label]) => (
-          <MetricCard key={field} label={label} value={disagreementSummary[field]} />
-        ))}
-      </div>
-    </ShadowSection>
   );
 }
 
@@ -283,16 +285,16 @@ function ShadowPerformanceNoCurrentSummary({ onRetry }) {
     <div className="statePanel warningPanel shadowPerformanceEmptyState" role="alert">
       <ShadowPerformanceDiagnosticBanner />
       <div className="shadowPerformanceEmptyIntro">
-        <p className="eyebrow">FDP-106 current summary</p>
+        <p className="eyebrow">v2 current summary</p>
         <h3>No current Shadow Performance Summary</h3>
         <p>
-          The dashboard reached the authorized FDP-106 read API, but no current validated Shadow Performance Summary is available.
+          The dashboard reached the authorized v2 read API, but no current validated Shadow Performance Summary is available.
         </p>
         <p>
           This is not a model quality result and it is not a failure of the dashboard. The UI does not display fake, zero, sample, fallback, or stale metrics when the API returns 404.
         </p>
         <p>
-          Shadow performance metrics will appear here only after a valid FDP-105 Shadow Performance Summary is available through the FDP-106 endpoint.
+          Shadow performance metrics will appear here only after a valid Shadow Performance Summary v2 is available through the v2 endpoint.
         </p>
         <p>
           This 404 state is not production approval, not promotion readiness, not threshold recommendation, not payment authorization, not automatic decisioning, and not analyst recommendation logic.
@@ -300,9 +302,9 @@ function ShadowPerformanceNoCurrentSummary({ onRetry }) {
       </div>
       <ShadowSection title="Technical context">
         <DefinitionList rows={[
-          ["Endpoint", "GET /api/v1/governance/shadow-performance/summary/current"],
+          ["Endpoint", "GET /api/v2/governance/shadow-performance/summary/current"],
           ["Status", "404 Not Found"],
-          ["Data source", "FDP-106 Authorized Read API"],
+          ["Data source", "Authorized Shadow Performance Summary v2 read API"],
           ["Current summary", "Unavailable"],
           ["Fallback metrics", "Disabled"],
           ["Demo/sample metrics", "Disabled"],
@@ -312,7 +314,7 @@ function ShadowPerformanceNoCurrentSummary({ onRetry }) {
       <ShadowSection title="What this means">
         <ul className="shadowPerformanceList">
           <li>The Shadow Performance dashboard route is working.</li>
-          <li>The FDP-106 endpoint was reached.</li>
+          <li>The authorized v2 endpoint was reached.</li>
           <li>No current validated Shadow Performance Summary is configured yet.</li>
           <li>No metrics are shown because showing fake or zero metrics would be misleading.</li>
           <li>Missing summary does not mean the model is approved, rejected, production-ready, or unsafe.</li>
@@ -323,12 +325,12 @@ function ShadowPerformanceNoCurrentSummary({ onRetry }) {
           To display metrics, the backend environment must provide a current validated Shadow Performance Summary produced from the governed artifact chain:
         </p>
         <ol className="shadowPerformanceChain">
-          <li>FDP-102 feedback dataset export</li>
-          <li>FDP-103 offline evaluation report</li>
-          <li>FDP-104 Model Card v1</li>
-          <li>FDP-105 Shadow Performance Summary v1</li>
-          <li>FDP-106 authorized read API</li>
-          <li>FDP-107 dashboard</li>
+          <li>FDP-123 bounded feedback dataset</li>
+          <li>FDP-124 evaluation artifact set</li>
+          <li>Platform Recommendation Evaluation Card v1 artifact set</li>
+          <li>Shadow Performance Summary v2</li>
+          <li>Authorized v2 read API</li>
+          <li>Analyst Console diagnostic dashboard</li>
         </ol>
       </ShadowSection>
       {onRetry && <button className="secondaryButton" type="button" onClick={onRetry}>Try again</button>}
@@ -369,49 +371,53 @@ function errorStateFor(error) {
 
 function isValidSummary(summary) {
   if (!isObject(summary)
-      || summary.summaryType !== "SHADOW_PERFORMANCE_SUMMARY_V1"
-      || summary.summaryVersion !== "1.0"
-      || !isString(summary.generatedAt)
+      || !hasExactKeys(summary, [
+        "reportType",
+        "summaryVersion",
+        "generatedAt",
+        "evaluationSubject",
+        "metricBasis",
+        "governance",
+        "evaluation",
+        "evaluationPopulation",
+        "metrics",
+        "warnings",
+        "limitations",
+        "banner"
+      ])
+      || summary.reportType !== "SHADOW_PERFORMANCE_SUMMARY_V2"
+      || summary.summaryVersion !== "shadow-performance-summary-v2"
+      || !isCanonicalUtcTimestamp(summary.generatedAt)
       || summary.banner !== REQUIRED_BANNER
-      || !isValidModel(summary.model)
+      || summary.metricBasis !== "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK"
+      || !isValidEvaluationSubject(summary.evaluationSubject)
       || !isValidGovernance(summary.governance)
       || !isValidEvaluation(summary.evaluation)
       || !isObject(summary.evaluationPopulation)
+      || !hasExactKeys(summary.evaluationPopulation, ["recordsEvaluated", "positiveClassCount", "negativeClassCount"])
       || !isObject(summary.metrics)
-      || !isObject(summary.disagreementSummary)
+      || !hasExactKeys(summary.metrics, RATE_METRIC_FIELDS)
       || !isSafeStringArray(summary.warnings)
-      || !isSafeStringArray(summary.limitations)) {
+      || !isSafeStringArray(summary.limitations)
+      || !containsRequiredLimitations(summary.limitations)) {
     return false;
   }
 
   const population = summary.evaluationPopulation;
-  const datasetRecordsRead = population.datasetRecordsRead;
-  const accepted = population.recordsAcceptedForEvaluation;
-  const excluded = population.recordsExcludedNotEvaluationEligible;
-  if (!isDiagnosticCount(datasetRecordsRead)
-      || !isDiagnosticCount(accepted)
-      || !isDiagnosticCount(excluded)
-      || accepted > datasetRecordsRead
-      || excluded > datasetRecordsRead
-      || accepted + excluded > datasetRecordsRead) {
+  const recordsEvaluated = population.recordsEvaluated;
+  const positive = population.positiveClassCount;
+  const negative = population.negativeClassCount;
+  if (!isDiagnosticCount(recordsEvaluated)
+      || !isDiagnosticCount(positive)
+      || !isDiagnosticCount(negative)
+      || positive + negative !== recordsEvaluated) {
     return false;
   }
 
-  if (!RATE_METRIC_FIELDS.every((field) => isRate(summary.metrics[field]))) {
+  if (!RATE_METRIC_FIELDS.every((field) => isMetricValue(summary.metrics[field]))) {
     return false;
   }
-  if (!COUNT_METRIC_FIELDS.every((field) => isDiagnosticCount(summary.metrics[field]) && summary.metrics[field] <= datasetRecordsRead)) {
-    return false;
-  }
-  if (summary.metrics.notEvaluationEligibleCount !== excluded) {
-    return false;
-  }
-
-  const disagreementValues = DISAGREEMENT_FIELDS.map(([field]) => summary.disagreementSummary[field]);
-  if (!disagreementValues.every(isDiagnosticCount)) {
-    return false;
-  }
-  return disagreementValues.reduce((total, value) => total + value, 0) <= datasetRecordsRead;
+  return isOrderedTimestamp(summary.evaluation.evaluationCardGeneratedAt, summary.generatedAt);
 }
 
 function isObject(value) {
@@ -422,43 +428,91 @@ function isString(value) {
   return typeof value === "string" && value.length > 0;
 }
 
-function isValidModel(model) {
-  return isObject(model)
-    && isString(model.modelName)
-    && isString(model.modelVersion)
-    && isString(model.modelFamily)
-    && isString(model.featureContractVersion);
+function isValidEvaluationSubject(subject) {
+  return isObject(subject)
+    && hasExactKeys(subject, Object.keys(REQUIRED_EVALUATION_SUBJECT))
+    && Object.entries(REQUIRED_EVALUATION_SUBJECT).every(([field, value]) => subject[field] === value);
 }
 
 function isValidGovernance(governance) {
   return isObject(governance)
-    && Object.entries(REQUIRED_GOVERNANCE).every(([field, value]) => governance[field] === value)
-    && Array.isArray(governance.approvedFor)
-    && governance.approvedFor.length === REQUIRED_APPROVED_FOR.length
-    && REQUIRED_APPROVED_FOR.every((value) => governance.approvedFor.includes(value));
+    && hasExactKeys(governance, Object.keys(REQUIRED_GOVERNANCE))
+    && Object.entries(REQUIRED_GOVERNANCE).every(([field, value]) => governance[field] === value);
 }
 
 function isValidEvaluation(evaluation) {
   return isObject(evaluation)
-    && Object.entries(REQUIRED_EVALUATION).every(([field, value]) => evaluation[field] === value);
+    && hasExactKeys(evaluation, [
+      "evaluationCardType",
+      "evaluationCardVersion",
+      "evaluationPurpose",
+      "evaluationReportType",
+      "evaluationReportVersion",
+      "evaluationReportGeneratedAt",
+      "evaluationCardGeneratedAt",
+      "evaluationArtifactSetVersion",
+      "datasetVersion",
+      "datasetTimeBasis",
+      "sourceManifestSha256",
+      "sourceEvaluationCardManifestSha256"
+    ])
+    && Object.entries(REQUIRED_EVALUATION).every(([field, value]) => evaluation[field] === value)
+    && isCanonicalUtcTimestamp(evaluation.evaluationReportGeneratedAt)
+    && isCanonicalUtcTimestamp(evaluation.evaluationCardGeneratedAt)
+    && isOrderedTimestamp(evaluation.evaluationReportGeneratedAt, evaluation.evaluationCardGeneratedAt)
+    && /^[a-f0-9]{64}$/.test(evaluation.sourceManifestSha256)
+    && /^[a-f0-9]{64}$/.test(evaluation.sourceEvaluationCardManifestSha256);
 }
 
-function isRate(value) {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
+function isMetricValue(metric) {
+  if (!isObject(metric) || !hasExactKeys(metric, ["available", "value", "reason"]) || typeof metric.available !== "boolean") {
+    return false;
+  }
+  if (metric.available) {
+    return typeof metric.value === "number"
+      && Number.isFinite(metric.value)
+      && metric.value >= 0
+      && metric.value <= 1
+      && metric.reason === null;
+  }
+  return metric.value === null && isMachineCode(metric.reason);
 }
 
 function isDiagnosticCount(value) {
   return Number.isInteger(value) && value >= 0 && value <= MAX_DIAGNOSTIC_COUNT;
 }
 
+function isOrderedTimestamp(earlier, later) {
+  return isOrderedCanonicalUtcTimestamp(earlier, later);
+}
+
 function isSafeStringArray(value) {
   return Array.isArray(value)
     && value.length <= 20
-    && value.every((item) => typeof item === "string" && item.length > 0 && item.length <= 160);
+    && new Set(value).size === value.length
+    && value.every(isMachineCode);
 }
 
+function containsRequiredLimitations(limitations) {
+  return Array.isArray(limitations) && [...REQUIRED_LIMITATIONS].every((limitation) => limitations.includes(limitation));
+}
+
+function isMachineCode(value) {
+  return typeof value === "string" && MACHINE_CODE_PATTERN.test(value);
+}
+
+function hasExactKeys(value, expectedKeys) {
+  const actual = Object.keys(value).sort();
+  const expected = [...expectedKeys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+
 function formatMetric(value, format) {
-  const number = Number(value);
+  if (!isObject(value) || value.available === false) {
+    return value?.reason ? `Unavailable: ${value.reason}` : "Unavailable";
+  }
+  const number = Number(value.value);
   if (!Number.isFinite(number)) {
     return "Unavailable";
   }
@@ -482,6 +536,10 @@ function booleanValue(value) {
 
 function listValue(value) {
   return Array.isArray(value) ? value.join(", ") : value;
+}
+
+function summaryMetricBasis() {
+  return "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK";
 }
 
 function displayValue(value) {

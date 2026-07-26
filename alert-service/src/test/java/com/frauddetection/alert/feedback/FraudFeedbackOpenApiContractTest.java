@@ -6,6 +6,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class FraudFeedbackOpenApiContractTest {
 
@@ -71,7 +73,99 @@ class FraudFeedbackOpenApiContractTest {
                 .contains("unknown reason code")
                 .contains("FRAUD_FEEDBACK_REASON_CODE_LABEL_MISMATCH")
                 .contains("does not mutate scoring, recommendation, payment, workflow, case, model, threshold, or dataset behavior")
-                .doesNotContain("APPROVE_PAYMENT", "DECLINE_PAYMENT", "BLOCK_TRANSACTION", "AUTHORIZE_PAYMENT");
+                .contains("DOES_NOT_AUTHORIZE_PAYMENTS");
+        FraudFeedbackNonDecisioningOpenApiPolicy.assertNonDecisioningContract(openApi);
+    }
+
+    @Test
+    void nonDecisioningGuardUsesStructuredMachineValues() {
+        for (String operationId : new String[]{
+                "authorizePayment",
+                "authorize_payment",
+                "authorize-payment",
+                "AuthorizePayment"
+        }) {
+            assertThatThrownBy(() -> FraudFeedbackNonDecisioningOpenApiPolicy.assertNonDecisioningContract("""
+                    paths:
+                      /unsafe:
+                        post:
+                          operationId: %s
+                    """.formatted(operationId))).isInstanceOf(AssertionError.class);
+        }
+        for (String yaml : new String[]{
+                """
+                components:
+                  schemas:
+                    Unsafe:
+                      enum: [AUTHORIZE_PAYMENT]
+                """,
+                """
+                components:
+                  schemas:
+                    Unsafe:
+                      enum: [authorizePayment]
+                """,
+                """
+                components:
+                  schemas:
+                    Unsafe:
+                      default: APPROVE_PAYMENT
+                """,
+                """
+                components:
+                  schemas:
+                    Unsafe:
+                      value: blockTransaction
+                """,
+                """
+                components:
+                  schemas:
+                    Unsafe:
+                      default: blockTransaction
+                """,
+                """
+                paths:
+                  /unsafe:
+                    get:
+                      responses:
+                        "200":
+                          content:
+                            application/json:
+                              example:
+                                action: approvePayment
+                """,
+                """
+                paths:
+                  /unsafe:
+                    get:
+                      responses:
+                        "200":
+                          content:
+                            application/json:
+                              examples:
+                                unsafe:
+                                  value:
+                                    authority: declinePayment
+                """
+        }) {
+            assertThatThrownBy(() -> FraudFeedbackNonDecisioningOpenApiPolicy.assertNonDecisioningContract(yaml))
+                    .isInstanceOf(AssertionError.class);
+        }
+        assertThatCode(() -> FraudFeedbackNonDecisioningOpenApiPolicy.assertNonDecisioningContract("""
+                components:
+                  schemas:
+                    Safe:
+                      enum:
+                        - DOES_NOT_AUTHORIZE_PAYMENTS
+                      description: This endpoint does not authorize payments.
+                """)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> FraudFeedbackNonDecisioningOpenApiPolicy.assertNonDecisioningContract("""
+                components:
+                  schemas:
+                    UnsafeNearMatch:
+                      enum:
+                        - DOES_NOT_AUTHORIZE_PAYMENT_NOW
+                """)).isInstanceOf(AssertionError.class);
     }
 
     private Path openApiPath() {

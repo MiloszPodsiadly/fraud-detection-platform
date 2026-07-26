@@ -272,7 +272,7 @@ function evidenceTimelineRequestOptions({ signal } = {}) {
 }
 
 function shadowPerformanceSummaryRequest(request, { signal } = {}) {
-  return request("/api/v1/governance/shadow-performance/summary/current", {
+  return request("/api/v2/governance/shadow-performance/summary/current", {
     ...(signal ? { signal } : {})
   });
 }

@@ -1,7 +1,10 @@
 package com.frauddetection.alert.governance.shadowperformance;
 
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -9,7 +12,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ShadowPerformanceSummaryValidatorTest {
 
+    private static final Path ROOT = Path.of("..").toAbsolutePath().normalize();
+    private static final Path TIMESTAMP_FIXTURE = ROOT.resolve("contract-fixtures/governance/canonical-utc-timestamp-cases.json");
+
     private final ShadowPerformanceSummaryValidator validator = new ShadowPerformanceSummaryValidator();
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
     void acceptsValidatedFdp105Summary() {
@@ -17,51 +24,38 @@ class ShadowPerformanceSummaryValidatorTest {
     }
 
     @Test
-    void acceptsApprovedForCompareAndShadowOnly() {
-        assertThatCode(() -> validator.validate(replaceApprovedFor(List.of("COMPARE", "SHADOW"))))
-                .doesNotThrowAnyException();
-    }
+    void rejectsAnyMissingDiagnosticNonGoal() {
+        ShadowPerformanceSummary base = validSummary();
+        ShadowPerformanceSummary summary = replaceGovernance(new ShadowPerformanceSummary.ShadowPerformanceGovernance(
+                base.governance().governanceStatus(),
+                base.governance().diagnosticOnly(),
+                false,
+                base.governance().notPromotionApproval(),
+                base.governance().notThresholdRecommendation(),
+                base.governance().notPaymentAuthorization(),
+                base.governance().notAutomaticDecisioning()
+        ));
 
-    @Test
-    void rejectsApprovedForWithDuplicateShadow() {
-        assertThatThrownBy(() -> validator.validate(replaceApprovedFor(List.of("SHADOW", "SHADOW"))))
-                .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
-    }
-
-    @Test
-    void rejectsApprovedForWithDuplicateCompare() {
-        assertThatThrownBy(() -> validator.validate(replaceApprovedFor(List.of("COMPARE", "COMPARE"))))
-                .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
-    }
-
-    @Test
-    void rejectsApprovedForWithOnlyShadow() {
-        assertThatThrownBy(() -> validator.validate(replaceApprovedFor(List.of("SHADOW"))))
-                .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
-    }
-
-    @Test
-    void rejectsApprovedForWithOnlyCompare() {
-        assertThatThrownBy(() -> validator.validate(replaceApprovedFor(List.of("COMPARE"))))
-                .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
-    }
-
-    @Test
-    void rejectsApprovedForWithOfflineEvaluation() {
-        assertThatThrownBy(() -> validator.validate(replaceApprovedFor(List.of("COMPARE", "OFFLINE_EVALUATION"))))
+        assertThatThrownBy(() -> validator.validate(summary))
                 .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
     }
 
     @Test
     void acceptsIsoInstantGeneratedAt() {
-        assertThatCode(() -> validator.validate(replaceGeneratedAt("2026-06-08T02:00:00Z")))
-                .doesNotThrowAnyException();
+        for (String generatedAt : validCanonicalTimestamps()) {
+            assertThatCode(() -> validator.validate(replaceAllTimestamps(generatedAt)))
+                    .doesNotThrowAnyException();
+        }
     }
 
     @Test
     void rejectsNonIsoGeneratedAt() {
-        assertThatThrownBy(() -> validator.validate(replaceGeneratedAt("2026-06-08 02:00:00")))
-                .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
+        for (JsonNode generatedAt : invalidCanonicalTimestamps()) {
+            if (generatedAt.isTextual() || generatedAt.isNull()) {
+                assertThatThrownBy(() -> validator.validate(replaceGeneratedAt(generatedAt.isTextual() ? generatedAt.textValue() : null)))
+                        .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
+            }
+        }
     }
 
     @Test
@@ -77,6 +71,12 @@ class ShadowPerformanceSummaryValidatorTest {
     }
 
     @Test
+    void rejectsSummaryGeneratedBeforeEvaluationCard() {
+        assertThatThrownBy(() -> validator.validate(replaceGeneratedAt("2026-06-11T23:59:59Z")))
+                .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
+    }
+
+    @Test
     void rejectsMissingEvaluationPopulation() {
         ShadowPerformanceSummary summary = replacePopulation(null);
 
@@ -86,27 +86,79 @@ class ShadowPerformanceSummaryValidatorTest {
 
     @Test
     void rejectsInconsistentNotEvaluationEligiblePopulation() {
-        ShadowPerformanceSummary summary = replacePopulation(new ShadowPerformanceSummary.ShadowPerformancePopulation(5, 3, 2));
+        ShadowPerformanceSummary summary = replacePopulation(new ShadowPerformanceSummary.ShadowPerformancePopulation(5, 4, 2));
 
         assertThatThrownBy(() -> validator.validate(summary))
                 .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
     }
 
     @Test
-    void rejectsDisagreementTotalGreaterThanDatasetRecordsRead() {
+    void rejectsPopulationOutsideBound() {
         ShadowPerformanceSummary base = validSummary();
         ShadowPerformanceSummary summary = new ShadowPerformanceSummary(
-                base.summaryType(),
+                base.reportType(),
                 base.summaryVersion(),
                 base.generatedAt(),
-                base.model(),
+                base.evaluationSubject(),
+                base.metricBasis(),
                 base.governance(),
                 base.evaluation(),
-                new ShadowPerformanceSummary.ShadowPerformancePopulation(2, 1, 1),
+                new ShadowPerformanceSummary.ShadowPerformancePopulation(1_001, 500, 501),
                 base.metrics(),
-                base.disagreementSummary(),
                 base.warnings(),
                 base.limitations(),
+                base.banner()
+        );
+
+        assertThatThrownBy(() -> validator.validate(summary))
+                .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
+    }
+
+    @Test
+    void rejectsUnsupportedLineageVersions() {
+        ShadowPerformanceSummary base = validSummary();
+        for (ShadowPerformanceSummary.ShadowPerformanceEvaluation evaluation : List.of(
+                replaceEvaluationLineage(base.evaluation(), "other-artifact-format-v99", "feedback-dataset-v1", "FEEDBACK_CREATED_AT"),
+                replaceEvaluationLineage(base.evaluation(), "fdp123-report-artifact-set-v1", "unknown-dataset-v77", "FEEDBACK_CREATED_AT"),
+                replaceEvaluationLineage(base.evaluation(), "fdp123-report-artifact-set-v1", "feedback-dataset-v1", "TRANSACTION_CREATED_AT")
+        )) {
+            ShadowPerformanceSummary summary = new ShadowPerformanceSummary(
+                    base.reportType(),
+                    base.summaryVersion(),
+                    base.generatedAt(),
+                    base.evaluationSubject(),
+                    base.metricBasis(),
+                    base.governance(),
+                    evaluation,
+                    base.evaluationPopulation(),
+                    base.metrics(),
+                    base.warnings(),
+                    base.limitations(),
+                    base.banner()
+            );
+
+            assertThatThrownBy(() -> validator.validate(summary))
+                    .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
+        }
+    }
+
+    @Test
+    void rejectsTwentyOneLimitations() {
+        ShadowPerformanceSummary base = validSummary();
+        ShadowPerformanceSummary summary = new ShadowPerformanceSummary(
+                base.reportType(),
+                base.summaryVersion(),
+                base.generatedAt(),
+                base.evaluationSubject(),
+                base.metricBasis(),
+                base.governance(),
+                base.evaluation(),
+                base.evaluationPopulation(),
+                base.metrics(),
+                base.warnings(),
+                java.util.stream.IntStream.range(0, 21)
+                        .mapToObj(index -> "LIMITATION_" + index)
+                        .toList(),
                 base.banner()
         );
 
@@ -118,15 +170,20 @@ class ShadowPerformanceSummaryValidatorTest {
     void excellentMetricsDoNotCreateApprovalSemantics() {
         ShadowPerformanceSummary base = validSummary();
         ShadowPerformanceSummary summary = new ShadowPerformanceSummary(
-                base.summaryType(),
+                base.reportType(),
                 base.summaryVersion(),
                 base.generatedAt(),
-                base.model(),
+                base.evaluationSubject(),
+                base.metricBasis(),
                 base.governance(),
                 base.evaluation(),
                 base.evaluationPopulation(),
-                new ShadowPerformanceSummary.ShadowPerformanceMetrics(1.0, 1.0, 0.0, 1, 1, 1, 1, 1, 1),
-                base.disagreementSummary(),
+                new ShadowPerformanceSummary.ShadowPerformanceMetrics(
+                        ShadowPerformanceSummaryTestFixtures.metric(1.0),
+                        ShadowPerformanceSummaryTestFixtures.metric(1.0),
+                        ShadowPerformanceSummaryTestFixtures.metric(0.0),
+                        ShadowPerformanceSummaryTestFixtures.metric(0.0)
+                ),
                 base.warnings(),
                 base.limitations(),
                 base.banner()
@@ -140,15 +197,15 @@ class ShadowPerformanceSummaryValidatorTest {
         ShadowPerformanceSummary base = validSummary();
         for (String value : List.of("PRODUCTION_APPROVED", "PROMOTION_READY", "THRESHOLD_RECOMMENDATION", "PAYMENT_AUTHORIZATION")) {
             ShadowPerformanceSummary summary = new ShadowPerformanceSummary(
-                    base.summaryType(),
+                    base.reportType(),
                     base.summaryVersion(),
                     base.generatedAt(),
-                    base.model(),
+                    base.evaluationSubject(),
+                    base.metricBasis(),
                     base.governance(),
                     base.evaluation(),
                     base.evaluationPopulation(),
                     base.metrics(),
-                    base.disagreementSummary(),
                     List.of(value),
                     base.limitations(),
                     base.banner()
@@ -162,42 +219,33 @@ class ShadowPerformanceSummaryValidatorTest {
     private ShadowPerformanceSummary replacePopulation(ShadowPerformanceSummary.ShadowPerformancePopulation population) {
         ShadowPerformanceSummary base = validSummary();
         return new ShadowPerformanceSummary(
-                base.summaryType(),
+                base.reportType(),
                 base.summaryVersion(),
                 base.generatedAt(),
-                base.model(),
+                base.evaluationSubject(),
+                base.metricBasis(),
                 base.governance(),
                 base.evaluation(),
                 population,
                 base.metrics(),
-                base.disagreementSummary(),
                 base.warnings(),
                 base.limitations(),
                 base.banner()
         );
     }
 
-    private ShadowPerformanceSummary replaceApprovedFor(List<String> approvedFor) {
+    private ShadowPerformanceSummary replaceGovernance(ShadowPerformanceSummary.ShadowPerformanceGovernance governance) {
         ShadowPerformanceSummary base = validSummary();
         return new ShadowPerformanceSummary(
-                base.summaryType(),
+                base.reportType(),
                 base.summaryVersion(),
                 base.generatedAt(),
-                base.model(),
-                new ShadowPerformanceSummary.ShadowPerformanceGovernance(
-                        base.governance().governanceStatus(),
-                        approvedFor,
-                        base.governance().diagnosticOnly(),
-                        base.governance().notProductionApproval(),
-                        base.governance().notPromotionApproval(),
-                        base.governance().notThresholdRecommendation(),
-                        base.governance().notPaymentAuthorization(),
-                        base.governance().notAutomaticDecisioning()
-                ),
+                base.evaluationSubject(),
+                base.metricBasis(),
+                governance,
                 base.evaluation(),
                 base.evaluationPopulation(),
                 base.metrics(),
-                base.disagreementSummary(),
                 base.warnings(),
                 base.limitations(),
                 base.banner()
@@ -207,15 +255,15 @@ class ShadowPerformanceSummaryValidatorTest {
     private ShadowPerformanceSummary replaceGeneratedAt(String generatedAt) {
         ShadowPerformanceSummary base = validSummary();
         return new ShadowPerformanceSummary(
-                base.summaryType(),
+                base.reportType(),
                 base.summaryVersion(),
                 generatedAt,
-                base.model(),
+                base.evaluationSubject(),
+                base.metricBasis(),
                 base.governance(),
                 base.evaluation(),
                 base.evaluationPopulation(),
                 base.metrics(),
-                base.disagreementSummary(),
                 base.warnings(),
                 base.limitations(),
                 base.banner()
@@ -224,5 +272,77 @@ class ShadowPerformanceSummaryValidatorTest {
 
     private ShadowPerformanceSummary validSummary() {
         return ShadowPerformanceSummaryTestFixtures.validSummary();
+    }
+
+    private ShadowPerformanceSummary replaceAllTimestamps(String generatedAt) {
+        ShadowPerformanceSummary base = validSummary();
+        ShadowPerformanceSummary.ShadowPerformanceEvaluation evaluation = new ShadowPerformanceSummary.ShadowPerformanceEvaluation(
+                base.evaluation().evaluationCardType(),
+                base.evaluation().evaluationCardVersion(),
+                base.evaluation().evaluationPurpose(),
+                base.evaluation().evaluationReportType(),
+                base.evaluation().evaluationReportVersion(),
+                generatedAt,
+                generatedAt,
+                base.evaluation().evaluationArtifactSetVersion(),
+                base.evaluation().datasetVersion(),
+                base.evaluation().datasetTimeBasis(),
+                base.evaluation().sourceManifestSha256(),
+                base.evaluation().sourceEvaluationCardManifestSha256()
+        );
+        return new ShadowPerformanceSummary(
+                base.reportType(),
+                base.summaryVersion(),
+                generatedAt,
+                base.evaluationSubject(),
+                base.metricBasis(),
+                base.governance(),
+                evaluation,
+                base.evaluationPopulation(),
+                base.metrics(),
+                base.warnings(),
+                base.limitations(),
+                base.banner()
+        );
+    }
+
+    private List<String> validCanonicalTimestamps() {
+        return java.util.stream.StreamSupport.stream(timestampFixture().get("valid").spliterator(), false)
+                .map(JsonNode::textValue)
+                .toList();
+    }
+
+    private List<JsonNode> invalidCanonicalTimestamps() {
+        return java.util.stream.StreamSupport.stream(timestampFixture().get("invalid").spliterator(), false).toList();
+    }
+
+    private JsonNode timestampFixture() {
+        try {
+            return objectMapper.readTree(TIMESTAMP_FIXTURE.toFile());
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private ShadowPerformanceSummary.ShadowPerformanceEvaluation replaceEvaluationLineage(
+            ShadowPerformanceSummary.ShadowPerformanceEvaluation base,
+            String evaluationArtifactSetVersion,
+            String datasetVersion,
+            String datasetTimeBasis
+    ) {
+        return new ShadowPerformanceSummary.ShadowPerformanceEvaluation(
+                base.evaluationCardType(),
+                base.evaluationCardVersion(),
+                base.evaluationPurpose(),
+                base.evaluationReportType(),
+                base.evaluationReportVersion(),
+                base.evaluationReportGeneratedAt(),
+                base.evaluationCardGeneratedAt(),
+                evaluationArtifactSetVersion,
+                datasetVersion,
+                datasetTimeBasis,
+                base.sourceManifestSha256(),
+                base.sourceEvaluationCardManifestSha256()
+        );
     }
 }

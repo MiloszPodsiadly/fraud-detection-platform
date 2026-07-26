@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 class FraudFeedbackArchitectureGuardTest {
 
@@ -78,6 +79,14 @@ class FraudFeedbackArchitectureGuardTest {
                 .contains("MARKED_FRAUD", "MARKED_LEGITIMATE", "MARKED_INCONCLUSIVE", "REQUESTED_MORE_INFO")
                 .contains("ANALYST_REVIEW")
                 .doesNotContain("APPROVE_PAYMENT", "DECLINE_PAYMENT", "BLOCK_TRANSACTION", "AUTHORIZE_PAYMENT");
+    }
+
+    @Test
+    void openApiAndArchitectureGuardsUseSameNonDecisioningPolicy() throws IOException {
+        String openApi = Files.readString(openApiPath());
+
+        assertThatCode(() -> FraudFeedbackNonDecisioningOpenApiPolicy.assertNonDecisioningContract(openApi))
+                .doesNotThrowAnyException();
     }
 
     @Test
@@ -205,5 +214,13 @@ class FraudFeedbackArchitectureGuardTest {
             return fromModule;
         }
         return Path.of("docs", "architecture", fileName);
+    }
+
+    private Path openApiPath() {
+        Path fromModule = Path.of("..", "docs", "openapi", "alert_service.openapi.yaml");
+        if (Files.exists(fromModule)) {
+            return fromModule;
+        }
+        return Path.of("docs", "openapi", "alert_service.openapi.yaml");
     }
 }

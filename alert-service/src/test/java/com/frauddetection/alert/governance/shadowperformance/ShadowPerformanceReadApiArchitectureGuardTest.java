@@ -20,6 +20,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
     private static final Path ROOT = Path.of("..").toAbsolutePath().normalize();
     private static final Path PRODUCTION_ROOT = Path.of("src/main/java/com/frauddetection/alert");
     private static final Path DOC = ROOT.resolve("docs/architecture/shadow_performance_read_api.md");
+    private static final Path SECURITY_ENDPOINT_MAP = ROOT.resolve("docs/security/endpoint_authorization_map.md");
     private static final Path OPENAPI = ROOT.resolve("docs/openapi/alert_service.openapi.yaml");
     private static final Path UI_ROOT = ROOT.resolve("analyst-console-ui/src");
     private static final Path DOCKER_COMPOSE = ROOT.resolve("deployment/docker-compose.yml");
@@ -40,22 +41,22 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         topLevelFields.addAll(json.propertyNames());
 
         assertThat(topLevelFields).containsExactly(
-                "summaryType",
+                "reportType",
                 "summaryVersion",
                 "generatedAt",
-                "model",
+                "evaluationSubject",
+                "metricBasis",
                 "governance",
                 "evaluation",
                 "evaluationPopulation",
                 "metrics",
-                "disagreementSummary",
                 "warnings",
                 "limitations",
                 "banner"
         );
 
         for (String term : new String[]{
-                "rawModelCard",
+                "rawEvaluationCard",
                 "rawEvaluationReport",
                 "rawDataset",
                 "rawFdp102Jsonl",
@@ -143,10 +144,10 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
 
     @Test
     void readAccessClassifierRecognizesShadowPerformanceSummary() {
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/governance/shadow-performance/summary/current");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v2/governance/shadow-performance/summary/current");
         request.setAttribute(
                 HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE,
-                "/api/v1/governance/shadow-performance/summary/current"
+                "/api/v2/governance/shadow-performance/summary/current"
         );
 
         var target = new ReadAccessAuditClassifier().classify(request).orElseThrow();
@@ -164,10 +165,8 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "read_fdp102_jsonl",
                 "Fdp102Jsonl",
                 "EvaluationRunner",
-                "build_model_card",
-                "ModelCardGenerator",
-                "precisionAtBudget =",
-                "recallAtTopK =",
+                "build_evaluation_card",
+                "EvaluationCardGenerator",
                 "falsePositiveRate =",
                 "recompute",
                 "disagreementSummary.values().stream()"
@@ -209,11 +208,16 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         assertThat(source).contains(
                 "ShadowPerformanceSummaryCurrentProperties",
                 "LinkOption.NOFOLLOW_LINKS",
+                "Files.isSymbolicLink",
                 "startsWith(baseDir)",
-                "objectMapper.readValue",
+                "readBoundedArtifact(manifestPath, MAX_MANIFEST_SIZE_BYTES)",
+                "readBoundedArtifact(artifactPath, properties.maxSizeBytes())",
+                "validateManifest(manifestPayload, summaryPayload, summary)",
+                "objectMapper.readValue(payload, ShadowPerformanceSummary.class)",
                 "validator.validate(summary)"
         );
         assertThat(source).doesNotContain(
+                "Files.size",
                 "DirectoryStream",
                 "Files.list",
                 "Files.walk",
@@ -242,15 +246,12 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "MapperFeature.ALLOW_COERCION_OF_SCALARS",
                 "DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES",
                 "DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES",
-                "DeserializationFeature.FAIL_ON_NULL_CREATOR_PROPERTIES",
                 "DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES"
         );
         assertThat(source).doesNotContain(
                 "defaultIfMissing",
                 "orElse(0)",
                 "orElse(false)",
-                "precisionAtBudget = 0",
-                "recallAtTopK = 0",
                 "falsePositiveRate = 0",
                 "new ShadowPerformanceSummary("
         );
@@ -283,7 +284,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         String openApi = Files.readString(OPENAPI);
 
         assertThat(openApi).contains(
-                "/api/v1/governance/shadow-performance/summary/current",
+                "/api/v2/governance/shadow-performance/summary/current",
                 "shadow-performance:read",
                 "diagnostic-only",
                 "not model promotion approval",
@@ -311,7 +312,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         String uiSource = uiSource();
 
         assertThat(uiSource).contains(
-                "/api/v1/governance/shadow-performance/summary/current",
+                "/api/v2/governance/shadow-performance/summary/current",
                 "shadowPerformance",
                 "ShadowPerformance"
         );
@@ -327,16 +328,37 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
     }
 
     @Test
+    void shadowCurrentEndpointPathMatchesControllerSecurityAuditOpenApiUiAndSecurityMap() throws Exception {
+        String expected = "/api/v2/governance/shadow-performance/summary/current";
+        String legacy = "/api/v" + "1/governance/shadow-performance/summary/current";
+        String controller = Files.readString(PRODUCTION_ROOT.resolve("governance/shadowperformance/ShadowPerformanceSummaryController.java"));
+        String security = Files.readString(PRODUCTION_ROOT.resolve("security/config/GovernanceAuthorizationRules.java"));
+        String audit = Files.readString(PRODUCTION_ROOT.resolve("audit/read/ReadAccessAuditClassifier.java"));
+        String openApi = Files.readString(OPENAPI);
+        String uiSource = uiSource();
+        String endpointMap = Files.readString(SECURITY_ENDPOINT_MAP);
+
+        assertThat(controller).contains("@RequestMapping(\"/api/v2/governance/shadow-performance/summary\")");
+        assertThat(security).contains(expected);
+        assertThat(audit).contains(expected);
+        assertThat(openApi).contains(expected);
+        assertThat(uiSource).contains(expected);
+        assertThat(endpointMap).contains("`GET " + expected + "`");
+
+        assertThat(controller + security + audit + openApi + uiSource + endpointMap).doesNotContain(legacy);
+    }
+
+    @Test
     void docsStateReadOnlyAuthorizedDiagnosticBoundary() throws Exception {
         String doc = Files.readString(DOC);
 
         assertThat(doc).contains(
                 "read-only API boundary",
                 "requires the explicit `shadow-performance:read` authority",
-                "exposes only validated FDP-105 Shadow Performance Summary fields",
+                "exposes only validated Shadow Performance Summary v2 fields",
                 "does not recompute metrics",
-                "does not read FDP-102 JSONL exports",
-                "does not expose raw Model Cards",
+                "does not read raw dataset exports",
+                "does not expose raw Platform Recommendation Evaluation Cards",
                 "not a dashboard",
                 "not model promotion approval",
                 "not threshold recommendation",
@@ -357,7 +379,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "base runtime is fail-closed by default",
                 "does not compute metrics",
                 "does not recompute shadow performance",
-                "does not read raw FDP-102/FDP-103/FDP-104 artifacts",
+                "does not read raw dataset exports",
                 "does not expose raw artifacts",
                 "Disabled provider or no configured path returns 404",
                 "Configured missing artifact returns 503",
@@ -370,11 +392,16 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "Null primitive metric field -> 503",
                 "Missing/null governance boolean -> 503",
                 "Missing/null evaluation population count -> 503",
-                "Missing/null disagreement count -> 503",
                 "No silent primitive defaults",
                 "No zero substitution",
                 "No false substitution",
                 "No partial summary",
+                "Manifest Boundary",
+                "The current summary is not consumed as a standalone file",
+                "Missing required sibling `manifest.json` returns 503",
+                "Invalid manifest, manifest-summary hash mismatch, or manifest-summary size mismatch returns 503",
+                "`sizeBytes`",
+                "not a digital signature",
                 "demo fixture metrics are not production current summary",
                 "No fake, sample, stale, fallback, or zero metrics",
                 "FDP-108 provides a validated current ShadowPerformanceSummary. It does not create model readiness, promotion approval, threshold recommendation, production decisioning approval, payment authorization, or analyst recommendation logic."
@@ -405,27 +432,30 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         assertThat(demoCompose).contains(
                 "SHADOW_PERFORMANCE_SUMMARY_CURRENT_ENABLED: \"true\"",
                 "SHADOW_PERFORMANCE_SUMMARY_CURRENT_BASE_DIR: /run/shadow-performance",
-                "SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH: /run/shadow-performance/current-summary.demo.json"
+                "SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH: /run/shadow-performance/current-summary.json"
         );
     }
 
     @Test
-    void shadowPerformanceDemoComposeUsesClearlyNamedDemoFixture() throws Exception {
+    void shadowPerformanceDemoComposeMountsCanonicalDemoArtifactSet() throws Exception {
         String demoCompose = Files.readString(DEMO_COMPOSE);
 
         assertThat(demoCompose).contains(
-                "local-fixtures/shadow-performance/current-summary.demo.json",
-                "current-summary.demo.json"
+                "local-fixtures/shadow-performance",
+                "target: /run/shadow-performance"
         );
-        assertThat(demoCompose).doesNotContain("ml-inference-service/tests");
+        assertThat(demoCompose).doesNotContain(
+                "current-summary.demo.json",
+                "ml-inference-service/tests"
+        );
     }
 
     @Test
-    void shadowPerformanceDemoComposeMountsFixtureReadOnly() throws Exception {
+    void shadowPerformanceDemoComposeMountsFixtureSetReadOnly() throws Exception {
         String demoCompose = Files.readString(DEMO_COMPOSE);
 
         assertThat(demoCompose).contains(
-                "target: /run/shadow-performance/current-summary.demo.json",
+                "target: /run/shadow-performance",
                 "read_only: true"
         );
     }
@@ -440,12 +470,15 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "app-up: deployment/.env shadow-performance-summary",
                 "app-up-shadow-performance-generated: deployment/.env shadow-performance-summary",
                 "deployment/local-generated/shadow-performance/current-summary.json",
-                "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary"
+                "deployment/local-generated/shadow-performance/manifest.json",
+                "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary",
+                "Generated Shadow Performance manifest not found. Run: make shadow-performance-summary"
         );
         assertThat(appPs1).contains(
                 "\"-f\", \"deployment/docker-compose.shadow-performance-generated.yml\"",
                 "offline_evaluation.generate_current_shadow_summary",
-                "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary"
+                "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary",
+                "Generated Shadow Performance manifest not found. Run: make shadow-performance-summary"
         );
         assertThat(makeTarget(makefile, "app-up")).doesNotContain("docker-compose.shadow-performance-demo.yml");
         assertThat(appPs1).doesNotContain(
@@ -482,6 +515,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "official full local launchers generate the local summary first and include the explicit generated override",
                 "If the base Compose file is run without a configured current summary source, the endpoint returns 404",
                 "docker-compose.shadow-performance-generated.yml",
+                "/run/shadow-performance/manifest.json",
                 "demo fixture metrics are not production current summary"
         );
         assertThat(baseCompose).doesNotContain(
@@ -499,8 +533,8 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "SHADOW_PERFORMANCE_SUMMARY_CURRENT_ENABLED: \"true\"",
                 "SHADOW_PERFORMANCE_SUMMARY_CURRENT_BASE_DIR: /run/shadow-performance",
                 "SHADOW_PERFORMANCE_SUMMARY_CURRENT_PATH: /run/shadow-performance/current-summary.json",
-                "./local-generated/shadow-performance/current-summary.json",
-                "target: /run/shadow-performance/current-summary.json",
+                "./local-generated/shadow-performance",
+                "target: /run/shadow-performance",
                 "read_only: true"
         );
     }
@@ -541,7 +575,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         assertThat(demoCompose).doesNotContain(
                 "docker-compose.shadow-performance-generated.yml",
                 "local-generated/shadow-performance/current-summary.json",
-                "/run/shadow-performance/current-summary.json"
+                "local-generated/shadow-performance/manifest.json"
         );
         assertThat(baseCompose).doesNotContain(
                 "docker-compose.shadow-performance-generated.yml",
@@ -554,6 +588,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         );
         assertThat(makeTarget(makefile, "app-up")).contains(
                 "deployment/local-generated/shadow-performance/current-summary.json",
+                "deployment/local-generated/shadow-performance/manifest.json",
                 "SECURITY_HARDENED_COMPOSE"
         );
         assertThat(makeTarget(makefile, "app-up")).doesNotContain("docker-compose.shadow-performance-demo.yml");
@@ -574,12 +609,20 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         assertThat(makefile).contains(
                 "check-python:",
                 "shadow-performance-summary: check-python",
+                "--evaluation-card ../deployment/local-generated/platform-recommendation-evaluation-card/platform_recommendation_evaluation_card.json",
+                "--evaluation-card-manifest ../deployment/local-generated/platform-recommendation-evaluation-card/manifest.json",
                 "Python 3.12+ is required to generate the local Shadow Performance Summary"
+        );
+        assertThat(makeTarget(makefile, "shadow-performance-summary")).doesNotContain(
+                "--dataset-jsonl",
+                "--model-metadata"
         );
         assertThat(generatedTarget).contains(
                 "app-up-shadow-performance-generated: deployment/.env shadow-performance-summary",
                 "deployment/local-generated/shadow-performance/current-summary.json",
+                "deployment/local-generated/shadow-performance/manifest.json",
                 "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary",
+                "Generated Shadow Performance manifest not found. Run: make shadow-performance-summary",
                 "SHADOW_PERFORMANCE_GENERATED_COMPOSE",
                 "up --build -d"
         );
@@ -602,7 +645,8 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "check-python:",
                 "@python --version >/dev/null 2>&1",
                 message,
-                "shadow-performance-summary: check-python"
+                "shadow-performance-summary: check-python",
+                "Generated Shadow Performance manifest not found. Run: make shadow-performance-summary"
         );
         assertThat(appPs1).contains(
                 "$pythonCommand = Get-Command python -ErrorAction SilentlyContinue",
@@ -617,7 +661,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         String doc = Files.readString(GENERATED_RUNTIME_DOC);
 
         assertThat(doc).contains(
-                "FDP-110 completes the local generated Shadow Performance runtime loop. It invokes the FDP-109 local generator before Docker Compose starts, mounts the generated current-summary.json artifact into alert-service, lets FDP-108 read it, FDP-106 expose it, and FDP-107 display it.",
+                "FDP-110 completes the local generated Shadow Performance runtime loop. It invokes the FDP-109 local generator before Docker Compose starts, mounts the generated Shadow Performance artifact set into alert-service, lets FDP-108 read it, FDP-106 expose it, and FDP-107 display it.",
                 "FDP-110 intentionally combines local generation before Compose, generated runtime mount, and shared global workspace counters as UI context.",
                 "FDP-109 owns generation logic.",
                 "FDP-110 owns local launcher wiring and runtime mounting.",
@@ -629,9 +673,11 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "Generation inside alert-service runtime is forbidden.",
                 "FDP-110 does not generate a Shadow Performance Summary inside Docker Compose or inside the application runtime.",
                 "The local developer launcher invokes the FDP-109 generator before `docker compose up`",
+                "current-summary.json` plus sibling `manifest.json`",
                 "Base runtime is fail-closed",
                 "no configured summary -> 404",
                 "Demo runtime uses `docker-compose.shadow-performance-demo.yml`",
+                "deployment/local-fixtures/shadow-performance/manifest.json",
                 "Demo artifact is separate from generated artifact",
                 "Demo artifact is for UI smoke/demo only",
                 "Demo artifact is not FDP-109 generated output",
@@ -639,8 +685,9 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "Official local launcher runs FDP-109 generation before Compose.",
                 "Generated runtime uses `docker-compose.shadow-performance-generated.yml`",
                 "deployment/local-generated/shadow-performance/current-summary.json",
-                "Generated runtime exposes the summary through FDP-108/FDP-106/FDP-107.",
-                "generated runtime does not use `current-summary.demo.json`",
+                "deployment/local-generated/shadow-performance/manifest.json",
+                "Generated runtime exposes the manifest-validated summary through FDP-108/FDP-106/FDP-107.",
+                "generated runtime does not use a non-canonical demo summary filename",
                 "generated runtime does not generate summary inside Docker Compose",
                 "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary",
                 "Generation happens before Docker Compose starts.",

@@ -6,24 +6,39 @@ from typing import Any
 
 from offline_evaluation.fdp123.dataset_reader import read_fdp123_feedback_dataset_jsonl
 from offline_evaluation.fdp123.disagreement_report import build_fdp123_disagreement_report
+from offline_evaluation.fdp123.evaluation_contract import EVALUATION_SUBJECT, METRIC_BASIS, METRICS_SUBJECT
 from offline_evaluation.fdp123.metrics import build_fdp123_metrics
 from offline_evaluation.fdp123.models import Fdp123Dataset
-from offline_evaluation.fdp123.report_writer import REPORT_TYPE, write_fdp123_reports
+from offline_evaluation.fdp123.report_contract import REPORT_TYPE
+from offline_evaluation.fdp123.report_writer import write_fdp123_reports
+from offline_evaluation.fdp123.timestamp_contract import normalize_rfc3339_timestamp
 
 
 def build_fdp123_evaluation_reports(
         dataset: Fdp123Dataset,
         generated_at: str | None = None,
 ) -> dict[str, Any]:
-    generated = generated_at or datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    raw_generated = generated_at
+    if raw_generated is None:
+        raw_generated = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    generated = normalize_rfc3339_timestamp(
+        raw_generated,
+        "generated_at",
+    )
     metrics = build_fdp123_metrics(dataset)
     disagreement = build_fdp123_disagreement_report(dataset.records)
-    warnings = sorted(set(metrics["warnings"]))
+    warnings = list(metrics["warnings"])
+    if len(set(warnings)) != len(warnings):
+        raise ValueError("metrics warnings contains duplicate values")
+    warnings = sorted(warnings)
     return {
         "evaluationSummary": {
             "datasetMetadata": dataset.metadata.as_report_dict(),
             "disagreementSummary": disagreement["summary"],
+            "evaluationSubject": dict(EVALUATION_SUBJECT),
             "generatedAt": generated,
+            "metricBasis": METRIC_BASIS,
+            "metricsSubject": METRICS_SUBJECT,
             "qualityMetrics": metrics,
             "reportType": REPORT_TYPE,
             "warnings": warnings,

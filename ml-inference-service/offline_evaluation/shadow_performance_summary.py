@@ -4,29 +4,32 @@ from typing import Any
 
 from offline_evaluation.shadow_performance_schema import (
     BANNER,
-    SUMMARY_TYPE,
+    EXPECTED_EVALUATION_REPORT_VERSION,
+    EXPECTED_GOVERNANCE_STATUS,
+    REPORT_TYPE,
     SUMMARY_VERSION,
-    validate_model_card_for_shadow_summary,
+    validate_evaluation_card_for_shadow_summary,
     validate_shadow_performance_summary,
 )
 
 
-def build_shadow_performance_summary(model_card: dict[str, Any], generated_at: str) -> dict[str, Any]:
-    safe_model_card = validate_model_card_for_shadow_summary(model_card)
-    metrics = safe_model_card["metricsSummary"]
+def build_shadow_performance_summary(
+        evaluation_card: dict[str, Any],
+        generated_at: str,
+        *,
+        source_evaluation_card_manifest_sha256: str,
+) -> dict[str, Any]:
+    safe_card = validate_evaluation_card_for_shadow_summary(evaluation_card)
+    metrics = safe_card["metricsSummary"]
+    evidence = safe_card["evaluationEvidence"]
     summary = {
-        "summaryType": SUMMARY_TYPE,
+        "reportType": REPORT_TYPE,
         "summaryVersion": SUMMARY_VERSION,
         "generatedAt": generated_at,
-        "model": {
-            "modelName": safe_model_card["modelName"],
-            "modelVersion": safe_model_card["modelVersion"],
-            "modelFamily": safe_model_card["modelFamily"],
-            "featureContractVersion": safe_model_card["featureContractVersion"],
-        },
+        "evaluationSubject": dict(safe_card["evaluationSubject"]),
+        "metricBasis": safe_card["metricBasis"],
         "governance": {
-            "governanceStatus": safe_model_card["governanceStatus"],
-            "approvedFor": list(safe_model_card["approvedFor"]),
+            "governanceStatus": EXPECTED_GOVERNANCE_STATUS,
             "diagnosticOnly": True,
             "notProductionApproval": True,
             "notPromotionApproval": True,
@@ -35,31 +38,32 @@ def build_shadow_performance_summary(model_card: dict[str, Any], generated_at: s
             "notAutomaticDecisioning": True,
         },
         "evaluation": {
-            "evaluationReportType": safe_model_card["evaluationReportType"],
-            "evaluationReportVersion": safe_model_card["evaluationReportVersion"],
-            "metricBasis": metrics["metricBasis"],
-            "datasetTimeBasis": safe_model_card["datasetTimeBasis"],
-            "datasetDeduplicationPolicy": safe_model_card["datasetDeduplicationPolicy"],
+            "evaluationCardType": safe_card["cardType"],
+            "evaluationCardVersion": safe_card["cardVersion"],
+            "evaluationPurpose": safe_card["evaluationPurpose"],
+            "evaluationReportType": evidence["evaluationReportType"],
+            "evaluationReportVersion": EXPECTED_EVALUATION_REPORT_VERSION,
+            "evaluationReportGeneratedAt": evidence["evaluationGeneratedAt"],
+            "evaluationCardGeneratedAt": safe_card["generatedAt"],
+            "evaluationArtifactSetVersion": evidence["evaluationArtifactSetVersion"],
+            "datasetVersion": evidence["datasetVersion"],
+            "datasetTimeBasis": evidence["datasetTimeBasis"],
+            "sourceManifestSha256": evidence["sourceManifestSha256"],
+            "sourceEvaluationCardManifestSha256": source_evaluation_card_manifest_sha256,
         },
         "evaluationPopulation": {
-            "datasetRecordsRead": metrics["datasetRecordsRead"],
-            "recordsAcceptedForEvaluation": metrics["recordsAcceptedForEvaluation"],
-            "recordsExcludedNotEvaluationEligible": metrics["recordsExcludedNotEvaluationEligible"],
+            "recordsEvaluated": evidence["recordsEvaluated"],
+            "positiveClassCount": evidence["positiveClassCount"],
+            "negativeClassCount": evidence["negativeClassCount"],
         },
         "metrics": {
-            "precisionAtBudget": metrics["precisionAtBudget"],
-            "recallAtTopK": metrics["recallAtTopK"],
-            "falsePositiveRate": metrics["falsePositiveRate"],
-            "mlCaughtRulesMissedCount": metrics["mlCaughtRulesMissedCount"],
-            "rulesCaughtMlMissedCount": metrics["rulesCaughtMlMissedCount"],
-            "missingMlCount": metrics["missingMlCount"],
-            "missingRulesCount": metrics["missingRulesCount"],
-            "missingProjectionCount": metrics["missingProjectionCount"],
-            "notEvaluationEligibleCount": metrics["notEvaluationEligibleCount"],
+            "alertRecommendedPrecision": dict(metrics["alertRecommendedPrecision"]),
+            "alertRecommendedRecall": dict(metrics["alertRecommendedRecall"]),
+            "falsePositiveRate": dict(metrics["falsePositiveRate"]),
+            "falseNegativeRate": dict(metrics["falseNegativeRate"]),
         },
-        "disagreementSummary": dict(metrics["disagreementSummary"]),
-        "warnings": list(safe_model_card["warnings"]),
-        "limitations": list(safe_model_card["limitations"]),
+        "warnings": list(safe_card["warnings"]),
+        "limitations": list(safe_card["limitations"]),
         "banner": BANNER,
     }
     return validate_shadow_performance_summary(summary)

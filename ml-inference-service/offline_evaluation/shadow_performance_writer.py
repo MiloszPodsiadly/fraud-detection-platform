@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
+from offline_evaluation.json_contract import dumps_strict_json
 from offline_evaluation.shadow_performance_schema import (
     BANNER,
     SAFE_CONTRACT_VALUES,
@@ -47,12 +47,17 @@ FORBIDDEN_OUTPUT_TERMS = {
     "recommendedthreshold",
     "championcandidate",
     "deployrecommendation",
+    "precisionatbudget",
+    "recallattopk",
+    "modelfamily",
+    "modelname",
+    "modelversion",
 }
 
 
 def write_shadow_performance_summary(summary: dict[str, Any]) -> str:
     safe_summary = validate_shadow_performance_summary(summary)
-    payload = json.dumps(safe_summary, sort_keys=True, separators=(",", ":"))
+    payload = dumps_strict_json(safe_summary, sort_keys=True, separators=(",", ":"))
     _reject_forbidden_output(payload)
     return payload + "\n"
 

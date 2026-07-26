@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import json
 import os
 import hashlib
 from pathlib import Path
 from typing import Any
 
+from offline_evaluation.json_contract import dumps_strict_json
+from offline_evaluation.fdp123.report_contract import ARTIFACT_SET_VERSION, REPORT_TYPE
+from offline_evaluation.fdp123.timestamp_contract import normalize_rfc3339_timestamp
 
 MAX_WARNINGS = 10
-REPORT_TYPE = "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"
-ARTIFACT_SET_VERSION = "fdp123-report-artifact-set-v1"
 FORBIDDEN_REPORT_COMPACT_TERMS = {
     "rawfeedbackid",
     "feedbackid",
@@ -53,10 +53,23 @@ ALLOWED_PSEUDONYM_FIELDS = {"evaluationrecordid", "transactionreference"}
 
 def report_json(report: dict[str, Any]) -> str:
     safe_report = dict(report)
-    safe_report["reportType"] = REPORT_TYPE
-    safe_report["warnings"] = sorted(str(item) for item in safe_report.get("warnings", []))[:MAX_WARNINGS]
+    if safe_report.get("reportType") != REPORT_TYPE:
+        raise ValueError(f"reportType must be {REPORT_TYPE}")
+    safe_report["generatedAt"] = normalize_rfc3339_timestamp(safe_report.get("generatedAt"), "generatedAt")
+    if "warnings" not in safe_report:
+        raise ValueError("warnings must be present")
+    warnings = safe_report["warnings"]
+    if not isinstance(warnings, list):
+        raise ValueError("warnings must be a list")
+    if len(warnings) > MAX_WARNINGS:
+        raise ValueError("warnings exceeds maximum item count")
+    if not all(isinstance(item, str) for item in warnings):
+        raise ValueError("warnings must contain strings")
+    if len(set(warnings)) != len(warnings):
+        raise ValueError("warnings contains duplicate values")
+    safe_report["warnings"] = sorted(warnings)
     _reject_forbidden_report_fields(safe_report)
-    payload = json.dumps(safe_report, sort_keys=True, separators=(",", ":"))
+    payload = dumps_strict_json(safe_report, sort_keys=True, separators=(",", ":"))
     _reject_forbidden_report_payload(payload)
     return payload + "\n"
 
@@ -70,7 +83,7 @@ def disagreement_jsonl(report: dict[str, Any]) -> str:
         if not isinstance(row, dict):
             raise ValueError("disagreement row must be an object")
         _reject_forbidden_report_fields(row)
-        payload = json.dumps(row, sort_keys=True, separators=(",", ":"))
+        payload = dumps_strict_json(row, sort_keys=True, separators=(",", ":"))
         _reject_forbidden_report_payload(payload)
         lines.append(payload)
     return "\n".join(lines) + ("\n" if lines else "")
@@ -82,7 +95,6 @@ def write_fdp123_reports(
         allow_output_root: Path | None = None,
 ) -> dict[str, Path]:
     output_dir = Path(output_dir)
-    _prepare_output_dir(output_dir, allow_output_root)
     paths = {
         "evaluationSummary": output_dir / "evaluation_summary.json",
         "scoreBucketReport": output_dir / "score_bucket_report.json",
@@ -99,12 +111,14 @@ def write_fdp123_reports(
     }
     manifest_path = output_dir / "manifest.json"
     manifest_payload = build_artifact_manifest(payloads, reports["evaluationSummary"].get("generatedAt"))
+    _prepare_output_dir(output_dir, allow_output_root)
     _write_artifacts_atomically(payloads, manifest_path, manifest_payload)
     paths["manifest"] = manifest_path
     return paths
 
 
 def build_artifact_manifest(payloads: dict[Path, str], generated_at: str | None) -> str:
+    generated_at = normalize_rfc3339_timestamp(generated_at, "generatedAt")
     files = []
     for path, payload in sorted(payloads.items(), key=lambda item: item[0].name):
         encoded = payload.encode("utf-8")
@@ -120,25 +134,31 @@ def build_artifact_manifest(payloads: dict[Path, str], generated_at: str | None)
         "reportType": REPORT_TYPE,
     }
     _reject_forbidden_report_fields(manifest)
-    payload = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
+    payload = dumps_strict_json(manifest, sort_keys=True, separators=(",", ":"))
     _reject_forbidden_report_payload(payload)
     return payload + "\n"
 
 
 def evaluation_run_markdown(summary: dict[str, Any]) -> str:
+    if summary.get("reportType") != REPORT_TYPE:
+        raise ValueError(f"reportType must be {REPORT_TYPE}")
     _reject_forbidden_report_fields(summary)
     metrics = summary.get("qualityMetrics", {})
     dataset_summary = metrics.get("datasetSummary", {}) if isinstance(metrics, dict) else {}
     warnings = summary.get("warnings", [])
+    if not isinstance(dataset_summary, dict):
+        raise ValueError("qualityMetrics.datasetSummary must be an object")
+    if not isinstance(warnings, list) or not all(isinstance(item, str) for item in warnings):
+        raise ValueError("warnings must contain strings")
     lines = [
         "# FDP-123 Offline Evaluation Run",
         "",
         "Status: offline/internal diagnostic artifact.",
         "",
         f"- reportType: {REPORT_TYPE}",
-        f"- recordsEvaluated: {dataset_summary.get('recordsEvaluated', 0)}",
-        f"- recordsReturned: {dataset_summary.get('recordsReturned', 0)}",
-        f"- truncated: {dataset_summary.get('truncated', False)}",
+        f"- recordsEvaluated: {_required_markdown_field(dataset_summary, 'recordsEvaluated')}",
+        f"- recordsReturned: {_required_markdown_field(dataset_summary, 'recordsReturned')}",
+        f"- truncated: {_required_markdown_field(dataset_summary, 'truncated')}",
         f"- warnings: {', '.join(warnings) if warnings else 'none'}",
         "",
         "This artifact does not train models, approve deployment, change scoring, change workflow, or authorize payments.",
@@ -147,6 +167,12 @@ def evaluation_run_markdown(summary: dict[str, Any]) -> str:
     payload = "\n".join(lines)
     _reject_forbidden_report_payload(payload)
     return payload
+
+
+def _required_markdown_field(raw: dict[str, Any], field: str) -> Any:
+    if field not in raw:
+        raise ValueError(f"{field} must be present")
+    return raw[field]
 
 
 def _reject_forbidden_report_fields(value: Any) -> None:
@@ -203,6 +229,8 @@ def _write_artifacts_atomically(payloads: dict[Path, str], manifest_path: Path, 
         if manifest_tmp_path.exists() or manifest_tmp_path.is_symlink():
             manifest_tmp_path.unlink()
         manifest_tmp_path.write_text(manifest_payload, encoding="utf-8", newline="\n")
+        if manifest_path.exists() or manifest_path.is_symlink():
+            manifest_path.unlink()
         for final_path in payloads:
             tmp_path = final_path.with_name(final_path.name + ".tmp")
             os.replace(tmp_path, final_path)

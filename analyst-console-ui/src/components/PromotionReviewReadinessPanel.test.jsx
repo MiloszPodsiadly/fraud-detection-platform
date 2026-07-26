@@ -34,17 +34,24 @@ describe("PromotionReviewReadinessPanel", () => {
   });
 
   it("renders INSUFFICIENT_DATA", () => {
-    renderPanel({ report: report({ readinessStatus: "INSUFFICIENT_DATA" }) });
+    renderPanel({ report: reportWithCheckStatus("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", "FAIL") });
 
     expect(screen.getAllByText("INSUFFICIENT_DATA").length).toBeGreaterThan(0);
     expect(screen.getByText("Not enough diagnostic evidence for human review.")).toBeInTheDocument();
   });
 
   it("renders NOT_REVIEWABLE", () => {
-    renderPanel({ report: report({ readinessStatus: "NOT_REVIEWABLE" }) });
+    renderPanel({ report: reportWithCheckStatus("EVALUATION_CARD_PRESENT", "FAIL") });
 
     expect(screen.getAllByText("NOT_REVIEWABLE").length).toBeGreaterThan(0);
     expect(screen.getByText("Diagnostic checks failed. Human review should not begin yet.")).toBeInTheDocument();
+  });
+
+  it("renders INCONCLUSIVE", () => {
+    renderPanel({ report: reportWithCheckStatus("ALERT_RECOMMENDED_RECALL_AVAILABLE", "INCONCLUSIVE") });
+
+    expect(screen.getAllByText("INCONCLUSIVE").length).toBeGreaterThan(0);
+    expect(screen.getByText("Diagnostic evidence is present but one or more metrics are unavailable.")).toBeInTheDocument();
   });
 
   it("renders diagnostic banner", () => {
@@ -69,9 +76,9 @@ describe("PromotionReviewReadinessPanel", () => {
     renderPanel();
 
     expect(screen.getByText("Shadow summary present")).toBeInTheDocument();
-    expect(screen.getByText("SHADOW_PERFORMANCE_SUMMARY_V1")).toBeInTheDocument();
+    expect(screen.getByText("SHADOW_PERFORMANCE_SUMMARY_V2")).toBeInTheDocument();
     expect(screen.getByText("Minimum diagnostic evidence records")).toBeInTheDocument();
-    expect(screen.getByText("Records accepted for evaluation")).toBeInTheDocument();
+    expect(screen.getByText("Records evaluated")).toBeInTheDocument();
   });
 
   it("renders checks table", () => {
@@ -79,31 +86,36 @@ describe("PromotionReviewReadinessPanel", () => {
 
     expect(screen.getByRole("heading", { name: "Checks" })).toBeInTheDocument();
     expect(screen.getByText("CURRENT_SUMMARY_PRESENT")).toBeInTheDocument();
-    expect(screen.getByText("PASS")).toBeInTheDocument();
-    expect(screen.getByText("INFO")).toBeInTheDocument();
+    expect(screen.getAllByText("PASS").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("INFO").length).toBeGreaterThan(0);
   });
 
   it("renders warnings limitations and reason codes", () => {
     renderPanel();
 
     expect(screen.getByRole("heading", { name: "Reason codes" })).toBeInTheDocument();
-    expect(screen.getByText("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS")).toBeInTheDocument();
+    expect(screen.getByText("No reason codes reported.")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Warnings" })).toBeInTheDocument();
     expect(screen.getByText("MISSING_ML_SIGNAL_PRESENT")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Limitations" })).toBeInTheDocument();
     expect(screen.getByText("OFFLINE_DIAGNOSTIC_AID_ONLY")).toBeInTheDocument();
   });
 
-  it("renders valid device merchant and customer machine codes", () => {
+  it("renders valid device merchant and customer machine codes in warnings and limitations", () => {
     renderPanel({
       report: report({
-        reasonCodes: ["DEVICE_SIGNAL_PRESENT"],
         warnings: ["MERCHANT_SEGMENT_COVERAGE"],
-        limitations: ["CUSTOMER_SEGMENT_COVERAGE"]
+        limitations: [
+          "CUSTOMER_SEGMENT_COVERAGE",
+          "DOES_NOT_AUTHORIZE_PAYMENTS",
+          "DOES_NOT_CHANGE_SCORING",
+          "DOES_NOT_RECOMMEND_THRESHOLDS",
+          "HUMAN_REVIEW_START_ONLY",
+          "OFFLINE_DIAGNOSTIC_AID_ONLY"
+        ]
       })
     });
 
-    expect(screen.getByText("DEVICE_SIGNAL_PRESENT")).toBeInTheDocument();
     expect(screen.getByText("MERCHANT_SEGMENT_COVERAGE")).toBeInTheDocument();
     expect(screen.getByText("CUSTOMER_SEGMENT_COVERAGE")).toBeInTheDocument();
   });
@@ -253,20 +265,148 @@ function report(overrides = {}) {
     inputs: {
       shadowPerformanceSummary: {
         present: true,
-        summaryType: "SHADOW_PERFORMANCE_SUMMARY_V1",
-        summaryVersion: "1.0",
+        reportType: "SHADOW_PERFORMANCE_SUMMARY_V2",
+        summaryVersion: "shadow-performance-summary-v2",
         generatedAt: "2026-06-08T02:00:00Z"
       },
       minimumDiagnosticEvidenceRecords: 1,
-      recordsAcceptedForEvaluation: 3
+      recordsEvaluated: 3
     },
-    checks: [
-      { name: "CURRENT_SUMMARY_PRESENT", status: "PASS", severity: "INFO" }
-    ],
-    reasonCodes: ["MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS"],
+    checkInputs: promotionReadinessCheckInputs(),
+    checks: promotionReadinessChecks(),
+    reasonCodes: [],
     warnings: ["MISSING_ML_SIGNAL_PRESENT"],
-    limitations: ["OFFLINE_DIAGNOSTIC_AID_ONLY"],
+    limitations: [
+      "DOES_NOT_AUTHORIZE_PAYMENTS",
+      "DOES_NOT_CHANGE_SCORING",
+      "DOES_NOT_RECOMMEND_THRESHOLDS",
+      "HUMAN_REVIEW_START_ONLY",
+      "OFFLINE_DIAGNOSTIC_AID_ONLY"
+    ],
     banner: "Promotion review readiness is an offline diagnostic aid only. It is not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.",
     ...overrides
   };
+}
+
+function reportWithCheckStatus(checkName, status) {
+  let inputs = report().inputs;
+  let checkInputs = promotionReadinessCheckInputs();
+  if (checkName === "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS" && status === "FAIL") {
+    inputs = { ...inputs, minimumDiagnosticEvidenceRecords: 4 };
+    checkInputs = { ...checkInputs, minimumDiagnosticEvidenceRecords: 4 };
+  }
+  if (checkName === "EVALUATION_CARD_PRESENT" && status === "FAIL") {
+    checkInputs = {
+      ...checkInputs,
+      evaluation: { ...checkInputs.evaluation, evaluationCardType: "LEGACY_EVALUATION_CARD" }
+    };
+  }
+  if (checkName === "ALERT_RECOMMENDED_RECALL_AVAILABLE" && status === "INCONCLUSIVE") {
+    checkInputs = {
+      ...checkInputs,
+      metrics: {
+        ...checkInputs.metrics,
+        alertRecommendedRecall: { available: false, value: null, reason: "NO_ACTUAL_POSITIVES" }
+      }
+    };
+  }
+  const checks = promotionReadinessChecks().map((item) => (
+    item.name === checkName ? { ...item, status } : item
+  ));
+  return report({
+    readinessStatus: deriveReadinessStatus(checks),
+    inputs,
+    checkInputs,
+    checks,
+    reasonCodes: derivedReasonCodes(checks)
+  });
+}
+
+function promotionReadinessCheckInputs() {
+  return {
+    sourceShadowSummaryManifestSha256: "a".repeat(64),
+    shadowPerformanceSummary: {
+      present: true,
+      reportType: "SHADOW_PERFORMANCE_SUMMARY_V2",
+      summaryVersion: "shadow-performance-summary-v2",
+      generatedAt: "2026-06-08T02:00:00Z",
+      sourceEvaluationCardManifestSha256: "b".repeat(64)
+    },
+    governance: {
+      governanceStatus: "DIAGNOSTIC_ONLY",
+      diagnosticOnly: true,
+      notProductionApproval: true,
+      notPromotionApproval: true,
+      notThresholdRecommendation: true,
+      notPaymentAuthorization: true,
+      notAutomaticDecisioning: true
+    },
+    evaluation: {
+      evaluationCardType: "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
+      evaluationCardVersion: "platform-recommendation-evaluation-card-v1",
+      evaluationReportType: "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"
+    },
+    metricBasis: "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK",
+    minimumDiagnosticEvidenceRecords: 1,
+    recordsEvaluated: 3,
+    metrics: {
+      alertRecommendedPrecision: metric(0.8),
+      alertRecommendedRecall: metric(0.75),
+      falsePositiveRate: metric(0.1),
+      falseNegativeRate: metric(0.2)
+    }
+  };
+}
+
+function promotionReadinessChecks() {
+  return [
+    check("CURRENT_SUMMARY_PRESENT"),
+    check("CURRENT_SUMMARY_VERSION_SUPPORTED"),
+    check("EVALUATION_CARD_PRESENT"),
+    check("EVALUATION_CARD_VERSION_SUPPORTED"),
+    check("GOVERNANCE_STATUS_DIAGNOSTIC_ONLY"),
+    check("NOT_PRODUCTION_APPROVAL_TRUE"),
+    check("NOT_PROMOTION_APPROVAL_TRUE"),
+    check("NOT_THRESHOLD_RECOMMENDATION_TRUE"),
+    check("NOT_PAYMENT_AUTHORIZATION_TRUE"),
+    check("NOT_AUTOMATIC_DECISIONING_TRUE"),
+    check("EVALUATION_REPORT_TYPE_SUPPORTED"),
+    check("METRIC_BASIS_SUPPORTED"),
+    check("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", "PASS", "HIGH"),
+    check("ALERT_RECOMMENDED_PRECISION_AVAILABLE", "PASS", "MEDIUM"),
+    check("ALERT_RECOMMENDED_RECALL_AVAILABLE", "PASS", "MEDIUM"),
+    check("FALSE_POSITIVE_RATE_AVAILABLE", "PASS", "MEDIUM"),
+    check("FALSE_NEGATIVE_RATE_AVAILABLE", "PASS", "MEDIUM")
+  ];
+}
+
+function check(name, status = "PASS", severity = "INFO") {
+  return { name, status, severity };
+}
+
+function metric(value) {
+  return { available: true, value, reason: null };
+}
+
+function deriveReadinessStatus(checks) {
+  const failedChecks = checks.filter((item) => item.status === "FAIL");
+  if (failedChecks.some((item) => item.name !== "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS")) {
+    return "NOT_REVIEWABLE";
+  }
+  if (failedChecks.some((item) => item.name === "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS")) {
+    return "INSUFFICIENT_DATA";
+  }
+  return checks.some((item) => item.status === "INCONCLUSIVE") ? "INCONCLUSIVE" : "REVIEWABLE";
+}
+
+function derivedReasonCodes(checks) {
+  return checks.flatMap((item) => {
+    if (item.status === "FAIL") {
+      return [`${item.name}_FAILED`];
+    }
+    if (item.status === "INCONCLUSIVE") {
+      return [`${item.name}_INCONCLUSIVE`];
+    }
+    return [];
+  }).sort();
 }

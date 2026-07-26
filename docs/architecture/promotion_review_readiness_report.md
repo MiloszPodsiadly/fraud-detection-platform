@@ -21,23 +21,25 @@ Should an analyst take action?
 ## Diagnostic Chain
 
 ```text
-FDP-109 generates current-summary.json
+FDP-109 publishes current-summary.json plus manifest.json as a Shadow Performance artifact set
 -> FDP-110 mounts/wires generated summary into local runtime
--> FDP-108 provider reads current summary
+-> FDP-108 provider validates the manifest and reads current summary
 -> FDP-106 API exposes current summary
 -> FDP-107 dashboard displays current summary
 -> FDP-111 generates Promotion Review Readiness Report
 ```
 
 FDP-111 consumes existing bounded artifacts. FDP-111 does not recompute metrics from raw data. The v1 local generator
-consumes the FDP-109 generated `deployment/local-generated/shadow-performance/current-summary.json` artifact.
+consumes the FDP-109 generated Shadow Performance artifact set:
+`deployment/local-generated/shadow-performance/current-summary.json` plus
+`deployment/local-generated/shadow-performance/manifest.json`.
 
 ## V1 Limitation
 
-FDP-111 v1 primarily consumes the FDP-109 generated Shadow Performance Summary artifact.
+FDP-111 v1 primarily consumes the FDP-109 generated Shadow Performance Summary artifact set.
 
-Model Card checks are included as bounded checklist placeholders and are currently NOT_APPLICABLE until a bounded Model
-Card artifact input is wired in a later scope.
+Platform Recommendation Evaluation Card checks validate that the consumed Shadow Performance Summary V2 was derived
+from the current Platform Recommendation Evaluation Card contract.
 
 ## Output
 
@@ -45,9 +47,13 @@ The local/offline generator writes:
 
 ```text
 deployment/local-generated/promotion-readiness/promotion-review-readiness-report.json
+deployment/local-generated/promotion-readiness/manifest.json
 ```
 
-The filename includes `review` so the artifact cannot be confused with promotion approval.
+The report and sibling manifest form the Promotion Review Readiness artifact set. The manifest uses
+`PROMOTION_REVIEW_READINESS_ARTIFACT_SET_V1`, `promotion-review-readiness-artifact-set-v1`, the exact report
+`generatedAt`, and one canonical `promotion-review-readiness-report.json` file entry with lowercase SHA-256 and
+`sizeBytes`. The filename includes `review` so the artifact cannot be confused with promotion approval.
 
 ## Status Semantics
 
@@ -55,11 +61,13 @@ Allowed `readinessStatus` values:
 
 ```text
 INSUFFICIENT_DATA
+INCONCLUSIVE
 NOT_REVIEWABLE
 REVIEWABLE
 ```
 
 `REVIEWABLE` means human review may begin. `REVIEWABLE` does not mean model promotion approval.
+`INCONCLUSIVE` means at least one required diagnostic metric is unavailable and must not be treated as zero, pass, or fail.
 
 `DIAGNOSTIC_ONLY` is governanceStatus, not readinessStatus.
 
@@ -71,11 +79,27 @@ Minimum diagnostic evidence is a review sufficiency check, not a model threshold
 
 ## Diagnostic Checks
 
-`GOVERNANCE_MODES_COMPARE_AND_SHADOW` is the governance-mode diagnostic check.
+`EVALUATION_CARD_VERSION_SUPPORTED` is the current evaluation-card contract diagnostic check.
 
-This check validates that the consumed summary is governed for COMPARE and SHADOW diagnostic use only. It is not promotion approval.
+This check validates that the consumed summary was derived from the current Platform Recommendation Evaluation Card contract.
 
 The report also includes explicit non-decisioning flags, including `notAnalystRecommendation`.
+
+The report carries stored `checkInputs`, including the source Shadow Performance manifest SHA-256. Validators derive
+checks, reason codes, and readiness status from those inputs and reject reports where stored checks have been edited.
+The SHA-256 values are local integrity and lineage fingerprints over exact local bytes. They are not signatures, producer
+authentication, independent attestation, legal proof, or protection against a privileged deployment writer replacing both
+artifact and manifest inside the filesystem trust boundary.
+
+Publication is manifest-last and fail-closed: the generator serializes and validates the report, writes temporary report
+and manifest files, validates the temporary artifact set, removes the old final manifest, replaces the report, then
+replaces the fresh manifest last. Symlink checks and `O_NOFOLLOW` are misuse hardening; local TOCTOU is not advertised as
+fully eliminated on every platform. Atomic replacement alone is not power-loss durability unless files and directories are
+explicitly synchronized, which is outside this local generator scope.
+
+Published report and manifest timestamps must be RFC3339 UTC `Z` strings with optional 1-6 digit fractional seconds.
+The manifest `generatedAt` must exactly equal the report `generatedAt`; equivalent offset encodings such as `+00:00`
+are rejected rather than normalized while reading a published artifact set.
 
 ## Non-Decisioning Boundary
 
@@ -86,7 +110,7 @@ FDP-111 does not authorize payments.
 FDP-111 does not recommend analyst action.
 FDP-111 does not add API, OpenAPI, UI, workflow, scheduler, or Kafka triggers.
 FDP-111 does not mutate model registry or model artifacts.
-FDP-111 does not read raw FDP-102 JSONL, raw FDP-103 evaluation reports, raw FDP-104 displays, raw transaction records,
+FDP-111 does not read raw dataset JSONL, raw offline evaluation reports, raw Platform Recommendation Evaluation Card displays, raw transaction records,
 MongoDB, Kafka, payment data, alert database, fraud case database, model registry, or raw model outputs.
 
 ## Local Command
@@ -137,7 +161,7 @@ It does not approve promotion, recommend thresholds, mutate registries, change s
 FDP-111 consumes bounded diagnostic artifacts only, primarily:
 
 - FDP-109 generated `current-summary.json`;
-- existing Model Card / Shadow Performance Summary artifacts where available.
+- existing Platform Recommendation Evaluation Card / Shadow Performance Summary artifacts where available.
 
 FDP-111 does not read raw transaction records, MongoDB, Kafka, payment data, alert database, fraud case database, or model registry.
 
@@ -146,6 +170,7 @@ FDP-111 does not read raw transaction records, MongoDB, Kafka, payment data, ale
 Allowed readiness statuses:
 
 - `INSUFFICIENT_DATA`
+- `INCONCLUSIVE`
 - `NOT_REVIEWABLE`
 - `REVIEWABLE`
 

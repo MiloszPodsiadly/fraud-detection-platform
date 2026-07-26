@@ -16,6 +16,7 @@ public record PromotionReviewReadinessReport(
         boolean notAutomaticDecisioning,
         boolean notAnalystRecommendation,
         PromotionReviewReadinessInputs inputs,
+        PromotionReviewReadinessCheckInputs checkInputs,
         List<PromotionReviewReadinessCheck> checks,
         List<String> reasonCodes,
         List<String> warnings,
@@ -25,15 +26,69 @@ public record PromotionReviewReadinessReport(
     public record PromotionReviewReadinessInputs(
             ShadowPerformanceSummaryInput shadowPerformanceSummary,
             int minimumDiagnosticEvidenceRecords,
-            int recordsAcceptedForEvaluation
+            int recordsEvaluated
     ) {
     }
 
     public record ShadowPerformanceSummaryInput(
             boolean present,
-            String summaryType,
+            String reportType,
             String summaryVersion,
             String generatedAt
+    ) {
+    }
+
+    public record PromotionReviewReadinessCheckInputs(
+            String sourceShadowSummaryManifestSha256,
+            ShadowPerformanceSummaryCheckInput shadowPerformanceSummary,
+            PromotionReadinessGovernanceCheckInput governance,
+            PromotionReadinessEvaluationCheckInput evaluation,
+            String metricBasis,
+            int minimumDiagnosticEvidenceRecords,
+            int recordsEvaluated,
+            PromotionReadinessMetricsCheckInput metrics
+    ) {
+    }
+
+    public record ShadowPerformanceSummaryCheckInput(
+            boolean present,
+            String reportType,
+            String summaryVersion,
+            String generatedAt,
+            String sourceEvaluationCardManifestSha256
+    ) {
+    }
+
+    public record PromotionReadinessGovernanceCheckInput(
+            String governanceStatus,
+            boolean diagnosticOnly,
+            boolean notProductionApproval,
+            boolean notPromotionApproval,
+            boolean notThresholdRecommendation,
+            boolean notPaymentAuthorization,
+            boolean notAutomaticDecisioning
+    ) {
+    }
+
+    public record PromotionReadinessEvaluationCheckInput(
+            String evaluationCardType,
+            String evaluationCardVersion,
+            String evaluationReportType
+    ) {
+    }
+
+    public record PromotionReadinessMetricsCheckInput(
+            PromotionReadinessMetricCheckInput alertRecommendedPrecision,
+            PromotionReadinessMetricCheckInput alertRecommendedRecall,
+            PromotionReadinessMetricCheckInput falsePositiveRate,
+            PromotionReadinessMetricCheckInput falseNegativeRate
+    ) {
+    }
+
+    public record PromotionReadinessMetricCheckInput(
+            Boolean available,
+            Double value,
+            String reason
     ) {
     }
 

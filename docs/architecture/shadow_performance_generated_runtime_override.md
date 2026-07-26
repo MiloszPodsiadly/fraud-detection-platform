@@ -2,7 +2,7 @@
 
 Status: FDP-110 local generated Shadow Performance runtime loop.
 
-FDP-110 completes the local generated Shadow Performance runtime loop. It invokes the FDP-109 local generator before Docker Compose starts, mounts the generated current-summary.json artifact into alert-service, lets FDP-108 read it, FDP-106 expose it, and FDP-107 display it.
+FDP-110 completes the local generated Shadow Performance runtime loop. It invokes the FDP-109 local generator before Docker Compose starts, mounts the generated Shadow Performance artifact set into alert-service, lets FDP-108 read it, FDP-106 expose it, and FDP-107 display it.
 
 FDP-110 intentionally combines local generation before Compose, generated runtime mount, and shared global workspace counters as UI context.
 
@@ -18,16 +18,18 @@ Ownership remains split:
 
 Generation before Compose in a local developer launcher is allowed. Generation inside Docker Compose is forbidden. Generation inside alert-service runtime is forbidden.
 
-FDP-110 does not generate a Shadow Performance Summary inside Docker Compose or inside the application runtime. The local developer launcher invokes the FDP-109 generator before `docker compose up`, then mounts the generated current-summary.json artifact into the local alert-service runtime.
+FDP-110 does not generate a Shadow Performance Summary inside Docker Compose or inside the application runtime. The local developer launcher invokes the FDP-109 generator before `docker compose up`, then mounts the generated `current-summary.json` plus sibling `manifest.json` into the local alert-service runtime.
 
 This keeps generation and runtime wiring separate:
 
 ```text
 make shadow-performance-summary
 -> deployment/local-generated/shadow-performance/current-summary.json
+-> deployment/local-generated/shadow-performance/manifest.json
 -> make app-up-shadow-performance-generated
 -> docker-compose.shadow-performance-generated.yml
 -> /run/shadow-performance/current-summary.json
+-> /run/shadow-performance/manifest.json
 -> FDP-108 provider
 -> FDP-106 API
 -> FDP-107 dashboard
@@ -46,10 +48,11 @@ no configured summary -> 404
 ## Demo Runtime
 
 Demo runtime uses `docker-compose.shadow-performance-demo.yml`.
-Demo runtime uses:
+Demo runtime uses a demo artifact set:
 
 ```text
-deployment/local-fixtures/shadow-performance/current-summary.demo.json
+deployment/local-fixtures/shadow-performance/current-summary.json
+deployment/local-fixtures/shadow-performance/manifest.json
 ```
 
 Demo artifact is separate from generated artifact. Demo artifact is for UI smoke/demo only. Demo artifact is not FDP-109 generated output. Demo artifact is not production current summary. Demo artifact is not promotion readiness. Demo artifact is not threshold recommendation. Demo artifact is not production decisioning. Demo artifact is not payment authorization. Demo artifact is not analyst recommendation logic.
@@ -82,15 +85,15 @@ The optional explicit local loop remains:
 make shadow-performance-local-loop
 ```
 
-The generated artifact is separate. Generated runtime mounts `deployment/local-generated/shadow-performance/current-summary.json` read-only to:
+The generated artifact set is separate. Generated runtime mounts `deployment/local-generated/shadow-performance` read-only to:
 
 ```text
-/run/shadow-performance/current-summary.json
+/run/shadow-performance
 ```
 
-Generated runtime exposes the summary through FDP-108/FDP-106/FDP-107.
+Generated runtime exposes the manifest-validated summary through FDP-108/FDP-106/FDP-107.
 
-The generated runtime does not use `current-summary.demo.json`. The generated runtime does not generate summary inside Docker Compose. If the generated artifact is still missing after local generation, `make app-up-shadow-performance-generated` fails before `docker compose up` with:
+The generated runtime does not use a non-canonical demo summary filename. The generated runtime does not generate summary inside Docker Compose. If the generated artifact is still missing after local generation, `make app-up-shadow-performance-generated` fails before `docker compose up` with:
 
 ```text
 Generated Shadow Performance Summary not found. Run: make shadow-performance-summary
@@ -159,8 +162,10 @@ The local loop is:
 
 `make app-up`
 -> FDP-109 generates `deployment/local-generated/shadow-performance/current-summary.json`
--> generated compose override mounts it read-only into alert-service
+   and `deployment/local-generated/shadow-performance/manifest.json`
+-> generated compose override mounts the artifact-set directory read-only into alert-service
 -> FDP-108 reads `/run/shadow-performance/current-summary.json`
+   and sibling `/run/shadow-performance/manifest.json`
 -> FDP-106 exposes the current summary
 -> FDP-107 displays the generated summary.
 

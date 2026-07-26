@@ -3,56 +3,68 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from offline_evaluation.model_card_schema import (
-    EXPECTED_DATASET_DEDUPLICATION_POLICY,
-    EXPECTED_DATASET_TIME_BASIS,
-    EXPECTED_EVALUATION_REPORT_TYPE,
-    EXPECTED_EVALUATION_REPORT_VERSION,
-    EXPECTED_METRIC_BASIS,
-    GOVERNANCE_STATUS,
-    MODEL_CARD_TYPE,
-    MODEL_CARD_VERSION,
-    ModelCardValidationError,
-    validate_model_card,
+from offline_evaluation.json_contract import JsonContractError, require_finite_number
+from offline_evaluation.fdp123.evaluation_card.schema import (
+    EVALUATION_PURPOSE,
+    MAX_FDP123_DATASET_RECORDS,
+    METRIC_BASIS as EXPECTED_METRIC_BASIS,
+    METRICS_SUBJECT,
+    PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
+    PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION,
+    Fdp123EvaluationCardValidationError,
+    REQUIRED_LIMITATIONS as REQUIRED_SHADOW_LIMITATIONS,
+    validate_evaluation_card,
+)
+from offline_evaluation.fdp123.dataset_schema import (
+    DATASET_TIME_BASIS as EXPECTED_DATASET_TIME_BASIS,
+    DATASET_VERSION as EXPECTED_DATASET_VERSION,
+)
+from offline_evaluation.fdp123.evaluation_contract import EVALUATION_SUBJECT
+from offline_evaluation.fdp123.report_contract import (
+    ARTIFACT_SET_VERSION as EXPECTED_EVALUATION_ARTIFACT_SET_VERSION,
+    REPORT_TYPE as EXPECTED_EVALUATION_REPORT_TYPE,
+)
+from offline_evaluation.fdp123.timestamp_contract import (
+    TimestampContractError,
+    normalize_rfc3339_timestamp,
+    timestamp_instant,
 )
 
 
 class ShadowPerformanceValidationError(ValueError):
-    """Raised when Shadow Performance Summary v1 is unsafe or outside FDP-105 bounds."""
+    """Raised when Shadow Performance Summary v2 is unsafe or outside FDP-126 bounds."""
 
 
-SUMMARY_TYPE = "SHADOW_PERFORMANCE_SUMMARY_V1"
-SUMMARY_VERSION = "1.0"
-EXPECTED_MODEL_CARD_TYPE = MODEL_CARD_TYPE
-EXPECTED_MODEL_CARD_VERSION = MODEL_CARD_VERSION
-EXPECTED_GOVERNANCE_STATUS = GOVERNANCE_STATUS
-ALLOWED_APPROVED_FOR = {"SHADOW", "COMPARE"}
-MAX_WARNINGS = 10
+REPORT_TYPE = "SHADOW_PERFORMANCE_SUMMARY_V2"
+SUMMARY_TYPE = REPORT_TYPE
+SUMMARY_VERSION = "shadow-performance-summary-v2"
+EXPECTED_EVALUATION_REPORT_VERSION = "FDP-124"
+EXPECTED_GOVERNANCE_STATUS = "DIAGNOSTIC_ONLY"
+MAX_WARNINGS = 20
 MAX_LIMITATIONS = 20
-MAX_COUNT_VALUE = 500
+MAX_COUNT_VALUE = MAX_FDP123_DATASET_RECORDS
+MAX_MACHINE_CODE_LENGTH = 128
 BANNER = (
     "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, "
     "threshold recommendation, production decisioning approval, payment authorization, "
     "automatic approve / decline / block logic, or analyst recommendation logic."
 )
 REQUIRED_SUMMARY_FIELDS = {
-    "summaryType",
+    "reportType",
     "summaryVersion",
     "generatedAt",
-    "model",
+    "evaluationSubject",
+    "metricBasis",
     "governance",
     "evaluation",
     "evaluationPopulation",
     "metrics",
-    "disagreementSummary",
     "warnings",
     "limitations",
     "banner",
 }
-MODEL_FIELDS = {"modelName", "modelVersion", "modelFamily", "featureContractVersion"}
 GOVERNANCE_FIELDS = {
     "governanceStatus",
-    "approvedFor",
     "diagnosticOnly",
     "notProductionApproval",
     "notPromotionApproval",
@@ -61,81 +73,87 @@ GOVERNANCE_FIELDS = {
     "notAutomaticDecisioning",
 }
 EVALUATION_FIELDS = {
+    "evaluationCardType",
+    "evaluationCardVersion",
+    "evaluationPurpose",
     "evaluationReportType",
     "evaluationReportVersion",
-    "metricBasis",
+    "evaluationReportGeneratedAt",
+    "evaluationCardGeneratedAt",
+    "evaluationArtifactSetVersion",
+    "datasetVersion",
     "datasetTimeBasis",
-    "datasetDeduplicationPolicy",
+    "sourceManifestSha256",
+    "sourceEvaluationCardManifestSha256",
 }
 EVALUATION_POPULATION_FIELDS = {
-    "datasetRecordsRead",
-    "recordsAcceptedForEvaluation",
-    "recordsExcludedNotEvaluationEligible",
+    "recordsEvaluated",
+    "positiveClassCount",
+    "negativeClassCount",
 }
 METRIC_FIELDS = {
-    "precisionAtBudget",
-    "recallAtTopK",
+    "alertRecommendedPrecision",
+    "alertRecommendedRecall",
     "falsePositiveRate",
-    "mlCaughtRulesMissedCount",
-    "rulesCaughtMlMissedCount",
-    "missingMlCount",
-    "missingRulesCount",
-    "missingProjectionCount",
-    "notEvaluationEligibleCount",
+    "falseNegativeRate",
 }
-RATE_FIELDS = {"precisionAtBudget", "recallAtTopK", "falsePositiveRate"}
-COUNT_FIELDS = METRIC_FIELDS - RATE_FIELDS
-DISAGREEMENT_FIELDS = {
-    "rulesHighMlHigh",
-    "rulesHighMlLowOrMedium",
-    "rulesLowOrMediumMlHigh",
-    "rulesLowOrMediumMlLowOrMedium",
-    "rulesMissingMlPresent",
-    "mlMissingRulesPresent",
-    "bothMissing",
-    "notEvaluationEligibleExcluded",
-}
+METRIC_OBJECT_FIELDS = {"available", "value", "reason"}
 MACHINE_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
-SAFE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-IDENTITY_FORBIDDEN_COMPACT_TERMS = {
-    "http",
-    "https",
-    "s3",
-    "gs",
-    "file",
-    "registry",
-    "bucket",
-    "endpoint",
-    "token",
-    "secret",
-    "artifact",
-    "path",
-}
-IDENTITY_FORBIDDEN_CHARS = {"/", "\\", ":", "?", "&", "=", "@", "$", "{", "}", "[", "]", "(", ")"}
+SHA256_PATTERN = re.compile(r"^[a-f0-9]{64}$")
 SAFE_CONTRACT_VALUES = {
-    SUMMARY_TYPE,
+    REPORT_TYPE,
     SUMMARY_VERSION,
-    EXPECTED_MODEL_CARD_TYPE,
-    EXPECTED_MODEL_CARD_VERSION,
-    EXPECTED_EVALUATION_REPORT_TYPE,
-    EXPECTED_EVALUATION_REPORT_VERSION,
     EXPECTED_GOVERNANCE_STATUS,
     EXPECTED_METRIC_BASIS,
+    EXPECTED_EVALUATION_REPORT_TYPE,
+    EXPECTED_EVALUATION_REPORT_VERSION,
+    EXPECTED_EVALUATION_ARTIFACT_SET_VERSION,
+    EXPECTED_DATASET_VERSION,
     EXPECTED_DATASET_TIME_BASIS,
-    EXPECTED_DATASET_DEDUPLICATION_POLICY,
+    PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
+    PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION,
+    EVALUATION_PURPOSE,
+    METRICS_SUBJECT,
     BANNER,
-    "SHADOW",
-    "COMPARE",
-    "ANALYST_LABELS_ARE_EVALUATION_SIGNALS_NOT_GROUND_TRUTH",
-    "NOT_EVALUATION_ELIGIBLE_EXCLUDED_FROM_QUALITY_METRICS",
-    "NO_MODEL_PROMOTION_APPROVAL",
-    "NO_THRESHOLD_RECOMMENDATION",
-    "NO_PRODUCTION_DECISIONING_APPROVAL",
-    "NO_PAYMENT_AUTHORIZATION",
-    "NO_AUTOMATIC_APPROVE_DECLINE_BLOCK",
-    "BUCKET_ORDERED_METRICS_NOT_CALIBRATED_PROBABILITIES",
-    "OFFLINE_ONLY",
     "DIAGNOSTIC_ONLY",
+    "FDP-124",
+    "OFFLINE_DIAGNOSTIC",
+    "NOT_AVAILABLE",
+    "NOT_APPLICABLE",
+    "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
+    "PLATFORM_RECOMMENDATION",
+    "ENGINE_INTELLIGENCE_PROJECTION",
+    "ENGINE_INTELLIGENCE_PROJECTION_V1",
+    "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK",
+    "ANALYST_LABELS_ARE_EVALUATION_SIGNALS_NOT_GROUND_TRUTH",
+    "ANALYST_FEEDBACK_LABELS_ARE_NOT_LEGAL_GROUND_TRUTH",
+    "NO_MODEL_PROMOTION_APPROVAL",
+    "NO_AUTOMATIC_TRANSACTION_DECLINE",
+    "NO_FINAL_BANK_DECISION",
+    "NO_AUTOMATIC_CUSTOMER_BLOCKING",
+    "NO_PRODUCTION_THRESHOLD_MUTATION",
+    "NO_CASE_WORKFLOW_AUTOMATION",
+    "NO_REGULATORY_CERTIFICATION_CLAIM",
+    "NO_THRESHOLD_RECOMMENDATION",
+    "NO_PAYMENT_AUTHORIZATION",
+    "NO_FINAL_DECISIONING",
+    "NO_WORKFLOW_AUTOMATION",
+    "NO_CASE_CREATION",
+    "NO_EXTERNAL_PUBLISHING",
+    "NO_PRODUCTION_APPROVAL",
+    "OFFLINE_DIAGNOSTIC_METRICS_ARE_NOT_PRODUCTION_APPROVAL",
+    "METRICS_ARE_PLATFORM_RECOMMENDATION_DIAGNOSTICS",
+    "SMALL_SAMPLE_SIZE_MAY_BE_INCONCLUSIVE",
+    "PSEUDONYMOUS_REFERENCES_ARE_NOT_ANONYMIZATION",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_APPROVE_PROMOTION",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_AUTHORIZE_AUTOMATIC_DECLINE",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_CHANGE_SCORING_THRESHOLDS",
+    "OFFLINE_ONLY",
+    "LOW_SAMPLE_SIZE",
+    "NO_ACTUAL_POSITIVES",
+    "NO_ACTUAL_NEGATIVES",
+    "NO_PREDICTED_POSITIVES",
+    "NO_PREDICTED_NEGATIVES",
 }
 SAFE_NEGATED_FIELDS = {
     "notProductionApproval",
@@ -179,48 +197,29 @@ FORBIDDEN_FIELD_NAMES = {
     "recommendedthreshold",
     "championcandidate",
     "deployrecommendation",
-    "rawevaluationreport",
-    "rawreport",
-    "rawmodelcard",
-    "rawdataset",
-    "perrecordexamples",
 }
 FORBIDDEN_VALUE_TERMS = FORBIDDEN_FIELD_NAMES | {
-    "eval",
-    "txnref",
-    "productiondecisioning",
-    "modelpromotion",
-    "thresholdchange",
-    "automaticdecline",
-    "autodecline",
-    "autoapprove",
-    "autoblock",
-    "analystrecommendation",
+    "modelfamily",
+    "modelname",
+    "modelversion",
 }
 
 
-def validate_model_card_for_shadow_summary(model_card: dict[str, Any]) -> dict[str, Any]:
+def validate_evaluation_card_for_shadow_summary(evaluation_card: dict[str, Any]) -> dict[str, Any]:
     try:
-        safe_model_card = validate_model_card(model_card)
-    except ModelCardValidationError as exc:
+        safe_evaluation_card = validate_evaluation_card(evaluation_card)
+    except Fdp123EvaluationCardValidationError as exc:
         raise ShadowPerformanceValidationError(str(exc)) from exc
-    if safe_model_card["cardType"] != EXPECTED_MODEL_CARD_TYPE:
-        raise ShadowPerformanceValidationError("model card type is unsupported")
-    if safe_model_card["modelCardVersion"] != EXPECTED_MODEL_CARD_VERSION:
-        raise ShadowPerformanceValidationError("model card version is unsupported")
-    if safe_model_card["governanceStatus"] != EXPECTED_GOVERNANCE_STATUS:
-        raise ShadowPerformanceValidationError("governanceStatus must be DIAGNOSTIC_ONLY")
-    if set(safe_model_card["approvedFor"]) - ALLOWED_APPROVED_FOR:
-        raise ShadowPerformanceValidationError("approvedFor contains unsupported value")
-    metrics = safe_model_card["metricsSummary"]
-    if metrics["metricBasis"] != EXPECTED_METRIC_BASIS:
+    if safe_evaluation_card["cardType"] != PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE:
+        raise ShadowPerformanceValidationError("evaluation card type is unsupported")
+    if safe_evaluation_card["cardVersion"] != PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION:
+        raise ShadowPerformanceValidationError("evaluation card version is unsupported")
+    if safe_evaluation_card["metricsSubject"] != METRICS_SUBJECT:
+        raise ShadowPerformanceValidationError("metricsSubject is unsupported")
+    if safe_evaluation_card["metricBasis"] != EXPECTED_METRIC_BASIS:
         raise ShadowPerformanceValidationError("metricBasis is unsupported")
-    if safe_model_card["datasetTimeBasis"] != EXPECTED_DATASET_TIME_BASIS:
-        raise ShadowPerformanceValidationError("datasetTimeBasis is unsupported")
-    if safe_model_card["datasetDeduplicationPolicy"] != EXPECTED_DATASET_DEDUPLICATION_POLICY:
-        raise ShadowPerformanceValidationError("datasetDeduplicationPolicy is unsupported")
-    _reject_unsafe(safe_model_card)
-    return safe_model_card
+    _reject_unsafe(safe_evaluation_card)
+    return safe_evaluation_card
 
 
 def validate_shadow_performance_summary(raw: dict[str, Any]) -> dict[str, Any]:
@@ -228,57 +227,46 @@ def validate_shadow_performance_summary(raw: dict[str, Any]) -> dict[str, Any]:
         raise ShadowPerformanceValidationError("shadow performance summary must be an object")
     _reject_unsafe(raw)
     _reject_unknown_or_missing(raw, REQUIRED_SUMMARY_FIELDS, "summary")
+    evaluation_subject = _evaluation_subject(raw["evaluationSubject"])
     evaluation_population = _evaluation_population(raw["evaluationPopulation"])
     metrics = _metrics(raw["metrics"])
-    disagreement_summary = _disagreement_summary(raw["disagreementSummary"])
-    _validate_summary_consistency(evaluation_population, metrics, disagreement_summary)
     normalized = {
-        "summaryType": _required_constant(raw, "summaryType", SUMMARY_TYPE),
+        "reportType": _required_constant(raw, "reportType", REPORT_TYPE),
         "summaryVersion": _required_constant(raw, "summaryVersion", SUMMARY_VERSION),
-        "generatedAt": _bounded_string(raw, "generatedAt", 128),
-        "model": _model(raw["model"]),
+        "generatedAt": normalize_shadow_timestamp(raw.get("generatedAt"), "generatedAt"),
+        "evaluationSubject": evaluation_subject,
+        "metricBasis": _required_constant(raw, "metricBasis", EXPECTED_METRIC_BASIS),
         "governance": _governance(raw["governance"]),
         "evaluation": _evaluation(raw["evaluation"]),
         "evaluationPopulation": evaluation_population,
         "metrics": metrics,
-        "disagreementSummary": disagreement_summary,
         "warnings": _machine_code_list(raw, "warnings", MAX_WARNINGS),
-        "limitations": _machine_code_list(raw, "limitations", MAX_LIMITATIONS),
+        "limitations": _required_machine_code_superset(raw, "limitations", MAX_LIMITATIONS, REQUIRED_SHADOW_LIMITATIONS),
         "banner": _required_constant(raw, "banner", BANNER),
     }
+    _validate_summary_consistency(normalized)
     _reject_unsafe(normalized)
     return normalized
 
 
-def _model(raw: Any) -> dict[str, str]:
-    if not isinstance(raw, dict):
-        raise ShadowPerformanceValidationError("model must be an object")
-    _reject_unknown_or_missing(raw, MODEL_FIELDS, "model")
-    return {
-        "modelName": _safe_identifier(raw, "modelName"),
-        "modelVersion": _safe_identifier(raw, "modelVersion"),
-        "modelFamily": _machine_code(raw, "modelFamily"),
-        "featureContractVersion": _safe_identifier(raw, "featureContractVersion"),
-    }
+def _evaluation_subject(raw: Any) -> dict[str, str]:
+    if raw != EVALUATION_SUBJECT:
+        raise ShadowPerformanceValidationError("evaluationSubject is unsupported")
+    return dict(EVALUATION_SUBJECT)
 
 
 def _governance(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ShadowPerformanceValidationError("governance must be an object")
     _reject_unknown_or_missing(raw, GOVERNANCE_FIELDS, "governance")
-    approved_for = _machine_code_list(raw, "approvedFor", 2)
-    if not approved_for or set(approved_for) - ALLOWED_APPROVED_FOR:
-        raise ShadowPerformanceValidationError("approvedFor contains unsupported value")
     result = {
         "governanceStatus": _required_constant(raw, "governanceStatus", EXPECTED_GOVERNANCE_STATUS),
-        "approvedFor": approved_for,
         "diagnosticOnly": _required_boolean(raw, "diagnosticOnly", True),
     }
     for field in sorted(SAFE_NEGATED_FIELDS):
         result[field] = _required_boolean(raw, field, True)
     return {
         "governanceStatus": result["governanceStatus"],
-        "approvedFor": result["approvedFor"],
         "diagnosticOnly": result["diagnosticOnly"],
         "notProductionApproval": result["notProductionApproval"],
         "notPromotionApproval": result["notPromotionApproval"],
@@ -293,15 +281,28 @@ def _evaluation(raw: Any) -> dict[str, str]:
         raise ShadowPerformanceValidationError("evaluation must be an object")
     _reject_unknown_or_missing(raw, EVALUATION_FIELDS, "evaluation")
     return {
+        "evaluationCardType": _required_constant(
+            raw, "evaluationCardType", PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE
+        ),
+        "evaluationCardVersion": _required_constant(
+            raw, "evaluationCardVersion", PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION
+        ),
+        "evaluationPurpose": _required_constant(raw, "evaluationPurpose", EVALUATION_PURPOSE),
         "evaluationReportType": _required_constant(raw, "evaluationReportType", EXPECTED_EVALUATION_REPORT_TYPE),
         "evaluationReportVersion": _required_constant(raw, "evaluationReportVersion", EXPECTED_EVALUATION_REPORT_VERSION),
-        "metricBasis": _required_constant(raw, "metricBasis", EXPECTED_METRIC_BASIS),
-        "datasetTimeBasis": _required_constant(raw, "datasetTimeBasis", EXPECTED_DATASET_TIME_BASIS),
-        "datasetDeduplicationPolicy": _required_constant(
-            raw,
-            "datasetDeduplicationPolicy",
-            EXPECTED_DATASET_DEDUPLICATION_POLICY,
+        "evaluationReportGeneratedAt": normalize_shadow_timestamp(
+            raw.get("evaluationReportGeneratedAt"), "evaluationReportGeneratedAt"
         ),
+        "evaluationCardGeneratedAt": normalize_shadow_timestamp(
+            raw.get("evaluationCardGeneratedAt"), "evaluationCardGeneratedAt"
+        ),
+        "evaluationArtifactSetVersion": _required_constant(
+            raw, "evaluationArtifactSetVersion", EXPECTED_EVALUATION_ARTIFACT_SET_VERSION
+        ),
+        "datasetVersion": _required_constant(raw, "datasetVersion", EXPECTED_DATASET_VERSION),
+        "datasetTimeBasis": _required_constant(raw, "datasetTimeBasis", EXPECTED_DATASET_TIME_BASIS),
+        "sourceManifestSha256": _sha256(raw, "sourceManifestSha256"),
+        "sourceEvaluationCardManifestSha256": _sha256(raw, "sourceEvaluationCardManifestSha256"),
     }
 
 
@@ -309,21 +310,10 @@ def _evaluation_population(raw: Any) -> dict[str, int]:
     if not isinstance(raw, dict):
         raise ShadowPerformanceValidationError("evaluationPopulation must be an object")
     _reject_unknown_or_missing(raw, EVALUATION_POPULATION_FIELDS, "evaluationPopulation")
-    dataset_records = _required_count(raw, "datasetRecordsRead")
-    accepted = _required_count(raw, "recordsAcceptedForEvaluation")
-    excluded_not_eligible = _required_count(raw, "recordsExcludedNotEvaluationEligible")
-    if accepted > dataset_records:
-        raise ShadowPerformanceValidationError("recordsAcceptedForEvaluation must not exceed datasetRecordsRead")
-    if excluded_not_eligible > dataset_records:
-        raise ShadowPerformanceValidationError("recordsExcludedNotEvaluationEligible must not exceed datasetRecordsRead")
-    if accepted + excluded_not_eligible > dataset_records:
-        raise ShadowPerformanceValidationError(
-            "recordsAcceptedForEvaluation plus recordsExcludedNotEvaluationEligible must not exceed datasetRecordsRead"
-        )
     return {
-        "datasetRecordsRead": dataset_records,
-        "recordsAcceptedForEvaluation": accepted,
-        "recordsExcludedNotEvaluationEligible": excluded_not_eligible,
+        "recordsEvaluated": _required_count(raw, "recordsEvaluated"),
+        "positiveClassCount": _required_count(raw, "positiveClassCount"),
+        "negativeClassCount": _required_count(raw, "negativeClassCount"),
     }
 
 
@@ -332,50 +322,60 @@ def _metrics(raw: Any) -> dict[str, Any]:
         raise ShadowPerformanceValidationError("metrics must be an object")
     _reject_unknown_or_missing(raw, METRIC_FIELDS, "metrics")
     return {
-        "precisionAtBudget": _required_rate(raw, "precisionAtBudget"),
-        "recallAtTopK": _required_rate(raw, "recallAtTopK"),
-        "falsePositiveRate": _required_rate(raw, "falsePositiveRate"),
-        "mlCaughtRulesMissedCount": _required_count(raw, "mlCaughtRulesMissedCount"),
-        "rulesCaughtMlMissedCount": _required_count(raw, "rulesCaughtMlMissedCount"),
-        "missingMlCount": _required_count(raw, "missingMlCount"),
-        "missingRulesCount": _required_count(raw, "missingRulesCount"),
-        "missingProjectionCount": _required_count(raw, "missingProjectionCount"),
-        "notEvaluationEligibleCount": _required_count(raw, "notEvaluationEligibleCount"),
+        "alertRecommendedPrecision": _metric_object(raw, "alertRecommendedPrecision"),
+        "alertRecommendedRecall": _metric_object(raw, "alertRecommendedRecall"),
+        "falsePositiveRate": _metric_object(raw, "falsePositiveRate"),
+        "falseNegativeRate": _metric_object(raw, "falseNegativeRate"),
     }
 
 
-def _validate_summary_consistency(
-    evaluation_population: dict[str, int],
-    metrics: dict[str, Any],
-    disagreement_summary: dict[str, int],
-) -> None:
-    dataset_records = evaluation_population["datasetRecordsRead"]
-    excluded_not_eligible = evaluation_population["recordsExcludedNotEvaluationEligible"]
-    if metrics["notEvaluationEligibleCount"] != excluded_not_eligible:
-        raise ShadowPerformanceValidationError(
-            "metrics.notEvaluationEligibleCount must match recordsExcludedNotEvaluationEligible"
-        )
-    for field in sorted(COUNT_FIELDS):
-        if metrics[field] > dataset_records:
-            raise ShadowPerformanceValidationError(f"metrics.{field} must not exceed datasetRecordsRead")
-    if sum(disagreement_summary.values()) > dataset_records:
-        raise ShadowPerformanceValidationError("disagreementSummary total must not exceed datasetRecordsRead")
+def _metric_object(raw: dict[str, Any], field: str) -> dict[str, Any]:
+    value = raw.get(field)
+    if not isinstance(value, dict):
+        raise ShadowPerformanceValidationError(f"metrics.{field} must be a metric object")
+    _reject_unknown_or_missing(value, METRIC_OBJECT_FIELDS, f"metrics.{field}")
+    available = value["available"]
+    metric_value = value["value"]
+    reason = value["reason"]
+    if not isinstance(available, bool):
+        raise ShadowPerformanceValidationError(f"metrics.{field}.available must be boolean")
+    if available:
+        try:
+            metric_value = require_finite_number(metric_value, f"metrics.{field}.value")
+        except JsonContractError as exc:
+            raise ShadowPerformanceValidationError(f"metrics.{field}.value must be numeric when available") from exc
+        if metric_value < 0.0 or metric_value > 1.0:
+            raise ShadowPerformanceValidationError(f"metrics.{field}.value must be in range 0.0..1.0")
+        if reason is not None:
+            raise ShadowPerformanceValidationError(f"metrics.{field}.reason must be null when available")
+        return {"available": True, "value": metric_value, "reason": None}
+    if metric_value is not None:
+        raise ShadowPerformanceValidationError(f"metrics.{field}.value must be null when unavailable")
+    if not isinstance(reason, str) or MACHINE_CODE_PATTERN.fullmatch(reason) is None:
+        raise ShadowPerformanceValidationError(f"metrics.{field}.reason must be machine-code when unavailable")
+    _reject_unsafe_value(reason)
+    return {"available": False, "value": None, "reason": reason}
 
 
-def _disagreement_summary(raw: Any) -> dict[str, int]:
-    if not isinstance(raw, dict):
-        raise ShadowPerformanceValidationError("disagreementSummary must be an object")
-    _reject_unknown_or_missing(raw, DISAGREEMENT_FIELDS, "disagreementSummary")
-    return {
-        "rulesHighMlHigh": _required_count(raw, "rulesHighMlHigh"),
-        "rulesHighMlLowOrMedium": _required_count(raw, "rulesHighMlLowOrMedium"),
-        "rulesLowOrMediumMlHigh": _required_count(raw, "rulesLowOrMediumMlHigh"),
-        "rulesLowOrMediumMlLowOrMedium": _required_count(raw, "rulesLowOrMediumMlLowOrMedium"),
-        "rulesMissingMlPresent": _required_count(raw, "rulesMissingMlPresent"),
-        "mlMissingRulesPresent": _required_count(raw, "mlMissingRulesPresent"),
-        "bothMissing": _required_count(raw, "bothMissing"),
-        "notEvaluationEligibleExcluded": _required_count(raw, "notEvaluationEligibleExcluded"),
-    }
+def normalize_shadow_timestamp(value: Any, field: str) -> str:
+    try:
+        return normalize_rfc3339_timestamp(value, field)
+    except TimestampContractError as exc:
+        raise ShadowPerformanceValidationError(str(exc)) from exc
+
+
+def _validate_summary_consistency(summary: dict[str, Any]) -> None:
+    evaluation_population = summary["evaluationPopulation"]
+    if evaluation_population["positiveClassCount"] + evaluation_population["negativeClassCount"] != evaluation_population["recordsEvaluated"]:
+        raise ShadowPerformanceValidationError("positiveClassCount + negativeClassCount must equal recordsEvaluated")
+    evaluation = summary["evaluation"]
+    report_generated_at = timestamp_instant(evaluation["evaluationReportGeneratedAt"])
+    card_generated_at = timestamp_instant(evaluation["evaluationCardGeneratedAt"])
+    summary_generated_at = timestamp_instant(summary["generatedAt"])
+    if card_generated_at < report_generated_at:
+        raise ShadowPerformanceValidationError("evaluationCardGeneratedAt must be greater than or equal to evaluationReportGeneratedAt")
+    if summary_generated_at < card_generated_at:
+        raise ShadowPerformanceValidationError("generatedAt must be greater than or equal to evaluationCardGeneratedAt")
 
 
 def _reject_unknown_or_missing(raw: dict[str, Any], allowed: set[str], label: str) -> None:
@@ -399,15 +399,6 @@ def _required_boolean(raw: dict[str, Any], field: str, expected: bool) -> bool:
     if value is not expected:
         raise ShadowPerformanceValidationError(f"{field} must be {expected}")
     return value
-
-
-def _required_rate(raw: dict[str, Any], field: str) -> float:
-    value = raw.get(field)
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ShadowPerformanceValidationError(f"{field} must be a numeric rate")
-    if value < 0.0 or value > 1.0:
-        raise ShadowPerformanceValidationError(f"{field} must be in range 0.0..1.0")
-    return float(value)
 
 
 def _required_count(raw: dict[str, Any], field: str) -> int:
@@ -440,24 +431,32 @@ def _machine_code_list(raw: dict[str, Any], field: str, max_items: int) -> list[
     for item in value:
         if not isinstance(item, str) or MACHINE_CODE_PATTERN.fullmatch(item) is None:
             raise ShadowPerformanceValidationError(f"{field} must contain machine-code strings")
-        if len(item) > 256:
+        if len(item) > MAX_MACHINE_CODE_LENGTH:
             raise ShadowPerformanceValidationError(f"{field} contains oversized item")
         _reject_unsafe_value(item)
         result.append(item)
-    return sorted(set(result))
+    if len(set(result)) != len(result):
+        raise ShadowPerformanceValidationError(f"{field} contains duplicate values")
+    return sorted(result)
 
 
-def _safe_identifier(raw: dict[str, Any], field: str) -> str:
-    value = _bounded_string(raw, field, 128)
-    compact = _compact(value)
-    if SAFE_IDENTIFIER_PATTERN.fullmatch(value) is None or ".." in value:
-        raise ShadowPerformanceValidationError(f"{field} must be a safe identifier")
-    if any(character in value for character in IDENTITY_FORBIDDEN_CHARS):
-        raise ShadowPerformanceValidationError(f"{field} must not be an artifact location")
-    if any(character.isspace() for character in value):
-        raise ShadowPerformanceValidationError(f"{field} must not contain whitespace")
-    if any(term in compact for term in IDENTITY_FORBIDDEN_COMPACT_TERMS):
-        raise ShadowPerformanceValidationError(f"{field} must not contain operational location details")
+def _required_machine_code_superset(
+        raw: dict[str, Any],
+        field: str,
+        max_items: int,
+        required: set[str],
+) -> list[str]:
+    values = _machine_code_list(raw, field, max_items)
+    missing = sorted(required - set(values))
+    if missing:
+        raise ShadowPerformanceValidationError(f"{field} missing required values: {', '.join(missing)}")
+    return values
+
+
+def _sha256(raw: dict[str, Any], field: str) -> str:
+    value = _bounded_string(raw, field, 64)
+    if SHA256_PATTERN.fullmatch(value) is None:
+        raise ShadowPerformanceValidationError(f"{field} must be sha256 hex")
     return value
 
 
@@ -488,7 +487,7 @@ def _reject_unsafe_value(value: str) -> None:
     if value in SAFE_CONTRACT_VALUES:
         return
     lowered = value.lower()
-    if "eval-" in lowered or "txnref-" in lowered:
+    if "eval-" in lowered or "txnref-" in lowered or "eval_" in lowered or "txnref_" in lowered:
         raise ShadowPerformanceValidationError("forbidden pseudonymous identifier prefix")
     compact = _compact(value)
     for safe_field in SAFE_NEGATED_FIELDS:

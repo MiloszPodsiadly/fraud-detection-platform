@@ -103,7 +103,7 @@ class PromotionReviewReadinessReportControllerAuthorizationTest {
                 .andExpect(jsonPath("$.reportType").value("PROMOTION_REVIEW_READINESS_REPORT_V1"))
                 .andExpect(jsonPath("$.readinessStatus").value("REVIEWABLE"))
                 .andExpect(jsonPath("$.notAnalystRecommendation").value(true))
-                .andExpect(jsonPath("$.inputs.recordsAcceptedForEvaluation").value(3))
+                .andExpect(jsonPath("$.inputs.recordsEvaluated").value(3))
                 .andExpect(jsonPath("$.banner").value(PromotionReviewReadinessReportContract.REQUIRED_BANNER));
 
         verify(readAccessAuditService).audit(

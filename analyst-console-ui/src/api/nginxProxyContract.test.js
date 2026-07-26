@@ -3,6 +3,17 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("nginx API proxy contract", () => {
+  it("proxies all versioned API paths before SPA fallback", () => {
+    const config = readFileSync(join(process.cwd(), "nginx.conf"), "utf8");
+    const apiLocationIndex = config.indexOf("location /api/ {");
+    const fallbackIndex = config.indexOf("location / {");
+
+    expect(apiLocationIndex).toBeGreaterThan(-1);
+    expect(apiLocationIndex).toBeLessThan(fallbackIndex);
+    expect(config).toContain("proxy_pass http://alert-service:8080/api/;");
+    expect(config).not.toMatch(/location\s+\/api\/v1\/\s*\{/);
+  });
+
   it("proxies only the suspicious transaction internal read API before SPA fallback", () => {
     const config = readFileSync(join(process.cwd(), "nginx.conf"), "utf8");
     const exactSuspiciousLocationIndex = config.indexOf("location = /internal/suspicious-transactions");

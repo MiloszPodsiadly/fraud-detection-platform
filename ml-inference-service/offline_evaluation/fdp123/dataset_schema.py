@@ -21,6 +21,7 @@ class Fdp123FailedDatasetError(ValueError):
 
 
 DATASET_VERSION = "feedback-dataset-v1"
+DATASET_TIME_BASIS = "FEEDBACK_CREATED_AT"
 MAX_DATASET_RECORDS = 1000
 MAX_JSONL_LINE_LENGTH = 64_000
 MAX_JSONL_NON_EMPTY_LINES = MAX_DATASET_RECORDS + 1
@@ -161,7 +162,7 @@ def validate_metadata(raw: dict[str, Any]) -> Fdp123DatasetMetadata:
         raise Fdp123DatasetValidationError("metadata type must be DATASET_METADATA")
     if raw.get("datasetVersion") != DATASET_VERSION:
         raise Fdp123DatasetValidationError("datasetVersion has unsupported value")
-    if raw.get("timeBasis") != "FEEDBACK_CREATED_AT":
+    if raw.get("timeBasis") != DATASET_TIME_BASIS:
         raise Fdp123DatasetValidationError("timeBasis must be FEEDBACK_CREATED_AT")
     failure_reason = _required_enum(raw, "failureReason", ALLOWED_FAILURE_REASONS)
     if failure_reason != "NONE":
@@ -176,7 +177,7 @@ def validate_metadata(raw: dict[str, Any]) -> Fdp123DatasetMetadata:
     return Fdp123DatasetMetadata(
         dataset_version=DATASET_VERSION,
         built_at=_required_datetime_string(raw, "builtAt"),
-        time_basis="FEEDBACK_CREATED_AT",
+        time_basis=DATASET_TIME_BASIS,
         from_inclusive=_optional_datetime_string(raw, "fromInclusive"),
         to_inclusive=_optional_datetime_string(raw, "toInclusive"),
         raw_rows_read=raw_rows_read,

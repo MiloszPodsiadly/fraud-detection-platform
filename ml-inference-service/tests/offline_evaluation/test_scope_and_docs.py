@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[3]
 ML_ROOT = ROOT / "ml-inference-service"
 OFFLINE_ROOT = ML_ROOT / "offline_evaluation"
 DOC = ROOT / "docs" / "architecture" / "python_ml_evaluation_suite.md"
-MODEL_CARD_DOC = ROOT / "docs" / "architecture" / "model_card_v1.md"
+PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOC = ROOT / "docs" / "architecture" / "evaluation_card_v1.md"
 
 
 class OfflineEvaluationScopeGuardTest(unittest.TestCase):
@@ -53,12 +53,11 @@ class OfflineEvaluationScopeGuardTest(unittest.TestCase):
     def test_fdp104DoesNotModifyOpenApi(self):
         openapi_root = ROOT / "docs" / "openapi"
         haystack = "\n".join(path.read_text(encoding="utf-8") for path in openapi_root.rglob("*.yaml"))
-        self.assertNotIn("model-card", haystack)
         self.assertNotIn("modelCard", haystack)
 
     def test_fdp104DoesNotAddUi(self):
         ui_root = ROOT / "analyst-console-ui"
-        self.assertFalse(any("model_card" in path.as_posix() or "ModelCard" in path.as_posix() for path in ui_root.rglob("*") if path.is_file()))
+        self.assertFalse(any("evaluation_card" in path.as_posix() or "EvaluationCard" in path.as_posix() for path in ui_root.rglob("*") if path.is_file()))
 
     def test_fdp104DoesNotAddDashboard(self):
         self.assertNotInAnyOfflineFile("dashboard", "Dashboard")
@@ -92,11 +91,13 @@ class OfflineEvaluationScopeGuardTest(unittest.TestCase):
 
     def test_fdp104DoesNotModifyKafkaEvents(self):
         common_events = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "common-events" / "src").rglob("*.java"))
-        self.assertNotIn("ModelCard", common_events)
+        self.assertNotIn("EvaluationCard", common_events)
 
     def test_fdp104DoesNotModifyAlertServiceProjection(self):
         alert_service = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "alert-service" / "src" / "main").rglob("*.java"))
-        self.assertNotIn("ModelCard", alert_service)
+        self.assertNotIn("EvaluationCardGenerator", alert_service)
+        self.assertNotIn("buildEvaluationCard", alert_service)
+        self.assertNotIn("EvaluationCardRepository", alert_service)
 
     def test_fdp104DoesNotAddRecommendationService(self):
         self.assertNotInAnyOfflineFile("recommendation_module", "AnalystRecommendation", "recommend_analyst_action")
@@ -113,10 +114,10 @@ class OfflineEvaluationScopeGuardTest(unittest.TestCase):
 
 class OfflineEvaluationDocumentationTest(unittest.TestCase):
     def test_docsMentionOfflineOnly(self):
-        self.assertDocContains("FDP-103 is offline-only")
+        self.assertDocContains("The current evaluation suite is offline-only")
 
-    def test_docsMentionConsumesOnlyFdp102Jsonl(self):
-        self.assertDocContains("consumes only FDP-102 bounded JSONL export")
+    def test_docsMentionConsumesOnlyFdp123Jsonl(self):
+        self.assertDocContains("consumes FDP-123 bounded feedback dataset JSONL")
 
     def test_docsMentionNoProductionDbReads(self):
         self.assertDocContains("does not read production DBs")
@@ -137,17 +138,11 @@ class OfflineEvaluationDocumentationTest(unittest.TestCase):
         self.assertDocContains("Analyst labels are evaluation signals only")
         self.assertDocContains("They are not ground truth")
 
-    def test_docsMentionFailedExportAborts(self):
-        self.assertDocContains("Failed FDP-102 exports abort evaluation")
-
-    def test_docsMentionNotEvaluationEligibleExcluded(self):
-        self.assertDocContains("NOT_EVALUATION_ELIGIBLE is excluded from model-quality metrics")
-
     def test_docsMentionFailFastMalformedInputPolicy(self):
-        self.assertDocContains("FDP-103 v1 fails fast on malformed or invalid schema input")
+        self.assertDocContains("FDP-124 fails fast on malformed or invalid schema input")
 
     def test_docsMentionPseudonymousInputReferencesStayInternal(self):
-        self.assertDocContains("accepts FDP-102 pseudonymous input references only for parsing and deterministic ordering")
+        self.assertDocContains("accepts FDP-123 pseudonymous input references only for parsing and deterministic ordering")
         self.assertDocContains("must not emit `evaluationRecordId`, `transactionReference`, `eval-`, or `txnref-`")
 
     def test_docsMentionStrictEngineStatusPolicy(self):
@@ -155,54 +150,53 @@ class OfflineEvaluationDocumentationTest(unittest.TestCase):
         self.assertDocContains("risk and score bucket fields must be absent")
         self.assertDocContains("are not ranked and are not high/low signals")
 
-    def test_docsMentionModelCardOfflineOnly(self):
-        self.assertModelCardDocContains("Model Card v1 is an offline governance artifact")
+    def test_docsMentionEvaluationCardOfflineOnly(self):
+        self.assertEvaluationCardDocContains("Platform Recommendation Evaluation Card v1 is an offline governance artifact")
 
-    def test_docsMentionModelCardNotPromotionApproval(self):
-        self.assertModelCardDocContains("does not promote models")
+    def test_docsMentionEvaluationCardNotPromotionApproval(self):
+        self.assertEvaluationCardDocContains("does not promote models")
 
-    def test_docsMentionModelCardNotThresholdRecommendation(self):
-        self.assertModelCardDocContains("does not recommend thresholds")
+    def test_docsMentionEvaluationCardNotThresholdRecommendation(self):
+        self.assertEvaluationCardDocContains("does not recommend thresholds")
 
-    def test_docsMentionModelCardNotProductionDecisioning(self):
-        self.assertModelCardDocContains("does not approve, decline, or block")
+    def test_docsMentionEvaluationCardNotProductionDecisioning(self):
+        self.assertEvaluationCardDocContains("does not approve, decline, or block")
 
-    def test_docsMentionModelCardNotPaymentAuthorization(self):
-        self.assertModelCardDocContains("does not authorize payments")
+    def test_docsMentionEvaluationCardNotPaymentAuthorization(self):
+        self.assertEvaluationCardDocContains("does not authorize payments")
 
-    def test_docsMentionApprovedForOnlyShadowCompareOffline(self):
-        self.assertModelCardDocContains("approvedFor is limited to SHADOW and COMPARE")
+    def test_docsMentionAllowedUsageModesOnlyShadowCompareOffline(self):
+        self.assertEvaluationCardDocContains("The card exposes only the current `allowedUsageModes` field")
 
     def test_docsMentionOfflineEvaluationIsNotApprovalTarget(self):
-        self.assertModelCardDocContains("OFFLINE_EVALUATION is not an approval target")
+        self.assertEvaluationCardDocContains("These values are documentation semantics only")
 
-    def test_docsMentionModelCardStrictValidation(self):
-        doc = MODEL_CARD_DOC.read_text(encoding="utf-8")
-        self.assertIn("Model Card v1 validates FDP-103 report identity", doc)
-        self.assertIn("validates metric basis", doc)
-        self.assertIn("validates dataset time basis", doc)
-        self.assertIn("validates deduplication policy", doc)
-        self.assertIn("validates metric numeric types and ranges", doc)
-        self.assertIn("validates disagreementSummary with allowlisted keys", doc)
+    def test_docsMentionEvaluationCardStrictValidation(self):
+        doc = PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOC.read_text(encoding="utf-8")
+        self.assertIn("FDP-124 `evaluation_summary.json` is the only source of evaluation identity", doc)
+        self.assertIn("metricsSubject = PLATFORM_RECOMMENDATION", doc)
+        self.assertIn("metricBasis = ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK", doc)
+        self.assertIn("positiveClassCount + negativeClassCount == recordsEvaluated", doc)
+        self.assertIn("does not copy it into", doc)
 
     def test_docsMentionModelIdentityIsSafeIdentifier(self):
-        self.assertModelCardDocContains(
-            "Model identity fields are safe identifiers, not URLs, paths, bucket URIs, registry endpoints, artifact locations, or secrets"
+        self.assertEvaluationCardDocContains(
+            "CLI callers cannot set model name, model version, model family, training mode, feature contract"
         )
 
     def test_docsMentionIntendedUseAndNonGoalsAreStrict(self):
-        doc = MODEL_CARD_DOC.read_text(encoding="utf-8")
-        self.assertIn("intendedUse is allowlisted", doc)
-        self.assertIn("required notIntendedUse non-goals cannot be omitted", doc)
+        doc = PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOC.read_text(encoding="utf-8")
+        self.assertIn("`intendedUse` is allowlisted", doc)
+        self.assertIn("required `notIntendedUse` non-goals cannot be omitted", doc)
 
     def test_docsMentionDashboardIsFutureScope(self):
-        self.assertModelCardDocContains("Dashboards and promotion workflows are future scopes")
+        self.assertEvaluationCardDocContains("Dashboards and promotion workflows are future scopes")
 
     def assertDocContains(self, text: str):
         self.assertIn(text, self.doc())
 
-    def assertModelCardDocContains(self, text: str):
-        self.assertIn(text, MODEL_CARD_DOC.read_text(encoding="utf-8"))
+    def assertEvaluationCardDocContains(self, text: str):
+        self.assertIn(text, PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOC.read_text(encoding="utf-8"))
 
     def doc(self) -> str:
         return DOC.read_text(encoding="utf-8")

@@ -12,6 +12,9 @@ const READINESS_COPY = Object.freeze({
   INSUFFICIENT_DATA: [
     "Not enough diagnostic evidence for human review."
   ],
+  INCONCLUSIVE: [
+    "Diagnostic evidence is present but one or more metrics are unavailable."
+  ],
   NOT_REVIEWABLE: [
     "Diagnostic checks failed. Human review should not begin yet."
   ]
@@ -98,11 +101,11 @@ function PromotionReadinessSuccess({ report }) {
         <PromotionSection title="Input summary">
           <DefinitionList rows={[
             ["Shadow summary present", displayBoolean(report.inputs?.shadowPerformanceSummary?.present)],
-            ["Shadow summary type", report.inputs?.shadowPerformanceSummary?.summaryType],
+            ["Shadow report type", report.inputs?.shadowPerformanceSummary?.reportType],
             ["Shadow summary version", report.inputs?.shadowPerformanceSummary?.summaryVersion],
             ["Shadow summary generated", displayTimestamp(report.inputs?.shadowPerformanceSummary?.generatedAt)],
             ["Minimum diagnostic evidence records", report.inputs?.minimumDiagnosticEvidenceRecords],
-            ["Records accepted for evaluation", report.inputs?.recordsAcceptedForEvaluation]
+            ["Records evaluated", report.inputs?.recordsEvaluated]
           ]} />
         </PromotionSection>
       </div>

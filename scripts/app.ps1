@@ -11,6 +11,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $envFile = Join-Path $repoRoot "deployment\.env"
 $envExampleFile = Join-Path $repoRoot "deployment\.env.example"
 $generatedSummaryFile = Join-Path $repoRoot "deployment\local-generated\shadow-performance\current-summary.json"
+$generatedManifestFile = Join-Path $repoRoot "deployment\local-generated\shadow-performance\manifest.json"
 $composeArgs = @(
     "compose",
     "--env-file", "deployment/.env",
@@ -106,6 +107,9 @@ try {
             Invoke-ShadowPerformanceSummaryGeneration
             if (-not (Test-Path -LiteralPath $generatedSummaryFile)) {
                 throw "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary"
+            }
+            if (-not (Test-Path -LiteralPath $generatedManifestFile)) {
+                throw "Generated Shadow Performance manifest not found. Run: make shadow-performance-summary"
             }
             Invoke-DockerCompose @("up", "--build", "-d")
         }

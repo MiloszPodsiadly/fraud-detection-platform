@@ -21,7 +21,13 @@ class EngineIntelligenceFeedbackDatasetScopeGuardTest {
     @Test
     void doesNotUpdateOpenApi() throws IOException {
         assertThat(Files.readString(ROOT.resolve("docs/openapi/alert_service.openapi.yaml")))
-                .doesNotContain("feedback-dataset", "dataset-export");
+                .doesNotContain(
+                        "/feedback-dataset",
+                        "/feedback-datasets",
+                        "/fraud-feedback-dataset",
+                        "/fraud-feedback-datasets",
+                        "dataset-export"
+                );
     }
 
     @Test

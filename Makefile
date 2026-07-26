@@ -23,6 +23,8 @@ app-up: deployment/.env shadow-performance-summary
 	bash scripts/bootstrap-local-fixtures.sh
 	@test -f deployment/local-generated/shadow-performance/current-summary.json || \
 		(echo "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary" && exit 1)
+	@test -f deployment/local-generated/shadow-performance/manifest.json || \
+		(echo "Generated Shadow Performance manifest not found. Run: make shadow-performance-summary" && exit 1)
 	$(SECURITY_HARDENED_COMPOSE) up --build -d
 
 app-down: deployment/.env
@@ -40,18 +42,21 @@ check-python:
 
 shadow-performance-summary: check-python
 	cd ml-inference-service && PYTHONPATH=. python -m offline_evaluation.generate_current_shadow_summary \
-		--dataset-jsonl ../deployment/local-demo-inputs/shadow-performance/fdp102-feedback-dataset.synthetic.jsonl \
-		--model-metadata ../deployment/local-demo-inputs/shadow-performance/model-metadata.synthetic.json \
+		--evaluation-card ../deployment/local-generated/platform-recommendation-evaluation-card/platform_recommendation_evaluation_card.json \
+		--evaluation-card-manifest ../deployment/local-generated/platform-recommendation-evaluation-card/manifest.json \
 		--output ../deployment/local-generated/shadow-performance/current-summary.json
 
 promotion-readiness-report: check-python
 	cd ml-inference-service && PYTHONPATH=. python -m offline_evaluation.generate_promotion_review_readiness_report \
 		--shadow-summary ../deployment/local-generated/shadow-performance/current-summary.json \
+		--shadow-summary-manifest ../deployment/local-generated/shadow-performance/manifest.json \
 		--output ../deployment/local-generated/promotion-readiness/promotion-review-readiness-report.json
 
 app-up-shadow-performance-generated: deployment/.env shadow-performance-summary
 	@test -f deployment/local-generated/shadow-performance/current-summary.json || \
 		(echo "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary" && exit 1)
+	@test -f deployment/local-generated/shadow-performance/manifest.json || \
+		(echo "Generated Shadow Performance manifest not found. Run: make shadow-performance-summary" && exit 1)
 	$(SHADOW_PERFORMANCE_GENERATED_COMPOSE) up --build -d
 
 shadow-performance-local-loop: app-up-shadow-performance-generated

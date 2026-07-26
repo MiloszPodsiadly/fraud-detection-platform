@@ -9,18 +9,21 @@ final class ShadowPerformanceSummaryTestFixtures {
 
     static ShadowPerformanceSummary validSummary() {
         return new ShadowPerformanceSummary(
-                "SHADOW_PERFORMANCE_SUMMARY_V1",
-                "1.0",
-                "2026-06-08T02:00:00Z",
-                new ShadowPerformanceSummary.ShadowPerformanceModel(
-                        "python-logistic-fraud-model",
-                        "2026-04-21.trained.v1",
-                        "LOGISTIC_REGRESSION",
-                        "2026-04-22.v1"
+                "SHADOW_PERFORMANCE_SUMMARY_V2",
+                "shadow-performance-summary-v2",
+                "2026-06-13T02:00:00Z",
+                new ShadowPerformanceSummary.EvaluationSubject(
+                        "PLATFORM_RECOMMENDATION",
+                        "ENGINE_INTELLIGENCE_PROJECTION",
+                        "ENGINE_INTELLIGENCE_PROJECTION_V1",
+                        "NOT_APPLICABLE",
+                        "NOT_AVAILABLE",
+                        "NOT_AVAILABLE",
+                        "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
                 ),
+                "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK",
                 new ShadowPerformanceSummary.ShadowPerformanceGovernance(
                         "DIAGNOSTIC_ONLY",
-                        List.of("COMPARE", "SHADOW"),
                         true,
                         true,
                         true,
@@ -29,39 +32,46 @@ final class ShadowPerformanceSummaryTestFixtures {
                         true
                 ),
                 new ShadowPerformanceSummary.ShadowPerformanceEvaluation(
-                        "PYTHON_ML_EVALUATION_FOUNDATION",
-                        "FDP-103",
-                        "bucket_ordered_offline_diagnostic",
-                        "FEEDBACK_SUBMITTED_AT",
-                        "TRANSACTION_REFERENCE_NEWEST_SUBMITTED_AT_FEEDBACK_ID_ASC"
+                        "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
+                        "platform-recommendation-evaluation-card-v1",
+                        "OFFLINE_DIAGNOSTIC",
+                        "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                        "FDP-124",
+                        "2026-06-10T00:00:00Z",
+                        "2026-06-12T00:00:00Z",
+                        "fdp123-report-artifact-set-v1",
+                        "feedback-dataset-v1",
+                        "FEEDBACK_CREATED_AT",
+                        "a".repeat(64),
+                        "b".repeat(64)
                 ),
-                new ShadowPerformanceSummary.ShadowPerformancePopulation(5, 3, 1),
+                new ShadowPerformanceSummary.ShadowPerformancePopulation(5, 3, 2),
                 new ShadowPerformanceSummary.ShadowPerformanceMetrics(
-                        0.666667,
-                        0.5,
-                        0.25,
-                        1,
-                        1,
-                        1,
-                        1,
-                        1,
-                        1
+                        metric(0.666667),
+                        metric(0.5),
+                        metric(0.25),
+                        metric(0.2)
                 ),
-                new ShadowPerformanceSummary.ShadowPerformanceDisagreement(1, 0, 1, 1, 0, 1, 0, 1),
-                List.of("MISSING_ML_SIGNAL_PRESENT", "MISSING_PROJECTION_PRESENT", "MISSING_RULES_SIGNAL_PRESENT"),
+                List.of("LOW_SAMPLE_SIZE"),
                 List.of(
-                        "ANALYST_LABELS_ARE_EVALUATION_SIGNALS_NOT_GROUND_TRUTH",
-                        "BUCKET_ORDERED_METRICS_NOT_CALIBRATED_PROBABILITIES",
-                        "DIAGNOSTIC_ONLY",
-                        "NOT_EVALUATION_ELIGIBLE_EXCLUDED_FROM_QUALITY_METRICS",
-                        "NO_AUTOMATIC_APPROVE_DECLINE_BLOCK",
-                        "NO_MODEL_PROMOTION_APPROVAL",
-                        "NO_PAYMENT_AUTHORIZATION",
-                        "NO_PRODUCTION_DECISIONING_APPROVAL",
-                        "NO_THRESHOLD_RECOMMENDATION",
-                        "OFFLINE_ONLY"
+                        "ANALYST_FEEDBACK_LABELS_ARE_NOT_LEGAL_GROUND_TRUTH",
+                        "OFFLINE_DIAGNOSTIC_METRICS_ARE_NOT_PRODUCTION_APPROVAL",
+                        "METRICS_ARE_PLATFORM_RECOMMENDATION_DIAGNOSTICS",
+                        "SMALL_SAMPLE_SIZE_MAY_BE_INCONCLUSIVE",
+                        "PSEUDONYMOUS_REFERENCES_ARE_NOT_ANONYMIZATION",
+                        "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_APPROVE_PROMOTION",
+                        "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_AUTHORIZE_AUTOMATIC_DECLINE",
+                        "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_CHANGE_SCORING_THRESHOLDS"
                 ),
                 ShadowPerformanceSummaryContract.REQUIRED_BANNER
         );
+    }
+
+    static ShadowPerformanceSummary.MetricValue metric(double value) {
+        return new ShadowPerformanceSummary.MetricValue(true, value, null);
+    }
+
+    static ShadowPerformanceSummary.MetricValue unavailable(String reason) {
+        return new ShadowPerformanceSummary.MetricValue(false, null, reason);
     }
 }

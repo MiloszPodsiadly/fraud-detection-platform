@@ -9,6 +9,6 @@ services:
       SHADOW_PERFORMANCE_SUMMARY_CURRENT_MAX_SIZE_BYTES: ${SHADOW_PERFORMANCE_SUMMARY_CURRENT_MAX_SIZE_BYTES:-1048576}
     volumes:
       - type: bind
-        source: ./local-generated/shadow-performance/current-summary.json
-        target: /run/shadow-performance/current-summary.json
+        source: ./local-generated/shadow-performance
+        target: /run/shadow-performance
         read_only: true
