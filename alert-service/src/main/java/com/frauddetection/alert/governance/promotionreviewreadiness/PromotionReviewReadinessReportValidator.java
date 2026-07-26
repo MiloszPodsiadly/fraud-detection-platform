@@ -1,9 +1,9 @@
 package com.frauddetection.alert.governance.promotionreviewreadiness;
 
+import com.frauddetection.alert.governance.GovernanceTimestampContract;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -16,9 +16,6 @@ class PromotionReviewReadinessReportValidator {
 
     private static final Pattern MACHINE_CODE_PATTERN = Pattern.compile("^[A-Z][A-Z0-9_]{0,127}$");
     private static final Pattern SHA256_PATTERN = Pattern.compile("^[a-f0-9]{64}$");
-    private static final Pattern RFC3339_TIMESTAMP_PATTERN = Pattern.compile(
-            "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
-    );
     private static final int MAX_DIAGNOSTIC_RECORDS = 1_000;
     private static final Set<String> READINESS_STATUSES = Set.of("INSUFFICIENT_DATA", "INCONCLUSIVE", "NOT_REVIEWABLE", "REVIEWABLE");
     private static final Set<String> CHECK_STATUSES = Set.of("PASS", "FAIL", "INCONCLUSIVE");
@@ -311,10 +308,9 @@ class PromotionReviewReadinessReportValidator {
 
     private Instant instant(String value, String field) {
         safeString(value, field);
-        require(RFC3339_TIMESTAMP_PATTERN.matcher(value).matches(), field + " must be an ISO-8601 instant");
         try {
-            return Instant.parse(value);
-        } catch (DateTimeParseException exception) {
+            return GovernanceTimestampContract.parse(value, field);
+        } catch (IllegalArgumentException exception) {
             throw new PromotionReviewReadinessReportValidationException(field + " must be an ISO-8601 instant");
         }
     }

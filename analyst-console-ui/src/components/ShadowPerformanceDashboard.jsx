@@ -1,4 +1,5 @@
 import { LoadingPanel } from "./LoadingPanel.jsx";
+import { isCanonicalUtcTimestamp, isOrderedCanonicalUtcTimestamp } from "../governance/canonicalUtcTimestamp.js";
 
 const REQUIRED_PERMISSION = "shadow-performance:read";
 const REQUIRED_BANNER = "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.";
@@ -42,7 +43,6 @@ const REQUIRED_LIMITATIONS = new Set([
   "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_CHANGE_SCORING_THRESHOLDS"
 ]);
 const MACHINE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
-const RFC3339_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
 
 const METRIC_FIELDS = [
   ["alertRecommendedPrecision", "Alert-recommended precision", "percent"],
@@ -387,7 +387,7 @@ function isValidSummary(summary) {
       ])
       || summary.reportType !== "SHADOW_PERFORMANCE_SUMMARY_V2"
       || summary.summaryVersion !== "shadow-performance-summary-v2"
-      || !isStrictRfc3339Timestamp(summary.generatedAt)
+      || !isCanonicalUtcTimestamp(summary.generatedAt)
       || summary.banner !== REQUIRED_BANNER
       || summary.metricBasis !== "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK"
       || !isValidEvaluationSubject(summary.evaluationSubject)
@@ -457,8 +457,8 @@ function isValidEvaluation(evaluation) {
       "sourceEvaluationCardManifestSha256"
     ])
     && Object.entries(REQUIRED_EVALUATION).every(([field, value]) => evaluation[field] === value)
-    && isStrictRfc3339Timestamp(evaluation.evaluationReportGeneratedAt)
-    && isStrictRfc3339Timestamp(evaluation.evaluationCardGeneratedAt)
+    && isCanonicalUtcTimestamp(evaluation.evaluationReportGeneratedAt)
+    && isCanonicalUtcTimestamp(evaluation.evaluationCardGeneratedAt)
     && isOrderedTimestamp(evaluation.evaluationReportGeneratedAt, evaluation.evaluationCardGeneratedAt)
     && /^[a-f0-9]{64}$/.test(evaluation.sourceManifestSha256)
     && /^[a-f0-9]{64}$/.test(evaluation.sourceEvaluationCardManifestSha256);
@@ -483,12 +483,7 @@ function isDiagnosticCount(value) {
 }
 
 function isOrderedTimestamp(earlier, later) {
-  if (!isStrictRfc3339Timestamp(earlier) || !isStrictRfc3339Timestamp(later)) {
-    return false;
-  }
-  const earlierTime = Date.parse(earlier);
-  const laterTime = Date.parse(later);
-  return Number.isFinite(earlierTime) && Number.isFinite(laterTime) && earlierTime <= laterTime;
+  return isOrderedCanonicalUtcTimestamp(earlier, later);
 }
 
 function isSafeStringArray(value) {
@@ -506,33 +501,12 @@ function isMachineCode(value) {
   return typeof value === "string" && MACHINE_CODE_PATTERN.test(value);
 }
 
-function isStrictRfc3339Timestamp(value) {
-  if (typeof value !== "string" || value.length > 128 || !RFC3339_TIMESTAMP_PATTERN.test(value)) {
-    return false;
-  }
-  if (!hasValidCalendarDate(value)) {
-    return false;
-  }
-  const time = Date.parse(value);
-  return Number.isFinite(time) && new Date(time).toISOString() === new Date(value).toISOString();
-}
-
 function hasExactKeys(value, expectedKeys) {
   const actual = Object.keys(value).sort();
   const expected = [...expectedKeys].sort();
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
 
-function hasValidCalendarDate(value) {
-  const [, year, month, day] = /^(\d{4})-(\d{2})-(\d{2})T/.exec(value) || [];
-  if (!year) {
-    return false;
-  }
-  const parsed = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
-  return parsed.getUTCFullYear() === Number(year)
-    && parsed.getUTCMonth() === Number(month) - 1
-    && parsed.getUTCDate() === Number(day);
-}
 
 function formatMetric(value, format) {
   if (!isObject(value) || value.available === false) {

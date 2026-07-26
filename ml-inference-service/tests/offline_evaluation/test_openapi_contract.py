@@ -10,6 +10,7 @@ from offline_evaluation.shadow_performance_schema import BANNER as SHADOW_PERFOR
 
 ROOT = Path(__file__).resolve().parents[3]
 OPENAPI = ROOT / "docs" / "openapi" / "alert_service.openapi.yaml"
+TIMESTAMP_FIXTURE = ROOT / "contract-fixtures" / "governance" / "canonical-utc-timestamp-cases.json"
 PROMOTION_READINESS_UI_VALIDATOR = (
     ROOT / "analyst-console-ui" / "src" / "governance" / "promotionReviewReadinessReportValidation.js"
 )
@@ -74,7 +75,13 @@ class OpenApiContractTest(unittest.TestCase):
     def test_governanceTimestampFieldsUseBoundedFractionalPrecisionPattern(self):
         document = yaml.safe_load(OPENAPI.read_text(encoding="utf-8"))
         schemas = document["components"]["schemas"]
-        expected_pattern = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$"
+        expected_pattern = (
+            r"^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|"
+            r"(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-"
+            r"(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|"
+            r"(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))"
+            r"T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,6})?Z$"
+        )
         fields = [
             schemas["ShadowPerformanceSummaryResponse"]["properties"]["generatedAt"],
             schemas["ShadowPerformanceEvaluationResponse"]["properties"]["evaluationReportGeneratedAt"],
@@ -87,6 +94,16 @@ class OpenApiContractTest(unittest.TestCase):
         for field in fields:
             self.assertEqual("date-time", field["format"])
             self.assertEqual(expected_pattern, field["pattern"])
+
+        timestamp_cases = yaml.safe_load(TIMESTAMP_FIXTURE.read_text(encoding="utf-8"))
+        compiled = re.compile(expected_pattern)
+        for value in timestamp_cases["valid"]:
+            with self.subTest(valid=value):
+                self.assertRegex(value, compiled)
+        for value in timestamp_cases["invalid"]:
+            if isinstance(value, str):
+                with self.subTest(invalid=value):
+                    self.assertIsNone(compiled.fullmatch(value))
 
     def test_shadowGoldenFixtureIdentityMatchesOpenApiClosedEnums(self):
         document = yaml.safe_load(OPENAPI.read_text(encoding="utf-8"))

@@ -1,3 +1,5 @@
+import { isCanonicalUtcTimestamp, isOrderedCanonicalUtcTimestamp } from "./canonicalUtcTimestamp.js";
+
 const PROMOTION_REVIEW_READINESS_REPORT_TYPE = "PROMOTION_REVIEW_READINESS_REPORT_V1";
 const PROMOTION_REVIEW_READINESS_REPORT_VERSION = "1.0";
 const PROMOTION_REVIEW_READINESS_GOVERNANCE_STATUS = "DIAGNOSTIC_ONLY";
@@ -18,7 +20,6 @@ const MAX_CHECK_NAME_LENGTH = 128;
 const MAX_MACHINE_CODE_LENGTH = 128;
 const MAX_SUMMARY_VERSION_LENGTH = 32;
 const MACHINE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
-const RFC3339_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const REQUIRED_CHECK_NAMES = [
   "CURRENT_SUMMARY_PRESENT",
@@ -134,7 +135,7 @@ export function isValidPromotionReviewReadinessReport(report) {
     ])
     && report.reportType === PROMOTION_REVIEW_READINESS_REPORT_TYPE
     && report.reportVersion === PROMOTION_REVIEW_READINESS_REPORT_VERSION
-    && isStrictRfc3339Timestamp(report.generatedAt)
+    && isCanonicalUtcTimestamp(report.generatedAt)
     && report.governanceStatus === PROMOTION_REVIEW_READINESS_GOVERNANCE_STATUS
     && PROMOTION_REVIEW_READINESS_STATUSES.has(report.readinessStatus)
     && report.diagnosticOnly === true
@@ -173,7 +174,7 @@ function isValidInputs(inputs, reportGeneratedAt) {
     && shadowPerformanceSummary.summaryVersion === "shadow-performance-summary-v2"
     && !containsForbiddenTerm(shadowPerformanceSummary.reportType)
     && !containsForbiddenTerm(shadowPerformanceSummary.summaryVersion)
-    && isStrictRfc3339Timestamp(shadowPerformanceSummary.generatedAt)
+    && isCanonicalUtcTimestamp(shadowPerformanceSummary.generatedAt)
     && isOrderedTimestamp(shadowPerformanceSummary.generatedAt, reportGeneratedAt)
     && isBoundedInteger(inputs.minimumDiagnosticEvidenceRecords, 1, MAX_DIAGNOSTIC_RECORDS)
     && isBoundedInteger(inputs.recordsEvaluated, 0, MAX_DIAGNOSTIC_RECORDS);
@@ -202,7 +203,7 @@ function isValidCheckInputs(inputs) {
     && summary.present === true
     && summary.reportType === "SHADOW_PERFORMANCE_SUMMARY_V2"
     && summary.summaryVersion === "shadow-performance-summary-v2"
-    && isStrictRfc3339Timestamp(summary.generatedAt)
+    && isCanonicalUtcTimestamp(summary.generatedAt)
     && typeof summary.sourceEvaluationCardManifestSha256 === "string"
     && SHA256_PATTERN.test(summary.sourceEvaluationCardManifestSha256)
     && isPlainObject(governance)
@@ -299,17 +300,6 @@ function isBoundedInteger(value, min, max) {
   return Number.isInteger(value) && value >= min && value <= max;
 }
 
-function isStrictRfc3339Timestamp(value) {
-  if (!isBoundedNonEmptyString(value, 128) || !RFC3339_TIMESTAMP_PATTERN.test(value)) {
-    return false;
-  }
-  if (!hasValidCalendarDate(value)) {
-    return false;
-  }
-  const time = Date.parse(value);
-  return Number.isFinite(time) && new Date(time).toISOString() === new Date(value).toISOString();
-}
-
 function checksFromInputs(inputs) {
   return [
     check("CURRENT_SUMMARY_PRESENT", passFail(inputs.shadowPerformanceSummary.present === true)),
@@ -369,10 +359,7 @@ function isMetric(metric) {
 }
 
 function isOrderedTimestamp(earlier, later) {
-  if (!isStrictRfc3339Timestamp(earlier) || !isStrictRfc3339Timestamp(later)) {
-    return false;
-  }
-  return Date.parse(earlier) <= Date.parse(later);
+  return isOrderedCanonicalUtcTimestamp(earlier, later);
 }
 
 function containsForbiddenTerm(value) {
@@ -431,15 +418,4 @@ function isExactReasonCodes(reasonCodes, checks) {
 
 function containsRequiredLimitations(limitations) {
   return Array.isArray(limitations) && [...REQUIRED_LIMITATIONS].every((limitation) => limitations.includes(limitation));
-}
-
-function hasValidCalendarDate(value) {
-  const [, year, month, day] = /^(\d{4})-(\d{2})-(\d{2})T/.exec(value) || [];
-  if (!year) {
-    return false;
-  }
-  const parsed = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
-  return parsed.getUTCFullYear() === Number(year)
-    && parsed.getUTCMonth() === Number(month) - 1
-    && parsed.getUTCDate() === Number(day);
 }

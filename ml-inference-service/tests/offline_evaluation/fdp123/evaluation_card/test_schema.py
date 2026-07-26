@@ -1,5 +1,7 @@
+import json
 import math
 import unittest
+from pathlib import Path
 
 from offline_evaluation.fdp123.evaluation_card.schema import (
     EVALUATION_SUBJECT,
@@ -26,25 +28,12 @@ from offline_evaluation.fdp123.timestamp_contract import (
 )
 
 
-VALID_CANONICAL_TIMESTAMPS = (
-    "2024-02-29T00:00:00Z",
-    "2026-06-13T23:59:59Z",
-    "2026-06-13T23:59:59.1Z",
-    "2026-06-13T23:59:59.123456Z",
+ROOT = Path(__file__).resolve().parents[5]
+TIMESTAMP_FIXTURE = json.loads(
+    (ROOT / "contract-fixtures" / "governance" / "canonical-utc-timestamp-cases.json").read_text(encoding="utf-8")
 )
-INVALID_CANONICAL_TIMESTAMPS = (
-    "0000-01-01T00:00:00Z",
-    "2026-06-13T24:00:00Z",
-    "2026-06-13T23:60:00Z",
-    "2016-12-31T23:59:60Z",
-    "2026-02-29T00:00:00Z",
-    "2026-06-13T00:00:00+00:00",
-    "2026-06-13T00:00:00.1234567Z",
-    "2026-06-13T00:00:00",
-    123,
-    True,
-    "2" * 129,
-)
+VALID_CANONICAL_TIMESTAMPS = tuple(TIMESTAMP_FIXTURE["valid"])
+INVALID_CANONICAL_TIMESTAMPS = tuple(TIMESTAMP_FIXTURE["invalid"])
 
 
 class SharedTimestampContractTest(unittest.TestCase):
@@ -259,7 +248,7 @@ class Fdp123EvaluationCardSchemaTest(unittest.TestCase):
             with self.subTest(value=value):
                 card = validate_evaluation_card(valid_evaluation_card(
                     generatedAt=value,
-                    evaluationEvidence=valid_evaluation_evidence(evaluationGeneratedAt="2024-02-29T00:00:00Z"),
+                    evaluationEvidence=valid_evaluation_evidence(evaluationGeneratedAt=value),
                 ))
                 self.assertEqual(value, card["generatedAt"])
 

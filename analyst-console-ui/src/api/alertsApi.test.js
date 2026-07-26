@@ -13,6 +13,11 @@ import { normalizeSession } from "../auth/session.js";
 import { createBffAuthProvider, createDemoAuthProvider, createOidcAuthProvider } from "../auth/authProvider.js";
 import { createInMemoryOidcSessionSource } from "../auth/oidcSessionSource.js";
 
+const TIMESTAMP_CASES = JSON.parse(readFileSync(
+  resolve("..", "contract-fixtures", "governance", "canonical-utc-timestamp-cases.json"),
+  "utf8"
+));
+
 describe("alertsApi auth headers", () => {
   let apiClient = createAlertsApiClient({
     session: null,
@@ -301,6 +306,17 @@ describe("alertsApi auth headers", () => {
 
   it("promotionReviewReadinessValidationAcceptsValidReport", () => {
     expect(isValidPromotionReviewReadinessReport(promotionReviewReadinessReport())).toBe(true);
+  });
+
+  it.each(TIMESTAMP_CASES.valid)("promotionReviewReadinessValidationAcceptsCanonicalTimestampFixtureCase: %s", (timestamp) => {
+    expect(isValidPromotionReviewReadinessReport(promotionReviewReadinessReportWithTimestamps(timestamp))).toBe(true);
+  });
+
+  it.each(TIMESTAMP_CASES.invalid)("promotionReviewReadinessValidationRejectsCanonicalTimestampFixtureCase: %s", (timestamp) => {
+    const report = promotionReviewReadinessReport();
+    report.generatedAt = timestamp;
+
+    expect(isValidPromotionReviewReadinessReport(report)).toBe(false);
   });
 
   it.each([
@@ -2106,6 +2122,31 @@ function promotionReviewReadinessReport(overrides = {}) {
     banner: REQUIRED_PROMOTION_REVIEW_READINESS_BANNER,
     ...overrides
   };
+}
+
+function promotionReviewReadinessReportWithTimestamps(timestamp) {
+  return promotionReviewReadinessReport({
+    generatedAt: timestamp,
+    inputs: {
+      shadowPerformanceSummary: {
+        present: true,
+        reportType: "SHADOW_PERFORMANCE_SUMMARY_V2",
+        summaryVersion: "shadow-performance-summary-v2",
+        generatedAt: timestamp
+      },
+      minimumDiagnosticEvidenceRecords: 1,
+      recordsEvaluated: 3
+    },
+    checkInputs: promotionReadinessCheckInputs({
+      shadowPerformanceSummary: {
+        present: true,
+        reportType: "SHADOW_PERFORMANCE_SUMMARY_V2",
+        summaryVersion: "shadow-performance-summary-v2",
+        generatedAt: timestamp,
+        sourceEvaluationCardManifestSha256: "b".repeat(64)
+      }
+    })
+  });
 }
 
 function promotionReadinessCheckInputs(overrides = {}) {

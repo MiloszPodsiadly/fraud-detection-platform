@@ -12,7 +12,13 @@ from offline_evaluation.shadow_performance_schema import (
 )
 from offline_evaluation.shadow_performance_summary import build_shadow_performance_summary
 from offline_evaluation.shadow_performance_writer import write_shadow_performance_summary
-from fdp123.evaluation_card.test_schema import valid_evaluation_card, valid_evaluation_evidence, valid_metrics
+from fdp123.evaluation_card.test_schema import (
+    INVALID_CANONICAL_TIMESTAMPS,
+    VALID_CANONICAL_TIMESTAMPS,
+    valid_evaluation_card,
+    valid_evaluation_evidence,
+    valid_metrics,
+)
 
 
 GENERATED_AT = "2026-06-13T02:00:00Z"
@@ -47,16 +53,11 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
         self.assertEqual(64, len(manifest_sha256))
 
     def test_canonicalTimestampMatrixAccepted(self):
-        for value in (
-                "2024-02-29T00:00:00Z",
-                "2026-06-13T23:59:59Z",
-                "2026-06-13T23:59:59.1Z",
-                "2026-06-13T23:59:59.123456Z",
-        ):
+        for value in VALID_CANONICAL_TIMESTAMPS:
             with self.subTest(value=value):
                 card = valid_evaluation_card(
-                    generatedAt="2024-02-29T00:00:00Z",
-                    evaluationEvidence=valid_evaluation_evidence(evaluationGeneratedAt="2024-02-29T00:00:00Z"),
+                    generatedAt=value,
+                    evaluationEvidence=valid_evaluation_evidence(evaluationGeneratedAt=value),
                 )
                 payload = write_shadow_performance_summary(build_shadow_performance_summary(
                     card,
@@ -66,19 +67,7 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
                 self.assertEqual(value, json.loads(payload)["generatedAt"])
 
     def test_canonicalTimestampMatrixRejected(self):
-        for value in (
-                "0000-01-01T00:00:00Z",
-                "2026-06-13T24:00:00Z",
-                "2026-06-13T23:60:00Z",
-                "2016-12-31T23:59:60Z",
-                "2026-02-29T00:00:00Z",
-                "2026-06-13T00:00:00+00:00",
-                "2026-06-13T00:00:00.1234567Z",
-                "2026-06-13T00:00:00",
-                123,
-                True,
-                "2" * 129,
-        ):
+        for value in INVALID_CANONICAL_TIMESTAMPS:
             with self.subTest(value=value):
                 with self.assertRaises(ShadowPerformanceValidationError):
                     build_shadow_performance_summary(

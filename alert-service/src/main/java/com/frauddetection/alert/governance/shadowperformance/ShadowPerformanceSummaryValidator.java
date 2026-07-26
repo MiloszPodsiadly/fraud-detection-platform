@@ -1,9 +1,9 @@
 package com.frauddetection.alert.governance.shadowperformance;
 
+import com.frauddetection.alert.governance.GovernanceTimestampContract;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
-import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -14,9 +14,6 @@ class ShadowPerformanceSummaryValidator {
     private static final int MAX_COUNT_VALUE = 1_000;
     private static final Pattern MACHINE_CODE_PATTERN = Pattern.compile("^[A-Z][A-Z0-9_]{0,127}$");
     private static final Pattern SHA256_PATTERN = Pattern.compile("^[a-f0-9]{64}$");
-    private static final Pattern RFC3339_TIMESTAMP_PATTERN = Pattern.compile(
-            "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
-    );
     private static final Set<String> SAFE_LIMITATIONS = Set.of(
             "ANALYST_FEEDBACK_LABELS_ARE_NOT_LEGAL_GROUND_TRUTH",
             "OFFLINE_DIAGNOSTIC_METRICS_ARE_NOT_PRODUCTION_APPROVAL",
@@ -204,10 +201,9 @@ class ShadowPerformanceSummaryValidator {
 
     private Instant instant(String value, String field) {
         safeString(value, field);
-        require(RFC3339_TIMESTAMP_PATTERN.matcher(value).matches(), field + " must be an ISO-8601 instant");
         try {
-            return Instant.parse(value);
-        } catch (DateTimeParseException exception) {
+            return GovernanceTimestampContract.parse(value, field);
+        } catch (IllegalArgumentException exception) {
             throw new ShadowPerformanceSummaryValidationException(field + " must be an ISO-8601 instant");
         }
     }

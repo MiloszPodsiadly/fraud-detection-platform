@@ -39,7 +39,12 @@ from offline_evaluation.shadow_performance_artifact_set import (
     read_validated_shadow_performance_artifact_set,
 )
 from offline_evaluation.shadow_performance_summary import build_shadow_performance_summary
-from fdp123.evaluation_card.test_schema import valid_evaluation_card, valid_evaluation_evidence
+from fdp123.evaluation_card.test_schema import (
+    INVALID_CANONICAL_TIMESTAMPS,
+    VALID_CANONICAL_TIMESTAMPS,
+    valid_evaluation_card,
+    valid_evaluation_evidence,
+)
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -82,17 +87,12 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
             self.assertTrue(paths.output.with_name("manifest.json").exists())
 
     def test_canonicalTimestampMatrixAcceptedByPromotionReadinessValidation(self):
-        for value in (
-                "2024-02-29T00:00:00Z",
-                "2026-06-13T23:59:59Z",
-                "2026-06-13T23:59:59.1Z",
-                "2026-06-13T23:59:59.123456Z",
-        ):
+        for value in VALID_CANONICAL_TIMESTAMPS:
             with self.subTest(value=value):
                 summary = build_shadow_performance_summary(
                     valid_evaluation_card(
-                        generatedAt="2024-02-29T00:00:00Z",
-                        evaluationEvidence=valid_evaluation_evidence(evaluationGeneratedAt="2024-02-29T00:00:00Z"),
+                        generatedAt=value,
+                        evaluationEvidence=valid_evaluation_evidence(evaluationGeneratedAt=value),
                     ),
                     value,
                     source_evaluation_card_manifest_sha256="b" * 64,
@@ -106,19 +106,7 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
                 self.assertEqual(value, validate_promotion_review_readiness_report(report)["generatedAt"])
 
     def test_canonicalTimestampMatrixRejectedByPromotionReadinessValidation(self):
-        for value in (
-                "0000-01-01T00:00:00Z",
-                "2026-06-13T24:00:00Z",
-                "2026-06-13T23:60:00Z",
-                "2016-12-31T23:59:60Z",
-                "2026-02-29T00:00:00Z",
-                "2026-06-13T00:00:00+00:00",
-                "2026-06-13T00:00:00.1234567Z",
-                "2026-06-13T00:00:00",
-                123,
-                True,
-                "2" * 129,
-        ):
+        for value in INVALID_CANONICAL_TIMESTAMPS:
             with self.subTest(value=value):
                 report = build_report()
                 report["generatedAt"] = value
@@ -234,22 +222,7 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
                     self.assertPromotionArtifactRejected(paths.output, manifest, "size", paths.root)
 
     def test_promotionReadinessManifestGeneratedAtMustExactlyMatchReport(self):
-        for value in (
-                "0000-01-01T00:00:00Z",
-                "2026-06-13T24:00:00Z",
-                "2026-06-13T23:60:00Z",
-                "2016-12-31T23:59:60Z",
-                "2026-02-29T00:00:00Z",
-                "2026-06-14T00:00:00+00:00",
-                "2026-06-14T01:00:00+01:00",
-                "2026-06-14T00:00:01Z",
-                "2026-06-14T00:00:00.1234567Z",
-                "2026-06-14T00:00:00",
-                "2026-13-14T00:00:00Z",
-                123,
-                True,
-                "2" * 129,
-        ):
+        for value in tuple(INVALID_CANONICAL_TIMESTAMPS) + ("2026-06-14T00:00:01Z",):
             with self.subTest(value=value):
                 with workspace() as paths:
                     payload = valid_payload()

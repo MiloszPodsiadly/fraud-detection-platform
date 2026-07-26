@@ -1,7 +1,10 @@
 package com.frauddetection.alert.governance.shadowperformance;
 
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -9,7 +12,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ShadowPerformanceSummaryValidatorTest {
 
+    private static final Path ROOT = Path.of("..").toAbsolutePath().normalize();
+    private static final Path TIMESTAMP_FIXTURE = ROOT.resolve("contract-fixtures/governance/canonical-utc-timestamp-cases.json");
+
     private final ShadowPerformanceSummaryValidator validator = new ShadowPerformanceSummaryValidator();
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
     void acceptsValidatedFdp105Summary() {
@@ -35,27 +42,19 @@ class ShadowPerformanceSummaryValidatorTest {
 
     @Test
     void acceptsIsoInstantGeneratedAt() {
-        for (String generatedAt : List.of(
-                "2026-06-13T02:00:00Z",
-                "2026-06-13T02:00:00.1Z",
-                "2026-06-13T02:00:00.123456Z"
-        )) {
-            assertThatCode(() -> validator.validate(replaceGeneratedAt(generatedAt)))
+        for (String generatedAt : validCanonicalTimestamps()) {
+            assertThatCode(() -> validator.validate(replaceAllTimestamps(generatedAt)))
                     .doesNotThrowAnyException();
         }
     }
 
     @Test
     void rejectsNonIsoGeneratedAt() {
-        for (String generatedAt : List.of(
-                "2026-06-08 02:00:00",
-                "2026-06-13T02:00:00.1234567Z",
-                "2026-06-13T02:00:00+00:00",
-                "2026-06-13T02:00:00",
-                "2026-13-13T02:00:00Z"
-        )) {
-            assertThatThrownBy(() -> validator.validate(replaceGeneratedAt(generatedAt)))
-                    .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
+        for (JsonNode generatedAt : invalidCanonicalTimestamps()) {
+            if (generatedAt.isTextual() || generatedAt.isNull()) {
+                assertThatThrownBy(() -> validator.validate(replaceGeneratedAt(generatedAt.isTextual() ? generatedAt.textValue() : null)))
+                        .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
+            }
         }
     }
 
@@ -273,6 +272,56 @@ class ShadowPerformanceSummaryValidatorTest {
 
     private ShadowPerformanceSummary validSummary() {
         return ShadowPerformanceSummaryTestFixtures.validSummary();
+    }
+
+    private ShadowPerformanceSummary replaceAllTimestamps(String generatedAt) {
+        ShadowPerformanceSummary base = validSummary();
+        ShadowPerformanceSummary.ShadowPerformanceEvaluation evaluation = new ShadowPerformanceSummary.ShadowPerformanceEvaluation(
+                base.evaluation().evaluationCardType(),
+                base.evaluation().evaluationCardVersion(),
+                base.evaluation().evaluationPurpose(),
+                base.evaluation().evaluationReportType(),
+                base.evaluation().evaluationReportVersion(),
+                generatedAt,
+                generatedAt,
+                base.evaluation().evaluationArtifactSetVersion(),
+                base.evaluation().datasetVersion(),
+                base.evaluation().datasetTimeBasis(),
+                base.evaluation().sourceManifestSha256(),
+                base.evaluation().sourceEvaluationCardManifestSha256()
+        );
+        return new ShadowPerformanceSummary(
+                base.reportType(),
+                base.summaryVersion(),
+                generatedAt,
+                base.evaluationSubject(),
+                base.metricBasis(),
+                base.governance(),
+                evaluation,
+                base.evaluationPopulation(),
+                base.metrics(),
+                base.warnings(),
+                base.limitations(),
+                base.banner()
+        );
+    }
+
+    private List<String> validCanonicalTimestamps() {
+        return java.util.stream.StreamSupport.stream(timestampFixture().get("valid").spliterator(), false)
+                .map(JsonNode::textValue)
+                .toList();
+    }
+
+    private List<JsonNode> invalidCanonicalTimestamps() {
+        return java.util.stream.StreamSupport.stream(timestampFixture().get("invalid").spliterator(), false).toList();
+    }
+
+    private JsonNode timestampFixture() {
+        try {
+            return objectMapper.readTree(TIMESTAMP_FIXTURE.toFile());
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     private ShadowPerformanceSummary.ShadowPerformanceEvaluation replaceEvaluationLineage(

@@ -6,6 +6,10 @@ import { ShadowPerformanceDashboard } from "./ShadowPerformanceDashboard.jsx";
 
 const REQUIRED_BANNER = "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.";
 const MALFORMED_MESSAGE = "Shadow Performance Summary response was malformed. Do not use this view for model assessment.";
+const TIMESTAMP_CASES = JSON.parse(readFileSync(
+  resolve("..", "contract-fixtures", "governance", "canonical-utc-timestamp-cases.json"),
+  "utf8"
+));
 
 describe("ShadowPerformanceDashboard", () => {
   it("rendersShadowPerformanceDashboard", () => {
@@ -362,6 +366,13 @@ describe("ShadowPerformanceDashboard", () => {
     expect(screen.getByText("Alert-recommended precision")).toBeInTheDocument();
   });
 
+  it.each(TIMESTAMP_CASES.valid)("acceptsCanonicalTimestampFixtureCase: %s", (timestamp) => {
+    renderDashboard({ summary: shadowSummaryWithTimestamps(timestamp) });
+
+    expect(screen.queryByText(MALFORMED_MESSAGE)).not.toBeInTheDocument();
+    expect(screen.getByText("Alert-recommended precision")).toBeInTheDocument();
+  });
+
   it.each([
     ["sevenFractionalDigits", "2026-06-13T02:00:00.1234567Z"],
     ["nineFractionalDigits", "2026-06-13T02:00:00.123456789Z"],
@@ -371,6 +382,12 @@ describe("ShadowPerformanceDashboard", () => {
     ["invalidMonth", "2026-13-13T02:00:00Z"],
     ["invalidDay", "2026-06-32T02:00:00Z"]
   ])("rejectsInvalidCanonicalTimestamp: %s", (_name, timestamp) => {
+    expectMalformedSummary((summary) => {
+      summary.generatedAt = timestamp;
+    });
+  });
+
+  it.each(TIMESTAMP_CASES.invalid)("rejectsInvalidCanonicalTimestampFixtureCase: %s", (timestamp) => {
     expectMalformedSummary((summary) => {
       summary.generatedAt = timestamp;
     });
@@ -750,6 +767,13 @@ function shadowSummary(overrides = {}) {
     banner: REQUIRED_BANNER,
     ...overrides
   };
+}
+
+function shadowSummaryWithTimestamps(timestamp) {
+  const summary = shadowSummary({ generatedAt: timestamp });
+  summary.evaluation.evaluationReportGeneratedAt = timestamp;
+  summary.evaluation.evaluationCardGeneratedAt = timestamp;
+  return summary;
 }
 
 function metric(value) {

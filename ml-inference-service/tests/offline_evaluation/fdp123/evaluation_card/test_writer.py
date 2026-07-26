@@ -19,14 +19,14 @@ from offline_evaluation.fdp123.evaluation_card.writer import (
 )
 try:
     from fdp123.evaluation_card.test_generator import PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT, fdp124_artifacts, model_metadata
-    from fdp123.evaluation_card.test_schema import valid_evaluation_card
+    from fdp123.evaluation_card.test_schema import INVALID_CANONICAL_TIMESTAMPS, valid_evaluation_card
 except ModuleNotFoundError:
     try:
         from .test_generator import PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT, fdp124_artifacts, model_metadata
-        from .test_schema import valid_evaluation_card
+        from .test_schema import INVALID_CANONICAL_TIMESTAMPS, valid_evaluation_card
     except ImportError:
         from test_generator import PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT, fdp124_artifacts, model_metadata
-        from test_schema import valid_evaluation_card
+        from test_schema import INVALID_CANONICAL_TIMESTAMPS, valid_evaluation_card
 
 
 class Fdp123EvaluationCardWriterTest(unittest.TestCase):
@@ -70,20 +70,7 @@ class Fdp123EvaluationCardWriterTest(unittest.TestCase):
                 self.assertEqual(hashlib.sha256(payload).hexdigest(), item["sha256"])
 
     def test_manifestGeneratedAtMustExactlyMatchEvaluationCard(self):
-        for value in (
-                "0000-01-01T00:00:00Z",
-                "2026-06-13T24:00:00Z",
-                "2026-06-13T23:60:00Z",
-                "2016-12-31T23:59:60Z",
-                "2026-02-29T00:00:00Z",
-                "2026-06-12T00:00:00+00:00",
-                "2026-06-12T00:00:01Z",
-                "2026-06-12T00:00:00.1234567Z",
-                "2026-06-12T00:00:00",
-                123,
-                True,
-                "2" * 129,
-        ):
+        for value in tuple(INVALID_CANONICAL_TIMESTAMPS) + ("2026-06-12T00:00:01Z",):
             with self.subTest(value=value):
                 with tempfile.TemporaryDirectory() as directory:
                     output = Path(directory)
