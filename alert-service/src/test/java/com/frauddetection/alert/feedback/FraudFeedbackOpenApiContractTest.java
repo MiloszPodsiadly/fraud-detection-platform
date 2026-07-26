@@ -79,13 +79,51 @@ class FraudFeedbackOpenApiContractTest {
 
     @Test
     void nonDecisioningGuardUsesStructuredMachineValues() {
-        assertThatThrownBy(() -> FraudFeedbackNonDecisioningOpenApiPolicy.assertNonDecisioningContract("""
+        for (String operationId : new String[]{
+                "authorizePayment",
+                "authorize_payment",
+                "authorize-payment",
+                "AuthorizePayment"
+        }) {
+            assertThatThrownBy(() -> FraudFeedbackNonDecisioningOpenApiPolicy.assertNonDecisioningContract("""
+                    paths:
+                      /unsafe:
+                        post:
+                          operationId: %s
+                    """.formatted(operationId))).isInstanceOf(AssertionError.class);
+        }
+        for (String yaml : new String[]{
+                """
                 components:
                   schemas:
                     Unsafe:
                       enum: [AUTHORIZE_PAYMENT]
-                """)).isInstanceOf(AssertionError.class);
-        assertThatThrownBy(() -> FraudFeedbackNonDecisioningOpenApiPolicy.assertNonDecisioningContract("""
+                """,
+                """
+                components:
+                  schemas:
+                    Unsafe:
+                      enum: [authorizePayment]
+                """,
+                """
+                components:
+                  schemas:
+                    Unsafe:
+                      default: APPROVE_PAYMENT
+                """,
+                """
+                components:
+                  schemas:
+                    Unsafe:
+                      value: blockTransaction
+                """,
+                """
+                components:
+                  schemas:
+                    Unsafe:
+                      default: blockTransaction
+                """,
+                """
                 paths:
                   /unsafe:
                     get:
@@ -94,8 +132,25 @@ class FraudFeedbackOpenApiContractTest {
                           content:
                             application/json:
                               example:
-                                action: APPROVE_PAYMENT
-                """)).isInstanceOf(AssertionError.class);
+                                action: approvePayment
+                """,
+                """
+                paths:
+                  /unsafe:
+                    get:
+                      responses:
+                        "200":
+                          content:
+                            application/json:
+                              examples:
+                                unsafe:
+                                  value:
+                                    authority: declinePayment
+                """
+        }) {
+            assertThatThrownBy(() -> FraudFeedbackNonDecisioningOpenApiPolicy.assertNonDecisioningContract(yaml))
+                    .isInstanceOf(AssertionError.class);
+        }
         assertThatCode(() -> FraudFeedbackNonDecisioningOpenApiPolicy.assertNonDecisioningContract("""
                 components:
                   schemas:
