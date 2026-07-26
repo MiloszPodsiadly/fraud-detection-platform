@@ -12,7 +12,7 @@ The endpoint returns a bounded, validated `PromotionReviewReadinessReport` DTO f
 
 ## Runtime Source
 
-The runtime provider reads only the configured current JSON artifact:
+The runtime provider reads only the configured current report artifact and its required sibling `manifest.json`:
 
 ```yaml
 promotion-review-readiness:
@@ -24,6 +24,9 @@ promotion-review-readiness:
 ```
 
 The provider is disabled by default and has no static, sample, demo, stale, or zero fallback. It does not invoke Python, Makefile, shell commands, FDP-111 generation, Kafka, schedulers, scoring, model registry writes, or alert-service runtime mutation.
+The configured path must resolve to `promotion-review-readiness-report.json`; the provider rejects standalone reports
+without `manifest.json`, renamed reports, malformed manifests, hash mismatches, size mismatches, and manifest/report
+`generatedAt` mismatches.
 
 ## HTTP Semantics
 
@@ -31,13 +34,16 @@ The provider is disabled by default and has no static, sample, demo, stale, or z
 - `401` means the request is unauthenticated.
 - `403` means the authenticated principal lacks `promotion-readiness:read`.
 - `404` means the provider is disabled or no current report path is configured.
-- `503` means the provider is configured but broken: missing file, unreadable file, malformed JSON, invalid schema, unsupported report type/version, unsupported readiness status, missing required booleans, non-JSON source, directory source, path traversal, symlink source, symlink directory, or file larger than the configured bound.
+- `503` means the provider is configured but broken: missing file, missing manifest, unreadable file, malformed JSON, duplicate JSON key, invalid schema, unsupported report type/version, unsupported readiness status, missing required booleans, non-JSON source, directory source, path traversal, symlink source, symlink directory, hash mismatch, size mismatch, generatedAt mismatch, or file larger than the configured bound.
 
 Configured-but-broken sources return `503`, not `404`, so local and operational misconfiguration remains visible.
 
 ## Validation Boundary
 
 The Java validator validates the public report contract and recomputes readiness from immutable `checkInputs`. It does not recompute metrics, thresholds, promotion status, production decisioning approval, payment authorization, automatic approve/decline/block logic, or analyst recommendation logic.
+The manifest SHA-256 binds the manifest to exact local report bytes. It is not a signature, producer identity proof,
+cryptographic attestation, or protection from a privileged writer replacing both files inside the deployment trust
+boundary.
 
 The response intentionally exposes only bounded diagnostic fields, including explicit non-goal booleans such as `notAnalystRecommendation`. It never exposes raw FDP-102 records, raw evaluation cards, raw evaluation reports, transaction references, customer identifiers, feature vectors, model registry data, secrets, stack traces, or filesystem paths.
 

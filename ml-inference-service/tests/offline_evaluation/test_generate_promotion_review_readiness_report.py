@@ -15,8 +15,10 @@ from offline_evaluation.generate_promotion_review_readiness_report import (
     generate_promotion_review_readiness_report,
     main,
     publish_promotion_review_readiness_report,
+    validate_promotion_review_readiness_artifact_set,
     validate_promotion_review_readiness_report_file,
 )
+import offline_evaluation.promotion_review_readiness_artifact_set as readiness_artifact_set
 from offline_evaluation.promotion_review_readiness_schema import (
     BANNER,
     GOVERNANCE_STATUS,
@@ -65,8 +67,36 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
             report = generate(paths)
 
             self.assertEqual(report, validate_promotion_review_readiness_report_file(paths.output))
+            self.assertEqual(report, validate_promotion_review_readiness_artifact_set(paths.output, paths.output.with_name("manifest.json")))
             self.assertEqual(report, validate_promotion_review_readiness_report(report))
             self.assertEqual(64, len(report["checkInputs"]["sourceShadowSummaryManifestSha256"]))
+            self.assertTrue(paths.output.with_name("manifest.json").exists())
+
+    def test_missingPromotionReadinessManifestRejected(self):
+        with workspace() as paths:
+            generate(paths)
+            paths.output.with_name("manifest.json").unlink()
+
+            with self.assertRaises(PromotionReviewReadinessGenerationError):
+                validate_promotion_review_readiness_artifact_set(paths.output, paths.output.with_name("manifest.json"))
+
+    def test_promotionReadinessManifestHashAndSizeMismatchRejected(self):
+        with workspace() as paths:
+            generate(paths)
+            manifest = paths.output.with_name("manifest.json")
+            manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
+
+            manifest_payload["files"][0]["sha256"] = "b" * 64
+            manifest.write_text(json.dumps(manifest_payload, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+            with self.assertRaises(PromotionReviewReadinessGenerationError):
+                validate_promotion_review_readiness_artifact_set(paths.output, manifest)
+
+            generate(paths)
+            manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
+            manifest_payload["files"][0]["sizeBytes"] = 1
+            manifest.write_text(json.dumps(manifest_payload, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+            with self.assertRaises(PromotionReviewReadinessGenerationError):
+                validate_promotion_review_readiness_artifact_set(paths.output, manifest)
 
     def test_rejectsLegacyWarnAndNotApplicableCheckStatuses(self):
         for status in ("WARN", "NOT_APPLICABLE"):
@@ -144,6 +174,17 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
             with self.assertRaises(PromotionReviewReadinessGenerationError):
                 validate_promotion_review_readiness_report_file(paths.output)
 
+    def test_duplicateJsonKeysInReportFileRejected(self):
+        with workspace() as paths:
+            paths.output.parent.mkdir(parents=True, exist_ok=True)
+            paths.output.write_text(
+                '{"reportType":"PROMOTION_REVIEW_READINESS_REPORT_V1","reportType":"FORGED"}',
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(PromotionReviewReadinessGenerationError):
+                validate_promotion_review_readiness_report_file(paths.output)
+
     def test_missingDiagnosticOnlyFlagsDoesNotPublishReport(self):
         with workspace() as paths:
             summary = valid_summary()
@@ -182,14 +223,20 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
         with workspace() as paths:
             payload = valid_payload()
             seen = []
+            original = readiness_artifact_set.read_validated_promotion_review_readiness_artifact_set
 
-            def validate(path):
-                seen.append(path.name == "promotion-review-readiness-report.json.tmp" and not paths.output.exists())
-                return validate_promotion_review_readiness_report_file(path)
+            def validate(report_path, manifest_path, **kwargs):
+                seen.append(
+                    report_path.name == "promotion-review-readiness-report.json.tmp"
+                    and manifest_path.name == "manifest.json.tmp"
+                    and not paths.output.exists()
+                    and not paths.output.with_name("manifest.json").exists()
+                )
+                return original(report_path, manifest_path, **kwargs)
 
             with patch(
-                    "offline_evaluation.generate_promotion_review_readiness_report."
-                    "validate_promotion_review_readiness_report_file",
+                    "offline_evaluation.promotion_review_readiness_artifact_set."
+                    "read_validated_promotion_review_readiness_artifact_set",
                     validate,
             ):
                 publish_promotion_review_readiness_report(payload, paths.output, allowed_output_root=paths.output.parent)
@@ -199,38 +246,47 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
     def test_validatesTempFileBeforePublish(self):
         with workspace() as paths:
             calls = []
+            original = readiness_artifact_set.read_validated_promotion_review_readiness_artifact_set
 
-            def validate(path):
-                calls.append(path)
-                return validate_promotion_review_readiness_report_file(path)
+            def validate(report_path, manifest_path, **kwargs):
+                calls.append((report_path, manifest_path))
+                return original(report_path, manifest_path, **kwargs)
 
             with patch(
-                    "offline_evaluation.generate_promotion_review_readiness_report."
-                    "validate_promotion_review_readiness_report_file",
+                    "offline_evaluation.promotion_review_readiness_artifact_set."
+                    "read_validated_promotion_review_readiness_artifact_set",
                     validate,
             ):
                 publish_promotion_review_readiness_report(valid_payload(), paths.output, allowed_output_root=paths.output.parent)
 
-            self.assertEqual([paths.output.with_name("promotion-review-readiness-report.json.tmp")], calls)
+            self.assertEqual([
+                (
+                    paths.output.with_name("promotion-review-readiness-report.json.tmp"),
+                    paths.output.with_name("manifest.json.tmp"),
+                )
+            ], calls)
 
     def test_atomicMovePublishesOnlyAfterValidation(self):
         with workspace() as paths:
             state = []
+            original = readiness_artifact_set.read_validated_promotion_review_readiness_artifact_set
 
-            def validate(path):
-                state.append((path.exists(), paths.output.exists()))
-                return validate_promotion_review_readiness_report_file(path)
+            def validate(report_path, manifest_path, **kwargs):
+                state.append((report_path.exists(), manifest_path.exists(), paths.output.exists(), paths.output.with_name("manifest.json").exists()))
+                return original(report_path, manifest_path, **kwargs)
 
             with patch(
-                    "offline_evaluation.generate_promotion_review_readiness_report."
-                    "validate_promotion_review_readiness_report_file",
+                    "offline_evaluation.promotion_review_readiness_artifact_set."
+                    "read_validated_promotion_review_readiness_artifact_set",
                     validate,
             ):
                 publish_promotion_review_readiness_report(valid_payload(), paths.output, allowed_output_root=paths.output.parent)
 
-            self.assertEqual([(True, False)], state)
+            self.assertEqual([(True, True, False, False)], state)
             self.assertTrue(paths.output.exists())
             self.assertFalse(paths.output.with_name("promotion-review-readiness-report.json.tmp").exists())
+            self.assertTrue(paths.output.with_name("manifest.json").exists())
+            self.assertFalse(paths.output.with_name("manifest.json.tmp").exists())
 
     def test_validationFailureDoesNotOverwritePreviousValidReport(self):
         with workspace() as paths:
@@ -243,6 +299,34 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
 
             self.assertEqual(existing, paths.output.read_text(encoding="utf-8"))
             self.assertFalse(paths.output.with_name("promotion-review-readiness-report.json.tmp").exists())
+
+    def test_interruptedOverwriteRemovesFinalManifestAndRejectsMixedDirectory(self):
+        with workspace() as paths:
+            payload_a = valid_payload(minimum_diagnostic_evidence_records=1)
+            payload_b = valid_payload(minimum_diagnostic_evidence_records=30)
+            publish_promotion_review_readiness_report(payload_a, paths.output, allowed_output_root=paths.output.parent)
+            report_a = validate_promotion_review_readiness_artifact_set(paths.output, paths.output.with_name("manifest.json"))
+            self.assertEqual("REVIEWABLE", report_a["readinessStatus"])
+            real_replace = readiness_artifact_set.os.replace
+
+            def fail_after_report_replace(source, target):
+                real_replace(source, target)
+                if Path(target).name == "promotion-review-readiness-report.json":
+                    raise OSError("injected after report replace")
+
+            with patch("offline_evaluation.promotion_review_readiness_artifact_set.os.replace", fail_after_report_replace):
+                with self.assertRaises(PromotionReviewReadinessGenerationError):
+                    publish_promotion_review_readiness_report(payload_b, paths.output, allowed_output_root=paths.output.parent)
+
+            self.assertFalse(paths.output.with_name("manifest.json").exists())
+            self.assertFalse(paths.output.with_name("promotion-review-readiness-report.json.tmp").exists())
+            self.assertFalse(paths.output.with_name("manifest.json.tmp").exists())
+            with self.assertRaises(PromotionReviewReadinessGenerationError):
+                validate_promotion_review_readiness_artifact_set(paths.output, paths.output.with_name("manifest.json"))
+
+            publish_promotion_review_readiness_report(payload_b, paths.output, allowed_output_root=paths.output.parent)
+            report_b = validate_promotion_review_readiness_artifact_set(paths.output, paths.output.with_name("manifest.json"))
+            self.assertEqual("INSUFFICIENT_DATA", report_b["readinessStatus"])
 
     def test_rejectsOutputPathOutsideLocalGeneratedPromotionReviewReadiness(self):
         with workspace() as paths:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,6 +13,11 @@ from offline_evaluation.promotion_review_readiness_schema import (
     build_promotion_review_readiness_report,
     promotion_review_readiness_report_json,
     validate_promotion_review_readiness_report,
+)
+from offline_evaluation.promotion_review_readiness_artifact_set import (
+    PromotionReviewReadinessArtifactSetError,
+    publish_promotion_review_readiness_artifact_set,
+    read_validated_promotion_review_readiness_artifact_set,
 )
 from offline_evaluation.shadow_performance_artifact_set import read_validated_shadow_performance_artifact_set
 
@@ -63,18 +67,18 @@ def publish_promotion_review_readiness_report(
 ) -> Path:
     final_path = _assert_allowed_output_path(output_path, allowed_output_root=allowed_output_root)
     final_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = final_path.with_name(f"{final_path.name}.tmp")
-    if temp_path.is_symlink():
-        raise PromotionReviewReadinessGenerationError("temporary output path must not be a symlink")
-
-    temp_path.write_text(payload, encoding="utf-8")
     try:
-        validate_promotion_review_readiness_report_file(temp_path)
-        os.replace(temp_path, final_path)
-    except Exception:
-        temp_path.unlink(missing_ok=True)
-        raise
+        publish_promotion_review_readiness_artifact_set(payload, final_path)
+    except Exception as exc:
+        raise PromotionReviewReadinessGenerationError(str(exc)) from exc
     return final_path
+
+
+def validate_promotion_review_readiness_artifact_set(report_path: Path, manifest_path: Path) -> dict[str, Any]:
+    try:
+        return read_validated_promotion_review_readiness_artifact_set(report_path, manifest_path)
+    except PromotionReviewReadinessArtifactSetError as exc:
+        raise PromotionReviewReadinessGenerationError(str(exc)) from exc
 
 
 def validate_promotion_review_readiness_report_file(path: Path) -> dict[str, Any]:

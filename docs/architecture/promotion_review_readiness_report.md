@@ -47,9 +47,13 @@ The local/offline generator writes:
 
 ```text
 deployment/local-generated/promotion-readiness/promotion-review-readiness-report.json
+deployment/local-generated/promotion-readiness/manifest.json
 ```
 
-The filename includes `review` so the artifact cannot be confused with promotion approval.
+The report and sibling manifest form the Promotion Review Readiness artifact set. The manifest uses
+`PROMOTION_REVIEW_READINESS_ARTIFACT_SET_V1`, `promotion-review-readiness-artifact-set-v1`, the exact report
+`generatedAt`, and one canonical `promotion-review-readiness-report.json` file entry with lowercase SHA-256 and
+`sizeBytes`. The filename includes `review` so the artifact cannot be confused with promotion approval.
 
 ## Status Semantics
 
@@ -83,6 +87,15 @@ The report also includes explicit non-decisioning flags, including `notAnalystRe
 
 The report carries immutable `checkInputs`, including the source Shadow Performance manifest SHA-256. Validators derive
 checks, reason codes, and readiness status from those inputs and reject reports where stored checks have been edited.
+The SHA-256 values are local integrity and lineage fingerprints over exact local bytes. They are not signatures, producer
+authentication, independent attestation, legal proof, or protection against a privileged deployment writer replacing both
+artifact and manifest inside the filesystem trust boundary.
+
+Publication is manifest-last and fail-closed: the generator serializes and validates the report, writes temporary report
+and manifest files, validates the temporary artifact set, removes the old final manifest, replaces the report, then
+replaces the fresh manifest last. Symlink checks and `O_NOFOLLOW` are misuse hardening; local TOCTOU is not advertised as
+fully eliminated on every platform. Atomic replacement alone is not power-loss durability unless files and directories are
+explicitly synchronized, which is outside this local generator scope.
 
 ## Non-Decisioning Boundary
 

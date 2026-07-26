@@ -126,9 +126,14 @@ class PromotionReviewReadinessReadApiArchitectureGuardTest {
 
         assertThat(source).contains(
                 "PromotionReviewReadinessReportCurrentProperties",
+                "manifest.json",
+                "PROMOTION_REVIEW_READINESS_ARTIFACT_SET_V1",
+                "promotion-review-readiness-artifact-set-v1",
                 "LinkOption.NOFOLLOW_LINKS",
                 "startsWith(baseDir)",
-                "readBoundedArtifact(artifactPath)",
+                "readBoundedArtifact(manifestPath, MAX_MANIFEST_SIZE_BYTES)",
+                "readBoundedArtifact(artifactPath, properties.maxSizeBytes())",
+                "validateManifest(manifestPayload, reportPayload, report)",
                 "objectMapper.readValue(payload, PromotionReviewReadinessReport.class)",
                 "validator.validate(report)",
                 "Files.isSymbolicLink"

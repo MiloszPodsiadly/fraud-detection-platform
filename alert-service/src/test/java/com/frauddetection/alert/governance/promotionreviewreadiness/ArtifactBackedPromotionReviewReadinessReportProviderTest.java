@@ -11,6 +11,8 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -21,6 +23,7 @@ import static org.mockito.Mockito.verify;
 class ArtifactBackedPromotionReviewReadinessReportProviderTest {
 
     private static final String FIXTURE = "fixtures/promotion-review-readiness/promotion-review-readiness-report.json";
+    private static final String REPORT_FILENAME = "promotion-review-readiness-report.json";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final PromotionReviewReadinessReportValidator validator = spy(new PromotionReviewReadinessReportValidator());
@@ -59,7 +62,15 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
 
     @Test
     void configuredMissingSourceMapsToUnavailable() {
-        assertUnavailable(provider(tempDir.resolve("missing.json")));
+        assertUnavailable(provider(tempDir.resolve(REPORT_FILENAME)));
+    }
+
+    @Test
+    void configuredMissingManifestMapsToUnavailable() throws Exception {
+        Path artifact = writeReport(PromotionReviewReadinessReportTestFixtures.validReport());
+        Files.delete(artifact.resolveSibling("manifest.json"));
+
+        assertUnavailable(provider(artifact));
     }
 
     @Test
@@ -164,7 +175,7 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
     void configuredDirectoryNonJsonTraversalAndUnreadablePathsMapToUnavailable() throws Exception {
         assertUnavailable(provider(tempDir));
         assertUnavailable(provider(writeJson("report.txt", validReportJson())));
-        assertUnavailable(provider(true, Path.of("..", "current-report.json")));
+        assertUnavailable(provider(true, Path.of("..", REPORT_FILENAME)));
         assertUnavailable(provider(true, "\u0000", 262_144L));
     }
 
@@ -179,10 +190,11 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
 
     @Test
     void configuredSymlinkFileMapsToUnavailable() throws Exception {
-        Path artifact = writeReport(PromotionReviewReadinessReportTestFixtures.validReport());
-        Path symlink = tempDir.resolve("current-report-link.json");
+        Path target = tempDir.resolve("target-" + REPORT_FILENAME);
+        objectMapper.writeValue(target.toFile(), PromotionReviewReadinessReportTestFixtures.validReport());
+        Path symlink = tempDir.resolve(REPORT_FILENAME);
         try {
-            Files.createSymbolicLink(symlink, artifact);
+            Files.createSymbolicLink(symlink, target);
         } catch (UnsupportedOperationException | IOException exception) {
             return;
         }
@@ -202,21 +214,48 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
         } catch (UnsupportedOperationException | IOException exception) {
             return;
         }
-        Path artifact = realDirectory.resolve("current-report.json");
+        Path artifact = realDirectory.resolve(REPORT_FILENAME);
         objectMapper.writeValue(artifact.toFile(), PromotionReviewReadinessReportTestFixtures.validReport());
 
-        assertUnavailable(provider(true, tempDir, symlinkDirectory.resolve("current-report.json")));
+        assertUnavailable(provider(true, tempDir, symlinkDirectory.resolve(REPORT_FILENAME)));
     }
 
     @Test
     void providerDoesNotExposeConfiguredPathWhenUnavailable() {
-        Path missing = tempDir.resolve("secret-current-report.json");
+        Path missing = tempDir.resolve("secret-" + REPORT_FILENAME);
 
         assertThatThrownBy(provider(missing)::currentReport)
                 .isInstanceOf(PromotionReviewReadinessReportProviderUnavailableException.class)
                 .hasMessage("Current promotion review readiness report artifact unavailable.")
                 .hasMessageNotContaining(tempDir.toString())
-                .hasMessageNotContaining("secret-current-report.json");
+                .hasMessageNotContaining("secret-" + REPORT_FILENAME);
+    }
+
+    @Test
+    void configuredWrongManifestHashOrSizeMapsToUnavailable() throws Exception {
+        Path artifact = writeReport(PromotionReviewReadinessReportTestFixtures.validReport());
+        Files.writeString(artifact.resolveSibling("manifest.json"), manifestFor(Files.readString(artifact), "b".repeat(64), null));
+        assertUnavailable(provider(artifact));
+
+        Files.writeString(artifact.resolveSibling("manifest.json"), manifestFor(Files.readString(artifact), null, 1L));
+        assertUnavailable(provider(artifact));
+    }
+
+    @Test
+    void configuredDuplicateJsonKeysMapToUnavailable() throws Exception {
+        String duplicateRoot = validReportJson().replaceFirst(
+                "\\{",
+                "{\"reportType\":\"PROMOTION_REVIEW_READINESS_REPORT_V1\","
+        );
+        assertUnavailable(provider(writeJson(duplicateRoot)));
+
+        String json = validReportJson();
+        Path artifact = writeJson(json);
+        Files.writeString(artifact.resolveSibling("manifest.json"), manifestFor(json).replaceFirst(
+                "\"sha256\":\"[a-f0-9]{64}\"",
+                "\"sha256\":\"" + sha256(json) + "\",\"sha256\":\"" + sha256(json) + "\""
+        ));
+        assertUnavailable(provider(artifact));
     }
 
     @Test
@@ -280,28 +319,58 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
     }
 
     private Path writeReport(PromotionReviewReadinessReport report) throws Exception {
-        Path artifact = tempDir.resolve("current-report.json");
+        Path artifact = tempDir.resolve(REPORT_FILENAME);
         objectMapper.writeValue(artifact.toFile(), report);
+        Files.writeString(artifact.resolveSibling("manifest.json"), manifestFor(Files.readString(artifact)));
         return artifact;
     }
 
     private Path writeJson(String json) throws IOException {
-        return writeJson("current-report.json", json);
+        return writeJson(REPORT_FILENAME, json);
     }
 
     private Path writeJson(String fileName, String json) throws IOException {
         Path artifact = tempDir.resolve(fileName);
         Files.writeString(artifact, json);
+        if (REPORT_FILENAME.equals(fileName)) {
+            Files.writeString(artifact.resolveSibling("manifest.json"), manifestFor(json));
+        }
         return artifact;
     }
 
     private Path copyFixture() throws Exception {
-        Path artifact = tempDir.resolve("current-report.json");
+        Path artifact = tempDir.resolve(REPORT_FILENAME);
         try (InputStream stream = getClass().getClassLoader().getResourceAsStream(FIXTURE)) {
             assertThat(stream).isNotNull();
             Files.copy(stream, artifact);
         }
+        Files.writeString(artifact.resolveSibling("manifest.json"), manifestFor(Files.readString(artifact)));
         return artifact;
+    }
+
+    private String manifestFor(String json) {
+        return manifestFor(json, null, null);
+    }
+
+    private String manifestFor(String json, String sha256, Long sizeBytes) {
+        return """
+                {"artifactSetVersion":"promotion-review-readiness-artifact-set-v1","files":[{"path":"%s","sha256":"%s","sizeBytes":%d}],"generatedAt":"%s","reportType":"PROMOTION_REVIEW_READINESS_ARTIFACT_SET_V1"}
+                """.formatted(
+                REPORT_FILENAME,
+                sha256 == null ? sha256(json) : sha256,
+                sizeBytes == null ? json.getBytes(java.nio.charset.StandardCharsets.UTF_8).length : sizeBytes,
+                PromotionReviewReadinessReportTestFixtures.validReport().generatedAt()
+        );
+    }
+
+    private String sha256(String json) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(
+                    json.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+            ));
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     private String validReportJson() throws Exception {
