@@ -8,7 +8,7 @@ const PROMOTION_REVIEW_READINESS_STATUSES = new Set([
   "REVIEWABLE"
 ]);
 const CHECK_STATUSES = new Set(["PASS", "WARN", "FAIL", "INCONCLUSIVE", "NOT_APPLICABLE"]);
-const CHECK_SEVERITIES = new Set(["INFO", "LOW", "MEDIUM", "HIGH"]);
+const CHECK_SEVERITY_VALUES = new Set(["INFO", "LOW", "MEDIUM", "HIGH"]);
 const MAX_DIAGNOSTIC_RECORDS = 1000;
 const MAX_BANNER_LENGTH = 512;
 const MAX_CHECKS = 50;
@@ -16,7 +16,54 @@ const MAX_MACHINE_CODE_ITEMS = 20;
 const MAX_CHECK_NAME_LENGTH = 128;
 const MAX_MACHINE_CODE_LENGTH = 128;
 const MAX_SUMMARY_VERSION_LENGTH = 32;
-const MACHINE_CODE_PATTERN = /^[A-Z0-9_-]+$/;
+const MACHINE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
+const RFC3339_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const REQUIRED_CHECK_NAMES = [
+  "CURRENT_SUMMARY_PRESENT",
+  "CURRENT_SUMMARY_VERSION_SUPPORTED",
+  "EVALUATION_CARD_PRESENT",
+  "EVALUATION_CARD_VERSION_SUPPORTED",
+  "GOVERNANCE_STATUS_DIAGNOSTIC_ONLY",
+  "NOT_PRODUCTION_APPROVAL_TRUE",
+  "NOT_PROMOTION_APPROVAL_TRUE",
+  "NOT_THRESHOLD_RECOMMENDATION_TRUE",
+  "NOT_PAYMENT_AUTHORIZATION_TRUE",
+  "NOT_AUTOMATIC_DECISIONING_TRUE",
+  "EVALUATION_REPORT_TYPE_SUPPORTED",
+  "METRIC_BASIS_SUPPORTED",
+  "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS",
+  "ALERT_RECOMMENDED_PRECISION_AVAILABLE",
+  "ALERT_RECOMMENDED_RECALL_AVAILABLE",
+  "FALSE_POSITIVE_RATE_AVAILABLE",
+  "FALSE_NEGATIVE_RATE_AVAILABLE"
+];
+const REQUIRED_CHECK_NAME_SET = new Set(REQUIRED_CHECK_NAMES);
+const CHECK_SEVERITIES = new Map([
+  ["CURRENT_SUMMARY_PRESENT", "INFO"],
+  ["CURRENT_SUMMARY_VERSION_SUPPORTED", "INFO"],
+  ["EVALUATION_CARD_PRESENT", "INFO"],
+  ["EVALUATION_CARD_VERSION_SUPPORTED", "INFO"],
+  ["GOVERNANCE_STATUS_DIAGNOSTIC_ONLY", "INFO"],
+  ["NOT_PRODUCTION_APPROVAL_TRUE", "INFO"],
+  ["NOT_PROMOTION_APPROVAL_TRUE", "INFO"],
+  ["NOT_THRESHOLD_RECOMMENDATION_TRUE", "INFO"],
+  ["NOT_PAYMENT_AUTHORIZATION_TRUE", "INFO"],
+  ["NOT_AUTOMATIC_DECISIONING_TRUE", "INFO"],
+  ["EVALUATION_REPORT_TYPE_SUPPORTED", "INFO"],
+  ["METRIC_BASIS_SUPPORTED", "INFO"],
+  ["MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", "HIGH"],
+  ["ALERT_RECOMMENDED_PRECISION_AVAILABLE", "MEDIUM"],
+  ["ALERT_RECOMMENDED_RECALL_AVAILABLE", "MEDIUM"],
+  ["FALSE_POSITIVE_RATE_AVAILABLE", "MEDIUM"],
+  ["FALSE_NEGATIVE_RATE_AVAILABLE", "MEDIUM"]
+]);
+const REQUIRED_LIMITATIONS = new Set([
+  "OFFLINE_DIAGNOSTIC_AID_ONLY",
+  "HUMAN_REVIEW_START_ONLY",
+  "DOES_NOT_RECOMMEND_THRESHOLDS",
+  "DOES_NOT_AUTHORIZE_PAYMENTS",
+  "DOES_NOT_CHANGE_SCORING"
+]);
 const FORBIDDEN_RAW_TERMS = [
   "transactionReference",
   "evaluationRecordId",
@@ -62,9 +109,29 @@ const FORBIDDEN_DECISIONING_COMPACT_TERMS = FORBIDDEN_DECISIONING_TERMS.map(comp
 
 export function isValidPromotionReviewReadinessReport(report) {
   return isPlainObject(report)
+    && hasExactKeys(report, [
+      "reportType",
+      "reportVersion",
+      "generatedAt",
+      "governanceStatus",
+      "readinessStatus",
+      "diagnosticOnly",
+      "notPromotionApproval",
+      "notThresholdRecommendation",
+      "notProductionDecisioning",
+      "notPaymentAuthorization",
+      "notAutomaticDecisioning",
+      "notAnalystRecommendation",
+      "inputs",
+      "checks",
+      "reasonCodes",
+      "warnings",
+      "limitations",
+      "banner"
+    ])
     && report.reportType === PROMOTION_REVIEW_READINESS_REPORT_TYPE
     && report.reportVersion === PROMOTION_REVIEW_READINESS_REPORT_VERSION
-    && isParseableDateString(report.generatedAt)
+    && isStrictRfc3339Timestamp(report.generatedAt)
     && report.governanceStatus === PROMOTION_REVIEW_READINESS_GOVERNANCE_STATUS
     && PROMOTION_REVIEW_READINESS_STATUSES.has(report.readinessStatus)
     && report.diagnosticOnly === true
@@ -75,60 +142,64 @@ export function isValidPromotionReviewReadinessReport(report) {
     && report.notAutomaticDecisioning === true
     && report.notAnalystRecommendation === true
     && isBoundedNonEmptyString(report.banner, MAX_BANNER_LENGTH)
-    && isValidInputs(report.inputs)
-    && isValidChecks(report.checks, report.readinessStatus)
-    && isValidMachineCodeList(report.reasonCodes)
+    && isValidInputs(report.inputs, report.generatedAt)
+    && isValidChecks(report.checks)
+    && report.readinessStatus === deriveReadinessStatus(report.checks)
+    && isExactReasonCodes(report.reasonCodes, report.checks)
     && isValidMachineCodeList(report.warnings)
-    && isValidMachineCodeList(report.limitations);
+    && isValidMachineCodeList(report.limitations)
+    && containsRequiredLimitations(report.limitations);
 }
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function isValidInputs(inputs) {
+function isValidInputs(inputs, reportGeneratedAt) {
   const shadowPerformanceSummary = inputs?.shadowPerformanceSummary;
   return isPlainObject(inputs)
+    && hasExactKeys(inputs, ["shadowPerformanceSummary", "minimumDiagnosticEvidenceRecords", "recordsEvaluated"])
     && isPlainObject(shadowPerformanceSummary)
-    && typeof shadowPerformanceSummary.present === "boolean"
+    && hasExactKeys(shadowPerformanceSummary, ["present", "reportType", "summaryVersion", "generatedAt"])
+    && shadowPerformanceSummary.present === true
     && shadowPerformanceSummary.reportType === "SHADOW_PERFORMANCE_SUMMARY_V2"
     && isBoundedString(shadowPerformanceSummary.summaryVersion, MAX_SUMMARY_VERSION_LENGTH)
     && shadowPerformanceSummary.summaryVersion === "shadow-performance-summary-v2"
     && !containsForbiddenTerm(shadowPerformanceSummary.reportType)
     && !containsForbiddenTerm(shadowPerformanceSummary.summaryVersion)
-    && isOptionalParseableDateString(shadowPerformanceSummary.generatedAt)
+    && isStrictRfc3339Timestamp(shadowPerformanceSummary.generatedAt)
+    && isOrderedTimestamp(shadowPerformanceSummary.generatedAt, reportGeneratedAt)
     && isBoundedInteger(inputs.minimumDiagnosticEvidenceRecords, 1, MAX_DIAGNOSTIC_RECORDS)
     && isBoundedInteger(inputs.recordsEvaluated, 0, MAX_DIAGNOSTIC_RECORDS);
 }
 
-function isValidChecks(checks, readinessStatus) {
-  if (!Array.isArray(checks) || checks.length < 1 || checks.length > MAX_CHECKS) {
+function isValidChecks(checks) {
+  if (!Array.isArray(checks) || checks.length !== REQUIRED_CHECK_NAMES.length || checks.length > MAX_CHECKS) {
     return false;
   }
   const names = new Set();
-  let hasFail = false;
   for (const check of checks) {
     if (!isPlainObject(check)
+        || !hasExactKeys(check, ["name", "status", "severity"])
         || !isBoundedNonEmptyString(check.name, MAX_CHECK_NAME_LENGTH)
+        || !REQUIRED_CHECK_NAME_SET.has(check.name)
         || !CHECK_STATUSES.has(check.status)
-        || !CHECK_SEVERITIES.has(check.severity)
-        || containsForbiddenTerm(check.name)) {
+        || !CHECK_SEVERITY_VALUES.has(check.severity)
+        || CHECK_SEVERITIES.get(check.name) !== check.severity) {
       return false;
     }
     if (names.has(check.name)) {
       return false;
     }
     names.add(check.name);
-    if (check.status === "FAIL") {
-      hasFail = true;
-    }
   }
-  return !(readinessStatus === "REVIEWABLE" && hasFail);
+  return REQUIRED_CHECK_NAMES.every((name) => names.has(name));
 }
 
 function isValidMachineCodeList(values) {
   return Array.isArray(values)
     && values.length <= MAX_MACHINE_CODE_ITEMS
+    && new Set(values).size === values.length
     && values.every((value) => isMachineCode(value) && !containsForbiddenTerm(value));
 }
 
@@ -148,12 +219,22 @@ function isBoundedInteger(value, min, max) {
   return Number.isInteger(value) && value >= min && value <= max;
 }
 
-function isParseableDateString(value) {
-  return isBoundedNonEmptyString(value, 128) && !Number.isNaN(Date.parse(value));
+function isStrictRfc3339Timestamp(value) {
+  if (!isBoundedNonEmptyString(value, 128) || !RFC3339_TIMESTAMP_PATTERN.test(value)) {
+    return false;
+  }
+  if (!hasValidCalendarDate(value)) {
+    return false;
+  }
+  const time = Date.parse(value);
+  return Number.isFinite(time) && new Date(time).toISOString() === new Date(value).toISOString();
 }
 
-function isOptionalParseableDateString(value) {
-  return value === "" || value === null || value === undefined || isParseableDateString(value);
+function isOrderedTimestamp(earlier, later) {
+  if (!isStrictRfc3339Timestamp(earlier) || !isStrictRfc3339Timestamp(later)) {
+    return false;
+  }
+  return Date.parse(earlier) <= Date.parse(later);
 }
 
 function containsForbiddenTerm(value) {
@@ -166,4 +247,60 @@ function containsForbiddenTerm(value) {
 
 function compactText(value) {
   return String(value || "").replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+}
+
+function hasExactKeys(value, expectedKeys) {
+  const actual = Object.keys(value).sort();
+  const expected = [...expectedKeys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function deriveReadinessStatus(checks) {
+  const failedChecks = checks.filter((check) => check.status === "FAIL");
+  if (failedChecks.length > 0) {
+    return failedChecks.some((check) => check.name === "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS")
+      ? "INSUFFICIENT_DATA"
+      : "NOT_REVIEWABLE";
+  }
+  return checks.some((check) => check.status === "INCONCLUSIVE") ? "INCONCLUSIVE" : "REVIEWABLE";
+}
+
+function derivedReasonCodes(checks) {
+  return checks
+    .flatMap((check) => {
+      if (check.status === "FAIL") {
+        return [`${check.name}_FAILED`];
+      }
+      if (check.status === "INCONCLUSIVE") {
+        return [`${check.name}_INCONCLUSIVE`];
+      }
+      return [];
+    })
+    .sort();
+}
+
+function isExactReasonCodes(reasonCodes, checks) {
+  if (!Array.isArray(reasonCodes)
+      || reasonCodes.length > MAX_MACHINE_CODE_ITEMS
+      || new Set(reasonCodes).size !== reasonCodes.length
+      || !reasonCodes.every(isMachineCode)) {
+    return false;
+  }
+  const expected = derivedReasonCodes(checks);
+  return reasonCodes.length === expected.length && reasonCodes.every((code, index) => code === expected[index]);
+}
+
+function containsRequiredLimitations(limitations) {
+  return Array.isArray(limitations) && [...REQUIRED_LIMITATIONS].every((limitation) => limitations.includes(limitation));
+}
+
+function hasValidCalendarDate(value) {
+  const [, year, month, day] = /^(\d{4})-(\d{2})-(\d{2})T/.exec(value) || [];
+  if (!year) {
+    return false;
+  }
+  const parsed = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  return parsed.getUTCFullYear() === Number(year)
+    && parsed.getUTCMonth() === Number(month) - 1
+    && parsed.getUTCDate() === Number(day);
 }

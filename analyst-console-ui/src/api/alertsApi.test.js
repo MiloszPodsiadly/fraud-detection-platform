@@ -325,9 +325,12 @@ describe("alertsApi auth headers", () => {
     ["oversizedBanner", (report) => { report.banner = "A".repeat(513); }],
     ["missingInputs", (report) => { delete report.inputs; }],
     ["missingShadowPerformanceSummaryInput", (report) => { delete report.inputs.shadowPerformanceSummary; }],
+    ["shadowPerformanceSummaryNotPresent", (report) => { report.inputs.shadowPerformanceSummary.present = false; }],
     ["rawShadowReportType", (report) => { report.inputs.shadowPerformanceSummary.reportType = "rawPayload"; }],
     ["unsafeShadowSummaryVersion", (report) => { report.inputs.shadowPerformanceSummary.summaryVersion = "approved"; }],
+    ["missingShadowSummaryGeneratedAt", (report) => { delete report.inputs.shadowPerformanceSummary.generatedAt; }],
     ["invalidShadowSummaryGeneratedAt", (report) => { report.inputs.shadowPerformanceSummary.generatedAt = "not-a-date"; }],
+    ["reportGeneratedBeforeSourceSummary", (report) => { report.generatedAt = "2026-06-13T01:00:00Z"; }],
     ["missingMinimumDiagnosticEvidenceRecords", (report) => { delete report.inputs.minimumDiagnosticEvidenceRecords; }],
     ["zeroMinimumDiagnosticEvidenceRecords", (report) => { report.inputs.minimumDiagnosticEvidenceRecords = 0; }],
     ["oversizedMinimumDiagnosticEvidenceRecords", (report) => { report.inputs.minimumDiagnosticEvidenceRecords = 1001; }],
@@ -336,14 +339,18 @@ describe("alertsApi auth headers", () => {
     ["missingChecks", (report) => { delete report.checks; }],
     ["checksNotArray", (report) => { report.checks = {}; }],
     ["emptyChecks", (report) => { report.checks = []; }],
+    ["singlePassCheckOnly", (report) => { report.checks = [{ name: "CURRENT_SUMMARY_PRESENT", status: "PASS", severity: "INFO" }]; }],
     ["nullCheckItem", (report) => { report.checks = [null]; }],
     ["missingCheckName", (report) => { delete report.checks[0].name; }],
     ["missingCheckStatus", (report) => { delete report.checks[0].status; }],
     ["missingCheckSeverity", (report) => { delete report.checks[0].severity; }],
+    ["unknownCheckName", (report) => { report.checks[0].name = "UNKNOWN_CHECK"; }],
     ["unsupportedCheckStatus", (report) => { report.checks[0].status = "DONE"; }],
     ["unsupportedCheckSeverity", (report) => { report.checks[0].severity = "CRITICAL"; }],
     ["duplicateCheckNames", (report) => { report.checks = [report.checks[0], { ...report.checks[0] }]; }],
     ["reviewableWithFailCheck", (report) => { report.checks[0].status = "FAIL"; }],
+    ["reviewableWithInconclusiveCheck", (report) => { report.checks[13].status = "INCONCLUSIVE"; }],
+    ["missingRequiredLimitation", (report) => { report.limitations = report.limitations.filter((value) => value !== "DOES_NOT_CHANGE_SCORING"); }],
     ["reasonCodesNotArray", (report) => { report.reasonCodes = {}; }],
     ["warningsNotArray", (report) => { report.warnings = {}; }],
     ["limitationsNotArray", (report) => { report.limitations = {}; }],
@@ -2032,7 +2039,7 @@ function shadowPerformanceSummary(overrides = {}) {
       falseNegativeRate: metric(0.2)
     },
     warnings: ["MISSING_ML_SIGNAL_PRESENT"],
-    limitations: ["DIAGNOSTIC_ONLY"],
+    limitations: shadowDiagnosticLimitations(),
     banner: "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.",
     ...overrides
   };
@@ -2042,7 +2049,7 @@ function promotionReviewReadinessReport(overrides = {}) {
   return {
     reportType: "PROMOTION_REVIEW_READINESS_REPORT_V1",
     reportVersion: "1.0",
-    generatedAt: "2026-06-13T00:00:00Z",
+    generatedAt: "2026-06-13T03:00:00Z",
     governanceStatus: "DIAGNOSTIC_ONLY",
     readinessStatus: "REVIEWABLE",
     diagnosticOnly: true,
@@ -2062,15 +2069,58 @@ function promotionReviewReadinessReport(overrides = {}) {
       minimumDiagnosticEvidenceRecords: 1,
       recordsEvaluated: 3
     },
-    checks: [
-      { name: "CURRENT_SUMMARY_PRESENT", status: "PASS", severity: "INFO" }
-    ],
+    checks: promotionReadinessChecks(),
     reasonCodes: [],
     warnings: ["MISSING_ML_SIGNAL_PRESENT"],
-    limitations: ["OFFLINE_DIAGNOSTIC_AID_ONLY"],
+    limitations: [
+      "DOES_NOT_AUTHORIZE_PAYMENTS",
+      "DOES_NOT_CHANGE_SCORING",
+      "DOES_NOT_RECOMMEND_THRESHOLDS",
+      "HUMAN_REVIEW_START_ONLY",
+      "OFFLINE_DIAGNOSTIC_AID_ONLY"
+    ],
     banner: "Promotion review readiness is an offline diagnostic aid only. It is not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.",
     ...overrides
   };
+}
+
+function shadowDiagnosticLimitations() {
+  return [
+    "ANALYST_FEEDBACK_LABELS_ARE_NOT_LEGAL_GROUND_TRUTH",
+    "METRICS_ARE_PLATFORM_RECOMMENDATION_DIAGNOSTICS",
+    "OFFLINE_DIAGNOSTIC_METRICS_ARE_NOT_PRODUCTION_APPROVAL",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_APPROVE_PROMOTION",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_AUTHORIZE_AUTOMATIC_DECLINE",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_CHANGE_SCORING_THRESHOLDS",
+    "PSEUDONYMOUS_REFERENCES_ARE_NOT_ANONYMIZATION",
+    "SMALL_SAMPLE_SIZE_MAY_BE_INCONCLUSIVE"
+  ];
+}
+
+function promotionReadinessChecks() {
+  return [
+    check("CURRENT_SUMMARY_PRESENT"),
+    check("CURRENT_SUMMARY_VERSION_SUPPORTED"),
+    check("EVALUATION_CARD_PRESENT"),
+    check("EVALUATION_CARD_VERSION_SUPPORTED"),
+    check("GOVERNANCE_STATUS_DIAGNOSTIC_ONLY"),
+    check("NOT_PRODUCTION_APPROVAL_TRUE"),
+    check("NOT_PROMOTION_APPROVAL_TRUE"),
+    check("NOT_THRESHOLD_RECOMMENDATION_TRUE"),
+    check("NOT_PAYMENT_AUTHORIZATION_TRUE"),
+    check("NOT_AUTOMATIC_DECISIONING_TRUE"),
+    check("EVALUATION_REPORT_TYPE_SUPPORTED"),
+    check("METRIC_BASIS_SUPPORTED"),
+    check("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", "PASS", "HIGH"),
+    check("ALERT_RECOMMENDED_PRECISION_AVAILABLE", "PASS", "MEDIUM"),
+    check("ALERT_RECOMMENDED_RECALL_AVAILABLE", "PASS", "MEDIUM"),
+    check("FALSE_POSITIVE_RATE_AVAILABLE", "PASS", "MEDIUM"),
+    check("FALSE_NEGATIVE_RATE_AVAILABLE", "PASS", "MEDIUM")
+  ];
+}
+
+function check(name, status = "PASS", severity = "INFO") {
+  return { name, status, severity };
 }
 
 function metric(value) {

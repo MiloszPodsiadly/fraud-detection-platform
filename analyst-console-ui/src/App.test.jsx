@@ -951,13 +951,26 @@ function shadowPerformanceSummary() {
       falseNegativeRate: metric(0.2)
     },
     warnings: ["MISSING_ML_SIGNAL_PRESENT"],
-    limitations: ["DIAGNOSTIC_ONLY"],
+    limitations: shadowDiagnosticLimitations(),
     banner: "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic."
   };
 }
 
 function metric(value) {
   return { available: true, value, reason: null };
+}
+
+function shadowDiagnosticLimitations() {
+  return [
+    "ANALYST_FEEDBACK_LABELS_ARE_NOT_LEGAL_GROUND_TRUTH",
+    "METRICS_ARE_PLATFORM_RECOMMENDATION_DIAGNOSTICS",
+    "OFFLINE_DIAGNOSTIC_METRICS_ARE_NOT_PRODUCTION_APPROVAL",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_APPROVE_PROMOTION",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_AUTHORIZE_AUTOMATIC_DECLINE",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_CHANGE_SCORING_THRESHOLDS",
+    "PSEUDONYMOUS_REFERENCES_ARE_NOT_ANONYMIZATION",
+    "SMALL_SAMPLE_SIZE_MAY_BE_INCONCLUSIVE"
+  ];
 }
 
 function deferred() {

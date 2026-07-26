@@ -355,7 +355,7 @@ function shadowSummary() {
       falseNegativeRate: metric(0.2)
     },
     warnings: ["MISSING_ML_SIGNAL_PRESENT"],
-    limitations: ["DIAGNOSTIC_ONLY"],
+    limitations: shadowDiagnosticLimitations(),
     banner: "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic."
   };
 }
@@ -364,7 +364,7 @@ function promotionReadinessReport() {
   return {
     reportType: "PROMOTION_REVIEW_READINESS_REPORT_V1",
     reportVersion: "1.0",
-    generatedAt: "2026-06-13T00:00:00Z",
+    generatedAt: "2026-06-13T03:00:00Z",
     governanceStatus: "DIAGNOSTIC_ONLY",
     readinessStatus: "REVIEWABLE",
     diagnosticOnly: true,
@@ -384,14 +384,59 @@ function promotionReadinessReport() {
       minimumDiagnosticEvidenceRecords: 1,
       recordsEvaluated: 3
     },
-    checks: [{ name: "CURRENT_SUMMARY_PRESENT", status: "PASS", severity: "INFO" }],
+    checks: promotionReadinessChecks(),
     reasonCodes: [],
     warnings: [],
-    limitations: ["OFFLINE_DIAGNOSTIC_AID_ONLY"],
+    limitations: [
+      "DOES_NOT_AUTHORIZE_PAYMENTS",
+      "DOES_NOT_CHANGE_SCORING",
+      "DOES_NOT_RECOMMEND_THRESHOLDS",
+      "HUMAN_REVIEW_START_ONLY",
+      "OFFLINE_DIAGNOSTIC_AID_ONLY"
+    ],
     banner: "Promotion review readiness is an offline diagnostic aid only. It is not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic."
   };
 }
 
 function metric(value) {
   return { available: true, value, reason: null };
+}
+
+function shadowDiagnosticLimitations() {
+  return [
+    "ANALYST_FEEDBACK_LABELS_ARE_NOT_LEGAL_GROUND_TRUTH",
+    "METRICS_ARE_PLATFORM_RECOMMENDATION_DIAGNOSTICS",
+    "OFFLINE_DIAGNOSTIC_METRICS_ARE_NOT_PRODUCTION_APPROVAL",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_APPROVE_PROMOTION",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_AUTHORIZE_AUTOMATIC_DECLINE",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_CHANGE_SCORING_THRESHOLDS",
+    "PSEUDONYMOUS_REFERENCES_ARE_NOT_ANONYMIZATION",
+    "SMALL_SAMPLE_SIZE_MAY_BE_INCONCLUSIVE"
+  ];
+}
+
+function promotionReadinessChecks() {
+  return [
+    check("CURRENT_SUMMARY_PRESENT"),
+    check("CURRENT_SUMMARY_VERSION_SUPPORTED"),
+    check("EVALUATION_CARD_PRESENT"),
+    check("EVALUATION_CARD_VERSION_SUPPORTED"),
+    check("GOVERNANCE_STATUS_DIAGNOSTIC_ONLY"),
+    check("NOT_PRODUCTION_APPROVAL_TRUE"),
+    check("NOT_PROMOTION_APPROVAL_TRUE"),
+    check("NOT_THRESHOLD_RECOMMENDATION_TRUE"),
+    check("NOT_PAYMENT_AUTHORIZATION_TRUE"),
+    check("NOT_AUTOMATIC_DECISIONING_TRUE"),
+    check("EVALUATION_REPORT_TYPE_SUPPORTED"),
+    check("METRIC_BASIS_SUPPORTED"),
+    check("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", "PASS", "HIGH"),
+    check("ALERT_RECOMMENDED_PRECISION_AVAILABLE", "PASS", "MEDIUM"),
+    check("ALERT_RECOMMENDED_RECALL_AVAILABLE", "PASS", "MEDIUM"),
+    check("FALSE_POSITIVE_RATE_AVAILABLE", "PASS", "MEDIUM"),
+    check("FALSE_NEGATIVE_RATE_AVAILABLE", "PASS", "MEDIUM")
+  ];
+}
+
+function check(name, status = "PASS", severity = "INFO") {
+  return { name, status, severity };
 }

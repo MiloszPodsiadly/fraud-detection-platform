@@ -106,7 +106,7 @@ describe("ShadowPerformanceDashboard", () => {
     renderDashboard();
 
     expect(screen.getByRole("heading", { name: "Limitations" })).toBeInTheDocument();
-    expect(screen.getByText("OFFLINE_ONLY")).toBeInTheDocument();
+    expect(screen.getByText("OFFLINE_DIAGNOSTIC_METRICS_ARE_NOT_PRODUCTION_APPROVAL")).toBeInTheDocument();
   });
 
   it("rendersLoadingState", () => {
@@ -286,27 +286,9 @@ describe("ShadowPerformanceDashboard", () => {
     });
   });
 
-  it("rejectsApprovedForProductionDecisioning", () => {
+  it("rejectsUnexpectedGovernanceField", () => {
     expectMalformedSummary((summary) => {
-      summary.governance.approvedFor = ["COMPARE", "SHADOW", "PRODUCTION_DECISIONING"];
-    });
-  });
-
-  it("rejectsApprovedForValuesOutsideCompareShadow", () => {
-    expectMalformedSummary((summary) => {
-      summary.governance.approvedFor = ["COMPARE", "RETRAINING"];
-    });
-  });
-
-  it("rejectsMissingCompareApprovedFor", () => {
-    expectMalformedSummary((summary) => {
-      summary.governance.approvedFor = ["SHADOW"];
-    });
-  });
-
-  it("rejectsMissingShadowApprovedFor", () => {
-    expectMalformedSummary((summary) => {
-      summary.governance.approvedFor = ["COMPARE"];
+      summary.governance.unexpectedUsageModes = ["COMPARE", "SHADOW"];
     });
   });
 
@@ -324,9 +306,11 @@ describe("ShadowPerformanceDashboard", () => {
   });
 
   it.each([
-    ["rejectsWrongEvaluationCardType", "evaluationCardType", "MODEL_CARD_V1"],
+    ["rejectsWrongEvaluationCardType", "evaluationCardType", "UNSUPPORTED_CARD_TYPE"],
     ["rejectsWrongEvaluationReportType", "evaluationReportType", "PLATFORM_RECOMMENDATION_EVALUATION_CARD"],
-    ["rejectsWrongEvaluationReportVersion", "evaluationReportVersion", "FDP-103"],
+    ["rejectsWrongEvaluationReportVersion", "evaluationReportVersion", "UNSUPPORTED_VERSION"],
+    ["rejectsWrongEvaluationArtifactSetVersion", "evaluationArtifactSetVersion", "other-artifact-format-v99"],
+    ["rejectsWrongDatasetVersion", "datasetVersion", "unknown-dataset-v77"],
     ["rejectsWrongDatasetTimeBasis", "datasetTimeBasis", "TRANSACTION_CREATED_AT"],
     ["rejectsWrongEvaluationPurpose", "evaluationPurpose", "PRODUCTION_APPROVAL"]
   ])("%s", (_name, field, value) => {
@@ -350,6 +334,24 @@ describe("ShadowPerformanceDashboard", () => {
   it("rejectsUnavailableMetricWithNumericValue", () => {
     expectMalformedSummary((summary) => {
       summary.metrics.alertRecommendedPrecision = { available: false, value: 0, reason: "NO_POSITIVE_CLASS" };
+    });
+  });
+
+  it("rejectsUnavailableMetricWithFreeTextReason", () => {
+    expectMalformedSummary((summary) => {
+      summary.metrics.alertRecommendedPrecision = { available: false, value: null, reason: "not available" };
+    });
+  });
+
+  it("rejectsDateOnlyTimestamp", () => {
+    expectMalformedSummary((summary) => {
+      summary.generatedAt = "2026-06-13";
+    });
+  });
+
+  it("rejectsTwentyOneLimitations", () => {
+    expectMalformedSummary((summary) => {
+      summary.limitations = Array.from({ length: 21 }, (_value, index) => `LIMITATION_${index}`);
     });
   });
 
@@ -700,7 +702,7 @@ function shadowSummary(overrides = {}) {
       falseNegativeRate: metric(0.2)
     },
     warnings: ["MISSING_ML_SIGNAL_PRESENT"],
-    limitations: ["OFFLINE_ONLY"],
+    limitations: shadowDiagnosticLimitations(),
     banner: REQUIRED_BANNER,
     ...overrides
   };
@@ -708,4 +710,17 @@ function shadowSummary(overrides = {}) {
 
 function metric(value) {
   return { available: true, value, reason: null };
+}
+
+function shadowDiagnosticLimitations() {
+  return [
+    "ANALYST_FEEDBACK_LABELS_ARE_NOT_LEGAL_GROUND_TRUTH",
+    "METRICS_ARE_PLATFORM_RECOMMENDATION_DIAGNOSTICS",
+    "OFFLINE_DIAGNOSTIC_METRICS_ARE_NOT_PRODUCTION_APPROVAL",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_APPROVE_PROMOTION",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_AUTHORIZE_AUTOMATIC_DECLINE",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_CHANGE_SCORING_THRESHOLDS",
+    "PSEUDONYMOUS_REFERENCES_ARE_NOT_ANONYMIZATION",
+    "SMALL_SAMPLE_SIZE_MAY_BE_INCONCLUSIVE"
+  ];
 }

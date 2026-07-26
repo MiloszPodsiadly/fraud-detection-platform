@@ -34,21 +34,21 @@ describe("PromotionReviewReadinessPanel", () => {
   });
 
   it("renders INSUFFICIENT_DATA", () => {
-    renderPanel({ report: report({ readinessStatus: "INSUFFICIENT_DATA" }) });
+    renderPanel({ report: reportWithCheckStatus("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", "FAIL") });
 
     expect(screen.getAllByText("INSUFFICIENT_DATA").length).toBeGreaterThan(0);
     expect(screen.getByText("Not enough diagnostic evidence for human review.")).toBeInTheDocument();
   });
 
   it("renders NOT_REVIEWABLE", () => {
-    renderPanel({ report: report({ readinessStatus: "NOT_REVIEWABLE" }) });
+    renderPanel({ report: reportWithCheckStatus("EVALUATION_CARD_PRESENT", "FAIL") });
 
     expect(screen.getAllByText("NOT_REVIEWABLE").length).toBeGreaterThan(0);
     expect(screen.getByText("Diagnostic checks failed. Human review should not begin yet.")).toBeInTheDocument();
   });
 
   it("renders INCONCLUSIVE", () => {
-    renderPanel({ report: report({ readinessStatus: "INCONCLUSIVE" }) });
+    renderPanel({ report: reportWithCheckStatus("ALERT_RECOMMENDED_RECALL_AVAILABLE", "INCONCLUSIVE") });
 
     expect(screen.getAllByText("INCONCLUSIVE").length).toBeGreaterThan(0);
     expect(screen.getByText("Diagnostic evidence is present but one or more metrics are unavailable.")).toBeInTheDocument();
@@ -86,31 +86,36 @@ describe("PromotionReviewReadinessPanel", () => {
 
     expect(screen.getByRole("heading", { name: "Checks" })).toBeInTheDocument();
     expect(screen.getByText("CURRENT_SUMMARY_PRESENT")).toBeInTheDocument();
-    expect(screen.getByText("PASS")).toBeInTheDocument();
-    expect(screen.getByText("INFO")).toBeInTheDocument();
+    expect(screen.getAllByText("PASS").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("INFO").length).toBeGreaterThan(0);
   });
 
   it("renders warnings limitations and reason codes", () => {
     renderPanel();
 
     expect(screen.getByRole("heading", { name: "Reason codes" })).toBeInTheDocument();
-    expect(screen.getByText("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS")).toBeInTheDocument();
+    expect(screen.getByText("No reason codes reported.")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Warnings" })).toBeInTheDocument();
     expect(screen.getByText("MISSING_ML_SIGNAL_PRESENT")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Limitations" })).toBeInTheDocument();
     expect(screen.getByText("OFFLINE_DIAGNOSTIC_AID_ONLY")).toBeInTheDocument();
   });
 
-  it("renders valid device merchant and customer machine codes", () => {
+  it("renders valid device merchant and customer machine codes in warnings and limitations", () => {
     renderPanel({
       report: report({
-        reasonCodes: ["DEVICE_SIGNAL_PRESENT"],
         warnings: ["MERCHANT_SEGMENT_COVERAGE"],
-        limitations: ["CUSTOMER_SEGMENT_COVERAGE"]
+        limitations: [
+          "CUSTOMER_SEGMENT_COVERAGE",
+          "DOES_NOT_AUTHORIZE_PAYMENTS",
+          "DOES_NOT_CHANGE_SCORING",
+          "DOES_NOT_RECOMMEND_THRESHOLDS",
+          "HUMAN_REVIEW_START_ONLY",
+          "OFFLINE_DIAGNOSTIC_AID_ONLY"
+        ]
       })
     });
 
-    expect(screen.getByText("DEVICE_SIGNAL_PRESENT")).toBeInTheDocument();
     expect(screen.getByText("MERCHANT_SEGMENT_COVERAGE")).toBeInTheDocument();
     expect(screen.getByText("CUSTOMER_SEGMENT_COVERAGE")).toBeInTheDocument();
   });
@@ -267,13 +272,76 @@ function report(overrides = {}) {
       minimumDiagnosticEvidenceRecords: 1,
       recordsEvaluated: 3
     },
-    checks: [
-      { name: "CURRENT_SUMMARY_PRESENT", status: "PASS", severity: "INFO" }
-    ],
-    reasonCodes: ["MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS"],
+    checks: promotionReadinessChecks(),
+    reasonCodes: [],
     warnings: ["MISSING_ML_SIGNAL_PRESENT"],
-    limitations: ["OFFLINE_DIAGNOSTIC_AID_ONLY"],
+    limitations: [
+      "DOES_NOT_AUTHORIZE_PAYMENTS",
+      "DOES_NOT_CHANGE_SCORING",
+      "DOES_NOT_RECOMMEND_THRESHOLDS",
+      "HUMAN_REVIEW_START_ONLY",
+      "OFFLINE_DIAGNOSTIC_AID_ONLY"
+    ],
     banner: "Promotion review readiness is an offline diagnostic aid only. It is not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.",
     ...overrides
   };
+}
+
+function reportWithCheckStatus(checkName, status) {
+  const checks = promotionReadinessChecks().map((item) => (
+    item.name === checkName ? { ...item, status } : item
+  ));
+  return report({
+    readinessStatus: deriveReadinessStatus(checks),
+    checks,
+    reasonCodes: derivedReasonCodes(checks)
+  });
+}
+
+function promotionReadinessChecks() {
+  return [
+    check("CURRENT_SUMMARY_PRESENT"),
+    check("CURRENT_SUMMARY_VERSION_SUPPORTED"),
+    check("EVALUATION_CARD_PRESENT"),
+    check("EVALUATION_CARD_VERSION_SUPPORTED"),
+    check("GOVERNANCE_STATUS_DIAGNOSTIC_ONLY"),
+    check("NOT_PRODUCTION_APPROVAL_TRUE"),
+    check("NOT_PROMOTION_APPROVAL_TRUE"),
+    check("NOT_THRESHOLD_RECOMMENDATION_TRUE"),
+    check("NOT_PAYMENT_AUTHORIZATION_TRUE"),
+    check("NOT_AUTOMATIC_DECISIONING_TRUE"),
+    check("EVALUATION_REPORT_TYPE_SUPPORTED"),
+    check("METRIC_BASIS_SUPPORTED"),
+    check("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", "PASS", "HIGH"),
+    check("ALERT_RECOMMENDED_PRECISION_AVAILABLE", "PASS", "MEDIUM"),
+    check("ALERT_RECOMMENDED_RECALL_AVAILABLE", "PASS", "MEDIUM"),
+    check("FALSE_POSITIVE_RATE_AVAILABLE", "PASS", "MEDIUM"),
+    check("FALSE_NEGATIVE_RATE_AVAILABLE", "PASS", "MEDIUM")
+  ];
+}
+
+function check(name, status = "PASS", severity = "INFO") {
+  return { name, status, severity };
+}
+
+function deriveReadinessStatus(checks) {
+  const failedChecks = checks.filter((item) => item.status === "FAIL");
+  if (failedChecks.length > 0) {
+    return failedChecks.some((item) => item.name === "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS")
+      ? "INSUFFICIENT_DATA"
+      : "NOT_REVIEWABLE";
+  }
+  return checks.some((item) => item.status === "INCONCLUSIVE") ? "INCONCLUSIVE" : "REVIEWABLE";
+}
+
+function derivedReasonCodes(checks) {
+  return checks.flatMap((item) => {
+    if (item.status === "FAIL") {
+      return [`${item.name}_FAILED`];
+    }
+    if (item.status === "INCONCLUSIVE") {
+      return [`${item.name}_INCONCLUSIVE`];
+    }
+    return [];
+  }).sort();
 }

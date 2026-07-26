@@ -27,8 +27,22 @@ const REQUIRED_EVALUATION = {
   evaluationPurpose: "OFFLINE_DIAGNOSTIC",
   evaluationReportType: "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
   evaluationReportVersion: "FDP-124",
+  evaluationArtifactSetVersion: "fdp123-report-artifact-set-v1",
+  datasetVersion: "feedback-dataset-v1",
   datasetTimeBasis: "FEEDBACK_CREATED_AT"
 };
+const REQUIRED_LIMITATIONS = new Set([
+  "ANALYST_FEEDBACK_LABELS_ARE_NOT_LEGAL_GROUND_TRUTH",
+  "OFFLINE_DIAGNOSTIC_METRICS_ARE_NOT_PRODUCTION_APPROVAL",
+  "METRICS_ARE_PLATFORM_RECOMMENDATION_DIAGNOSTICS",
+  "SMALL_SAMPLE_SIZE_MAY_BE_INCONCLUSIVE",
+  "PSEUDONYMOUS_REFERENCES_ARE_NOT_ANONYMIZATION",
+  "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_APPROVE_PROMOTION",
+  "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_AUTHORIZE_AUTOMATIC_DECLINE",
+  "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_CHANGE_SCORING_THRESHOLDS"
+]);
+const MACHINE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
+const RFC3339_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 const METRIC_FIELDS = [
   ["alertRecommendedPrecision", "Alert-recommended precision", "percent"],
@@ -357,19 +371,35 @@ function errorStateFor(error) {
 
 function isValidSummary(summary) {
   if (!isObject(summary)
+      || !hasExactKeys(summary, [
+        "reportType",
+        "summaryVersion",
+        "generatedAt",
+        "evaluationSubject",
+        "metricBasis",
+        "governance",
+        "evaluation",
+        "evaluationPopulation",
+        "metrics",
+        "warnings",
+        "limitations",
+        "banner"
+      ])
       || summary.reportType !== "SHADOW_PERFORMANCE_SUMMARY_V2"
       || summary.summaryVersion !== "shadow-performance-summary-v2"
-      || !isString(summary.generatedAt)
+      || !isStrictRfc3339Timestamp(summary.generatedAt)
       || summary.banner !== REQUIRED_BANNER
       || summary.metricBasis !== "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK"
-      || hasLegacyShadowFields(summary)
       || !isValidEvaluationSubject(summary.evaluationSubject)
       || !isValidGovernance(summary.governance)
       || !isValidEvaluation(summary.evaluation)
       || !isObject(summary.evaluationPopulation)
+      || !hasExactKeys(summary.evaluationPopulation, ["recordsEvaluated", "positiveClassCount", "negativeClassCount"])
       || !isObject(summary.metrics)
+      || !hasExactKeys(summary.metrics, RATE_METRIC_FIELDS)
       || !isSafeStringArray(summary.warnings)
-      || !isSafeStringArray(summary.limitations)) {
+      || !isSafeStringArray(summary.limitations)
+      || !containsRequiredLimitations(summary.limitations)) {
     return false;
   }
 
@@ -400,29 +430,42 @@ function isString(value) {
 
 function isValidEvaluationSubject(subject) {
   return isObject(subject)
+    && hasExactKeys(subject, Object.keys(REQUIRED_EVALUATION_SUBJECT))
     && Object.entries(REQUIRED_EVALUATION_SUBJECT).every(([field, value]) => subject[field] === value);
 }
 
 function isValidGovernance(governance) {
   return isObject(governance)
-    && !("approvedFor" in governance)
+    && hasExactKeys(governance, Object.keys(REQUIRED_GOVERNANCE))
     && Object.entries(REQUIRED_GOVERNANCE).every(([field, value]) => governance[field] === value);
 }
 
 function isValidEvaluation(evaluation) {
   return isObject(evaluation)
+    && hasExactKeys(evaluation, [
+      "evaluationCardType",
+      "evaluationCardVersion",
+      "evaluationPurpose",
+      "evaluationReportType",
+      "evaluationReportVersion",
+      "evaluationReportGeneratedAt",
+      "evaluationCardGeneratedAt",
+      "evaluationArtifactSetVersion",
+      "datasetVersion",
+      "datasetTimeBasis",
+      "sourceManifestSha256",
+      "sourceEvaluationCardManifestSha256"
+    ])
     && Object.entries(REQUIRED_EVALUATION).every(([field, value]) => evaluation[field] === value)
-    && isString(evaluation.evaluationReportGeneratedAt)
-    && isString(evaluation.evaluationCardGeneratedAt)
+    && isStrictRfc3339Timestamp(evaluation.evaluationReportGeneratedAt)
+    && isStrictRfc3339Timestamp(evaluation.evaluationCardGeneratedAt)
     && isOrderedTimestamp(evaluation.evaluationReportGeneratedAt, evaluation.evaluationCardGeneratedAt)
-    && isString(evaluation.evaluationArtifactSetVersion)
-    && isString(evaluation.datasetVersion)
     && /^[a-f0-9]{64}$/.test(evaluation.sourceManifestSha256)
     && /^[a-f0-9]{64}$/.test(evaluation.sourceEvaluationCardManifestSha256);
 }
 
 function isMetricValue(metric) {
-  if (!isObject(metric) || typeof metric.available !== "boolean") {
+  if (!isObject(metric) || !hasExactKeys(metric, ["available", "value", "reason"]) || typeof metric.available !== "boolean") {
     return false;
   }
   if (metric.available) {
@@ -432,7 +475,7 @@ function isMetricValue(metric) {
       && metric.value <= 1
       && metric.reason === null;
   }
-  return metric.value === null && isString(metric.reason);
+  return metric.value === null && isMachineCode(metric.reason);
 }
 
 function isDiagnosticCount(value) {
@@ -440,6 +483,9 @@ function isDiagnosticCount(value) {
 }
 
 function isOrderedTimestamp(earlier, later) {
+  if (!isStrictRfc3339Timestamp(earlier) || !isStrictRfc3339Timestamp(later)) {
+    return false;
+  }
   const earlierTime = Date.parse(earlier);
   const laterTime = Date.parse(later);
   return Number.isFinite(earlierTime) && Number.isFinite(laterTime) && earlierTime <= laterTime;
@@ -448,7 +494,44 @@ function isOrderedTimestamp(earlier, later) {
 function isSafeStringArray(value) {
   return Array.isArray(value)
     && value.length <= 20
-    && value.every((item) => typeof item === "string" && item.length > 0 && item.length <= 160);
+    && new Set(value).size === value.length
+    && value.every(isMachineCode);
+}
+
+function containsRequiredLimitations(limitations) {
+  return Array.isArray(limitations) && [...REQUIRED_LIMITATIONS].every((limitation) => limitations.includes(limitation));
+}
+
+function isMachineCode(value) {
+  return typeof value === "string" && MACHINE_CODE_PATTERN.test(value);
+}
+
+function isStrictRfc3339Timestamp(value) {
+  if (typeof value !== "string" || value.length > 128 || !RFC3339_TIMESTAMP_PATTERN.test(value)) {
+    return false;
+  }
+  if (!hasValidCalendarDate(value)) {
+    return false;
+  }
+  const time = Date.parse(value);
+  return Number.isFinite(time) && new Date(time).toISOString() === new Date(value).toISOString();
+}
+
+function hasExactKeys(value, expectedKeys) {
+  const actual = Object.keys(value).sort();
+  const expected = [...expectedKeys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function hasValidCalendarDate(value) {
+  const [, year, month, day] = /^(\d{4})-(\d{2})-(\d{2})T/.exec(value) || [];
+  if (!year) {
+    return false;
+  }
+  const parsed = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  return parsed.getUTCFullYear() === Number(year)
+    && parsed.getUTCMonth() === Number(month) - 1
+    && parsed.getUTCDate() === Number(day);
 }
 
 function formatMetric(value, format) {
@@ -479,14 +562,6 @@ function booleanValue(value) {
 
 function listValue(value) {
   return Array.isArray(value) ? value.join(", ") : value;
-}
-
-function hasLegacyShadowFields(summary) {
-  return "summaryType" in summary
-    || "model" in summary
-    || "disagreementSummary" in summary
-    || "precisionAtBudget" in (summary.metrics || {})
-    || "recallAtTopK" in (summary.metrics || {});
 }
 
 function summaryMetricBasis() {
