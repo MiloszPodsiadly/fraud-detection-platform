@@ -102,6 +102,58 @@ class ShadowPerformanceSummaryValidatorTest {
     }
 
     @Test
+    void rejectsUnsupportedLineageVersions() {
+        ShadowPerformanceSummary base = validSummary();
+        for (ShadowPerformanceSummary.ShadowPerformanceEvaluation evaluation : List.of(
+                replaceEvaluationLineage(base.evaluation(), "other-artifact-format-v99", "feedback-dataset-v1", "FEEDBACK_CREATED_AT"),
+                replaceEvaluationLineage(base.evaluation(), "fdp123-report-artifact-set-v1", "unknown-dataset-v77", "FEEDBACK_CREATED_AT"),
+                replaceEvaluationLineage(base.evaluation(), "fdp123-report-artifact-set-v1", "feedback-dataset-v1", "TRANSACTION_CREATED_AT")
+        )) {
+            ShadowPerformanceSummary summary = new ShadowPerformanceSummary(
+                    base.reportType(),
+                    base.summaryVersion(),
+                    base.generatedAt(),
+                    base.evaluationSubject(),
+                    base.metricBasis(),
+                    base.governance(),
+                    evaluation,
+                    base.evaluationPopulation(),
+                    base.metrics(),
+                    base.warnings(),
+                    base.limitations(),
+                    base.banner()
+            );
+
+            assertThatThrownBy(() -> validator.validate(summary))
+                    .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
+        }
+    }
+
+    @Test
+    void rejectsTwentyOneLimitations() {
+        ShadowPerformanceSummary base = validSummary();
+        ShadowPerformanceSummary summary = new ShadowPerformanceSummary(
+                base.reportType(),
+                base.summaryVersion(),
+                base.generatedAt(),
+                base.evaluationSubject(),
+                base.metricBasis(),
+                base.governance(),
+                base.evaluation(),
+                base.evaluationPopulation(),
+                base.metrics(),
+                base.warnings(),
+                java.util.stream.IntStream.range(0, 21)
+                        .mapToObj(index -> "LIMITATION_" + index)
+                        .toList(),
+                base.banner()
+        );
+
+        assertThatThrownBy(() -> validator.validate(summary))
+                .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
+    }
+
+    @Test
     void excellentMetricsDoNotCreateApprovalSemantics() {
         ShadowPerformanceSummary base = validSummary();
         ShadowPerformanceSummary summary = new ShadowPerformanceSummary(
@@ -207,5 +259,27 @@ class ShadowPerformanceSummaryValidatorTest {
 
     private ShadowPerformanceSummary validSummary() {
         return ShadowPerformanceSummaryTestFixtures.validSummary();
+    }
+
+    private ShadowPerformanceSummary.ShadowPerformanceEvaluation replaceEvaluationLineage(
+            ShadowPerformanceSummary.ShadowPerformanceEvaluation base,
+            String evaluationArtifactSetVersion,
+            String datasetVersion,
+            String datasetTimeBasis
+    ) {
+        return new ShadowPerformanceSummary.ShadowPerformanceEvaluation(
+                base.evaluationCardType(),
+                base.evaluationCardVersion(),
+                base.evaluationPurpose(),
+                base.evaluationReportType(),
+                base.evaluationReportVersion(),
+                base.evaluationReportGeneratedAt(),
+                base.evaluationCardGeneratedAt(),
+                evaluationArtifactSetVersion,
+                datasetVersion,
+                datasetTimeBasis,
+                base.sourceManifestSha256(),
+                base.sourceEvaluationCardManifestSha256()
+        );
     }
 }

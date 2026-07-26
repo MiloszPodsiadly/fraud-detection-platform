@@ -81,7 +81,7 @@ class ShadowPerformanceSummaryValidator {
         validatePopulation(summary.evaluationPopulation());
         validateMetrics(summary.metrics());
         validateMachineCodes(summary.warnings(), 20, "warnings");
-        validateMachineCodes(summary.limitations(), 30, "limitations");
+        validateMachineCodes(summary.limitations(), 20, "limitations");
         require(summary.limitations() != null, "limitations is missing");
         require(Set.copyOf(summary.limitations()).containsAll(SAFE_LIMITATIONS), "limitations missing diagnostic non-goals");
         require(ShadowPerformanceSummaryContract.REQUIRED_BANNER.equals(summary.banner()), "banner is unsupported");
@@ -132,9 +132,12 @@ class ShadowPerformanceSummaryValidator {
         Instant cardGeneratedAt = instant(evaluation.evaluationCardGeneratedAt(), "evaluationCardGeneratedAt");
         require(!cardGeneratedAt.isBefore(reportGeneratedAt), "evaluationCardGeneratedAt must be >= evaluationReportGeneratedAt");
         require(!summaryGeneratedAt.isBefore(cardGeneratedAt), "generatedAt must be >= evaluationCardGeneratedAt");
-        safeString(evaluation.evaluationArtifactSetVersion(), "evaluationArtifactSetVersion");
-        safeString(evaluation.datasetVersion(), "datasetVersion");
-        machineCode(evaluation.datasetTimeBasis(), "datasetTimeBasis");
+        require(
+                "fdp123-report-artifact-set-v1".equals(evaluation.evaluationArtifactSetVersion()),
+                "evaluationArtifactSetVersion is unsupported"
+        );
+        require("feedback-dataset-v1".equals(evaluation.datasetVersion()), "datasetVersion is unsupported");
+        require("FEEDBACK_CREATED_AT".equals(evaluation.datasetTimeBasis()), "datasetTimeBasis is unsupported");
         sha256(evaluation.sourceManifestSha256(), "sourceManifestSha256");
         sha256(evaluation.sourceEvaluationCardManifestSha256(), "sourceEvaluationCardManifestSha256");
     }
@@ -174,6 +177,7 @@ class ShadowPerformanceSummaryValidator {
     private void validateMachineCodes(List<String> values, int maxItems, String field) {
         require(values != null, field + " is missing");
         require(values.size() <= maxItems, field + " has too many items");
+        require(Set.copyOf(values).size() == values.size(), field + " contains duplicate values");
         for (String value : values) {
             machineCode(value, field);
         }

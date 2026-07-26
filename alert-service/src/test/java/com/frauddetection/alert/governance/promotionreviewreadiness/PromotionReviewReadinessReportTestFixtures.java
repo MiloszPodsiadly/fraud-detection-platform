@@ -44,11 +44,11 @@ final class PromotionReviewReadinessReportTestFixtures {
                         check("NOT_AUTOMATIC_DECISIONING_TRUE"),
                         check("EVALUATION_REPORT_TYPE_SUPPORTED"),
                         check("METRIC_BASIS_SUPPORTED"),
-                        check("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS"),
-                        check("ALERT_RECOMMENDED_PRECISION_AVAILABLE"),
-                        check("ALERT_RECOMMENDED_RECALL_AVAILABLE"),
-                        check("FALSE_POSITIVE_RATE_AVAILABLE"),
-                        check("FALSE_NEGATIVE_RATE_AVAILABLE")
+                        check("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", "HIGH"),
+                        check("ALERT_RECOMMENDED_PRECISION_AVAILABLE", "MEDIUM"),
+                        check("ALERT_RECOMMENDED_RECALL_AVAILABLE", "MEDIUM"),
+                        check("FALSE_POSITIVE_RATE_AVAILABLE", "MEDIUM"),
+                        check("FALSE_NEGATIVE_RATE_AVAILABLE", "MEDIUM")
                 ),
                 List.of(),
                 List.of("MISSING_ML_SIGNAL_PRESENT", "MISSING_PROJECTION_PRESENT", "MISSING_RULES_SIGNAL_PRESENT"),
@@ -65,5 +65,9 @@ final class PromotionReviewReadinessReportTestFixtures {
 
     private static PromotionReviewReadinessReport.PromotionReviewReadinessCheck check(String name) {
         return new PromotionReviewReadinessReport.PromotionReviewReadinessCheck(name, "PASS", "INFO");
+    }
+
+    private static PromotionReviewReadinessReport.PromotionReviewReadinessCheck check(String name, String severity) {
+        return new PromotionReviewReadinessReport.PromotionReviewReadinessCheck(name, "PASS", severity);
     }
 }

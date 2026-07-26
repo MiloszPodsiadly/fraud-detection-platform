@@ -4,14 +4,18 @@ import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 @Component
 class PromotionReviewReadinessReportValidator {
 
     private static final Pattern MACHINE_CODE_PATTERN = Pattern.compile("^[A-Z][A-Z0-9_]{0,127}$");
+    private static final int MAX_DIAGNOSTIC_RECORDS = 1_000;
     private static final Set<String> READINESS_STATUSES = Set.of("INSUFFICIENT_DATA", "INCONCLUSIVE", "NOT_REVIEWABLE", "REVIEWABLE");
     private static final Set<String> CHECK_STATUSES = Set.of("PASS", "WARN", "FAIL", "INCONCLUSIVE", "NOT_APPLICABLE");
     private static final Set<String> SEVERITIES = Set.of("INFO", "LOW", "MEDIUM", "HIGH");
@@ -33,6 +37,25 @@ class PromotionReviewReadinessReportValidator {
             "ALERT_RECOMMENDED_RECALL_AVAILABLE",
             "FALSE_POSITIVE_RATE_AVAILABLE",
             "FALSE_NEGATIVE_RATE_AVAILABLE"
+    );
+    private static final Map<String, String> CHECK_SEVERITIES = Map.ofEntries(
+            Map.entry("CURRENT_SUMMARY_PRESENT", "INFO"),
+            Map.entry("CURRENT_SUMMARY_VERSION_SUPPORTED", "INFO"),
+            Map.entry("EVALUATION_CARD_PRESENT", "INFO"),
+            Map.entry("EVALUATION_CARD_VERSION_SUPPORTED", "INFO"),
+            Map.entry("GOVERNANCE_STATUS_DIAGNOSTIC_ONLY", "INFO"),
+            Map.entry("NOT_PRODUCTION_APPROVAL_TRUE", "INFO"),
+            Map.entry("NOT_PROMOTION_APPROVAL_TRUE", "INFO"),
+            Map.entry("NOT_THRESHOLD_RECOMMENDATION_TRUE", "INFO"),
+            Map.entry("NOT_PAYMENT_AUTHORIZATION_TRUE", "INFO"),
+            Map.entry("NOT_AUTOMATIC_DECISIONING_TRUE", "INFO"),
+            Map.entry("EVALUATION_REPORT_TYPE_SUPPORTED", "INFO"),
+            Map.entry("METRIC_BASIS_SUPPORTED", "INFO"),
+            Map.entry("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", "HIGH"),
+            Map.entry("ALERT_RECOMMENDED_PRECISION_AVAILABLE", "MEDIUM"),
+            Map.entry("ALERT_RECOMMENDED_RECALL_AVAILABLE", "MEDIUM"),
+            Map.entry("FALSE_POSITIVE_RATE_AVAILABLE", "MEDIUM"),
+            Map.entry("FALSE_NEGATIVE_RATE_AVAILABLE", "MEDIUM")
     );
     private static final Set<String> SAFE_LIMITATIONS = Set.of(
             "OFFLINE_DIAGNOSTIC_AID_ONLY",
@@ -92,6 +115,10 @@ class PromotionReviewReadinessReportValidator {
         validateMachineCodes(report.reasonCodes(), 20, "reasonCodes");
         validateMachineCodes(report.warnings(), 20, "warnings");
         validateMachineCodes(report.limitations(), 20, "limitations");
+        require(report.readinessStatus().equals(derivedReadinessStatus(report.checks())),
+                "readinessStatus must match required checks");
+        require(report.reasonCodes().equals(derivedReasonCodes(report.checks())),
+                "reasonCodes must match required checks");
         require(Set.copyOf(report.limitations()).containsAll(SAFE_LIMITATIONS), "limitations missing diagnostic non-goals");
         require(PromotionReviewReadinessReportContract.REQUIRED_BANNER.equals(report.banner()), "banner is unsupported");
     }
@@ -115,21 +142,27 @@ class PromotionReviewReadinessReportValidator {
 
     private void validateChecks(List<PromotionReviewReadinessReport.PromotionReviewReadinessCheck> checks) {
         require(checks != null && !checks.isEmpty(), "checks are missing");
-        require(checks.size() <= CHECK_NAMES.size(), "too many checks");
+        require(checks.size() == CHECK_NAMES.size(), "checks must contain exactly the required checks");
+        Set<String> names = new TreeSet<>();
         for (PromotionReviewReadinessReport.PromotionReviewReadinessCheck check : checks) {
             require(check != null, "check is missing");
             machineCode(check.name(), "check.name");
             require(CHECK_NAMES.contains(check.name()), "check.name is unsupported");
+            require(names.add(check.name()), "check.name is duplicated");
             machineCode(check.status(), "check.status");
             require(CHECK_STATUSES.contains(check.status()), "check.status is unsupported");
             machineCode(check.severity(), "check.severity");
             require(SEVERITIES.contains(check.severity()), "check.severity is unsupported");
+            require(CHECK_SEVERITIES.get(check.name()).equals(check.severity()),
+                    "check.severity does not match required check");
         }
+        require(names.equals(CHECK_NAMES), "checks must contain exactly the required checks");
     }
 
     private void validateMachineCodes(List<String> values, int maxItems, String field) {
         require(values != null, field + " is missing");
         require(values.size() <= maxItems, field + " has too many items");
+        require(Set.copyOf(values).size() == values.size(), field + " contains duplicate values");
         for (String value : values) {
             machineCode(value, field);
         }
@@ -158,6 +191,32 @@ class PromotionReviewReadinessReportValidator {
 
     private void boundedCount(int value, String field) {
         require(value >= 0, field + " must be non-negative");
+        require(value <= MAX_DIAGNOSTIC_RECORDS, field + " exceeds maximum");
+    }
+
+    private String derivedReadinessStatus(List<PromotionReviewReadinessReport.PromotionReviewReadinessCheck> checks) {
+        List<PromotionReviewReadinessReport.PromotionReviewReadinessCheck> failedChecks = checks.stream()
+                .filter(check -> "FAIL".equals(check.status()))
+                .toList();
+        if (!failedChecks.isEmpty()) {
+            return failedChecks.stream().anyMatch(check -> "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS".equals(check.name()))
+                    ? "INSUFFICIENT_DATA"
+                    : "NOT_REVIEWABLE";
+        }
+        boolean hasInconclusive = checks.stream().anyMatch(check -> "INCONCLUSIVE".equals(check.status()));
+        return hasInconclusive ? "INCONCLUSIVE" : "REVIEWABLE";
+    }
+
+    private List<String> derivedReasonCodes(List<PromotionReviewReadinessReport.PromotionReviewReadinessCheck> checks) {
+        List<String> reasonCodes = new ArrayList<>();
+        for (PromotionReviewReadinessReport.PromotionReviewReadinessCheck check : checks) {
+            if ("FAIL".equals(check.status())) {
+                reasonCodes.add(check.name() + "_FAILED");
+            } else if ("INCONCLUSIVE".equals(check.status())) {
+                reasonCodes.add(check.name() + "_INCONCLUSIVE");
+            }
+        }
+        return reasonCodes.stream().sorted().toList();
     }
 
     private void rejectForbidden(String value, String field) {

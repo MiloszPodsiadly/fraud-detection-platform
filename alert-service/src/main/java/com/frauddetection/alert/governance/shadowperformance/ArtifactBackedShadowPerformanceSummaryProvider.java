@@ -6,6 +6,7 @@ import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
@@ -41,10 +42,10 @@ public class ArtifactBackedShadowPerformanceSummaryProvider implements ShadowPer
 
         Path artifactPath = configuredArtifactPath();
         assertJsonArtifact(artifactPath);
+        assertNoSymlinkDirectory(artifactPath);
         assertRegularFile(artifactPath);
-        assertBoundedSize(artifactPath);
 
-        ShadowPerformanceSummary summary = readSummary(artifactPath);
+        ShadowPerformanceSummary summary = readSummary(readBoundedArtifact(artifactPath));
         try {
             validator.validate(summary);
         } catch (ShadowPerformanceSummaryValidationException exception) {
@@ -74,6 +75,16 @@ public class ArtifactBackedShadowPerformanceSummaryProvider implements ShadowPer
         }
     }
 
+    private void assertNoSymlinkDirectory(Path artifactPath) {
+        Path parent = artifactPath.getParent();
+        while (parent != null) {
+            if (Files.isSymbolicLink(parent)) {
+                throw unavailable();
+            }
+            parent = parent.getParent();
+        }
+    }
+
     private void assertJsonArtifact(Path artifactPath) {
         Path fileName = artifactPath.getFileName();
         if (fileName == null || !fileName.toString().endsWith(".json")) {
@@ -87,19 +98,27 @@ public class ArtifactBackedShadowPerformanceSummaryProvider implements ShadowPer
         }
     }
 
-    private void assertBoundedSize(Path artifactPath) {
+    private byte[] readBoundedArtifact(Path artifactPath) {
+        long maxSizeBytes = properties.maxSizeBytes();
+        if (maxSizeBytes < 0 || maxSizeBytes >= Integer.MAX_VALUE) {
+            throw unavailable();
+        }
         try {
-            if (Files.size(artifactPath) > properties.maxSizeBytes()) {
-                throw unavailable();
+            try (InputStream stream = Files.newInputStream(artifactPath)) {
+                byte[] payload = stream.readNBytes((int) maxSizeBytes + 1);
+                if (payload.length > maxSizeBytes) {
+                    throw unavailable();
+                }
+                return payload;
             }
         } catch (IOException exception) {
             throw unavailable();
         }
     }
 
-    private ShadowPerformanceSummary readSummary(Path artifactPath) {
+    private ShadowPerformanceSummary readSummary(byte[] payload) {
         try {
-            return objectMapper.readValue(artifactPath.toFile(), ShadowPerformanceSummary.class);
+            return objectMapper.readValue(payload, ShadowPerformanceSummary.class);
         } catch (JacksonException exception) {
             throw unavailable();
         }

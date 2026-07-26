@@ -6,6 +6,7 @@ import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
@@ -44,9 +45,8 @@ public class ArtifactBackedPromotionReviewReadinessReportProvider implements Pro
         assertJsonArtifact(artifactPath);
         assertNoSymlinkDirectory(artifactPath);
         assertRegularFile(artifactPath);
-        assertBoundedSize(artifactPath);
 
-        PromotionReviewReadinessReport report = readReport(artifactPath);
+        PromotionReviewReadinessReport report = readReport(readBoundedArtifact(artifactPath));
         try {
             validator.validate(report);
         } catch (PromotionReviewReadinessReportValidationException exception) {
@@ -99,19 +99,27 @@ public class ArtifactBackedPromotionReviewReadinessReportProvider implements Pro
         }
     }
 
-    private void assertBoundedSize(Path artifactPath) {
+    private byte[] readBoundedArtifact(Path artifactPath) {
+        long maxSizeBytes = properties.maxSizeBytes();
+        if (maxSizeBytes < 0 || maxSizeBytes >= Integer.MAX_VALUE) {
+            throw unavailable();
+        }
         try {
-            if (Files.size(artifactPath) > properties.maxSizeBytes()) {
-                throw unavailable();
+            try (InputStream stream = Files.newInputStream(artifactPath)) {
+                byte[] payload = stream.readNBytes((int) maxSizeBytes + 1);
+                if (payload.length > maxSizeBytes) {
+                    throw unavailable();
+                }
+                return payload;
             }
         } catch (IOException exception) {
             throw unavailable();
         }
     }
 
-    private PromotionReviewReadinessReport readReport(Path artifactPath) {
+    private PromotionReviewReadinessReport readReport(byte[] payload) {
         try {
-            return objectMapper.readValue(artifactPath.toFile(), PromotionReviewReadinessReport.class);
+            return objectMapper.readValue(payload, PromotionReviewReadinessReport.class);
         } catch (JacksonException exception) {
             throw unavailable();
         }

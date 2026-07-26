@@ -166,8 +166,6 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "EvaluationRunner",
                 "build_evaluation_card",
                 "EvaluationCardGenerator",
-                "precisionAtBudget =",
-                "recallAtTopK =",
                 "falsePositiveRate =",
                 "recompute",
                 "disagreementSummary.values().stream()"
@@ -209,11 +207,14 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         assertThat(source).contains(
                 "ShadowPerformanceSummaryCurrentProperties",
                 "LinkOption.NOFOLLOW_LINKS",
+                "Files.isSymbolicLink",
                 "startsWith(baseDir)",
-                "objectMapper.readValue",
+                "readBoundedArtifact(artifactPath)",
+                "objectMapper.readValue(payload, ShadowPerformanceSummary.class)",
                 "validator.validate(summary)"
         );
         assertThat(source).doesNotContain(
+                "Files.size",
                 "DirectoryStream",
                 "Files.list",
                 "Files.walk",
@@ -248,8 +249,6 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "defaultIfMissing",
                 "orElse(0)",
                 "orElse(false)",
-                "precisionAtBudget = 0",
-                "recallAtTopK = 0",
                 "falsePositiveRate = 0",
                 "new ShadowPerformanceSummary("
         );

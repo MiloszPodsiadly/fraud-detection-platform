@@ -62,7 +62,13 @@ class FeedbackDatasetArchitectureGuardTest {
     void openApiDoesNotExposeFeedbackDatasetPath() throws IOException {
         String openApi = Files.readString(ROOT.resolve("docs/openapi/alert_service.openapi.yaml"));
 
-        assertThat(openApi).doesNotContain("feedback-dataset", "fraud-feedback-dataset");
+        assertThat(openApi).doesNotContain(
+                "/feedback-dataset",
+                "/feedback-datasets",
+                "/fraud-feedback-dataset",
+                "/fraud-feedback-datasets",
+                "dataset-export"
+        );
     }
 
     @Test

@@ -108,6 +108,52 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
     }
 
     @Test
+    void configuredIncompleteChecksMapToUnavailable() throws Exception {
+        JsonNode root = objectMapper.readTree(validReportJson());
+        ((ObjectNode) root).putArray("checks").add(objectMapper.createObjectNode()
+                .put("name", "CURRENT_SUMMARY_PRESENT")
+                .put("status", "PASS")
+                .put("severity", "INFO"));
+
+        assertUnavailable(provider(writeJson(objectMapper.writeValueAsString(root))));
+    }
+
+    @Test
+    void configuredMissingRequiredCheckMapsToUnavailable() throws Exception {
+        JsonNode root = objectMapper.readTree(validReportJson());
+        ((ObjectNode) root).putArray("checks");
+
+        assertUnavailable(provider(writeJson(objectMapper.writeValueAsString(root))));
+    }
+
+    @Test
+    void configuredContradictoryReadinessStatusMapsToUnavailable() throws Exception {
+        JsonNode root = objectMapper.readTree(validReportJson());
+        ((ObjectNode) root.get("checks").get(13)).put("status", "INCONCLUSIVE");
+
+        assertUnavailable(provider(writeJson(objectMapper.writeValueAsString(root))));
+    }
+
+    @Test
+    void configuredContradictoryReasonCodesMapToUnavailable() throws Exception {
+        JsonNode root = objectMapper.readTree(validReportJson());
+        ((ObjectNode) root).putArray("reasonCodes").add("EXTRA_REASON");
+
+        assertUnavailable(provider(writeJson(objectMapper.writeValueAsString(root))));
+    }
+
+    @Test
+    void configuredCountsAboveFdp123LimitMapToUnavailable() throws Exception {
+        JsonNode records = objectMapper.readTree(validReportJson());
+        ((ObjectNode) records.get("inputs")).put("recordsEvaluated", 1001);
+        assertUnavailable(provider(writeJson(objectMapper.writeValueAsString(records))));
+
+        JsonNode minimum = objectMapper.readTree(validReportJson());
+        ((ObjectNode) minimum.get("inputs")).put("minimumDiagnosticEvidenceRecords", 1001);
+        assertUnavailable(provider(writeJson(objectMapper.writeValueAsString(minimum))));
+    }
+
+    @Test
     void configuredTooLargeSourceMapsToUnavailable() throws Exception {
         Path artifact = writeJson(validReportJson());
 

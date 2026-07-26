@@ -127,11 +127,13 @@ class PromotionReviewReadinessReadApiArchitectureGuardTest {
                 "PromotionReviewReadinessReportCurrentProperties",
                 "LinkOption.NOFOLLOW_LINKS",
                 "startsWith(baseDir)",
-                "objectMapper.readValue",
+                "readBoundedArtifact(artifactPath)",
+                "objectMapper.readValue(payload, PromotionReviewReadinessReport.class)",
                 "validator.validate(report)",
                 "Files.isSymbolicLink"
         );
         assertThat(source).doesNotContain(
+                "Files.size",
                 "DirectoryStream",
                 "Files.list",
                 "Files.walk",
