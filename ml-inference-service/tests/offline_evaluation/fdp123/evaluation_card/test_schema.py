@@ -31,17 +31,17 @@ class Fdp123EvaluationCardSchemaTest(unittest.TestCase):
     def test_unsupportedEvaluationCardVersionRejected(self):
         self._assert_rejected(cardVersion="1.0")
 
-    def test_oldFdp103EvaluationCardShapeRejected(self):
+    def test_incompleteEvaluationCardShapeRejected(self):
         with self.assertRaises(Fdp123EvaluationCardValidationError):
             validate_evaluation_card({
                 "cardVersion": "1.0",
-                "cardType": "OFFLINE_PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
-                "approvedFor": ["SHADOW"],
-                "evaluationReportType": "PYTHON_ML_EVALUATION_FOUNDATION",
+                "cardType": "UNSUPPORTED_CARD_TYPE",
+                "unexpectedUsageModes": ["SHADOW"],
+                "evaluationReportType": "UNSUPPORTED_REPORT_TYPE",
             })
 
-    def test_approvedForRejected(self):
-        self._assert_rejected(approvedFor=["SHADOW"])
+    def test_unexpectedUsageModeFieldRejected(self):
+        self._assert_rejected(unexpectedUsageModes=["SHADOW"])
 
     def test_unsupportedAllowedUsageModeRejected(self):
         self._assert_rejected(allowedUsageModes=["BANANA"])

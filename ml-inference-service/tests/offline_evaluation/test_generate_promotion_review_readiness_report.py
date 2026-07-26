@@ -277,6 +277,42 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
         self.assertEqual("INCONCLUSIVE", report["readinessStatus"])
         self.assertIn("ALERT_RECOMMENDED_RECALL_AVAILABLE_INCONCLUSIVE", report["reasonCodes"])
 
+    def test_rejectsReportContainingOnlyOnePassCheck(self):
+        report = build_report()
+        report["checks"] = [{"name": "CURRENT_SUMMARY_PRESENT", "status": "PASS", "severity": "INFO"}]
+
+        with self.assertRaises(PromotionReviewReadinessValidationError):
+            validate_promotion_review_readiness_report(report)
+
+    def test_rejectsReportMissingRequiredCheck(self):
+        report = build_report()
+        report["checks"] = report["checks"][:-1]
+
+        with self.assertRaises(PromotionReviewReadinessValidationError):
+            validate_promotion_review_readiness_report(report)
+
+    def test_rejectsStoredReviewableWhenCheckIsInconclusive(self):
+        report = build_report()
+        report["checks"][13]["status"] = "INCONCLUSIVE"
+
+        with self.assertRaises(PromotionReviewReadinessValidationError):
+            validate_promotion_review_readiness_report(report)
+
+    def test_rejectsContradictoryReasonCodes(self):
+        report = build_report()
+        report["reasonCodes"] = ["EXTRA_REASON"]
+
+        with self.assertRaises(PromotionReviewReadinessValidationError):
+            validate_promotion_review_readiness_report(report)
+
+    def test_rejectsCountsAboveFdp123Limit(self):
+        for field in ("recordsEvaluated", "minimumDiagnosticEvidenceRecords"):
+            report = build_report()
+            report["inputs"][field] = 1001
+
+            with self.assertRaises(PromotionReviewReadinessValidationError):
+                validate_promotion_review_readiness_report(report)
+
     def test_reportDoesNotContainPromotionApprovalLanguage(self):
         self.assertMaskedPayloadDoesNotContain("APPROVED", "PROMOTED", "READY_FOR_PRODUCTION", "DEPLOYABLE")
 

@@ -79,7 +79,7 @@ The final Platform Recommendation Evaluation Card `generatedAt` instant must be 
 
 ## Semantics
 
-The card uses `allowedUsageModes`, not `approvedFor`.
+The card exposes only the current `allowedUsageModes` field for offline documentation semantics.
 
 Allowed usage modes are limited to:
 

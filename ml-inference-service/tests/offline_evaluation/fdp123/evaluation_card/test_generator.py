@@ -49,7 +49,7 @@ class Fdp123EvaluationCardGeneratorTest(unittest.TestCase):
         self.assertEqual("NONE", card["paymentAuthorizationAuthority"])
         self.assertEqual("NONE", card["workflowAuthority"])
         self.assertIn("allowedUsageModes", card)
-        self.assertNotIn("approvedFor", card)
+        self.assertEqual({"SHADOW", "COMPARE", "OFFLINE_EVALUATION"}, set(card["allowedUsageModes"]))
         self.assertNotIn("disagreementSummary", card["metricsSummary"])
 
     def test_acceptsCanonicalSummaryAndManifestFilenames(self):

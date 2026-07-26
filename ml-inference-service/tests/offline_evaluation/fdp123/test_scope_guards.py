@@ -1,13 +1,6 @@
 from pathlib import Path
+import importlib
 import unittest
-
-from offline_evaluation.dataset_reader import read_fdp102_jsonl
-from offline_evaluation.dataset_schema import DatasetFormatError
-
-try:
-    from fdp123.fdp123_fixtures import jsonl, record
-except ModuleNotFoundError:
-    from fdp123_fixtures import jsonl, record
 
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -20,9 +13,9 @@ class Fdp123ScopeGuardTest(unittest.TestCase):
     def test_noForbiddenSourceOfTruthImports(self):
         self.assertNotInAnyFdp123File("app.feedback.feedback_dataset", "app.data.dataset", "read_fdp102_jsonl")
 
-    def test_fdp102ReaderDoesNotAcceptFdp123Metadata(self):
-        with self.assertRaises(DatasetFormatError):
-            read_fdp102_jsonl(jsonl(record()))
+    def test_removedFdp102ReaderCannotResolve(self):
+        with self.assertRaises(ModuleNotFoundError):
+            importlib.import_module("offline_evaluation.dataset_reader")
 
     def test_noRuntimeSurfaces(self):
         self.assertNotInAnyFdp123File("FastAPI", "Flask", "@app.route", "uvicorn", "@RestController", "@RequestMapping")
@@ -65,7 +58,7 @@ class Fdp123ScopeGuardTest(unittest.TestCase):
         self.assertIn("FDP-124 consumes FDP-123 `DATASET_RECORD` rows", doc)
         self.assertIn("`DATASET_METADATA` is not an evaluation row", doc)
         self.assertIn("Only FDP-123 `DATASET_RECORD` lines are metric rows", doc)
-        self.assertIn("FDP-102 and FDP-123 are separate input contracts", doc)
+        self.assertIn("FDP-123/FDP-124 is not a permissive dual-format parser", doc)
         self.assertIn("manual local offline runner", doc)
         self.assertIn("not a scheduler", doc)
         self.assertIn("not automatic report publishing", doc)

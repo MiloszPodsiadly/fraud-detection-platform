@@ -55,7 +55,7 @@ class CurrentShadowSummaryGenerationTest(unittest.TestCase):
     def test_invalidEvaluationCardDoesNotWriteSummary(self):
         with workspace() as paths:
             card = json.loads(paths.evaluation_card.read_text())
-            card["cardType"] = "FDP103_LEGACY_MODEL_CARD"
+            card["cardType"] = "UNSUPPORTED_CARD_TYPE"
             paths.evaluation_card.write_text(json.dumps(card), encoding="utf-8")
 
             with self.assertRaises(Exception):
@@ -111,6 +111,53 @@ class CurrentShadowSummaryGenerationTest(unittest.TestCase):
             card = json.loads(paths.evaluation_card.read_text())
             card["warnings"] = ["LOW_SAMPLE_SIZE", "NO_ACTUAL_POSITIVES"]
             paths.evaluation_card.write_text(json.dumps(card, sort_keys=True), encoding="utf-8")
+
+            with self.assertRaises(CurrentSummaryGenerationError):
+                generate(paths)
+
+            self.assertFalse(paths.output.exists())
+
+    def test_manifestWithExtraTopLevelFieldDoesNotWriteSummary(self):
+        with workspace() as paths:
+            manifest = json.loads(paths.manifest.read_text())
+            manifest["extra"] = "unsupported"
+            paths.manifest.write_text(json.dumps(manifest), encoding="utf-8")
+
+            with self.assertRaises(CurrentSummaryGenerationError):
+                generate(paths)
+
+            self.assertFalse(paths.output.exists())
+
+    def test_manifestMissingMarkdownEntryDoesNotWriteSummary(self):
+        with workspace() as paths:
+            manifest = json.loads(paths.manifest.read_text())
+            manifest["files"] = [
+                item for item in manifest["files"]
+                if item["name"] != "platform_recommendation_evaluation_card.md"
+            ]
+            paths.manifest.write_text(json.dumps(manifest), encoding="utf-8")
+
+            with self.assertRaises(CurrentSummaryGenerationError):
+                generate(paths)
+
+            self.assertFalse(paths.output.exists())
+
+    def test_manifestWithThirdArtifactDoesNotWriteSummary(self):
+        with workspace() as paths:
+            manifest = json.loads(paths.manifest.read_text())
+            manifest["files"].append({"name": "extra.json", "sha256": "0" * 64, "sizeBytes": 2})
+            paths.manifest.write_text(json.dumps(manifest), encoding="utf-8")
+
+            with self.assertRaises(CurrentSummaryGenerationError):
+                generate(paths)
+
+            self.assertFalse(paths.output.exists())
+
+    def test_manifestTimestampMismatchDoesNotWriteSummary(self):
+        with workspace() as paths:
+            manifest = json.loads(paths.manifest.read_text())
+            manifest["generatedAt"] = "2026-06-12T00:00:01Z"
+            paths.manifest.write_text(json.dumps(manifest), encoding="utf-8")
 
             with self.assertRaises(CurrentSummaryGenerationError):
                 generate(paths)

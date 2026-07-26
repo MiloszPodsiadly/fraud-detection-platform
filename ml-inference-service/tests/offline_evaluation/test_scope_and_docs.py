@@ -114,10 +114,10 @@ class OfflineEvaluationScopeGuardTest(unittest.TestCase):
 
 class OfflineEvaluationDocumentationTest(unittest.TestCase):
     def test_docsMentionOfflineOnly(self):
-        self.assertDocContains("FDP-103 is offline-only")
+        self.assertDocContains("The current evaluation suite is offline-only")
 
-    def test_docsMentionConsumesOnlyFdp102Jsonl(self):
-        self.assertDocContains("consumes only FDP-102 bounded JSONL export")
+    def test_docsMentionConsumesOnlyFdp123Jsonl(self):
+        self.assertDocContains("consumes FDP-123 bounded feedback dataset JSONL")
 
     def test_docsMentionNoProductionDbReads(self):
         self.assertDocContains("does not read production DBs")
@@ -138,17 +138,11 @@ class OfflineEvaluationDocumentationTest(unittest.TestCase):
         self.assertDocContains("Analyst labels are evaluation signals only")
         self.assertDocContains("They are not ground truth")
 
-    def test_docsMentionFailedExportAborts(self):
-        self.assertDocContains("Failed FDP-102 exports abort evaluation")
-
-    def test_docsMentionNotEvaluationEligibleExcluded(self):
-        self.assertDocContains("NOT_EVALUATION_ELIGIBLE is excluded from model-quality metrics")
-
     def test_docsMentionFailFastMalformedInputPolicy(self):
-        self.assertDocContains("FDP-103 v1 fails fast on malformed or invalid schema input")
+        self.assertDocContains("FDP-124 fails fast on malformed or invalid schema input")
 
     def test_docsMentionPseudonymousInputReferencesStayInternal(self):
-        self.assertDocContains("accepts FDP-102 pseudonymous input references only for parsing and deterministic ordering")
+        self.assertDocContains("accepts FDP-123 pseudonymous input references only for parsing and deterministic ordering")
         self.assertDocContains("must not emit `evaluationRecordId`, `transactionReference`, `eval-`, or `txnref-`")
 
     def test_docsMentionStrictEngineStatusPolicy(self):
@@ -171,8 +165,8 @@ class OfflineEvaluationDocumentationTest(unittest.TestCase):
     def test_docsMentionEvaluationCardNotPaymentAuthorization(self):
         self.assertEvaluationCardDocContains("does not authorize payments")
 
-    def test_docsMentionApprovedForOnlyShadowCompareOffline(self):
-        self.assertEvaluationCardDocContains("The card uses `allowedUsageModes`, not `approvedFor`")
+    def test_docsMentionAllowedUsageModesOnlyShadowCompareOffline(self):
+        self.assertEvaluationCardDocContains("The card exposes only the current `allowedUsageModes` field")
 
     def test_docsMentionOfflineEvaluationIsNotApprovalTarget(self):
         self.assertEvaluationCardDocContains("These values are documentation semantics only")

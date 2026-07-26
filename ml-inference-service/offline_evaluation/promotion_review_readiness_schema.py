@@ -7,9 +7,11 @@ from typing import Any
 from offline_evaluation.fdp123.evaluation_card.schema import (
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION,
-    Fdp123EvaluationCardValidationError,
+)
+from offline_evaluation.fdp123.timestamp_contract import (
+    TimestampContractError,
     normalize_rfc3339_timestamp,
-    _timestamp_instant,
+    timestamp_instant,
 )
 from offline_evaluation.shadow_performance_schema import (
     BANNER as SHADOW_PERFORMANCE_BANNER,
@@ -37,7 +39,7 @@ BANNER = (
 READINESS_STATUSES = {"INSUFFICIENT_DATA", "INCONCLUSIVE", "NOT_REVIEWABLE", "REVIEWABLE"}
 CHECK_STATUSES = {"PASS", "WARN", "FAIL", "INCONCLUSIVE", "NOT_APPLICABLE"}
 SEVERITIES = {"INFO", "LOW", "MEDIUM", "HIGH"}
-CHECK_NAMES = {
+REQUIRED_CHECK_NAMES = (
     "CURRENT_SUMMARY_PRESENT",
     "CURRENT_SUMMARY_VERSION_SUPPORTED",
     "EVALUATION_CARD_PRESENT",
@@ -55,6 +57,26 @@ CHECK_NAMES = {
     "ALERT_RECOMMENDED_RECALL_AVAILABLE",
     "FALSE_POSITIVE_RATE_AVAILABLE",
     "FALSE_NEGATIVE_RATE_AVAILABLE",
+)
+CHECK_NAMES = set(REQUIRED_CHECK_NAMES)
+CHECK_SEVERITIES = {
+    "CURRENT_SUMMARY_PRESENT": "INFO",
+    "CURRENT_SUMMARY_VERSION_SUPPORTED": "INFO",
+    "EVALUATION_CARD_PRESENT": "INFO",
+    "EVALUATION_CARD_VERSION_SUPPORTED": "INFO",
+    "GOVERNANCE_STATUS_DIAGNOSTIC_ONLY": "INFO",
+    "NOT_PRODUCTION_APPROVAL_TRUE": "INFO",
+    "NOT_PROMOTION_APPROVAL_TRUE": "INFO",
+    "NOT_THRESHOLD_RECOMMENDATION_TRUE": "INFO",
+    "NOT_PAYMENT_AUTHORIZATION_TRUE": "INFO",
+    "NOT_AUTOMATIC_DECISIONING_TRUE": "INFO",
+    "EVALUATION_REPORT_TYPE_SUPPORTED": "INFO",
+    "METRIC_BASIS_SUPPORTED": "INFO",
+    "MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS": "HIGH",
+    "ALERT_RECOMMENDED_PRECISION_AVAILABLE": "MEDIUM",
+    "ALERT_RECOMMENDED_RECALL_AVAILABLE": "MEDIUM",
+    "FALSE_POSITIVE_RATE_AVAILABLE": "MEDIUM",
+    "FALSE_NEGATIVE_RATE_AVAILABLE": "MEDIUM",
 }
 REQUIRED_FIELDS = {
     "reportType",
@@ -116,6 +138,14 @@ FORBIDDEN_OUTPUT_TERMS = {
     "finaldecision",
 }
 MACHINE_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+MAX_DIAGNOSTIC_RECORDS = 1000
+REQUIRED_LIMITATIONS = {
+    "OFFLINE_DIAGNOSTIC_AID_ONLY",
+    "HUMAN_REVIEW_START_ONLY",
+    "DOES_NOT_RECOMMEND_THRESHOLDS",
+    "DOES_NOT_AUTHORIZE_PAYMENTS",
+    "DOES_NOT_CHANGE_SCORING",
+}
 
 
 def build_promotion_review_readiness_report(
@@ -125,21 +155,18 @@ def build_promotion_review_readiness_report(
         minimum_diagnostic_evidence_records: int = 1,
 ) -> dict[str, Any]:
     summary = validate_shadow_performance_summary(current_summary)
-    if minimum_diagnostic_evidence_records < 1:
-        raise PromotionReviewReadinessValidationError("minimumDiagnosticEvidenceRecords must be positive")
+    if (
+            isinstance(minimum_diagnostic_evidence_records, bool)
+            or not isinstance(minimum_diagnostic_evidence_records, int)
+            or minimum_diagnostic_evidence_records < 1
+            or minimum_diagnostic_evidence_records > MAX_DIAGNOSTIC_RECORDS
+    ):
+        raise PromotionReviewReadinessValidationError("minimumDiagnosticEvidenceRecords must be in range 1..1000")
 
     records_evaluated = summary["evaluationPopulation"]["recordsEvaluated"]
     checks = _checks(summary, minimum_diagnostic_evidence_records)
-    failed_checks = [check for check in checks if check["status"] == "FAIL"]
-    inconclusive_checks = [check for check in checks if check["status"] == "INCONCLUSIVE"]
-    readiness_status = "REVIEWABLE"
-    reason_codes: list[str] = []
-    if failed_checks:
-        readiness_status = "INSUFFICIENT_DATA" if _minimum_evidence_failed(failed_checks) else "NOT_REVIEWABLE"
-        reason_codes = [f"{check['name']}_FAILED" for check in failed_checks]
-    elif inconclusive_checks:
-        readiness_status = "INCONCLUSIVE"
-        reason_codes = [f"{check['name']}_INCONCLUSIVE" for check in inconclusive_checks]
+    readiness_status = _derive_readiness_status(checks)
+    reason_codes = _derive_reason_codes(checks)
 
     report = {
         "reportType": REPORT_TYPE,
@@ -167,13 +194,7 @@ def build_promotion_review_readiness_report(
         "checks": checks,
         "reasonCodes": reason_codes,
         "warnings": _machine_codes(summary["warnings"]),
-        "limitations": [
-            "OFFLINE_DIAGNOSTIC_AID_ONLY",
-            "HUMAN_REVIEW_START_ONLY",
-            "DOES_NOT_RECOMMEND_THRESHOLDS",
-            "DOES_NOT_AUTHORIZE_PAYMENTS",
-            "DOES_NOT_CHANGE_SCORING",
-        ],
+        "limitations": sorted(REQUIRED_LIMITATIONS),
         "banner": BANNER,
     }
     return validate_promotion_review_readiness_report(report)
@@ -259,15 +280,15 @@ def _minimum_evidence_failed(checks: list[dict[str, str]]) -> bool:
 
 
 def _validate_status_consistency(report: dict[str, Any]) -> None:
-    failed_checks = [check for check in report["checks"] if check["status"] == "FAIL"]
-    inconclusive_checks = [check for check in report["checks"] if check["status"] == "INCONCLUSIVE"]
-    if report["readinessStatus"] == "REVIEWABLE" and (failed_checks or inconclusive_checks):
-        raise PromotionReviewReadinessValidationError("REVIEWABLE requires all required checks to pass")
-    if report["readinessStatus"] == "INCONCLUSIVE" and failed_checks:
-        raise PromotionReviewReadinessValidationError("INCONCLUSIVE requires no failed checks")
-    if report["readinessStatus"] == GOVERNANCE_STATUS:
-        raise PromotionReviewReadinessValidationError("DIAGNOSTIC_ONLY is governanceStatus, not readinessStatus")
-    if _timestamp_instant(report["generatedAt"]) < _timestamp_instant(
+    expected_status = _derive_readiness_status(report["checks"])
+    if report["readinessStatus"] != expected_status:
+        raise PromotionReviewReadinessValidationError("readinessStatus must match required checks")
+    expected_reason_codes = _derive_reason_codes(report["checks"])
+    if report["reasonCodes"] != expected_reason_codes:
+        raise PromotionReviewReadinessValidationError("reasonCodes must match required checks")
+    if not REQUIRED_LIMITATIONS.issubset(set(report["limitations"])):
+        raise PromotionReviewReadinessValidationError("limitations missing diagnostic non-goals")
+    if timestamp_instant(report["generatedAt"]) < timestamp_instant(
             report["inputs"]["shadowPerformanceSummary"]["generatedAt"]
     ):
         raise PromotionReviewReadinessValidationError(
@@ -278,22 +299,29 @@ def _validate_status_consistency(report: dict[str, Any]) -> None:
 def normalize_readiness_timestamp(value: Any, field: str) -> str:
     try:
         return normalize_rfc3339_timestamp(value, field)
-    except Fdp123EvaluationCardValidationError as exc:
+    except TimestampContractError as exc:
         raise PromotionReviewReadinessValidationError(str(exc)) from exc
 
 
 def _inputs(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise PromotionReviewReadinessValidationError("inputs must be an object")
+    _reject_unknown_or_missing(raw, {"shadowPerformanceSummary", "minimumDiagnosticEvidenceRecords", "recordsEvaluated"}, "inputs")
     summary = raw.get("shadowPerformanceSummary")
     if not isinstance(summary, dict):
         raise PromotionReviewReadinessValidationError("inputs.shadowPerformanceSummary must be an object")
+    _reject_unknown_or_missing(summary, {"present", "reportType", "summaryVersion", "generatedAt"}, "inputs.shadowPerformanceSummary")
     minimum = raw.get("minimumDiagnosticEvidenceRecords")
     records_evaluated = raw.get("recordsEvaluated")
-    if isinstance(minimum, bool) or not isinstance(minimum, int) or minimum < 1:
-        raise PromotionReviewReadinessValidationError("minimumDiagnosticEvidenceRecords must be positive")
-    if isinstance(records_evaluated, bool) or not isinstance(records_evaluated, int) or records_evaluated < 0:
-        raise PromotionReviewReadinessValidationError("recordsEvaluated must be non-negative")
+    if isinstance(minimum, bool) or not isinstance(minimum, int) or minimum < 1 or minimum > MAX_DIAGNOSTIC_RECORDS:
+        raise PromotionReviewReadinessValidationError("minimumDiagnosticEvidenceRecords must be in range 1..1000")
+    if (
+            isinstance(records_evaluated, bool)
+            or not isinstance(records_evaluated, int)
+            or records_evaluated < 0
+            or records_evaluated > MAX_DIAGNOSTIC_RECORDS
+    ):
+        raise PromotionReviewReadinessValidationError("recordsEvaluated must be in range 0..1000")
     normalized_summary = {
         "present": _required_true(summary, "present"),
         "reportType": _required_constant(summary, "reportType", SHADOW_REPORT_TYPE),
@@ -313,6 +341,7 @@ def _check_list(raw: Any) -> list[dict[str, str]]:
     if not isinstance(raw, list) or not raw:
         raise PromotionReviewReadinessValidationError("checks must be a non-empty list")
     checks = []
+    names = []
     for item in raw:
         if not isinstance(item, dict):
             raise PromotionReviewReadinessValidationError("checks must contain objects")
@@ -320,7 +349,16 @@ def _check_list(raw: Any) -> list[dict[str, str]]:
         name = _enum(item, "name", CHECK_NAMES)
         status = _enum(item, "status", CHECK_STATUSES)
         severity = _enum(item, "severity", SEVERITIES)
+        if severity != CHECK_SEVERITIES[name]:
+            raise PromotionReviewReadinessValidationError("check.severity does not match required check")
+        names.append(name)
         checks.append({"name": name, "status": status, "severity": severity})
+    if len(checks) != len(REQUIRED_CHECK_NAMES):
+        raise PromotionReviewReadinessValidationError("checks must contain exactly the required checks")
+    if len(set(names)) != len(names):
+        raise PromotionReviewReadinessValidationError("checks contain duplicate names")
+    if set(names) != CHECK_NAMES:
+        raise PromotionReviewReadinessValidationError("checks must contain exactly the required checks")
     return checks
 
 
@@ -371,7 +409,9 @@ def _machine_code_list(raw: dict[str, Any], field: str, max_items: int) -> list[
         if not isinstance(item, str) or MACHINE_CODE_PATTERN.fullmatch(item) is None:
             raise PromotionReviewReadinessValidationError(f"{field} must contain machine-code strings")
         result.append(item)
-    return sorted(set(result))
+    if len(set(result)) != len(result):
+        raise PromotionReviewReadinessValidationError(f"{field} contains duplicate values")
+    return sorted(result)
 
 
 def _machine_codes(values: list[str]) -> list[str]:
@@ -380,6 +420,25 @@ def _machine_codes(values: list[str]) -> list[str]:
         if isinstance(value, str) and MACHINE_CODE_PATTERN.fullmatch(value):
             result.append(value)
     return sorted(set(result))
+
+
+def _derive_readiness_status(checks: list[dict[str, str]]) -> str:
+    failed_checks = [check for check in checks if check["status"] == "FAIL"]
+    if failed_checks:
+        return "INSUFFICIENT_DATA" if _minimum_evidence_failed(failed_checks) else "NOT_REVIEWABLE"
+    if any(check["status"] == "INCONCLUSIVE" for check in checks):
+        return "INCONCLUSIVE"
+    return "REVIEWABLE"
+
+
+def _derive_reason_codes(checks: list[dict[str, str]]) -> list[str]:
+    reason_codes = []
+    for check in checks:
+        if check["status"] == "FAIL":
+            reason_codes.append(f"{check['name']}_FAILED")
+        elif check["status"] == "INCONCLUSIVE":
+            reason_codes.append(f"{check['name']}_INCONCLUSIVE")
+    return sorted(reason_codes)
 
 
 def _reject_unknown_or_missing(raw: dict[str, Any], allowed: set[str], label: str) -> None:

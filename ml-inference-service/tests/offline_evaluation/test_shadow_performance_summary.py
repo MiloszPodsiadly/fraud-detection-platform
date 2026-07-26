@@ -50,13 +50,14 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
         )
         self.assertEqual({"available": True, "value": 0.0, "reason": None}, metrics["falsePositiveRate"])
 
-    def test_doesNotUseBudgetOrTopKMetricAliases(self):
+    def test_usesOnlyRequiredMetricFields(self):
         payload = write_shadow_performance_summary(self.summary())
+        metrics = json.loads(payload)["metrics"]
 
-        self.assertIn("alertRecommendedPrecision", payload)
-        self.assertIn("alertRecommendedRecall", payload)
-        self.assertNotIn("precisionAtBudget", payload)
-        self.assertNotIn("recallAtTopK", payload)
+        self.assertEqual(
+            {"alertRecommendedPrecision", "alertRecommendedRecall", "falsePositiveRate", "falseNegativeRate"},
+            set(metrics),
+        )
 
     def test_doesNotEmitFabricatedLegacyCounters(self):
         payload = write_shadow_performance_summary(self.summary())
@@ -91,7 +92,18 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
         self.assertTrue(governance["notThresholdRecommendation"])
         self.assertTrue(governance["notPaymentAuthorization"])
         self.assertTrue(governance["notAutomaticDecisioning"])
-        self.assertNotIn("approvedFor", governance)
+        self.assertEqual(
+            {
+                "governanceStatus",
+                "diagnosticOnly",
+                "notProductionApproval",
+                "notPromotionApproval",
+                "notThresholdRecommendation",
+                "notPaymentAuthorization",
+                "notAutomaticDecisioning",
+            },
+            set(governance),
+        )
 
     def test_includesRequiredOfflineDiagnosticsBanner(self):
         self.assertEqual(BANNER, self.summary()["banner"])
@@ -148,7 +160,7 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
 
     def test_rejectsUnsupportedMetricName(self):
         summary = self.summary()
-        summary["metrics"]["precisionAtBudget"] = {"available": True, "value": 0.5, "reason": None}
+        summary["metrics"]["unexpectedMetric"] = {"available": True, "value": 0.5, "reason": None}
 
         with self.assertRaises(ShadowPerformanceValidationError):
             write_shadow_performance_summary(summary)
@@ -156,6 +168,25 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
     def test_rejectsFdp103LineageLabelledAsCurrent(self):
         summary = self.summary()
         summary["evaluation"]["evaluationReportType"] = "PYTHON_ML_EVALUATION_FOUNDATION"
+
+        with self.assertRaises(ShadowPerformanceValidationError):
+            write_shadow_performance_summary(summary)
+
+    def test_rejectsUnsupportedLineageVersions(self):
+        for field, value in (
+                ("evaluationArtifactSetVersion", "other-artifact-format-v99"),
+                ("datasetVersion", "unknown-dataset-v77"),
+                ("datasetTimeBasis", "TRANSACTION_CREATED_AT"),
+        ):
+            summary = self.summary()
+            summary["evaluation"][field] = value
+
+            with self.assertRaises(ShadowPerformanceValidationError):
+                write_shadow_performance_summary(summary)
+
+    def test_rejectsTwentyOneLimitations(self):
+        summary = self.summary()
+        summary["limitations"] = [f"LIMITATION_{index}" for index in range(21)]
 
         with self.assertRaises(ShadowPerformanceValidationError):
             write_shadow_performance_summary(summary)

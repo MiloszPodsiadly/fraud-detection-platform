@@ -10,13 +10,23 @@ from offline_evaluation.fdp123.evaluation_card.schema import (
     METRICS_SUBJECT,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION,
-    normalize_rfc3339_timestamp,
-    _timestamp_instant,
     Fdp123EvaluationCardValidationError,
     validate_evaluation_card,
 )
+from offline_evaluation.fdp123.dataset_schema import (
+    DATASET_TIME_BASIS as EXPECTED_DATASET_TIME_BASIS,
+    DATASET_VERSION as EXPECTED_DATASET_VERSION,
+)
 from offline_evaluation.fdp123.evaluation_contract import EVALUATION_SUBJECT
-from offline_evaluation.fdp123.report_writer import REPORT_TYPE as EXPECTED_EVALUATION_REPORT_TYPE
+from offline_evaluation.fdp123.report_writer import (
+    ARTIFACT_SET_VERSION as EXPECTED_EVALUATION_ARTIFACT_SET_VERSION,
+    REPORT_TYPE as EXPECTED_EVALUATION_REPORT_TYPE,
+)
+from offline_evaluation.fdp123.timestamp_contract import (
+    TimestampContractError,
+    normalize_rfc3339_timestamp,
+    timestamp_instant,
+)
 
 
 class ShadowPerformanceValidationError(ValueError):
@@ -29,8 +39,9 @@ SUMMARY_VERSION = "shadow-performance-summary-v2"
 EXPECTED_EVALUATION_REPORT_VERSION = "FDP-124"
 EXPECTED_GOVERNANCE_STATUS = "DIAGNOSTIC_ONLY"
 MAX_WARNINGS = 20
-MAX_LIMITATIONS = 30
+MAX_LIMITATIONS = 20
 MAX_COUNT_VALUE = MAX_FDP123_DATASET_RECORDS
+MAX_MACHINE_CODE_LENGTH = 128
 BANNER = (
     "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, "
     "threshold recommendation, production decisioning approval, payment authorization, "
@@ -85,21 +96,6 @@ METRIC_FIELDS = {
     "falseNegativeRate",
 }
 METRIC_OBJECT_FIELDS = {"available", "value", "reason"}
-LEGACY_V1_ONLY_FIELDS = {
-    "summaryType",
-    "model",
-    "precisionAtBudget",
-    "recallAtTopK",
-    "disagreementSummary",
-    "approvedFor",
-    "recordsExcludedNotEvaluationEligible",
-    "mlCaughtRulesMissedCount",
-    "rulesCaughtMlMissedCount",
-    "missingMlCount",
-    "missingRulesCount",
-    "missingProjectionCount",
-    "notEvaluationEligibleCount",
-}
 MACHINE_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
 SHA256_PATTERN = re.compile(r"^[a-f0-9]{64}$")
 SAFE_CONTRACT_VALUES = {
@@ -109,6 +105,9 @@ SAFE_CONTRACT_VALUES = {
     EXPECTED_METRIC_BASIS,
     EXPECTED_EVALUATION_REPORT_TYPE,
     EXPECTED_EVALUATION_REPORT_VERSION,
+    EXPECTED_EVALUATION_ARTIFACT_SET_VERSION,
+    EXPECTED_DATASET_VERSION,
+    EXPECTED_DATASET_TIME_BASIS,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION,
     EVALUATION_PURPOSE,
@@ -198,8 +197,6 @@ FORBIDDEN_FIELD_NAMES = {
     "deployrecommendation",
 }
 FORBIDDEN_VALUE_TERMS = FORBIDDEN_FIELD_NAMES | {
-    "precisionatbudget",
-    "recallattopk",
     "modelfamily",
     "modelname",
     "modelversion",
@@ -226,7 +223,6 @@ def validate_evaluation_card_for_shadow_summary(evaluation_card: dict[str, Any])
 def validate_shadow_performance_summary(raw: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ShadowPerformanceValidationError("shadow performance summary must be an object")
-    _reject_legacy_v1_fields(raw)
     _reject_unsafe(raw)
     _reject_unknown_or_missing(raw, REQUIRED_SUMMARY_FIELDS, "summary")
     evaluation_subject = _evaluation_subject(raw["evaluationSubject"])
@@ -298,9 +294,11 @@ def _evaluation(raw: Any) -> dict[str, str]:
         "evaluationCardGeneratedAt": normalize_shadow_timestamp(
             raw.get("evaluationCardGeneratedAt"), "evaluationCardGeneratedAt"
         ),
-        "evaluationArtifactSetVersion": _bounded_string(raw, "evaluationArtifactSetVersion", 128),
-        "datasetVersion": _bounded_string(raw, "datasetVersion", 128),
-        "datasetTimeBasis": _machine_code(raw, "datasetTimeBasis"),
+        "evaluationArtifactSetVersion": _required_constant(
+            raw, "evaluationArtifactSetVersion", EXPECTED_EVALUATION_ARTIFACT_SET_VERSION
+        ),
+        "datasetVersion": _required_constant(raw, "datasetVersion", EXPECTED_DATASET_VERSION),
+        "datasetTimeBasis": _required_constant(raw, "datasetTimeBasis", EXPECTED_DATASET_TIME_BASIS),
         "sourceManifestSha256": _sha256(raw, "sourceManifestSha256"),
         "sourceEvaluationCardManifestSha256": _sha256(raw, "sourceEvaluationCardManifestSha256"),
     }
@@ -358,7 +356,7 @@ def _metric_object(raw: dict[str, Any], field: str) -> dict[str, Any]:
 def normalize_shadow_timestamp(value: Any, field: str) -> str:
     try:
         return normalize_rfc3339_timestamp(value, field)
-    except Fdp123EvaluationCardValidationError as exc:
+    except TimestampContractError as exc:
         raise ShadowPerformanceValidationError(str(exc)) from exc
 
 
@@ -367,9 +365,9 @@ def _validate_summary_consistency(summary: dict[str, Any]) -> None:
     if evaluation_population["positiveClassCount"] + evaluation_population["negativeClassCount"] != evaluation_population["recordsEvaluated"]:
         raise ShadowPerformanceValidationError("positiveClassCount + negativeClassCount must equal recordsEvaluated")
     evaluation = summary["evaluation"]
-    report_generated_at = _timestamp_instant(evaluation["evaluationReportGeneratedAt"])
-    card_generated_at = _timestamp_instant(evaluation["evaluationCardGeneratedAt"])
-    summary_generated_at = _timestamp_instant(summary["generatedAt"])
+    report_generated_at = timestamp_instant(evaluation["evaluationReportGeneratedAt"])
+    card_generated_at = timestamp_instant(evaluation["evaluationCardGeneratedAt"])
+    summary_generated_at = timestamp_instant(summary["generatedAt"])
     if card_generated_at < report_generated_at:
         raise ShadowPerformanceValidationError("evaluationCardGeneratedAt must be greater than or equal to evaluationReportGeneratedAt")
     if summary_generated_at < card_generated_at:
@@ -383,12 +381,6 @@ def _reject_unknown_or_missing(raw: dict[str, Any], allowed: set[str], label: st
     missing = sorted(allowed - set(raw))
     if missing:
         raise ShadowPerformanceValidationError(f"{label} missing required fields: {', '.join(missing)}")
-
-
-def _reject_legacy_v1_fields(raw: dict[str, Any]) -> None:
-    present = sorted(LEGACY_V1_ONLY_FIELDS & set(raw))
-    if present:
-        raise ShadowPerformanceValidationError(f"summary contains legacy V1 fields: {', '.join(present)}")
 
 
 def _required_constant(raw: dict[str, Any], field: str, expected: str) -> str:
@@ -435,11 +427,13 @@ def _machine_code_list(raw: dict[str, Any], field: str, max_items: int) -> list[
     for item in value:
         if not isinstance(item, str) or MACHINE_CODE_PATTERN.fullmatch(item) is None:
             raise ShadowPerformanceValidationError(f"{field} must contain machine-code strings")
-        if len(item) > 256:
+        if len(item) > MAX_MACHINE_CODE_LENGTH:
             raise ShadowPerformanceValidationError(f"{field} contains oversized item")
         _reject_unsafe_value(item)
         result.append(item)
-    return sorted(set(result))
+    if len(set(result)) != len(result):
+        raise ShadowPerformanceValidationError(f"{field} contains duplicate values")
+    return sorted(result)
 
 
 def _sha256(raw: dict[str, Any], field: str) -> str:
