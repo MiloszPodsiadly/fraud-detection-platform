@@ -10,7 +10,8 @@ class TimestampContractError(ValueError):
 
 
 RFC3339_DATETIME_PATTERN = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$"
+    r"^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})T"
+    r"(?P<hour>\d{2}):(?P<minute>\d{2}):(?P<second>\d{2})(?:\.\d{1,6})?Z$"
 )
 
 
@@ -19,22 +20,34 @@ def normalize_rfc3339_timestamp(value: Any, field: str) -> str:
         raise TimestampContractError(f"{field} must be a non-empty RFC3339 timestamp")
     if len(value) > 128:
         raise TimestampContractError(f"{field} exceeds maximum timestamp length")
-    if RFC3339_DATETIME_PATTERN.fullmatch(value) is None:
+    match = RFC3339_DATETIME_PATTERN.fullmatch(value)
+    if match is None:
         raise TimestampContractError(f"{field} must be an RFC3339 date-time with timezone")
-    if value.endswith("Z"):
-        parse_value = value[:-1] + "+00:00"
-    else:
-        parse_value = value
+    year = int(match.group("year"))
+    month = int(match.group("month"))
+    hour = int(match.group("hour"))
+    minute = int(match.group("minute"))
+    second = int(match.group("second"))
+    if year < 1:
+        raise TimestampContractError(f"{field} year must be in range 0001..9999")
+    if month < 1 or month > 12:
+        raise TimestampContractError(f"{field} month must be in range 01..12")
+    if hour > 23:
+        raise TimestampContractError(f"{field} hour must be in range 00..23")
+    if minute > 59:
+        raise TimestampContractError(f"{field} minute must be in range 00..59")
+    if second > 59:
+        raise TimestampContractError(f"{field} second must be in range 00..59")
+    parse_value = value[:-1] + "+00:00"
     try:
         parsed = datetime.fromisoformat(parse_value)
     except ValueError as exc:
         raise TimestampContractError(f"{field} must be a valid RFC3339 timestamp") from exc
     if parsed.tzinfo is None:
         raise TimestampContractError(f"{field} must include timezone")
-    utc = parsed.astimezone(UTC)
-    timespec = "microseconds" if utc.microsecond else "seconds"
-    return utc.isoformat(timespec=timespec).replace("+00:00", "Z")
+    return value
 
 
 def timestamp_instant(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+    normalized = normalize_rfc3339_timestamp(value, "timestamp")
+    return datetime.fromisoformat(normalized.replace("Z", "+00:00")).astimezone(UTC)

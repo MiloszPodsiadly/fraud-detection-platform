@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import re
 from typing import Any
 
@@ -28,9 +27,13 @@ from offline_evaluation.fdp123.report_contract import (
 )
 from offline_evaluation.fdp123.evaluation_card.safety_policy import (
     EvaluationCardSafetyPolicyError,
-    compact_policy_token,
     reject_unsafe_policy_value,
     reject_unsafe_structure,
+)
+from offline_evaluation.fdp123.timestamp_contract import (
+    TimestampContractError,
+    normalize_rfc3339_timestamp as _normalize_rfc3339_timestamp,
+    timestamp_instant as _timestamp_instant,
 )
 
 
@@ -171,9 +174,6 @@ SAFE_CONTRACT_VALUES = {
 SAFE_NEGATED_MACHINE_CODES = REQUIRED_NOT_INTENDED_USE | REQUIRED_LIMITATIONS | REQUIRED_GOVERNANCE_BOUNDARY
 
 MACHINE_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
-RFC3339_DATETIME_PATTERN = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$"
-)
 def validate_evaluation_card(raw: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise Fdp123EvaluationCardValidationError("evaluation card must be an object")
@@ -188,7 +188,7 @@ def validate_evaluation_card(raw: dict[str, Any]) -> dict[str, Any]:
     normalized = {
         "cardVersion": _required_constant(raw, "cardVersion", PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION),
         "cardType": _required_constant(raw, "cardType", PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE),
-        "generatedAt": normalize_rfc3339_timestamp(raw.get("generatedAt"), "generatedAt"),
+        "generatedAt": _required_timestamp(raw.get("generatedAt"), "generatedAt"),
         "evaluationSubject": _evaluation_subject(raw),
         "metricsSubject": _required_constant(raw, "metricsSubject", METRICS_SUBJECT),
         "metricBasis": _required_constant(raw, "metricBasis", METRIC_BASIS),
@@ -244,7 +244,7 @@ def _evaluation_evidence(raw: dict[str, Any]) -> dict[str, Any]:
     warnings = _optional_machine_code_list(value, "warnings", MAX_WARNINGS)
     evidence = {
         "evaluationReportType": _required_constant(value, "evaluationReportType", EXPECTED_EVALUATION_REPORT_TYPE),
-        "evaluationGeneratedAt": normalize_rfc3339_timestamp(value.get("evaluationGeneratedAt"), "evaluationGeneratedAt"),
+        "evaluationGeneratedAt": _required_timestamp(value.get("evaluationGeneratedAt"), "evaluationGeneratedAt"),
         "evaluationArtifactSetVersion": _required_constant(
             value,
             "evaluationArtifactSetVersion",
@@ -324,31 +324,13 @@ def validate_class_count_integrity(positive_class_count: int, negative_class_cou
         raise Fdp123EvaluationCardValidationError("positiveClassCount + negativeClassCount must equal recordsEvaluated")
 
 
-def normalize_rfc3339_timestamp(value: Any, field: str) -> str:
-    if not isinstance(value, str) or not value:
-        raise Fdp123EvaluationCardValidationError(f"{field} must be a non-empty timestamp")
-    if len(value) > 128:
-        raise Fdp123EvaluationCardValidationError(f"{field} exceeds maximum length")
-    _reject_unsafe_value(value)
-    if RFC3339_DATETIME_PATTERN.fullmatch(value) is None:
-        raise Fdp123EvaluationCardValidationError(f"{field} must be an RFC3339 date-time with timezone")
-    return _format_utc_timestamp(_timestamp_instant(value))
-
-
-def _timestamp_instant(value: str) -> datetime:
-    parseable = value[:-1] + "+00:00" if value.endswith("Z") else value
+def _required_timestamp(value: Any, field: str) -> str:
     try:
-        parsed = datetime.fromisoformat(parseable)
-    except ValueError as exception:
-        raise Fdp123EvaluationCardValidationError("timestamp must be a valid calendar date-time") from exception
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise Fdp123EvaluationCardValidationError("timestamp must include timezone")
-    return parsed.astimezone(timezone.utc)
-
-
-def _format_utc_timestamp(value: datetime) -> str:
-    timespec = "microseconds" if value.microsecond else "seconds"
-    return value.astimezone(timezone.utc).isoformat(timespec=timespec).replace("+00:00", "Z")
+        normalized = _normalize_rfc3339_timestamp(value, field)
+    except TimestampContractError as exc:
+        raise Fdp123EvaluationCardValidationError(str(exc)) from exc
+    _reject_unsafe_value(normalized)
+    return normalized
 
 
 def _required_constant(raw: dict[str, Any], field: str, expected: str) -> str:
@@ -462,8 +444,3 @@ def _reject_unsafe_value(value: str) -> None:
         reject_unsafe_policy_value(value, safe_values=SAFE_CONTRACT_VALUES | SAFE_NEGATED_MACHINE_CODES)
     except EvaluationCardSafetyPolicyError as exc:
         raise Fdp123EvaluationCardValidationError(str(exc)) from exc
-
-
-def _compact(value: str) -> str:
-    return compact_policy_token(value)
-

@@ -28,7 +28,6 @@ from offline_evaluation.fdp123.evaluation_card.schema import (
     SAFE_CONTRACT_VALUES,
     SAFE_NEGATED_MACHINE_CODES,
     Fdp123EvaluationCardValidationError,
-    normalize_rfc3339_timestamp,
     validate_class_count_integrity,
     validate_evaluation_card,
 )
@@ -37,6 +36,10 @@ from offline_evaluation.fdp123.evaluation_card.safety_policy import (
     FORBIDDEN_INPUT_COMPACT_TERMS,
     compact_policy_token,
     reject_unsafe_structure,
+)
+from offline_evaluation.fdp123.timestamp_contract import (
+    TimestampContractError,
+    normalize_rfc3339_timestamp,
 )
 
 
@@ -124,6 +127,15 @@ EXPECTED_EVALUATION_ARTIFACT_FILENAMES = {
 }
 MANIFEST_FIELDS = {"artifactSetVersion", "files", "generatedAt", "reportType"}
 MANIFEST_FILE_FIELDS = {"name", "sha256", "sizeBytes"}
+
+
+def _normalize_timestamp(value: Any, field: str) -> str:
+    try:
+        return normalize_rfc3339_timestamp(value, field)
+    except TimestampContractError as exc:
+        raise Fdp123EvaluationCardValidationError(str(exc)) from exc
+
+
 def generate_evaluation_card_from_fdp124_artifacts(
         evaluation_summary_path: Path,
         evaluation_manifest_path: Path,
@@ -176,7 +188,7 @@ def generate_evaluation_card_from_fdp124_artifacts(
         "notIntendedUse": metadata["notIntendedUse"],
         "evaluationEvidence": {
             "evaluationReportType": summary["reportType"],
-            "evaluationGeneratedAt": normalize_rfc3339_timestamp(summary["generatedAt"], "evaluation summary generatedAt"),
+            "evaluationGeneratedAt": _normalize_timestamp(summary["generatedAt"], "evaluation summary generatedAt"),
             "evaluationArtifactSetVersion": manifest["artifactSetVersion"],
             "datasetVersion": dataset_metadata["datasetVersion"],
             "datasetTimeBasis": dataset_metadata["timeBasis"],
@@ -209,8 +221,8 @@ def _validate_manifest(manifest: dict[str, Any], summary: dict[str, Any], artifa
         raise Fdp123EvaluationCardValidationError("manifest reportType unsupported")
     if manifest.get("artifactSetVersion") != EXPECTED_SOURCE_ARTIFACT_SET_VERSION:
         raise Fdp123EvaluationCardValidationError("manifest artifactSetVersion unsupported")
-    normalize_rfc3339_timestamp(manifest.get("generatedAt"), "manifest generatedAt")
-    normalize_rfc3339_timestamp(summary.get("generatedAt"), "evaluation summary generatedAt")
+    _normalize_timestamp(manifest.get("generatedAt"), "manifest generatedAt")
+    _normalize_timestamp(summary.get("generatedAt"), "evaluation summary generatedAt")
     if manifest.get("generatedAt") != summary.get("generatedAt"):
         raise Fdp123EvaluationCardValidationError("manifest generatedAt must match evaluation summary generatedAt")
     files = manifest.get("files")
@@ -259,7 +271,7 @@ def _validate_summary(summary: dict[str, Any]) -> None:
         raise Fdp123EvaluationCardValidationError("evaluation summary metricsSubject unsupported")
     if summary.get("metricBasis") != METRIC_BASIS:
         raise Fdp123EvaluationCardValidationError("evaluation summary metricBasis unsupported")
-    normalize_rfc3339_timestamp(summary.get("generatedAt"), "evaluation summary generatedAt")
+    _normalize_timestamp(summary.get("generatedAt"), "evaluation summary generatedAt")
     dataset_metadata = _required_object(summary, "datasetMetadata")
     _reject_unknown(dataset_metadata, DATASET_METADATA_FIELDS, "datasetMetadata")
     if dataset_metadata.get("datasetVersion") != EXPECTED_DATASET_VERSION:
