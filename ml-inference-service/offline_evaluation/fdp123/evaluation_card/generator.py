@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ from offline_evaluation.fdp123.evaluation_card.schema import (
     validate_class_count_integrity,
     validate_evaluation_card,
 )
+from offline_evaluation.fdp123.evaluation_card.safety_policy import FORBIDDEN_INPUT_COMPACT_TERMS
 
 
 REQUIRED_GOVERNANCE_METADATA_FIELDS = {
@@ -105,37 +107,15 @@ REQUIRED_ALERT_MATRIX_FIELDS = {
     "falsePositiveRate",
     "falseNegativeRate",
 }
-FORBIDDEN_INPUT_COMPACT_TERMS = {
-    "evaluationrecordid",
-    "transactionreference",
-    "transactionid",
-    "feedbackid",
-    "customerid",
-    "correlationid",
-    "createdby",
-    "notes",
-    "rawnotes",
-    "rawpayload",
-    "rawmlrequest",
-    "rawmlresponse",
-    "rawfeaturevector",
-    "rawevidence",
-    "groundtruth",
-    "traininglabel",
-    "finaldecision",
-    "paymentdecision",
-    "paymentauthorization",
-    "promotionrecommended",
-    "thresholdrecommendation",
-    "productionready",
-    "certifiedforproduction",
-    "token",
-    "secret",
-    "password",
-    "decisionreasoncodes",
+EXPECTED_EVALUATION_ARTIFACT_FILENAMES = {
+    "disagreement_report.jsonl",
+    "evaluation_run.md",
+    EXPECTED_EVALUATION_SUMMARY_FILENAME,
+    "risk_level_report.json",
+    "score_bucket_report.json",
 }
-
-
+MANIFEST_FIELDS = {"artifactSetVersion", "files", "generatedAt", "reportType"}
+MANIFEST_FILE_FIELDS = {"name", "sha256", "sizeBytes"}
 def generate_evaluation_card_from_fdp124_artifacts(
         evaluation_summary_path: Path,
         evaluation_manifest_path: Path,
@@ -148,11 +128,19 @@ def generate_evaluation_card_from_fdp124_artifacts(
     _require_canonical_filename(manifest_path, EXPECTED_EVALUATION_MANIFEST_FILENAME, "manifest")
     manifest_bytes = _read_required_bytes(manifest_path, "manifest", MAX_EVALUATION_MANIFEST_BYTES)
     summary_bytes = _read_required_bytes(summary_path, "evaluation_summary", MAX_EVALUATION_SUMMARY_BYTES)
+    artifact_bytes = {
+        name: (
+            summary_bytes
+            if name == EXPECTED_EVALUATION_SUMMARY_FILENAME
+            else _read_required_bytes(summary_path.with_name(name), name, MAX_EVALUATION_SUMMARY_BYTES)
+        )
+        for name in EXPECTED_EVALUATION_ARTIFACT_FILENAMES
+    }
     manifest = _load_json_bytes(manifest_bytes, "manifest")
-    _validate_manifest(manifest, summary_bytes)
     summary = _load_json_bytes(summary_bytes, "evaluation_summary")
     _reject_forbidden_input(summary)
     _validate_summary(summary)
+    _validate_manifest(manifest, summary, artifact_bytes)
     metadata = _governance_metadata(governance_metadata)
 
     quality_metrics = summary["qualityMetrics"]
@@ -203,24 +191,52 @@ def generate_evaluation_card_from_fdp124_artifacts(
     return validate_evaluation_card(evaluation_card)
 
 
-def _validate_manifest(manifest: dict[str, Any], summary_bytes: bytes) -> None:
+def _validate_manifest(manifest: dict[str, Any], summary: dict[str, Any], artifact_bytes: dict[str, bytes]) -> None:
     _reject_forbidden_input(manifest)
+    _reject_unknown(manifest, MANIFEST_FIELDS, "manifest")
+    missing = sorted(MANIFEST_FIELDS - set(manifest))
+    if missing:
+        raise Fdp123EvaluationCardValidationError(f"manifest missing required fields: {', '.join(missing)}")
     if manifest.get("reportType") != EXPECTED_EVALUATION_REPORT_TYPE:
         raise Fdp123EvaluationCardValidationError("manifest reportType unsupported")
     if manifest.get("artifactSetVersion") != EXPECTED_SOURCE_ARTIFACT_SET_VERSION:
         raise Fdp123EvaluationCardValidationError("manifest artifactSetVersion unsupported")
+    if normalize_rfc3339_timestamp(manifest.get("generatedAt"), "manifest generatedAt") != normalize_rfc3339_timestamp(
+            summary.get("generatedAt"), "evaluation summary generatedAt"
+    ):
+        raise Fdp123EvaluationCardValidationError("manifest generatedAt must match evaluation summary generatedAt")
     files = manifest.get("files")
-    if not isinstance(files, list) or not files:
-        raise Fdp123EvaluationCardValidationError("manifest files must be a non-empty list")
-    matching = [item for item in files if isinstance(item, dict) and item.get("name") == EXPECTED_EVALUATION_SUMMARY_FILENAME]
-    if len(matching) != 1:
-        raise Fdp123EvaluationCardValidationError("manifest must list evaluation_summary.json")
-    summary_entry = matching[0]
-    expected_sha = hashlib.sha256(summary_bytes).hexdigest()
-    if summary_entry.get("sha256") != expected_sha:
-        raise Fdp123EvaluationCardValidationError("evaluation_summary.json hash mismatch")
-    if summary_entry.get("sizeBytes") != len(summary_bytes):
-        raise Fdp123EvaluationCardValidationError("evaluation_summary.json size mismatch")
+    if not isinstance(files, list) or len(files) != len(EXPECTED_EVALUATION_ARTIFACT_FILENAMES):
+        raise Fdp123EvaluationCardValidationError("manifest files must list canonical FDP-124 artifacts")
+    seen_names: set[str] = set()
+    for item in files:
+        if not isinstance(item, dict):
+            raise Fdp123EvaluationCardValidationError("manifest file entries must be objects")
+        _reject_unknown(item, MANIFEST_FILE_FIELDS, "manifest file entry")
+        missing_file_fields = sorted(MANIFEST_FILE_FIELDS - set(item))
+        if missing_file_fields:
+            raise Fdp123EvaluationCardValidationError(
+                f"manifest file entry missing required fields: {', '.join(missing_file_fields)}"
+            )
+        name = item["name"]
+        if name not in EXPECTED_EVALUATION_ARTIFACT_FILENAMES:
+            raise Fdp123EvaluationCardValidationError("manifest lists unsupported artifact")
+        if name in seen_names:
+            raise Fdp123EvaluationCardValidationError("manifest contains duplicate artifact")
+        seen_names.add(name)
+        expected_bytes = artifact_bytes[name]
+        sha256 = item["sha256"]
+        size_bytes = item["sizeBytes"]
+        if not isinstance(sha256, str) or re.fullmatch(r"[a-f0-9]{64}", sha256) is None:
+            raise Fdp123EvaluationCardValidationError("manifest file sha256 must be lowercase hex")
+        if isinstance(size_bytes, bool) or not isinstance(size_bytes, int) or size_bytes < 0:
+            raise Fdp123EvaluationCardValidationError("manifest file sizeBytes must be a non-negative integer")
+        if sha256 != hashlib.sha256(expected_bytes).hexdigest():
+            raise Fdp123EvaluationCardValidationError(f"{name} hash mismatch")
+        if size_bytes != len(expected_bytes):
+            raise Fdp123EvaluationCardValidationError(f"{name} size mismatch")
+    if seen_names != EXPECTED_EVALUATION_ARTIFACT_FILENAMES:
+        raise Fdp123EvaluationCardValidationError("manifest files must list canonical FDP-124 artifacts")
 
 
 def _validate_summary(summary: dict[str, Any]) -> None:

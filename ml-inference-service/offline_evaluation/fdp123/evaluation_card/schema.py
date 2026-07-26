@@ -25,6 +25,10 @@ from offline_evaluation.fdp123.report_writer import (
     ARTIFACT_SET_VERSION as EXPECTED_SOURCE_ARTIFACT_SET_VERSION,
     REPORT_TYPE as EXPECTED_EVALUATION_REPORT_TYPE,
 )
+from offline_evaluation.fdp123.evaluation_card.safety_policy import (
+    FORBIDDEN_FIELD_NAMES,
+    FORBIDDEN_VALUE_TERMS,
+)
 
 
 class Fdp123EvaluationCardValidationError(ValueError):
@@ -141,46 +145,6 @@ REQUIRED_METRICS_SUMMARY_FIELDS = {
 }
 ALLOWED_METRICS_SUMMARY_FIELDS = REQUIRED_METRICS_SUMMARY_FIELDS
 
-FORBIDDEN_FIELD_NAMES = {
-    "transactionid",
-    "feedbackid",
-    "customerid",
-    "correlationid",
-    "createdby",
-    "evaluationrecordid",
-    "transactionreference",
-    "notes",
-    "rawnotes",
-    "rawpayload",
-    "rawmlrequest",
-    "rawmlresponse",
-    "rawfeaturevector",
-    "rawevidence",
-    "groundtruth",
-    "traininglabel",
-    "modeltraininglabel",
-    "finaldecision",
-    "paymentdecision",
-    "paymentauthorization",
-    "promotionrecommended",
-    "thresholdrecommendation",
-    "productionready",
-    "certifiedforproduction",
-    "bankcertified",
-    "token",
-    "secret",
-    "password",
-}
-FORBIDDEN_VALUE_TERMS = set(FORBIDDEN_FIELD_NAMES) | {
-    "autodecline",
-    "autoapprove",
-    "autoblock",
-    "champion",
-    "productiondecisioning",
-    "productionapproved",
-    "promotionapproved",
-    "promotionready",
-}
 SAFE_CONTRACT_VALUES = {
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,

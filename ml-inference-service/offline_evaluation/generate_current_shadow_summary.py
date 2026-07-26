@@ -11,6 +11,7 @@ from typing import Any
 from offline_evaluation.fdp123.evaluation_card.artifact_reader import read_validated_evaluation_card_artifact_set
 from offline_evaluation.fdp123.evaluation_card.schema import Fdp123EvaluationCardValidationError
 from offline_evaluation.shadow_performance_summary import build_shadow_performance_summary
+from offline_evaluation.shadow_performance_artifact_set import publish_shadow_performance_artifact_set
 from offline_evaluation.shadow_performance_writer import write_shadow_performance_summary
 
 
@@ -68,7 +69,8 @@ def publish_current_summary(payload: str, output_path: Path, *, allowed_output_r
     temp_path.write_text(payload, encoding="utf-8")
     try:
         validate_current_summary_file(temp_path)
-        os.replace(temp_path, final_path)
+        publish_shadow_performance_artifact_set(payload, final_path)
+        temp_path.unlink(missing_ok=True)
     except Exception:
         temp_path.unlink(missing_ok=True)
         raise

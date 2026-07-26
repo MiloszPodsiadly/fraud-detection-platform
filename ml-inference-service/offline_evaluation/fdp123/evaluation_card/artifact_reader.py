@@ -86,9 +86,15 @@ def _validate_manifest(
             raise Fdp123EvaluationCardValidationError("evaluation card manifest contains duplicate artifact")
         seen_names.add(name)
         expected_bytes = artifact_bytes[name]
-        if item["sha256"] != hashlib.sha256(expected_bytes).hexdigest():
+        sha256 = item["sha256"]
+        size_bytes = item["sizeBytes"]
+        if not isinstance(sha256, str) or len(sha256) != 64 or not all(c in "0123456789abcdef" for c in sha256):
+            raise Fdp123EvaluationCardValidationError("evaluation card manifest sha256 must be lowercase hex")
+        if isinstance(size_bytes, bool) or not isinstance(size_bytes, int) or size_bytes < 0:
+            raise Fdp123EvaluationCardValidationError("evaluation card manifest sizeBytes must be a non-negative integer")
+        if sha256 != hashlib.sha256(expected_bytes).hexdigest():
             raise Fdp123EvaluationCardValidationError("evaluation card artifact hash mismatch")
-        if item["sizeBytes"] != len(expected_bytes):
+        if size_bytes != len(expected_bytes):
             raise Fdp123EvaluationCardValidationError("evaluation card artifact size mismatch")
     if seen_names != EXPECTED_ARTIFACT_FILENAMES:
         raise Fdp123EvaluationCardValidationError("evaluation card manifest files must list the canonical artifacts")

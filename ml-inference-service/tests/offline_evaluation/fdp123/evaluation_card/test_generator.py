@@ -374,12 +374,11 @@ class Fdp123EvaluationCardGeneratorTest(unittest.TestCase):
             with self.assertRaises(Fdp123EvaluationCardValidationError):
                 self.generate(paths, metadata=metadata)
 
-    def test_doesNotReadDisagreementJsonl(self):
+    def test_rejectsTamperedDisagreementJsonlListedByManifest(self):
         with self.artifacts() as paths:
             paths["disagreementReport"].write_text("transactionId unsafe\n", encoding="utf-8")
-            card = self.generate(paths)
-
-        self.assertEqual("PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1", card["cardType"])
+            with self.assertRaises(Fdp123EvaluationCardValidationError):
+                self.generate(paths)
 
     def test_doesNotIncludeRawIdsOrDecisionReasonCodes(self):
         with self.artifacts() as paths:
@@ -423,7 +422,10 @@ class Fdp123EvaluationCardGeneratorTest(unittest.TestCase):
 
     def _rewrite_manifest(self, paths):
         payload = paths["evaluationSummary"].read_bytes()
+        summary = self._summary(paths)
         manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+        if "generatedAt" in summary:
+            manifest["generatedAt"] = summary["generatedAt"]
         for item in manifest["files"]:
             if item["name"] == "evaluation_summary.json":
                 item["sha256"] = hashlib.sha256(payload).hexdigest()

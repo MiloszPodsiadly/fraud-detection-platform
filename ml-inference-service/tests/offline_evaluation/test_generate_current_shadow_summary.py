@@ -16,6 +16,7 @@ from offline_evaluation.generate_current_shadow_summary import (
     publish_current_summary,
     validate_current_summary_file,
 )
+from offline_evaluation.shadow_performance_artifact_set import read_validated_shadow_performance_artifact_set
 from offline_evaluation.shadow_performance_schema import REPORT_TYPE, SUMMARY_VERSION
 from offline_evaluation.shadow_performance_writer import write_shadow_performance_summary
 from offline_evaluation.fdp123.evaluation_card.writer import write_evaluation_card_artifacts
@@ -43,6 +44,17 @@ class CurrentShadowSummaryGenerationTest(unittest.TestCase):
 
             self.assertEqual("current-summary.json", paths.output.name)
             self.assertEqual(REPORT_TYPE, validate_current_summary_file(paths.output)["reportType"])
+
+    def test_successfulGenerationWritesValidatedArtifactSetManifest(self):
+        with workspace() as paths:
+            summary = generate(paths)
+
+            manifest = paths.output.with_name("manifest.json")
+            validated, manifest_sha256 = read_validated_shadow_performance_artifact_set(paths.output, manifest)
+
+            self.assertTrue(manifest.is_file())
+            self.assertEqual(summary, validated)
+            self.assertEqual(64, len(manifest_sha256))
 
     def test_runnerDelegatesToAuthoritativeBuilder(self):
         source = generator_source()

@@ -14,37 +14,7 @@ from offline_evaluation.fdp123.evaluation_card.schema import (
     Fdp123EvaluationCardValidationError,
     validate_evaluation_card,
 )
-
-
-FORBIDDEN_OUTPUT_TERMS = {
-    "evaluationrecordid",
-    "transactionreference",
-    "transactionid",
-    "feedbackid",
-    "customerid",
-    "correlationid",
-    "createdby",
-    "notes",
-    "rawnotes",
-    "rawpayload",
-    "rawmlrequest",
-    "rawmlresponse",
-    "rawfeaturevector",
-    "rawevidence",
-    "decisionreasoncodes",
-    "groundtruth",
-    "traininglabel",
-    "finaldecision",
-    "paymentdecision",
-    "paymentauthorization",
-    "promotionrecommended",
-    "thresholdrecommendation",
-    "productionready",
-    "certifiedforproduction",
-    "token",
-    "secret",
-    "password",
-}
+from offline_evaluation.fdp123.evaluation_card.safety_policy import FORBIDDEN_OUTPUT_TERMS
 
 
 def evaluation_card_json(evaluation_card: dict[str, Any]) -> str:
@@ -209,6 +179,8 @@ def _write_artifacts_atomically(payloads: dict[Path, str], manifest_path: Path, 
         if manifest_tmp_path.exists() or manifest_tmp_path.is_symlink():
             manifest_tmp_path.unlink()
         manifest_tmp_path.write_text(manifest_payload, encoding="utf-8", newline="\n")
+        if manifest_path.exists() or manifest_path.is_symlink():
+            manifest_path.unlink()
         for final_path in payloads:
             tmp_path = final_path.with_name(final_path.name + ".tmp")
             os.replace(tmp_path, final_path)

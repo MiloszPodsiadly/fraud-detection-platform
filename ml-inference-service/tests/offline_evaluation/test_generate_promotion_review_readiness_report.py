@@ -8,6 +8,7 @@ from offline_evaluation.generate_promotion_review_readiness_report import (
     DEFAULT_OUTPUT,
     DEFAULT_OUTPUT_ROOT,
     DEFAULT_SHADOW_SUMMARY,
+    DEFAULT_SHADOW_SUMMARY_MANIFEST,
     PromotionReviewReadinessGenerationError,
     _assert_allowed_output_path,
     generate_promotion_review_readiness_report,
@@ -26,6 +27,7 @@ from offline_evaluation.promotion_review_readiness_schema import (
     promotion_review_readiness_report_json,
     validate_promotion_review_readiness_report,
 )
+from offline_evaluation.shadow_performance_artifact_set import build_shadow_performance_manifest
 from offline_evaluation.shadow_performance_summary import build_shadow_performance_summary
 from fdp123.evaluation_card.test_schema import valid_evaluation_card
 
@@ -63,6 +65,22 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
 
             self.assertEqual(report, validate_promotion_review_readiness_report_file(paths.output))
             self.assertEqual(report, validate_promotion_review_readiness_report(report))
+            self.assertEqual(64, len(report["checkInputs"]["sourceShadowSummaryManifestSha256"]))
+
+    def test_rejectsLegacyWarnAndNotApplicableCheckStatuses(self):
+        for status in ("WARN", "NOT_APPLICABLE"):
+            report = build_report()
+            report["checks"][0]["status"] = status
+
+            with self.assertRaises(PromotionReviewReadinessValidationError):
+                validate_promotion_review_readiness_report(report)
+
+    def test_rejectsChecksTamperedAwayFromCheckInputs(self):
+        report = build_report()
+        report["checks"][0]["status"] = "FAIL"
+
+        with self.assertRaises(PromotionReviewReadinessValidationError):
+            validate_promotion_review_readiness_report(report)
 
     def test_reviewableOnlyWhenRequiredChecksPass(self):
         report = build_report(minimum_diagnostic_evidence_records=1)
@@ -78,6 +96,7 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
 
             code = main([
                 "--shadow-summary", str(paths.summary),
+                "--shadow-summary-manifest", str(paths.manifest),
                 "--output", str(paths.output),
                 "--allow-output-root", str(paths.output.parent),
             ])
@@ -91,6 +110,7 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
 
             code = main([
                 "--shadow-summary", str(paths.summary),
+                "--shadow-summary-manifest", str(paths.manifest),
                 "--output", str(paths.output),
                 "--allow-output-root", str(paths.output.parent),
             ])
@@ -107,6 +127,7 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
             with self.assertRaises(Exception):
                 generate_promotion_review_readiness_report(
                     paths.summary,
+                    paths.manifest,
                     paths.output,
                     generated_at=generated_at(),
                     allowed_output_root=paths.output.parent,
@@ -123,6 +144,7 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
             with self.assertRaises(Exception):
                 generate_promotion_review_readiness_report(
                     paths.summary,
+                    paths.manifest,
                     paths.output,
                     generated_at=generated_at(),
                     allowed_output_root=paths.output.parent,
@@ -139,6 +161,7 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
             with self.assertRaises(Exception):
                 generate_promotion_review_readiness_report(
                     paths.summary,
+                    paths.manifest,
                     paths.output,
                     generated_at=generated_at(),
                     allowed_output_root=paths.output.parent,
@@ -232,6 +255,7 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
         self.assertEqual(DEFAULT_OUTPUT, _assert_allowed_output_path(DEFAULT_OUTPUT))
         self.assertEqual(DEFAULT_OUTPUT_ROOT, DEFAULT_OUTPUT.parent)
         self.assertIn("current-summary.json", str(DEFAULT_SHADOW_SUMMARY))
+        self.assertEqual("manifest.json", DEFAULT_SHADOW_SUMMARY_MANIFEST.name)
 
     def test_readinessStatusAllowsOnlyReviewStatuses(self):
         self.assertEqual({"INSUFFICIENT_DATA", "INCONCLUSIVE", "NOT_REVIEWABLE", "REVIEWABLE"}, READINESS_STATUSES)
@@ -272,7 +296,11 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
             "reason": "NO_ACTUAL_POSITIVES",
         }
 
-        report = build_promotion_review_readiness_report(summary, generated_at=generated_at())
+        report = build_promotion_review_readiness_report(
+            summary,
+            generated_at=generated_at(),
+            source_shadow_summary_manifest_sha256="a" * 64,
+        )
 
         self.assertEqual("INCONCLUSIVE", report["readinessStatus"])
         self.assertIn("ALERT_RECOMMENDED_RECALL_AVAILABLE_INCONCLUSIVE", report["reasonCodes"])
@@ -389,6 +417,7 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
         self.assertIn("promotion-readiness-report: check-python", target)
         self.assertIn("python -m offline_evaluation.generate_promotion_review_readiness_report", target)
         self.assertIn("--shadow-summary ../deployment/local-generated/shadow-performance/current-summary.json", target)
+        self.assertIn("--shadow-summary-manifest ../deployment/local-generated/shadow-performance/manifest.json", target)
         self.assertIn("--output ../deployment/local-generated/promotion-readiness/promotion-review-readiness-report.json", target)
         self.assertNotIn("docker compose", target)
         self.assertNotIn("curl", target)
@@ -407,7 +436,7 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
             "FDP-111 does not recommend analyst action.",
             "FDP-111 does not add API, OpenAPI, UI, workflow, scheduler, or Kafka triggers.",
             "Minimum diagnostic evidence is a review sufficiency check, not a model threshold and not a promotion threshold.",
-            "FDP-111 v1 primarily consumes the FDP-109 generated Shadow Performance Summary artifact.",
+            "FDP-111 v1 primarily consumes the FDP-109 generated Shadow Performance Summary artifact set.",
             "EVALUATION_CARD_VERSION_SUPPORTED",
             "This check validates that the consumed summary was derived from the current Platform Recommendation Evaluation Card contract.",
         ):
@@ -462,7 +491,12 @@ def valid_summary():
 
 
 def build_report(**kwargs):
-    return build_promotion_review_readiness_report(valid_summary(), generated_at=generated_at(), **kwargs)
+    return build_promotion_review_readiness_report(
+        valid_summary(),
+        generated_at=generated_at(),
+        source_shadow_summary_manifest_sha256="a" * 64,
+        **kwargs,
+    )
 
 
 def valid_payload(**kwargs):
@@ -490,6 +524,7 @@ def masked_payload(payload):
 def generate(paths):
     generate_promotion_review_readiness_report(
         paths.summary,
+        paths.manifest,
         paths.output,
         generated_at=generated_at(),
         allowed_output_root=paths.output.parent,
@@ -517,9 +552,12 @@ class workspace:
         self._temp = tempfile.TemporaryDirectory()
         self.root = Path(self._temp.name)
         self.summary = self.root / "local-generated" / "shadow-performance" / "current-summary.json"
+        self.manifest = self.summary.with_name("manifest.json")
         self.output = self.root / "local-generated" / "promotion-readiness" / "promotion-review-readiness-report.json"
         self.summary.parent.mkdir(parents=True)
-        self.summary.write_text(json.dumps(valid_summary(), sort_keys=True), encoding="utf-8")
+        summary_payload = json.dumps(valid_summary(), sort_keys=True, separators=(",", ":")) + "\n"
+        self.summary.write_text(summary_payload, encoding="utf-8", newline="\n")
+        self.manifest.write_text(build_shadow_performance_manifest(summary_payload), encoding="utf-8", newline="\n")
         return self
 
     def __exit__(self, exc_type, exc, tb):

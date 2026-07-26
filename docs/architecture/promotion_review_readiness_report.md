@@ -21,20 +21,22 @@ Should an analyst take action?
 ## Diagnostic Chain
 
 ```text
-FDP-109 generates current-summary.json
+FDP-109 publishes current-summary.json plus manifest.json as a Shadow Performance artifact set
 -> FDP-110 mounts/wires generated summary into local runtime
--> FDP-108 provider reads current summary
+-> FDP-108 provider validates the manifest and reads current summary
 -> FDP-106 API exposes current summary
 -> FDP-107 dashboard displays current summary
 -> FDP-111 generates Promotion Review Readiness Report
 ```
 
 FDP-111 consumes existing bounded artifacts. FDP-111 does not recompute metrics from raw data. The v1 local generator
-consumes the FDP-109 generated `deployment/local-generated/shadow-performance/current-summary.json` artifact.
+consumes the FDP-109 generated Shadow Performance artifact set:
+`deployment/local-generated/shadow-performance/current-summary.json` plus
+`deployment/local-generated/shadow-performance/manifest.json`.
 
 ## V1 Limitation
 
-FDP-111 v1 primarily consumes the FDP-109 generated Shadow Performance Summary artifact.
+FDP-111 v1 primarily consumes the FDP-109 generated Shadow Performance Summary artifact set.
 
 Platform Recommendation Evaluation Card checks validate that the consumed Shadow Performance Summary V2 was derived
 from the current Platform Recommendation Evaluation Card contract.
@@ -78,6 +80,9 @@ Minimum diagnostic evidence is a review sufficiency check, not a model threshold
 This check validates that the consumed summary was derived from the current Platform Recommendation Evaluation Card contract.
 
 The report also includes explicit non-decisioning flags, including `notAnalystRecommendation`.
+
+The report carries immutable `checkInputs`, including the source Shadow Performance manifest SHA-256. Validators derive
+checks, reason codes, and readiness status from those inputs and reject reports where stored checks have been edited.
 
 ## Non-Decisioning Boundary
 

@@ -14,10 +14,12 @@ from offline_evaluation.promotion_review_readiness_schema import (
     promotion_review_readiness_report_json,
     validate_promotion_review_readiness_report,
 )
+from offline_evaluation.shadow_performance_artifact_set import read_validated_shadow_performance_artifact_set
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SHADOW_SUMMARY = REPO_ROOT / "deployment/local-generated/shadow-performance/current-summary.json"
+DEFAULT_SHADOW_SUMMARY_MANIFEST = DEFAULT_SHADOW_SUMMARY.with_name("manifest.json")
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "deployment/local-generated/promotion-readiness"
 DEFAULT_OUTPUT = DEFAULT_OUTPUT_ROOT / "promotion-review-readiness-report.json"
 MAX_PROMOTION_READINESS_INPUT_BYTES = 262_144
@@ -29,18 +31,23 @@ class PromotionReviewReadinessGenerationError(RuntimeError):
 
 def generate_promotion_review_readiness_report(
         shadow_summary_path: Path,
+        shadow_summary_manifest_path: Path,
         output_path: Path,
         *,
         generated_at: str | None = None,
         minimum_diagnostic_evidence_records: int = 1,
         allowed_output_root: Path | None = None,
 ) -> Path:
-    current_summary = _read_required_json_object(shadow_summary_path, "Shadow Performance Summary")
+    current_summary, shadow_manifest_sha256 = read_validated_shadow_performance_artifact_set(
+        shadow_summary_path,
+        shadow_summary_manifest_path,
+    )
     timestamp = generated_at or _utc_now()
     report = build_promotion_review_readiness_report(
         current_summary,
         generated_at=timestamp,
         minimum_diagnostic_evidence_records=minimum_diagnostic_evidence_records,
+        source_shadow_summary_manifest_sha256=shadow_manifest_sha256,
     )
     payload = promotion_review_readiness_report_json(report)
     publish_promotion_review_readiness_report(payload, output_path, allowed_output_root=allowed_output_root)
@@ -85,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         output_path = generate_promotion_review_readiness_report(
             Path(args.shadow_summary),
+            Path(args.shadow_summary_manifest),
             Path(args.output),
             generated_at=args.generated_at,
             minimum_diagnostic_evidence_records=args.minimum_diagnostic_evidence_records,
@@ -102,6 +110,7 @@ def _parser() -> argparse.ArgumentParser:
         description="Generate a non-decisioning PromotionReviewReadinessReport v1 artifact for FDP-111."
     )
     parser.add_argument("--shadow-summary", default=str(DEFAULT_SHADOW_SUMMARY))
+    parser.add_argument("--shadow-summary-manifest", default=str(DEFAULT_SHADOW_SUMMARY_MANIFEST))
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
     parser.add_argument("--allow-output-root")
     parser.add_argument("--generated-at")
