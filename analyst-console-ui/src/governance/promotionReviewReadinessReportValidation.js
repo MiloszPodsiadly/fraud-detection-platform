@@ -18,7 +18,7 @@ const MAX_CHECK_NAME_LENGTH = 128;
 const MAX_MACHINE_CODE_LENGTH = 128;
 const MAX_SUMMARY_VERSION_LENGTH = 32;
 const MACHINE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
-const RFC3339_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
+const RFC3339_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const REQUIRED_CHECK_NAMES = [
   "CURRENT_SUMMARY_PRESENT",

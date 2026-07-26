@@ -42,7 +42,7 @@ const REQUIRED_LIMITATIONS = new Set([
   "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_CHANGE_SCORING_THRESHOLDS"
 ]);
 const MACHINE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
-const RFC3339_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const RFC3339_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
 
 const METRIC_FIELDS = [
   ["alertRecommendedPrecision", "Alert-recommended precision", "percent"],

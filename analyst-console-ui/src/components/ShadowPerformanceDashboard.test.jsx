@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ShadowPerformanceDashboard } from "./ShadowPerformanceDashboard.jsx";
@@ -347,6 +349,48 @@ describe("ShadowPerformanceDashboard", () => {
     expectMalformedSummary((summary) => {
       summary.generatedAt = "2026-06-13";
     });
+  });
+
+  it.each([
+    ["zeroFractionalDigits", "2026-06-13T02:00:00Z"],
+    ["oneFractionalDigit", "2026-06-13T02:00:00.1Z"],
+    ["sixFractionalDigits", "2026-06-13T02:00:00.123456Z"]
+  ])("acceptsCanonicalTimestampPrecision: %s", (_name, timestamp) => {
+    renderDashboard({ summary: shadowSummary({ generatedAt: timestamp }) });
+
+    expect(screen.queryByText(MALFORMED_MESSAGE)).not.toBeInTheDocument();
+    expect(screen.getByText("Alert-recommended precision")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["sevenFractionalDigits", "2026-06-13T02:00:00.1234567Z"],
+    ["nineFractionalDigits", "2026-06-13T02:00:00.123456789Z"],
+    ["offsetTimestamp", "2026-06-13T02:00:00+00:00"],
+    ["naiveDateTime", "2026-06-13T02:00:00"],
+    ["dateOnly", "2026-06-13"],
+    ["invalidMonth", "2026-13-13T02:00:00Z"],
+    ["invalidDay", "2026-06-32T02:00:00Z"]
+  ])("rejectsInvalidCanonicalTimestamp: %s", (_name, timestamp) => {
+    expectMalformedSummary((summary) => {
+      summary.generatedAt = timestamp;
+    });
+  });
+
+  it.each([
+    ["evaluationReportGeneratedAt"],
+    ["evaluationCardGeneratedAt"]
+  ])("rejectsInvalidSourceLineageTimestamp: %s", (field) => {
+    expectMalformedSummary((summary) => {
+      summary.evaluation[field] = "2026-06-12T00:00:00.1234567Z";
+    });
+  });
+
+  it("acceptsCanonicalDeploymentFixture", () => {
+    const fixture = JSON.parse(readFileSync(resolve("..", "deployment", "local-fixtures", "shadow-performance", "current-summary.json"), "utf8"));
+    renderDashboard({ summary: fixture });
+
+    expect(screen.queryByText(MALFORMED_MESSAGE)).not.toBeInTheDocument();
+    expect(screen.getByText("Alert-recommended precision")).toBeInTheDocument();
   });
 
   it("rejectsTwentyOneLimitations", () => {
