@@ -18,13 +18,14 @@ On Windows, the equivalent manual wrapper is:
 scripts\shadow-performance-summary.cmd
 ```
 
-The command builds a candidate `ShadowPerformanceSummary v2` from the current Platform Recommendation Evaluation Card artifact set and publishes it to:
+The command builds a candidate `ShadowPerformanceSummary v2` from the current Platform Recommendation Evaluation Card artifact set and publishes it as a local artifact set:
 
 ```text
 deployment/local-generated/shadow-performance/current-summary.json
+deployment/local-generated/shadow-performance/manifest.json
 ```
 
-The generated file is compatible with the artifact-backed provider when mounted under the configured safe base directory.
+The generated artifact set is compatible with the artifact-backed provider when both files are mounted under the configured safe base directory.
 
 ## Input And Reuse
 
@@ -43,7 +44,7 @@ The job reuses the existing governed chain without rebuilding legacy model-card 
 - Platform Recommendation Evaluation Card v1 artifact set as the only executable source for summary generation.
 - Shadow Performance Summary v2 builder and writer for validated current summary output.
 
-It does not independently recompute precision, recall, false-positive rate, false-negative rate, disagreement counts, or evaluation
+It does not independently recompute precision, recall, false-positive rate, false-negative rate, or evaluation
 population outside the validated evaluation card, and does not read raw Mongo or Kafka directly.
 
 ## Publish Semantics
@@ -55,9 +56,12 @@ The job follows a fail-closed publish sequence:
 3. Write candidate to `current-summary.json.tmp` in the output directory.
 4. Parse the temp file.
 5. Validate the temp file as `ShadowPerformanceSummary v2`.
-6. Atomically move the temp file to `current-summary.json`.
+6. Write and validate `manifest.json.tmp`.
+7. Invalidate any previous final `manifest.json`.
+8. Replace `current-summary.json`.
+9. Replace `manifest.json` last.
 
-If any step fails, the command exits non-zero, does not overwrite the previous valid `current-summary.json`, does not publish partial output, does not fallback to demo data, and does not write zero metrics.
+If any step fails, the command exits non-zero, does not leave a final manifest advertising a partial artifact set, does not fallback to demo data, and does not write zero metrics.
 
 ## Boundary
 
@@ -69,4 +73,4 @@ The final generated summary must not contain raw dataset exports, raw evaluation
 
 The final summary must not contain promotion readiness score, promotion approval, promotion workflow, threshold recommendation, threshold switching, recommended threshold, champion/challenger status, champion candidate, deploy recommendation, production approval, payment authorization, automatic approve/decline/block, or analyst recommendation logic.
 
-Demo fixture metrics remain only for the explicit FDP-108 local demo compose override. FDP-109 does not use `deployment/local-fixtures/shadow-performance/current-summary.demo.json` as generation input or fallback. FDP-110 provides the generated-summary compose override; FDP-109 only generates the artifact.
+Demo fixture metrics remain only for the explicit FDP-108 local demo compose override. FDP-109 does not use `deployment/local-fixtures/shadow-performance/current-summary.json` or its sibling manifest as generation input or fallback. FDP-110 provides the generated-summary compose override; FDP-109 only generates the artifact.

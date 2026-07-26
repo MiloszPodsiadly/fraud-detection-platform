@@ -23,6 +23,8 @@ app-up: deployment/.env shadow-performance-summary
 	bash scripts/bootstrap-local-fixtures.sh
 	@test -f deployment/local-generated/shadow-performance/current-summary.json || \
 		(echo "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary" && exit 1)
+	@test -f deployment/local-generated/shadow-performance/manifest.json || \
+		(echo "Generated Shadow Performance manifest not found. Run: make shadow-performance-summary" && exit 1)
 	$(SECURITY_HARDENED_COMPOSE) up --build -d
 
 app-down: deployment/.env
@@ -53,6 +55,8 @@ promotion-readiness-report: check-python
 app-up-shadow-performance-generated: deployment/.env shadow-performance-summary
 	@test -f deployment/local-generated/shadow-performance/current-summary.json || \
 		(echo "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary" && exit 1)
+	@test -f deployment/local-generated/shadow-performance/manifest.json || \
+		(echo "Generated Shadow Performance manifest not found. Run: make shadow-performance-summary" && exit 1)
 	$(SHADOW_PERFORMANCE_GENERATED_COMPOSE) up --build -d
 
 shadow-performance-local-loop: app-up-shadow-performance-generated

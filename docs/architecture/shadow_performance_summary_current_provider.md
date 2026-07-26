@@ -6,7 +6,7 @@ The provider is an artifact-backed Current Provider Foundation for:
 
 `GET /api/v2/governance/shadow-performance/summary/current`
 
-It reads one explicitly configured current `ShadowPerformanceSummary` JSON artifact, validates it with the existing FDP-105/FDP-106 validator, and returns it through the existing authorized read path.
+It reads one explicitly configured current `ShadowPerformanceSummary` V2 JSON artifact, validates the required sibling `manifest.json`, validates the summary with the existing FDP-105/FDP-106 validator, and returns it through the existing authorized read path.
 
 ## Configuration
 
@@ -23,7 +23,9 @@ There is no default sample path, classpath fixture, hardcoded summary, directory
 
 ## Source Boundary
 
-The only allowed source is the configured current Shadow Performance Summary v2 JSON artifact under the configured safe base directory. The default base directory is `/run/shadow-performance`. The source is bounded to the configured safe directory and does not allow symlink artifacts.
+The only allowed source is the configured current Shadow Performance Summary V2 artifact set under the configured safe base directory. The default base directory is `/run/shadow-performance`. The source is bounded to the configured safe directory and does not allow symlink artifacts.
+
+The configured summary path must point to the canonical `current-summary.json` artifact. The provider resolves the deterministic sibling `manifest.json` in the same directory and requires both files to be regular, non-symlink `.json` files under the safe base directory.
 
 The configured path is normalized and must resolve under the safe base directory. The provider rejects path traversal, paths outside the base directory, symlink artifacts, directories, non-regular files, unsupported file extensions, and artifacts larger than the configured maximum size.
 
@@ -43,18 +45,34 @@ Missing/null primitive fields are treated as invalid/unavailable configured sour
 - Null primitive metric field -> 503.
 - Missing/null governance boolean -> 503.
 - Missing/null evaluation population count -> 503.
-- Missing/null disagreement count -> 503.
 - No silent primitive defaults.
 - No zero substitution.
 - No false substitution.
 - No partial summary.
 
+## Manifest Boundary
+
+The current summary is not consumed as a standalone file. The configured `current-summary.json` must have a sibling `manifest.json` with:
+
+- `reportType = SHADOW_PERFORMANCE_ARTIFACT_SET_V1`.
+- `artifactSetVersion = shadow-performance-artifact-set-v1`.
+- `generatedAt` equal to the summary `generatedAt`.
+- exactly one file entry for `current-summary.json`.
+- lowercase SHA-256 for the exact summary bytes consumed by the provider.
+- `sizeBytes` equal to the exact byte length consumed by the provider.
+
+The manifest is validated before the summary can be returned. Missing, malformed, unsupported, oversized, symlinked, or semantically invalid manifests result in 503. A hash mismatch, size mismatch, timestamp mismatch, wrong filename, extra file entry, wrong report type, or wrong artifact-set version also results in 503.
+
+The SHA-256 value is a local integrity fingerprint for the deployment-controlled artifact set. It is not a digital signature, producer identity, external attestation, or protection against a privileged writer replacing both `current-summary.json` and `manifest.json`.
+
 ## Failure Semantics
 
 - Disabled provider or no configured path returns 404.
 - Configured missing artifact returns 503.
+- Missing required sibling `manifest.json` returns 503.
 - Unavailable or invalid configured source returns 503.
 - Malformed JSON returns 503.
+- Invalid manifest, manifest-summary hash mismatch, or manifest-summary size mismatch returns 503.
 - Valid JSON that fails `ShadowPerformanceSummaryValidator` returns 503.
 
 No fake, sample, stale, fallback, or zero metrics are returned. Invalid configured data is never converted into a missing summary and never becomes a partial success.
@@ -95,11 +113,11 @@ docker compose --env-file deployment/.env \
   up --build -d
 ```
 
-The generated override mounts `deployment/local-generated/shadow-performance/current-summary.json` read-only as `/run/shadow-performance/current-summary.json`. The generated runtime does not use `current-summary.demo.json` and does not generate a summary inside Docker Compose.
+The generated override must make the generated Shadow Performance artifact set available to `alert-service` as `/run/shadow-performance/current-summary.json` plus sibling `/run/shadow-performance/manifest.json`. The generated runtime does not use a non-canonical demo summary filename and does not generate a summary inside Docker Compose.
 
-The separate demo override mounts `deployment/local-fixtures/shadow-performance/current-summary.demo.json` read-only as `/run/shadow-performance/current-summary.demo.json`. Demo fixture metrics are not production current summary, not promotion readiness, not threshold recommendation, not production decisioning approval, not payment authorization, and not analyst recommendation logic. The demo fixture metrics are local demonstration data only; demo fixture metrics are not production current summary.
+Any separate demo data must still satisfy the same V2 artifact-set contract: canonical `current-summary.json` plus sibling `manifest.json`. Demo fixture metrics are not production current summary, not promotion readiness, not threshold recommendation, not production decisioning approval, not payment authorization, and not analyst recommendation logic. The demo fixture metrics are local demonstration data only; demo fixture metrics are not production current summary.
 
-If the base Compose file is run without a configured current summary source, the endpoint returns 404. If a different artifact is configured, its path must point to an existing valid current `ShadowPerformanceSummary v1` JSON artifact mounted inside the `alert-service` container under the configured safe base directory. If the provider is disabled or has no path, 404 is expected. If the configured file is missing, unreadable, malformed, invalid, too large, a symlink, a directory, outside the safe base directory, or not `.json`, the endpoint returns 503 with a safe generic response.
+If the base Compose file is run without a configured current summary source, the endpoint returns 404. If a different artifact set is configured, its path must point to an existing valid current `ShadowPerformanceSummary` V2 `current-summary.json` artifact mounted inside the `alert-service` container under the configured safe base directory with sibling `manifest.json`. If the provider is disabled or has no path, 404 is expected. If the configured summary or required manifest is missing, unreadable, malformed, invalid, too large, a symlink, a directory, outside the safe base directory, not `.json`, or inconsistent by SHA-256/`sizeBytes`, the endpoint returns 503 with a safe generic response.
 
 ## Non-Goals
 

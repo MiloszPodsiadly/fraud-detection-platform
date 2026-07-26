@@ -22,6 +22,8 @@ import static org.mockito.Mockito.verify;
 
 class ArtifactBackedShadowPerformanceSummaryProviderTest {
 
+    private static final Path ROOT = Path.of("..").toAbsolutePath().normalize();
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ShadowPerformanceSummaryValidator validator = spy(new ShadowPerformanceSummaryValidator());
 
@@ -35,6 +37,18 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
         Optional<ShadowPerformanceSummary> result = provider(artifact).currentSummary();
 
         assertThat(result).contains(validSummary());
+    }
+
+    @Test
+    void deploymentDemoArtifactSetIsReadableByRealProvider() {
+        Path fixtureDir = ROOT.resolve("deployment/local-fixtures/shadow-performance");
+        Path artifact = fixtureDir.resolve("current-summary.json");
+
+        Optional<ShadowPerformanceSummary> result = provider(true, fixtureDir, artifact).currentSummary();
+
+        assertThat(fixtureDir.resolve("manifest.json")).isRegularFile();
+        assertThat(result).isPresent();
+        assertThat(result.orElseThrow().reportType()).isEqualTo("SHADOW_PERFORMANCE_SUMMARY_V2");
     }
 
     @Test

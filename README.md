@@ -169,12 +169,12 @@ make shadow-performance-summary
 make app-up-shadow-performance-generated
 ```
 
-The generated runtime mounts `deployment/local-generated/shadow-performance/current-summary.json` read-only into
-`/run/shadow-performance/current-summary.json`. It does not use `current-summary.demo.json` and does not generate a
-summary inside Docker Compose.
+The generated runtime mounts `deployment/local-generated/shadow-performance` read-only into
+`/run/shadow-performance`, including `current-summary.json` and sibling `manifest.json`. It does not use a
+non-canonical demo summary filename and does not generate a summary inside Docker Compose.
 
 The separate demo override `deployment/docker-compose.shadow-performance-demo.yml` remains available only for the
-demo fixture path; demo fixture metrics are not production current summary, not promotion readiness, not threshold
+canonical demo artifact-set path; demo fixture metrics are not production current summary, not promotion readiness, not threshold
 recommendation, not production decisioning approval, not payment authorization, and not analyst recommendation logic.
 
 `deployment/.env` is a committed local demo/evaluation configuration fixture, so the project remains runnable for
