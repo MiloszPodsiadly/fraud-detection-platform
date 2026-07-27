@@ -22,7 +22,23 @@ import static org.mockito.Mockito.verify;
 
 class ArtifactBackedShadowPerformanceSummaryProviderTest {
 
-    private static final Path ROOT = Path.of("..").toAbsolutePath().normalize();
+    private static final Path ROOT = resolveProjectRoot();
+
+    private static Path resolveProjectRoot() {
+        String projectRootProperty = System.getProperty("project.root");
+        if (projectRootProperty != null && !projectRootProperty.isBlank()) {
+            return Path.of(projectRootProperty).toAbsolutePath().normalize();
+        }
+
+        Path current = Path.of("").toAbsolutePath().normalize();
+        while (current != null) {
+            if (Files.exists(current.resolve("deployment/local-fixtures"))) {
+                return current;
+            }
+            current = current.getParent();
+        }
+        return Path.of("..").toAbsolutePath().normalize();
+    }
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ShadowPerformanceSummaryValidator validator = spy(new ShadowPerformanceSummaryValidator());
