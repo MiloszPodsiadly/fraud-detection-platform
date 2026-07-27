@@ -36,7 +36,7 @@
         <nimbus-jose-jwt.version>10.9.1</nimbus-jose-jwt.version>
         <spring-kafka.version>4.1.0</spring-kafka.version>
         <kafka-clients.version>4.3.0</kafka-clients.version>
-        <netty.version>4.2.15.Final</netty.version>
+        <netty.version>4.2.16.Final</netty.version>
         <tomcat.version>11.0.22</tomcat.version>
         <commons-compress.version>1.28.0</commons-compress.version>
         <commons-codec.version>1.22.0</commons-codec.version>
@@ -48,6 +48,7 @@
         <jackson2.annotations.version>2.22</jackson2.annotations.version>
         <prometheus.version>1.8.0</prometheus.version>
         <caffeine.version>3.2.4</caffeine.version>
+        <lz4-java.version>1.11.1</lz4-java.version>
     </properties>
 
     <dependencyManagement>
@@ -63,6 +64,11 @@
                 <groupId>com.nimbusds</groupId>
                 <artifactId>nimbus-jose-jwt</artifactId>
                 <version>${nimbus-jose-jwt.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>at.yawk.lz4</groupId>
+                <artifactId>lz4-java</artifactId>
+                <version>${lz4-java.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.commons</groupId>
