@@ -1,1 +1,12 @@
-{"artifactSetVersion":"shadow-performance-artifact-set-v1","files":[{"path":"current-summary.json","sha256":"0b45c5722d4a776cc47c774f2f1746501fa59804db5f452e5ba2b51e4002e19d","sizeBytes":3104}],"generatedAt":"2026-06-13T02:00:00Z","reportType":"SHADOW_PERFORMANCE_ARTIFACT_SET_V1"}
+{
+  "artifactSetVersion": "shadow-performance-artifact-set-v1",
+  "reportType": "SHADOW_PERFORMANCE_ARTIFACT_SET_V1",
+  "generatedAt": "2026-06-13T02:00:00Z",
+  "files": [
+    {
+      "path": "current-summary.json",
+      "sha256": "2595eaf10b858a99e41154f0da917d56bdacd7bc374a55526cd32c88ab2709af",
+      "sizeBytes": 3181
+    }
+  ]
+}

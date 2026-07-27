@@ -134,8 +134,6 @@ cat > "$staging_dir/jwks.json" <<EOF
 EOF
 
 rm -f "$staging_dir"/*.cnf "$staging_dir"/*.csr "$staging_dir/modulus.bin" "$mtls_dir/local-dev-ca.srl"
-# Linux bind mounts preserve host modes, while application containers run as
-# fixed non-root UIDs distinct from the user that generates these local fixtures.
 chmod 755 "$staging_dir" "$mtls_dir"
 chmod 444 "$staging_dir"/*.pem "$staging_dir/jwks.json" "$mtls_dir"/*.pem
 
@@ -145,3 +143,164 @@ trap - EXIT
 
 echo "Generated local-only identity fixtures in deployment/.local/service-identity/."
 echo "This directory is ignored by Git and excluded from Docker build contexts."
+
+generated_eval_dir="$repo_root/deployment/local-generated/platform-recommendation-evaluation-card"
+generated_shadow_dir="$repo_root/deployment/local-generated/shadow-performance"
+
+fixtures_eval_dir="$repo_root/deployment/local-fixtures/platform-recommendation-evaluation-card"
+fixtures_shadow_dir="$repo_root/deployment/local-fixtures/shadow-performance"
+
+mkdir -p "$generated_eval_dir" "$generated_shadow_dir"
+
+if [ -d "$fixtures_shadow_dir" ]; then
+  cp -r "$fixtures_shadow_dir"/* "$generated_shadow_dir/" 2>/dev/null || true
+fi
+
+if [ -d "$fixtures_eval_dir" ]; then
+  cp -r "$fixtures_eval_dir"/* "$generated_eval_dir/" 2>/dev/null || true
+fi
+
+cat > "$generated_eval_dir/platform_recommendation_evaluation_card.json" <<'EOF'
+{
+  "cardVersion": "platform-recommendation-evaluation-card-v1",
+  "cardType": "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
+  "generatedAt": "2026-06-12T00:00:00Z",
+  "evaluationSubject": {
+    "subjectType": "PLATFORM_RECOMMENDATION",
+    "sourceComponent": "ENGINE_INTELLIGENCE_PROJECTION",
+    "sourceVersion": "ENGINE_INTELLIGENCE_PROJECTION_V1",
+    "featureContractVersion": "NOT_APPLICABLE",
+    "modelIdentity": "NOT_AVAILABLE",
+    "modelArtifactSha256": "NOT_AVAILABLE",
+    "identityCompleteness": "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
+  },
+  "metricsSubject": "PLATFORM_RECOMMENDATION",
+  "metricBasis": "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK",
+  "allowedUsageModes": [
+    "SHADOW",
+    "COMPARE",
+    "OFFLINE_EVALUATION"
+  ],
+  "evaluationPurpose": "OFFLINE_DIAGNOSTIC",
+  "runtimeDecisionAuthority": "NONE",
+  "promotionAuthority": "NONE",
+  "thresholdChangeAuthority": "NONE",
+  "paymentAuthorizationAuthority": "NONE",
+  "workflowAuthority": "NONE",
+  "intendedUse": [
+    "SHADOW_FRAUD_RISK_REVIEW",
+    "OFFLINE_DIAGNOSTIC_ANALYSIS"
+  ],
+  "notIntendedUse": [
+    "NO_AUTOMATIC_CUSTOMER_BLOCKING",
+    "NO_AUTOMATIC_TRANSACTION_DECLINE",
+    "NO_CASE_WORKFLOW_AUTOMATION",
+    "NO_FINAL_BANK_DECISION",
+    "NO_MODEL_PROMOTION_APPROVAL",
+    "NO_PAYMENT_AUTHORIZATION",
+    "NO_PRODUCTION_THRESHOLD_MUTATION",
+    "NO_REGULATORY_CERTIFICATION_CLAIM"
+  ],
+  "evaluationEvidence": {
+    "evaluationReportType": "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+    "evaluationGeneratedAt": "2026-06-10T00:00:00Z",
+    "evaluationArtifactSetVersion": "fdp123-report-artifact-set-v1",
+    "datasetVersion": "feedback-dataset-v1",
+    "datasetTimeBasis": "FEEDBACK_CREATED_AT",
+    "recordsEvaluated": 2,
+    "positiveClassCount": 1,
+    "negativeClassCount": 1,
+    "warnings": [
+      "LOW_SAMPLE_SIZE"
+    ],
+    "sourceManifestSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "metricsSummary": {
+    "alertRecommendedPrecision": {
+      "available": true,
+      "value": 0.5,
+      "reason": null
+    },
+    "alertRecommendedRecall": {
+      "available": true,
+      "value": 0.5,
+      "reason": null
+    },
+    "falsePositiveRate": {
+      "available": true,
+      "value": 0.5,
+      "reason": null
+    },
+    "falseNegativeRate": {
+      "available": true,
+      "value": 0.5,
+      "reason": null
+    }
+  },
+  "warnings": [
+    "LOW_SAMPLE_SIZE"
+  ],
+  "limitations": [
+    "ANALYST_FEEDBACK_LABELS_ARE_NOT_LEGAL_GROUND_TRUTH",
+    "METRICS_ARE_PLATFORM_RECOMMENDATION_DIAGNOSTICS",
+    "OFFLINE_DIAGNOSTIC_METRICS_ARE_NOT_PRODUCTION_APPROVAL",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_APPROVE_PROMOTION",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_AUTHORIZE_AUTOMATIC_DECLINE",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_CHANGE_SCORING_THRESHOLDS",
+    "PSEUDONYMOUS_REFERENCES_ARE_NOT_ANONYMIZATION",
+    "SMALL_SAMPLE_SIZE_MAY_BE_INCONCLUSIVE"
+  ],
+  "governanceBoundary": [
+    "NO_CASE_CREATION",
+    "NO_EXTERNAL_PUBLISHING",
+    "NO_FINAL_DECISIONING",
+    "NO_MODEL_PROMOTION",
+    "NO_PAYMENT_AUTHORIZATION",
+    "NO_PRODUCTION_APPROVAL",
+    "NO_THRESHOLD_RECOMMENDATION",
+    "NO_WORKFLOW_AUTOMATION"
+  ]
+}
+EOF
+
+cat > "$generated_eval_dir/platform_recommendation_evaluation_card.md" <<'EOF'
+# Platform Evaluation Card
+
+- **Card Version:** platform-recommendation-evaluation-card-v1
+- **Card Type:** PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1
+- **Generated At:** 2026-06-12T00:00:00Z
+
+## Summary
+Offline diagnostic performance monitoring card.
+EOF
+
+json_file="$generated_eval_dir/platform_recommendation_evaluation_card.json"
+md_file="$generated_eval_dir/platform_recommendation_evaluation_card.md"
+
+json_size=$(wc -c < "$json_file" | tr -d ' ')
+md_size=$(wc -c < "$md_file" | tr -d ' ')
+
+json_sha=$(openssl dgst -sha256 "$json_file" | awk '{print $NF}')
+md_sha=$(openssl dgst -sha256 "$md_file" | awk '{print $NF}')
+
+cat > "$generated_eval_dir/manifest.json" <<EOF
+{
+  "artifactSetVersion": "platform-recommendation-evaluation-card-artifact-set-v1",
+  "reportType": "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
+  "generatedAt": "2026-06-12T00:00:00Z",
+  "files": [
+    {
+      "name": "platform_recommendation_evaluation_card.json",
+      "sizeBytes": $json_size,
+      "sha256": "$json_sha"
+    },
+    {
+      "name": "platform_recommendation_evaluation_card.md",
+      "sizeBytes": $md_size,
+      "sha256": "$md_sha"
+    }
+  ]
+}
+EOF
+
+echo "Generated local evaluation fixtures in deployment/local-generated/."

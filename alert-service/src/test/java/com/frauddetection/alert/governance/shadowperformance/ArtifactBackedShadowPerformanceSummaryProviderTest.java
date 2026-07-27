@@ -22,7 +22,35 @@ import static org.mockito.Mockito.verify;
 
 class ArtifactBackedShadowPerformanceSummaryProviderTest {
 
-    private static final Path ROOT = Path.of("..").toAbsolutePath().normalize();
+    private static final Path ROOT = resolveProjectRoot();
+
+    private static Path resolveProjectRoot() {
+        String projectRootProperty = System.getProperty("project.root");
+        if (projectRootProperty != null && !projectRootProperty.isBlank()) {
+            Path resolved = Path.of(projectRootProperty).toAbsolutePath().normalize();
+            if (Files.exists(resolved.resolve("deployment/local-fixtures"))) {
+                return resolved;
+            }
+        }
+
+        String multiModuleDir = System.getProperty("maven.multiModuleProjectDirectory");
+        if (multiModuleDir != null && !multiModuleDir.isBlank()) {
+            Path resolved = Path.of(multiModuleDir).toAbsolutePath().normalize();
+            if (Files.exists(resolved.resolve("deployment/local-fixtures"))) {
+                return resolved;
+            }
+        }
+
+        Path current = Path.of("").toAbsolutePath().normalize();
+        for (int i = 0; i < 4 && current != null; i++) {
+            if (Files.exists(current.resolve("deployment/local-fixtures"))) {
+                return current;
+            }
+            current = current.getParent();
+        }
+
+        throw new IllegalStateException("Could not resolve project root containing deployment/local-fixtures");
+    }
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ShadowPerformanceSummaryValidator validator = spy(new ShadowPerformanceSummaryValidator());

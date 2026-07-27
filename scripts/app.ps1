@@ -39,11 +39,21 @@ function Invoke-ShadowPerformanceSummaryGeneration {
         throw "Python 3.12+ is required to generate the local Shadow Performance Summary. Install Python and rerun."
     }
 
+    $shadowOutputDir = Join-Path $repoRoot "deployment\local-generated\shadow-performance"
+    if (-not (Test-Path -LiteralPath $shadowOutputDir)) {
+        New-Item -ItemType Directory -Force -Path $shadowOutputDir | Out-Null
+    }
+
     $previousPythonPath = $env:PYTHONPATH
     Push-Location (Join-Path $repoRoot "ml-inference-service")
     try {
         $env:PYTHONPATH = "."
-        & python -m offline_evaluation.generate_current_shadow_summary
+
+        & python -m offline_evaluation.generate_current_shadow_summary `
+            --evaluation-card "../deployment/local-generated/platform-recommendation-evaluation-card/platform_recommendation_evaluation_card.json" `
+            --evaluation-card-manifest "../deployment/local-generated/platform-recommendation-evaluation-card/manifest.json" `
+            --output "../deployment/local-generated/shadow-performance/current-summary.json"
+
         if ($LASTEXITCODE -ne 0) {
             throw "Shadow Performance Summary generation failed with exit code $LASTEXITCODE."
         }
