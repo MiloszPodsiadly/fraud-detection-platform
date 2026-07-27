@@ -27,17 +27,29 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
     private static Path resolveProjectRoot() {
         String projectRootProperty = System.getProperty("project.root");
         if (projectRootProperty != null && !projectRootProperty.isBlank()) {
-            return Path.of(projectRootProperty).toAbsolutePath().normalize();
+            Path resolved = Path.of(projectRootProperty).toAbsolutePath().normalize();
+            if (Files.exists(resolved.resolve("deployment/local-fixtures"))) {
+                return resolved;
+            }
+        }
+
+        String multiModuleDir = System.getProperty("maven.multiModuleProjectDirectory");
+        if (multiModuleDir != null && !multiModuleDir.isBlank()) {
+            Path resolved = Path.of(multiModuleDir).toAbsolutePath().normalize();
+            if (Files.exists(resolved.resolve("deployment/local-fixtures"))) {
+                return resolved;
+            }
         }
 
         Path current = Path.of("").toAbsolutePath().normalize();
-        while (current != null) {
+        for (int i = 0; i < 4 && current != null; i++) {
             if (Files.exists(current.resolve("deployment/local-fixtures"))) {
                 return current;
             }
             current = current.getParent();
         }
-        return Path.of("..").toAbsolutePath().normalize();
+
+        throw new IllegalStateException("Could not resolve project root containing deployment/local-fixtures");
     }
 
     private final ObjectMapper objectMapper = new ObjectMapper();
