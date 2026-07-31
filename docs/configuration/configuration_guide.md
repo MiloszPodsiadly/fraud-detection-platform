@@ -33,6 +33,21 @@ enable production mode and does not replace environment-specific release approva
 - Consumers must deduplicate by event id where required.
 - Manual outbox confirmation and recovery visibility are operational evidence workflows, not business approval.
 
+## Diagnostic Engine Intelligence
+
+- Producer diagnostic publication is disabled by default with
+  `fraud.scoring.events.engine-intelligence.emit-enabled=false`
+  (`FRAUD_SCORING_EVENTS_ENGINE_INTELLIGENCE_EMIT_ENABLED=false`).
+- Velocity V1 registration is disabled by default with
+  `fraud.scoring.engines.velocity.enabled=false`
+  (`FRAUD_SCORING_ENGINE_VELOCITY_ENABLED=false`).
+- The emission flag controls publication. The Velocity flag controls whether `velocity.primary / VELOCITY` is
+  registered inside the diagnostic runtime after emission is enabled.
+- Velocity is diagnostic-only. It cannot authorize payments, block transactions, create cases, alter final decision
+  source, change thresholds, or change analyst recommended actions.
+- The current engine-intelligence contract has max three engines: Rules, ML model, and Velocity. Future Device,
+  Merchant, or Graph engines require a versioned contract update.
+
 ## Release Governance Settings
 
 - Mutable tag deployment is NO-GO for release proof.

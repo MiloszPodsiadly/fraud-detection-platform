@@ -76,6 +76,10 @@ unbounded metadata values in the contract.
 Only `FALLBACK_USED` declares that fallback occurred. `UNAVAILABLE`, `TIMEOUT`, `SKIPPED`, and `DEGRADED` do not imply
 low risk, fallback behavior, or a platform decision.
 
+FDP-129 narrowly allows `AVAILABLE` Velocity V1 results to use `confidence=UNKNOWN`. Velocity confidence is not inferred
+from reason-code count, score magnitude, risk level, or feature presence. Rules and ML available results still require
+known `LOW`, `MEDIUM`, or `HIGH` confidence unless a future versioned contract changes that explicitly.
+
 ## Unsafe Content
 
 Public contract strings must not contain raw request or response payloads, raw evidence, raw contributions, feature

@@ -39,8 +39,9 @@ When source output explicitly reports `modelAvailable=false`, the adapter return
 does not require those fields.
 
 Unavailable and timeout outputs use bounded `UNAVAILABLE` or `TIMEOUT` status with null score,
-null risk level, `UNKNOWN` confidence, deterministic `generatedAt` from `ScoringContext.receivedAt()`,
-and `latencyMs` equal to `0`.
+null risk level, and `UNKNOWN` confidence. The isolated adapter may create a bounded timestamp and
+`latencyMs=0`, but FDP-129 runtime publication is owned by `FraudScoringOrchestrator`, which rewrites
+published engine-result `generatedAt` and `latencyMs` from the injected execution `Clock`.
 
 FDP-88 treats unexpected runtime exceptions from the isolated ML boundary as bounded
 `ML_CLIENT_ERROR` because the adapter is not runtime-wired. Timeout-like exceptions are bounded as

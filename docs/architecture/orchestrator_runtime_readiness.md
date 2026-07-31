@@ -70,8 +70,11 @@ The orchestrator receives a `Clock` and measures bounded elapsed time for each e
 Timeout latency uses the bounded deadline.
 
 FDP-129 records orchestrator-measured latency to metrics for every engine execution.
-FDP-129 rewrites completed engine FraudEngineResult latencyMs with the bounded orchestrator-measured duration.
-For orchestrator-created timeout, rejection, and failure results, latencyMs is also the bounded orchestrator-measured duration.
+FDP-129 rewrites completed engine FraudEngineResult latencyMs and generatedAt with the bounded
+orchestrator-measured duration and completion timestamp.
+For orchestrator-created timeout, rejection, and failure results, latencyMs and generatedAt are also
+owned by the same orchestrator execution boundary. Engine adapters may carry input lineage time, but
+published engine result time is not copied from `ScoringContext.receivedAt()`.
 
 ## Metrics Abstraction
 

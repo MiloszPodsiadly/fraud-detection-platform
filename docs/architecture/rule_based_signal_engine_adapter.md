@@ -42,8 +42,9 @@ Feature status semantics:
 - `WRONG_ACCESSOR` is an implementation bug and must fail fast.
 - `NOT_ALLOWED` is an implementation bug and must fail fast.
 
-Generated timestamps and latency are deterministic for this isolated adapter: `generatedAt` comes
-from `ScoringContext.receivedAt()`, and `latencyMs` is `0`.
+Generated timestamps and latency are deterministic for this isolated adapter, but FDP-129 runtime
+publication is owned by `FraudScoringOrchestrator`, which rewrites published engine-result
+`generatedAt` and `latencyMs` from the injected execution `Clock`.
 
 ## Evidence Safety
 

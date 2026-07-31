@@ -135,3 +135,15 @@ The current rule adapter boundary is documented in
 documented in `docs/architecture/python_ml_signal_engine_adapter.md`, and that adapter remains
 outside feature snapshot consumption for FDP-88 because the existing ML scoring boundary owns
 feature extraction.
+
+FDP-129 adds the optional Velocity V1 adapter. Velocity reads only typed factual scalar features through
+`FeatureSnapshotReader`: `recentTransactionCount`, `recentTransactionCountWindow`, `recentAmountSumPln`, and
+`transactionVelocityPerMinute`. It validates type, finite numeric domain, positive bounded window, and impossible
+zero-count factual relationships, but it does not recompute producer rounding or require exact double equality for
+`transactionVelocityPerMinute`.
+
+`rapidTransferFraudCaseCandidate`, `rapidTransferThresholdPln`, `rapidTransferCount`,
+`rapidTransferTotalPln`, and `rapidTransferTransactionIds` remain in the enriched feature snapshot for compatibility
+with existing consumers. Velocity V1 does not consume them. The rapid-transfer count/amount predicate and thresholds
+are owned by `FraudFeatureThresholdContract`; Velocity derives its rapid-burst signal from factual count and PLN
+amount through that contract.
