@@ -65,8 +65,10 @@ public class TransactionFeatureCalculator {
         if (recentTransactionCount >= 2 && recentAmountSum.compareTo(BigDecimal.valueOf(5000)) >= 0) {
             featureFlags.add(FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY);
         }
-        boolean rapidPln20kBurst = recentTransactionCount >= 2
-                && recentAmountSumPln.compareTo(FraudFeatureThresholdContract.RAPID_TRANSFER_PLN_THRESHOLD) >= 0;
+        boolean rapidPln20kBurst = FraudFeatureThresholdContract.isRapidTransferPlnBurst(
+                recentTransactionCount,
+                recentAmountSumPln
+        );
         if (rapidPln20kBurst) {
             featureFlags.add(FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST);
         }

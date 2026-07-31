@@ -94,7 +94,7 @@ public record FraudEngineResult(
                 "statusReason",
                 FraudEngineValuePolicy.FALLBACK_REASON_MAX_LENGTH
         );
-        validateStatusSemantics(status, score, riskLevel, confidence, statusReason);
+        validateStatusSemantics(engineType, status, score, riskLevel, confidence, statusReason);
     }
 
     @JsonIgnore
@@ -193,6 +193,7 @@ public record FraudEngineResult(
     }
 
     private static void validateStatusSemantics(
+            FraudEngineType engineType,
             FraudEngineStatus status,
             Double score,
             RiskLevel riskLevel,
@@ -202,7 +203,7 @@ public record FraudEngineResult(
         switch (status) {
             case AVAILABLE -> {
                 requireScoreAndRiskLevel(score, riskLevel, status);
-                requireKnownConfidence(confidence, status);
+                requireKnownConfidence(engineType, confidence, status);
                 if (statusReason != null) {
                     throw new IllegalArgumentException("AVAILABLE status must not declare statusReason");
                 }
@@ -241,9 +242,16 @@ public record FraudEngineResult(
         return confidence == null ? FraudEngineConfidence.UNKNOWN : confidence;
     }
 
-    private static void requireKnownConfidence(FraudEngineConfidence confidence, FraudEngineStatus status) {
+    private static void requireKnownConfidence(
+            FraudEngineType engineType,
+            FraudEngineConfidence confidence,
+            FraudEngineStatus status
+    ) {
         if (confidence == null) {
             throw new IllegalArgumentException(status + " status requires confidence");
+        }
+        if (engineType == FraudEngineType.VELOCITY && confidence == FraudEngineConfidence.UNKNOWN) {
+            return;
         }
         if (confidence == FraudEngineConfidence.UNKNOWN) {
             throw new IllegalArgumentException(status + " status requires known confidence");

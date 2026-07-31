@@ -9,19 +9,22 @@ import java.util.ArrayList;
 import java.util.List;
 
 final class VelocitySignalPolicy {
+    static final String ENGINE_VERSION = "velocity-v1";
     static final double TRANSACTION_VELOCITY_PER_MINUTE_THRESHOLD = 5.0d;
-    static final int RAPID_TRANSFER_MIN_COUNT = 2;
-    static final BigDecimal RAPID_TRANSFER_PLN_THRESHOLD = FraudFeatureThresholdContract.RAPID_TRANSFER_PLN_THRESHOLD;
-    static final int HIGH_VELOCITY_TRANSACTION_COUNT = FraudFeatureThresholdContract.HIGH_VELOCITY_TRANSACTION_COUNT;
 
     private VelocitySignalPolicy() {
     }
 
     static VelocityDecision decide(VelocityFacts facts) {
-        boolean countSpike = facts.recentTransactionCount() >= HIGH_VELOCITY_TRANSACTION_COUNT;
+        boolean countSpike =
+                facts.recentTransactionCount() >= FraudFeatureThresholdContract.HIGH_VELOCITY_TRANSACTION_COUNT;
         boolean highRate = facts.transactionVelocityPerMinute() >= TRANSACTION_VELOCITY_PER_MINUTE_THRESHOLD;
-        boolean highAmount = facts.recentAmountSumPln().compareTo(RAPID_TRANSFER_PLN_THRESHOLD) >= 0;
-        boolean rapidBurst = facts.rapidTransferFraudCaseCandidate();
+        boolean highAmount = facts.recentAmountSumPln()
+                .compareTo(FraudFeatureThresholdContract.RAPID_TRANSFER_PLN_THRESHOLD) >= 0;
+        boolean rapidBurst = FraudFeatureThresholdContract.isRapidTransferPlnBurst(
+                facts.recentTransactionCount(),
+                facts.recentAmountSumPln()
+        );
 
         double score;
         if (rapidBurst && (countSpike || highRate)) {
@@ -98,8 +101,7 @@ final class VelocitySignalPolicy {
     record VelocityFacts(
             int recentTransactionCount,
             BigDecimal recentAmountSumPln,
-            double transactionVelocityPerMinute,
-            boolean rapidTransferFraudCaseCandidate
+            double transactionVelocityPerMinute
     ) {
     }
 }

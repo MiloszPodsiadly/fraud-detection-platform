@@ -57,12 +57,11 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
 
     public FraudScoringOrchestrationResult evaluate(ScoringContext context) {
         Objects.requireNonNull(context, "context is required");
-        Instant generatedAt = context.receivedAt();
         List<FraudEngineResult> engineResults = new ArrayList<>();
         List<FraudScoringExecutionWarning> executionWarnings = new ArrayList<>();
         for (FraudSignalEngineRegistry.RegisteredEngine registeredEngine : registry.registeredEngines()) {
             FraudEngineExecutionPolicy policy = executionPolicy.policyFor(registeredEngine.descriptor().engineId());
-            EvaluatedEngineResult evaluated = evaluateEngine(registeredEngine, policy, context, generatedAt);
+            EvaluatedEngineResult evaluated = evaluateEngine(registeredEngine, policy, context);
             FraudEngineResult engineResult = evaluated.result();
             engineResults.add(engineResult);
             addWarnings(policy, engineResult, executionWarnings);
@@ -70,6 +69,9 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
         }
         FraudScoringOrchestrationStatus status = statusFor(registry.registeredEngines(), engineResults);
         recordOrchestrationSafely(status);
+        Instant generatedAt = engineResults.isEmpty()
+                ? clock.instant()
+                : engineResults.getLast().generatedAt();
         return new FraudScoringOrchestrationResult(status, engineResults, executionWarnings, generatedAt);
     }
 
@@ -81,8 +83,7 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
     private EvaluatedEngineResult evaluateEngine(
             FraudSignalEngineRegistry.RegisteredEngine registeredEngine,
             FraudEngineExecutionPolicy policy,
-            ScoringContext context,
-            Instant generatedAt
+            ScoringContext context
     ) {
         Instant startedAt = clock.instant();
         BoundedFraudEngineExecutor.ExecutionResult<FraudEngineResult> execution = executor.execute(
@@ -90,6 +91,7 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
                 policy.deadline()
         );
         Duration latency = measuredLatency(startedAt, policy.deadline(), execution.status());
+        Instant generatedAt = startedAt.plus(latency);
         FraudEngineResult result = switch (execution.status()) {
             case COMPLETED -> execution.value() == null
                     ? failureResult(
@@ -98,7 +100,7 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
                     generatedAt,
                     latency
             )
-                    : withMeasuredLatency(execution.value(), latency);
+                    : withExecutionMetadata(execution.value(), latency, generatedAt);
             case FAILED -> failureResult(
                     registeredEngine.descriptor(),
                     OrchestrationFailureReasonCode.ORCHESTRATOR_ENGINE_EXCEPTION,
@@ -148,7 +150,7 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
         );
     }
 
-    private FraudEngineResult withMeasuredLatency(FraudEngineResult source, Duration latency) {
+    private FraudEngineResult withExecutionMetadata(FraudEngineResult source, Duration latency, Instant generatedAt) {
         return new FraudEngineResult(
                 source.engineId(),
                 source.engineType(),
@@ -164,7 +166,7 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
                 source.modelName(),
                 source.modelVersion(),
                 source.statusReason(),
-                source.generatedAt()
+                generatedAt
         );
     }
 

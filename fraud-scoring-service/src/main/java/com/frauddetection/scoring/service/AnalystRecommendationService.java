@@ -64,7 +64,7 @@ public class AnalystRecommendationService {
             return AnalystRecommendationResult.notApplicable("ENGINE_INTELLIGENCE_NO_COMPARABLE_ENGINES", generatedAt);
         }
 
-        boolean degraded = degraded(rules, ml);
+        boolean degraded = degraded(summary, rules, ml);
         Optional<RecommendationDecision> decision = rapidTransferRecommendation(rules, degraded)
                 .or(() -> rulesHighRiskRecommendation(rules, degraded))
                 .or(() -> mlHighRulesLowerRecommendation(rules, ml, degraded))
@@ -162,10 +162,12 @@ public class AnalystRecommendationService {
     }
 
     private boolean degraded(
+            EngineIntelligenceSummary summary,
             Optional<EngineIntelligenceEngineResult> rules,
             Optional<EngineIntelligenceEngineResult> ml
     ) {
-        return rules.map(engine -> engine.status() != FraudEngineStatus.AVAILABLE).orElse(false)
+        return !summary.warnings().isEmpty()
+                || rules.map(engine -> engine.status() != FraudEngineStatus.AVAILABLE).orElse(false)
                 || ml.map(engine -> engine.status() != FraudEngineStatus.AVAILABLE).orElse(false);
     }
 

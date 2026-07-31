@@ -4922,6 +4922,10 @@ components:
       type: object
       additionalProperties: false
       required: [engineId, engineType, status, scoreBucket, reasonCodes]
+      oneOf:
+        - $ref: "#/components/schemas/RulesEngineIdentity"
+        - $ref: "#/components/schemas/MlEngineIdentity"
+        - $ref: "#/components/schemas/VelocityEngineIdentity"
       properties:
         engineId:
           type: string
@@ -4951,6 +4955,10 @@ components:
       type: object
       additionalProperties: false
       required: [engineId, engineType, engineStatus, signalCategory, scoreBucket, reasonCode]
+      oneOf:
+        - $ref: "#/components/schemas/RulesEngineIdentity"
+        - $ref: "#/components/schemas/MlEngineIdentity"
+        - $ref: "#/components/schemas/VelocityEngineIdentity"
       properties:
         engineId:
           type: string
@@ -5057,6 +5065,10 @@ components:
       type: object
       additionalProperties: false
       required: [engineId, engineType, status, scoreBucket, reasonCodes]
+      oneOf:
+        - $ref: "#/components/schemas/RulesEngineIdentity"
+        - $ref: "#/components/schemas/MlEngineIdentity"
+        - $ref: "#/components/schemas/VelocityEngineIdentity"
       properties:
         engineId:
           type: string
@@ -5086,6 +5098,10 @@ components:
       type: object
       additionalProperties: false
       required: [engineId, engineType, engineStatus, signalCategory, scoreBucket, reasonCode]
+      oneOf:
+        - $ref: "#/components/schemas/RulesEngineIdentity"
+        - $ref: "#/components/schemas/MlEngineIdentity"
+        - $ref: "#/components/schemas/VelocityEngineIdentity"
       properties:
         engineId:
           type: string
@@ -5111,6 +5127,36 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+    RulesEngineIdentity:
+      type: object
+      required: [engineId, engineType]
+      properties:
+        engineId:
+          type: string
+          enum: [rules.primary]
+        engineType:
+          type: string
+          enum: [RULES]
+    MlEngineIdentity:
+      type: object
+      required: [engineId, engineType]
+      properties:
+        engineId:
+          type: string
+          enum: [ml.python.primary]
+        engineType:
+          type: string
+          enum: [ML_MODEL]
+    VelocityEngineIdentity:
+      type: object
+      required: [engineId, engineType]
+      properties:
+        engineId:
+          type: string
+          enum: [velocity.primary]
+        engineType:
+          type: string
+          enum: [VELOCITY]
     EngineIntelligenceWarningReadModel:
       type: object
       additionalProperties: false

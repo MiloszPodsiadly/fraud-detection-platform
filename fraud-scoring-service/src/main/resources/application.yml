@@ -80,6 +80,6 @@ fraud:
     events:
       engine-intelligence:
         emit-enabled: ${FRAUD_SCORING_EVENTS_ENGINE_INTELLIGENCE_EMIT_ENABLED:false}
-  engines:
-    velocity:
-      enabled: ${FRAUD_SCORING_ENGINE_VELOCITY_ENABLED:false}
+    engines:
+      velocity:
+        enabled: ${FRAUD_SCORING_ENGINE_VELOCITY_ENABLED:false}

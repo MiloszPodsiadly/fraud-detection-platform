@@ -20,16 +20,18 @@ import com.frauddetection.scoring.features.FeatureSnapshotValue;
 import com.frauddetection.scoring.features.FeatureSnapshotValueStatus;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Stream;
 
 public final class VelocitySignalEngine implements FraudSignalEngine {
     private static final String ENGINE_LANGUAGE = "java";
-    private static final String ENGINE_VERSION = "1.0.0";
     private static final String EVIDENCE_SOURCE = "VELOCITY";
+    private static final Duration MAX_OBSERVED_WINDOW = Duration.ofDays(1);
+    private static final Instant ORCHESTRATOR_GENERATED_AT_PLACEHOLDER = Instant.EPOCH;
 
     private final FeatureSnapshotReaderFactory readerFactory;
 
@@ -42,8 +44,8 @@ public final class VelocitySignalEngine implements FraudSignalEngine {
         Objects.requireNonNull(context, "context is required");
         FeatureSnapshotReader reader = readerFactory.from(context);
         VelocityInputs inputs = readInputs(reader);
-        FeatureSnapshotValueStatus status = firstNonPresent(inputs.values());
-        if (status == FeatureSnapshotValueStatus.MISSING) {
+        InputReadiness readiness = readiness(inputs.values());
+        if (readiness == InputReadiness.MISSING_ONLY) {
             return operationalResult(
                     FraudEngineStatus.UNAVAILABLE,
                     VelocitySignalReasonCode.VELOCITY_FEATURES_UNAVAILABLE,
@@ -51,10 +53,26 @@ public final class VelocitySignalEngine implements FraudSignalEngine {
                     context
             );
         }
-        if (status != null) {
+        if (readiness == InputReadiness.INVALID_TYPE) {
             return operationalResult(
                     FraudEngineStatus.DEGRADED,
                     VelocitySignalReasonCode.VELOCITY_FEATURE_TYPE_INVALID,
+                    FraudEngineEvidenceStatus.PARTIAL,
+                    context
+            );
+        }
+        if (readiness == InputReadiness.INVALID_VALUE) {
+            return operationalResult(
+                    FraudEngineStatus.DEGRADED,
+                    VelocitySignalReasonCode.VELOCITY_FEATURE_VALUE_INVALID,
+                    FraudEngineEvidenceStatus.PARTIAL,
+                    context
+            );
+        }
+        if (readiness == InputReadiness.INCONSISTENT) {
+            return operationalResult(
+                    FraudEngineStatus.DEGRADED,
+                    VelocitySignalReasonCode.VELOCITY_FEATURES_INCONSISTENT,
                     FraudEngineEvidenceStatus.PARTIAL,
                     context
             );
@@ -83,8 +101,7 @@ public final class VelocitySignalEngine implements FraudSignalEngine {
                 new VelocitySignalPolicy.VelocityFacts(
                         validated.recentTransactionCount(),
                         validated.recentAmountSumPln(),
-                        validated.transactionVelocityPerMinute(),
-                        validated.rapidTransferFraudCaseCandidate()
+                        validated.transactionVelocityPerMinute()
                 )
         );
         return availableResult(decision, context);
@@ -96,7 +113,7 @@ public final class VelocitySignalEngine implements FraudSignalEngine {
                 FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID,
                 FraudEngineType.VELOCITY,
                 ENGINE_LANGUAGE,
-                ENGINE_VERSION,
+                VelocitySignalPolicy.ENGINE_VERSION,
                 false
         );
     }
@@ -106,77 +123,106 @@ public final class VelocitySignalEngine implements FraudSignalEngine {
                 reader.integerValue(FraudFeatureContract.RECENT_TRANSACTION_COUNT),
                 reader.stringValue(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW),
                 reader.decimalValue(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN),
-                reader.doubleValue(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE),
-                reader.booleanValue(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE),
-                reader.integerValue(FraudFeatureContract.RAPID_TRANSFER_COUNT),
-                reader.decimalValue(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN),
-                reader.stringValue(FraudFeatureContract.RAPID_TRANSFER_WINDOW),
-                reader.decimalValue(FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN)
+                reader.doubleValue(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE)
         );
     }
 
-    private FeatureSnapshotValueStatus firstNonPresent(List<FeatureSnapshotValue<?>> values) {
-        FeatureSnapshotValueStatus firstInvalid = null;
+    private InputReadiness readiness(List<FeatureSnapshotValue<?>> values) {
+        boolean missing = false;
         for (FeatureSnapshotValue<?> value : values) {
-            if (value.status() == FeatureSnapshotValueStatus.PRESENT) {
-                continue;
-            }
-            if (value.status() == FeatureSnapshotValueStatus.MISSING) {
-                return FeatureSnapshotValueStatus.MISSING;
-            }
-            if (firstInvalid == null) {
-                firstInvalid = value.status();
+            if (value.status() == FeatureSnapshotValueStatus.WRONG_ACCESSOR
+                    || value.status() == FeatureSnapshotValueStatus.NOT_ALLOWED) {
+                return InputReadiness.INVALID_TYPE;
             }
         }
-        return firstInvalid;
+        for (FeatureSnapshotValue<?> value : values) {
+            if (value.status() == FeatureSnapshotValueStatus.INVALID_TYPE) {
+                return InputReadiness.INVALID_TYPE;
+            }
+            if (value.status() == FeatureSnapshotValueStatus.MISSING) {
+                missing = true;
+            }
+        }
+        try {
+            validatePresentInputDomains(values);
+        } catch (InvalidVelocityFeatureValueException exception) {
+            return InputReadiness.INVALID_VALUE;
+        }
+        try {
+            validatePresentInputRelationships(values);
+        } catch (InconsistentVelocityFeaturesException exception) {
+            return InputReadiness.INCONSISTENT;
+        }
+        return missing ? InputReadiness.MISSING_ONLY : InputReadiness.READY;
+    }
+
+    private void validatePresentInputDomains(List<FeatureSnapshotValue<?>> values) {
+        for (FeatureSnapshotValue<?> value : values) {
+            if (value.status() != FeatureSnapshotValueStatus.PRESENT) {
+                continue;
+            }
+            Object actual = value.value();
+            if (actual instanceof Integer integer && integer < 0) {
+                throw new InvalidVelocityFeatureValueException();
+            }
+            if (actual instanceof BigDecimal decimal && decimal.signum() < 0) {
+                throw new InvalidVelocityFeatureValueException();
+            }
+            if (actual instanceof Double doubleValue && (!Double.isFinite(doubleValue) || doubleValue < 0.0d)) {
+                throw new InvalidVelocityFeatureValueException();
+            }
+            if (actual instanceof String stringValue) {
+                parsePositiveDuration(stringValue);
+            }
+        }
+    }
+
+    private void validatePresentInputRelationships(List<FeatureSnapshotValue<?>> values) {
+        FeatureSnapshotValue<?> count = values.get(0);
+        FeatureSnapshotValue<?> amount = values.get(2);
+        FeatureSnapshotValue<?> rate = values.get(3);
+        if (count.status() != FeatureSnapshotValueStatus.PRESENT) {
+            return;
+        }
+        if ((Integer) count.value() != 0) {
+            return;
+        }
+        if (amount.status() == FeatureSnapshotValueStatus.PRESENT
+                && ((BigDecimal) amount.value()).signum() > 0) {
+            throw new InconsistentVelocityFeaturesException();
+        }
+        if (rate.status() == FeatureSnapshotValueStatus.PRESENT
+                && Double.compare((Double) rate.value(), 0.0d) > 0) {
+            throw new InconsistentVelocityFeaturesException();
+        }
     }
 
     private ValidatedVelocityInputs validate(VelocityInputs inputs) {
         int count = inputs.recentTransactionCount().value();
-        int rapidCount = inputs.rapidTransferCount().value();
         BigDecimal amountPln = inputs.recentAmountSumPln().value();
-        BigDecimal rapidTotalPln = inputs.rapidTransferTotalPln().value();
-        BigDecimal thresholdPln = inputs.rapidTransferThresholdPln().value();
         double velocityPerMinute = inputs.transactionVelocityPerMinute().value();
-        Duration recentWindow = parsePositiveDuration(inputs.recentTransactionCountWindow().value());
-        Duration rapidWindow = parsePositiveDuration(inputs.rapidTransferWindow().value());
+        parsePositiveDuration(inputs.recentTransactionCountWindow().value());
 
         if (count < 0
-                || rapidCount < 0
                 || amountPln.signum() < 0
-                || rapidTotalPln.signum() < 0
-                || thresholdPln.signum() <= 0
                 || !Double.isFinite(velocityPerMinute)
                 || velocityPerMinute < 0.0d) {
             throw new InvalidVelocityFeatureValueException();
         }
-        if (!recentWindow.equals(rapidWindow)
-                || rapidCount != count
-                || rapidTotalPln.compareTo(amountPln) != 0
-                || thresholdPln.compareTo(VelocitySignalPolicy.RAPID_TRANSFER_PLN_THRESHOLD) != 0) {
-            throw new InconsistentVelocityFeaturesException();
-        }
-        double expectedVelocity = BigDecimal.valueOf(count)
-                .divide(BigDecimal.valueOf(Math.max(recentWindow.toMinutes(), 1L)), 4, RoundingMode.HALF_UP)
-                .doubleValue();
-        boolean expectedCandidate = count >= VelocitySignalPolicy.RAPID_TRANSFER_MIN_COUNT
-                && rapidTotalPln.compareTo(VelocitySignalPolicy.RAPID_TRANSFER_PLN_THRESHOLD) >= 0;
-        if (Double.compare(velocityPerMinute, expectedVelocity) != 0
-                || inputs.rapidTransferFraudCaseCandidate().value() != expectedCandidate) {
+        if (count == 0 && (amountPln.signum() > 0 || Double.compare(velocityPerMinute, 0.0d) > 0)) {
             throw new InconsistentVelocityFeaturesException();
         }
         return new ValidatedVelocityInputs(
                 count,
                 amountPln,
-                velocityPerMinute,
-                inputs.rapidTransferFraudCaseCandidate().value()
+                velocityPerMinute
         );
     }
 
     private Duration parsePositiveDuration(String value) {
         try {
             Duration duration = Duration.parse(value);
-            if (duration.isZero() || duration.isNegative()) {
+            if (duration.isZero() || duration.isNegative() || duration.compareTo(MAX_OBSERVED_WINDOW) > 0) {
                 throw new InvalidVelocityFeatureValueException();
             }
             return duration;
@@ -193,7 +239,7 @@ public final class VelocitySignalEngine implements FraudSignalEngine {
                 FraudEngineStatus.AVAILABLE,
                 decision.score(),
                 decision.riskLevel(),
-                decision.reasonCodes().isEmpty() ? FraudEngineConfidence.LOW : FraudEngineConfidence.MEDIUM,
+                FraudEngineConfidence.UNKNOWN,
                 decision.reasonCodes(),
                 contributions(decision),
                 evidence(decision),
@@ -201,7 +247,7 @@ public final class VelocitySignalEngine implements FraudSignalEngine {
                 null,
                 null,
                 null,
-                context.receivedAt()
+                ORCHESTRATOR_GENERATED_AT_PLACEHOLDER
         );
     }
 
@@ -233,27 +279,26 @@ public final class VelocitySignalEngine implements FraudSignalEngine {
                 null,
                 null,
                 reasonCode.wireValue(),
-                context.receivedAt()
+                ORCHESTRATOR_GENERATED_AT_PLACEHOLDER
         );
     }
 
     private List<FraudEngineContribution> contributions(VelocitySignalPolicy.VelocityDecision decision) {
-        return List.of(
-                        contribution(decision.rapidBurst(), "RAPID_TRANSFER_FRAUD_CASE_CANDIDATE", "RAPID_BURST_CONFIRMED", 0.40d),
-                        contribution(decision.highRate(), "TRANSACTION_VELOCITY_PER_MINUTE", "HIGH_RATE", 0.25d),
-                        contribution(decision.countSpike(), "RECENT_TRANSACTION_COUNT", "HIGH_COUNT", 0.20d),
-                        contribution(decision.highAmount(), "RECENT_AMOUNT_SUM_PLN", "AT_OR_ABOVE_THRESHOLD", 0.15d)
+        return Stream.of(
+                        contribution(decision.rapidBurst(), "RAPID_TRANSFER_PLN_BURST", 0.40d),
+                        contribution(decision.highRate(), "TRANSACTION_VELOCITY_PER_MINUTE", 0.25d),
+                        contribution(decision.countSpike(), "RECENT_TRANSACTION_COUNT", 0.20d),
+                        contribution(decision.highAmount(), "RECENT_AMOUNT_SUM_PLN", 0.15d)
                 )
-                .stream()
                 .filter(Objects::nonNull)
                 .toList();
     }
 
-    private FraudEngineContribution contribution(boolean present, String feature, String value, double weight) {
+    private FraudEngineContribution contribution(boolean present, String feature, double weight) {
         if (!present) {
             return null;
         }
-        return new FraudEngineContribution(feature, value, weight, FraudEngineContributionDirection.INCREASES_RISK);
+        return new FraudEngineContribution(feature, null, weight, FraudEngineContributionDirection.INCREASES_RISK);
     }
 
     private List<FraudEngineEvidence> evidence(VelocitySignalPolicy.VelocityDecision decision) {
@@ -273,24 +318,14 @@ public final class VelocitySignalEngine implements FraudSignalEngine {
             FeatureSnapshotValue<Integer> recentTransactionCount,
             FeatureSnapshotValue<String> recentTransactionCountWindow,
             FeatureSnapshotValue<BigDecimal> recentAmountSumPln,
-            FeatureSnapshotValue<Double> transactionVelocityPerMinute,
-            FeatureSnapshotValue<Boolean> rapidTransferFraudCaseCandidate,
-            FeatureSnapshotValue<Integer> rapidTransferCount,
-            FeatureSnapshotValue<BigDecimal> rapidTransferTotalPln,
-            FeatureSnapshotValue<String> rapidTransferWindow,
-            FeatureSnapshotValue<BigDecimal> rapidTransferThresholdPln
+            FeatureSnapshotValue<Double> transactionVelocityPerMinute
     ) {
         List<FeatureSnapshotValue<?>> values() {
             return List.of(
                     recentTransactionCount,
                     recentTransactionCountWindow,
                     recentAmountSumPln,
-                    transactionVelocityPerMinute,
-                    rapidTransferFraudCaseCandidate,
-                    rapidTransferCount,
-                    rapidTransferTotalPln,
-                    rapidTransferWindow,
-                    rapidTransferThresholdPln
+                    transactionVelocityPerMinute
             );
         }
     }
@@ -298,9 +333,16 @@ public final class VelocitySignalEngine implements FraudSignalEngine {
     private record ValidatedVelocityInputs(
             int recentTransactionCount,
             BigDecimal recentAmountSumPln,
-            double transactionVelocityPerMinute,
-            boolean rapidTransferFraudCaseCandidate
+            double transactionVelocityPerMinute
     ) {
+    }
+
+    private enum InputReadiness {
+        READY,
+        MISSING_ONLY,
+        INVALID_TYPE,
+        INVALID_VALUE,
+        INCONSISTENT
     }
 
     private static final class InvalidVelocityFeatureValueException extends RuntimeException {
