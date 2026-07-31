@@ -139,8 +139,8 @@ function EngineResultList({ engines }) {
           {engines.map((engine) => (
             <article className="engineIntelligenceCard" key={engine.engineId}>
               <div className="engineIntelligenceCardHeader">
-                <strong>{engine.engineId}</strong>
-                <span>{engine.engineType}</span>
+                <strong>{engineDisplayName(engine)}</strong>
+                <span>{engine.engineId} / {engine.engineType}</span>
               </div>
               <dl>
                 <Field label="Status" value={engineStatusLabel(engine.status)} />
@@ -166,7 +166,7 @@ function DiagnosticSignalList({ signals }) {
             <article className="engineIntelligenceCard" key={`${signal.signalCategory}-${signal.reasonCodes.join("-")}-${index}`}>
               <div className="engineIntelligenceCardHeader">
                 <strong>{signal.signalCategory}</strong>
-                {signal.engineType && <span>{signal.engineType}</span>}
+                {signal.engineType && <span>{engineDisplayName(signal)} / {signal.engineId}</span>}
               </div>
               <dl>
                 {signal.engineStatus && <Field label="Status" value={engineStatusLabel(signal.engineStatus)} />}
@@ -268,6 +268,19 @@ function engineStatusLabel(status) {
     return "Engine response degraded";
   }
   return status || "UNKNOWN";
+}
+
+function engineDisplayName(engine) {
+  if (engine?.engineId === "velocity.primary") {
+    return "Velocity";
+  }
+  if (engine?.engineId === "rules.primary") {
+    return "Rules";
+  }
+  if (engine?.engineId === "ml.python.primary") {
+    return "ML model";
+  }
+  return engine?.engineId || "Engine";
 }
 
 function isOperationalStatus(status) {

@@ -63,7 +63,7 @@ const NON_DECISIONING_FLAGS = [
   "notModelPromotion",
   "notThresholdRecommendation"
 ];
-const MAX_ENGINES = 2;
+const MAX_ENGINES = 3;
 const MAX_DIAGNOSTIC_SIGNALS = 5;
 const MAX_WARNINGS = 10;
 const MAX_REASON_CODES = 5;
@@ -84,6 +84,11 @@ const UNSAFE_FIELD_NAMES = [
   "token",
   "secret"
 ];
+const ENGINE_TYPE_BY_ID = Object.freeze({
+  "rules.primary": "RULES",
+  "ml.python.primary": "ML_MODEL",
+  "velocity.primary": "VELOCITY"
+});
 
 export function validateTransactionRiskIntelligenceDetail(detail) {
   if (!detail || typeof detail !== "object" || Array.isArray(detail)) {
@@ -153,6 +158,7 @@ function isEngineShape(engine) {
   return Boolean(engine && typeof engine === "object" && !Array.isArray(engine))
     && safeString(engine.engineId)
     && oneOf(engine.engineType, ENGINE_TYPES)
+    && isExpectedEngineType(engine.engineId, engine.engineType)
     && oneOf(engine.status, ENGINE_STATUSES)
     && optionalOneOf(engine.riskLevel, RISK_LEVELS)
     && oneOf(engine.scoreBucket, SCORE_BUCKETS)
@@ -163,6 +169,7 @@ function isDiagnosticSignalShape(signal) {
   return Boolean(signal && typeof signal === "object" && !Array.isArray(signal))
     && safeString(signal.engineId)
     && oneOf(signal.engineType, ENGINE_TYPES)
+    && isExpectedEngineType(signal.engineId, signal.engineType)
     && oneOf(signal.engineStatus, ENGINE_STATUSES)
     && oneOf(signal.signalCategory, SIGNAL_CATEGORIES)
     && safeString(signal.reasonCode)
@@ -257,6 +264,10 @@ function parseableDateString(value) {
 
 function oneOf(value, allowedValues) {
   return typeof value === "string" && allowedValues.has(value);
+}
+
+function isExpectedEngineType(engineId, engineType) {
+  return ENGINE_TYPE_BY_ID[engineId] === engineType;
 }
 
 function optionalOneOf(value, allowedValues) {

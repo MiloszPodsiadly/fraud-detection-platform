@@ -52,7 +52,8 @@ describe("EngineIntelligencePanel", () => {
     expect(await screen.findByRole("heading", { name: "Engine intelligence" })).toBeInTheDocument();
     expect(screen.getByText("Diagnostic engine output for this transaction.")).toBeInTheDocument();
     expect(screen.getByText("Diagnostic only. Operational statuses and disagreement are investigation context.")).toBeInTheDocument();
-    expect(screen.getByText("rules.primary")).toBeInTheDocument();
+    expect(screen.getByText("Rules")).toBeInTheDocument();
+    expect(panelText()).toContain("rules.primary / RULES");
     expect(screen.getAllByText("HIGH_VELOCITY").length).toBeGreaterThan(0);
   });
 
@@ -136,7 +137,8 @@ describe("EngineIntelligencePanel", () => {
     renderPanel(availableResult());
 
     expect(await screen.findByRole("heading", { name: "Engine results" })).toBeInTheDocument();
-    expect(screen.getByText("RULES")).toBeInTheDocument();
+    expect(screen.getByText("Rules")).toBeInTheDocument();
+    expect(panelText()).toContain("rules.primary / RULES");
     expect(screen.getAllByText("AVAILABLE").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Score bucket").length).toBeGreaterThan(0);
     expect(screen.getAllByText("HIGH").length).toBeGreaterThan(0);

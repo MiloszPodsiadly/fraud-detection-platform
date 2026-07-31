@@ -161,7 +161,7 @@ class EngineIntelligenceResponseMapperTest {
     void limitsPublicProjectionArraysToOpenApiBounds() {
         EngineIntelligenceResponse response = mapper.toResponse(readModelWithManyValues());
 
-        assertThat(response.engines()).hasSize(2);
+        assertThat(response.engines()).hasSize(3);
         assertThat(response.engines().getFirst().reasonCodes()).hasSize(5);
         assertThat(response.diagnosticSignals()).hasSize(5);
         assertThat(response.warnings()).hasSize(10);

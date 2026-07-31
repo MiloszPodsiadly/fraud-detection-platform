@@ -4891,7 +4891,7 @@ components:
             - $ref: "#/components/schemas/EngineIntelligenceComparisonResponse"
         engines:
           type: array
-          maxItems: 2
+          maxItems: 3
           items:
             $ref: "#/components/schemas/EngineIntelligenceEngineResponse"
         diagnosticSignals:
@@ -4929,6 +4929,7 @@ components:
           maxLength: 128
         engineType:
           type: string
+          enum: [RULES, ML_MODEL, VELOCITY]
         status:
           type: string
           enum: [AVAILABLE, UNAVAILABLE, TIMEOUT, DEGRADED, NOT_APPLICABLE]
@@ -4957,6 +4958,7 @@ components:
           maxLength: 128
         engineType:
           type: string
+          enum: [RULES, ML_MODEL, VELOCITY]
         engineStatus:
           type: string
           enum: [AVAILABLE, UNAVAILABLE, TIMEOUT, DEGRADED, NOT_APPLICABLE]
@@ -5013,7 +5015,7 @@ components:
         engineCount:
           type: integer
           minimum: 0
-          maximum: 2
+          maximum: 3
         diagnosticSignalCount:
           type: integer
           minimum: 0
@@ -5024,7 +5026,7 @@ components:
           maximum: 10
         engines:
           type: array
-          maxItems: 2
+          maxItems: 3
           items:
             $ref: "#/components/schemas/EngineIntelligenceEngineReadModel"
         diagnosticSignals:
@@ -5062,6 +5064,7 @@ components:
           maxLength: 128
         engineType:
           type: string
+          enum: [RULES, ML_MODEL, VELOCITY]
         status:
           type: string
           enum: [AVAILABLE, UNAVAILABLE, DEGRADED, TIMEOUT, FALLBACK_USED, SKIPPED]
@@ -5090,6 +5093,7 @@ components:
           maxLength: 128
         engineType:
           type: string
+          enum: [RULES, ML_MODEL, VELOCITY]
         engineStatus:
           type: string
           enum: [AVAILABLE, UNAVAILABLE, DEGRADED, TIMEOUT, FALLBACK_USED, SKIPPED]

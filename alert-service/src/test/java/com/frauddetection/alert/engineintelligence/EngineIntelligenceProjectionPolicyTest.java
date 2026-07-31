@@ -33,7 +33,7 @@ class EngineIntelligenceProjectionPolicyTest {
     @Test
     void alertServiceStorageLimitsStillApplyAfterPublicContractValidation() {
         EngineIntelligenceSummary source = summaryMock();
-        when(source.engines()).thenReturn(Collections.nCopies(3, EngineIntelligenceProjectionTestFixtures.timeoutMl()));
+        when(source.engines()).thenReturn(Collections.nCopies(4, EngineIntelligenceProjectionTestFixtures.timeoutMl()));
 
         assertOversized(source);
     }

@@ -1,6 +1,7 @@
 package com.frauddetection.alert.engineintelligence;
 
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparison;
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceDiagnosticSignal;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceEngineResult;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
@@ -25,13 +26,12 @@ import java.util.function.Supplier;
 @Component
 public class EngineIntelligenceProjectionPolicy {
 
-    public static final int MAX_ENGINES = 2;
+    public static final int MAX_ENGINES = FraudEngineIdentityContract.MAX_ENGINE_INTELLIGENCE_ENGINES;
     public static final int MAX_DIAGNOSTIC_SIGNALS = 5;
     public static final int MAX_WARNINGS = 10;
     public static final int MAX_REASON_CODES_PER_ENGINE = 5;
     public static final int MAX_STRING_LENGTH = 128;
 
-    private static final Set<String> ALLOWED_ENGINE_IDS = Set.of("rules.primary", "ml.python.primary");
     private static final Set<String> FORBIDDEN_COMPACT_TEXT = Set.of(
             "rawevidence",
             "rawcontribution",
@@ -123,7 +123,7 @@ public class EngineIntelligenceProjectionPolicy {
 
     private String allowedEngineId(String engineId) {
         String safe = boundedString(engineId);
-        if (!ALLOWED_ENGINE_IDS.contains(safe)) {
+        if (!FraudEngineIdentityContract.isKnownEngineId(safe)) {
             throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
         }
         return safe;

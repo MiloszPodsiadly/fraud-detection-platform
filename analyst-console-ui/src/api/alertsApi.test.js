@@ -1871,7 +1871,7 @@ describe("alertsApi auth headers", () => {
   });
 
   it.each([
-    ["getEngineIntelligenceFailsClosedForOversizedEngines", { engines: [engineResult(), engineResult({ engineId: "ml.python.primary", engineType: "ML_MODEL", status: "TIMEOUT", riskLevel: undefined, scoreBucket: "UNAVAILABLE", reasonCodes: ["ML_MODEL_TIMEOUT"] }), engineResult({ engineId: "rules.secondary" })] }],
+    ["getEngineIntelligenceFailsClosedForOversizedEngines", { engines: [engineResult(), engineResult(), engineResult(), engineResult()] }],
     ["getEngineIntelligenceFailsClosedForOversizedDiagnosticSignals", { diagnosticSignals: Array.from({ length: 6 }, (_value, index) => diagnosticSignal({ engineId: `rules.${index}` })) }],
     ["getEngineIntelligenceFailsClosedForOversizedWarnings", { warnings: Array.from({ length: 11 }, () => warning()) }],
     ["getEngineIntelligenceFailsClosedForOversizedEngineReasonCodes", { engines: [engineResult({ reasonCodes: ["A", "B", "C", "D", "E", "F"] })] }],
@@ -1880,6 +1880,29 @@ describe("alertsApi auth headers", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable(patch)));
 
     await expect(getEngineIntelligence("txn-1")).resolves.toMatchObject({ state: "unavailable", available: false });
+  });
+
+  it("getEngineIntelligenceAcceptsThreeKnownEnginesIncludingVelocity", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable({
+      engines: [
+        engineResult(),
+        engineResult({ engineId: "ml.python.primary", engineType: "ML_MODEL", riskLevel: "MEDIUM", scoreBucket: "MEDIUM", reasonCodes: ["MODEL_HIGH_RISK"] }),
+        engineResult({ engineId: "velocity.primary", engineType: "VELOCITY", riskLevel: "HIGH", scoreBucket: "HIGH", reasonCodes: ["RAPID_PLN_20K_BURST"] })
+      ],
+      diagnosticSignals: [
+        diagnosticSignal(),
+        diagnosticSignal({ engineId: "velocity.primary", engineType: "VELOCITY", reasonCode: "RAPID_PLN_20K_BURST" })
+      ]
+    })));
+
+    await expect(getEngineIntelligence("txn-1")).resolves.toMatchObject({
+      state: "available",
+      engines: [
+        expect.objectContaining({ engineId: "rules.primary", engineType: "RULES" }),
+        expect.objectContaining({ engineId: "ml.python.primary", engineType: "ML_MODEL" }),
+        expect.objectContaining({ engineId: "velocity.primary", engineType: "VELOCITY" })
+      ]
+    });
   });
 
   it.each([

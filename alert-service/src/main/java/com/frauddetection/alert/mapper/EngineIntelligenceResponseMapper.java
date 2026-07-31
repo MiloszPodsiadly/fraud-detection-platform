@@ -9,6 +9,7 @@ import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
 import com.frauddetection.alert.api.EngineIntelligenceWarningResponse;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -16,7 +17,7 @@ import java.util.List;
 @Component
 public class EngineIntelligenceResponseMapper {
 
-    static final int MAX_PUBLIC_ENGINES = 2;
+    static final int MAX_PUBLIC_ENGINES = FraudEngineIdentityContract.MAX_ENGINE_INTELLIGENCE_ENGINES;
     static final int MAX_PUBLIC_DIAGNOSTIC_SIGNALS = 5;
     static final int MAX_PUBLIC_WARNINGS = 10;
     static final int MAX_PUBLIC_REASON_CODES = 5;

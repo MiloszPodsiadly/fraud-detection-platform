@@ -84,7 +84,7 @@ class EngineIntelligenceProjectionMapperTest {
     @Test
     void oversizedPayloadUsesTypedOmissionReason() {
         EngineIntelligenceSummary summary = summaryMock();
-        when(summary.engines()).thenReturn(Collections.nCopies(3, EngineIntelligenceProjectionTestFixtures.timeoutMl()));
+        when(summary.engines()).thenReturn(Collections.nCopies(4, EngineIntelligenceProjectionTestFixtures.timeoutMl()));
 
         assertOmitted(
                 mapper.map("txn-1", summary, null),

@@ -288,7 +288,7 @@ async function promotionReviewReadinessReportRequest(request, { signal } = {}) {
 }
 
 const ENGINE_INTELLIGENCE_TRANSACTION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
-const MAX_ENGINE_INTELLIGENCE_ENGINES = 2;
+const MAX_ENGINE_INTELLIGENCE_ENGINES = 3;
 const MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS = 5;
 const MAX_ENGINE_INTELLIGENCE_WARNINGS = 10;
 const MAX_ENGINE_INTELLIGENCE_REASON_CODES = 5;
@@ -310,7 +310,12 @@ const SCORE_DELTA_BUCKETS = new Set(["NONE", "SMALL", "MEDIUM", "LARGE", "UNAVAI
 const ENGINE_STATUSES = new Set(["AVAILABLE", "UNAVAILABLE", "DEGRADED", "TIMEOUT", "FALLBACK_USED", "SKIPPED"]);
 const SCORE_BUCKETS = new Set(["NONE", "LOW", "MEDIUM", "HIGH", "VERY_HIGH", "UNAVAILABLE"]);
 const SIGNAL_CATEGORIES = new Set(["FRAUD_SIGNAL", "OPERATIONAL_SIGNAL"]);
-const ENGINE_TYPES = new Set(["RULES", "ML_MODEL"]);
+const ENGINE_TYPES = new Set(["RULES", "ML_MODEL", "VELOCITY"]);
+const ENGINE_TYPE_BY_ID = Object.freeze({
+  "rules.primary": "RULES",
+  "ml.python.primary": "ML_MODEL",
+  "velocity.primary": "VELOCITY"
+});
 const RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
 const ENGINE_INTELLIGENCE_FEEDBACK_TYPES = new Set([
   "ENGINE_INTELLIGENCE_USEFULNESS",
@@ -569,7 +574,7 @@ function normalizeEngineResults(values) {
     const engineType = normalizedAllowedValue(value?.engineType, ENGINE_TYPES);
     const status = normalizedAllowedValue(value?.status, ENGINE_STATUSES);
     const scoreBucket = normalizedAllowedValue(value?.scoreBucket, SCORE_BUCKETS);
-    if (!engineId || !engineType || !status || !scoreBucket) {
+    if (!engineId || !engineType || !isExpectedEngineType(engineId, engineType) || !status || !scoreBucket) {
       return null;
     }
     const riskLevel = normalizedOptionalAllowedValue(value?.riskLevel, RISK_LEVELS);
@@ -606,7 +611,7 @@ function normalizeDiagnosticSignals(values) {
     const engineType = normalizedAllowedValue(value?.engineType, ENGINE_TYPES);
     const engineStatus = normalizedAllowedValue(value?.engineStatus, ENGINE_STATUSES);
     const scoreBucket = normalizedAllowedValue(value?.scoreBucket, SCORE_BUCKETS);
-    if (!signalCategory || !engineId || !engineType || !engineStatus || !scoreBucket) {
+    if (!signalCategory || !engineId || !engineType || !isExpectedEngineType(engineId, engineType) || !engineStatus || !scoreBucket) {
       return null;
     }
     const riskLevel = normalizedOptionalAllowedValue(value?.riskLevel, RISK_LEVELS);
@@ -715,6 +720,10 @@ function isEngineResultOperationallyConsistent(status, scoreBucket, riskLevel) {
     return true;
   }
   return scoreBucket === "UNAVAILABLE" && !riskLevel;
+}
+
+function isExpectedEngineType(engineId, engineType) {
+  return ENGINE_TYPE_BY_ID[engineId] === engineType;
 }
 
 function isDiagnosticSignalOperationallyConsistent(signalCategory, engineStatus, scoreBucket, riskLevel) {

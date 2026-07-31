@@ -235,7 +235,7 @@ describe("transactionRiskIntelligenceValidation", () => {
 
   it("rejects arrays above display bounds", () => {
     expect(validateTransactionRiskIntelligenceDetail(detail({
-      engineIntelligence: { ...engineIntelligence(), engines: Array.from({ length: 3 }, (_, index) => engine({ engineId: `engine-${index}` })) }
+      engineIntelligence: { ...engineIntelligence(), engines: Array.from({ length: 4 }, () => engine()) }
     }))).toMatchObject({ valid: false, reason: "ENGINE_LIMIT_EXCEEDED" });
     expect(validateTransactionRiskIntelligenceDetail(detail({
       engineIntelligence: { ...engineIntelligence(), diagnosticSignals: Array.from({ length: 6 }, (_, index) => signal({ reasonCode: `R${index}` })) }
@@ -243,6 +243,23 @@ describe("transactionRiskIntelligenceValidation", () => {
     expect(validateTransactionRiskIntelligenceDetail(detail({
       engineIntelligence: { ...engineIntelligence(), warnings: Array.from({ length: 11 }, (_, index) => ({ warningCode: `WARNING_${index}`, count: index })) }
     }))).toMatchObject({ valid: false, reason: "WARNING_LIMIT_EXCEEDED" });
+  });
+
+  it("accepts three known engine intelligence engines including velocity", () => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      engineIntelligence: {
+        ...engineIntelligence(),
+        engines: [
+          engine(),
+          engine({ engineId: "ml.python.primary", engineType: "ML_MODEL", riskLevel: "MEDIUM", scoreBucket: "MEDIUM", reasonCodes: ["MODEL_HIGH_RISK"] }),
+          engine({ engineId: "velocity.primary", engineType: "VELOCITY", riskLevel: "HIGH", scoreBucket: "HIGH", reasonCodes: ["RAPID_PLN_20K_BURST"] })
+        ],
+        diagnosticSignals: [
+          signal(),
+          signal({ engineId: "velocity.primary", engineType: "VELOCITY", reasonCode: "RAPID_PLN_20K_BURST" })
+        ]
+      }
+    })).valid).toBe(true);
   });
 
   it("rejects reasonCodes above display bound", () => {
