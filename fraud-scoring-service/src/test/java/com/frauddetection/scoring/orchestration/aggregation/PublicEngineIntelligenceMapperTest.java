@@ -8,6 +8,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreement
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningSummary;
 import org.junit.jupiter.api.Test;
@@ -60,6 +61,23 @@ class PublicEngineIntelligenceMapperTest {
         )));
 
         assertThat(summary.engines().get(1).scoreBucket()).isEqualTo(EngineIntelligenceScoreBucket.UNAVAILABLE);
+    }
+
+    @Test
+    void mapsAggregationCompatibleWithSharedThreeEngineGoldenFixture() throws Exception {
+        EngineIntelligenceSummary expected = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build()
+                .readValue(Files.readString(goldenFixturePath()), EngineIntelligenceSummary.class);
+        EngineIntelligenceSummary actual = mapper.map(service.aggregate(AggregationTestSupport.orchestration(
+                AggregationTestSupport.available("rules.primary", 0.75d, RiskLevel.HIGH, "HIGH_VELOCITY"),
+                AggregationTestSupport.available("ml.python.primary", 0.25d, RiskLevel.LOW, "LOW_MODEL_RISK"),
+                AggregationTestSupport.available("velocity.primary", 0.95d, RiskLevel.CRITICAL, "RAPID_PLN_20K_BURST")
+        )));
+
+        assertThat(actual.engines()).extracting("engineId")
+                .containsExactlyElementsOf(expected.engines().stream().map(engine -> engine.engineId()).toList());
+        assertThat(actual.engines()).extracting("engineType")
+                .containsExactlyElementsOf(expected.engines().stream().map(engine -> engine.engineType()).toList());
+        assertThat(actual.warnings()).isEqualTo(expected.warnings());
     }
 
     @Test
@@ -333,5 +351,20 @@ class PublicEngineIntelligenceMapperTest {
         return Files.exists(moduleRelative)
                 ? moduleRelative
                 : Path.of("fraud-scoring-service").resolve(moduleRelative);
+    }
+
+    private Path goldenFixturePath() {
+        Path fromRoot = Path.of(
+                "common-events",
+                "src/test/resources/fixtures/engine-intelligence/engine_intelligence_three_engine_golden.json"
+        );
+        if (Files.exists(fromRoot)) {
+            return fromRoot;
+        }
+        return Path.of(
+                "..",
+                "common-events",
+                "src/test/resources/fixtures/engine-intelligence/engine_intelligence_three_engine_golden.json"
+        );
     }
 }

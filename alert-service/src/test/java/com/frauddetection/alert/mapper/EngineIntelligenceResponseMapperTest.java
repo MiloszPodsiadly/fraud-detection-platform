@@ -16,10 +16,13 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMisma
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 
@@ -165,6 +168,22 @@ class EngineIntelligenceResponseMapperTest {
         assertThat(response.engines().getFirst().reasonCodes()).hasSize(5);
         assertThat(response.diagnosticSignals()).hasSize(5);
         assertThat(response.warnings()).hasSize(10);
+    }
+
+    @Test
+    void mapsSharedThreeEngineGoldenFixtureToPublicResponse() throws Exception {
+        EngineIntelligenceSummary summary = objectMapper.readValue(
+                Files.readString(goldenFixturePath()),
+                EngineIntelligenceSummary.class
+        );
+
+        EngineIntelligenceResponse response = mapper.toResponse(readModelFrom(summary));
+
+        assertThat(response.status()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
+        assertThat(response.engines()).extracting("engineId")
+                .containsExactly("rules.primary", "ml.python.primary", "velocity.primary");
+        assertThat(response.diagnosticSignals()).extracting("engineId").containsExactly("velocity.primary");
+        assertThat(response.warnings()).isEmpty();
     }
 
     @Test
@@ -314,6 +333,58 @@ class EngineIntelligenceResponseMapperTest {
                 engines,
                 diagnosticSignals,
                 warnings
+        );
+    }
+
+    private EngineIntelligenceReadModel readModelFrom(EngineIntelligenceSummary summary) {
+        return EngineIntelligenceReadModel.projected(
+                "txn-golden",
+                summary.contractVersion(),
+                summary.generatedAt(),
+                new EngineIntelligenceComparisonReadModel(
+                        summary.comparison().agreementStatus(),
+                        summary.comparison().riskMismatchStatus(),
+                        summary.comparison().scoreDeltaBucket()
+                ),
+                summary.engines().stream()
+                        .map(engine -> new EngineIntelligenceEngineReadModel(
+                                engine.engineId(),
+                                engine.engineType(),
+                                engine.status(),
+                                engine.riskLevel(),
+                                engine.scoreBucket(),
+                                engine.reasonCodes()
+                        ))
+                        .toList(),
+                summary.diagnosticSignals().stream()
+                        .map(signal -> new EngineIntelligenceDiagnosticSignalReadModel(
+                                signal.engineId(),
+                                signal.engineType(),
+                                signal.engineStatus(),
+                                signal.signalCategory(),
+                                signal.riskLevel(),
+                                signal.scoreBucket(),
+                                signal.reasonCode()
+                        ))
+                        .toList(),
+                summary.warnings().stream()
+                        .map(warning -> new EngineIntelligenceWarningReadModel(warning.code(), warning.count()))
+                        .toList()
+        );
+    }
+
+    private Path goldenFixturePath() {
+        Path fromRoot = Path.of(
+                "common-events",
+                "src/test/resources/fixtures/engine-intelligence/engine_intelligence_three_engine_golden.json"
+        );
+        if (Files.exists(fromRoot)) {
+            return fromRoot;
+        }
+        return Path.of(
+                "..",
+                "common-events",
+                "src/test/resources/fixtures/engine-intelligence/engine_intelligence_three_engine_golden.json"
         );
     }
 

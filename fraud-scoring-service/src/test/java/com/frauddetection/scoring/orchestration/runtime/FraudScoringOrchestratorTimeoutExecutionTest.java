@@ -76,6 +76,7 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
         assertThat(result.engineResults().get(1).confidence()).isEqualTo(FraudEngineConfidence.UNKNOWN);
         assertThat(result.engineResults().get(1).statusReason()).isEqualTo("ORCHESTRATOR_ENGINE_TIMEOUT");
         assertThat(result.engineResults().get(1).latencyMs()).isEqualTo(ML_DEADLINE.toMillis());
+        assertThat(result.engineResults().get(1).generatedAt()).isEqualTo(RECEIVED_AT.plusMillis(51));
         assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.PARTIAL);
         assertThat(result.executionWarnings().stream().map(FraudScoringExecutionWarning::code))
                 .contains(FraudScoringExecutionWarningCode.ENGINE_TIMEOUT_RECORDED);
@@ -185,11 +186,14 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
 
         assertThat(result.engineResults()).extracting(FraudEngineResult::latencyMs)
                 .containsExactly(7L, 19L);
+        assertThat(result.engineResults()).extracting(FraudEngineResult::generatedAt)
+                .containsExactly(RECEIVED_AT.plusMillis(7), RECEIVED_AT.plusMillis(26));
+        assertThat(result.generatedAt()).isEqualTo(RECEIVED_AT.plusMillis(26));
         assertThat(metrics.latencyCalls).extracting(LatencyMetricCall::latency)
                 .containsExactly(Duration.ofMillis(7), Duration.ofMillis(19));
         assertThat(Files.readString(Path.of("..", "docs", "architecture", "orchestrator_runtime_readiness.md"))
                 .toLowerCase(Locale.ROOT))
-                .contains("rewrites completed engine fraudengineresult latencyms");
+                .contains("rewrites completed engine fraudengineresult latencyms and generatedat");
     }
 
     @Test
@@ -216,6 +220,8 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
 
         assertThat(result.engineResults()).extracting(FraudEngineResult::latencyMs)
                 .containsExactly(7L, 19L);
+        assertThat(result.engineResults()).extracting(FraudEngineResult::generatedAt)
+                .containsExactly(RECEIVED_AT.plusMillis(7), RECEIVED_AT.plusMillis(26));
         assertThat(metrics.latencyCalls).extracting(LatencyMetricCall::latency)
                 .containsExactly(Duration.ofMillis(7), Duration.ofMillis(19));
     }
@@ -241,6 +247,7 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
 
         assertThat(result.engineResults().get(1).status()).isEqualTo(FraudEngineStatus.DEGRADED);
         assertThat(result.engineResults().get(1).latencyMs()).isEqualTo(17L);
+        assertThat(result.engineResults().get(1).generatedAt()).isEqualTo(RECEIVED_AT.plusMillis(17));
         assertThat(metrics.latencyCalls.get(1).latency()).isEqualTo(Duration.ofMillis(17));
         assertThat(result.toString()).doesNotContain("secret raw exception");
     }

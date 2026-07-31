@@ -41,7 +41,8 @@ class FraudScoringOrchestratorRealAdapterCompositionTest {
         assertThat(result.engineResults()).extracting(FraudEngineResult::status)
                 .containsExactly(FraudEngineStatus.AVAILABLE, FraudEngineStatus.AVAILABLE);
         assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.COMPLETE);
-        assertThat(result.generatedAt()).isEqualTo(context().receivedAt());
+        assertThat(result.generatedAt()).isNotEqualTo(context().receivedAt());
+        assertThat(result.generatedAt()).isEqualTo(result.engineResults().getLast().generatedAt());
         assertThat(mlClient.calls()).isEqualTo(1);
         assertNoExternalDecisionFields();
     }

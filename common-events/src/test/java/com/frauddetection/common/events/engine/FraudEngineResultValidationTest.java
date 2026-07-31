@@ -90,6 +90,11 @@ class FraudEngineResultValidationTest {
 
             assertThat(result.confidence()).isEqualTo(confidence);
         }
+
+        FraudEngineResult velocity = new FraudEngineResult("velocity.primary", FraudEngineType.VELOCITY, "java",
+                FraudEngineStatus.AVAILABLE, 0.4000d, RiskLevel.MEDIUM, FraudEngineConfidence.UNKNOWN,
+                List.of(), List.of(), List.of(), 3L, null, null, null, now());
+        assertThat(velocity.confidence()).isEqualTo(FraudEngineConfidence.UNKNOWN);
     }
 
     @Test

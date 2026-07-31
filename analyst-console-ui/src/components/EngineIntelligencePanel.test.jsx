@@ -1,5 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { EngineIntelligencePanel } from "./EngineIntelligencePanel.jsx";
 
 describe("EngineIntelligencePanel", () => {
@@ -55,6 +57,17 @@ describe("EngineIntelligencePanel", () => {
     expect(screen.getByText("Rules")).toBeInTheDocument();
     expect(panelText()).toContain("rules.primary / RULES");
     expect(screen.getAllByText("HIGH_VELOCITY").length).toBeGreaterThan(0);
+  });
+
+  it("rendersSharedThreeEngineGoldenFixture", async () => {
+    renderPanel(goldenPanelResult());
+
+    expect(await screen.findByRole("heading", { name: "Engine intelligence" })).toBeInTheDocument();
+    expect(screen.getByText("Rules")).toBeInTheDocument();
+    expect(screen.getByText("ML model")).toBeInTheDocument();
+    expect(screen.getByText("Velocity")).toBeInTheDocument();
+    expect(panelText()).toContain("velocity.primary / VELOCITY");
+    expect(screen.getAllByText("RAPID_PLN_20K_BURST").length).toBeGreaterThan(0);
   });
 
   it("rendersFeedbackControlsBelowEngineIntelligencePanelWhenSubmitClientIsProvided", async () => {
@@ -360,6 +373,23 @@ function availableResult({ engineStatus = "AVAILABLE", engineRiskLevel = "HIGH",
       count: 1,
       rawPayload: "rawPayload"
     }]
+  };
+}
+
+function goldenPanelResult() {
+  const golden = JSON.parse(readFileSync(resolve(
+    process.cwd(),
+    "../common-events/src/test/resources/fixtures/engine-intelligence/engine_intelligence_three_engine_golden.json"
+  ), "utf8"));
+  return {
+    state: "available",
+    available: true,
+    transactionId: "txn-golden",
+    ...golden,
+    diagnosticSignals: golden.diagnosticSignals.map((signal) => ({
+      ...signal,
+      reasonCodes: [signal.reasonCode]
+    }))
   };
 }
 

@@ -83,7 +83,7 @@ final class FraudScoringOrchestratorTestSupport {
                 FraudSignalEngineRegistry.VELOCITY_PRIMARY_ENGINE_ID,
                 FraudEngineType.VELOCITY,
                 "java",
-                "1.0.0",
+                "velocity-v1",
                 false
         );
     }
@@ -94,7 +94,7 @@ final class FraudScoringOrchestratorTestSupport {
                 FraudEngineStatus.AVAILABLE,
                 score,
                 riskLevel,
-                FraudEngineConfidence.MEDIUM,
+                availableConfidence(descriptor),
                 "ENGINE_SIGNAL",
                 null
         );
@@ -178,6 +178,13 @@ final class FraudScoringOrchestratorTestSupport {
                 statusReason,
                 RECEIVED_AT
         );
+    }
+
+    private static FraudEngineConfidence availableConfidence(FraudEngineDescriptor descriptor) {
+        if (descriptor.engineType() == FraudEngineType.VELOCITY) {
+            return FraudEngineConfidence.UNKNOWN;
+        }
+        return FraudEngineConfidence.MEDIUM;
     }
 
     static final class FakeFraudSignalEngine implements FraudSignalEngine {

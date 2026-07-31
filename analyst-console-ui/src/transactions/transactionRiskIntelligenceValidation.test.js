@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { validateTransactionRiskIntelligenceDetail } from "./transactionRiskIntelligenceValidation.js";
 import {
   absentRecommendationDetail,
@@ -36,6 +38,22 @@ import {
 describe("transactionRiskIntelligenceValidation", () => {
   it("accepts valid AVAILABLE detail", () => {
     expect(validateTransactionRiskIntelligenceDetail(detail()).valid).toBe(true);
+  });
+
+  it("accepts shared three-engine golden fixture", () => {
+    const result = validateTransactionRiskIntelligenceDetail(detail({
+      engineIntelligence: {
+        status: "AVAILABLE",
+        ...goldenEngineIntelligence()
+      }
+    }));
+
+    expect(result.valid).toBe(true);
+    expect(result.detail.engineIntelligence.engines.map((engine) => engine.engineId)).toEqual([
+      "rules.primary",
+      "ml.python.primary",
+      "velocity.primary"
+    ]);
   });
 
   it.each([
@@ -456,4 +474,11 @@ function analystRecommendation(overrides = {}) {
     },
     ...overrides
   };
+}
+
+function goldenEngineIntelligence() {
+  return JSON.parse(readFileSync(resolve(
+    process.cwd(),
+    "../common-events/src/test/resources/fixtures/engine-intelligence/engine_intelligence_three_engine_golden.json"
+  ), "utf8"));
 }

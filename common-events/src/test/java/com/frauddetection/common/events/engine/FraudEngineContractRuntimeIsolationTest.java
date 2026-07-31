@@ -49,20 +49,21 @@ class FraudEngineContractRuntimeIsolationTest {
                 scoringRoot,
                 scoringRoot.resolve("engine/rules"),
                 scoringRoot.resolve("engine/ml"),
+                scoringRoot.resolve("engine/velocity"),
                 scoringRoot.resolve("orchestration")
         );
 
         assertThat(scoringRuntime)
-                .doesNotContain("VelocitySignalEngine")
                 .doesNotContain("DeviceSignalEngine")
                 .doesNotContain("MerchantSignalEngine")
+                .doesNotContain("GraphSignalEngine")
                 .doesNotContain("ExperimentalSignalEngine")
                 .doesNotContain("FraudIntelligenceResult")
                 .doesNotContain("engineResults");
     }
 
     @Test
-    void scoringEnginePackageContainsOnlyFdp84FoundationTypes() throws Exception {
+    void scoringEnginePackageContainsOnlyApprovedMultiEngineContractTypes() throws Exception {
         Path engineRoot = repositoryRoot().resolve(
                 "fraud-scoring-service/src/main/java/com/frauddetection/scoring/engine"
         );
@@ -79,7 +80,30 @@ class FraudEngineContractRuntimeIsolationTest {
                             "ml/PythonMlSignalEngine.java",
                             "ml/PythonMlSignalReasonCode.java",
                             "rules/RuleBasedSignalEngine.java",
-                            "rules/RuleBasedSignalReasonCode.java"
+                            "rules/RuleBasedSignalReasonCode.java",
+                            "velocity/VelocitySignalEngine.java",
+                            "velocity/VelocitySignalPolicy.java",
+                            "velocity/VelocitySignalReasonCode.java"
+                    );
+        }
+    }
+
+    @Test
+    void velocityV1HasOneApprovedExecutablePath() throws Exception {
+        Path engineRoot = repositoryRoot().resolve(
+                "fraud-scoring-service/src/main/java/com/frauddetection/scoring/engine"
+        );
+
+        try (Stream<Path> files = Files.walk(engineRoot)) {
+            assertThat(files.filter(Files::isRegularFile)
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .map(path -> engineRoot.relativize(path).toString().replace('\\', '/'))
+                    .filter(path -> path.toLowerCase().contains("velocity"))
+                    .toList())
+                    .containsExactlyInAnyOrder(
+                            "velocity/VelocitySignalEngine.java",
+                            "velocity/VelocitySignalPolicy.java",
+                            "velocity/VelocitySignalReasonCode.java"
                     );
         }
     }

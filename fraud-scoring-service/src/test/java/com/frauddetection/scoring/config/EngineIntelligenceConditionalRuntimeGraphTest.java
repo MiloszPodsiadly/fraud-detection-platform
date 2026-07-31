@@ -2,6 +2,7 @@ package com.frauddetection.scoring.config;
 
 import com.frauddetection.scoring.engine.ml.PythonMlSignalEngine;
 import com.frauddetection.scoring.engine.rules.RuleBasedSignalEngine;
+import com.frauddetection.scoring.engine.velocity.VelocitySignalEngine;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrator;
@@ -15,6 +16,8 @@ import com.frauddetection.scoring.orchestration.aggregation.PublicEngineIntellig
 import com.frauddetection.scoring.orchestration.runtime.BoundedFraudEngineExecutor;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.config.YamlPropertiesFactoryBean;
+import org.springframework.core.io.ClassPathResource;
 
 import java.util.Optional;
 
@@ -55,6 +58,7 @@ class EngineIntelligenceConditionalRuntimeGraphTest {
             assertThat(context).hasSingleBean(FraudSignalEngineRegistry.class);
             assertThat(context).hasSingleBean(RuleBasedSignalEngine.class);
             assertThat(context).hasSingleBean(PythonMlSignalEngine.class);
+            assertThat(context).doesNotHaveBean(VelocitySignalEngine.class);
             assertThat(context).hasSingleBean(BoundedFraudEngineExecutor.class);
             assertThat(context).hasSingleBean(FraudEngineAggregationService.class);
             assertThat(context).hasSingleBean(PublicEngineIntelligenceMapper.class);
@@ -86,6 +90,73 @@ class EngineIntelligenceConditionalRuntimeGraphTest {
     @Test
     void disabledContextDoesNotRequireMlFraudScoringEngine() {
         contextRunner().run(context -> assertThat(context).hasNotFailed());
+    }
+
+    @Test
+    void applicationYmlExposesVelocityBeanPropertyPath() {
+        YamlPropertiesFactoryBean yaml = new YamlPropertiesFactoryBean();
+        yaml.setResources(new ClassPathResource("application.yml"));
+
+        var properties = yaml.getObject();
+
+        assertThat(properties).containsKey("fraud.scoring.engines.velocity.enabled");
+        assertThat(properties).doesNotContainKey("fraud.engines.velocity.enabled");
+    }
+
+    @Test
+    void enabledVelocityContextCreatesSingleOptionalVelocityEngineInRegistryOrder() {
+        enabledContextRunner()
+                .withPropertyValues("fraud.scoring.engines.velocity.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(VelocitySignalEngine.class);
+                    assertThat(context.getBean(VelocitySignalEngine.class).descriptor().required()).isFalse();
+                    assertThat(context.getBean(FraudSignalEngineRegistry.class).orderedEngines())
+                            .extracting(engine -> engine.descriptor().engineId())
+                            .containsExactly("rules.primary", "ml.python.primary", "velocity.primary");
+                });
+    }
+
+    @Test
+    void disabledVelocityContextKeepsTwoEngineRegistryOrder() {
+        enabledContextRunner()
+                .withPropertyValues("fraud.scoring.engines.velocity.enabled=false")
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(VelocitySignalEngine.class);
+                    assertThat(context.getBean(FraudSignalEngineRegistry.class).orderedEngines())
+                            .extracting(engine -> engine.descriptor().engineId())
+                            .containsExactly("rules.primary", "ml.python.primary");
+                });
+    }
+
+    @Test
+    void absentVelocityPropertyKeepsVelocityBeanAbsent() {
+        enabledContextRunner().run(context -> assertThat(context).doesNotHaveBean(VelocitySignalEngine.class));
+    }
+
+    @Test
+    void emissionAndVelocityFlagsAreIndependentConfigurationLevers() {
+        contextRunner()
+                .withPropertyValues(
+                        "fraud.scoring.events.engine-intelligence.emit-enabled=false",
+                        "fraud.scoring.engines.velocity.enabled=true"
+                )
+                .run(context -> {
+                    assertThat(context).hasSingleBean(EngineIntelligenceEmissionService.class);
+                    assertThat(context).doesNotHaveBean(FraudSignalEngineRegistry.class);
+                    assertThat(context).doesNotHaveBean(VelocitySignalEngine.class);
+                });
+        enabledContextRunner()
+                .withPropertyValues("fraud.scoring.engines.velocity.enabled=false")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(FraudSignalEngineRegistry.class);
+                    assertThat(context).doesNotHaveBean(VelocitySignalEngine.class);
+                });
+        enabledContextRunner()
+                .withPropertyValues("fraud.scoring.engines.velocity.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(FraudSignalEngineRegistry.class);
+                    assertThat(context).hasSingleBean(VelocitySignalEngine.class);
+                });
     }
 
     private EngineIntelligenceEmissionService service(

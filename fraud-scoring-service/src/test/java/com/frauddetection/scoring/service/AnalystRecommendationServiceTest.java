@@ -136,6 +136,34 @@ class AnalystRecommendationServiceTest {
     }
 
     @Test
+    void velocityUnavailableDoesNotChangeRulesMlRecommendation() {
+        var result = service.recommend(scoreResult(RiskLevel.LOW), Optional.of(summary(
+                rules(RiskLevel.LOW, "LOW_MODEL_RISK"),
+                ml(RiskLevel.LOW, "LOW_MODEL_RISK"),
+                velocity(FraudEngineStatus.UNAVAILABLE, null, "VELOCITY_FEATURES_UNAVAILABLE")
+        )));
+
+        assertThat(result.status()).isEqualTo(AnalystRecommendationStatus.AVAILABLE);
+        assertThat(result.recommendation()).isEqualTo(AnalystRecommendation.RECOMMEND_NO_ACTION);
+        assertThat(result.source()).isEqualTo(AnalystRecommendationSource.ENGINE_COMPARISON);
+        assertThat(result.reasonCodes()).containsExactly("BOTH_ENGINES_LOW_RISK", "LOW_RISK_DIAGNOSTIC_CONTEXT");
+    }
+
+    @Test
+    void velocityDegradedDoesNotBecomeRecommendationSourceOrSeverityInput() {
+        var result = service.recommend(scoreResult(RiskLevel.HIGH), Optional.of(summary(
+                rules(RiskLevel.HIGH, "HIGH_VELOCITY"),
+                ml(RiskLevel.LOW, "LOW_MODEL_RISK"),
+                velocity(FraudEngineStatus.DEGRADED, null, "VELOCITY_FEATURE_VALUE_INVALID")
+        )));
+
+        assertThat(result.status()).isEqualTo(AnalystRecommendationStatus.AVAILABLE);
+        assertThat(result.recommendation()).isEqualTo(AnalystRecommendation.RECOMMEND_REVIEW);
+        assertThat(result.source()).isEqualTo(AnalystRecommendationSource.RULES_RISK);
+        assertThat(result.warnings()).isEmpty();
+    }
+
+    @Test
     void unavailableMlEngineAloneDoesNotIncreaseRecommendationSeverity() {
         var result = service.recommend(scoreResult(RiskLevel.LOW), Optional.of(summary(
                 new EngineIntelligenceEngineResult(
@@ -219,6 +247,21 @@ class AnalystRecommendationServiceTest {
                 FraudEngineStatus.AVAILABLE,
                 riskLevel,
                 EngineIntelligenceScoreBucket.HIGH,
+                List.of(reasonCode)
+        );
+    }
+
+    private EngineIntelligenceEngineResult velocity(
+            FraudEngineStatus status,
+            RiskLevel riskLevel,
+            String reasonCode
+    ) {
+        return new EngineIntelligenceEngineResult(
+                "velocity.primary",
+                FraudEngineType.VELOCITY,
+                status,
+                riskLevel,
+                EngineIntelligenceScoreBucket.UNAVAILABLE,
                 List.of(reasonCode)
         );
     }

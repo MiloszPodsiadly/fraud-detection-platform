@@ -1,6 +1,8 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
 import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.common.events.engine.FraudEngineContribution;
+import com.frauddetection.common.events.engine.FraudEngineContributionDirection;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrationResult;
@@ -49,6 +51,33 @@ class FraudEngineAggregationServiceTest {
         assertThat(result.scoreDelta().absoluteDelta()).isBetween(0.699d, 0.701d);
         assertThat(result.riskMismatch().status()).isEqualTo(FraudEngineRiskMismatchStatus.MATERIAL_RISK_MISMATCH);
         assertThat(result.agreementStatus()).isEqualTo(FraudEngineAgreementStatus.DISAGREEMENT);
+    }
+
+    @Test
+    void officialVelocityContributionsDoNotCreateRoutineSanitizerWarnings() {
+        FraudScoringOrchestrationResult orchestration = AggregationTestSupport.orchestration(
+                AggregationTestSupport.available("rules.primary", 0.9d, RiskLevel.HIGH, "HIGH_VELOCITY"),
+                AggregationTestSupport.available("ml.python.primary", 0.2d, RiskLevel.LOW, "LOW_MODEL_RISK"),
+                AggregationTestSupport.raw(
+                        "velocity.primary",
+                        FraudEngineStatus.AVAILABLE,
+                        0.95d,
+                        RiskLevel.CRITICAL,
+                        List.of("RAPID_PLN_20K_BURST"),
+                        List.of(new FraudEngineContribution(
+                                "RAPID_TRANSFER_PLN_BURST",
+                                null,
+                                0.4d,
+                                FraudEngineContributionDirection.INCREASES_RISK
+                        )),
+                        List.of()
+                )
+        );
+
+        FraudEngineAggregationResult result = service.aggregate(orchestration);
+
+        assertThat(result.warnings()).isEmpty();
+        assertThat(result.normalizedEngineResults().get(2).contributions()).hasSize(1);
     }
 
     @Test

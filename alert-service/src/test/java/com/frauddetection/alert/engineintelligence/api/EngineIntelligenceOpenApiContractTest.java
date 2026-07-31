@@ -226,6 +226,33 @@ class EngineIntelligenceOpenApiContractTest {
     }
 
     @Test
+    void openApiBindsEngineIdsToExactEngineTypes() throws Exception {
+        String openApi = openApi();
+
+        assertThat(openApi).contains(
+                "RulesEngineIdentity:",
+                "enum: [rules.primary]",
+                "enum: [RULES]",
+                "MlEngineIdentity:",
+                "enum: [ml.python.primary]",
+                "enum: [ML_MODEL]",
+                "VelocityEngineIdentity:",
+                "enum: [velocity.primary]",
+                "enum: [VELOCITY]"
+        );
+        assertThat(schema("EngineIntelligenceEngineResponse")).contains(
+                "oneOf:",
+                "$ref: \"#/components/schemas/RulesEngineIdentity\"",
+                "$ref: \"#/components/schemas/MlEngineIdentity\"",
+                "$ref: \"#/components/schemas/VelocityEngineIdentity\""
+        );
+        assertThat(schema("EngineIntelligenceDiagnosticSignalResponse")).contains("oneOf:");
+        assertThat(schema("EngineIntelligenceEngineReadModel")).contains("oneOf:");
+        assertThat(schema("EngineIntelligenceDiagnosticSignalReadModel")).contains("oneOf:");
+    }
+
+
+    @Test
     void openApiReasonCodesHaveMaxLength() throws Exception {
         assertThat(schema("EngineIntelligenceEngineReadModel")).contains(
                 "reasonCodes:",
