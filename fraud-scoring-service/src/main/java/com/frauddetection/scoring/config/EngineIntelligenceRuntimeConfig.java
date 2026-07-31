@@ -3,6 +3,7 @@ package com.frauddetection.scoring.config;
 import com.frauddetection.scoring.context.ScoringContextFactory;
 import com.frauddetection.scoring.engine.ml.PythonMlSignalEngine;
 import com.frauddetection.scoring.engine.rules.RuleBasedSignalEngine;
+import com.frauddetection.scoring.engine.velocity.VelocitySignalEngine;
 import com.frauddetection.scoring.features.FeatureSnapshotReaderFactory;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrator;
 import com.frauddetection.scoring.orchestration.FraudSignalEngineRegistry;
@@ -75,11 +76,22 @@ public class EngineIntelligenceRuntimeConfig {
         }
 
         @Bean
+        @ConditionalOnProperty(name = "fraud.scoring.engines.velocity.enabled", havingValue = "true")
+        VelocitySignalEngine velocitySignalEngine(FeatureSnapshotReaderFactory featureSnapshotReaderFactory) {
+            return new VelocitySignalEngine(featureSnapshotReaderFactory);
+        }
+
+        @Bean
         FraudSignalEngineRegistry fraudSignalEngineRegistry(
                 RuleBasedSignalEngine ruleBasedSignalEngine,
-                PythonMlSignalEngine pythonMlSignalEngine
+                PythonMlSignalEngine pythonMlSignalEngine,
+                ObjectProvider<VelocitySignalEngine> velocitySignalEngine
         ) {
-            return new FraudSignalEngineRegistry(List.of(ruleBasedSignalEngine, pythonMlSignalEngine));
+            VelocitySignalEngine velocity = velocitySignalEngine.getIfAvailable();
+            if (velocity == null) {
+                return new FraudSignalEngineRegistry(List.of(ruleBasedSignalEngine, pythonMlSignalEngine));
+            }
+            return new FraudSignalEngineRegistry(List.of(ruleBasedSignalEngine, pythonMlSignalEngine, velocity));
         }
 
         @Bean(destroyMethod = "close")

@@ -39,7 +39,7 @@ class FraudEngineExecutionPolicyTest {
 
         entries.clear();
 
-        assertThat(policy.enginePolicies()).hasSize(2);
+        assertThat(policy.enginePolicies()).hasSize(3);
         assertThatThrownBy(() -> policy.enginePolicies().clear())
                 .isInstanceOf(UnsupportedOperationException.class);
     }
@@ -89,7 +89,7 @@ class FraudEngineExecutionPolicyTest {
 
         assertThat(policy.enginePolicies())
                 .extracting(FraudEngineExecutionPolicy::engineId)
-                .containsExactlyInAnyOrder("rules.primary", "ml.python.primary");
+                .containsExactlyInAnyOrder("rules.primary", "ml.python.primary", "velocity.primary");
     }
 
     @Test
@@ -110,10 +110,13 @@ class FraudEngineExecutionPolicyTest {
 
         FraudEngineExecutionPolicy rules = policy.policyFor(FraudSignalEngineRegistry.RULES_PRIMARY_ENGINE_ID);
         FraudEngineExecutionPolicy ml = policy.policyFor(FraudSignalEngineRegistry.PYTHON_ML_PRIMARY_ENGINE_ID);
+        FraudEngineExecutionPolicy velocity = policy.policyFor(FraudSignalEngineRegistry.VELOCITY_PRIMARY_ENGINE_ID);
 
         assertThat(rules.required()).isTrue();
         assertThat(ml.required()).isFalse();
+        assertThat(velocity.required()).isFalse();
         assertThat(ml.deadline()).isGreaterThan(rules.deadline());
+        assertThat(velocity.deadline()).isEqualTo(rules.deadline());
     }
 
     private List<FraudEngineExecutionPolicy> defaultEntries() {

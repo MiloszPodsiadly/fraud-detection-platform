@@ -2,6 +2,7 @@ package com.frauddetection.enricher.service;
 
 import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.features.FraudFeatureContract;
+import com.frauddetection.common.events.features.FraudFeatureThresholdContract;
 import com.frauddetection.common.events.model.Money;
 import com.frauddetection.enricher.config.FeatureStoreProperties;
 import com.frauddetection.enricher.domain.EnrichedTransactionFeatures;
@@ -18,9 +19,6 @@ import java.util.Map;
 
 @Component
 public class TransactionFeatureCalculator {
-
-    private static final BigDecimal RAPID_TRANSFER_PLN_THRESHOLD = BigDecimal.valueOf(20_000);
-    private static final int HIGH_VELOCITY_TRANSACTION_COUNT = 5;
 
     private final FeatureStoreProperties featureStoreProperties;
     private final CurrencyAmountConverter currencyAmountConverter;
@@ -58,7 +56,7 @@ public class TransactionFeatureCalculator {
         if (proxyOrVpnDetected) {
             featureFlags.add(FraudFeatureContract.FLAG_PROXY_OR_VPN);
         }
-        if (recentTransactionCount >= HIGH_VELOCITY_TRANSACTION_COUNT) {
+        if (recentTransactionCount >= FraudFeatureThresholdContract.HIGH_VELOCITY_TRANSACTION_COUNT) {
             featureFlags.add(FraudFeatureContract.FLAG_HIGH_VELOCITY);
         }
         if (merchantFrequency7d >= 5) {
@@ -67,7 +65,8 @@ public class TransactionFeatureCalculator {
         if (recentTransactionCount >= 2 && recentAmountSum.compareTo(BigDecimal.valueOf(5000)) >= 0) {
             featureFlags.add(FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY);
         }
-        boolean rapidPln20kBurst = recentTransactionCount >= 2 && recentAmountSumPln.compareTo(RAPID_TRANSFER_PLN_THRESHOLD) >= 0;
+        boolean rapidPln20kBurst = recentTransactionCount >= 2
+                && recentAmountSumPln.compareTo(FraudFeatureThresholdContract.RAPID_TRANSFER_PLN_THRESHOLD) >= 0;
         if (rapidPln20kBurst) {
             featureFlags.add(FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST);
         }
@@ -80,7 +79,10 @@ public class TransactionFeatureCalculator {
         featureSnapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, recentAmountSumPln);
         featureSnapshot.put(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, currentAmountPln);
         featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_WINDOW, featureStoreProperties.recentTransactionWindow().toString());
-        featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN, RAPID_TRANSFER_PLN_THRESHOLD);
+        featureSnapshot.put(
+                FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN,
+                FraudFeatureThresholdContract.RAPID_TRANSFER_PLN_THRESHOLD
+        );
         featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, rapidPln20kBurst);
         featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_COUNT, recentTransactionCount);
         featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, recentAmountSumPln);

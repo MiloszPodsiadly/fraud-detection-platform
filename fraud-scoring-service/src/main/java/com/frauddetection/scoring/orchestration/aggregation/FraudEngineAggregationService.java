@@ -1,22 +1,17 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
 import com.frauddetection.common.events.engine.FraudEngineResult;
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrationResult;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
 public final class FraudEngineAggregationService {
-    private static final Map<String, Integer> ENGINE_ORDER = Map.of(
-            "rules.primary", 0,
-            "ml.python.primary", 1
-    );
-
     private final FraudEngineAggregationPolicy policy;
     private final FraudEngineReasonCodeNormalizer reasonCodeNormalizer = new FraudEngineReasonCodeNormalizer();
     private final FraudEngineEvidenceSanitizer evidenceSanitizer = new FraudEngineEvidenceSanitizer();
@@ -35,7 +30,7 @@ public final class FraudEngineAggregationService {
         List<FraudEngineAggregationWarning> warnings = new ArrayList<>();
         validateEngineIdentities(orchestrationResult.engineResults());
         List<FraudEngineResult> orderedResults = orchestrationResult.engineResults().stream()
-                .sorted(Comparator.comparingInt(result -> ENGINE_ORDER.getOrDefault(result.engineId(), Integer.MAX_VALUE)))
+                .sorted(Comparator.comparingInt(result -> FraudEngineIdentityContract.orderOf(result.engineId())))
                 .toList();
         if (orderedResults.size() > policy.maxEngineResults()) {
             FraudEngineAggregationSafety.addWarning(
@@ -64,8 +59,11 @@ public final class FraudEngineAggregationService {
         Set<String> seen = new HashSet<>();
         for (FraudEngineResult result : engineResults) {
             String engineId = result.engineId();
-            if (engineId == null || !ENGINE_ORDER.containsKey(engineId)) {
+            if (engineId == null || !FraudEngineIdentityContract.isKnownEngineId(engineId)) {
                 throw new IllegalArgumentException("AGGREGATION_UNKNOWN_ENGINE_ID");
+            }
+            if (!FraudEngineIdentityContract.hasExpectedType(engineId, result.engineType())) {
+                throw new IllegalArgumentException("AGGREGATION_ENGINE_TYPE_MISMATCH");
             }
             if (!seen.add(engineId)) {
                 throw new IllegalArgumentException("AGGREGATION_DUPLICATE_ENGINE_ID");

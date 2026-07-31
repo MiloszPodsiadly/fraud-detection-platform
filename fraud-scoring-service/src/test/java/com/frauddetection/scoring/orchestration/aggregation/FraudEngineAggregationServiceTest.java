@@ -33,6 +33,25 @@ class FraudEngineAggregationServiceTest {
     }
 
     @Test
+    void velocityIsNormalizedAsThirdEngineButComparisonStaysRulesVersusMl() {
+        FraudScoringOrchestrationResult orchestration = AggregationTestSupport.orchestration(
+                AggregationTestSupport.available("velocity.primary", 0.95d, RiskLevel.CRITICAL, "RAPID_PLN_20K_BURST"),
+                AggregationTestSupport.available("ml.python.primary", 0.2d, RiskLevel.LOW, "LOW_MODEL_RISK"),
+                AggregationTestSupport.available("rules.primary", 0.9d, RiskLevel.HIGH, "HIGH_VELOCITY")
+        );
+
+        FraudEngineAggregationResult result = service.aggregate(orchestration);
+
+        assertThat(result.normalizedEngineResults())
+                .extracting(NormalizedFraudEngineResult::engineId)
+                .containsExactly("rules.primary", "ml.python.primary", "velocity.primary");
+        assertThat(result.scoreDelta().status()).isEqualTo(FraudEngineScoreDeltaStatus.AVAILABLE);
+        assertThat(result.scoreDelta().absoluteDelta()).isBetween(0.699d, 0.701d);
+        assertThat(result.riskMismatch().status()).isEqualTo(FraudEngineRiskMismatchStatus.MATERIAL_RISK_MISMATCH);
+        assertThat(result.agreementStatus()).isEqualTo(FraudEngineAgreementStatus.DISAGREEMENT);
+    }
+
+    @Test
     void operationalEngineStatusesRemainVisible() {
         for (FraudEngineStatus status : List.of(FraudEngineStatus.TIMEOUT, FraudEngineStatus.UNAVAILABLE, FraudEngineStatus.DEGRADED)) {
             FraudEngineAggregationResult result = service.aggregate(AggregationTestSupport.orchestration(

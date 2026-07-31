@@ -162,7 +162,7 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
     }
 
     @Test
-    void adapterProducedSuccessfulResultsRemainUnmodifiedWhileMetricsReceiveMeasuredLatency() throws Exception {
+    void adapterProducedSuccessfulResultsReceiveOrchestratorMeasuredLatency() throws Exception {
         MutableClock clock = new MutableClock(RECEIVED_AT);
         RecordingMetrics metrics = new RecordingMetrics();
 
@@ -184,16 +184,16 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
         }
 
         assertThat(result.engineResults()).extracting(FraudEngineResult::latencyMs)
-                .containsExactly(0L, 0L);
+                .containsExactly(7L, 19L);
         assertThat(metrics.latencyCalls).extracting(LatencyMetricCall::latency)
                 .containsExactly(Duration.ofMillis(7), Duration.ofMillis(19));
         assertThat(Files.readString(Path.of("..", "docs", "architecture", "orchestrator_runtime_readiness.md"))
                 .toLowerCase(Locale.ROOT))
-                .contains("does not rewrite adapter-produced successful fraudengineresult latencyms");
+                .contains("rewrites completed engine fraudengineresult latencyms");
     }
 
     @Test
-    void adapterProducedLatencyIsNotOverwrittenByOrchestrator() {
+    void adapterProducedLatencyIsOverwrittenByOrchestratorMeasuredLatency() {
         MutableClock clock = new MutableClock(RECEIVED_AT);
         RecordingMetrics metrics = new RecordingMetrics();
 
@@ -215,7 +215,7 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
         }
 
         assertThat(result.engineResults()).extracting(FraudEngineResult::latencyMs)
-                .containsExactly(123L, 456L);
+                .containsExactly(7L, 19L);
         assertThat(metrics.latencyCalls).extracting(LatencyMetricCall::latency)
                 .containsExactly(Duration.ofMillis(7), Duration.ofMillis(19));
     }

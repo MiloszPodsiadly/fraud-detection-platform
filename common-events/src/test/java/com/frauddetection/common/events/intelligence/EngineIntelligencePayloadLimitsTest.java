@@ -13,8 +13,51 @@ class EngineIntelligencePayloadLimitsTest {
     @Test
     void rejectsTooManyEngineResults() {
         assertThatThrownBy(() -> EngineIntelligenceTestSupport.summary(
-                Collections.nCopies(3, EngineIntelligenceTestSupport.engine()), List.of(), List.of()
+                Collections.nCopies(4, EngineIntelligenceTestSupport.engine()), List.of(), List.of()
         )).hasMessage("ENGINE_INTELLIGENCE_ENGINES_LIMIT_EXCEEDED");
+    }
+
+    @Test
+    void acceptsThreeEngineResultsAndLegacyTwoEngineResults() {
+        assertThat(EngineIntelligenceTestSupport.summary(
+                List.of(
+                        EngineIntelligenceTestSupport.engine(),
+                        new EngineIntelligenceEngineResult(
+                                "ml.python.primary",
+                                com.frauddetection.common.events.engine.FraudEngineType.ML_MODEL,
+                                com.frauddetection.common.events.engine.FraudEngineStatus.AVAILABLE,
+                                com.frauddetection.common.events.enums.RiskLevel.MEDIUM,
+                                EngineIntelligenceScoreBucket.MEDIUM,
+                                List.of("MODEL_HIGH_RISK")
+                        ),
+                        new EngineIntelligenceEngineResult(
+                                "velocity.primary",
+                                com.frauddetection.common.events.engine.FraudEngineType.VELOCITY,
+                                com.frauddetection.common.events.engine.FraudEngineStatus.AVAILABLE,
+                                com.frauddetection.common.events.enums.RiskLevel.HIGH,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("RAPID_PLN_20K_BURST")
+                        )
+                ),
+                List.of(),
+                List.of()
+        ).engines()).hasSize(3);
+
+        assertThat(EngineIntelligenceTestSupport.summary(
+                List.of(
+                        EngineIntelligenceTestSupport.engine(),
+                        new EngineIntelligenceEngineResult(
+                                "ml.python.primary",
+                                com.frauddetection.common.events.engine.FraudEngineType.ML_MODEL,
+                                com.frauddetection.common.events.engine.FraudEngineStatus.AVAILABLE,
+                                com.frauddetection.common.events.enums.RiskLevel.MEDIUM,
+                                EngineIntelligenceScoreBucket.MEDIUM,
+                                List.of("MODEL_HIGH_RISK")
+                        )
+                ),
+                List.of(),
+                List.of()
+        ).engines()).hasSize(2);
     }
 
     @Test

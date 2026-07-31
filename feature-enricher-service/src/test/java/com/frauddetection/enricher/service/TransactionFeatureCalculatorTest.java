@@ -75,6 +75,24 @@ class TransactionFeatureCalculatorTest {
         assertThat(features.featureSnapshot())
                 .containsEntry(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true)
                 .containsEntry(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("20000.00"));
+        assertThat(features.featureSnapshot().get(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW))
+                .isEqualTo("PT1M")
+                .isInstanceOf(String.class);
+        assertThat(features.featureSnapshot().get(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW))
+                .isEqualTo("PT1M")
+                .isInstanceOf(String.class);
+        assertThat(features.featureSnapshot().get(FraudFeatureContract.RAPID_TRANSFER_WINDOW))
+                .isEqualTo("PT1M")
+                .isInstanceOf(String.class);
+        assertThat(features.featureSnapshot().get(FraudFeatureContract.RECENT_AMOUNT_SUM))
+                .isEqualTo(new BigDecimal("20000.00"))
+                .isInstanceOf(BigDecimal.class);
+        assertThat(features.featureSnapshot().get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN))
+                .isEqualTo(new BigDecimal("20000.00"))
+                .isInstanceOf(BigDecimal.class);
+        assertThat(features.featureSnapshot().get(FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN))
+                .isEqualTo(new BigDecimal("20000"))
+                .isInstanceOf(BigDecimal.class);
     }
 
     @Test

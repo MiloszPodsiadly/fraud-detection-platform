@@ -16,6 +16,8 @@ import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorT
 import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.mlEngine;
 import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.ruleDescriptor;
 import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.ruleEngine;
+import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.velocityDescriptor;
+import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.velocityEngine;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -90,11 +92,24 @@ class FraudScoringOrchestratorExecutionOrderTest {
     }
 
     @Test
+    void registryAcceptsOptionalVelocityAfterRulesAndMl() {
+        FraudSignalEngineRegistry registry = new FraudSignalEngineRegistry(List.of(
+                velocityEngine(availableResult(velocityDescriptor(), 0.95d, RiskLevel.CRITICAL)),
+                mlEngine(availableResult(mlDescriptor(), 0.72d, RiskLevel.MEDIUM)),
+                ruleEngine(availableResult(ruleDescriptor(), 0.42d, RiskLevel.LOW))
+        ));
+
+        assertThat(registry.orderedEngines().stream()
+                .map(engine -> engine.descriptor().engineId()))
+                .containsExactly("rules.primary", "ml.python.primary", "velocity.primary");
+    }
+
+    @Test
     void registryRejectsUnknownEngineIds() {
         FraudEngineDescriptor unknownDescriptor = new FraudEngineDescriptor(
-                "velocity.primary",
-                FraudEngineType.VELOCITY,
-                "java",
+                "merchant.experimental",
+                FraudEngineType.MERCHANT_RISK,
+                "other",
                 "1.0.0",
                 false
         );
@@ -102,7 +117,7 @@ class FraudScoringOrchestratorExecutionOrderTest {
         assertThatThrownBy(() -> new FraudSignalEngineRegistry(List.of(engineReturningDescriptor(unknownDescriptor))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("ENGINE_REGISTRY_UNKNOWN_ENGINE_ID")
-                .hasMessageNotContaining("velocity.primary");
+                .hasMessageNotContaining("merchant.experimental");
     }
 
     @Test

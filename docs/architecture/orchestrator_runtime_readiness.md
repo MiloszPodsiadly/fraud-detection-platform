@@ -69,9 +69,9 @@ already collected from other engines.
 The orchestrator receives a `Clock` and measures bounded elapsed time for each engine execution.
 Timeout latency uses the bounded deadline.
 
-FDP-90 records orchestrator-measured latency to metrics for every engine execution.
-FDP-90 does not rewrite adapter-produced successful FraudEngineResult latencyMs.
-For orchestrator-created timeout, rejection, and failure results, latencyMs is the bounded orchestrator-measured duration.
+FDP-129 records orchestrator-measured latency to metrics for every engine execution.
+FDP-129 rewrites completed engine FraudEngineResult latencyMs with the bounded orchestrator-measured duration.
+For orchestrator-created timeout, rejection, and failure results, latencyMs is also the bounded orchestrator-measured duration.
 
 ## Metrics Abstraction
 
@@ -86,7 +86,7 @@ Metrics use low-cardinality labels only:
 - `status`
 - `required`
 
-The engine IDs are allowlisted to `rules.primary` and `ml.python.primary`. Status labels are
+The engine IDs are allowlisted to `rules.primary`, `ml.python.primary`, and `velocity.primary`. Status labels are
 allowlisted to `AVAILABLE`, `UNAVAILABLE`, `TIMEOUT`, and `DEGRADED`.
 
 Forbidden metric labels and values:

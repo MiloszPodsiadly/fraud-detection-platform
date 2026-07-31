@@ -27,6 +27,10 @@ final class FraudScoringOrchestratorMetricLabels {
             requireType(engineType, FraudEngineType.ML_MODEL);
             return;
         }
+        if (FraudSignalEngineRegistry.VELOCITY_PRIMARY_ENGINE_ID.equals(engineId)) {
+            requireType(engineType, FraudEngineType.VELOCITY);
+            return;
+        }
         throw new IllegalArgumentException("METRICS_UNKNOWN_ENGINE_ID");
     }
 

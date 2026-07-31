@@ -99,6 +99,11 @@ final class AggregationTestSupport {
     }
 
     private static FraudEngineType engineType(String engineId) {
-        return engineId.equals("rules.primary") ? FraudEngineType.RULES : FraudEngineType.ML_MODEL;
+        return switch (engineId) {
+            case "rules.primary" -> FraudEngineType.RULES;
+            case "ml.python.primary" -> FraudEngineType.ML_MODEL;
+            case "velocity.primary" -> FraudEngineType.VELOCITY;
+            default -> FraudEngineType.ML_MODEL;
+        };
     }
 }

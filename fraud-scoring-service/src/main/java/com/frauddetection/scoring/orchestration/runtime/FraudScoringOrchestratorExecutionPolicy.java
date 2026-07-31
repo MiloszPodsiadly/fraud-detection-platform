@@ -13,7 +13,8 @@ public record FraudScoringOrchestratorExecutionPolicy(
 ) {
     private static final Set<String> ALLOWED_ENGINE_IDS = Set.of(
             FraudSignalEngineRegistry.RULES_PRIMARY_ENGINE_ID,
-            FraudSignalEngineRegistry.PYTHON_ML_PRIMARY_ENGINE_ID
+            FraudSignalEngineRegistry.PYTHON_ML_PRIMARY_ENGINE_ID,
+            FraudSignalEngineRegistry.VELOCITY_PRIMARY_ENGINE_ID
     );
 
     public FraudScoringOrchestratorExecutionPolicy {
@@ -30,6 +31,10 @@ public record FraudScoringOrchestratorExecutionPolicy(
         }
         requirePolicy(engineIds, FraudSignalEngineRegistry.RULES_PRIMARY_ENGINE_ID);
         requirePolicy(engineIds, FraudSignalEngineRegistry.PYTHON_ML_PRIMARY_ENGINE_ID);
+        if (engineIds.contains(FraudSignalEngineRegistry.VELOCITY_PRIMARY_ENGINE_ID)
+                && policyFor(enginePolicies, FraudSignalEngineRegistry.VELOCITY_PRIMARY_ENGINE_ID).required()) {
+            throw new IllegalArgumentException("ENGINE_EXECUTION_POLICY_OPTIONAL_ENGINE_REQUIRED");
+        }
         enginePolicies = List.copyOf(enginePolicies);
     }
 
@@ -43,6 +48,11 @@ public record FraudScoringOrchestratorExecutionPolicy(
                 new FraudEngineExecutionPolicy(
                         FraudSignalEngineRegistry.PYTHON_ML_PRIMARY_ENGINE_ID,
                         Duration.ofSeconds(1),
+                        false
+                ),
+                new FraudEngineExecutionPolicy(
+                        FraudSignalEngineRegistry.VELOCITY_PRIMARY_ENGINE_ID,
+                        Duration.ofMillis(250),
                         false
                 )
         ));
@@ -60,5 +70,12 @@ public record FraudScoringOrchestratorExecutionPolicy(
         if (!engineIds.contains(engineId)) {
             throw new IllegalArgumentException("ENGINE_EXECUTION_POLICY_REQUIRED_ENTRY_MISSING");
         }
+    }
+
+    private static FraudEngineExecutionPolicy policyFor(List<FraudEngineExecutionPolicy> policies, String engineId) {
+        return policies.stream()
+                .filter(policy -> policy.engineId().equals(engineId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("ENGINE_EXECUTION_POLICY_MISSING"));
     }
 }

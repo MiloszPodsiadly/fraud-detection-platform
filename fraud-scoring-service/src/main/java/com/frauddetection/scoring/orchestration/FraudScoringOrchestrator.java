@@ -98,7 +98,7 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
                     generatedAt,
                     latency
             )
-                    : execution.value();
+                    : withMeasuredLatency(execution.value(), latency);
             case FAILED -> failureResult(
                     registeredEngine.descriptor(),
                     OrchestrationFailureReasonCode.ORCHESTRATOR_ENGINE_EXCEPTION,
@@ -145,6 +145,26 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
                 null,
                 reasonCode.wireValue(),
                 generatedAt
+        );
+    }
+
+    private FraudEngineResult withMeasuredLatency(FraudEngineResult source, Duration latency) {
+        return new FraudEngineResult(
+                source.engineId(),
+                source.engineType(),
+                source.engineLanguage(),
+                source.status(),
+                source.score(),
+                source.riskLevel(),
+                source.confidence(),
+                source.reasonCodes(),
+                source.contributions(),
+                source.evidence(),
+                latency.toMillis(),
+                source.modelName(),
+                source.modelVersion(),
+                source.statusReason(),
+                source.generatedAt()
         );
     }
 

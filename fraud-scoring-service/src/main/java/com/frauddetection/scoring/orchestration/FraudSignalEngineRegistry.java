@@ -1,5 +1,6 @@
 package com.frauddetection.scoring.orchestration;
 
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.scoring.engine.FraudEngineDescriptor;
 import com.frauddetection.scoring.engine.FraudSignalEngine;
 
@@ -11,11 +12,9 @@ import java.util.Objects;
 public final class FraudSignalEngineRegistry {
     public static final String RULES_PRIMARY_ENGINE_ID = "rules.primary";
     public static final String PYTHON_ML_PRIMARY_ENGINE_ID = "ml.python.primary";
+    public static final String VELOCITY_PRIMARY_ENGINE_ID = "velocity.primary";
 
-    private static final List<String> KNOWN_ENGINE_ORDER = List.of(
-            RULES_PRIMARY_ENGINE_ID,
-            PYTHON_ML_PRIMARY_ENGINE_ID
-    );
+    private static final List<String> KNOWN_ENGINE_ORDER = FraudEngineIdentityContract.engineOrder();
 
     private final List<RegisteredEngine> engines;
 
@@ -31,6 +30,12 @@ public final class FraudSignalEngineRegistry {
             String engineId = descriptor.engineId();
             if (!KNOWN_ENGINE_ORDER.contains(engineId)) {
                 throw new IllegalArgumentException("ENGINE_REGISTRY_UNKNOWN_ENGINE_ID");
+            }
+            if (!FraudEngineIdentityContract.hasExpectedType(engineId, descriptor.engineType())) {
+                throw new IllegalArgumentException("ENGINE_REGISTRY_ENGINE_TYPE_MISMATCH");
+            }
+            if (VELOCITY_PRIMARY_ENGINE_ID.equals(engineId) && descriptor.required()) {
+                throw new IllegalArgumentException("ENGINE_REGISTRY_OPTIONAL_ENGINE_REQUIRED");
             }
             if (engineIds.contains(engineId)) {
                 throw new IllegalArgumentException("ENGINE_REGISTRY_DUPLICATE_ENGINE_ID");

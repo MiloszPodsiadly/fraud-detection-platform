@@ -1,5 +1,7 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
+
 public record FraudEngineAggregationPolicy(
         int maxEngineResults,
         int maxReasonCodesPerEngine,
@@ -11,7 +13,7 @@ public record FraudEngineAggregationPolicy(
         int maxEvidenceTitleLength,
         int maxEvidenceDescriptionLength
 ) {
-    private static final int MAX_ENGINE_RESULTS = 16;
+    private static final int MAX_ENGINE_RESULTS = FraudEngineIdentityContract.MAX_ENGINE_INTELLIGENCE_ENGINES;
     private static final int MAX_REASON_CODES_PER_ENGINE = 32;
     private static final int MAX_EVIDENCE_ITEMS_PER_ENGINE = 16;
     private static final int MAX_CONTRIBUTIONS_PER_ENGINE = 32;
@@ -34,7 +36,7 @@ public record FraudEngineAggregationPolicy(
     }
 
     public static FraudEngineAggregationPolicy defaultInternalPolicy() {
-        return new FraudEngineAggregationPolicy(2, 10, 5, 5, 5, 20, 128, 120, 256);
+        return new FraudEngineAggregationPolicy(3, 10, 5, 5, 5, 20, 128, 120, 256);
     }
 
     private static void requireBounded(int value, int maximum, String fieldName) {

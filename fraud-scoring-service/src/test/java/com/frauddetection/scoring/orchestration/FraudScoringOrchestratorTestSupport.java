@@ -42,6 +42,10 @@ final class FraudScoringOrchestratorTestSupport {
         return new FakeFraudSignalEngine(mlDescriptor(), ignored -> result);
     }
 
+    static FakeFraudSignalEngine velocityEngine(FraudEngineResult result) {
+        return new FakeFraudSignalEngine(velocityDescriptor(), ignored -> result);
+    }
+
     static FakeFraudSignalEngine throwingRuleEngine(RuntimeException exception) {
         return new FakeFraudSignalEngine(ruleDescriptor(), ignored -> {
             throw exception;
@@ -69,6 +73,16 @@ final class FraudScoringOrchestratorTestSupport {
                 FraudSignalEngineRegistry.PYTHON_ML_PRIMARY_ENGINE_ID,
                 FraudEngineType.ML_MODEL,
                 "python",
+                "1.0.0",
+                false
+        );
+    }
+
+    static FraudEngineDescriptor velocityDescriptor() {
+        return new FraudEngineDescriptor(
+                FraudSignalEngineRegistry.VELOCITY_PRIMARY_ENGINE_ID,
+                FraudEngineType.VELOCITY,
+                "java",
                 "1.0.0",
                 false
         );
