@@ -3182,6 +3182,20 @@ components:
           type: string
           nullable: true
           enum: [AVAILABLE, ABSENT, UNAVAILABLE, DEGRADED]
+        comparisonType:
+          type: string
+          nullable: true
+          enum: [RULES_VS_ML]
+        comparedEngineIds:
+          type: array
+          nullable: true
+          minItems: 2
+          maxItems: 2
+          uniqueItems: true
+          description: Exact ordered engine identities compared by RULES_VS_ML when feedback captured projected engine intelligence.
+          items:
+            type: string
+            enum: [rules.primary, ml.python.primary]
         agreementStatus:
           type: string
           nullable: true
@@ -4909,8 +4923,22 @@ components:
     EngineIntelligenceComparisonResponse:
       type: object
       additionalProperties: false
-      required: [agreementStatus, riskMismatchStatus, scoreDeltaBucket]
+      required: [comparisonType, comparedEngineIds, agreementStatus, riskMismatchStatus, scoreDeltaBucket]
       properties:
+        comparisonType:
+          type: string
+          enum: [RULES_VS_ML]
+          description: Explicit comparison identity. FDP-129 compares only Rules against ML; Velocity is not included in score delta semantics.
+        comparedEngineIds:
+          type: array
+          minItems: 2
+          maxItems: 2
+          uniqueItems: true
+          description: Exact ordered engine identities compared by RULES_VS_ML.
+          items:
+            type: string
+            enum: [rules.primary, ml.python.primary]
+          example: [rules.primary, ml.python.primary]
         agreementStatus:
           type: string
           enum: [AGREEMENT, ADJACENT_RISK_VARIANCE, DISAGREEMENT, PARTIAL, INSUFFICIENT_DATA, REQUIRED_ENGINE_NOT_COMPARABLE]
@@ -5052,8 +5080,22 @@ components:
     EngineIntelligenceComparisonReadModel:
       type: object
       additionalProperties: false
-      required: [agreementStatus, riskMismatchStatus, scoreDeltaBucket]
+      required: [comparisonType, comparedEngineIds, agreementStatus, riskMismatchStatus, scoreDeltaBucket]
       properties:
+        comparisonType:
+          type: string
+          enum: [RULES_VS_ML]
+          description: Explicit comparison identity. FDP-129 compares only Rules against ML; Velocity is not included in score delta semantics.
+        comparedEngineIds:
+          type: array
+          minItems: 2
+          maxItems: 2
+          uniqueItems: true
+          description: Exact ordered engine identities compared by RULES_VS_ML.
+          items:
+            type: string
+            enum: [rules.primary, ml.python.primary]
+          example: [rules.primary, ml.python.primary]
         agreementStatus:
           type: string
           enum: [AGREEMENT, ADJACENT_RISK_VARIANCE, DISAGREEMENT, PARTIAL, INSUFFICIENT_DATA, REQUIRED_ENGINE_NOT_COMPARABLE]

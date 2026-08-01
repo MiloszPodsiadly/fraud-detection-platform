@@ -1,6 +1,6 @@
 # Multi-Engine Scoring Contract Boundary
 
-Status: FDP-101 bounded contract maintenance with FDP-102 internal feedback dataset-export foundation.
+Status: current multi-engine scoring contract boundary with historical FDP-101/FDP-102 notes.
 
 ## Scope
 
@@ -11,15 +11,16 @@ transaction -> features -> multiple engines -> risk intelligence -> alert/case -
             -> feedback -> model/rules evaluation
 ```
 
-FDP-101 tightens and maintains the pre-exposure shared `FraudEngineResult` contract. FDP-102 adds an internal
-alert-service feedback dataset-export foundation for offline evaluation input only. FDP-104 adds an offline Model
-Card v1 governance artifact that consumes FDP-103 aggregate evaluation reports only. These changes do not alter the
-current event flow, current scoring selection, Kafka payloads, API/OpenAPI surface, analyst UI, dashboards, model
-retraining, thresholds, automatic decisioning, recommendations, payment authorization, alert severity, or fraud-case
-status.
-Existing `TransactionScoredEvent` shape remains unchanged. Later exposure requires a separate scoped PR with
-compatibility and rollout gates. Later public/operator-triggered export also requires authorization, sensitive-read
-audit, rate limits, privacy review, and retention policy.
+Current Engine Intelligence runtime maps bounded engine outputs into `EngineIntelligenceSummary`, carries that
+optional summary on `TransactionScoredEvent`, projects it in alert-service, exposes bounded read DTOs/OpenAPI, and
+renders it in Analyst Console. Historical FDP-101 tightened the pre-exposure shared `FraudEngineResult` contract.
+Historical FDP-102 added an internal alert-service feedback dataset-export foundation for offline evaluation input
+only. FDP-104 added an offline Model Card v1 governance artifact that consumes FDP-103 aggregate evaluation reports
+only.
+
+These contracts still do not alter baseline scoring selection, dashboards, model retraining, thresholds, automatic
+decisioning, recommendations, payment authorization, alert severity, or fraud-case status. Public/operator-triggered
+export also requires authorization, sensitive-read audit, rate limits, privacy review, and retention policy.
 
 ## Declared Engine Categories
 
@@ -45,12 +46,15 @@ Velocity consumes factual bounded feature snapshot inputs only: `recentTransacti
 Velocity V1 requires `recentTransactionCountWindow=PT1M`; producer meaning, consumer validation, and policy meaning
 all use that one-minute observation window. Changing the window is a versioned contract change, not a configuration
 override.
+Velocity validates count/window/rate consistency: when count, window, and per-minute rate are present, the rate must
+match the PT1M count within bounded tolerance. Inconsistent present values degrade Velocity with
+`VELOCITY_FEATURES_INCONSISTENT` rather than silently choosing one fact over another.
 `rapidTransferFraudCaseCandidate` remains an upstream compatibility feature for existing consumers, but Velocity does
 not use it as a scoring input or validation oracle. Rapid-transfer minimum count and PLN threshold semantics are owned
 by `FraudFeatureThresholdContract`.
 
-Velocity score is a normalized deterministic risk-severity signal. It is not a calibrated fraud probability and must
-not be directly interpreted as model confidence. It is not a payment authorization decision or threshold
+Velocity score is a deterministic normalized risk-severity signal. It is not a calibrated fraud probability and must
+not be interpreted as model confidence. It is not a payment authorization decision or threshold
 recommendation. Velocity V1 confidence is `UNKNOWN`.
 The orchestrator owns published engine-result `latencyMs` and `generatedAt`.
 The reachable Velocity V1 score table is: rapid burst plus high rate -> `0.95`, rapid burst -> `0.80`, high rate ->
@@ -136,13 +140,13 @@ mapping and compatibility policy before those concepts can cross the existing sc
 
 ## Compatibility Policy
 
-This foundation does not add `engineResults[]` to `TransactionScoredEvent` or any other Kafka event.
-FDP-101 does not add new `ScoringContext`, `FraudSignalEngine`, scoring orchestration, alert projection, API,
-OpenAPI, UI, feedback dataset, dataset export, model retraining, rule update, or export integration. FDP-102 adds only
-an internal alert-service dataset export foundation. It does not expose a public API, OpenAPI path, UI, scheduled job,
-CLI job, Python runner, Kafka event field, scoring behavior change, model evaluation runner, retraining, promotion, or
-threshold switch. Existing optional `TransactionScoredEvent.engineIntelligence` shape remains unchanged and no
-`engineResults[]` event field is added.
+`FraudEngineResult` is not added as `engineResults[]` to `TransactionScoredEvent` or any other Kafka event. Current
+event exposure uses the bounded optional `TransactionScoredEvent.engineIntelligence` summary. Historical FDP-101 did
+not add new `ScoringContext`, `FraudSignalEngine`, scoring orchestration, alert projection, API, OpenAPI, UI, feedback
+dataset, dataset export, model retraining, rule update, or export integration. Historical FDP-102 added only an
+internal alert-service dataset export foundation and did not expose a public API, OpenAPI path, UI, scheduled job, CLI
+job, Python runner, Kafka event field, scoring behavior change, model evaluation runner, retraining, promotion, or
+threshold switch. No public `engineResults[]` event field is added.
 
 Producers remain strict and emit only documented fields. Consumers tolerate unknown additive fields in the engine
 result, contribution, and evidence records while still validating all known fields. Unknown fields are ignored,
@@ -191,7 +195,8 @@ Before any later integration branch emits or projects `FraudEngineResult`, it mu
 
 ## Out Of Scope
 
-FDP-101 does not add scoring context, engine wrappers, orchestration, comparison behavior, event integration,
-projections, API surface, UI, feedback evaluation, dataset export, model retraining, rule updates, platform
-aggregation, analyst recommendation, payment authorization, approve/decline/block behavior, or automatic
-decisioning.
+Current Engine Intelligence still does not expose raw `FraudEngineResult`, add public `engineResults[]`, change
+baseline scoring selection, retrain models, update rules, create platform aggregation as a final decision, recommend
+analyst actions, authorize payments, approve/decline/block transactions, or perform automatic decisioning.
+Historical FDP-101 itself also did not add scoring context, engine wrappers, orchestration, comparison behavior, event
+integration, projections, API surface, UI, feedback evaluation, or dataset export.

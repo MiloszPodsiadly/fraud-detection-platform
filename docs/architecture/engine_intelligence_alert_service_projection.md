@@ -2,7 +2,8 @@
 
 ## Purpose
 
-FDP-95 projects bounded engine intelligence internally in alert-service.
+Alert-service projects bounded engine intelligence into a Mongo read model. Historical FDP-95 introduced the
+projection-only slice; later scoped work added bounded API and Analyst Console consumption.
 
 ## Scope
 
@@ -10,11 +11,15 @@ The `TransactionMonitoringService` keeps the existing base scored-transaction sa
 internal projection after that save succeeds. The projection reads the optional public `engineIntelligence` event
 field and writes a bounded Mongo read model.
 
+## Current Scope
+
+The projection is the alert-service storage boundary for public `TransactionScoredEvent.engineIntelligence`.
+Current API/UI exposure is owned by the bounded Engine Intelligence API read model, OpenAPI contract, and Analyst
+Console validators. This projection document does not grant new scoring, workflow, or authorization behavior.
+
 ## Non-goals
 
-FDP-95 does not expose engine intelligence through API/UI.
-FDP-95 does not use engine intelligence for decisions.
-Final decisioning remains out of scope.
+The projection does not use engine intelligence for decisions. Final decisioning remains out of scope.
 
 ## Projection-only Boundary
 
@@ -24,13 +29,13 @@ logic. Projection failure must not break base alert projection.
 ## Storage Model
 
 The `engine_intelligence_projections` Mongo collection stores one replacement document per transaction ID. The
-document contains the contract version, generated timestamp, comparison summary, bounded engine results, bounded
+document contains the contract version, generated timestamp, explicit Rules-vs-ML comparison identity and summary, bounded engine results, bounded
 diagnostic signals, bounded warnings, counts, and projection timestamps.
 
 ## Projection Policy and Limits
 
 The alert-service projection policy reconstructs a safe copy through the shared bounded public event contract
-before persistence. It enforces at most 2 engines, 5 diagnostic signals, 10 warnings, 5 reason codes per engine, and
+before persistence. It enforces at most 3 engines, 5 diagnostic signals, 10 warnings, 5 reason codes per engine, and
 128 characters per bounded string. Only allowlisted engine IDs, statuses, score buckets, warning codes, and public
 reason codes are persisted.
 
@@ -90,14 +95,15 @@ raw exception, endpoint, or payload.
 Only bounded public event contract fields may be stored. Raw evidence, raw contributions, feature vectors,
 endpoints, tokens, secrets, stack traces, exception messages, and internal aggregation objects must not be stored.
 
-## No API/UI Exposure
+## API/UI Boundary
 
-API/UI exposure is future FDP-96/FDP-97 scope. FDP-95 adds no controller, response DTO, OpenAPI field, or
-analyst-console component.
+Bounded API/UI exposure exists through later scoped Engine Intelligence work. The projection must still not leak Mongo
+metadata, raw payloads, internal aggregation objects, raw engine outputs, or scoring internals. API/UI layers consume
+dedicated read DTOs and validators rather than the projection class directly.
 
 ## No Decisioning
 
-Projected disagreement, unavailable engines, warnings, and diagnostic risk levels remain internal diagnostics.
+Projected Rules-vs-ML disagreement, unavailable engines, warnings, and diagnostic risk levels remain internal diagnostics.
 They do not change alert severity, priority, recommendation, fraud-case status, assignment, escalation, or payment
 authorization.
 
@@ -121,13 +127,11 @@ Allowed labels are bounded `result`, `omission_reason`, and `projection_version`
 transactionId, customerId, accountId, cardId, merchantId, endpoint, payload, raw exception, and raw reason code if
 unbounded. Metrics must never affect base projection.
 
-## Future FDP-96 API Read Model
+## Historical FDP-96 API Read Model Gate
 
-Any bounded API read model requires separate FDP-96 review. UI rendering remains FDP-97 scope.
-FDP-95 source-scan guards are architecture tripwires only.
-FDP-95 does not expose engine intelligence through API/UI.
-FDP-96 API read model must add behavior-level controller/API tests before exposing engine intelligence.
-FDP-96 tests must prove:
+Historical FDP-95 required separate FDP-96/FDP-97 review before API/UI exposure. That gate has been superseded by the
+current bounded API, OpenAPI, and UI contracts. The guard remains useful as a checklist for any future read-model
+change. API read-model tests must prove:
 - a bounded response DTO;
 - no raw/internal projection leakage;
 - no final decisioning fields;

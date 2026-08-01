@@ -1,12 +1,13 @@
 # Public Engine Intelligence Event Contract
 
-Status: FDP-92 contract-only foundation.
+Status: current public Engine Intelligence event contract with historical FDP-92 foundation.
 
 ## Purpose
 
-FDP-92 defines a safe, bounded, backward-compatible public engine intelligence event. It adds an
-optional nested `engineIntelligence` field to `TransactionScoredEvent` without changing current
-scoring behavior or downstream consumption.
+The public Engine Intelligence event is a safe, bounded, backward-compatible optional
+`TransactionScoredEvent.engineIntelligence` summary. Historical FDP-92 defined the contract-only foundation. Later
+scoped work wires disabled-by-default producer emission, alert-service projection, bounded API/OpenAPI, and Analyst
+Console rendering without making engine intelligence a final decision source.
 
 ## Public Contract Boundary
 
@@ -35,7 +36,7 @@ field.
 
 ## Payload Limits
 
-The public payload allows at most two engines, five diagnostic signals, ten warning summaries, five
+The public payload allows at most three engines, five diagnostic signals, ten warning summaries, five
 reason codes per engine, and 128 characters per bounded string.
 
 ## Public Field Allowlist
@@ -53,7 +54,9 @@ text, raw contribution values, internal objects, and decisioning fields.
 
 Score is bucketed or omitted, not raw, unless explicitly approved. A score bucket is diagnostic,
 not a calibrated probability and not a final score. Score delta is also bucketed and is not
-calibration proof. For v1, available scores map to `LOW` for `0.00-0.25`, `MEDIUM` for
+calibration proof. For v1, score delta applies only to `RULES_VS_ML` comparison identity:
+`comparedEngineIds=["rules.primary","ml.python.primary"]`. Velocity is not included in score-delta semantics.
+For v1, available scores map to `LOW` for `0.00-0.25`, `MEDIUM` for
 `>0.25-0.50`, `HIGH` for `>0.50-0.75`, and `VERY_HIGH` for `>0.75-1.00`. `NONE` is reserved for an
 explicitly omitted value and is not a missing-score fallback. Comparable score deltas map to `NONE`
 for exact zero, `SMALL` for `>0.00-0.15`, `MEDIUM` for `>0.15-0.35`, and `LARGE` for `>0.35-1.00`.
@@ -81,13 +84,15 @@ signals must not carry fraud risk or fraud score buckets.
 
 ## No Final Decisioning
 
-Agreement is not approval. Disagreement is not decline. Risk mismatch is not final decision.
+Rules-vs-ML agreement is not approval. Rules-vs-ML disagreement is not decline. Risk mismatch is not final decision.
 FDP-92 does not add final decisioning.
 
 ## Non-Goals
 
-FDP-92 does not add alert-service projection. FDP-92 does not add API/UI. FDP-92 does not wire the
-public mapper into production scoring or event publication.
+The public event contract does not expose raw `FraudEngineResult`, raw feature vectors, internal aggregation objects,
+final decisioning, payment authorization, automatic approve/decline/block behavior, or generic all-engine comparison.
+Historical FDP-92 did not add alert-service projection, API/UI, or production publication; those branch limits are
+superseded by later scoped Engine Intelligence work.
 
 ## FDP-93 Consumer-First Rollout Guard
 
@@ -102,5 +107,6 @@ missing risk does not become LOW, operational statuses do not carry `riskLevel`,
 diagnostic signals do not carry fraud score buckets, agreement is not approval, disagreement is not
 decline, and diagnostic signals are not recommendations.
 
-Producer rollout must not add alert-service projection, API/UI, or final decisioning in the same
-branch unless explicitly scoped and reviewed. FDP-94 does not add those downstream capabilities.
+Producer rollout must not add final decisioning. Any future change to projection, API/UI, or event semantics must be
+explicitly scoped and reviewed rather than hidden inside producer rollout. FDP-94 itself did not add downstream
+projection, API/UI, or final decisioning.
