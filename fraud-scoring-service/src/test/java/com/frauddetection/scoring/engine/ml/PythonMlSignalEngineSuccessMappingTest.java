@@ -26,8 +26,6 @@ class PythonMlSignalEngineSuccessMappingTest {
         assertThat(result.confidence()).isEqualTo(com.frauddetection.common.events.engine.FraudEngineConfidence.MEDIUM);
         assertThat(result.modelName()).isEqualTo("python-logistic-fraud-model");
         assertThat(result.modelVersion()).isEqualTo("2026-05-30.v1");
-        assertThat(result.generatedAt()).isEqualTo(PythonMlSignalEngineTestSupport.RECEIVED_AT);
-        assertThat(result.latencyMs()).isZero();
         assertThat(result.reasonCodes()).containsExactly(PythonMlSignalReasonCode.ML_MODEL_SIGNAL.wireValue());
         assertThat(result.evidence()).extracting(evidence -> evidence.reasonCode())
                 .containsExactly(PythonMlSignalReasonCode.ML_MODEL_SIGNAL.wireValue());

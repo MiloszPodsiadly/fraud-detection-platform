@@ -1,0 +1,37 @@
+{
+  "contractVersion": 1,
+  "generatedAt": "2026-05-31T10:00:00Z",
+  "engines": [
+    {
+      "engineId": "rules.primary",
+      "engineType": "RULES",
+      "status": "AVAILABLE",
+      "riskLevel": "HIGH",
+      "scoreBucket": "HIGH",
+      "reasonCodes": ["HIGH_VELOCITY"]
+    },
+    {
+      "engineId": "rules.primary",
+      "engineType": "RULES",
+      "status": "AVAILABLE",
+      "riskLevel": "MEDIUM",
+      "scoreBucket": "MEDIUM",
+      "reasonCodes": ["RECENT_AMOUNT_ACCUMULATION"]
+    },
+    {
+      "engineId": "velocity.primary",
+      "engineType": "VELOCITY",
+      "status": "AVAILABLE",
+      "riskLevel": "HIGH",
+      "scoreBucket": "HIGH",
+      "reasonCodes": ["RAPID_PLN_20K_BURST"]
+    }
+  ],
+  "comparison": {
+    "agreementStatus": "PARTIAL",
+    "riskMismatchStatus": "NOT_COMPARABLE",
+    "scoreDeltaBucket": "UNAVAILABLE"
+  },
+  "diagnosticSignals": [],
+  "warnings": []
+}

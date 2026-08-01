@@ -1,0 +1,21 @@
+{
+  "contractVersion": 1,
+  "generatedAt": "2026-05-31T10:00:00Z",
+  "engines": [
+    {
+      "engineId": "graph.primary",
+      "engineType": "GRAPH_RISK",
+      "status": "AVAILABLE",
+      "riskLevel": "LOW",
+      "scoreBucket": "LOW",
+      "reasonCodes": ["LOW_MODEL_RISK"]
+    }
+  ],
+  "comparison": {
+    "agreementStatus": "PARTIAL",
+    "riskMismatchStatus": "NOT_COMPARABLE",
+    "scoreDeltaBucket": "UNAVAILABLE"
+  },
+  "diagnosticSignals": [],
+  "warnings": []
+}

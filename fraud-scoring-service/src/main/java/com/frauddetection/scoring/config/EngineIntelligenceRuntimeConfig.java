@@ -18,9 +18,10 @@ import com.frauddetection.scoring.orchestration.aggregation.PublicEngineIntellig
 import com.frauddetection.scoring.orchestration.runtime.BoundedFraudEngineExecutor;
 import com.frauddetection.scoring.orchestration.runtime.FraudScoringOrchestratorExecutionPolicy;
 import com.frauddetection.scoring.orchestration.runtime.FraudScoringOrchestratorMetrics;
-import com.frauddetection.scoring.orchestration.runtime.NoOpFraudScoringOrchestratorMetrics;
+import com.frauddetection.scoring.orchestration.runtime.MicrometerFraudScoringOrchestratorMetrics;
 import com.frauddetection.scoring.service.MlFraudScoringEngine;
 import com.frauddetection.scoring.service.RuleBasedFraudScoringEngine;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -116,8 +117,8 @@ public class EngineIntelligenceRuntimeConfig {
         }
 
         @Bean
-        FraudScoringOrchestratorMetrics fraudScoringOrchestratorMetrics() {
-            return new NoOpFraudScoringOrchestratorMetrics();
+        FraudScoringOrchestratorMetrics fraudScoringOrchestratorMetrics(MeterRegistry meterRegistry) {
+            return new MicrometerFraudScoringOrchestratorMetrics(meterRegistry);
         }
 
         @Bean

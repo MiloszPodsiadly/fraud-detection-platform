@@ -16,9 +16,21 @@ class EngineIntelligenceGoldenFixtureTest {
     private final JsonMapper mapper = JsonMapper.builder().findAndAddModules().build();
 
     @Test
+    void goldenTwoEngineFixtureRemainsValidForVelocityDisabledRuntime() throws Exception {
+        EngineIntelligenceSummary summary = mapper.readValue(
+                Files.readString(fixturePath("engine_intelligence_two_engine_golden.json")),
+                EngineIntelligenceSummary.class
+        );
+
+        assertThat(summary.contractVersion()).isEqualTo(EngineIntelligenceSummary.CONTRACT_VERSION);
+        assertThat(summary.engines()).extracting(EngineIntelligenceEngineResult::engineId)
+                .containsExactly("rules.primary", "ml.python.primary");
+    }
+
+    @Test
     void goldenThreeEngineFixtureDeserializesThroughCommonContract() throws Exception {
         EngineIntelligenceSummary summary = mapper.readValue(
-                Files.readString(goldenFixturePath()),
+                Files.readString(fixturePath("engine_intelligence_three_engine_golden.json")),
                 EngineIntelligenceSummary.class
         );
 
@@ -33,8 +45,13 @@ class EngineIntelligenceGoldenFixtureTest {
     @ParameterizedTest
     @ValueSource(strings = {
             "invalid/engine_intelligence_duplicate_velocity.json",
+            "invalid/engine_intelligence_duplicate_rules.json",
+            "invalid/engine_intelligence_duplicate_ml.json",
+            "invalid/engine_intelligence_duplicate_rules_missing_ml.json",
             "invalid/engine_intelligence_too_many_engines.json",
-            "invalid/engine_intelligence_velocity_type_mismatch.json"
+            "invalid/engine_intelligence_velocity_type_mismatch.json",
+            "invalid/engine_intelligence_invalid_order.json",
+            "invalid/engine_intelligence_unknown_future_engine.json"
     })
     void invalidGoldenFixturesAreRejectedByCommonContract(String fixtureName) {
         Path fixture = Path.of("src/test/resources/fixtures/engine-intelligence", fixtureName);
@@ -43,7 +60,7 @@ class EngineIntelligenceGoldenFixtureTest {
                 .isInstanceOf(RuntimeException.class);
     }
 
-    private Path goldenFixturePath() {
-        return Path.of("src/test/resources/fixtures/engine-intelligence/engine_intelligence_three_engine_golden.json");
+    private Path fixturePath(String fixtureName) {
+        return Path.of("src/test/resources/fixtures/engine-intelligence", fixtureName);
     }
 }

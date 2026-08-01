@@ -36,7 +36,7 @@ public record FraudEngineAggregationPolicy(
     }
 
     public static FraudEngineAggregationPolicy defaultInternalPolicy() {
-        return new FraudEngineAggregationPolicy(3, 10, 5, 5, 5, 20, 128, 120, 256);
+        return new FraudEngineAggregationPolicy(3, 5, 5, 5, 5, 20, 128, 120, 256);
     }
 
     private static void requireBounded(int value, int maximum, String fieldName) {

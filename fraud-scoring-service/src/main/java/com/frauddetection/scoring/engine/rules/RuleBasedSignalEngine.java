@@ -6,7 +6,7 @@ import com.frauddetection.common.events.engine.FraudEngineContributionDirection;
 import com.frauddetection.common.events.engine.FraudEngineEvidence;
 import com.frauddetection.common.events.engine.FraudEngineEvidenceStatus;
 import com.frauddetection.common.events.engine.FraudEngineEvidenceType;
-import com.frauddetection.common.events.engine.FraudEngineResult;
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.features.FraudFeatureContract;
@@ -16,19 +16,19 @@ import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.engine.FraudEngineDescriptor;
 import com.frauddetection.scoring.engine.FraudSignalEngine;
+import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import com.frauddetection.scoring.features.FeatureSnapshotReader;
 import com.frauddetection.scoring.features.FeatureSnapshotReaderFactory;
 import com.frauddetection.scoring.features.FeatureSnapshotValue;
 import com.frauddetection.scoring.features.FeatureSnapshotValueStatus;
 import com.frauddetection.scoring.service.RuleBasedFraudScoringEngine;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 
 public final class RuleBasedSignalEngine implements FraudSignalEngine {
 
-    private static final String ENGINE_ID = "rules.primary";
+    private static final String ENGINE_ID = FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID;
     private static final String ENGINE_LANGUAGE = "java";
     private static final String ENGINE_VERSION = "1.0.0";
     private static final String EVIDENCE_SOURCE = "RULES";
@@ -45,15 +45,15 @@ public final class RuleBasedSignalEngine implements FraudSignalEngine {
     }
 
     @Override
-    public FraudEngineResult evaluate(ScoringContext context) {
+    public FraudSignalEvaluation evaluate(ScoringContext context) {
         Objects.requireNonNull(context, "context is required");
         FeatureSnapshotReader reader = readerFactory.from(context);
         FeatureSnapshotValueStatus invalidStatus = validateFeatureSnapshot(reader);
         if (invalidStatus != null) {
-            return degradedResultFor(invalidStatus, 0L, context.receivedAt());
+            return degradedResultFor(invalidStatus);
         }
         FraudScoreResult productionResult = productionRuleEngine.score(FraudScoringRequest.from(context.transaction()));
-        return availableResult(productionResult, context.receivedAt());
+        return availableResult(productionResult);
     }
 
     @Override
@@ -61,17 +61,14 @@ public final class RuleBasedSignalEngine implements FraudSignalEngine {
         return new FraudEngineDescriptor(ENGINE_ID, FraudEngineType.RULES, ENGINE_LANGUAGE, ENGINE_VERSION, true);
     }
 
-    static FraudEngineResult degradedResultFor(FeatureSnapshotValueStatus status, long latencyMs, Instant generatedAt) {
+    static FraudSignalEvaluation degradedResultFor(FeatureSnapshotValueStatus status) {
         RuleBasedSignalReasonCode reasonCode = switch (status) {
             case INVALID_TYPE -> RuleBasedSignalReasonCode.FEATURE_STATUS_INVALID;
             case WRONG_ACCESSOR -> throw new IllegalStateException("adapter feature accessor mismatch");
             case NOT_ALLOWED -> throw new IllegalStateException("adapter feature access policy violation");
             case PRESENT, MISSING -> throw new IllegalArgumentException("status is not a degraded feature status");
         };
-        return new FraudEngineResult(
-                ENGINE_ID,
-                FraudEngineType.RULES,
-                ENGINE_LANGUAGE,
+        return new FraudSignalEvaluation(
                 FraudEngineStatus.DEGRADED,
                 null,
                 null,
@@ -86,22 +83,17 @@ public final class RuleBasedSignalEngine implements FraudSignalEngine {
                         EVIDENCE_SOURCE,
                         FraudEngineEvidenceStatus.PARTIAL
                 )),
-                latencyMs,
                 null,
                 null,
-                reasonCode.wireValue(),
-                generatedAt
+                reasonCode.wireValue()
         );
     }
 
-    private FraudEngineResult availableResult(FraudScoreResult productionResult, Instant generatedAt) {
+    private FraudSignalEvaluation availableResult(FraudScoreResult productionResult) {
         List<String> reasonCodes = ReasonCode.supportedWireValues(
                 ReasonCode.parseLegacyList(productionResult.reasonCodes())
         );
-        return new FraudEngineResult(
-                ENGINE_ID,
-                FraudEngineType.RULES,
-                ENGINE_LANGUAGE,
+        return new FraudSignalEvaluation(
                 FraudEngineStatus.AVAILABLE,
                 productionResult.fraudScore(),
                 productionResult.riskLevel(),
@@ -109,11 +101,9 @@ public final class RuleBasedSignalEngine implements FraudSignalEngine {
                 reasonCodes,
                 contributionsFor(reasonCodes),
                 evidenceFor(reasonCodes),
-                0L,
                 productionResult.modelName(),
                 productionResult.modelVersion(),
-                null,
-                generatedAt
+                null
         );
     }
 

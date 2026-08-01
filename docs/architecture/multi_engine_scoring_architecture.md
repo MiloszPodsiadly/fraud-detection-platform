@@ -42,14 +42,20 @@ Velocity enablement controls registration inside that diagnostic runtime.
 
 Velocity consumes factual bounded feature snapshot inputs only: `recentTransactionCount`,
 `recentTransactionCountWindow`, `recentAmountSumPln`, and `transactionVelocityPerMinute`.
+Velocity V1 requires `recentTransactionCountWindow=PT1M`; producer meaning, consumer validation, and policy meaning
+all use that one-minute observation window. Changing the window is a versioned contract change, not a configuration
+override.
 `rapidTransferFraudCaseCandidate` remains an upstream compatibility feature for existing consumers, but Velocity does
 not use it as a scoring input or validation oracle. Rapid-transfer minimum count and PLN threshold semantics are owned
 by `FraudFeatureThresholdContract`.
 
-Velocity score is a deterministic normalized heuristic severity score. It is not a fraud probability, calibrated
-likelihood, confidence percentage, payment authorization decision or threshold recommendation. Scores from different
-engine types must not be interpreted as directly calibrated probabilities. Velocity V1 confidence is `UNKNOWN`.
+Velocity score is a normalized deterministic risk-severity signal. It is not a calibrated fraud probability and must
+not be directly interpreted as model confidence. It is not a payment authorization decision or threshold
+recommendation. Velocity V1 confidence is `UNKNOWN`.
 The orchestrator owns published engine-result `latencyMs` and `generatedAt`.
+The reachable Velocity V1 score table is: rapid burst plus high rate -> `0.95`, rapid burst -> `0.80`, high rate ->
+`0.75`, high amount activity -> `0.50`, and valid baseline -> `0.10`. `RECENT_TRANSACTION_SPIKE` is not emitted by
+Velocity V1 because the PT1M count threshold is the same official fact as the per-minute rate threshold.
 
 The current public engine-intelligence contract has exactly three engine identities: `rules.primary`,
 `ml.python.primary`, and `velocity.primary`. Device, Merchant, Graph, or any fourth engine requires an intentional

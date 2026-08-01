@@ -8,6 +8,7 @@ import com.frauddetection.common.events.engine.FraudEngineResult;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.scoring.context.ScoringContext;
 import com.frauddetection.scoring.engine.FraudEngineDescriptor;
+import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import com.frauddetection.scoring.orchestration.runtime.BoundedFraudEngineExecutor;
 import com.frauddetection.scoring.orchestration.runtime.FraudEngineExecutionPolicy;
 import com.frauddetection.scoring.orchestration.runtime.FraudScoringOrchestratorExecutionPolicy;
@@ -86,7 +87,7 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
             ScoringContext context
     ) {
         Instant startedAt = clock.instant();
-        BoundedFraudEngineExecutor.ExecutionResult<FraudEngineResult> execution = executor.execute(
+        BoundedFraudEngineExecutor.ExecutionResult<FraudSignalEvaluation> execution = executor.execute(
                 () -> registeredEngine.engine().evaluate(context),
                 policy.deadline()
         );
@@ -100,7 +101,7 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
                     generatedAt,
                     latency
             )
-                    : withExecutionMetadata(execution.value(), latency, generatedAt);
+                    : publishedResult(registeredEngine.descriptor(), execution.value(), latency, generatedAt);
             case FAILED -> failureResult(
                     registeredEngine.descriptor(),
                     OrchestrationFailureReasonCode.ORCHESTRATOR_ENGINE_EXCEPTION,
@@ -150,11 +151,16 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
         );
     }
 
-    private FraudEngineResult withExecutionMetadata(FraudEngineResult source, Duration latency, Instant generatedAt) {
+    private FraudEngineResult publishedResult(
+            FraudEngineDescriptor descriptor,
+            FraudSignalEvaluation source,
+            Duration latency,
+            Instant generatedAt
+    ) {
         return new FraudEngineResult(
-                source.engineId(),
-                source.engineType(),
-                source.engineLanguage(),
+                descriptor.engineId(),
+                descriptor.engineType(),
+                descriptor.engineLanguage(),
                 source.status(),
                 source.score(),
                 source.riskLevel(),
@@ -210,6 +216,11 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
         if (result.status() == FraudEngineStatus.AVAILABLE) {
             return;
         }
+        recordSafely(() -> metrics.recordEngineFailure(
+                result.engineId(),
+                result.engineType(),
+                failureCategoryFor(result)
+        ));
         executionWarnings.add(new FraudScoringExecutionWarning(
                 policy.engineId(),
                 policy.required()
@@ -234,6 +245,42 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
                     policy.required()
             ));
         }
+    }
+
+    private String failureCategoryFor(FraudEngineResult result) {
+        if (result.status() == FraudEngineStatus.TIMEOUT) {
+            return "timeout";
+        }
+        String reason = result.statusReason();
+        if (reason == null || reason.isBlank()) {
+            return result.status() == FraudEngineStatus.UNAVAILABLE ? "missing" : "degraded";
+        }
+        String normalized = reason.toLowerCase();
+        if (normalized.contains("timeout")) {
+            return "timeout";
+        }
+        if (normalized.contains("exception")) {
+            return "exception";
+        }
+        if (normalized.contains("null")) {
+            return "null_result";
+        }
+        if (normalized.contains("rejected")) {
+            return "rejected";
+        }
+        if (normalized.contains("type")) {
+            return "invalid_type";
+        }
+        if (normalized.contains("value")) {
+            return "invalid_value";
+        }
+        if (normalized.contains("inconsistent")) {
+            return "inconsistent";
+        }
+        if (normalized.contains("unavailable") || normalized.contains("missing")) {
+            return "missing";
+        }
+        return result.status() == FraudEngineStatus.UNAVAILABLE ? "missing" : "degraded";
     }
 
     private void recordMetrics(

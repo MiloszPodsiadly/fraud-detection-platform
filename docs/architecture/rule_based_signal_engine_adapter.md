@@ -5,7 +5,8 @@ Status: FDP-87 adapter foundation only.
 ## Purpose
 
 `RuleBasedSignalEngine` proves that current rule-based scoring intent can be represented as a
-`FraudSignalEngine` using `ScoringContext`, `FeatureSnapshotReader`, and `FraudEngineResult`.
+`FraudSignalEngine` using `ScoringContext`, `FeatureSnapshotReader`, and internal
+`FraudSignalEvaluation`.
 
 The adapter is internal to `fraud-scoring-service`. It is not a Spring component, is not wired
 into `CompositeFraudScoringEngine`, and is not a production runtime path. The existing
@@ -13,7 +14,7 @@ into `CompositeFraudScoringEngine`, and is not a production runtime path. The ex
 
 `RuleBasedSignalEngine` is a true adapter around `RuleBasedFraudScoringEngine`. It delegates
 scoring to the production rule engine and maps the production score, risk level, model identity,
-and supported production reason codes into `FraudEngineResult`. It must not keep independent
+and supported production reason codes into `FraudSignalEvaluation`. It must not keep independent
 weights, high thresholds, critical thresholds, or local score calculations.
 
 FDP-87 introduces no runtime scoring behavior changes, no orchestrator, no Python ML adapter, no
@@ -42,8 +43,8 @@ Feature status semantics:
 - `WRONG_ACCESSOR` is an implementation bug and must fail fast.
 - `NOT_ALLOWED` is an implementation bug and must fail fast.
 
-Generated timestamps and latency are deterministic for this isolated adapter, but FDP-129 runtime
-publication is owned by `FraudScoringOrchestrator`, which rewrites published engine-result
+The isolated adapter does not assign public `generatedAt` or `latencyMs`. FDP-129 runtime
+publication is owned by `FraudScoringOrchestrator`, which publishes bounded engine-result
 `generatedAt` and `latencyMs` from the injected execution `Clock`.
 
 ## Evidence Safety

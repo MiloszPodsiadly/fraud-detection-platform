@@ -70,7 +70,7 @@ The orchestrator receives a `Clock` and measures bounded elapsed time for each e
 Timeout latency uses the bounded deadline.
 
 FDP-129 records orchestrator-measured latency to metrics for every engine execution.
-FDP-129 rewrites completed engine FraudEngineResult latencyMs and generatedAt with the bounded
+FDP-129 publishes completed engine FraudEngineResult latencyMs and generatedAt with the bounded
 orchestrator-measured duration and completion timestamp.
 For orchestrator-created timeout, rejection, and failure results, latencyMs and generatedAt are also
 owned by the same orchestrator execution boundary. Engine adapters may carry input lineage time, but
@@ -78,8 +78,9 @@ published engine result time is not copied from `ScoringContext.receivedAt()`.
 
 ## Metrics Abstraction
 
-`FraudScoringOrchestratorMetrics` is an internal interface. `NoOpFraudScoringOrchestratorMetrics` is
-the default-safe implementation. FDP-90 adds no vendor-specific metrics integration. Metrics
+`FraudScoringOrchestratorMetrics` is an internal interface. FDP-129 production diagnostic runtime
+wiring uses `MicrometerFraudScoringOrchestratorMetrics`. `NoOpFraudScoringOrchestratorMetrics`
+remains the default-safe implementation for direct internal construction and isolated tests. Metrics
 recording is best-effort: metrics failures do not change engine results or orchestration status.
 
 Metrics use low-cardinality labels only:
@@ -87,7 +88,7 @@ Metrics use low-cardinality labels only:
 - `engine_id`
 - `engine_type`
 - `status`
-- `required`
+- `failure_category`
 
 The engine IDs are allowlisted to `rules.primary`, `ml.python.primary`, and `velocity.primary`. Status labels are
 allowlisted to `AVAILABLE`, `UNAVAILABLE`, `TIMEOUT`, and `DEGRADED`.
@@ -108,7 +109,7 @@ Forbidden metric labels and values:
 ## Metrics Validation Boundary
 
 Metrics are best-effort and must not change orchestration results.
-NoOpFraudScoringOrchestratorMetrics validates the low-cardinality label contract.
+NoOpFraudScoringOrchestratorMetrics and MicrometerFraudScoringOrchestratorMetrics validate the low-cardinality label contract.
 A metrics validation failure is intentionally isolated from scoring.
 This prevents observability from becoming a scoring availability dependency.
 It also means a future metrics label drift can create an observability blind spot if not covered by
@@ -120,9 +121,9 @@ Any new FraudEngineStatus, FraudEngineType, engineId, or metric label must updat
 - metrics safety tests
 - docs governance tests
 
-If FraudEngineStatus grows, FDP-90 metrics safety tests must be updated intentionally before runtime
-wiring. FDP-90 does not provide production telemetry delivery. FDP-90 provides the safe metrics
-boundary only.
+If FraudEngineStatus grows, metrics safety tests must be updated intentionally before runtime
+wiring. FDP-129 provides production diagnostic runtime telemetry delivery through Micrometer while
+preserving the safe metrics boundary.
 
 ## Required Engine Metrics Boundary
 

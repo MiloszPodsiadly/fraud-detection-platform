@@ -1,7 +1,7 @@
 package com.frauddetection.scoring.engine.rules;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
-import com.frauddetection.common.events.engine.FraudEngineResult;
+import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.features.FraudFeatureContract;
@@ -37,7 +37,7 @@ class RuleBasedSignalEngineFeatureStatusTest {
 
     @Test
     void presentTypedFeatureProducesBoundedMappedProductionSignal() {
-        FraudEngineResult result = engine.evaluate(context(event(true, false, false, 1, 0.1d, BigDecimal.TEN,
+        FraudSignalEvaluation result = engine.evaluate(context(event(true, false, false, 1, 0.1d, BigDecimal.TEN,
                 List.of(),
                 Map.of(FraudFeatureContract.DEVICE_NOVELTY, true))));
 
@@ -49,7 +49,7 @@ class RuleBasedSignalEngineFeatureStatusTest {
 
     @Test
     void missingFeaturesSkipPreflightWithoutInventingSafeEvidence() {
-        FraudEngineResult result = engine.evaluate(context(event(false, false, false, 1, 0.1d, BigDecimal.TEN,
+        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 1, 0.1d, BigDecimal.TEN,
                 List.of(),
                 Map.of())));
 
@@ -67,7 +67,7 @@ class RuleBasedSignalEngineFeatureStatusTest {
                 Map.of(FraudFeatureContract.RECENT_TRANSACTION_COUNT, "5"));
         FraudScoreResult production = productionEngine.score(FraudScoringRequest.from(event));
 
-        FraudEngineResult result = engine.evaluate(context(event));
+        FraudSignalEvaluation result = engine.evaluate(context(event));
 
         assertThat(result.status()).isEqualTo(FraudEngineStatus.AVAILABLE);
         assertThat(result.statusReason()).isNull();
@@ -80,7 +80,7 @@ class RuleBasedSignalEngineFeatureStatusTest {
 
     @Test
     void invalidRapidTransferFraudCaseCandidateSnapshotTypeStillDegrades() {
-        FraudEngineResult result = engine.evaluate(context(event(false, false, false, 1, 0.1d, BigDecimal.TEN,
+        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 1, 0.1d, BigDecimal.TEN,
                 List.of(),
                 Map.of(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, "true"))));
 
@@ -94,7 +94,7 @@ class RuleBasedSignalEngineFeatureStatusTest {
 
     @Test
     void missingRapidTransferFraudCaseCandidateDoesNotDegrade() {
-        FraudEngineResult result = engine.evaluate(context(event(false, false, false, 5, 0.1d, BigDecimal.TEN,
+        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 5, 0.1d, BigDecimal.TEN,
                 List.of(),
                 Map.of())));
 
@@ -108,9 +108,7 @@ class RuleBasedSignalEngineFeatureStatusTest {
     @Test
     void wrongAccessorFailsFastAsAdapterBug() {
         assertThatThrownBy(() -> RuleBasedSignalEngine.degradedResultFor(
-                FeatureSnapshotValueStatus.WRONG_ACCESSOR,
-                1L,
-                RECEIVED_AT
+                FeatureSnapshotValueStatus.WRONG_ACCESSOR
         ))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("adapter feature accessor mismatch")
@@ -120,9 +118,7 @@ class RuleBasedSignalEngineFeatureStatusTest {
     @Test
     void notAllowedFailsFastAsAdapterBugWithoutRawRejectedKey() {
         assertThatThrownBy(() -> RuleBasedSignalEngine.degradedResultFor(
-                FeatureSnapshotValueStatus.NOT_ALLOWED,
-                1L,
-                RECEIVED_AT
+                FeatureSnapshotValueStatus.NOT_ALLOWED
         ))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("adapter feature access policy violation")
@@ -132,13 +128,13 @@ class RuleBasedSignalEngineFeatureStatusTest {
     }
 
     @Test
-    void generatedAtAndLatencyAreDeterministicForIsolatedAdapter() {
-        FraudEngineResult result = engine.evaluate(context(event(false, false, false, 1, 0.1d, BigDecimal.TEN,
+    void isolatedAdapterDoesNotAssignPublicationMetadata() {
+        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 1, 0.1d, BigDecimal.TEN,
                 List.of(),
                 Map.of())));
 
-        assertThat(result.generatedAt()).isEqualTo(RECEIVED_AT);
-        assertThat(result.latencyMs()).isZero();
+        assertThat(result.status()).isEqualTo(FraudEngineStatus.AVAILABLE);
+        assertThat(result.statusReason()).isNull();
     }
 
     private ScoringContext context(TransactionEnrichedEvent event) {
@@ -189,7 +185,7 @@ class RuleBasedSignalEngineFeatureStatusTest {
         );
     }
 
-    private String flatten(FraudEngineResult result) {
+    private String flatten(FraudSignalEvaluation result) {
         return result.reasonCodes() + " " + result.contributions() + " " + result.evidence() + " " + result.statusReason();
     }
 }

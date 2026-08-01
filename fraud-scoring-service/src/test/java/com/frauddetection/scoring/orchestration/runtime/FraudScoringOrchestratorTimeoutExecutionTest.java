@@ -11,6 +11,7 @@ import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.context.ScoringContext;
 import com.frauddetection.scoring.engine.FraudEngineDescriptor;
 import com.frauddetection.scoring.engine.FraudSignalEngine;
+import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import com.frauddetection.scoring.orchestration.FraudScoringExecutionWarning;
 import com.frauddetection.scoring.orchestration.FraudScoringExecutionWarningCode;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrationResult;
@@ -193,7 +194,7 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
                 .containsExactly(Duration.ofMillis(7), Duration.ofMillis(19));
         assertThat(Files.readString(Path.of("..", "docs", "architecture", "orchestrator_runtime_readiness.md"))
                 .toLowerCase(Locale.ROOT))
-                .contains("rewrites completed engine fraudengineresult latencyms and generatedat");
+                .contains("publishes completed engine fraudengineresult latencyms and generatedat");
     }
 
     @Test
@@ -283,8 +284,8 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
     ) {
         return new FraudSignalEngine() {
             @Override
-            public FraudEngineResult evaluate(ScoringContext context) {
-                return handler.apply(context);
+            public FraudSignalEvaluation evaluate(ScoringContext context) {
+                return evaluation(handler.apply(context));
             }
 
             @Override
@@ -292,6 +293,21 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
                 return descriptor;
             }
         };
+    }
+
+    private FraudSignalEvaluation evaluation(FraudEngineResult result) {
+        return new FraudSignalEvaluation(
+                result.status(),
+                result.score(),
+                result.riskLevel(),
+                result.confidence(),
+                result.reasonCodes(),
+                result.contributions(),
+                result.evidence(),
+                result.modelName(),
+                result.modelVersion(),
+                result.statusReason()
+        );
     }
 
     private FraudEngineDescriptor ruleDescriptor() {

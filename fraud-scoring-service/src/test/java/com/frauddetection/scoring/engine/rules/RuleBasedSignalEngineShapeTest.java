@@ -1,6 +1,6 @@
 package com.frauddetection.scoring.engine.rules;
 
-import com.frauddetection.common.events.engine.FraudEngineResult;
+import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import com.frauddetection.scoring.context.ScoringContext;
 import com.frauddetection.scoring.engine.FraudEngineDescriptor;
 import com.frauddetection.scoring.engine.FraudSignalEngine;
@@ -19,7 +19,7 @@ class RuleBasedSignalEngineShapeTest {
     void implementsFraudSignalEngineWithExpectedMethods() throws Exception {
         assertThat(FraudSignalEngine.class).isAssignableFrom(RuleBasedSignalEngine.class);
         assertThat(RuleBasedSignalEngine.class.getMethod("evaluate", ScoringContext.class).getReturnType())
-                .isEqualTo(FraudEngineResult.class);
+                .isEqualTo(FraudSignalEvaluation.class);
         assertThat(RuleBasedSignalEngine.class.getMethod("descriptor").getReturnType())
                 .isEqualTo(FraudEngineDescriptor.class);
     }

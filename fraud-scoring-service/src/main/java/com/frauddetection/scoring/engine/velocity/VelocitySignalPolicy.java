@@ -16,8 +16,6 @@ final class VelocitySignalPolicy {
     }
 
     static VelocityDecision decide(VelocityFacts facts) {
-        boolean countSpike =
-                facts.recentTransactionCount() >= FraudFeatureThresholdContract.HIGH_VELOCITY_TRANSACTION_COUNT;
         boolean highRate = facts.transactionVelocityPerMinute() >= TRANSACTION_VELOCITY_PER_MINUTE_THRESHOLD;
         boolean highAmount = facts.recentAmountSumPln()
                 .compareTo(FraudFeatureThresholdContract.RAPID_TRANSFER_PLN_THRESHOLD) >= 0;
@@ -27,15 +25,13 @@ final class VelocitySignalPolicy {
         );
 
         double score;
-        if (rapidBurst && (countSpike || highRate)) {
+        if (rapidBurst && highRate) {
             score = 0.95d;
         } else if (rapidBurst) {
             score = 0.80d;
-        } else if (countSpike && highRate) {
+        } else if (highRate) {
             score = 0.75d;
-        } else if (highAmount && (countSpike || highRate)) {
-            score = 0.70d;
-        } else if (countSpike || highRate || highAmount) {
+        } else if (highAmount) {
             score = 0.50d;
         } else {
             score = 0.10d;
@@ -44,10 +40,9 @@ final class VelocitySignalPolicy {
         return new VelocityDecision(
                 score,
                 riskLevel(score),
-                reasonCodes(rapidBurst, highRate, countSpike, highAmount),
+                reasonCodes(rapidBurst, highRate, highAmount),
                 rapidBurst,
                 highRate,
-                countSpike,
                 highAmount
         );
     }
@@ -68,7 +63,6 @@ final class VelocitySignalPolicy {
     private static List<String> reasonCodes(
             boolean rapidBurst,
             boolean highRate,
-            boolean countSpike,
             boolean highAmount
     ) {
         List<String> reasons = new ArrayList<>();
@@ -78,10 +72,7 @@ final class VelocitySignalPolicy {
         if (highRate) {
             reasons.add(ReasonCode.TRANSACTION_VELOCITY.wireValue());
         }
-        if (countSpike) {
-            reasons.add(ReasonCode.RECENT_TRANSACTION_SPIKE.wireValue());
-        }
-        if (highAmount) {
+        if (highAmount && !rapidBurst) {
             reasons.add(ReasonCode.RECENT_AMOUNT_ACCUMULATION.wireValue());
         }
         return List.copyOf(reasons);
@@ -93,7 +84,6 @@ final class VelocitySignalPolicy {
             List<String> reasonCodes,
             boolean rapidBurst,
             boolean highRate,
-            boolean countSpike,
             boolean highAmount
     ) {
     }

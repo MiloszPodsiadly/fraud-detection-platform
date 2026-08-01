@@ -205,6 +205,30 @@ class PublicEngineIntelligenceMapperTest {
     }
 
     @Test
+    void limitsReasonCodesBeforeCreatingPublicContract() {
+        var summary = mapper.map(service.aggregate(AggregationTestSupport.orchestration(
+                AggregationTestSupport.available(
+                        "rules.primary",
+                        0.95d,
+                        RiskLevel.CRITICAL,
+                        "DEVICE_NOVELTY",
+                        "COUNTRY_MISMATCH",
+                        "PROXY_OR_VPN",
+                        "HIGH_VELOCITY",
+                        "HIGH_AMOUNT_ACTIVITY",
+                        "RAPID_PLN_20K_BURST"
+                ),
+                AggregationTestSupport.available("ml.python.primary", 0.7d, RiskLevel.HIGH, "MODEL_HIGH_RISK")
+        )));
+
+        assertThat(summary.engines().getFirst().reasonCodes()).hasSize(5);
+        assertThat(summary.warnings()).contains(new EngineIntelligenceWarningSummary(
+                EngineIntelligenceWarningCode.REASON_CODE_LIMIT_APPLIED,
+                1
+        ));
+    }
+
+    @Test
     void mapsEveryInternalWarningCodeToPublicWarningCode() {
         for (FraudEngineAggregationWarningCode code : FraudEngineAggregationWarningCode.values()) {
             assertThat(mapper.map(resultWithWarnings(List.of(

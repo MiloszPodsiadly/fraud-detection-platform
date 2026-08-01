@@ -1,6 +1,6 @@
 package com.frauddetection.scoring.engine.ml;
 
-import com.frauddetection.common.events.engine.FraudEngineResult;
+import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import com.frauddetection.scoring.context.ScoringContext;
 import com.frauddetection.scoring.engine.FraudEngineDescriptor;
 import com.frauddetection.scoring.engine.FraudSignalEngine;
@@ -18,7 +18,7 @@ class PythonMlSignalEngineShapeTest {
     void implementsFraudSignalEngineWithExpectedMethods() throws Exception {
         assertThat(FraudSignalEngine.class).isAssignableFrom(PythonMlSignalEngine.class);
         assertThat(PythonMlSignalEngine.class.getMethod("evaluate", ScoringContext.class).getReturnType())
-                .isEqualTo(FraudEngineResult.class);
+                .isEqualTo(FraudSignalEvaluation.class);
         assertThat(PythonMlSignalEngine.class.getMethod("descriptor").getReturnType())
                 .isEqualTo(FraudEngineDescriptor.class);
     }

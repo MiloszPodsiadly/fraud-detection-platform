@@ -2,7 +2,7 @@ package com.frauddetection.scoring.engine.rules;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.engine.FraudEngineEvidence;
-import com.frauddetection.common.events.engine.FraudEngineResult;
+import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.model.Money;
 import com.frauddetection.common.events.reason.ReasonCode;
@@ -30,7 +30,7 @@ class RuleBasedSignalEngineEvidenceSafetyTest {
 
     @Test
     void resultExposesOnlyBoundedReasonCodesAndSafeIdentifiers() {
-        FraudEngineResult result = adapter.evaluate(context(event(Map.of(
+        FraudSignalEvaluation result = adapter.evaluate(context(event(Map.of(
                 FraudFeatureContract.DEVICE_NOVELTY, true,
                 FraudFeatureContract.CUSTOMER_SEGMENT, "VIP",
                 FraudFeatureContract.MERCHANT_CATEGORY, "crypto",
@@ -115,7 +115,7 @@ class RuleBasedSignalEngineEvidenceSafetyTest {
         );
     }
 
-    private String flatten(FraudEngineResult result) {
+    private String flatten(FraudSignalEvaluation result) {
         return result.reasonCodes() + " " + result.contributions() + " " + result.evidence() + " " + result.statusReason();
     }
 }

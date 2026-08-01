@@ -16,16 +16,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 @Component
 public class TransactionFeatureCalculator {
 
-    private final FeatureStoreProperties featureStoreProperties;
     private final CurrencyAmountConverter currencyAmountConverter;
 
     public TransactionFeatureCalculator(FeatureStoreProperties featureStoreProperties, CurrencyAmountConverter currencyAmountConverter) {
-        this.featureStoreProperties = featureStoreProperties;
-        this.currencyAmountConverter = currencyAmountConverter;
+        Objects.requireNonNull(featureStoreProperties, "featureStoreProperties is required");
+        this.currencyAmountConverter = Objects.requireNonNull(currencyAmountConverter, "currencyAmountConverter is required");
     }
 
     public EnrichedTransactionFeatures calculate(TransactionRawEvent event, FeatureStoreSnapshot snapshot) {
@@ -43,7 +43,11 @@ public class TransactionFeatureCalculator {
                 || Boolean.TRUE.equals(event.deviceInfo().vpnDetected());
 
         double velocityPerMinute = BigDecimal.valueOf(recentTransactionCount)
-                .divide(BigDecimal.valueOf(Math.max(featureStoreProperties.recentTransactionWindow().toMinutes(), 1L)), 4, RoundingMode.HALF_UP)
+                .divide(
+                        BigDecimal.valueOf(FraudFeatureThresholdContract.VELOCITY_V1_OBSERVATION_WINDOW.toMinutes()),
+                        4,
+                        RoundingMode.HALF_UP
+                )
                 .doubleValue();
 
         List<String> featureFlags = new ArrayList<>();
@@ -74,13 +78,14 @@ public class TransactionFeatureCalculator {
         }
 
         Map<String, Object> featureSnapshot = new LinkedHashMap<>();
+        String velocityV1ObservationWindow = FraudFeatureThresholdContract.VELOCITY_V1_OBSERVATION_WINDOW.toString();
         featureSnapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT, recentTransactionCount);
-        featureSnapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, featureStoreProperties.recentTransactionWindow().toString());
+        featureSnapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, velocityV1ObservationWindow);
         featureSnapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM, recentAmountSum);
-        featureSnapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, featureStoreProperties.recentTransactionWindow().toString());
+        featureSnapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, velocityV1ObservationWindow);
         featureSnapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, recentAmountSumPln);
         featureSnapshot.put(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, currentAmountPln);
-        featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_WINDOW, featureStoreProperties.recentTransactionWindow().toString());
+        featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_WINDOW, velocityV1ObservationWindow);
         featureSnapshot.put(
                 FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN,
                 FraudFeatureThresholdContract.RAPID_TRANSFER_PLN_THRESHOLD
@@ -101,9 +106,9 @@ public class TransactionFeatureCalculator {
 
         return new EnrichedTransactionFeatures(
                 recentTransactionCount,
-                featureStoreProperties.recentTransactionWindow().toString(),
+                velocityV1ObservationWindow,
                 new Money(recentAmountSum, event.transactionAmount().currency()),
-                featureStoreProperties.recentTransactionWindow().toString(),
+                velocityV1ObservationWindow,
                 velocityPerMinute,
                 merchantFrequency7d,
                 deviceNovelty,

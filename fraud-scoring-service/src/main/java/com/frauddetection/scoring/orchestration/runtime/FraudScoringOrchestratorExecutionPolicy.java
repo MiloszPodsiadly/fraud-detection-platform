@@ -1,6 +1,6 @@
 package com.frauddetection.scoring.orchestration.runtime;
 
-import com.frauddetection.scoring.orchestration.FraudSignalEngineRegistry;
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 
 import java.time.Duration;
 import java.util.HashSet;
@@ -12,9 +12,9 @@ public record FraudScoringOrchestratorExecutionPolicy(
         List<FraudEngineExecutionPolicy> enginePolicies
 ) {
     private static final Set<String> ALLOWED_ENGINE_IDS = Set.of(
-            FraudSignalEngineRegistry.RULES_PRIMARY_ENGINE_ID,
-            FraudSignalEngineRegistry.PYTHON_ML_PRIMARY_ENGINE_ID,
-            FraudSignalEngineRegistry.VELOCITY_PRIMARY_ENGINE_ID
+            FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+            FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
+            FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID
     );
 
     public FraudScoringOrchestratorExecutionPolicy {
@@ -29,10 +29,10 @@ public record FraudScoringOrchestratorExecutionPolicy(
                 throw new IllegalArgumentException("ENGINE_EXECUTION_POLICY_DUPLICATE_ENGINE_ID");
             }
         }
-        requirePolicy(engineIds, FraudSignalEngineRegistry.RULES_PRIMARY_ENGINE_ID);
-        requirePolicy(engineIds, FraudSignalEngineRegistry.PYTHON_ML_PRIMARY_ENGINE_ID);
-        if (engineIds.contains(FraudSignalEngineRegistry.VELOCITY_PRIMARY_ENGINE_ID)
-                && policyFor(enginePolicies, FraudSignalEngineRegistry.VELOCITY_PRIMARY_ENGINE_ID).required()) {
+        requirePolicy(engineIds, FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID);
+        requirePolicy(engineIds, FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID);
+        if (engineIds.contains(FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID)
+                && policyFor(enginePolicies, FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID).required()) {
             throw new IllegalArgumentException("ENGINE_EXECUTION_POLICY_OPTIONAL_ENGINE_REQUIRED");
         }
         enginePolicies = List.copyOf(enginePolicies);
@@ -41,17 +41,17 @@ public record FraudScoringOrchestratorExecutionPolicy(
     public static FraudScoringOrchestratorExecutionPolicy defaultInternalPolicy() {
         return new FraudScoringOrchestratorExecutionPolicy(List.of(
                 new FraudEngineExecutionPolicy(
-                        FraudSignalEngineRegistry.RULES_PRIMARY_ENGINE_ID,
+                        FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
                         Duration.ofMillis(250),
                         true
                 ),
                 new FraudEngineExecutionPolicy(
-                        FraudSignalEngineRegistry.PYTHON_ML_PRIMARY_ENGINE_ID,
+                        FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
                         Duration.ofSeconds(1),
                         false
                 ),
                 new FraudEngineExecutionPolicy(
-                        FraudSignalEngineRegistry.VELOCITY_PRIMARY_ENGINE_ID,
+                        FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID,
                         Duration.ofMillis(250),
                         false
                 )

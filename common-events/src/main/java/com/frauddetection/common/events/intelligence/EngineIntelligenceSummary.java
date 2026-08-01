@@ -51,6 +51,7 @@ public record EngineIntelligenceSummary(
                 "engines"
         );
         requireUniqueEngineIds(engines);
+        requireCanonicalEngineOrder(engines);
         Objects.requireNonNull(comparison, "comparison is required");
         diagnosticSignals = EngineIntelligenceValuePolicy.copyBounded(
                 diagnosticSignals,
@@ -70,6 +71,17 @@ public record EngineIntelligenceSummary(
             if (!engineIds.add(engine.engineId())) {
                 throw new IllegalArgumentException("ENGINE_INTELLIGENCE_DUPLICATE_ENGINE_ID");
             }
+        }
+    }
+
+    private static void requireCanonicalEngineOrder(List<EngineIntelligenceEngineResult> engines) {
+        int previousOrder = -1;
+        for (EngineIntelligenceEngineResult engine : engines) {
+            int currentOrder = com.frauddetection.common.events.engine.FraudEngineIdentityContract.orderOf(engine.engineId());
+            if (currentOrder <= previousOrder) {
+                throw new IllegalArgumentException("ENGINE_INTELLIGENCE_ENGINE_ORDER_INVALID");
+            }
+            previousOrder = currentOrder;
         }
     }
 }

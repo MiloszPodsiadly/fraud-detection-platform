@@ -20,6 +20,7 @@ class PythonMlSignalEngineArchitectureDocsTest {
                 .contains("pythonmlsignalengine")
                 .contains("fraudsignalengine")
                 .contains("scoringcontext")
+                .contains("fraudsignalevaluation")
                 .contains("fraudengineresult")
                 .contains("existing ml scoring boundary remains source of truth")
                 .contains("internal to `fraud-scoring-service`")

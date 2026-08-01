@@ -138,9 +138,13 @@ feature extraction.
 
 FDP-129 adds the optional Velocity V1 adapter. Velocity reads only typed factual scalar features through
 `FeatureSnapshotReader`: `recentTransactionCount`, `recentTransactionCountWindow`, `recentAmountSumPln`, and
-`transactionVelocityPerMinute`. It validates type, finite numeric domain, positive bounded window, and impossible
-zero-count factual relationships, but it does not recompute producer rounding or require exact double equality for
+`transactionVelocityPerMinute`. It validates type, finite numeric domain, the exact `PT1M` Velocity V1 observation
+window, and impossible zero-count factual relationships, but it does not recompute producer rounding or require exact double equality for
 `transactionVelocityPerMinute`.
+
+`recentTransactionCount` and `transactionVelocityPerMinute` have the same official one-minute time basis in Velocity
+V1. A non-`PT1M` window is an invalid contract value and cannot produce an AVAILABLE Velocity V1 result. Changing the
+window requires a versioned policy and contract update.
 
 `rapidTransferFraudCaseCandidate`, `rapidTransferThresholdPln`, `rapidTransferCount`,
 `rapidTransferTotalPln`, and `rapidTransferTransactionIds` remain in the enriched feature snapshot for compatibility

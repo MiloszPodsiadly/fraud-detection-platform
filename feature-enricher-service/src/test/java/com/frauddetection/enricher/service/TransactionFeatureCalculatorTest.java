@@ -1,10 +1,14 @@
 package com.frauddetection.enricher.service;
 
 import com.frauddetection.common.events.features.FraudFeatureContract;
+import com.frauddetection.common.events.features.FraudFeatureThresholdContract;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.enricher.config.FeatureStoreProperties;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -12,6 +16,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TransactionFeatureCalculatorTest {
 
@@ -140,5 +145,73 @@ class TransactionFeatureCalculatorTest {
         assertThat(features.featureSnapshot().keySet())
                 .containsExactlyElementsOf(FraudFeatureContract.JAVA_ENRICHED_FEATURE_NAMES);
         assertThat(FraudFeatureContract.FEATURE_FLAGS_VALUES).containsAll(features.featureFlags());
+    }
+
+    @Test
+    void featureStorePropertiesAcceptVelocityV1CanonicalObservationWindow() {
+        var properties = properties(FraudFeatureThresholdContract.VELOCITY_V1_OBSERVATION_WINDOW);
+
+        assertThat(properties.recentTransactionWindow())
+                .isEqualTo(FraudFeatureThresholdContract.VELOCITY_V1_OBSERVATION_WINDOW);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"PT59S", "PT2M", "PT1H", "PT24H", "PT0S", "PT-1S"})
+    void featureStorePropertiesRejectNonCanonicalVelocityV1ObservationWindow(String window) {
+        assertThatThrownBy(() -> properties(Duration.parse(window)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("app.feature-store.recent-transaction-window")
+                .hasMessageContaining("PT1M");
+    }
+
+    @ParameterizedTest
+    @NullSource
+    void featureStorePropertiesRejectMissingVelocityV1ObservationWindow(Duration window) {
+        assertThatThrownBy(() -> properties(window))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("app.feature-store.recent-transaction-window")
+                .hasMessageContaining("PT1M");
+    }
+
+    @Test
+    void featureStorePropertiesRejectMalformedVelocityV1ObservationWindow() {
+        assertThatThrownBy(() -> Duration.parse("not-a-duration"))
+                .isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
+    void producedVelocityFeaturesUseCanonicalOneMinuteMeaning() {
+        var event = TransactionFixtures.rawTransaction()
+                .withAmount(new BigDecimal("100.00"), "PLN")
+                .build();
+        var snapshot = new FeatureStoreSnapshot(
+                4,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                List.of(),
+                0,
+                Instant.parse("2026-04-20T10:12:00Z"),
+                true
+        );
+
+        var features = calculator.calculate(event, snapshot);
+
+        assertThat(features.recentTransactionCount()).isEqualTo(5);
+        assertThat(features.recentTransactionCountWindow()).isEqualTo("PT1M");
+        assertThat(features.transactionVelocityPerMinute()).isEqualTo(5.0d);
+        assertThat(features.featureSnapshot())
+                .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5)
+                .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M")
+                .containsEntry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d);
+    }
+
+    private FeatureStoreProperties properties(Duration recentTransactionWindow) {
+        return new FeatureStoreProperties(
+                recentTransactionWindow,
+                Duration.ofDays(7),
+                Duration.ofDays(8),
+                Duration.ofDays(180),
+                Duration.ofDays(30)
+        );
     }
 }

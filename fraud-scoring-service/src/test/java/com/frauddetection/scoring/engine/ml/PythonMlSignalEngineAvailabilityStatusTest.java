@@ -1,7 +1,7 @@
 package com.frauddetection.scoring.engine.ml;
 
 import com.frauddetection.common.events.engine.FraudEngineConfidence;
-import com.frauddetection.common.events.engine.FraudEngineResult;
+import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.scoring.domain.FraudScoreResult;
@@ -25,14 +25,14 @@ class PythonMlSignalEngineAvailabilityStatusTest {
 
     @Test
     void mlServiceUnavailableDoesNotReturnLowRisk() {
-        FraudEngineResult result = new PythonMlSignalEngine(sourceReturning(unavailableResult())).evaluate(context());
+        FraudSignalEvaluation result = new PythonMlSignalEngine(sourceReturning(unavailableResult())).evaluate(context());
 
         assertFailure(result, FraudEngineStatus.UNAVAILABLE, PythonMlSignalReasonCode.ML_MODEL_UNAVAILABLE);
     }
 
     @Test
     void modelAvailableFalseWithNullScoreAndNullRiskMapsToUnavailable() {
-        FraudEngineResult result = new PythonMlSignalEngine(
+        FraudSignalEvaluation result = new PythonMlSignalEngine(
                 sourceReturning(result(null, null, null, null, false, List.of()))
         ).evaluate(context());
 
@@ -42,7 +42,7 @@ class PythonMlSignalEngineAvailabilityStatusTest {
 
     @Test
     void missingModelAvailableMetadataDoesNotReturnAvailable() {
-        FraudEngineResult result = new PythonMlSignalEngine(
+        FraudSignalEvaluation result = new PythonMlSignalEngine(
                 sourceReturning(result(0.82d, RiskLevel.HIGH, "python-logistic-fraud-model", "2026-05-30.v1", null, List.of()))
         ).evaluate(context());
 
@@ -65,7 +65,7 @@ class PythonMlSignalEngineAvailabilityStatusTest {
                 true
         );
 
-        FraudEngineResult result = new PythonMlSignalEngine(sourceReturning(source)).evaluate(context());
+        FraudSignalEvaluation result = new PythonMlSignalEngine(sourceReturning(source)).evaluate(context());
 
         assertFailure(result, FraudEngineStatus.DEGRADED, PythonMlSignalReasonCode.ML_AVAILABILITY_METADATA_INVALID);
         assertThat(flatten(result)).doesNotContain("false");
@@ -73,7 +73,7 @@ class PythonMlSignalEngineAvailabilityStatusTest {
 
     @Test
     void mlTimeoutDoesNotReturnLowRisk() {
-        FraudEngineResult result = new PythonMlSignalEngine(
+        FraudSignalEvaluation result = new PythonMlSignalEngine(
                 sourceThrowing(new RuntimeException(new TimeoutException("timeout host token stacktrace")))
         ).evaluate(context());
 
@@ -83,7 +83,7 @@ class PythonMlSignalEngineAvailabilityStatusTest {
 
     @Test
     void socketTimeoutDoesNotReturnLowRisk() {
-        FraudEngineResult result = new PythonMlSignalEngine(
+        FraudSignalEvaluation result = new PythonMlSignalEngine(
                 sourceThrowing(new RuntimeException(new SocketTimeoutException("http://ml-internal token")))
         ).evaluate(context());
 
@@ -93,7 +93,7 @@ class PythonMlSignalEngineAvailabilityStatusTest {
 
     @Test
     void mlClientExceptionDoesNotLeakExceptionMessage() {
-        FraudEngineResult result = new PythonMlSignalEngine(
+        FraudSignalEvaluation result = new PythonMlSignalEngine(
                 sourceThrowing(new IllegalStateException("raw response body token endpoint stacktrace"))
         ).evaluate(context());
 
@@ -103,7 +103,7 @@ class PythonMlSignalEngineAvailabilityStatusTest {
 
     @Test
     void modelAvailableTrueWithMissingRiskReturnsDegraded() {
-        FraudEngineResult result = new PythonMlSignalEngine(
+        FraudSignalEvaluation result = new PythonMlSignalEngine(
                 sourceReturning(result(0.50d, null, "python-logistic-fraud-model", "2026-05-30.v1", true, List.of()))
         ).evaluate(context());
 
@@ -112,7 +112,7 @@ class PythonMlSignalEngineAvailabilityStatusTest {
 
     @Test
     void modelAvailableTrueWithMissingScoreReturnsDegraded() {
-        FraudEngineResult result = new PythonMlSignalEngine(
+        FraudSignalEvaluation result = new PythonMlSignalEngine(
                 sourceReturning(result(null, RiskLevel.HIGH, "python-logistic-fraud-model", "2026-05-30.v1", true, List.of()))
         ).evaluate(context());
 
@@ -121,7 +121,7 @@ class PythonMlSignalEngineAvailabilityStatusTest {
 
     @Test
     void scoreBelowZeroReturnsDegraded() {
-        FraudEngineResult result = new PythonMlSignalEngine(
+        FraudSignalEvaluation result = new PythonMlSignalEngine(
                 sourceReturning(result(-0.01d, RiskLevel.LOW, "python-logistic-fraud-model", "2026-05-30.v1", true, List.of()))
         ).evaluate(context());
 
@@ -130,7 +130,7 @@ class PythonMlSignalEngineAvailabilityStatusTest {
 
     @Test
     void scoreAboveOneReturnsDegraded() {
-        FraudEngineResult result = new PythonMlSignalEngine(
+        FraudSignalEvaluation result = new PythonMlSignalEngine(
                 sourceReturning(result(1.01d, RiskLevel.CRITICAL, "python-logistic-fraud-model", "2026-05-30.v1", true, List.of()))
         ).evaluate(context());
 
@@ -139,7 +139,7 @@ class PythonMlSignalEngineAvailabilityStatusTest {
 
     @Test
     void nullResponseReturnsDegradedOrUnavailable() {
-        FraudEngineResult result = new PythonMlSignalEngine(sourceReturning(null)).evaluate(context());
+        FraudSignalEvaluation result = new PythonMlSignalEngine(sourceReturning(null)).evaluate(context());
 
         assertFailure(result, FraudEngineStatus.DEGRADED, PythonMlSignalReasonCode.ML_MODEL_INVALID_RESPONSE);
     }
@@ -160,14 +160,14 @@ class PythonMlSignalEngineAvailabilityStatusTest {
                 false
         );
 
-        FraudEngineResult result = new PythonMlSignalEngine(sourceReturning(empty)).evaluate(context());
+        FraudSignalEvaluation result = new PythonMlSignalEngine(sourceReturning(empty)).evaluate(context());
 
         assertFailure(result, FraudEngineStatus.DEGRADED, PythonMlSignalReasonCode.ML_AVAILABILITY_METADATA_MISSING);
     }
 
     @Test
     void modelAvailableTrueWithMissingModelMetadataReturnsDegraded() {
-        FraudEngineResult result = new PythonMlSignalEngine(
+        FraudSignalEvaluation result = new PythonMlSignalEngine(
                 sourceReturning(result(0.82d, RiskLevel.HIGH, null, "2026-05-30.v1", true, List.of()))
         ).evaluate(context());
 
@@ -175,7 +175,7 @@ class PythonMlSignalEngineAvailabilityStatusTest {
     }
 
     private void assertFailure(
-            FraudEngineResult result,
+            FraudSignalEvaluation result,
             FraudEngineStatus expectedStatus,
             PythonMlSignalReasonCode expectedReason
     ) {

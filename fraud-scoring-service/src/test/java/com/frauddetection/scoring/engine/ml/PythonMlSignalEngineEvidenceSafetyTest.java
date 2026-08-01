@@ -2,6 +2,7 @@ package com.frauddetection.scoring.engine.ml;
 
 import com.frauddetection.common.events.engine.FraudEngineEvidence;
 import com.frauddetection.common.events.reason.ReasonCode;
+import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -69,7 +70,7 @@ class PythonMlSignalEngineEvidenceSafetyTest {
         assertThat(evidence.description()).doesNotMatch(".*\\s{2,}.*");
     }
 
-    private void assertNoUnsafeMlData(com.frauddetection.common.events.engine.FraudEngineResult result) {
+    private void assertNoUnsafeMlData(FraudSignalEvaluation result) {
         assertThat(flatten(result))
                 .doesNotContain("VIP")
                 .doesNotContain("crypto")

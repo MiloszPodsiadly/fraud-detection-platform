@@ -75,12 +75,20 @@ class FraudEngineContractRuntimeIsolationTest {
                     .toList())
                     .containsExactlyInAnyOrder(
                             "FraudSignalEngine.java",
+                            "FraudSignalEvaluation.java",
                             "FraudEngineDescriptor.java",
                             "FraudEngineDescriptorValuePolicy.java",
                             "ml/PythonMlSignalEngine.java",
                             "ml/PythonMlSignalReasonCode.java",
                             "rules/RuleBasedSignalEngine.java",
                             "rules/RuleBasedSignalReasonCode.java",
+                            "velocity/ValidatedVelocityInputs.java",
+                            "velocity/VelocityFeatureReader.java",
+                            "velocity/VelocityInputReadiness.java",
+                            "velocity/VelocityInputs.java",
+                            "velocity/VelocityInputValidation.java",
+                            "velocity/VelocityInputValidator.java",
+                            "velocity/VelocityResultFactory.java",
                             "velocity/VelocitySignalEngine.java",
                             "velocity/VelocitySignalPolicy.java",
                             "velocity/VelocitySignalReasonCode.java"
@@ -101,6 +109,13 @@ class FraudEngineContractRuntimeIsolationTest {
                     .filter(path -> path.toLowerCase().contains("velocity"))
                     .toList())
                     .containsExactlyInAnyOrder(
+                            "velocity/ValidatedVelocityInputs.java",
+                            "velocity/VelocityFeatureReader.java",
+                            "velocity/VelocityInputReadiness.java",
+                            "velocity/VelocityInputs.java",
+                            "velocity/VelocityInputValidation.java",
+                            "velocity/VelocityInputValidator.java",
+                            "velocity/VelocityResultFactory.java",
                             "velocity/VelocitySignalEngine.java",
                             "velocity/VelocitySignalPolicy.java",
                             "velocity/VelocitySignalReasonCode.java"

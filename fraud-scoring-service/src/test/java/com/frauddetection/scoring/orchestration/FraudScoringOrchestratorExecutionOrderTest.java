@@ -4,6 +4,7 @@ import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.scoring.engine.FraudEngineDescriptor;
 import com.frauddetection.scoring.engine.FraudSignalEngine;
+import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -147,10 +148,10 @@ class FraudScoringOrchestratorExecutionOrderTest {
     private FraudSignalEngine engineReturningDescriptor(FraudEngineDescriptor descriptor) {
         return new FraudSignalEngine() {
             @Override
-            public com.frauddetection.common.events.engine.FraudEngineResult evaluate(
+            public FraudSignalEvaluation evaluate(
                     com.frauddetection.scoring.context.ScoringContext context
             ) {
-                return availableResult(ruleDescriptor(), 0.42d, RiskLevel.LOW);
+                return evaluation();
             }
 
             @Override
@@ -163,10 +164,10 @@ class FraudScoringOrchestratorExecutionOrderTest {
     private FraudSignalEngine engineWithInvalidDescriptor() {
         return new FraudSignalEngine() {
             @Override
-            public com.frauddetection.common.events.engine.FraudEngineResult evaluate(
+            public FraudSignalEvaluation evaluate(
                     com.frauddetection.scoring.context.ScoringContext context
             ) {
-                return availableResult(ruleDescriptor(), 0.42d, RiskLevel.LOW);
+                return evaluation();
             }
 
             @Override
@@ -174,5 +175,21 @@ class FraudScoringOrchestratorExecutionOrderTest {
                 return new FraudEngineDescriptor(" ", FraudEngineType.RULES, "java", "1.0.0", true);
             }
         };
+    }
+
+    private FraudSignalEvaluation evaluation() {
+        var result = availableResult(ruleDescriptor(), 0.42d, RiskLevel.LOW);
+        return new FraudSignalEvaluation(
+                result.status(),
+                result.score(),
+                result.riskLevel(),
+                result.confidence(),
+                result.reasonCodes(),
+                result.contributions(),
+                result.evidence(),
+                result.modelName(),
+                result.modelVersion(),
+                result.statusReason()
+        );
     }
 }

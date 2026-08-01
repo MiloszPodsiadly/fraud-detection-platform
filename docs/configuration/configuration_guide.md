@@ -45,6 +45,8 @@ enable production mode and does not replace environment-specific release approva
   registered inside the diagnostic runtime after emission is enabled.
 - Velocity is diagnostic-only. It cannot authorize payments, block transactions, create cases, alter final decision
   source, change thresholds, or change analyst recommended actions.
+- Velocity V1 requires the Feature Enricher recent-transaction window to remain exactly `PT1M`; unsupported windows
+  fail startup/configuration or consumer validation rather than silently changing score meaning.
 - The current engine-intelligence contract has max three engines: Rules, ML model, and Velocity. Future Device,
   Merchant, or Graph engines require a versioned contract update.
 
