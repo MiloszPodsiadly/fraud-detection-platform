@@ -62,7 +62,7 @@ class RuleBasedSignalEngineFeatureStatusTest {
 
     @Test
     void invalidSnapshotTypeForTypedEventFieldDoesNotDegradeAdapter() {
-        TransactionEnrichedEvent event = event(false, false, false, 5, 0.1d, BigDecimal.TEN,
+        TransactionEnrichedEvent event = event(false, false, false, 1, 0.1d, BigDecimal.TEN,
                 List.of(),
                 Map.of(FraudFeatureContract.RECENT_TRANSACTION_COUNT, "5"));
         FraudScoreResult production = productionEngine.score(FraudScoringRequest.from(event));
@@ -94,7 +94,7 @@ class RuleBasedSignalEngineFeatureStatusTest {
 
     @Test
     void missingRapidTransferFraudCaseCandidateDoesNotDegrade() {
-        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 5, 0.1d, BigDecimal.TEN,
+        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 1, 0.1d, BigDecimal.TEN,
                 List.of(),
                 Map.of())));
 

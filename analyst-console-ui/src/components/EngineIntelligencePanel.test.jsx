@@ -154,7 +154,7 @@ describe("EngineIntelligencePanel", () => {
     expect(await screen.findByRole("heading", { name: "Engine results" })).toBeInTheDocument();
     expect(screen.getByText("Rules")).toBeInTheDocument();
     expect(panelText()).toContain("rules.primary / RULES");
-    expect(screen.getAllByText("AVAILABLE").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Engine result available").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Score bucket").length).toBeGreaterThan(0);
     expect(screen.getAllByText("HIGH").length).toBeGreaterThan(0);
   });
@@ -184,19 +184,19 @@ describe("EngineIntelligencePanel", () => {
   it("rendersUnavailableAsOperationalStatus", async () => {
     renderPanel(availableResult({ engineStatus: "UNAVAILABLE", engineRiskLevel: "", engineScoreBucket: "UNAVAILABLE" }));
 
-    expect((await screen.findAllByText("Engine unavailable")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("Engine result unavailable")).length).toBeGreaterThan(0);
   });
 
   it("rendersDegradedAsOperationalStatus", async () => {
     renderPanel(availableResult({ engineStatus: "DEGRADED", engineRiskLevel: "", engineScoreBucket: "UNAVAILABLE" }));
 
-    expect(await screen.findByText("Engine response degraded")).toBeInTheDocument();
+    expect(await screen.findByText("Engine result degraded")).toBeInTheDocument();
   });
 
   it("doesNotRenderSafeTransactionForOperationalFailure", async () => {
     renderPanel(availableResult({ engineStatus: "UNAVAILABLE", engineRiskLevel: "", engineScoreBucket: "UNAVAILABLE" }));
 
-    expect((await screen.findAllByText("Engine unavailable")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("Engine result unavailable")).length).toBeGreaterThan(0);
     expect(panelText()).not.toMatch(/LOW risk|\bsafe\b|no fraud|less severe|not suspicious|low risk because ML unavailable/i);
   });
 
@@ -212,7 +212,7 @@ describe("EngineIntelligencePanel", () => {
 
     const operationalSignal = await screen.findByText("OPERATIONAL_SIGNAL");
     const card = operationalSignal.closest("article");
-    expect(within(card).getByText("Engine unavailable")).toBeInTheDocument();
+    expect(within(card).getByText("Engine result unavailable")).toBeInTheDocument();
     expect(within(card).queryByText("Risk level")).not.toBeInTheDocument();
   });
 
@@ -220,7 +220,7 @@ describe("EngineIntelligencePanel", () => {
     renderPanel(availableResult());
 
     const operationalSignal = await screen.findByText("OPERATIONAL_SIGNAL");
-    expect(operationalSignal.closest("article")).toHaveTextContent("Engine unavailable");
+    expect(operationalSignal.closest("article")).toHaveTextContent("Engine result unavailable");
   });
 
   it.each([
@@ -285,7 +285,7 @@ describe("EngineIntelligencePanel", () => {
     renderPanel(availableResult());
 
     expect((await screen.findAllByText("Status")).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("AVAILABLE").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Engine result available").length).toBeGreaterThan(0);
   });
 
   it.each([

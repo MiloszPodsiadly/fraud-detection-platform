@@ -70,6 +70,16 @@ class EngineIntelligenceDiagnosticSignalTest {
     }
 
     @Test
+    void rejectsUnavailableFraudSignalCategory() {
+        assertThatThrownBy(() -> signal(
+                FraudEngineStatus.UNAVAILABLE,
+                EngineIntelligenceSignalCategory.FRAUD_SIGNAL,
+                null,
+                EngineIntelligenceScoreBucket.UNAVAILABLE
+        )).hasMessage("ENGINE_INTELLIGENCE_OPERATIONAL_SIGNAL_CATEGORY_INVALID");
+    }
+
+    @Test
     void rejectsDegradedDiagnosticSignalWithRiskLevel() {
         assertOperationalRiskRejected(FraudEngineStatus.DEGRADED, RiskLevel.LOW);
     }
@@ -92,6 +102,26 @@ class EngineIntelligenceDiagnosticSignalTest {
                 RiskLevel.HIGH,
                 EngineIntelligenceScoreBucket.HIGH
         ).riskLevel()).isEqualTo(RiskLevel.HIGH);
+    }
+
+    @Test
+    void rejectsAvailableFraudSignalWithoutRiskLevel() {
+        assertThatThrownBy(() -> signal(
+                FraudEngineStatus.AVAILABLE,
+                EngineIntelligenceSignalCategory.FRAUD_SIGNAL,
+                null,
+                EngineIntelligenceScoreBucket.HIGH
+        )).hasMessage("ENGINE_INTELLIGENCE_FRAUD_SIGNAL_RISK_LEVEL_REQUIRED");
+    }
+
+    @Test
+    void rejectsAvailableFraudSignalWithUnavailableScoreBucket() {
+        assertFraudSignalScoreBucketRejected(EngineIntelligenceScoreBucket.UNAVAILABLE);
+    }
+
+    @Test
+    void rejectsAvailableFraudSignalWithNoneScoreBucket() {
+        assertFraudSignalScoreBucketRejected(EngineIntelligenceScoreBucket.NONE);
     }
 
     @Test
@@ -154,6 +184,15 @@ class EngineIntelligenceDiagnosticSignalTest {
                 null,
                 scoreBucket
         )).hasMessage("ENGINE_INTELLIGENCE_OPERATIONAL_SIGNAL_SCORE_BUCKET_INVALID");
+    }
+
+    private void assertFraudSignalScoreBucketRejected(EngineIntelligenceScoreBucket scoreBucket) {
+        assertThatThrownBy(() -> signal(
+                FraudEngineStatus.AVAILABLE,
+                EngineIntelligenceSignalCategory.FRAUD_SIGNAL,
+                RiskLevel.HIGH,
+                scoreBucket
+        )).hasMessage("ENGINE_INTELLIGENCE_FRAUD_SIGNAL_SCORE_BUCKET_INVALID");
     }
 
     private EngineIntelligenceDiagnosticSignal signal(

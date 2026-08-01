@@ -17,7 +17,10 @@ import com.frauddetection.scoring.engine.FraudEngineDescriptor;
 import com.frauddetection.scoring.engine.FraudSignalEngine;
 import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import com.frauddetection.scoring.service.MlFraudScoringEngine;
+import org.springframework.web.client.RestClientException;
 
+import java.net.ConnectException;
+import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.util.List;
 import java.util.Locale;
@@ -40,15 +43,19 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
     @Override
     public FraudSignalEvaluation evaluate(ScoringContext context) {
         Objects.requireNonNull(context, "context is required");
+        FraudScoreResult sourceResult;
         try {
-            FraudScoreResult sourceResult = mlSource.score(FraudScoringRequest.from(context.transaction()));
-            return mapSourceResult(sourceResult);
+            sourceResult = mlSource.score(FraudScoringRequest.from(context.transaction()));
         } catch (RuntimeException exception) {
             if (isTimeout(exception)) {
                 return unavailableResult(FraudEngineStatus.TIMEOUT, PythonMlSignalReasonCode.ML_MODEL_TIMEOUT);
             }
-            return unavailableResult(FraudEngineStatus.UNAVAILABLE, PythonMlSignalReasonCode.ML_CLIENT_ERROR);
+            if (isKnownClientFailure(exception)) {
+                return unavailableResult(FraudEngineStatus.UNAVAILABLE, PythonMlSignalReasonCode.ML_CLIENT_ERROR);
+            }
+            throw exception;
         }
+        return mapSourceResult(sourceResult);
     }
 
     @Override
@@ -112,7 +119,7 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
                 FraudEngineStatus.AVAILABLE,
                 sourceResult.fraudScore(),
                 sourceResult.riskLevel(),
-                FraudEngineConfidence.MEDIUM,
+                FraudEngineConfidence.UNKNOWN,
                 reasonCodes,
                 contributions(reasonCodes),
                 evidence(reasonCodes, FraudEngineEvidenceStatus.AVAILABLE),
@@ -214,6 +221,21 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
                 return true;
             }
             if (current.getClass().getSimpleName().toLowerCase(Locale.ROOT).contains("timeout")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isKnownClientFailure(Throwable throwable) {
+        for (Throwable current = throwable; current != null; current = current.getCause()) {
+            if (current instanceof RestClientException
+                    || current instanceof ConnectException
+                    || current instanceof SocketException) {
+                return true;
+            }
+            String simpleName = current.getClass().getSimpleName().toLowerCase(Locale.ROOT);
+            if (simpleName.contains("connect") || simpleName.contains("client")) {
                 return true;
             }
         }

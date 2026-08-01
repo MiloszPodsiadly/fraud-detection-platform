@@ -4,6 +4,7 @@ import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AlertServiceTransactionScoredEventDeserializationCompatibilityTest {
 
@@ -21,6 +22,16 @@ class AlertServiceTransactionScoredEventDeserializationCompatibilityTest {
 
         assertExistingFields(event);
         assertThat(event.engineIntelligence()).isNotNull();
+    }
+
+    @Test
+    void alertServiceDeserializesLegacyV1EngineIntelligenceComparison() {
+        TransactionScoredEvent event = AlertServiceTransactionScoredEventFixtureLoader.legacyV1EngineIntelligence();
+
+        assertThat(event.transactionId()).isEqualTo("txn-fdp129-stage2-001");
+        assertThat(event.engineIntelligence().comparison().comparisonType().name()).isEqualTo("RULES_VS_ML");
+        assertThat(event.engineIntelligence().comparison().comparedEngineIds())
+                .containsExactly("rules.primary", "ml.python.primary");
     }
 
     @Test
@@ -45,6 +56,13 @@ class AlertServiceTransactionScoredEventDeserializationCompatibilityTest {
 
         assertExistingFields(event);
         assertThat(event.engineIntelligence()).isNotNull();
+    }
+
+    @Test
+    void alertServiceRejectsPartialComparisonIdentity() {
+        assertThatThrownBy(AlertServiceTransactionScoredEventFixtureLoader::partialComparisonTypeOnly)
+                .isInstanceOf(org.apache.kafka.common.errors.SerializationException.class)
+                .hasMessageContaining("Unable to deserialize Kafka payload");
     }
 
     private void assertExistingFields(TransactionScoredEvent event) {

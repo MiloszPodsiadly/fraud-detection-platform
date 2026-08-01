@@ -88,6 +88,15 @@ class FraudScoringOrchestratorMetricsSafetyTest {
     }
 
     @Test
+    void clientFailureMetricCategoryIsLowCardinality() {
+        metrics.recordEngineFailure(
+                FraudSignalEngineRegistry.PYTHON_ML_PRIMARY_ENGINE_ID,
+                FraudEngineType.ML_MODEL,
+                "client_error"
+        );
+    }
+
+    @Test
     void requiredEngineFailedMetricsAreLowCardinality() {
         metrics.recordRequiredEngineFailed(FraudSignalEngineRegistry.RULES_PRIMARY_ENGINE_ID);
 

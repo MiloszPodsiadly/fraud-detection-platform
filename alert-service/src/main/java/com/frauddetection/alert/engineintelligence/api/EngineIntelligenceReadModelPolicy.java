@@ -46,6 +46,8 @@ final class EngineIntelligenceReadModelPolicy {
                         .map(this::engine)
                         .toList(),
                 new EngineIntelligenceComparison(
+                        source.getComparisonType(),
+                        source.getComparedEngineIds(),
                         source.getComparisonStatus(),
                         source.getRiskMismatchStatus(),
                         source.getScoreDeltaBucket()

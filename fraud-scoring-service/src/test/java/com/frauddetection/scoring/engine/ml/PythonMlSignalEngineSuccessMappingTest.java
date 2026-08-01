@@ -1,6 +1,7 @@
 package com.frauddetection.scoring.engine.ml;
 
 import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.common.events.engine.FraudEngineConfidence;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.reason.ReasonCode;
 import org.junit.jupiter.api.Test;
@@ -23,7 +24,7 @@ class PythonMlSignalEngineSuccessMappingTest {
         assertThat(result.status()).isEqualTo(FraudEngineStatus.AVAILABLE);
         assertThat(result.score()).isEqualTo(0.82d);
         assertThat(result.riskLevel()).isEqualTo(RiskLevel.HIGH);
-        assertThat(result.confidence()).isEqualTo(com.frauddetection.common.events.engine.FraudEngineConfidence.MEDIUM);
+        assertThat(result.confidence()).isEqualTo(FraudEngineConfidence.UNKNOWN);
         assertThat(result.modelName()).isEqualTo("python-logistic-fraud-model");
         assertThat(result.modelVersion()).isEqualTo("2026-05-30.v1");
         assertThat(result.reasonCodes()).containsExactly(PythonMlSignalReasonCode.ML_MODEL_SIGNAL.wireValue());

@@ -72,18 +72,14 @@ class FraudEngineResultValidationTest {
     }
 
     @Test
-    void availableRequiresKnownConfidence() {
+    void availableRequiresConfidenceButDoesNotInferTruthfulness() {
         assertThatThrownBy(() -> new FraudEngineResult("rules.primary", FraudEngineType.RULES, "java",
                 FraudEngineStatus.AVAILABLE, 0.4000d, RiskLevel.MEDIUM, null, List.of(), List.of(), List.of(),
                 3L, null, null, null, now()))
                 .hasMessageContaining("requires confidence");
-        assertThatThrownBy(() -> new FraudEngineResult("rules.primary", FraudEngineType.RULES, "java",
-                FraudEngineStatus.AVAILABLE, 0.4000d, RiskLevel.MEDIUM, FraudEngineConfidence.UNKNOWN,
-                List.of(), List.of(), List.of(), 3L, null, null, null, now()))
-                .hasMessageContaining("known confidence");
 
         for (FraudEngineConfidence confidence : List.of(FraudEngineConfidence.LOW, FraudEngineConfidence.MEDIUM,
-                FraudEngineConfidence.HIGH)) {
+                FraudEngineConfidence.HIGH, FraudEngineConfidence.UNKNOWN)) {
             FraudEngineResult result = new FraudEngineResult("rules.primary", FraudEngineType.RULES, "java",
                     FraudEngineStatus.AVAILABLE, 0.4000d, RiskLevel.MEDIUM, confidence, List.of(), List.of(),
                     List.of(), 3L, null, null, null, now());

@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { isAbortError } from "../api/apiErrors.js";
+import {
+  BoundedEngineResultsView,
+  DiagnosticComparisonView,
+  VELOCITY_SEVERITY_COPY,
+  WarningListView,
+  engineDisplayName,
+  engineStatusLabel
+} from "./EngineIntelligenceDiagnosticView.jsx";
 import { EngineIntelligenceFeedbackPanel } from "./EngineIntelligenceFeedbackPanel.jsx";
 import { LoadingPanel } from "./LoadingPanel.jsx";
 
 const TEMPORARILY_UNAVAILABLE = "Engine intelligence is temporarily unavailable.";
 const NOT_PROJECTED = "Engine intelligence is not available for this transaction.";
 const NOT_PROJECTED_HELPER = "This may happen for older transactions or periods when diagnostic emission was disabled.";
-const VELOCITY_SEVERITY_COPY = "Velocity score is a deterministic normalized risk-severity signal. It is not a calibrated fraud probability and must not be interpreted as model confidence.";
-const OPERATIONAL_STATUSES = new Set(["TIMEOUT", "UNAVAILABLE", "DEGRADED"]);
 const NON_AVAILABLE_STATES = new Set(["not-projected", "unauthorized", "not-found", "unavailable"]);
 
 export function EngineIntelligencePanel({
@@ -121,42 +127,31 @@ function EngineIntelligenceContent({ result }) {
 
 function ComparisonSection({ comparison }) {
   return (
-    <section className="engineIntelligenceBlock" aria-labelledby="engine-intelligence-comparison-heading">
-      <h3 id="engine-intelligence-comparison-heading">Diagnostic comparison</h3>
-      <dl className="engineIntelligenceFields">
-        <Field label="Comparison type" value={comparison.comparisonType} />
-        <Field label="Compared engines" value={comparison.comparedEngineIds.join(" vs ")} />
-        <Field label="Rules vs ML agreement" value={comparison.agreementStatus} />
-        <Field label="Risk mismatch" value={comparison.riskMismatchStatus} />
-        <Field label="Score delta" value={comparison.scoreDeltaBucket} />
-      </dl>
-    </section>
+    <DiagnosticComparisonView
+      comparison={comparison}
+      sectionClassName="engineIntelligenceBlock"
+      headingId="engine-intelligence-comparison-heading"
+      title="Diagnostic comparison"
+      FieldComponent={Field}
+      comparedEnginesText={(engineIds) => engineIds.join(" vs ")}
+    />
   );
 }
 
 function EngineResultList({ engines }) {
   return (
-    <section className="engineIntelligenceBlock" aria-labelledby="engine-intelligence-engines-heading">
-      <h3 id="engine-intelligence-engines-heading">Engine results</h3>
-      {engines.length === 0 ? <p className="muted">No engine results</p> : (
-        <div className="engineIntelligenceCards">
-          {engines.map((engine) => (
-            <article className="engineIntelligenceCard" key={engine.engineId}>
-              <div className="engineIntelligenceCardHeader">
-                <strong>{engineDisplayName(engine)}</strong>
-                <span>{engine.engineId} / {engine.engineType}</span>
-              </div>
-              <dl>
-                <Field label="Status" value={engineStatusLabel(engine.status)} />
-                <Field label="Score bucket" value={engine.scoreBucket} />
-                {!isOperationalStatus(engine.status) && engine.riskLevel && <Field label="Risk level" value={engine.riskLevel} />}
-              </dl>
-              <ReasonCodes reasonCodes={engine.reasonCodes} />
-            </article>
-          ))}
-        </div>
-      )}
-    </section>
+    <BoundedEngineResultsView
+      engines={engines}
+      sectionClassName="engineIntelligenceBlock"
+      cardClassName="engineIntelligenceCard"
+      headingId="engine-intelligence-engines-heading"
+      title="Engine results"
+      emptyCopy="No engine results"
+      FieldComponent={Field}
+      ReasonCodesComponent={ReasonCodes}
+      showDisplayName
+      hideRiskForOperationalStatus
+    />
   );
 }
 
@@ -188,19 +183,16 @@ function DiagnosticSignalList({ signals }) {
 
 function EngineIntelligenceWarningList({ warnings }) {
   return (
-    <section className="engineIntelligenceBlock" aria-labelledby="engine-intelligence-warnings-heading">
-      <h3 id="engine-intelligence-warnings-heading">Warnings</h3>
-      {warnings.length === 0 ? <p className="muted">No warnings</p> : (
-        <ul className="engineIntelligenceWarningList">
-          {warnings.map((warning) => (
-            <li key={warning.warningCode}>
-              <span>{warning.warningCode}</span>
-              <strong>{warning.count}</strong>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+    <WarningListView
+      warnings={warnings}
+      sectionClassName="engineIntelligenceBlock"
+      cardClassName="engineIntelligenceCard"
+      headingId="engine-intelligence-warnings-heading"
+      title="Warnings"
+      emptyCopy="No warnings"
+      FieldComponent={Field}
+      compact
+    />
   );
 }
 
@@ -261,36 +253,6 @@ function isValidAvailablePanelResult(result) {
       && Array.isArray(result.diagnosticSignals)
       && Array.isArray(result.warnings)
   );
-}
-
-function engineStatusLabel(status) {
-  if (status === "TIMEOUT") {
-    return "Engine timed out";
-  }
-  if (status === "UNAVAILABLE") {
-    return "Engine unavailable";
-  }
-  if (status === "DEGRADED") {
-    return "Engine response degraded";
-  }
-  return status || "UNKNOWN";
-}
-
-function engineDisplayName(engine) {
-  if (engine?.engineId === "velocity.primary") {
-    return "Velocity";
-  }
-  if (engine?.engineId === "rules.primary") {
-    return "Rules";
-  }
-  if (engine?.engineId === "ml.python.primary") {
-    return "ML model";
-  }
-  return engine?.engineId || "Engine";
-}
-
-function isOperationalStatus(status) {
-  return OPERATIONAL_STATUSES.has(status);
 }
 
 function safeDomId(value) {

@@ -162,6 +162,7 @@ function deferred() {
 function detail(overrides = {}) {
   return {
     transactionId: "txn-1",
+    reasonCodes: [],
     engineIntelligence: {
       status: "AVAILABLE",
       contractVersion: 1,

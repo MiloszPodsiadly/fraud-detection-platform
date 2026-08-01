@@ -22,6 +22,7 @@ class EngineIntelligenceApiArchitectureGuardTest {
             "analyst-console-ui/src/components/EngineIntelligenceAnalystUiDisplayDocsTest.test.js",
             "analyst-console-ui/src/components/EngineIntelligenceFeedbackPanel.jsx",
             "analyst-console-ui/src/components/EngineIntelligenceFeedbackPanel.test.jsx",
+            "analyst-console-ui/src/components/EngineIntelligenceDiagnosticView.jsx",
             "analyst-console-ui/src/components/EngineIntelligencePanel.jsx",
             "analyst-console-ui/src/components/EngineIntelligencePanel.test.jsx",
             "analyst-console-ui/src/components/EngineIntelligencePanelScopeGuard.test.js",

@@ -117,6 +117,20 @@ describe("transactionRiskIntelligenceValidation", () => {
     expect(validateTransactionRiskIntelligenceDetail(value)).toMatchObject({ valid: false, reason: "MISSING_ENGINE_INTELLIGENCE" });
   });
 
+  it.each([
+    ["top-level detail", () => detail({ extra: "x" }), "INVALID_DETAIL_RESPONSE"],
+    ["engine-intelligence", () => detail({ engineIntelligence: { ...engineIntelligence(), extra: "x" } }), "INVALID_ENGINE_INTELLIGENCE_ENVELOPE"],
+    ["analyst-recommendation", () => detail({ analystRecommendation: { ...analystRecommendation(), extra: "x" } }), "INVALID_ANALYST_RECOMMENDATION_ENVELOPE"],
+    ["non-decisioning", () => detail({
+      analystRecommendation: {
+        ...analystRecommendation(),
+        nonDecisioning: { ...analystRecommendation().nonDecisioning, extra: true }
+      }
+    }), "INVALID_ANALYST_RECOMMENDATION_NON_DECISIONING"]
+  ])("rejects benign extra %s field", (_caseName, factory, reason) => {
+    expect(validateTransactionRiskIntelligenceDetail(factory())).toMatchObject({ valid: false, reason });
+  });
+
   it("rejects malformed display fixtures", () => {
     expect(validateTransactionRiskIntelligenceDetail(malformedMissingEngineIntelligence())).toMatchObject({
       valid: false,
@@ -324,6 +338,22 @@ describe("transactionRiskIntelligenceValidation", () => {
     expect(validateTransactionRiskIntelligenceDetail(detail({
       engineIntelligence: { ...engineIntelligence(), generatedAt }
     }))).toMatchObject({ valid: false, reason: "INVALID_ENGINE_INTELLIGENCE_METADATA" });
+  });
+
+  it.each(timestampCases())("applies shared timestamp matrix to engineIntelligence.generatedAt $caseId", ({ value, valid }) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      engineIntelligence: { ...engineIntelligence(), generatedAt: value }
+    })).valid).toBe(valid);
+  });
+
+  it.each(stringBoundaryCases().filter(({ maxLength }) => maxLength === 128))("applies shared bounded-string matrix to transactionId $caseId", ({ value, valid }) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({ transactionId: value })).valid).toBe(valid);
+  });
+
+  it.each(stringBoundaryCases().filter(({ maxLength }) => maxLength === 64))("applies recommendationVersion bound $caseId", ({ value, valid }) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      analystRecommendation: analystRecommendation({ recommendationVersion: value })
+    })).valid).toBe(valid);
   });
 
   it.each([
@@ -574,4 +604,16 @@ function sharedInvalidEngineIntelligenceCases() {
     "../common-events/src/test/resources/fixtures/engine-intelligence/invalid_semantic_cases.json"
   ), "utf8")).cases
     .filter((semanticCase) => semanticCase.category === "engine-intelligence");
+}
+
+function timestampCases() {
+  return publicApiFixture("canonical-utc-timestamp-cases.json").cases;
+}
+
+function stringBoundaryCases() {
+  return publicApiFixture("public-string-boundary-cases.json").cases;
+}
+
+function publicApiFixture(name) {
+  return JSON.parse(readFileSync(resolve(process.cwd(), "../contract-fixtures/public-api", name), "utf8"));
 }

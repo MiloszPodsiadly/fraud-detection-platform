@@ -80,7 +80,9 @@ public class FraudFeedbackRecord {
     public String getCreatedBy() { return createdBy; }
     public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public List<String> getDecisionReasonCodes() { return decisionReasonCodes; }
-    public void setDecisionReasonCodes(List<String> decisionReasonCodes) { this.decisionReasonCodes = decisionReasonCodes; }
+    public void setDecisionReasonCodes(List<String> decisionReasonCodes) {
+        this.decisionReasonCodes = decisionReasonCodes == null ? null : List.copyOf(decisionReasonCodes);
+    }
     public String getNotes() { return notes; }
     public void setNotes(String notes) { this.notes = notes; }
     public Double getFraudScore() { return fraudScore; }
@@ -98,7 +100,9 @@ public class FraudFeedbackRecord {
     public EngineIntelligenceComparisonType getComparisonType() { return comparisonType; }
     public void setComparisonType(EngineIntelligenceComparisonType comparisonType) { this.comparisonType = comparisonType; }
     public List<String> getComparedEngineIds() { return comparedEngineIds; }
-    public void setComparedEngineIds(List<String> comparedEngineIds) { this.comparedEngineIds = comparedEngineIds; }
+    public void setComparedEngineIds(List<String> comparedEngineIds) {
+        this.comparedEngineIds = comparedEngineIds == null ? null : List.copyOf(comparedEngineIds);
+    }
     public EngineIntelligenceAgreementStatus getAgreementStatus() { return agreementStatus; }
     public void setAgreementStatus(EngineIntelligenceAgreementStatus agreementStatus) { this.agreementStatus = agreementStatus; }
     public EngineIntelligenceRiskMismatchStatus getRiskMismatchStatus() { return riskMismatchStatus; }
@@ -114,5 +118,7 @@ public class FraudFeedbackRecord {
     public Instant getAnalystRecommendationGeneratedAt() { return analystRecommendationGeneratedAt; }
     public void setAnalystRecommendationGeneratedAt(Instant analystRecommendationGeneratedAt) { this.analystRecommendationGeneratedAt = analystRecommendationGeneratedAt; }
     public List<String> getAnalystRecommendationReasonCodes() { return analystRecommendationReasonCodes; }
-    public void setAnalystRecommendationReasonCodes(List<String> analystRecommendationReasonCodes) { this.analystRecommendationReasonCodes = analystRecommendationReasonCodes; }
+    public void setAnalystRecommendationReasonCodes(List<String> analystRecommendationReasonCodes) {
+        this.analystRecommendationReasonCodes = analystRecommendationReasonCodes == null ? null : List.copyOf(analystRecommendationReasonCodes);
+    }
 }

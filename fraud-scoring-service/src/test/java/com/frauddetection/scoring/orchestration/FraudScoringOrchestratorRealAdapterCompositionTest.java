@@ -9,6 +9,7 @@ import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.features.VelocityFeatureContract;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.model.Money;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.config.ScoringProperties;
@@ -158,7 +159,7 @@ class FraudScoringOrchestratorRealAdapterCompositionTest {
                 FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW,
                 VelocityFeatureContract.CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW_TEXT
         );
-        features.put(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("25000.00"));
+        features.put(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("100.00"));
         features.put(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 6.0d);
         TransactionEnrichedEvent eventWithVelocityFeatures = new TransactionEnrichedEvent(
                 event.eventId(),
@@ -168,21 +169,21 @@ class FraudScoringOrchestratorRealAdapterCompositionTest {
                 event.accountId(),
                 event.createdAt(),
                 event.transactionTimestamp(),
-                event.transactionAmount(),
+                new Money(new BigDecimal("100.00"), "PLN"),
                 event.merchantInfo(),
                 event.deviceInfo(),
                 event.locationInfo(),
                 event.customerContext(),
-                event.recentTransactionCount(),
-                event.recentTransactionCountWindow(),
-                event.recentAmountSum(),
-                event.recentAmountSumWindow(),
-                event.transactionVelocityPerMinute(),
+                6,
+                VelocityFeatureContract.CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW_TEXT,
+                new Money(new BigDecimal("100.00"), "PLN"),
+                VelocityFeatureContract.CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW_TEXT,
+                6.0d,
                 event.merchantFrequency7d(),
-                event.deviceNovelty(),
-                event.countryMismatch(),
-                event.proxyOrVpnDetected(),
-                event.featureFlags(),
+                false,
+                false,
+                false,
+                List.of(),
                 Map.copyOf(features)
         );
         return new ScoringContext(

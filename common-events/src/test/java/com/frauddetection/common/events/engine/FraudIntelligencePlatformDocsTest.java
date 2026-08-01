@@ -87,7 +87,8 @@ class FraudIntelligencePlatformDocsTest {
                 .contains("`fallbackReason` is accepted only as a JSON input alias")
                 .contains("is not serialized as output")
                 .contains("`AVAILABLE`")
-                .contains("`LOW`, `MEDIUM`, or `HIGH` required")
+                .contains("may be `UNKNOWN` when no authoritative calibration policy exists")
+                .contains("Confidence is not inferred from engine type, reason-code count, score magnitude")
                 .contains("Contribution `direction` is the semantic source of truth")
                 .contains("Evidence `title` and `description` are bounded display summaries only")
                 .contains("Legacy reason codes may contain the word `METADATA` only as explicitly allowlisted")
@@ -104,7 +105,9 @@ class FraudIntelligencePlatformDocsTest {
                 .contains("The current non-goal is still exposing raw `FraudEngineResult` or raw engine payloads")
                 .contains("does not introduce `ScoringContext`, `FraudSignalEngine`")
                 .contains("model retraining")
-                .contains("rule updates");
+                .contains("rule updates")
+                .doesNotContain("Rules and ML available results still require")
+                .doesNotContain("`LOW`, `MEDIUM`, or `HIGH` confidence unless a future versioned contract changes");
         assertThat(docsLower)
                 .contains("not a final banking decision")
                 .contains("not automatic blocking")

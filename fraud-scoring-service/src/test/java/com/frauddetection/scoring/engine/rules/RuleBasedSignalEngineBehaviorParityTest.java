@@ -1,6 +1,7 @@
 package com.frauddetection.scoring.engine.rules;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
+import com.frauddetection.common.events.engine.FraudEngineConfidence;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.model.Money;
@@ -49,7 +50,7 @@ class RuleBasedSignalEngineBehaviorParityTest {
     }
 
     @Test
-    void thresholdBoundaryRiskAndAlertRecommendationMirrorProduction() {
+    void consolidatedRulesV1ThresholdRiskAndAlertRecommendationMirrorProduction() {
         TransactionEnrichedEvent event = event(true, true, false, 5, 5.0d, BigDecimal.TEN,
                 List.of(
                         ReasonCode.DEVICE_NOVELTY.wireValue(),
@@ -67,7 +68,7 @@ class RuleBasedSignalEngineBehaviorParityTest {
         FraudScoreResult production = assertProductionMappingParity(event);
         var adapterResult = adapter.evaluate(context(event));
 
-        assertThat(production.riskLevel()).isEqualTo(RiskLevel.HIGH);
+        assertThat(production.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
         assertThat(production.alertRecommended()).isEqualTo(alertRecommended(adapterResult.riskLevel()));
     }
 
@@ -95,7 +96,7 @@ class RuleBasedSignalEngineBehaviorParityTest {
 
         FraudScoreResult production = assertProductionMappingParity(event);
 
-        assertThat(production.reasonCodes()).containsExactly(ReasonCode.RAPID_TRANSFER_FRAUD_CASE.wireValue());
+        assertThat(production.reasonCodes()).containsExactly(ReasonCode.RAPID_PLN_20K_BURST.wireValue());
     }
 
     @Test
@@ -127,6 +128,7 @@ class RuleBasedSignalEngineBehaviorParityTest {
         assertThat(adapterResult.reasonCodes()).containsExactlyElementsOf(production.reasonCodes());
         assertThat(adapterResult.modelName()).isEqualTo(production.modelName());
         assertThat(adapterResult.modelVersion()).isEqualTo(production.modelVersion());
+        assertThat(adapterResult.confidence()).isEqualTo(FraudEngineConfidence.UNKNOWN);
         assertThat(alertRecommended(adapterResult.riskLevel())).isEqualTo(production.alertRecommended());
         return production;
     }

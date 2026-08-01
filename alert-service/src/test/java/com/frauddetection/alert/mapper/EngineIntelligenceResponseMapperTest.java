@@ -1,6 +1,9 @@
 package com.frauddetection.alert.mapper;
 
 import com.frauddetection.alert.api.EngineIntelligenceEngineStatusResponse;
+import com.frauddetection.alert.api.EngineIntelligenceComparisonResponse;
+import com.frauddetection.alert.api.EngineIntelligenceDiagnosticSignalResponse;
+import com.frauddetection.alert.api.EngineIntelligenceEngineResponse;
 import com.frauddetection.alert.api.EngineIntelligenceResponse;
 import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceComparisonReadModel;
@@ -27,6 +30,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class EngineIntelligenceResponseMapperTest {
 
@@ -81,6 +85,42 @@ class EngineIntelligenceResponseMapperTest {
         assertThat(response.comparison().agreementStatus()).isEqualTo(EngineIntelligenceAgreementStatus.DISAGREEMENT);
         assertThat(response.comparison().riskMismatchStatus()).isEqualTo(EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH);
         assertThat(response.comparison().scoreDeltaBucket()).isEqualTo(EngineIntelligenceScoreDeltaBucket.LARGE);
+    }
+
+    @Test
+    void publicComparisonResponseRejectsPartialIdentity() {
+        assertThatThrownBy(() -> new EngineIntelligenceComparisonResponse(
+                com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType.RULES_VS_ML,
+                null,
+                EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
+                EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
+                EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
+        )).hasMessage("comparedEngineIds is required");
+    }
+
+    @Test
+    void publicEngineResponseRejectsAvailableWithoutRiskLevel() {
+        assertThatThrownBy(() -> new EngineIntelligenceEngineResponse(
+                "rules.primary",
+                FraudEngineType.RULES,
+                EngineIntelligenceEngineStatusResponse.AVAILABLE,
+                null,
+                EngineIntelligenceScoreBucket.HIGH,
+                List.of("HIGH_VELOCITY")
+        )).hasMessage("ENGINE_INTELLIGENCE_AVAILABLE_STATUS_RISK_LEVEL_REQUIRED");
+    }
+
+    @Test
+    void publicDiagnosticSignalResponseRejectsAvailableFraudSignalWithoutRiskLevel() {
+        assertThatThrownBy(() -> new EngineIntelligenceDiagnosticSignalResponse(
+                "rules.primary",
+                FraudEngineType.RULES,
+                EngineIntelligenceEngineStatusResponse.AVAILABLE,
+                EngineIntelligenceSignalCategory.FRAUD_SIGNAL,
+                null,
+                EngineIntelligenceScoreBucket.HIGH,
+                "HIGH_VELOCITY"
+        )).hasMessage("ENGINE_INTELLIGENCE_FRAUD_SIGNAL_RISK_LEVEL_REQUIRED");
     }
 
     @Test
@@ -281,38 +321,53 @@ class EngineIntelligenceResponseMapperTest {
                         scoreDeltaBucket
                 ),
                 List.of(
-                        engine("rules.primary", FraudEngineType.RULES, rulesStatus, List.of("RULE_MATCH")),
-                        engine("ml.python.primary", FraudEngineType.ML_MODEL, mlStatus, List.of("ML_SIGNAL"))
+                        engine("rules.primary", FraudEngineType.RULES, rulesStatus, List.of("HIGH_VELOCITY")),
+                        engine("ml.python.primary", FraudEngineType.ML_MODEL, mlStatus, List.of("ML_MODEL_SIGNAL"))
                 ),
-                List.of(new EngineIntelligenceDiagnosticSignalReadModel(
-                        "rules.primary",
-                        FraudEngineType.RULES,
-                        rulesStatus,
-                        EngineIntelligenceSignalCategory.FRAUD_SIGNAL,
-                        RiskLevel.HIGH,
-                        EngineIntelligenceScoreBucket.HIGH,
-                        "RULE_MATCH"
-                )),
+                diagnosticSignals(rulesStatus),
                 warnings
         );
     }
 
+    private List<EngineIntelligenceDiagnosticSignalReadModel> diagnosticSignals(FraudEngineStatus rulesStatus) {
+        if (rulesStatus == FraudEngineStatus.AVAILABLE) {
+            return List.of(new EngineIntelligenceDiagnosticSignalReadModel(
+                    "rules.primary",
+                    FraudEngineType.RULES,
+                    rulesStatus,
+                    EngineIntelligenceSignalCategory.FRAUD_SIGNAL,
+                    RiskLevel.HIGH,
+                    EngineIntelligenceScoreBucket.HIGH,
+                    "HIGH_VELOCITY"
+            ));
+        }
+        return List.of(new EngineIntelligenceDiagnosticSignalReadModel(
+                "rules.primary",
+                FraudEngineType.RULES,
+                rulesStatus,
+                EngineIntelligenceSignalCategory.OPERATIONAL_SIGNAL,
+                null,
+                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                "ORCHESTRATOR_ENGINE_TIMEOUT"
+        ));
+    }
+
     private EngineIntelligenceReadModel readModelWithManyValues() {
-        List<String> reasonCodes = java.util.stream.IntStream.range(0, 100)
-                .mapToObj(index -> "REASON_" + index)
+        List<String> reasonCodes = java.util.stream.IntStream.range(0, 5)
+                .mapToObj(index -> "HIGH_VELOCITY")
                 .toList();
         List<EngineIntelligenceEngineReadModel> engines = java.util.stream.IntStream.range(0, 100)
-                .mapToObj(index -> engine("engine-" + index, FraudEngineType.RULES, FraudEngineStatus.AVAILABLE, reasonCodes))
+                .mapToObj(index -> engine("rules.primary", FraudEngineType.RULES, FraudEngineStatus.AVAILABLE, reasonCodes))
                 .toList();
         List<EngineIntelligenceDiagnosticSignalReadModel> diagnosticSignals = java.util.stream.IntStream.range(0, 100)
                 .mapToObj(index -> new EngineIntelligenceDiagnosticSignalReadModel(
-                        "engine-" + index,
+                        "rules.primary",
                         FraudEngineType.RULES,
                         FraudEngineStatus.AVAILABLE,
                         EngineIntelligenceSignalCategory.FRAUD_SIGNAL,
                         RiskLevel.HIGH,
                         EngineIntelligenceScoreBucket.HIGH,
-                        "REASON_" + index
+                        "HIGH_VELOCITY"
                 ))
                 .toList();
         List<EngineIntelligenceWarningReadModel> warnings = java.util.stream.IntStream.range(0, 100)

@@ -1,5 +1,10 @@
 package com.frauddetection.alert.feedback;
 
+import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparison;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -8,6 +13,7 @@ import java.util.List;
 public class FraudFeedbackMapper {
 
     public FraudFeedbackResponse toResponse(FraudFeedbackRecord record) {
+        EngineIntelligenceComparisonSnapshot comparison = comparisonSnapshot(record);
         return new FraudFeedbackResponse(
                 record.getFeedbackId(),
                 record.getTransactionId(),
@@ -27,11 +33,11 @@ public class FraudFeedbackMapper {
                 record.getScoredAt(),
                 record.getTransactionTimestamp(),
                 record.getEngineIntelligenceStatus(),
-                record.getComparisonType(),
-                immutable(record.getComparedEngineIds()),
-                record.getAgreementStatus(),
-                record.getRiskMismatchStatus(),
-                record.getScoreDeltaBucket(),
+                comparison.comparisonType(),
+                comparison.comparedEngineIds(),
+                comparison.agreementStatus(),
+                comparison.riskMismatchStatus(),
+                comparison.scoreDeltaBucket(),
                 record.getAnalystRecommendationStatus(),
                 record.getAnalystRecommendation(),
                 record.getAnalystRecommendationVersion(),
@@ -40,7 +46,55 @@ public class FraudFeedbackMapper {
         );
     }
 
+    private static EngineIntelligenceComparisonSnapshot comparisonSnapshot(FraudFeedbackRecord record) {
+        if (!hasComparisonSnapshot(record)) {
+            return EngineIntelligenceComparisonSnapshot.absent();
+        }
+        try {
+            EngineIntelligenceComparison comparison = new EngineIntelligenceComparison(
+                    record.getComparisonType(),
+                    record.getComparedEngineIds(),
+                    record.getAgreementStatus(),
+                    record.getRiskMismatchStatus(),
+                    record.getScoreDeltaBucket()
+            );
+            return new EngineIntelligenceComparisonSnapshot(
+                    comparison.comparisonType(),
+                    comparison.comparedEngineIds(),
+                    comparison.agreementStatus(),
+                    comparison.riskMismatchStatus(),
+                    comparison.scoreDeltaBucket()
+            );
+        } catch (RuntimeException exception) {
+            return EngineIntelligenceComparisonSnapshot.absent();
+        }
+    }
+
+    private static boolean hasComparisonSnapshot(FraudFeedbackRecord record) {
+        return record.getComparisonType() != null
+                || record.getComparedEngineIds() != null && !record.getComparedEngineIds().isEmpty()
+                || record.getAgreementStatus() != null
+                || record.getRiskMismatchStatus() != null
+                || record.getScoreDeltaBucket() != null;
+    }
+
     private static List<String> immutable(List<String> values) {
         return values == null ? List.of() : List.copyOf(values);
+    }
+
+    private record EngineIntelligenceComparisonSnapshot(
+            EngineIntelligenceComparisonType comparisonType,
+            List<String> comparedEngineIds,
+            EngineIntelligenceAgreementStatus agreementStatus,
+            EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
+            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket
+    ) {
+        private static EngineIntelligenceComparisonSnapshot absent() {
+            return new EngineIntelligenceComparisonSnapshot(null, List.of(), null, null, null);
+        }
+
+        private EngineIntelligenceComparisonSnapshot {
+            comparedEngineIds = immutable(comparedEngineIds);
+        }
     }
 }

@@ -14,7 +14,8 @@ import {
   isComparisonShape,
   isDiagnosticSignalShape,
   isEngineShape,
-  isWarningShape
+  isWarningShape,
+  safeString
 } from "./engineIntelligenceContractValidation.js";
 
 describe("engineIntelligenceContractValidation", () => {
@@ -35,6 +36,23 @@ describe("engineIntelligenceContractValidation", () => {
 
   it.each(sharedInvalidEngineIntelligenceCases())("rejects shared invalid semantic case $caseId", ({ engineIntelligence }) => {
     expect(isValidEngineIntelligence(engineIntelligence)).toBe(false);
+  });
+
+  it.each(timestampCases())("applies shared timestamp matrix $caseId", ({ value, valid }) => {
+    expect(isCanonicalUtcTimestamp(value)).toBe(valid);
+  });
+
+  it.each(stringBoundaryCases())("applies shared bounded-string matrix $caseId", ({ value, maxLength, valid }) => {
+    expect(safeString(value, maxLength)).toBe(valid);
+  });
+
+  it("rejects extra field at every nested public DTO", () => {
+    const fixture = sharedFixture("engine_intelligence_three_engine_golden.json");
+
+    expect(isComparisonShape({ ...fixture.comparison, extra: "x" })).toBe(false);
+    expect(isEngineShape({ ...fixture.engines[0], extra: "x" })).toBe(false);
+    expect(isDiagnosticSignalShape({ ...fixture.diagnosticSignals[0], extra: "x" })).toBe(false);
+    expect(isWarningShape({ warningCode: "ENGINE_RESULT_LIMIT_APPLIED", count: 1, extra: "x" })).toBe(false);
   });
 });
 
@@ -66,4 +84,16 @@ function sharedFixture(name) {
     "../common-events/src/test/resources/fixtures/engine-intelligence",
     name
   ), "utf8"));
+}
+
+function timestampCases() {
+  return publicApiFixture("canonical-utc-timestamp-cases.json").cases;
+}
+
+function stringBoundaryCases() {
+  return publicApiFixture("public-string-boundary-cases.json").cases;
+}
+
+function publicApiFixture(name) {
+  return JSON.parse(readFileSync(resolve(process.cwd(), "../contract-fixtures/public-api", name), "utf8"));
 }

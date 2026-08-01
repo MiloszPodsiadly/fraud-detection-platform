@@ -149,7 +149,7 @@
       }
     },
     {
-      "caseId": "generic_agreement_without_comparison_identity",
+      "caseId": "partial_comparison_identity",
       "category": "engine-intelligence",
       "commonReject": true,
       "engineIntelligence": {
@@ -158,7 +158,7 @@
         "engines": [
           {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["HIGH_VELOCITY"]}
         ],
-        "comparison": {"genericAgreement": "DISAGREEMENT", "agreementStatus": "DISAGREEMENT", "riskMismatchStatus": "MATERIAL_RISK_MISMATCH", "scoreDeltaBucket": "LARGE"},
+        "comparison": {"comparisonType": "RULES_VS_ML", "agreementStatus": "DISAGREEMENT", "riskMismatchStatus": "MATERIAL_RISK_MISMATCH", "scoreDeltaBucket": "LARGE"},
         "diagnosticSignals": [],
         "warnings": []
       }

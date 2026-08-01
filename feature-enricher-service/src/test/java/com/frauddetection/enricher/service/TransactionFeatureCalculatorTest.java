@@ -21,16 +21,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TransactionFeatureCalculatorTest {
 
-    private final TransactionFeatureCalculator calculator = new TransactionFeatureCalculator(
-            new FeatureStoreProperties(
-                    Duration.ofMinutes(1),
-                    Duration.ofDays(7),
-                    Duration.ofDays(8),
-                    Duration.ofDays(180),
-                    Duration.ofDays(30)
-            ),
-            new CurrencyAmountConverter()
-    );
+    private final TransactionFeatureCalculator calculator = new TransactionFeatureCalculator(new CurrencyAmountConverter());
 
     @Test
     void shouldCalculateFraudRelevantFeatureFlags() {

@@ -6,7 +6,6 @@ import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.features.VelocityFeatureContract;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
-import com.frauddetection.enricher.config.FeatureStoreProperties;
 import com.frauddetection.enricher.domain.EnrichedTransactionFeatures;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
 import com.frauddetection.enricher.domain.RecentTransaction;
@@ -18,7 +17,6 @@ import com.frauddetection.scoring.features.FeatureSnapshotReaderFactory;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
@@ -53,10 +51,8 @@ class VelocityProducerCompositionTest {
                 .withTransactionId("txn-velocity-producer-composition")
                 .withAmount(new BigDecimal("100.00"), "PLN")
                 .build();
-        EnrichedTransactionFeatures features = new TransactionFeatureCalculator(
-                featureStoreProperties(),
-                new CurrencyAmountConverter()
-        ).calculate(raw, velocitySnapshot());
+        EnrichedTransactionFeatures features = new TransactionFeatureCalculator(new CurrencyAmountConverter())
+                .calculate(raw, velocitySnapshot());
         TransactionEnrichedEvent enriched = new TransactionEnrichedEvent(
                 raw.eventId(),
                 raw.transactionId(),
@@ -113,13 +109,4 @@ class VelocityProducerCompositionTest {
         );
     }
 
-    private FeatureStoreProperties featureStoreProperties() {
-        return new FeatureStoreProperties(
-                VelocityFeatureContract.CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW,
-                Duration.ofDays(7),
-                Duration.ofDays(8),
-                Duration.ofDays(180),
-                Duration.ofDays(30)
-        );
-    }
 }

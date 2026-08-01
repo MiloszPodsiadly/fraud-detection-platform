@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { TransactionRiskIntelligencePanel } from "./TransactionRiskIntelligencePanel.jsx";
 import { useScoredTransactionDetail } from "../transactions/useScoredTransactionDetail.js";
 import { useFraudFeedback } from "../transactions/useFraudFeedback.js";
@@ -138,6 +140,30 @@ describe("TransactionRiskIntelligencePanel", () => {
     expect(screen.getByRole("region", { name: "Diagnostic Signals" })).toHaveTextContent("FRAUD_SIGNAL");
     expect(screen.getByRole("region", { name: "Warnings and Limitations" })).toHaveTextContent("ENGINE_RESULT_LIMIT_APPLIED");
     expect(screen.getByText("Warnings are not operational instructions.")).toBeInTheDocument();
+  });
+
+  it("renders shared three-engine golden fixture without deriving hidden fields", () => {
+    const golden = sharedEngineIntelligenceFixture("engine_intelligence_three_engine_golden.json");
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({
+        transactionId: "txn-golden-detail",
+        engineIntelligence: {
+          status: "AVAILABLE",
+          ...golden
+        }
+      }),
+      isLoading: false,
+      error: null
+    });
+
+    renderPanel({ transactionId: "txn-golden-detail" });
+
+    const engines = screen.getByRole("region", { name: "Engine Results" });
+    expect(within(engines).getByText("rules.primary")).toBeInTheDocument();
+    expect(within(engines).getByText("ml.python.primary")).toBeInTheDocument();
+    expect(within(engines).getByText("velocity.primary")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Projected Comparison" })).toHaveTextContent("RULES_VS_ML");
+    expect(screen.queryByText("modelConfidence")).not.toBeInTheDocument();
   });
 
   it("renders empty bounded arrays safely", () => {
@@ -385,4 +411,12 @@ describe("TransactionRiskIntelligencePanel", () => {
 
 function renderPanel(props = {}) {
   return render(<TransactionRiskIntelligencePanel transactionId="txn-available-1" apiClient={{}} {...props} />);
+}
+
+function sharedEngineIntelligenceFixture(name) {
+  return JSON.parse(readFileSync(resolve(
+    process.cwd(),
+    "../common-events/src/test/resources/fixtures/engine-intelligence",
+    name
+  ), "utf8"));
 }

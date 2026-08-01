@@ -10,10 +10,8 @@ import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.enums.RiskLevel;
-import com.frauddetection.common.events.features.VelocityFeatureContract;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparison;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
-import com.frauddetection.enricher.config.FeatureStoreProperties;
 import com.frauddetection.enricher.domain.EnrichedTransactionFeatures;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
 import com.frauddetection.enricher.domain.RecentTransaction;
@@ -43,7 +41,6 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -141,10 +138,8 @@ class EngineIntelligenceFullPathCompositionTest {
                 .withTransactionId("txn-full-path-velocity")
                 .withAmount(new BigDecimal("100.00"), "PLN")
                 .build();
-        EnrichedTransactionFeatures features = new TransactionFeatureCalculator(
-                featureStoreProperties(),
-                new CurrencyAmountConverter()
-        ).calculate(raw, velocityReadySnapshot());
+        EnrichedTransactionFeatures features = new TransactionFeatureCalculator(new CurrencyAmountConverter())
+                .calculate(raw, velocityReadySnapshot());
 
         return new TransactionEnrichedEvent(
                 raw.eventId(),
@@ -197,16 +192,6 @@ class EngineIntelligenceFullPathCompositionTest {
                 BigDecimal.ZERO,
                 "PLN",
                 BigDecimal.ZERO
-        );
-    }
-
-    private FeatureStoreProperties featureStoreProperties() {
-        return new FeatureStoreProperties(
-                VelocityFeatureContract.CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW,
-                Duration.ofDays(7),
-                Duration.ofDays(8),
-                Duration.ofDays(180),
-                Duration.ofDays(30)
         );
     }
 

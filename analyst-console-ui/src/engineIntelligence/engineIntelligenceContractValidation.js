@@ -3,6 +3,8 @@ export const MAX_ENGINE_INTELLIGENCE_ENGINES = 3;
 export const MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS = 5;
 export const MAX_ENGINE_INTELLIGENCE_WARNINGS = 10;
 export const MAX_ENGINE_INTELLIGENCE_REASON_CODES = 5;
+export const MAX_PUBLIC_STRING_LENGTH = 128;
+export const MAX_RECOMMENDATION_VERSION_LENGTH = 64;
 
 export const COMPARISON_TYPE = "RULES_VS_ML";
 export const COMPARED_ENGINE_IDS = Object.freeze(["rules.primary", "ml.python.primary"]);
@@ -35,7 +37,9 @@ export const ENGINE_TYPE_BY_ID = Object.freeze({
 });
 export const ENGINE_ORDER = Object.freeze(Object.keys(ENGINE_TYPE_BY_ID));
 
-const UTC_INSTANT_PATTERN = /^([1-9][0-9]{3,})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])(?:\.[0-9]{1,9})?Z$/;
+export const CANONICAL_UTC_TIMESTAMP_PATTERN = "^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,6})?Z$";
+
+const UTC_INSTANT_PATTERN = new RegExp(CANONICAL_UTC_TIMESTAMP_PATTERN);
 
 export function isCanonicalUtcTimestamp(value) {
   if (typeof value !== "string") {
@@ -45,7 +49,10 @@ export function isCanonicalUtcTimestamp(value) {
   if (!match) {
     return false;
   }
-  const [, yearText, monthText, dayText, hourText, minuteText, secondText] = match;
+  const [datePart, timePart] = value.slice(0, -1).split("T");
+  const [yearText, monthText, dayText] = datePart.split("-");
+  const [hourText, minuteText, secondWithFraction] = timePart.split(":");
+  const [secondText] = secondWithFraction.split(".");
   const year = Number(yearText);
   const month = Number(monthText);
   const day = Number(dayText);
@@ -93,34 +100,34 @@ export function normalizeComparison(value) {
 export function isEngineShape(engine) {
   return isPlainObject(engine)
     && hasOnlyKeys(engine, ["engineId", "engineType", "status", "riskLevel", "scoreBucket", "reasonCodes"])
-    && safeString(engine.engineId)
+    && safeString(engine.engineId, MAX_PUBLIC_STRING_LENGTH)
     && oneOf(engine.engineType, ENGINE_TYPES)
     && isExpectedEngineType(engine.engineId, engine.engineType)
     && oneOf(engine.status, ENGINE_STATUSES)
     && optionalOneOf(engine.riskLevel, RISK_LEVELS)
     && oneOf(engine.scoreBucket, SCORE_BUCKETS)
-    && safeStringArray(engine.reasonCodes, MAX_ENGINE_INTELLIGENCE_REASON_CODES)
+    && safeStringArray(engine.reasonCodes, MAX_ENGINE_INTELLIGENCE_REASON_CODES, MAX_PUBLIC_STRING_LENGTH)
     && isEngineResultOperationallyConsistent(engine.status, engine.scoreBucket, engine.riskLevel);
 }
 
 export function isDiagnosticSignalShape(signal) {
   return isPlainObject(signal)
     && hasOnlyKeys(signal, ["engineId", "engineType", "engineStatus", "signalCategory", "riskLevel", "scoreBucket", "reasonCode"])
-    && safeString(signal.engineId)
+    && safeString(signal.engineId, MAX_PUBLIC_STRING_LENGTH)
     && oneOf(signal.engineType, ENGINE_TYPES)
     && isExpectedEngineType(signal.engineId, signal.engineType)
     && oneOf(signal.engineStatus, ENGINE_STATUSES)
     && oneOf(signal.signalCategory, SIGNAL_CATEGORIES)
     && optionalOneOf(signal.riskLevel, RISK_LEVELS)
     && oneOf(signal.scoreBucket, SCORE_BUCKETS)
-    && safeString(signal.reasonCode)
+    && safeString(signal.reasonCode, MAX_PUBLIC_STRING_LENGTH)
     && isDiagnosticSignalOperationallyConsistent(signal.signalCategory, signal.engineStatus, signal.scoreBucket, signal.riskLevel);
 }
 
 export function isWarningShape(warning, allowedWarningCodes = null) {
   return isPlainObject(warning)
     && hasOnlyKeys(warning, ["warningCode", "count"])
-    && safeString(warning.warningCode)
+    && safeString(warning.warningCode, MAX_PUBLIC_STRING_LENGTH)
     && (allowedWarningCodes === null || oneOf(warning.warningCode, allowedWarningCodes))
     && Number.isInteger(warning.count)
     && warning.count >= 0;
@@ -148,12 +155,17 @@ export function isBoundedArray(value, maxLength) {
   return Array.isArray(value) && value.length <= maxLength;
 }
 
-export function safeString(value) {
-  return typeof value === "string" && value.trim().length > 0;
+export function safeString(value, maxLength = MAX_PUBLIC_STRING_LENGTH) {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= maxLength
+    && value.trim().length === value.length
+    && !hasControlCharacter(value);
 }
 
-export function safeStringArray(value, maxLength) {
-  return isBoundedArray(value, maxLength) && value.every(safeString);
+export function safeStringArray(value, maxLength, maxStringLength = MAX_PUBLIC_STRING_LENGTH) {
+  return isBoundedArray(value, maxLength)
+    && value.every((item) => safeString(item, maxStringLength));
 }
 
 export function oneOf(value, allowedValues) {
@@ -168,6 +180,11 @@ export function hasOnlyKeys(value, allowedKeys) {
   const actualKeys = Object.keys(value);
   return actualKeys.length === allowedKeys.length
     && allowedKeys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+}
+
+export function hasOnlyKnownKeys(value, allowedKeys) {
+  return isPlainObject(value)
+    && Object.keys(value).every((key) => allowedKeys.includes(key));
 }
 
 export function isPlainObject(value) {
@@ -186,14 +203,27 @@ function hasExactComparedEngineIds(value) {
 
 function isEngineResultOperationallyConsistent(status, scoreBucket, riskLevel) {
   if (status === "AVAILABLE") {
-    return riskLevel !== null && riskLevel !== undefined && scoreBucket !== "UNAVAILABLE";
+    return riskLevel !== null && riskLevel !== undefined && isUsableAvailableScoreBucket(scoreBucket);
   }
   return scoreBucket === "UNAVAILABLE" && (riskLevel === null || riskLevel === undefined);
 }
 
 function isDiagnosticSignalOperationallyConsistent(signalCategory, engineStatus, scoreBucket, riskLevel) {
-  if (engineStatus !== "AVAILABLE" || signalCategory === "OPERATIONAL_SIGNAL") {
+  if (engineStatus !== "AVAILABLE") {
+    return signalCategory === "OPERATIONAL_SIGNAL"
+      && scoreBucket === "UNAVAILABLE"
+      && (riskLevel === null || riskLevel === undefined);
+  }
+  if (signalCategory === "OPERATIONAL_SIGNAL") {
     return scoreBucket === "UNAVAILABLE" && (riskLevel === null || riskLevel === undefined);
   }
-  return riskLevel !== null && riskLevel !== undefined && scoreBucket !== "UNAVAILABLE";
+  return riskLevel !== null && riskLevel !== undefined && isUsableAvailableScoreBucket(scoreBucket);
+}
+
+function isUsableAvailableScoreBucket(scoreBucket) {
+  return scoreBucket === "LOW" || scoreBucket === "MEDIUM" || scoreBucket === "HIGH" || scoreBucket === "VERY_HIGH";
+}
+
+function hasControlCharacter(value) {
+  return /[\u0000-\u001F\u007F]/.test(value);
 }

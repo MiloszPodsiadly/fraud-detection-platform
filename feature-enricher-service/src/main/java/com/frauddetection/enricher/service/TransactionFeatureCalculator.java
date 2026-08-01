@@ -5,7 +5,6 @@ import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.features.FraudFeatureThresholdContract;
 import com.frauddetection.common.events.features.VelocityFeatureContract;
 import com.frauddetection.common.events.model.Money;
-import com.frauddetection.enricher.config.FeatureStoreProperties;
 import com.frauddetection.enricher.domain.EnrichedTransactionFeatures;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
 import org.springframework.stereotype.Component;
@@ -23,8 +22,7 @@ public class TransactionFeatureCalculator {
 
     private final CurrencyAmountConverter currencyAmountConverter;
 
-    public TransactionFeatureCalculator(FeatureStoreProperties featureStoreProperties, CurrencyAmountConverter currencyAmountConverter) {
-        Objects.requireNonNull(featureStoreProperties, "featureStoreProperties is required");
+    public TransactionFeatureCalculator(CurrencyAmountConverter currencyAmountConverter) {
         this.currencyAmountConverter = Objects.requireNonNull(currencyAmountConverter, "currencyAmountConverter is required");
     }
 

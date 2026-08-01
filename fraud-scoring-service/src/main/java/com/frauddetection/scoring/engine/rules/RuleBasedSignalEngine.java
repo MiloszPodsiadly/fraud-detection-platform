@@ -97,7 +97,7 @@ public final class RuleBasedSignalEngine implements FraudSignalEngine {
                 FraudEngineStatus.AVAILABLE,
                 productionResult.fraudScore(),
                 productionResult.riskLevel(),
-                reasonCodes.isEmpty() ? FraudEngineConfidence.LOW : FraudEngineConfidence.MEDIUM,
+                FraudEngineConfidence.UNKNOWN,
                 reasonCodes,
                 contributionsFor(reasonCodes),
                 evidenceFor(reasonCodes),

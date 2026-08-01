@@ -6,6 +6,7 @@ import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.client.RestClientException;
 
 import java.net.SocketTimeoutException;
 import java.time.Instant;
@@ -20,6 +21,7 @@ import static com.frauddetection.scoring.engine.ml.PythonMlSignalEngineTestSuppo
 import static com.frauddetection.scoring.engine.ml.PythonMlSignalEngineTestSupport.sourceThrowing;
 import static com.frauddetection.scoring.engine.ml.PythonMlSignalEngineTestSupport.unavailableResult;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PythonMlSignalEngineAvailabilityStatusTest {
 
@@ -94,11 +96,32 @@ class PythonMlSignalEngineAvailabilityStatusTest {
     @Test
     void mlClientExceptionDoesNotLeakExceptionMessage() {
         FraudSignalEvaluation result = new PythonMlSignalEngine(
-                sourceThrowing(new IllegalStateException("raw response body token endpoint stacktrace"))
+                sourceThrowing(new RestClientException("raw response body token endpoint stacktrace"))
         ).evaluate(context());
 
         assertFailure(result, FraudEngineStatus.UNAVAILABLE, PythonMlSignalReasonCode.ML_CLIENT_ERROR);
         assertThat(flatten(result)).doesNotContain("raw response body", "token", "endpoint", "stacktrace");
+    }
+
+    @Test
+    void programmerRuntimeExceptionPropagatesToOrchestratorIsolation() {
+        PythonMlSignalEngine adapter = new PythonMlSignalEngine(
+                sourceThrowing(new IllegalStateException("programmer bug token stacktrace"))
+        );
+
+        assertThatThrownBy(() -> adapter.evaluate(context()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("programmer bug");
+    }
+
+    @Test
+    void nullPointerExceptionPropagatesToOrchestratorIsolation() {
+        PythonMlSignalEngine adapter = new PythonMlSignalEngine(
+                sourceThrowing(new NullPointerException("secret token"))
+        );
+
+        assertThatThrownBy(() -> adapter.evaluate(context()))
+                .isInstanceOf(NullPointerException.class);
     }
 
     @Test

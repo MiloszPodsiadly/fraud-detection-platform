@@ -20,6 +20,7 @@ final class FraudScoringOrchestratorMetricLabels {
             "invalid_value",
             "inconsistent",
             "timeout",
+            "client_error",
             "exception",
             "null_result",
             "publication_failure",

@@ -37,6 +37,41 @@ const NON_DECISIONING_FLAGS = [
 ];
 const MAX_WARNINGS = 10;
 const MAX_REASON_CODES = 5;
+const DETAIL_KEYS = [
+  "transactionId",
+  "customerId",
+  "correlationId",
+  "transactionTimestamp",
+  "scoredAt",
+  "transactionAmount",
+  "merchantInfo",
+  "fraudScore",
+  "riskLevel",
+  "alertRecommended",
+  "reasonCodes",
+  "engineIntelligence",
+  "analystRecommendation"
+];
+const ENGINE_INTELLIGENCE_KEYS = [
+  "status",
+  "contractVersion",
+  "generatedAt",
+  "comparison",
+  "engines",
+  "diagnosticSignals",
+  "warnings"
+];
+const ANALYST_RECOMMENDATION_KEYS = [
+  "status",
+  "recommendation",
+  "recommendationVersion",
+  "generatedAt",
+  "confidence",
+  "source",
+  "reasonCodes",
+  "warnings",
+  "nonDecisioning"
+];
 
 const UNSAFE_FIELD_NAMES = [
   ["raw", "ml", "request"].join(""),
@@ -61,13 +96,25 @@ export function validateTransactionRiskIntelligenceDetail(detail) {
   if (containsUnsafeFieldName(detail)) {
     return invalid("UNSAFE_DETAIL_RESPONSE");
   }
+  if (!engineIntelligenceContract.hasOnlyKnownKeys(detail, DETAIL_KEYS)) {
+    return invalid("INVALID_DETAIL_RESPONSE");
+  }
   if (!safeString(detail.transactionId)) {
     return invalid("MISSING_TRANSACTION_ID");
+  }
+  if (!validOptionalTimestamp(detail.transactionTimestamp) || !validOptionalTimestamp(detail.scoredAt)) {
+    return invalid("INVALID_DETAIL_TIMESTAMP");
+  }
+  if (!isBoundedArray(detail.reasonCodes, MAX_REASON_CODES) || !detail.reasonCodes.every((reasonCode) => safeString(reasonCode))) {
+    return invalid("INVALID_DETAIL_REASON_CODES");
   }
   if (!detail.engineIntelligence || typeof detail.engineIntelligence !== "object" || Array.isArray(detail.engineIntelligence)) {
     return invalid("MISSING_ENGINE_INTELLIGENCE");
   }
   const engineIntelligence = detail.engineIntelligence;
+  if (!engineIntelligenceContract.hasOnlyKeys(engineIntelligence, ENGINE_INTELLIGENCE_KEYS)) {
+    return invalid("INVALID_ENGINE_INTELLIGENCE_ENVELOPE");
+  }
   if (!DETAIL_STATUSES.has(engineIntelligence.status)) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_STATUS");
   }
@@ -141,10 +188,13 @@ function validateAnalystRecommendation(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return invalid("MISSING_ANALYST_RECOMMENDATION");
   }
+  if (!engineIntelligenceContract.hasOnlyKnownKeys(value, ANALYST_RECOMMENDATION_KEYS)) {
+    return invalid("INVALID_ANALYST_RECOMMENDATION_ENVELOPE");
+  }
   if (!oneOf(value.status, ANALYST_RECOMMENDATION_STATUSES)) {
     return invalid("INVALID_ANALYST_RECOMMENDATION_STATUS");
   }
-  if (!safeString(value.recommendationVersion)) {
+  if (!safeString(value.recommendationVersion, engineIntelligenceContract.MAX_RECOMMENDATION_VERSION_LENGTH)) {
     return invalid("INVALID_ANALYST_RECOMMENDATION_VERSION");
   }
   if (!oneOf(value.confidence, ANALYST_RECOMMENDATION_CONFIDENCES)) {
@@ -187,7 +237,7 @@ function validateAnalystRecommendation(value) {
 }
 
 function isNonDecisioningShape(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value))
+  return engineIntelligenceContract.hasOnlyKeys(value, NON_DECISIONING_FLAGS)
     && NON_DECISIONING_FLAGS.every((flag) => value[flag] === true);
 }
 
@@ -196,7 +246,11 @@ function isBoundedArray(value, maxLength) {
 }
 
 function safeStringArray(value, maxLength) {
-  return isBoundedArray(value, maxLength) && value.every(safeString);
+  return engineIntelligenceContract.safeStringArray(
+    value,
+    maxLength,
+    engineIntelligenceContract.MAX_PUBLIC_STRING_LENGTH
+  );
 }
 
 function isNumberOrNull(value) {
@@ -207,12 +261,16 @@ function isStringOrNull(value) {
   return value === null || typeof value === "string";
 }
 
-function safeString(value) {
-  return typeof value === "string" && value.trim().length > 0;
+function safeString(value, maxLength = engineIntelligenceContract.MAX_PUBLIC_STRING_LENGTH) {
+  return engineIntelligenceContract.safeString(value, maxLength);
 }
 
 function parseableDateString(value) {
   return engineIntelligenceContract.isCanonicalUtcTimestamp(value);
+}
+
+function validOptionalTimestamp(value) {
+  return value === undefined || value === null || parseableDateString(value);
 }
 
 function oneOf(value, allowedValues) {

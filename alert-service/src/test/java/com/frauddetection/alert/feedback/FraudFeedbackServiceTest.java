@@ -217,6 +217,26 @@ class FraudFeedbackServiceTest {
     }
 
     @Test
+    void existingFeedbackWithPartialEngineIntelligenceComparisonDoesNotExposeSnapshot() {
+        FraudFeedbackRecord record = record();
+        record.setEngineIntelligenceStatus(EngineIntelligenceResponseStatus.DEGRADED);
+        record.setComparisonType(EngineIntelligenceComparisonType.RULES_VS_ML);
+        record.setAgreementStatus(EngineIntelligenceAgreementStatus.PARTIAL);
+        record.setRiskMismatchStatus(EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE);
+        record.setScoreDeltaBucket(EngineIntelligenceScoreDeltaBucket.UNAVAILABLE);
+        when(repository.findByTransactionId("txn-1")).thenReturn(Optional.of(record));
+
+        FraudFeedbackResponse response = service.get("txn-1");
+
+        assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
+        assertThat(response.comparisonType()).isNull();
+        assertThat(response.comparedEngineIds()).isEmpty();
+        assertThat(response.agreementStatus()).isNull();
+        assertThat(response.riskMismatchStatus()).isNull();
+        assertThat(response.scoreDeltaBucket()).isNull();
+    }
+
+    @Test
     void noFeedbackReadReturns404() {
         when(repository.findByTransactionId("txn-1")).thenReturn(Optional.empty());
 
