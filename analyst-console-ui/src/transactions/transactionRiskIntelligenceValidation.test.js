@@ -395,6 +395,42 @@ describe("transactionRiskIntelligenceValidation", () => {
     expect(result.valid).toBe(true);
     expect(result.detail.engineIntelligence.comparison).toBe(comparison);
   });
+
+  it.each([
+    ["duplicate rules", [engine(), engine()], "INVALID_ENGINE_INTELLIGENCE_ENGINE_ORDER"],
+    ["duplicate ml", [
+      engine(),
+      engine({ engineId: "ml.python.primary", engineType: "ML_MODEL", riskLevel: "LOW", scoreBucket: "LOW", reasonCodes: ["LOW_MODEL_RISK"] }),
+      engine({ engineId: "ml.python.primary", engineType: "ML_MODEL", riskLevel: "MEDIUM", scoreBucket: "MEDIUM", reasonCodes: ["MODEL_HIGH_RISK"] })
+    ], "INVALID_ENGINE_INTELLIGENCE_ENGINE_ORDER"],
+    ["duplicate velocity", [
+      engine(),
+      engine({ engineId: "velocity.primary", engineType: "VELOCITY", riskLevel: "HIGH", scoreBucket: "HIGH", reasonCodes: ["RAPID_PLN_20K_BURST"] }),
+      engine({ engineId: "velocity.primary", engineType: "VELOCITY", riskLevel: "MEDIUM", scoreBucket: "MEDIUM", reasonCodes: ["RECENT_AMOUNT_ACCUMULATION"] })
+    ], "INVALID_ENGINE_INTELLIGENCE_ENGINE_ORDER"],
+    ["duplicate with omitted ml", [
+      engine(),
+      engine(),
+      engine({ engineId: "velocity.primary", engineType: "VELOCITY", riskLevel: "HIGH", scoreBucket: "HIGH", reasonCodes: ["RAPID_PLN_20K_BURST"] })
+    ], "INVALID_ENGINE_INTELLIGENCE_ENGINE_ORDER"],
+    ["invalid order", [
+      engine({ engineId: "ml.python.primary", engineType: "ML_MODEL", riskLevel: "LOW", scoreBucket: "LOW", reasonCodes: ["LOW_MODEL_RISK"] }),
+      engine()
+    ], "INVALID_ENGINE_INTELLIGENCE_ENGINE_ORDER"],
+    ["wrong type pair", [
+      engine({ engineId: "velocity.primary", engineType: "RULES" })
+    ], "INVALID_ENGINE_INTELLIGENCE_ENGINE"]
+  ])("rejects invalid engine identity set: %s", (_name, engines, reason) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      engineIntelligence: { ...engineIntelligence(), engines }
+    }))).toMatchObject({ valid: false, reason });
+  });
+
+  it("rejects unsupported available contract version", () => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      engineIntelligence: { ...engineIntelligence(), contractVersion: 2 }
+    }))).toMatchObject({ valid: false, reason: "INVALID_ENGINE_INTELLIGENCE_METADATA" });
+  });
 });
 
 function detail(overrides = {}) {

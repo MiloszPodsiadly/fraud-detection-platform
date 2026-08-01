@@ -64,6 +64,7 @@ const NON_DECISIONING_FLAGS = [
   "notThresholdRecommendation"
 ];
 const MAX_ENGINES = 3;
+const ENGINE_INTELLIGENCE_CONTRACT_VERSION = 1;
 const MAX_DIAGNOSTIC_SIGNALS = 5;
 const MAX_WARNINGS = 10;
 const MAX_REASON_CODES = 5;
@@ -89,6 +90,7 @@ const ENGINE_TYPE_BY_ID = Object.freeze({
   "ml.python.primary": "ML_MODEL",
   "velocity.primary": "VELOCITY"
 });
+const ENGINE_ORDER = Object.freeze(Object.keys(ENGINE_TYPE_BY_ID));
 
 export function validateTransactionRiskIntelligenceDetail(detail) {
   if (!detail || typeof detail !== "object" || Array.isArray(detail)) {
@@ -110,11 +112,19 @@ export function validateTransactionRiskIntelligenceDetail(detail) {
   if (!isNumberOrNull(engineIntelligence.contractVersion) || !isStringOrNull(engineIntelligence.generatedAt)) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_METADATA");
   }
+  if (engineIntelligence.status === "AVAILABLE" || engineIntelligence.status === "DEGRADED") {
+    if (engineIntelligence.contractVersion !== ENGINE_INTELLIGENCE_CONTRACT_VERSION || !parseableDateString(engineIntelligence.generatedAt)) {
+      return invalid("INVALID_ENGINE_INTELLIGENCE_METADATA");
+    }
+  }
   if (engineIntelligence.comparison !== null && !isComparisonShape(engineIntelligence.comparison)) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_COMPARISON");
   }
   if (!isBoundedArray(engineIntelligence.engines, MAX_ENGINES)) {
     return invalid("ENGINE_LIMIT_EXCEEDED");
+  }
+  if (!hasUniqueCanonicalEngineOrder(engineIntelligence.engines)) {
+    return invalid("INVALID_ENGINE_INTELLIGENCE_ENGINE_ORDER");
   }
   if (!engineIntelligence.engines.every(isEngineShape)) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_ENGINE");
@@ -268,6 +278,24 @@ function oneOf(value, allowedValues) {
 
 function isExpectedEngineType(engineId, engineType) {
   return ENGINE_TYPE_BY_ID[engineId] === engineType;
+}
+
+function hasUniqueCanonicalEngineOrder(values) {
+  const seen = new Set();
+  let previousOrder = -1;
+  for (const value of values) {
+    const engineId = typeof value?.engineId === "string" ? value.engineId.trim() : "";
+    const order = ENGINE_ORDER.indexOf(engineId);
+    if (order < 0) {
+      continue;
+    }
+    if (seen.has(engineId) || order <= previousOrder) {
+      return false;
+    }
+    seen.add(engineId);
+    previousOrder = order;
+  }
+  return true;
 }
 
 function optionalOneOf(value, allowedValues) {

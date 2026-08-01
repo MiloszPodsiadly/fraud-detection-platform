@@ -4879,6 +4879,7 @@ components:
           description: ABSENT means no projection exists for this scored transaction, which is expected for old transactions and disabled producer periods. UNAVAILABLE means the projection read path degraded.
         contractVersion:
           type: integer
+          enum: [1]
           minimum: 1
           nullable: true
         generatedAt:
@@ -4892,6 +4893,7 @@ components:
         engines:
           type: array
           maxItems: 3
+          description: AVAILABLE and DEGRADED contractVersion 1 responses expose at most the canonical engine IDs rules.primary, ml.python.primary, and velocity.primary in that order. engineId values must be unique; OpenAPI uniqueItems cannot prove uniqueness by object property, so runtime validators enforce unique engineId and exact engineId/engineType pairing.
           items:
             $ref: "#/components/schemas/EngineIntelligenceEngineResponse"
         diagnosticSignals:

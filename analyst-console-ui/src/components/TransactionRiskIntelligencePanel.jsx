@@ -19,6 +19,7 @@ const ENGINE_STATUS_COPY = {
   DEGRADED: "Engine result degraded",
   NOT_APPLICABLE: "Engine not applicable"
 };
+const VELOCITY_SEVERITY_COPY = "Velocity score is a normalized deterministic risk-severity signal. It is not a calibrated fraud probability and must not be directly interpreted as model confidence.";
 
 export function TransactionRiskIntelligencePanel({
   transactionId,
@@ -320,6 +321,7 @@ function DiagnosticBoundaryBanner() {
         It does not approve, decline, block, authorize payment, create cases, trigger workflow, change scoring,
         update recommendations, train models, promote models, or change thresholds.
       </p>
+      <p>{VELOCITY_SEVERITY_COPY}</p>
     </section>
   );
 }

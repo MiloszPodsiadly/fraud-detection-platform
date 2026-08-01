@@ -133,7 +133,7 @@ public class EngineIntelligenceProjectionPolicy {
         String safe = boundedString(reasonCode);
         try {
             new EngineIntelligenceEngineResult(
-                    "rules.primary",
+                    FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
                     FraudEngineType.RULES,
                     FraudEngineStatus.AVAILABLE,
                     RiskLevel.LOW,

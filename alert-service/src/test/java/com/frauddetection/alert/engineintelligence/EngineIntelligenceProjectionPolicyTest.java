@@ -160,6 +160,29 @@ class EngineIntelligenceProjectionPolicyTest {
     }
 
     @Test
+    void duplicateCanonicalEngineIdRejectedBySharedPublicContract() {
+        EngineIntelligenceSummary source = summaryMock();
+        List<EngineIntelligenceEngineResult> engines = List.of(
+                engineMock("rules.primary", List.of("HIGH_VELOCITY")),
+                engineMock("rules.primary", List.of("HIGH_VELOCITY"))
+        );
+        when(source.engines()).thenReturn(engines);
+
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
+    }
+
+    @Test
+    void outOfOrderCanonicalEngineIdRejectedBySharedPublicContract() {
+        EngineIntelligenceSummary source = summaryMock();
+        EngineIntelligenceEngineResult ml = engineMock("ml.python.primary", List.of("ML_MODEL_SIGNAL"));
+        when(ml.engineType()).thenReturn(FraudEngineType.ML_MODEL);
+        EngineIntelligenceEngineResult rules = engineMock("rules.primary", List.of("HIGH_VELOCITY"));
+        when(source.engines()).thenReturn(List.of(ml, rules));
+
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
+    }
+
+    @Test
     void warningCodeAcceptedWhenPublic() {
         EngineIntelligenceSummary source = summaryMock();
         when(source.warnings()).thenReturn(List.of(new EngineIntelligenceWarningSummary(

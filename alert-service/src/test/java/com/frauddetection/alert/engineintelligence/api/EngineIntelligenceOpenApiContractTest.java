@@ -1,13 +1,41 @@
 package com.frauddetection.alert.engineintelligence.api;
 
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
+import com.frauddetection.common.events.engine.FraudEngineType;
+import io.swagger.v3.parser.OpenAPIV3Parser;
+import io.swagger.v3.parser.core.models.ParseOptions;
+import io.swagger.v3.parser.core.models.SwaggerParseResult;
 import org.junit.jupiter.api.Test;
+import org.yaml.snakeyaml.Yaml;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class EngineIntelligenceOpenApiContractTest {
+
+    @Test
+    void openApiDocumentIsAcceptedByStandardsCompatibleParser() {
+        ParseOptions options = new ParseOptions();
+        options.setResolve(true);
+        options.setResolveFully(false);
+
+        SwaggerParseResult result = new OpenAPIV3Parser().readLocation(openApiPath().toString(), null, options);
+
+        assertThat(result.getOpenAPI()).isNotNull();
+        assertThat(result.getMessages()).isEmpty();
+        assertThat(result.getOpenAPI().getPaths())
+                .containsKey("/api/v1/transactions/scored/{transactionId}/engine-intelligence");
+        assertThat(result.getOpenAPI().getComponents().getSchemas())
+                .containsKeys(
+                        "EngineIntelligenceResponse",
+                        "EngineIntelligenceEngineResponse",
+                        "EngineIntelligenceDiagnosticSignalResponse"
+                );
+    }
 
     @Test
     void openApiContainsOnlyBoundedEngineIntelligenceSchema() throws Exception {
@@ -251,6 +279,47 @@ class EngineIntelligenceOpenApiContractTest {
         assertThat(schema("EngineIntelligenceDiagnosticSignalReadModel")).contains("oneOf:");
     }
 
+    @Test
+    void parsedOpenApiContractMatchesRuntimeEngineIdentityContract() throws Exception {
+        Map<String, Object> schemas = schemas();
+        Map<String, Object> response = schema(schemas, "EngineIntelligenceResponse");
+
+        assertThat(enumValues(property(response, "contractVersion")))
+                .containsExactly(EngineIntelligenceSummaryContract.VERSION);
+        assertThat(property(response, "engines"))
+                .containsEntry("maxItems", FraudEngineIdentityContract.MAX_ENGINE_INTELLIGENCE_ENGINES);
+        assertThat(oneOfRefs(schema(schemas, "EngineIntelligenceEngineResponse")))
+                .containsExactly(
+                        "#/components/schemas/RulesEngineIdentity",
+                        "#/components/schemas/MlEngineIdentity",
+                        "#/components/schemas/VelocityEngineIdentity"
+                );
+        assertThat(oneOfRefs(schema(schemas, "EngineIntelligenceDiagnosticSignalResponse")))
+                .containsExactly(
+                        "#/components/schemas/RulesEngineIdentity",
+                        "#/components/schemas/MlEngineIdentity",
+                        "#/components/schemas/VelocityEngineIdentity"
+                );
+        assertIdentitySchema(
+                schemas,
+                "RulesEngineIdentity",
+                FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                FraudEngineType.RULES
+        );
+        assertIdentitySchema(
+                schemas,
+                "MlEngineIdentity",
+                FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
+                FraudEngineType.ML_MODEL
+        );
+        assertIdentitySchema(
+                schemas,
+                "VelocityEngineIdentity",
+                FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID,
+                FraudEngineType.VELOCITY
+        );
+    }
+
 
     @Test
     void openApiReasonCodesHaveMaxLength() throws Exception {
@@ -356,5 +425,58 @@ class EngineIntelligenceOpenApiContractTest {
             return fromRoot;
         }
         return Path.of("..", "docs", "openapi", "alert_service.openapi.yaml");
+    }
+
+    private Map<String, Object> schemas() throws Exception {
+        return map(map(new Yaml().load(openApi()), "components"), "schemas");
+    }
+
+    private Map<String, Object> schema(Map<String, Object> schemas, String name) {
+        return map(schemas, name);
+    }
+
+    private Map<String, Object> property(Map<String, Object> schema, String name) {
+        return map(map(schema, "properties"), name);
+    }
+
+    private List<Object> enumValues(Map<String, Object> property) {
+        return list(property, "enum");
+    }
+
+    private List<String> oneOfRefs(Map<String, Object> schema) {
+        return list(schema, "oneOf").stream()
+                .map(item -> map(item).get("$ref").toString())
+                .toList();
+    }
+
+    private void assertIdentitySchema(
+            Map<String, Object> schemas,
+            String schemaName,
+            String engineId,
+            FraudEngineType engineType
+    ) {
+        Map<String, Object> identitySchema = schema(schemas, schemaName);
+
+        assertThat(list(identitySchema, "required")).containsExactly("engineId", "engineType");
+        assertThat(enumValues(property(identitySchema, "engineId"))).containsExactly(engineId);
+        assertThat(enumValues(property(identitySchema, "engineType"))).containsExactly(engineType.name());
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> map(Object source) {
+        return (Map<String, Object>) source;
+    }
+
+    private Map<String, Object> map(Map<String, Object> source, String key) {
+        return map(source.get(key));
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Object> list(Map<String, Object> source, String key) {
+        return (List<Object>) source.get(key);
+    }
+
+    private static final class EngineIntelligenceSummaryContract {
+        private static final int VERSION = com.frauddetection.common.events.intelligence.EngineIntelligenceSummary.CONTRACT_VERSION;
     }
 }

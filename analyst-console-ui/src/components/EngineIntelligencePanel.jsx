@@ -6,6 +6,7 @@ import { LoadingPanel } from "./LoadingPanel.jsx";
 const TEMPORARILY_UNAVAILABLE = "Engine intelligence is temporarily unavailable.";
 const NOT_PROJECTED = "Engine intelligence is not available for this transaction.";
 const NOT_PROJECTED_HELPER = "This may happen for older transactions or periods when diagnostic emission was disabled.";
+const VELOCITY_SEVERITY_COPY = "Velocity score is a normalized deterministic risk-severity signal. It is not a calibrated fraud probability and must not be directly interpreted as model confidence.";
 const OPERATIONAL_STATUSES = new Set(["TIMEOUT", "UNAVAILABLE", "DEGRADED"]);
 const NON_AVAILABLE_STATES = new Set(["not-projected", "unauthorized", "not-found", "unavailable"]);
 
@@ -63,6 +64,7 @@ export function EngineIntelligencePanel({
           <h2 id={headingId}>Engine intelligence</h2>
           <p className="sectionCopy">Diagnostic engine output for this transaction.</p>
           <p className="sectionCopy">Diagnostic only. Operational statuses and disagreement are investigation context.</p>
+          <p className="sectionCopy">{VELOCITY_SEVERITY_COPY}</p>
         </div>
       </div>
 

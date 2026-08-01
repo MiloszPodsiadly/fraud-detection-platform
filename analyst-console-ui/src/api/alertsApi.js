@@ -289,6 +289,7 @@ async function promotionReviewReadinessReportRequest(request, { signal } = {}) {
 
 const ENGINE_INTELLIGENCE_TRANSACTION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const MAX_ENGINE_INTELLIGENCE_ENGINES = 3;
+const ENGINE_INTELLIGENCE_CONTRACT_VERSION = 1;
 const MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS = 5;
 const MAX_ENGINE_INTELLIGENCE_WARNINGS = 10;
 const MAX_ENGINE_INTELLIGENCE_REASON_CODES = 5;
@@ -316,6 +317,7 @@ const ENGINE_TYPE_BY_ID = Object.freeze({
   "ml.python.primary": "ML_MODEL",
   "velocity.primary": "VELOCITY"
 });
+const ENGINE_ORDER = Object.freeze(Object.keys(ENGINE_TYPE_BY_ID));
 const RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
 const ENGINE_INTELLIGENCE_FEEDBACK_TYPES = new Set([
   "ENGINE_INTELLIGENCE_USEFULNESS",
@@ -512,7 +514,12 @@ function normalizeEngineIntelligenceResponse(response, fallbackTransactionId) {
     });
   }
 
-  if (response.available !== true || !isValidComparison(response.comparison)) {
+  if (
+    response.available !== true
+    || Number(response.contractVersion) !== ENGINE_INTELLIGENCE_CONTRACT_VERSION
+    || !parseableDateString(response.generatedAt)
+    || !isValidComparison(response.comparison)
+  ) {
     return unavailableEngineIntelligence(transactionId);
   }
 
@@ -527,7 +534,7 @@ function normalizeEngineIntelligenceResponse(response, fallbackTransactionId) {
     state: "available",
     available: true,
     transactionId,
-    contractVersion: Number.isFinite(Number(response.contractVersion)) ? Number(response.contractVersion) : null,
+    contractVersion: ENGINE_INTELLIGENCE_CONTRACT_VERSION,
     generatedAt: safeString(response.generatedAt),
     comparison: Object.freeze({
       agreementStatus: normalizedAllowedValue(response.comparison.agreementStatus, AGREEMENT_STATUSES),
@@ -566,6 +573,9 @@ function normalizeEngineResults(values) {
     return null;
   }
   if (values.length > MAX_ENGINE_INTELLIGENCE_ENGINES) {
+    return null;
+  }
+  if (!hasUniqueCanonicalEngineOrder(values)) {
     return null;
   }
   const normalized = [];
@@ -722,6 +732,24 @@ function isEngineResultOperationallyConsistent(status, scoreBucket, riskLevel) {
   return scoreBucket === "UNAVAILABLE" && !riskLevel;
 }
 
+function hasUniqueCanonicalEngineOrder(values) {
+  const seen = new Set();
+  let previousOrder = -1;
+  for (const value of values) {
+    const engineId = safeRenderableString(value?.engineId);
+    const order = ENGINE_ORDER.indexOf(engineId);
+    if (order < 0) {
+      continue;
+    }
+    if (seen.has(engineId) || order <= previousOrder) {
+      return false;
+    }
+    seen.add(engineId);
+    previousOrder = order;
+  }
+  return true;
+}
+
 function isExpectedEngineType(engineId, engineType) {
   return ENGINE_TYPE_BY_ID[engineId] === engineType;
 }
@@ -740,6 +768,10 @@ function safeRenderableString(value) {
 
 function safeString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function parseableDateString(value) {
+  return Boolean(safeString(value)) && !Number.isNaN(Date.parse(value));
 }
 
 function safeStringArray(values) {

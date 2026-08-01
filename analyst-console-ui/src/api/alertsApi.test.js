@@ -1872,6 +1872,31 @@ describe("alertsApi auth headers", () => {
 
   it.each([
     ["getEngineIntelligenceFailsClosedForOversizedEngines", { engines: [engineResult(), engineResult(), engineResult(), engineResult()] }],
+    ["getEngineIntelligenceFailsClosedForDuplicateRulesEngineId", { engines: [engineResult(), engineResult()] }],
+    ["getEngineIntelligenceFailsClosedForDuplicateMlEngineId", { engines: [
+      engineResult(),
+      engineResult({ engineId: "ml.python.primary", engineType: "ML_MODEL", riskLevel: "MEDIUM", scoreBucket: "MEDIUM", reasonCodes: ["MODEL_HIGH_RISK"] }),
+      engineResult({ engineId: "ml.python.primary", engineType: "ML_MODEL", riskLevel: "LOW", scoreBucket: "LOW", reasonCodes: ["LOW_MODEL_RISK"] })
+    ] }],
+    ["getEngineIntelligenceFailsClosedForDuplicateVelocityEngineId", { engines: [
+      engineResult(),
+      engineResult({ engineId: "velocity.primary", engineType: "VELOCITY", riskLevel: "HIGH", scoreBucket: "HIGH", reasonCodes: ["RAPID_PLN_20K_BURST"] }),
+      engineResult({ engineId: "velocity.primary", engineType: "VELOCITY", riskLevel: "MEDIUM", scoreBucket: "MEDIUM", reasonCodes: ["RECENT_AMOUNT_ACCUMULATION"] })
+    ] }],
+    ["getEngineIntelligenceFailsClosedForDuplicateWithOmittedCanonicalEngine", { engines: [
+      engineResult(),
+      engineResult(),
+      engineResult({ engineId: "velocity.primary", engineType: "VELOCITY", riskLevel: "HIGH", scoreBucket: "HIGH", reasonCodes: ["RAPID_PLN_20K_BURST"] })
+    ] }],
+    ["getEngineIntelligenceFailsClosedForInvalidEngineOrder", { engines: [
+      engineResult({ engineId: "ml.python.primary", engineType: "ML_MODEL", riskLevel: "MEDIUM", scoreBucket: "MEDIUM", reasonCodes: ["MODEL_HIGH_RISK"] }),
+      engineResult()
+    ] }],
+    ["getEngineIntelligenceFailsClosedForWrongCanonicalTypePair", { engines: [
+      engineResult({ engineId: "velocity.primary", engineType: "RULES" })
+    ] }],
+    ["getEngineIntelligenceFailsClosedForUnsupportedContractVersion", { contractVersion: 2 }],
+    ["getEngineIntelligenceFailsClosedForUnparseableGeneratedAt", { generatedAt: "not-a-date" }],
     ["getEngineIntelligenceFailsClosedForOversizedDiagnosticSignals", { diagnosticSignals: Array.from({ length: 6 }, (_value, index) => diagnosticSignal({ engineId: `rules.${index}` })) }],
     ["getEngineIntelligenceFailsClosedForOversizedWarnings", { warnings: Array.from({ length: 11 }, () => warning()) }],
     ["getEngineIntelligenceFailsClosedForOversizedEngineReasonCodes", { engines: [engineResult({ reasonCodes: ["A", "B", "C", "D", "E", "F"] })] }],

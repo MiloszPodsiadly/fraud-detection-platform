@@ -51,6 +51,9 @@ describe("TransactionRiskIntelligencePanel", () => {
     expect(boundary).toHaveTextContent("It does not approve");
     expect(boundary).toHaveTextContent("authorize payment");
     expect(boundary).toHaveTextContent("create cases");
+    expect(boundary).toHaveTextContent("Velocity score is a normalized deterministic risk-severity signal.");
+    expect(boundary).toHaveTextContent("It is not a calibrated fraud probability");
+    expect(boundary).toHaveTextContent("must not be directly interpreted as model confidence");
   });
 
   it("uses a stable sanitized panel id", () => {
