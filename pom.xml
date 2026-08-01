@@ -49,6 +49,8 @@
         <prometheus.version>1.8.0</prometheus.version>
         <caffeine.version>3.2.4</caffeine.version>
         <lz4-java.version>1.11.1</lz4-java.version>
+        <maven-surefire-plugin.version>3.5.5</maven-surefire-plugin.version>
+        <swagger-parser.version>2.1.42</swagger-parser.version>
     </properties>
 
     <dependencyManagement>
@@ -191,6 +193,11 @@
                     <configuration>
                         <classifier>exec</classifier>
                     </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>${maven-surefire-plugin.version}</version>
                 </plugin>
             </plugins>
         </pluginManagement>
