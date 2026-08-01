@@ -63,6 +63,13 @@ for exact zero, `SMALL` for `>0.00-0.15`, `MEDIUM` for `>0.15-0.35`, and `LARGE`
 For score buckets, `NONE` does not mean score zero and does not mean a missing score. Missing score
 maps to `UNAVAILABLE`.
 
+## Confidence Exposure Decision
+
+`confidence` is an explicit engine output field, not a value inferred by the public mapper. Public
+available engine results may carry `UNKNOWN` confidence when no authoritative calibration policy is
+available. Consumers must not infer confidence from score bucket, risk level, reason codes, engine
+type, or availability status.
+
 ## Evidence Exposure Decision
 
 Evidence free-text descriptions are omitted or templated, not raw. FDP-92 v1 also omits evidence

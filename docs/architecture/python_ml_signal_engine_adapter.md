@@ -44,10 +44,15 @@ null risk level, and `UNKNOWN` confidence. The isolated adapter does not assign 
 which publishes `FraudEngineResult.generatedAt` and `FraudEngineResult.latencyMs` from the injected
 execution `Clock`.
 
-FDP-88 treats unexpected runtime exceptions from the isolated ML boundary as bounded
-`ML_CLIENT_ERROR` because the adapter is not runtime-wired. Timeout-like exceptions are bounded as
-`ML_MODEL_TIMEOUT`. No raw exception message or stacktrace is exposed. Future orchestrator/runtime
-integration may narrow this exception taxonomy.
+Known timeout-like exceptions are bounded as `ML_MODEL_TIMEOUT`. Known ML client/network boundary
+failures are returned as bounded `ML_CLIENT_ERROR`. Programmer defects and other unexpected runtime
+exceptions are not reclassified as client failures; they propagate to the orchestrator isolation
+boundary, which publishes bounded engine-exception diagnostics without exposing raw exception
+message or stacktrace.
+
+Available adapter output uses `UNKNOWN` confidence unless a future authoritative calibration policy
+defines a stronger value. Confidence is not inferred from ML score, risk level, model availability
+metadata, or reason codes.
 
 ## Evidence Safety
 

@@ -19,6 +19,12 @@ Rules owns baseline business-rule interpretation and the single Rules contributi
 may use the same official rapid-transfer threshold facts as other components, but it must not emit multiple
 contributions for the same semantic signal.
 
+FDP-129 Stage 1 keeps the production Rules model at `rule-based-engine` / `v1` and the adapter descriptor at
+`rules.primary` / `1.0.0`. The frozen Rules V1 compatibility matrix is captured in
+`fraud-scoring-service/src/test/resources/fixtures/rules/rules_v1_baseline_matrix.json`; it preserves the historical
+official Feature Enricher to Rules outcomes while consolidating duplicate velocity, recent-amount, and rapid-transfer
+contributions into one Rules contribution per semantic fact.
+
 Python ML owns bounded ML score context only. The current public comparison identity is explicitly `RULES_VS_ML` with
 `comparedEngineIds=["rules.primary","ml.python.primary"]`; it is not generic all-engine agreement.
 

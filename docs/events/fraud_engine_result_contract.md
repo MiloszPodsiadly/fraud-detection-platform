@@ -69,7 +69,7 @@ unbounded metadata values in the contract.
 
 | Status | Score and risk level | Confidence | Reason |
 | --- | --- | --- | --- |
-| `AVAILABLE` | Both required | `LOW`, `MEDIUM`, or `HIGH` required | No `statusReason` |
+| `AVAILABLE` | Both required | Required; may be `UNKNOWN` when no authoritative calibration policy exists | No `statusReason` |
 | `UNAVAILABLE` | Both absent | `UNKNOWN` | Required bounded status reason |
 | `TIMEOUT` | Both absent | `UNKNOWN` | Required bounded status reason |
 | `SKIPPED` | Both absent | `UNKNOWN` | Required bounded status reason |
@@ -79,9 +79,9 @@ unbounded metadata values in the contract.
 Only `FALLBACK_USED` declares that fallback occurred. `UNAVAILABLE`, `TIMEOUT`, `SKIPPED`, and `DEGRADED` do not imply
 low risk, fallback behavior, or a platform decision.
 
-FDP-129 narrowly allows `AVAILABLE` Velocity V1 results to use `confidence=UNKNOWN`. Velocity confidence is not inferred
-from reason-code count, score magnitude, risk level, or feature presence. Rules and ML available results still require
-known `LOW`, `MEDIUM`, or `HIGH` confidence unless a future versioned contract changes that explicitly.
+FDP-129 allows `AVAILABLE` results to use `confidence=UNKNOWN` when the engine does not have an authoritative
+confidence-calibration policy. Confidence is not inferred from engine type, reason-code count, score magnitude, risk
+level, model metadata, or feature presence.
 
 ## Unsafe Content
 
