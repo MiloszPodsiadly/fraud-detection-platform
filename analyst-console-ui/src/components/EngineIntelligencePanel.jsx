@@ -6,7 +6,7 @@ import { LoadingPanel } from "./LoadingPanel.jsx";
 const TEMPORARILY_UNAVAILABLE = "Engine intelligence is temporarily unavailable.";
 const NOT_PROJECTED = "Engine intelligence is not available for this transaction.";
 const NOT_PROJECTED_HELPER = "This may happen for older transactions or periods when diagnostic emission was disabled.";
-const VELOCITY_SEVERITY_COPY = "Velocity score is a normalized deterministic risk-severity signal. It is not a calibrated fraud probability and must not be directly interpreted as model confidence.";
+const VELOCITY_SEVERITY_COPY = "Velocity score is a deterministic normalized risk-severity signal. It is not a calibrated fraud probability and must not be interpreted as model confidence.";
 const OPERATIONAL_STATUSES = new Set(["TIMEOUT", "UNAVAILABLE", "DEGRADED"]);
 const NON_AVAILABLE_STATES = new Set(["not-projected", "unauthorized", "not-found", "unavailable"]);
 
@@ -124,7 +124,9 @@ function ComparisonSection({ comparison }) {
     <section className="engineIntelligenceBlock" aria-labelledby="engine-intelligence-comparison-heading">
       <h3 id="engine-intelligence-comparison-heading">Diagnostic comparison</h3>
       <dl className="engineIntelligenceFields">
-        <Field label="Engine agreement" value={comparison.agreementStatus} />
+        <Field label="Comparison type" value={comparison.comparisonType} />
+        <Field label="Compared engines" value={comparison.comparedEngineIds.join(" vs ")} />
+        <Field label="Rules vs ML agreement" value={comparison.agreementStatus} />
         <Field label="Risk mismatch" value={comparison.riskMismatchStatus} />
         <Field label="Score delta" value={comparison.scoreDeltaBucket} />
       </dl>
@@ -250,6 +252,8 @@ function isValidAvailablePanelResult(result) {
   return Boolean(
     result.comparison
       && typeof result.comparison === "object"
+      && result.comparison.comparisonType
+      && Array.isArray(result.comparison.comparedEngineIds)
       && result.comparison.agreementStatus
       && result.comparison.riskMismatchStatus
       && result.comparison.scoreDeltaBucket

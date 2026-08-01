@@ -46,6 +46,8 @@ class EngineIntelligenceSummaryTest {
                   "generatedAt": "2026-06-01T06:00:00Z",
                   "engines": [],
                   "comparison": {
+                    "comparisonType": "RULES_VS_ML",
+                    "comparedEngineIds": ["rules.primary", "ml.python.primary"],
                     "agreementStatus": "INSUFFICIENT_DATA",
                     "riskMismatchStatus": "NOT_COMPARABLE",
                     "scoreDeltaBucket": "UNAVAILABLE"
@@ -70,6 +72,21 @@ class EngineIntelligenceSummaryTest {
                 List.of(),
                 List.of()
         )).isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    void rulesVersusMlComparisonIdentityIsExplicitAndOrdered() {
+        EngineIntelligenceComparison comparison = EngineIntelligenceTestSupport.comparison();
+
+        assertThat(comparison.comparisonType()).isEqualTo(EngineIntelligenceComparisonType.RULES_VS_ML);
+        assertThat(comparison.comparedEngineIds()).containsExactly("rules.primary", "ml.python.primary");
+        assertThatThrownBy(() -> new EngineIntelligenceComparison(
+                EngineIntelligenceComparisonType.RULES_VS_ML,
+                List.of("rules.primary", "velocity.primary"),
+                EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
+                EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
+                EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
+        )).hasMessage("ENGINE_INTELLIGENCE_COMPARISON_ENGINE_IDS_INVALID");
     }
 
     private void assertInvalidVersion(int version) {

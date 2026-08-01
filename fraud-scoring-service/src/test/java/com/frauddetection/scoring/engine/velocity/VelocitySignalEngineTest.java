@@ -8,6 +8,7 @@ import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.features.FraudFeatureThresholdContract;
+import com.frauddetection.common.events.features.VelocityFeatureContract;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.context.ScoringContext;
@@ -152,7 +153,7 @@ class VelocitySignalEngineTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"PT59S", "PT2M", "PT1H", "PT24H", "PT0S", "PT-1S", "not-a-duration"})
+    @ValueSource(strings = {"PT60S", "PT59S", "PT2M", "PT1H", "PT24H", "PT0S", "PT-1S", "not-a-duration"})
     void nonCanonicalWindowIsDegradedInvalidValue(String window) {
         Map<String, Object> featureSnapshot = producerSnapshot(5, "25000.00");
         featureSnapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, window);
@@ -182,13 +183,19 @@ class VelocitySignalEngineTest {
                 .isEqualTo("VELOCITY_FEATURE_VALUE_INVALID");
         assertThat(engine.evaluate(context(snapshot(1, "PT1M", "-0.01", 1.0d))).statusReason())
                 .isEqualTo("VELOCITY_FEATURE_VALUE_INVALID");
+        assertThat(engine.evaluate(context(snapshot(1, "PT1M", "100.00", -1.0d))).statusReason())
+                .isEqualTo("VELOCITY_FEATURE_VALUE_INVALID");
+        assertThat(engine.evaluate(context(snapshot(1, "PT1M", "100.00", Double.NaN))).statusReason())
+                .isEqualTo("VELOCITY_FEATURE_VALUE_INVALID");
         assertThat(engine.evaluate(context(snapshot(1, "PT1M", "100.00", Double.POSITIVE_INFINITY))).statusReason())
+                .isEqualTo("VELOCITY_FEATURE_VALUE_INVALID");
+        assertThat(engine.evaluate(context(snapshot(1, "PT1M", "100.00", Double.NEGATIVE_INFINITY))).statusReason())
                 .isEqualTo("VELOCITY_FEATURE_VALUE_INVALID");
     }
 
     @Test
-    void impossiblePresentFactualRelationshipIsDegraded() {
-        var result = engine.evaluate(context(snapshot(0, "PT1M", "0.01", 0.0d)));
+    void inconsistentCountWindowRateRelationshipIsDegraded() {
+        var result = engine.evaluate(context(snapshot(1, "PT1M", "0.00", 100.0d)));
 
         assertThat(result.status()).isEqualTo(FraudEngineStatus.DEGRADED);
         assertThat(result.statusReason()).isEqualTo("VELOCITY_FEATURES_INCONSISTENT");
@@ -205,10 +212,9 @@ class VelocitySignalEngineTest {
 
     @Test
     void authoritativeThresholdsAndWindowComeFromSharedFeatureContract() {
-        assertThat(FraudFeatureThresholdContract.VELOCITY_V1_OBSERVATION_WINDOW.toString()).isEqualTo("PT1M");
+        assertThat(VelocityFeatureContract.CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW_TEXT).isEqualTo("PT1M");
         assertThat(FraudFeatureThresholdContract.RAPID_TRANSFER_MIN_COUNT).isEqualTo(2);
         assertThat(FraudFeatureThresholdContract.RAPID_TRANSFER_PLN_THRESHOLD).isEqualByComparingTo("20000");
-        assertThat(FraudFeatureThresholdContract.HIGH_VELOCITY_TRANSACTION_COUNT).isEqualTo(5);
     }
 
     private void assertAvailable(Map<String, Object> featureSnapshot, double score, RiskLevel riskLevel) {

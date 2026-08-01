@@ -1687,6 +1687,8 @@ describe("alertsApi auth headers", () => {
       state: "available",
       available: true,
       comparison: {
+        comparisonType: "RULES_VS_ML",
+        comparedEngineIds: ["rules.primary", "ml.python.primary"],
         agreementStatus: "DISAGREEMENT",
         riskMismatchStatus: "MATERIAL_RISK_MISMATCH",
         scoreDeltaBucket: "LARGE"
@@ -1897,6 +1899,11 @@ describe("alertsApi auth headers", () => {
     ] }],
     ["getEngineIntelligenceFailsClosedForUnsupportedContractVersion", { contractVersion: 2 }],
     ["getEngineIntelligenceFailsClosedForUnparseableGeneratedAt", { generatedAt: "not-a-date" }],
+    ["getEngineIntelligenceFailsClosedForOffsetGeneratedAt", { generatedAt: "2026-06-02T10:00:00+00:00" }],
+    ["getEngineIntelligenceFailsClosedForTwentyFourHourGeneratedAt", { generatedAt: "2026-06-02T24:00:00Z" }],
+    ["getEngineIntelligenceFailsClosedForLeapSecondGeneratedAt", { generatedAt: "2016-12-31T23:59:60Z" }],
+    ["getEngineIntelligenceFailsClosedForYearZeroGeneratedAt", { generatedAt: "0000-01-01T00:00:00Z" }],
+    ["getEngineIntelligenceFailsClosedForInvalidCalendarGeneratedAt", { generatedAt: "2026-02-30T00:00:00Z" }],
     ["getEngineIntelligenceFailsClosedForOversizedDiagnosticSignals", { diagnosticSignals: Array.from({ length: 6 }, (_value, index) => diagnosticSignal({ engineId: `rules.${index}` })) }],
     ["getEngineIntelligenceFailsClosedForOversizedWarnings", { warnings: Array.from({ length: 11 }, () => warning()) }],
     ["getEngineIntelligenceFailsClosedForOversizedEngineReasonCodes", { engines: [engineResult({ reasonCodes: ["A", "B", "C", "D", "E", "F"] })] }],
@@ -1930,7 +1937,30 @@ describe("alertsApi auth headers", () => {
     });
   });
 
+  it("getEngineIntelligenceAcceptsSharedThreeEngineGoldenFixture", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable(
+      sharedEngineIntelligenceFixture("engine_intelligence_three_engine_golden.json")
+    )));
+
+    await expect(getEngineIntelligence("txn-golden")).resolves.toMatchObject({
+      state: "available",
+      comparison: {
+        comparisonType: "RULES_VS_ML",
+        comparedEngineIds: ["rules.primary", "ml.python.primary"]
+      },
+      engines: [
+        expect.objectContaining({ engineId: "rules.primary", engineType: "RULES" }),
+        expect.objectContaining({ engineId: "ml.python.primary", engineType: "ML_MODEL" }),
+        expect.objectContaining({ engineId: "velocity.primary", engineType: "VELOCITY" })
+      ]
+    });
+  });
+
   it.each([
+    ["getEngineIntelligenceFailsClosedForExtraComparisonField", { comparison: { ...comparison(), genericAgreement: "ALL_ENGINES" } }],
+    ["getEngineIntelligenceFailsClosedForExtraEngineField", { engines: [engineResult({ modelConfidence: "HIGH" })] }],
+    ["getEngineIntelligenceFailsClosedForExtraDiagnosticSignalField", { diagnosticSignals: [diagnosticSignal({ reasonCodes: ["HIGH_VELOCITY"] })] }],
+    ["getEngineIntelligenceFailsClosedForExtraWarningField", { warnings: [warning({ rawPayload: "hidden" })] }],
     ["getEngineIntelligenceFailsClosedForUnknownAgreementStatus", { comparison: { ...comparison(), agreementStatus: "FINAL_DECLINE" } }],
     ["getEngineIntelligenceFailsClosedForUnknownRiskMismatchStatus", { comparison: { ...comparison(), riskMismatchStatus: "WINNING_ENGINE" } }],
     ["getEngineIntelligenceFailsClosedForUnknownScoreDeltaBucket", { comparison: { ...comparison(), scoreDeltaBucket: "PLATFORM_VERDICT" } }],
@@ -1940,6 +1970,12 @@ describe("alertsApi auth headers", () => {
     ["getEngineIntelligenceFailsClosedForDecisioningLikeEnumValues", { engines: [engineResult({ engineType: "BLOCK" })] }]
   ])("%s", async (_name, patch) => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable(patch)));
+
+    await expect(getEngineIntelligence("txn-1")).resolves.toMatchObject({ state: "unavailable", available: false });
+  });
+
+  it.each(sharedInvalidEngineIntelligenceCases())("getEngineIntelligenceRejectsSharedInvalidSemanticCase $caseId", async ({ engineIntelligence }) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable(engineIntelligence)));
 
     await expect(getEngineIntelligence("txn-1")).resolves.toMatchObject({ state: "unavailable", available: false });
   });
@@ -1975,7 +2011,7 @@ describe("alertsApi auth headers", () => {
         engineId: "ml.python.primary",
         engineType: "ML_MODEL",
         engineStatus: "TIMEOUT",
-        riskLevel: undefined,
+        riskLevel: null,
         scoreBucket: "UNAVAILABLE",
         reasonCode: "ML_MODEL_TIMEOUT"
       })]
@@ -2279,6 +2315,8 @@ function metric(value) {
 
 function comparison() {
   return {
+    comparisonType: "RULES_VS_ML",
+    comparedEngineIds: ["rules.primary", "ml.python.primary"],
     agreementStatus: "DISAGREEMENT",
     riskMismatchStatus: "MATERIAL_RISK_MISMATCH",
     scoreDeltaBucket: "LARGE"
@@ -2323,7 +2361,6 @@ function engineResult(overrides = {}) {
     riskLevel: "HIGH",
     scoreBucket: "HIGH",
     reasonCodes: ["HIGH_VELOCITY"],
-    rawEvidence: "must not leak",
     ...overrides
   };
 }
@@ -2345,9 +2382,21 @@ function warning(overrides = {}) {
   return {
     warningCode: "EVIDENCE_UNSAFE_DROPPED",
     count: 1,
-    rawPayload: "must not leak",
     ...overrides
   };
+}
+
+function sharedEngineIntelligenceFixture(name) {
+  return JSON.parse(readFileSync(resolve(
+    process.cwd(),
+    "../common-events/src/test/resources/fixtures/engine-intelligence",
+    name
+  ), "utf8"));
+}
+
+function sharedInvalidEngineIntelligenceCases() {
+  return sharedEngineIntelligenceFixture("invalid_semantic_cases.json").cases
+    .filter((semanticCase) => semanticCase.category === "engine-intelligence");
 }
 
 function engineIntelligenceFeedbackResponse(overrides = {}) {

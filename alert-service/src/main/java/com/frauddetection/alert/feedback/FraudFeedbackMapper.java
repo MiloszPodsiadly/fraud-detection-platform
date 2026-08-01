@@ -27,6 +27,8 @@ public class FraudFeedbackMapper {
                 record.getScoredAt(),
                 record.getTransactionTimestamp(),
                 record.getEngineIntelligenceStatus(),
+                record.getComparisonType(),
+                immutable(record.getComparedEngineIds()),
                 record.getAgreementStatus(),
                 record.getRiskMismatchStatus(),
                 record.getScoreDeltaBucket(),

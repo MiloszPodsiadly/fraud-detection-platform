@@ -1,6 +1,7 @@
 package com.frauddetection.alert.engineintelligence;
 
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparison;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceDiagnosticSignal;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceEngineResult;
@@ -94,6 +95,8 @@ public class EngineIntelligenceProjectionPolicy {
     private EngineIntelligenceComparison validatedComparison(EngineIntelligenceComparison source) {
         requireShape(source);
         return publicContract(() -> new EngineIntelligenceComparison(
+                boundedEnum(source.comparisonType(), EngineIntelligenceComparisonType.class),
+                source.comparedEngineIds(),
                 boundedEnum(source.agreementStatus(), EngineIntelligenceAgreementStatus.class),
                 boundedEnum(source.riskMismatchStatus(), EngineIntelligenceRiskMismatchStatus.class),
                 boundedEnum(source.scoreDeltaBucket(), EngineIntelligenceScoreDeltaBucket.class)

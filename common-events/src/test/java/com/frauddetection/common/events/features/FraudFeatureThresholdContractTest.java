@@ -3,19 +3,11 @@ package com.frauddetection.common.events.features;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
-import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class FraudFeatureThresholdContractTest {
-
-    @Test
-    void velocityV1ObservationWindowIsAuthoritativeOneMinuteDuration() {
-        assertThat(FraudFeatureThresholdContract.VELOCITY_V1_OBSERVATION_WINDOW)
-                .isEqualTo(Duration.parse("PT1M"));
-        assertThat(FraudFeatureThresholdContract.VELOCITY_V1_OBSERVATION_WINDOW.toString()).isEqualTo("PT1M");
-    }
 
     @Test
     void rapidTransferPredicateUsesSharedCountAndAmountBoundaries() {

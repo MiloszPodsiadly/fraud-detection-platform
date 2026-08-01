@@ -51,9 +51,9 @@ describe("TransactionRiskIntelligencePanel", () => {
     expect(boundary).toHaveTextContent("It does not approve");
     expect(boundary).toHaveTextContent("authorize payment");
     expect(boundary).toHaveTextContent("create cases");
-    expect(boundary).toHaveTextContent("Velocity score is a normalized deterministic risk-severity signal.");
+    expect(boundary).toHaveTextContent("Velocity score is a deterministic normalized risk-severity signal.");
     expect(boundary).toHaveTextContent("It is not a calibrated fraud probability");
-    expect(boundary).toHaveTextContent("must not be directly interpreted as model confidence");
+    expect(boundary).toHaveTextContent("must not be interpreted as model confidence");
   });
 
   it("uses a stable sanitized panel id", () => {
@@ -110,7 +110,7 @@ describe("TransactionRiskIntelligencePanel", () => {
 
     const comparison = screen.getByRole("region", { name: "Projected Comparison" });
     expect(within(comparison).getByText("PARTIAL")).toBeInTheDocument();
-    expect(within(comparison).getByText("Agreement status describes projected engine comparison only.")).toBeInTheDocument();
+    expect(within(comparison).getByText("Agreement status describes the Rules vs ML diagnostic comparison only.")).toBeInTheDocument();
 
     useScoredTransactionDetail.mockReturnValue({
       detail: comparisonNullDetail(),

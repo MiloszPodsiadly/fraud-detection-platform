@@ -1,9 +1,11 @@
 package com.frauddetection.alert.engineintelligence;
 
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.PersistenceCreator;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
@@ -16,6 +18,8 @@ public class EngineIntelligenceProjection {
     private final String transactionId;
     private final int contractVersion;
     private final Instant generatedAt;
+    private final EngineIntelligenceComparisonType comparisonType;
+    private final List<String> comparedEngineIds;
     private final EngineIntelligenceAgreementStatus comparisonStatus;
     private final EngineIntelligenceRiskMismatchStatus riskMismatchStatus;
     private final EngineIntelligenceScoreDeltaBucket scoreDeltaBucket;
@@ -28,6 +32,7 @@ public class EngineIntelligenceProjection {
     private final Instant createdAt;
     private final Instant updatedAt;
 
+    @PersistenceCreator
     public EngineIntelligenceProjection(
             String transactionId,
             int contractVersion,
@@ -41,9 +46,43 @@ public class EngineIntelligenceProjection {
             Instant createdAt,
             Instant updatedAt
     ) {
+        this(
+                transactionId,
+                contractVersion,
+                generatedAt,
+                EngineIntelligenceComparisonType.RULES_VS_ML,
+                com.frauddetection.common.events.engine.FraudEngineIdentityContract.rulesVsMlComparisonEngineIds(),
+                comparisonStatus,
+                riskMismatchStatus,
+                scoreDeltaBucket,
+                engines,
+                diagnosticSignals,
+                warnings,
+                createdAt,
+                updatedAt
+        );
+    }
+
+    public EngineIntelligenceProjection(
+            String transactionId,
+            int contractVersion,
+            Instant generatedAt,
+            EngineIntelligenceComparisonType comparisonType,
+            List<String> comparedEngineIds,
+            EngineIntelligenceAgreementStatus comparisonStatus,
+            EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
+            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket,
+            List<EngineIntelligenceEngineProjection> engines,
+            List<EngineIntelligenceDiagnosticSignalProjection> diagnosticSignals,
+            List<EngineIntelligenceWarningProjection> warnings,
+            Instant createdAt,
+            Instant updatedAt
+    ) {
         this.transactionId = transactionId;
         this.contractVersion = contractVersion;
         this.generatedAt = generatedAt;
+        this.comparisonType = comparisonType;
+        this.comparedEngineIds = comparedEngineIds == null ? List.of() : List.copyOf(comparedEngineIds);
         this.comparisonStatus = comparisonStatus;
         this.riskMismatchStatus = riskMismatchStatus;
         this.scoreDeltaBucket = scoreDeltaBucket;
@@ -60,6 +99,8 @@ public class EngineIntelligenceProjection {
     public String getTransactionId() { return transactionId; }
     public int getContractVersion() { return contractVersion; }
     public Instant getGeneratedAt() { return generatedAt; }
+    public EngineIntelligenceComparisonType getComparisonType() { return comparisonType; }
+    public List<String> getComparedEngineIds() { return comparedEngineIds; }
     public EngineIntelligenceAgreementStatus getComparisonStatus() { return comparisonStatus; }
     public EngineIntelligenceRiskMismatchStatus getRiskMismatchStatus() { return riskMismatchStatus; }
     public EngineIntelligenceScoreDeltaBucket getScoreDeltaBucket() { return scoreDeltaBucket; }

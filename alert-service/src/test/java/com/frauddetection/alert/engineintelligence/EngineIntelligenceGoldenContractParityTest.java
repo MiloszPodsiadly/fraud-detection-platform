@@ -9,13 +9,16 @@ import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.stream.StreamSupport;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class EngineIntelligenceGoldenContractParityTest {
 
@@ -45,15 +48,41 @@ class EngineIntelligenceGoldenContractParityTest {
     @Test
     void threeEngineGoldenFixtureProjectsToReadModelAndPublicResponseInCanonicalOrder() throws Exception {
         EngineIntelligenceResponse response = publicResponse("engine_intelligence_three_engine_golden.json");
+        JsonNode registry = jsonMapper.readTree(fixturePath("engine_registry_contract.json").toFile());
+        List<String> registryOrder = StreamSupport.stream(registry.get("order").spliterator(), false)
+                .map(JsonNode::textValue)
+                .toList();
 
         assertThat(response.status()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
         assertThat(response.contractVersion()).isEqualTo(EngineIntelligenceSummary.CONTRACT_VERSION);
         assertThat(response.engines()).extracting(engine -> engine.engineId())
-                .containsExactlyElementsOf(FraudEngineIdentityContract.engineOrder());
+                .containsExactlyElementsOf(registryOrder);
         assertThat(response.engines()).extracting(engine -> engine.engineType())
                 .containsExactly(FraudEngineType.RULES, FraudEngineType.ML_MODEL, FraudEngineType.VELOCITY);
+        assertThat(response.comparison().comparisonType().name()).isEqualTo("RULES_VS_ML");
+        assertThat(response.comparison().comparedEngineIds())
+                .containsExactlyElementsOf(FraudEngineIdentityContract.rulesVsMlComparisonEngineIds());
         assertThat(response.diagnosticSignals()).extracting(signal -> signal.engineId())
                 .containsExactly(FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID);
+    }
+
+    @Test
+    void sharedInvalidSemanticCasesMarkedForCommonContractDoNotReachProjection() throws Exception {
+        JsonNode cases = jsonMapper.readTree(fixturePath("invalid_semantic_cases.json").toFile()).get("cases");
+
+        for (JsonNode semanticCase : StreamSupport.stream(cases.spliterator(), false).toList()) {
+            if (!"engine-intelligence".equals(semanticCase.get("category").textValue())
+                    || !semanticCase.get("commonReject").booleanValue()) {
+                continue;
+            }
+
+            assertThatThrownBy(() -> jsonMapper.readValue(
+                    jsonMapper.writeValueAsString(semanticCase.get("engineIntelligence")),
+                    EngineIntelligenceSummary.class
+            ))
+                    .as(semanticCase.get("caseId").textValue())
+                    .isInstanceOf(RuntimeException.class);
+        }
     }
 
     private EngineIntelligenceResponse publicResponse(String fixtureName) throws Exception {

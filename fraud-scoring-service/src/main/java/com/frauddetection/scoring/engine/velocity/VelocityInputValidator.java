@@ -1,12 +1,10 @@
 package com.frauddetection.scoring.engine.velocity;
 
-import com.frauddetection.common.events.features.FraudFeatureThresholdContract;
+import com.frauddetection.common.events.features.VelocityFeatureContract;
 import com.frauddetection.scoring.features.FeatureSnapshotValue;
 import com.frauddetection.scoring.features.FeatureSnapshotValueStatus;
 
 import java.math.BigDecimal;
-import java.time.Duration;
-import java.time.format.DateTimeParseException;
 
 final class VelocityInputValidator {
     private static final int MAX_WINDOW_TEXT_LENGTH = 32;
@@ -45,13 +43,13 @@ final class VelocityInputValidator {
                 continue;
             }
             Object actual = value.value();
-            if (actual instanceof Integer integer && integer < 0) {
+            if (actual instanceof Integer integer && !VelocityFeatureContract.isWithinBounds(integer)) {
                 return false;
             }
-            if (actual instanceof BigDecimal decimal && decimal.signum() < 0) {
+            if (actual instanceof BigDecimal decimal && !VelocityFeatureContract.isWithinBounds(decimal)) {
                 return false;
             }
-            if (actual instanceof Double doubleValue && (!Double.isFinite(doubleValue) || doubleValue < 0.0d)) {
+            if (actual instanceof Double doubleValue && !VelocityFeatureContract.isWithinBounds(doubleValue)) {
                 return false;
             }
             if (actual instanceof String window && !isCanonicalVelocityWindow(window)) {
@@ -62,27 +60,20 @@ final class VelocityInputValidator {
     }
 
     private boolean presentInputRelationshipsAreConsistent(VelocityInputs inputs) {
-        FeatureSnapshotValue<Integer> count = inputs.recentTransactionCount();
-        if (count.status() != FeatureSnapshotValueStatus.PRESENT || count.value() != 0) {
+        if (inputs.recentTransactionCount().status() != FeatureSnapshotValueStatus.PRESENT
+                || inputs.transactionVelocityPerMinute().status() != FeatureSnapshotValueStatus.PRESENT) {
             return true;
         }
-        FeatureSnapshotValue<BigDecimal> amount = inputs.recentAmountSumPln();
-        if (amount.status() == FeatureSnapshotValueStatus.PRESENT && amount.value().signum() > 0) {
-            return false;
-        }
-        FeatureSnapshotValue<Double> rate = inputs.transactionVelocityPerMinute();
-        return rate.status() != FeatureSnapshotValueStatus.PRESENT
-                || Double.compare(rate.value(), 0.0d) <= 0;
+        return VelocityFeatureContract.isRateConsistentWithCount(
+                inputs.recentTransactionCount().value(),
+                inputs.transactionVelocityPerMinute().value()
+        );
     }
 
     private boolean isCanonicalVelocityWindow(String value) {
         if (value.length() > MAX_WINDOW_TEXT_LENGTH) {
             return false;
         }
-        try {
-            return FraudFeatureThresholdContract.VELOCITY_V1_OBSERVATION_WINDOW.equals(Duration.parse(value));
-        } catch (DateTimeParseException exception) {
-            return false;
-        }
+        return VelocityFeatureContract.isCanonicalWindowText(value);
     }
 }

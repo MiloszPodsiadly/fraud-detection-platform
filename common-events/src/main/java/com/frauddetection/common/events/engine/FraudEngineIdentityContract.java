@@ -15,6 +15,10 @@ public final class FraudEngineIdentityContract {
             PYTHON_ML_PRIMARY_ENGINE_ID,
             VELOCITY_PRIMARY_ENGINE_ID
     );
+    private static final List<String> RULES_VS_ML_COMPARISON_ENGINE_IDS = List.of(
+            RULES_PRIMARY_ENGINE_ID,
+            PYTHON_ML_PRIMARY_ENGINE_ID
+    );
     private static final Map<String, FraudEngineType> ENGINE_TYPES = Map.of(
             RULES_PRIMARY_ENGINE_ID, FraudEngineType.RULES,
             PYTHON_ML_PRIMARY_ENGINE_ID, FraudEngineType.ML_MODEL,
@@ -26,6 +30,10 @@ public final class FraudEngineIdentityContract {
 
     public static List<String> engineOrder() {
         return ENGINE_ORDER;
+    }
+
+    public static List<String> rulesVsMlComparisonEngineIds() {
+        return RULES_VS_ML_COMPARISON_ENGINE_IDS;
     }
 
     public static boolean isKnownEngineId(String engineId) {

@@ -24,7 +24,7 @@ class MicrometerFraudScoringOrchestratorMetricsTest {
         metrics.recordOrchestration(FraudScoringOrchestrationStatus.PARTIAL);
         metrics.recordEngineResult("rules.primary", FraudEngineType.RULES, FraudEngineStatus.AVAILABLE, true);
         metrics.recordEngineResult("velocity.primary", FraudEngineType.VELOCITY, FraudEngineStatus.DEGRADED, false);
-        metrics.recordEngineFailure("velocity.primary", FraudEngineType.VELOCITY, "invalid_value");
+        metrics.recordEngineFailure("velocity.primary", FraudEngineType.VELOCITY, "publication_failure");
         metrics.recordTimeout("ml.python.primary", FraudEngineType.ML_MODEL, false);
         metrics.recordRequiredEngineFailed("rules.primary");
         metrics.recordEngineLatency(
@@ -45,7 +45,7 @@ class MicrometerFraudScoringOrchestratorMetricsTest {
         assertThat(registry.get(MicrometerFraudScoringOrchestratorMetrics.ENGINE_FAILURE_COUNTER)
                 .tag("engine_id", "velocity.primary")
                 .tag("engine_type", "VELOCITY")
-                .tag("failure_category", "invalid_value")
+                .tag("failure_category", "publication_failure")
                 .counter().count()).isEqualTo(1.0d);
         assertThat(registry.get(MicrometerFraudScoringOrchestratorMetrics.ENGINE_TIMEOUT_COUNTER)
                 .tag("engine_id", "ml.python.primary")

@@ -35,6 +35,10 @@ class EngineIntelligenceScoreDeltaBucketTest {
     @Test
     void scoreDeltaBucketIsSerializedAsEnumString() throws Exception {
         assertThat(EngineIntelligenceTestSupport.objectMapper().writeValueAsString(EngineIntelligenceTestSupport.comparison()))
-                .contains("\"scoreDeltaBucket\":\"SMALL\"");
+                .contains(
+                        "\"comparisonType\":\"RULES_VS_ML\"",
+                        "\"comparedEngineIds\":[\"rules.primary\",\"ml.python.primary\"]",
+                        "\"scoreDeltaBucket\":\"SMALL\""
+                );
     }
 }

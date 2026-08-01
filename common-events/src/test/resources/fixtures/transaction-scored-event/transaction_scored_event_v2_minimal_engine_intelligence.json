@@ -49,7 +49,9 @@
       }
     ],
     "comparison": {
-      "agreementStatus": "INSUFFICIENT_DATA",
+      "comparisonType": "RULES_VS_ML",
+      "comparedEngineIds": ["rules.primary", "ml.python.primary"],
+"agreementStatus": "INSUFFICIENT_DATA",
       "riskMismatchStatus": "NOT_COMPARABLE",
       "scoreDeltaBucket": "UNAVAILABLE"
     },

@@ -12,7 +12,9 @@
     }
   ],
   "comparison": {
-    "agreementStatus": "PARTIAL",
+    "comparisonType": "RULES_VS_ML",
+    "comparedEngineIds": ["rules.primary", "ml.python.primary"],
+"agreementStatus": "PARTIAL",
     "riskMismatchStatus": "NOT_COMPARABLE",
     "scoreDeltaBucket": "UNAVAILABLE"
   },

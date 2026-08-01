@@ -28,6 +28,8 @@
     }
   ],
   "comparison": {
+    "comparisonType": "RULES_VS_ML",
+    "comparedEngineIds": ["rules.primary", "ml.python.primary"],
     "agreementStatus": "DISAGREEMENT",
     "riskMismatchStatus": "MATERIAL_RISK_MISMATCH",
     "scoreDeltaBucket": "LARGE"

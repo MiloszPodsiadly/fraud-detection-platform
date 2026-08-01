@@ -1,6 +1,7 @@
 package com.frauddetection.scoring.service;
 
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.ScoringMode;
@@ -56,7 +57,7 @@ class RuleBasedFraudScoringEngineTest {
         assertThat(result.reasonCodes()).contains(
                 ReasonCode.DEVICE_NOVELTY.wireValue(),
                 ReasonCode.COUNTRY_MISMATCH.wireValue(),
-                ReasonCode.TRANSACTION_VELOCITY.wireValue(),
+                ReasonCode.HIGH_VELOCITY.wireValue(),
                 ReasonCode.HIGH_TRANSACTION_AMOUNT.wireValue()
         );
         assertThat(result.reasonCodes()).allSatisfy(reasonCode ->
@@ -70,6 +71,91 @@ class RuleBasedFraudScoringEngineTest {
         assertThat(result.explanationMetadata()).containsEntry("explanationType", "WEIGHTED_REASON_CODES");
         assertThat(result.scoreDetails()).containsKey("explanationMetadata");
         assertThat(result.alertRecommended()).isTrue();
+    }
+
+    @Test
+    void oneHighVelocityFactDoesNotGenerateDuplicatedRuleContributions() {
+        var event = new com.frauddetection.common.events.contract.TransactionEnrichedEvent(
+                java.util.UUID.randomUUID().toString(),
+                "txn-velocity-one-fact",
+                "corr-velocity-one-fact",
+                "cust-velocity-one-fact",
+                "acct-velocity-one-fact",
+                java.time.Instant.now(),
+                java.time.Instant.now(),
+                new com.frauddetection.common.events.model.Money(new BigDecimal("45.00"), "PLN"),
+                TransactionFixtures.enrichedTransaction().build().merchantInfo(),
+                TransactionFixtures.enrichedTransaction().build().deviceInfo(),
+                TransactionFixtures.enrichedTransaction().build().locationInfo(),
+                TransactionFixtures.enrichedTransaction().build().customerContext(),
+                5,
+                "PT1M",
+                new com.frauddetection.common.events.model.Money(new BigDecimal("45.00"), "PLN"),
+                "PT1M",
+                5.0d,
+                1,
+                false,
+                false,
+                false,
+                List.of(ReasonCode.HIGH_VELOCITY.wireValue()),
+                Map.of(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
+                        FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d
+                )
+        );
+
+        var result = engine.score(FraudScoringRequest.from(event));
+
+        assertThat(result.reasonCodes()).containsExactly(ReasonCode.HIGH_VELOCITY.wireValue());
+        assertThat(result.reasonCodes()).doesNotContain(
+                ReasonCode.RECENT_TRANSACTION_SPIKE.wireValue(),
+                ReasonCode.TRANSACTION_VELOCITY.wireValue()
+        );
+        assertThat(result.scoreDetails()).containsEntry("high_velocityWeight", 0.20d);
+        assertThat(result.scoreDetails()).doesNotContainKeys("recentTransactionSpikeBoost", "transactionVelocityBoost");
+    }
+
+    @Test
+    void oneRapidTransferFactDoesNotGenerateDuplicatedRuleContributions() {
+        var event = new com.frauddetection.common.events.contract.TransactionEnrichedEvent(
+                java.util.UUID.randomUUID().toString(),
+                "txn-rapid-transfer-one-fact",
+                "corr-rapid-transfer-one-fact",
+                "cust-rapid-transfer-one-fact",
+                "acct-rapid-transfer-one-fact",
+                java.time.Instant.now(),
+                java.time.Instant.now(),
+                new com.frauddetection.common.events.model.Money(new BigDecimal("100.00"), "PLN"),
+                TransactionFixtures.enrichedTransaction().build().merchantInfo(),
+                TransactionFixtures.enrichedTransaction().build().deviceInfo(),
+                TransactionFixtures.enrichedTransaction().build().locationInfo(),
+                TransactionFixtures.enrichedTransaction().build().customerContext(),
+                2,
+                "PT1M",
+                new com.frauddetection.common.events.model.Money(new BigDecimal("20000.00"), "PLN"),
+                "PT1M",
+                2.0d,
+                1,
+                false,
+                false,
+                false,
+                List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue()),
+                Map.of(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
+                        FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true
+                )
+        );
+
+        var result = engine.score(FraudScoringRequest.from(event));
+
+        assertThat(result.reasonCodes()).containsExactly(ReasonCode.RAPID_PLN_20K_BURST.wireValue());
+        assertThat(result.scoreDetails()).containsEntry("rapid_pln_20k_burstWeight", 0.45d);
+        assertThat(result.scoreDetails()).doesNotContainKeys(
+                "recentAmountAccumulationBoost",
+                "rapidTransferFraudCaseBoost"
+        );
+        assertThat(result.fraudScore()).isEqualTo(0.50d);
     }
 
     @Test

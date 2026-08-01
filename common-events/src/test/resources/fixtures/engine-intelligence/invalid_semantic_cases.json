@@ -1,0 +1,212 @@
+{
+  "validFixture": "engine_intelligence_three_engine_golden.json",
+  "cases": [
+    {
+      "caseId": "inconsistent_count_window_rate",
+      "category": "velocity-input",
+      "expectedReason": "VELOCITY_FEATURES_INCONSISTENT",
+      "velocityInput": {
+        "recentTransactionCount": 5,
+        "recentTransactionCountWindow": "PT1M",
+        "recentAmountSumPln": "0.00",
+        "transactionVelocityPerMinute": 6.0
+      }
+    },
+    {
+      "caseId": "duplicate_engine_id",
+      "category": "engine-intelligence",
+      "commonReject": true,
+      "engineIntelligence": {
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["HIGH_VELOCITY"]},
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "MEDIUM", "scoreBucket": "MEDIUM", "reasonCodes": ["RULE_DUPLICATE"]}
+        ],
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "PARTIAL", "riskMismatchStatus": "NOT_COMPARABLE", "scoreDeltaBucket": "UNAVAILABLE"},
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "invalid_engine_id_type_pair",
+      "category": "engine-intelligence",
+      "commonReject": true,
+      "engineIntelligence": {
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          {"engineId": "velocity.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["HIGH_VELOCITY"]}
+        ],
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "PARTIAL", "riskMismatchStatus": "NOT_COMPARABLE", "scoreDeltaBucket": "UNAVAILABLE"},
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "malformed_optional_engine_evaluation",
+      "category": "engine-intelligence",
+      "commonReject": true,
+      "engineIntelligence": {
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          {"engineId": "device.primary", "engineType": "VELOCITY", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["DEVICE_RISK_SIGNAL"]}
+        ],
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "PARTIAL", "riskMismatchStatus": "NOT_COMPARABLE", "scoreDeltaBucket": "UNAVAILABLE"},
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "invalid_operational_status_relationship",
+      "category": "engine-intelligence",
+      "commonReject": true,
+      "engineIntelligence": {
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "TIMEOUT", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["ENGINE_TIMEOUT"]}
+        ],
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "PARTIAL", "riskMismatchStatus": "NOT_COMPARABLE", "scoreDeltaBucket": "UNAVAILABLE"},
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "numeric_string_instead_of_number",
+      "category": "engine-intelligence",
+      "commonReject": false,
+      "engineIntelligence": {
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["HIGH_VELOCITY"]}
+        ],
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "PARTIAL", "riskMismatchStatus": "NOT_COMPARABLE", "scoreDeltaBucket": "UNAVAILABLE"},
+        "diagnosticSignals": [],
+        "warnings": [{"code": "ENGINE_RESULT_LIMIT_APPLIED", "count": "1"}]
+      }
+    },
+    {
+      "caseId": "extra_property",
+      "category": "engine-intelligence",
+      "commonReject": false,
+      "engineIntelligence": {
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["HIGH_VELOCITY"], "rawPayload": "hidden"}
+        ],
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "PARTIAL", "riskMismatchStatus": "NOT_COMPARABLE", "scoreDeltaBucket": "UNAVAILABLE"},
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "invalid_timestamp",
+      "category": "engine-intelligence",
+      "commonReject": false,
+      "engineIntelligence": {
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00+00:00",
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["HIGH_VELOCITY"]}
+        ],
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "PARTIAL", "riskMismatchStatus": "NOT_COMPARABLE", "scoreDeltaBucket": "UNAVAILABLE"},
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "wrong_comparison_type",
+      "category": "engine-intelligence",
+      "commonReject": true,
+      "engineIntelligence": {
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["HIGH_VELOCITY"]}
+        ],
+        "comparison": {"comparisonType": "ALL_ENGINES", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "PARTIAL", "riskMismatchStatus": "NOT_COMPARABLE", "scoreDeltaBucket": "UNAVAILABLE"},
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "wrong_compared_engine_ids",
+      "category": "engine-intelligence",
+      "commonReject": true,
+      "engineIntelligence": {
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["HIGH_VELOCITY"]}
+        ],
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "velocity.primary"], "agreementStatus": "PARTIAL", "riskMismatchStatus": "NOT_COMPARABLE", "scoreDeltaBucket": "UNAVAILABLE"},
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "generic_agreement_without_comparison_identity",
+      "category": "engine-intelligence",
+      "commonReject": true,
+      "engineIntelligence": {
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["HIGH_VELOCITY"]}
+        ],
+        "comparison": {"genericAgreement": "DISAGREEMENT", "agreementStatus": "DISAGREEMENT", "riskMismatchStatus": "MATERIAL_RISK_MISMATCH", "scoreDeltaBucket": "LARGE"},
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "unavailable_result_containing_fake_zero_score",
+      "category": "engine-intelligence",
+      "commonReject": true,
+      "engineIntelligence": {
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "UNAVAILABLE", "riskLevel": "LOW", "scoreBucket": "NONE", "reasonCodes": ["ENGINE_UNAVAILABLE_ZERO_SCORE"]}
+        ],
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "PARTIAL", "riskMismatchStatus": "NOT_COMPARABLE", "scoreDeltaBucket": "UNAVAILABLE"},
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "velocity_score_described_or_transport_as_probability",
+      "category": "engine-intelligence",
+      "commonReject": false,
+      "engineIntelligence": {
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          {"engineId": "velocity.primary", "engineType": "VELOCITY", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["RAPID_PLN_20K_BURST"], "probability": 0.92}
+        ],
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "PARTIAL", "riskMismatchStatus": "NOT_COMPARABLE", "scoreDeltaBucket": "UNAVAILABLE"},
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "unbounded_reason_codes_or_evidence",
+      "category": "engine-intelligence",
+      "commonReject": true,
+      "engineIntelligence": {
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["A", "B", "C", "D", "E", "F"]}
+        ],
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "PARTIAL", "riskMismatchStatus": "NOT_COMPARABLE", "scoreDeltaBucket": "UNAVAILABLE"},
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    }
+  ]
+}

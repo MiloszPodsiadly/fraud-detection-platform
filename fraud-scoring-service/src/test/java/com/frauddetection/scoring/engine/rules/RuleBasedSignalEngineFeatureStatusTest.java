@@ -74,7 +74,7 @@ class RuleBasedSignalEngineFeatureStatusTest {
         assertThat(result.score()).isEqualTo(production.fraudScore());
         assertThat(result.riskLevel()).isEqualTo(production.riskLevel());
         assertThat(result.reasonCodes()).containsExactlyElementsOf(production.reasonCodes());
-        assertThat(result.reasonCodes()).containsExactly(ReasonCode.RECENT_TRANSACTION_SPIKE.wireValue());
+        assertThat(result.reasonCodes()).isEmpty();
         assertThat(flatten(result)).doesNotContain("5");
     }
 
@@ -100,9 +100,8 @@ class RuleBasedSignalEngineFeatureStatusTest {
 
         assertThat(result.status()).isEqualTo(FraudEngineStatus.AVAILABLE);
         assertThat(result.statusReason()).isNull();
-        assertThat(result.reasonCodes()).containsExactly(ReasonCode.RECENT_TRANSACTION_SPIKE.wireValue());
-        assertThat(result.evidence()).extracting(evidence -> evidence.reasonCode())
-                .containsExactly(ReasonCode.RECENT_TRANSACTION_SPIKE.wireValue());
+        assertThat(result.reasonCodes()).isEmpty();
+        assertThat(result.evidence()).isEmpty();
     }
 
     @Test

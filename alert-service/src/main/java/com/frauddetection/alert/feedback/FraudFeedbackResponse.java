@@ -3,6 +3,7 @@ package com.frauddetection.alert.feedback;
 import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
@@ -30,6 +31,8 @@ public record FraudFeedbackResponse(
         Instant scoredAt,
         Instant transactionTimestamp,
         EngineIntelligenceResponseStatus engineIntelligenceStatus,
+        EngineIntelligenceComparisonType comparisonType,
+        List<String> comparedEngineIds,
         EngineIntelligenceAgreementStatus agreementStatus,
         EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
         EngineIntelligenceScoreDeltaBucket scoreDeltaBucket,

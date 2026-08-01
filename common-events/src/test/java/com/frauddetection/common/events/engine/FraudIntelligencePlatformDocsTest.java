@@ -45,7 +45,7 @@ class FraudIntelligencePlatformDocsTest {
     }
 
     @Test
-    void docsDenyOverclaimsAndDoNotDescribeRuntimeIntegration() throws Exception {
+    void docsDenyOverclaimsAndDescribeCurrentRuntimeBoundaries() throws Exception {
         String product = Files.readString(docsRoot().resolve("product/fraud_intelligence_platform.md"));
         String architecture = Files.readString(docsRoot().resolve("architecture/multi_engine_scoring_architecture.md"));
         String nonGoals = Files.readString(docsRoot().resolve("product/fraud_intelligence_non_goals.md"));
@@ -60,8 +60,8 @@ class FraudIntelligencePlatformDocsTest {
                 .contains("does not")
                 .doesNotContain("guaranteed fraud proof");
         assertThat(architecture)
-                .contains("tightens and maintains the pre-exposure shared `FraudEngineResult` contract")
-                .contains("does not add `engineResults[]` to `TransactionScoredEvent`")
+                .contains("Current Engine Intelligence runtime maps bounded engine outputs into `EngineIntelligenceSummary`")
+                .contains("`FraudEngineResult` is not added as `engineResults[]` to `TransactionScoredEvent`")
                 .contains("Consumers tolerate unknown additive fields")
                 .contains("Breaking semantic changes require versioning")
                 .contains("Maximum items");
@@ -98,10 +98,10 @@ class FraudIntelligencePlatformDocsTest {
                 .contains("payload channels")
                 .contains("Future richer explainability requires a separate scoped contract")
                 .contains("It is not DLP")
-                .contains("FDP-101 tightens and maintains the pre-exposure shared `FraudEngineResult` contract")
-                .contains("Existing `TransactionScoredEvent` shape remains unchanged")
-                .contains("This branch is `common-events` contract/docs/tests only")
-                .contains("Later exposure requires a separate scoped PR with compatibility and rollout gates")
+                .contains("Historical FDP-101 introduced the pre-exposure shared contract")
+                .contains("Current runtime orchestration may produce bounded engine outputs")
+                .contains("Runtime publication maps bounded engine outputs into `EngineIntelligenceSummary`")
+                .contains("The current non-goal is still exposing raw `FraudEngineResult` or raw engine payloads")
                 .contains("does not introduce `ScoringContext`, `FraudSignalEngine`")
                 .contains("model retraining")
                 .contains("rule updates");
@@ -110,11 +110,11 @@ class FraudIntelligencePlatformDocsTest {
                 .contains("not automatic blocking")
                 .contains("not core banking authorization")
                 .contains("pre-exposure")
-                .contains("tightens")
-                .contains("does not add kafka")
-                .contains("does not add api")
-                .contains("does not add ui")
-                .contains("does not add new `scoringcontext`")
+                .contains("tightened")
+                .contains("historical fdp-101")
+                .contains("current engine intelligence")
+                .contains("optional `transactionscoredevent.engineintelligence` summary")
+                .contains("did not add new `scoringcontext`")
                 .contains("api")
                 .contains("ui")
                 .contains("dataset export")

@@ -4,6 +4,7 @@ import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.evidence.ScoringEvidenceItem;
 import com.frauddetection.common.events.evidence.ScoringEvidenceSource;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.scoring.config.ScoringProperties;
 import com.frauddetection.scoring.domain.FraudScoreResult;
@@ -44,6 +45,10 @@ public class RuleBasedFraudScoringEngine implements FraudScoringEngine {
         score = addFlagWeight(event.featureFlags(), ReasonCode.MERCHANT_CONCENTRATION, score, 0.08d, reasonCodes, scoreDetails);
         score = addFlagWeight(event.featureFlags(), ReasonCode.HIGH_AMOUNT_ACTIVITY, score, 0.14d, reasonCodes, scoreDetails);
         score = addFlagWeight(event.featureFlags(), ReasonCode.RAPID_PLN_20K_BURST, score, 0.45d, reasonCodes, scoreDetails);
+        boolean rapidTransferFactAlreadyScored = containsFeatureFlag(
+                event.featureFlags(),
+                FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST
+        );
 
         if (Boolean.TRUE.equals(event.countryMismatch())) {
             score += 0.12d;
@@ -60,26 +65,20 @@ public class RuleBasedFraudScoringEngine implements FraudScoringEngine {
             reasonCodes.add(ReasonCode.PROXY_OR_VPN.wireValue());
             scoreDetails.put("proxyOrVpnBoost", 0.10d);
         }
-        if (event.recentTransactionCount() != null && event.recentTransactionCount() >= 5) {
-            score += 0.10d;
-            reasonCodes.add(ReasonCode.RECENT_TRANSACTION_SPIKE.wireValue());
-            scoreDetails.put("recentTransactionSpikeBoost", 0.10d);
-        }
-        if (event.transactionVelocityPerMinute() != null && event.transactionVelocityPerMinute() >= 5.0d) {
-            score += 0.12d;
-            reasonCodes.add(ReasonCode.TRANSACTION_VELOCITY.wireValue());
-            scoreDetails.put("transactionVelocityBoost", 0.12d);
-        }
         if (event.transactionAmount() != null && event.transactionAmount().amount().compareTo(BigDecimal.valueOf(1000)) >= 0) {
             reasonCodes.add(ReasonCode.HIGH_TRANSACTION_AMOUNT.wireValue());
             scoreDetails.put("highTransactionAmountDiagnostic", true);
         }
-        if (event.recentAmountSum() != null && event.recentAmountSum().amount().compareTo(BigDecimal.valueOf(5000)) >= 0) {
+        if (!rapidTransferFactAlreadyScored
+                && event.recentAmountSum() != null
+                && event.recentAmountSum().amount().compareTo(BigDecimal.valueOf(5000)) >= 0) {
             score += 0.10d;
             reasonCodes.add(ReasonCode.RECENT_AMOUNT_ACCUMULATION.wireValue());
             scoreDetails.put("recentAmountAccumulationBoost", 0.10d);
         }
-        if (event.featureSnapshot() != null && Boolean.TRUE.equals(event.featureSnapshot().get("rapidTransferFraudCaseCandidate"))) {
+        if (!rapidTransferFactAlreadyScored
+                && event.featureSnapshot() != null
+                && Boolean.TRUE.equals(event.featureSnapshot().get(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE))) {
             score += 0.20d;
             reasonCodes.add(ReasonCode.RAPID_TRANSFER_FRAUD_CASE.wireValue());
             scoreDetails.put("rapidTransferFraudCaseBoost", 0.20d);
@@ -145,6 +144,10 @@ public class RuleBasedFraudScoringEngine implements FraudScoringEngine {
             return currentScore + weight;
         }
         return currentScore;
+    }
+
+    private boolean containsFeatureFlag(List<String> featureFlags, String featureFlag) {
+        return featureFlags != null && featureFlags.contains(featureFlag);
     }
 
     private RiskLevel mapRiskLevel(double fraudScore) {

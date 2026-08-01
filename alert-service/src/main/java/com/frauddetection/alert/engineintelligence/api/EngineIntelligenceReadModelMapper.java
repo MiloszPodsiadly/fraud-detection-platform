@@ -57,6 +57,8 @@ public class EngineIntelligenceReadModelMapper {
                 source.getContractVersion(),
                 source.getGeneratedAt(),
                 new EngineIntelligenceComparisonReadModel(
+                        source.getComparisonType(),
+                        source.getComparedEngineIds(),
                         source.getComparisonStatus(),
                         source.getRiskMismatchStatus(),
                         source.getScoreDeltaBucket()

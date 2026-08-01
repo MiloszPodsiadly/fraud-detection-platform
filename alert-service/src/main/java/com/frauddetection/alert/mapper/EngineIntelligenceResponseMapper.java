@@ -70,6 +70,8 @@ public class EngineIntelligenceResponseMapper {
             return null;
         }
         return new EngineIntelligenceComparisonResponse(
+                readModel.comparison().comparisonType(),
+                readModel.comparison().comparedEngineIds(),
                 readModel.comparison().agreementStatus(),
                 readModel.comparison().riskMismatchStatus(),
                 readModel.comparison().scoreDeltaBucket()

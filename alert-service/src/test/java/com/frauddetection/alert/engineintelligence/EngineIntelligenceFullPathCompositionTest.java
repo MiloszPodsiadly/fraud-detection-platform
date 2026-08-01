@@ -10,7 +10,7 @@ import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.enums.RiskLevel;
-import com.frauddetection.common.events.features.FraudFeatureThresholdContract;
+import com.frauddetection.common.events.features.VelocityFeatureContract;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparison;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.enricher.config.FeatureStoreProperties;
@@ -202,7 +202,7 @@ class EngineIntelligenceFullPathCompositionTest {
 
     private FeatureStoreProperties featureStoreProperties() {
         return new FeatureStoreProperties(
-                FraudFeatureThresholdContract.VELOCITY_V1_OBSERVATION_WINDOW,
+                VelocityFeatureContract.CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW,
                 Duration.ofDays(7),
                 Duration.ofDays(8),
                 Duration.ofDays(180),

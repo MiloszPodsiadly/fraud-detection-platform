@@ -3,6 +3,7 @@ package com.frauddetection.alert.feedback;
 import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
@@ -47,6 +48,8 @@ public class FraudFeedbackRecord {
     private Instant scoredAt;
     private Instant transactionTimestamp;
     private EngineIntelligenceResponseStatus engineIntelligenceStatus;
+    private EngineIntelligenceComparisonType comparisonType;
+    private List<String> comparedEngineIds;
     private EngineIntelligenceAgreementStatus agreementStatus;
     private EngineIntelligenceRiskMismatchStatus riskMismatchStatus;
     private EngineIntelligenceScoreDeltaBucket scoreDeltaBucket;
@@ -92,6 +95,10 @@ public class FraudFeedbackRecord {
     public void setTransactionTimestamp(Instant transactionTimestamp) { this.transactionTimestamp = transactionTimestamp; }
     public EngineIntelligenceResponseStatus getEngineIntelligenceStatus() { return engineIntelligenceStatus; }
     public void setEngineIntelligenceStatus(EngineIntelligenceResponseStatus engineIntelligenceStatus) { this.engineIntelligenceStatus = engineIntelligenceStatus; }
+    public EngineIntelligenceComparisonType getComparisonType() { return comparisonType; }
+    public void setComparisonType(EngineIntelligenceComparisonType comparisonType) { this.comparisonType = comparisonType; }
+    public List<String> getComparedEngineIds() { return comparedEngineIds; }
+    public void setComparedEngineIds(List<String> comparedEngineIds) { this.comparedEngineIds = comparedEngineIds; }
     public EngineIntelligenceAgreementStatus getAgreementStatus() { return agreementStatus; }
     public void setAgreementStatus(EngineIntelligenceAgreementStatus agreementStatus) { this.agreementStatus = agreementStatus; }
     public EngineIntelligenceRiskMismatchStatus getRiskMismatchStatus() { return riskMismatchStatus; }

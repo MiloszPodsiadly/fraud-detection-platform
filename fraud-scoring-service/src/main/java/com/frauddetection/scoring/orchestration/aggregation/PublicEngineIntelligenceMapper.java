@@ -1,9 +1,11 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
 import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparison;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceDiagnosticSignal;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceEngineResult;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
@@ -48,6 +50,8 @@ public final class PublicEngineIntelligenceMapper {
 
     private EngineIntelligenceComparison mapComparison(FraudEngineAggregationResult result) {
         return new EngineIntelligenceComparison(
+                EngineIntelligenceComparisonType.RULES_VS_ML,
+                FraudEngineIdentityContract.rulesVsMlComparisonEngineIds(),
                 mapAgreementStatus(result.agreementStatus()),
                 mapRiskMismatchStatus(result.riskMismatch().status()),
                 result.scoreDelta().status() == FraudEngineScoreDeltaStatus.AVAILABLE

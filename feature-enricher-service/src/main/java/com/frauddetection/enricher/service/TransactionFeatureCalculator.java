@@ -3,6 +3,7 @@ package com.frauddetection.enricher.service;
 import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.features.FraudFeatureThresholdContract;
+import com.frauddetection.common.events.features.VelocityFeatureContract;
 import com.frauddetection.common.events.model.Money;
 import com.frauddetection.enricher.config.FeatureStoreProperties;
 import com.frauddetection.enricher.domain.EnrichedTransactionFeatures;
@@ -10,7 +11,6 @@ import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -42,13 +42,7 @@ public class TransactionFeatureCalculator {
         boolean proxyOrVpnDetected = Boolean.TRUE.equals(event.deviceInfo().proxyDetected())
                 || Boolean.TRUE.equals(event.deviceInfo().vpnDetected());
 
-        double velocityPerMinute = BigDecimal.valueOf(recentTransactionCount)
-                .divide(
-                        BigDecimal.valueOf(FraudFeatureThresholdContract.VELOCITY_V1_OBSERVATION_WINDOW.toMinutes()),
-                        4,
-                        RoundingMode.HALF_UP
-                )
-                .doubleValue();
+        double velocityPerMinute = VelocityFeatureContract.expectedRatePerMinute(recentTransactionCount);
 
         List<String> featureFlags = new ArrayList<>();
         if (deviceNovelty) {
@@ -59,9 +53,6 @@ public class TransactionFeatureCalculator {
         }
         if (proxyOrVpnDetected) {
             featureFlags.add(FraudFeatureContract.FLAG_PROXY_OR_VPN);
-        }
-        if (recentTransactionCount >= FraudFeatureThresholdContract.HIGH_VELOCITY_TRANSACTION_COUNT) {
-            featureFlags.add(FraudFeatureContract.FLAG_HIGH_VELOCITY);
         }
         if (merchantFrequency7d >= 5) {
             featureFlags.add(FraudFeatureContract.FLAG_MERCHANT_CONCENTRATION);
@@ -78,7 +69,7 @@ public class TransactionFeatureCalculator {
         }
 
         Map<String, Object> featureSnapshot = new LinkedHashMap<>();
-        String velocityV1ObservationWindow = FraudFeatureThresholdContract.VELOCITY_V1_OBSERVATION_WINDOW.toString();
+        String velocityV1ObservationWindow = VelocityFeatureContract.CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW_TEXT;
         featureSnapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT, recentTransactionCount);
         featureSnapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, velocityV1ObservationWindow);
         featureSnapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM, recentAmountSum);

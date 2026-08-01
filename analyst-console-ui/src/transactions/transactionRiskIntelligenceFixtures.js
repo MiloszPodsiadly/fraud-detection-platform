@@ -57,8 +57,8 @@ export function degradedDetail(overrides = {}) {
         engineId: "rules.primary",
         engineType: "RULES",
         status: "DEGRADED",
-        riskLevel: "CRITICAL",
-        scoreBucket: "HIGH",
+        riskLevel: null,
+        scoreBucket: "UNAVAILABLE",
         reasonCodes: ["HIGH_VELOCITY"]
       }],
       warnings: [{ warningCode: "ENGINE_RESULT_LIMIT_APPLIED", count: 1 }]
@@ -363,6 +363,8 @@ function availableEngineIntelligence(overrides = {}) {
     contractVersion: 1,
     generatedAt: "2026-06-18T10:00:02Z",
     comparison: {
+      comparisonType: "RULES_VS_ML",
+      comparedEngineIds: ["rules.primary", "ml.python.primary"],
       agreementStatus: "PARTIAL",
       riskMismatchStatus: "NOT_COMPARABLE",
       scoreDeltaBucket: "UNAVAILABLE"

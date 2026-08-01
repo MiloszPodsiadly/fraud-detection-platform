@@ -152,6 +152,8 @@ class TransactionScoredEventCompatibilityTest {
                   "generatedAt": "2026-06-01T06:00:00Z",
                   "engines": [],
                   "comparison": {
+                    "comparisonType": "RULES_VS_ML",
+                    "comparedEngineIds": ["rules.primary", "ml.python.primary"],
                     "agreementStatus": "INSUFFICIENT_DATA",
                     "riskMismatchStatus": "NOT_COMPARABLE",
                     "scoreDeltaBucket": "UNAVAILABLE"

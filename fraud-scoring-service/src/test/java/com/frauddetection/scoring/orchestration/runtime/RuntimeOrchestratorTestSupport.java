@@ -67,8 +67,13 @@ final class RuntimeOrchestratorTestSupport {
                 executionPolicy(),
                 new BoundedFraudEngineExecutor(new ScriptedExecutorService(modes)),
                 metrics,
-                clock
+                clock,
+                clockBackedTicker(clock)
         );
+    }
+
+    static MonotonicTicker clockBackedTicker(Clock clock) {
+        return () -> Duration.between(RECEIVED_AT, clock.instant()).toNanos();
     }
 
     static FraudSignalEngineRegistry registry() {

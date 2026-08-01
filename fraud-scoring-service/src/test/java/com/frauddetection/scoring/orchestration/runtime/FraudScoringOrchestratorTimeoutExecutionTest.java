@@ -77,7 +77,7 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
         assertThat(result.engineResults().get(1).confidence()).isEqualTo(FraudEngineConfidence.UNKNOWN);
         assertThat(result.engineResults().get(1).statusReason()).isEqualTo("ORCHESTRATOR_ENGINE_TIMEOUT");
         assertThat(result.engineResults().get(1).latencyMs()).isEqualTo(ML_DEADLINE.toMillis());
-        assertThat(result.engineResults().get(1).generatedAt()).isEqualTo(RECEIVED_AT.plusMillis(51));
+        assertThat(result.engineResults().get(1).generatedAt()).isEqualTo(RECEIVED_AT.plusMillis(11));
         assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.PARTIAL);
         assertThat(result.executionWarnings().stream().map(FraudScoringExecutionWarning::code))
                 .contains(FraudScoringExecutionWarningCode.ENGINE_TIMEOUT_RECORDED);
@@ -269,7 +269,8 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
                 policy,
                 new BoundedFraudEngineExecutor(new ScriptedExecutorService(modes)),
                 metrics,
-                clock
+                clock,
+                () -> Duration.between(RECEIVED_AT, clock.instant()).toNanos()
         );
     }
 

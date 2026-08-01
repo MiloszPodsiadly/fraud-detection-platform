@@ -50,12 +50,16 @@ class RuleBasedSignalEngineBehaviorParityTest {
 
     @Test
     void thresholdBoundaryRiskAndAlertRecommendationMirrorProduction() {
-        TransactionEnrichedEvent event = event(true, true, true, 5, 5.0d, BigDecimal.TEN,
-                List.of(ReasonCode.HIGH_VELOCITY.wireValue()),
+        TransactionEnrichedEvent event = event(true, true, false, 5, 5.0d, BigDecimal.TEN,
+                List.of(
+                        ReasonCode.DEVICE_NOVELTY.wireValue(),
+                        ReasonCode.COUNTRY_MISMATCH.wireValue(),
+                        ReasonCode.HIGH_VELOCITY.wireValue()
+                ),
                 Map.of(
                         FraudFeatureContract.DEVICE_NOVELTY, true,
                         FraudFeatureContract.COUNTRY_MISMATCH, true,
-                        FraudFeatureContract.PROXY_OR_VPN_DETECTED, true,
+                        FraudFeatureContract.PROXY_OR_VPN_DETECTED, false,
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
                         FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d
                 ));
@@ -95,7 +99,7 @@ class RuleBasedSignalEngineBehaviorParityTest {
     }
 
     @Test
-    void rapidTransferSignalsKeepDistinctMappedEvidenceAndContributions() {
+    void rapidTransferSignalsKeepSingleMappedEvidenceAndContributionForOneFact() {
         TransactionEnrichedEvent event = event(false, false, false, 1, 0.1d, BigDecimal.TEN,
                 List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue()),
                 Map.of(
@@ -106,10 +110,7 @@ class RuleBasedSignalEngineBehaviorParityTest {
         FraudScoreResult production = assertProductionMappingParity(event);
         var adapterResult = adapter.evaluate(context(event));
 
-        assertThat(production.reasonCodes()).containsExactly(
-                ReasonCode.RAPID_PLN_20K_BURST.wireValue(),
-                ReasonCode.RAPID_TRANSFER_FRAUD_CASE.wireValue()
-        );
+        assertThat(production.reasonCodes()).containsExactly(ReasonCode.RAPID_PLN_20K_BURST.wireValue());
         assertThat(adapterResult.contributions()).extracting(contribution -> contribution.feature())
                 .containsExactlyElementsOf(production.reasonCodes());
         assertThat(adapterResult.evidence()).extracting(evidence -> evidence.reasonCode())

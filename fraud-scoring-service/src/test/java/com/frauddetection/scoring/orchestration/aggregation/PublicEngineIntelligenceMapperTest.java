@@ -5,6 +5,7 @@ import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
@@ -29,8 +30,11 @@ class PublicEngineIntelligenceMapperTest {
 
     @Test
     void mapsAgreementWithoutDecisioning() {
-        assertThat(map(0.8d, RiskLevel.HIGH, 0.7d, RiskLevel.HIGH).comparison().agreementStatus())
-                .isEqualTo(EngineIntelligenceAgreementStatus.AGREEMENT);
+        var comparison = map(0.8d, RiskLevel.HIGH, 0.7d, RiskLevel.HIGH).comparison();
+
+        assertThat(comparison.comparisonType()).isEqualTo(EngineIntelligenceComparisonType.RULES_VS_ML);
+        assertThat(comparison.comparedEngineIds()).containsExactly("rules.primary", "ml.python.primary");
+        assertThat(comparison.agreementStatus()).isEqualTo(EngineIntelligenceAgreementStatus.AGREEMENT);
     }
 
     @Test

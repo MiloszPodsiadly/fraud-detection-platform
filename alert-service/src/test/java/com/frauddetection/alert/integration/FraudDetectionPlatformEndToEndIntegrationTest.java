@@ -24,10 +24,14 @@ import com.frauddetection.ingest.api.LocationInfoRequest;
 import com.frauddetection.ingest.api.MerchantInfoRequest;
 import com.frauddetection.ingest.api.MoneyRequest;
 import com.frauddetection.scoring.FraudScoringServiceApplication;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.TopicExistsException;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -56,6 +60,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -80,6 +86,9 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
     private static final String FRAUD_DECISIONS_TOPIC = "fraud.decisions.e2e." + TOPIC_SUFFIX;
     private static final String DEAD_LETTER_TOPIC = "transactions.dead-letter.e2e." + TOPIC_SUFFIX;
     private static final String MONGODB_DATABASE = "fraud_platform_e2e_" + TOPIC_SUFFIX;
+    private static final int PLATFORM_TOPIC_PARTITIONS = 3;
+    private static final short PLATFORM_TOPIC_REPLICAS = 1;
+    private static final Duration E2E_WAIT_TIMEOUT = Duration.ofSeconds(60);
 
     private final RestTemplate restTemplate = new RestTemplate();
 
@@ -91,6 +100,7 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
     @BeforeAll
     void startPlatform() {
         FraudPlatformContainers.startAll();
+        createKafkaTopics();
 
         transactionIngestContext = startWebApplication(TransactionIngestServiceApplication.class, Map.of(
                 "server.port", 0,
@@ -301,6 +311,29 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
         return Integer.parseInt(context.getEnvironment().getProperty("local.server.port"));
     }
 
+    private void createKafkaTopics() {
+        Map<String, Object> properties = Map.of(
+                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, FraudPlatformContainers.kafka().getBootstrapServers()
+        );
+
+        try (AdminClient adminClient = AdminClient.create(properties)) {
+            adminClient.createTopics(List.of(
+                    new NewTopic(TRANSACTION_RAW_TOPIC, PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS),
+                    new NewTopic(TRANSACTION_ENRICHED_TOPIC, PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS),
+                    new NewTopic(TRANSACTION_SCORED_TOPIC, PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS),
+                    new NewTopic(FRAUD_ALERTS_TOPIC, PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS),
+                    new NewTopic(FRAUD_DECISIONS_TOPIC, PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS),
+                    new NewTopic(DEAD_LETTER_TOPIC, PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS)
+            )).all().get(30, TimeUnit.SECONDS);
+        } catch (ExecutionException exception) {
+            if (!(exception.getCause() instanceof TopicExistsException)) {
+                throw new AssertionError("E2E Kafka topics could not be created.", exception);
+            }
+        } catch (Exception exception) {
+            throw new AssertionError("E2E Kafka topics could not be created.", exception);
+        }
+    }
+
     private IngestTransactionRequest buildHighRiskRequest(
             String transactionId,
             String customerId,
@@ -397,8 +430,10 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
         );
 
         try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(properties)) {
-            consumer.subscribe(List.of(topic));
-            long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+            List<TopicPartition> partitions = topicPartitions(topic);
+            consumer.assign(partitions);
+            consumer.seekToBeginning(partitions);
+            long deadline = System.nanoTime() + E2E_WAIT_TIMEOUT.toNanos();
 
             while (System.nanoTime() < deadline) {
                 ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(500));
@@ -419,6 +454,14 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
         throw new AssertionError("No Kafka record for transaction " + transactionId + " was published to topic " + topic + ".");
     }
 
+    private List<TopicPartition> topicPartitions(String topic) {
+        List<TopicPartition> partitions = new ArrayList<>();
+        for (int partition = 0; partition < PLATFORM_TOPIC_PARTITIONS; partition++) {
+            partitions.add(new TopicPartition(topic, partition));
+        }
+        return partitions;
+    }
+
     private <T> T deserializeKafkaValue(String payload, Class<T> valueType) {
         try {
             return new JacksonKafkaDeserializer<>(valueType).deserialize(
@@ -431,7 +474,7 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
     }
 
     private <T> T awaitCondition(Supplier<Optional<T>> supplier) {
-        long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+        long deadline = System.nanoTime() + E2E_WAIT_TIMEOUT.toNanos();
 
         while (System.nanoTime() < deadline) {
             Optional<T> value = supplier.get();

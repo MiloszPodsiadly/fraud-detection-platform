@@ -7,7 +7,7 @@ import com.frauddetection.common.events.engine.FraudEngineResult;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.features.FraudFeatureContract;
-import com.frauddetection.common.events.features.FraudFeatureThresholdContract;
+import com.frauddetection.common.events.features.VelocityFeatureContract;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.ScoringMode;
@@ -156,7 +156,7 @@ class FraudScoringOrchestratorRealAdapterCompositionTest {
         features.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 6);
         features.put(
                 FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW,
-                FraudFeatureThresholdContract.VELOCITY_V1_OBSERVATION_WINDOW.toString()
+                VelocityFeatureContract.CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW_TEXT
         );
         features.put(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("25000.00"));
         features.put(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 6.0d);

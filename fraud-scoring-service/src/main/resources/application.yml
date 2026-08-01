@@ -1,8 +1,6 @@
 spring:
   application:
     name: fraud-scoring-service
-  cache:
-    type: caffeine
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:

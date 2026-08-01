@@ -2,6 +2,7 @@ package com.frauddetection.enricher.service;
 
 import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.features.FraudFeatureThresholdContract;
+import com.frauddetection.common.events.features.VelocityFeatureContract;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.enricher.config.FeatureStoreProperties;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
@@ -52,10 +53,10 @@ class TransactionFeatureCalculatorTest {
         assertThat(features.countryMismatch()).isFalse();
         assertThat(features.featureFlags()).contains(
                 FraudFeatureContract.FLAG_DEVICE_NOVELTY,
-                FraudFeatureContract.FLAG_HIGH_VELOCITY,
                 FraudFeatureContract.FLAG_MERCHANT_CONCENTRATION,
                 FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY
         );
+        assertThat(features.featureFlags()).doesNotContain(FraudFeatureContract.FLAG_HIGH_VELOCITY);
         assertThat(features.featureSnapshot()).containsEntry(FraudFeatureContract.MERCHANT_FREQUENCY_7D, 5);
     }
 
@@ -149,10 +150,10 @@ class TransactionFeatureCalculatorTest {
 
     @Test
     void featureStorePropertiesAcceptVelocityV1CanonicalObservationWindow() {
-        var properties = properties(FraudFeatureThresholdContract.VELOCITY_V1_OBSERVATION_WINDOW);
+        var properties = properties(VelocityFeatureContract.CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW);
 
         assertThat(properties.recentTransactionWindow())
-                .isEqualTo(FraudFeatureThresholdContract.VELOCITY_V1_OBSERVATION_WINDOW);
+                .isEqualTo(VelocityFeatureContract.CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW);
     }
 
     @ParameterizedTest
@@ -199,6 +200,7 @@ class TransactionFeatureCalculatorTest {
         assertThat(features.recentTransactionCount()).isEqualTo(5);
         assertThat(features.recentTransactionCountWindow()).isEqualTo("PT1M");
         assertThat(features.transactionVelocityPerMinute()).isEqualTo(5.0d);
+        assertThat(features.featureFlags()).doesNotContain(FraudFeatureContract.FLAG_HIGH_VELOCITY);
         assertThat(features.featureSnapshot())
                 .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5)
                 .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M")

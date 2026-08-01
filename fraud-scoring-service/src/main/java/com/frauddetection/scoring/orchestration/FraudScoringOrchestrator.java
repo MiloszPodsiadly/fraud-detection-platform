@@ -13,6 +13,7 @@ import com.frauddetection.scoring.orchestration.runtime.BoundedFraudEngineExecut
 import com.frauddetection.scoring.orchestration.runtime.FraudEngineExecutionPolicy;
 import com.frauddetection.scoring.orchestration.runtime.FraudScoringOrchestratorExecutionPolicy;
 import com.frauddetection.scoring.orchestration.runtime.FraudScoringOrchestratorMetrics;
+import com.frauddetection.scoring.orchestration.runtime.MonotonicTicker;
 import com.frauddetection.scoring.orchestration.runtime.NoOpFraudScoringOrchestratorMetrics;
 
 import java.time.Clock;
@@ -30,6 +31,7 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
     private final BoundedFraudEngineExecutor executor;
     private final FraudScoringOrchestratorMetrics metrics;
     private final Clock clock;
+    private final MonotonicTicker ticker;
 
     public FraudScoringOrchestrator(FraudSignalEngineRegistry registry) {
         this(
@@ -37,7 +39,8 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
                 FraudScoringOrchestratorExecutionPolicy.defaultInternalPolicy(),
                 BoundedFraudEngineExecutor.defaultInternalExecutor(),
                 new NoOpFraudScoringOrchestratorMetrics(),
-                Clock.systemUTC()
+                Clock.systemUTC(),
+                MonotonicTicker.system()
         );
     }
 
@@ -48,11 +51,23 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
             FraudScoringOrchestratorMetrics metrics,
             Clock clock
     ) {
+        this(registry, executionPolicy, executor, metrics, clock, MonotonicTicker.system());
+    }
+
+    public FraudScoringOrchestrator(
+            FraudSignalEngineRegistry registry,
+            FraudScoringOrchestratorExecutionPolicy executionPolicy,
+            BoundedFraudEngineExecutor executor,
+            FraudScoringOrchestratorMetrics metrics,
+            Clock clock,
+            MonotonicTicker ticker
+    ) {
         this.registry = Objects.requireNonNull(registry, "registry is required");
         this.executionPolicy = Objects.requireNonNull(executionPolicy, "executionPolicy is required");
         this.executor = Objects.requireNonNull(executor, "executor is required");
         this.metrics = Objects.requireNonNull(metrics, "metrics is required");
         this.clock = Objects.requireNonNull(clock, "clock is required");
+        this.ticker = Objects.requireNonNull(ticker, "ticker is required");
         validatePolicyAlignment();
     }
 
@@ -86,13 +101,13 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
             FraudEngineExecutionPolicy policy,
             ScoringContext context
     ) {
-        Instant startedAt = clock.instant();
+        long startedNanos = ticker.readNanos();
         BoundedFraudEngineExecutor.ExecutionResult<FraudSignalEvaluation> execution = executor.execute(
                 () -> registeredEngine.engine().evaluate(context),
                 policy.deadline()
         );
-        Duration latency = measuredLatency(startedAt, policy.deadline(), execution.status());
-        Instant generatedAt = startedAt.plus(latency);
+        Duration latency = measuredLatency(startedNanos, policy.deadline(), execution.status());
+        Instant generatedAt = clock.instant();
         FraudEngineResult result = switch (execution.status()) {
             case COMPLETED -> execution.value() == null
                     ? failureResult(
@@ -157,23 +172,32 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
             Duration latency,
             Instant generatedAt
     ) {
-        return new FraudEngineResult(
-                descriptor.engineId(),
-                descriptor.engineType(),
-                descriptor.engineLanguage(),
-                source.status(),
-                source.score(),
-                source.riskLevel(),
-                source.confidence(),
-                source.reasonCodes(),
-                source.contributions(),
-                source.evidence(),
-                latency.toMillis(),
-                source.modelName(),
-                source.modelVersion(),
-                source.statusReason(),
-                generatedAt
-        );
+        try {
+            return new FraudEngineResult(
+                    descriptor.engineId(),
+                    descriptor.engineType(),
+                    descriptor.engineLanguage(),
+                    source.status(),
+                    source.score(),
+                    source.riskLevel(),
+                    source.confidence(),
+                    source.reasonCodes(),
+                    source.contributions(),
+                    source.evidence(),
+                    latency.toMillis(),
+                    source.modelName(),
+                    source.modelVersion(),
+                    source.statusReason(),
+                    generatedAt
+            );
+        } catch (RuntimeException exception) {
+            return failureResult(
+                    descriptor,
+                    OrchestrationFailureReasonCode.ORCHESTRATOR_ENGINE_PUBLICATION_FAILURE,
+                    generatedAt,
+                    latency
+            );
+        }
     }
 
     private FraudEngineResult timeoutResult(
@@ -238,6 +262,22 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
             ));
         }
         if (result.status() == FraudEngineStatus.DEGRADED) {
+            if (isEvaluationFailure(result)) {
+                executionWarnings.add(new FraudScoringExecutionWarning(
+                        policy.engineId(),
+                        FraudScoringExecutionWarningCode.ENGINE_EVALUATION_FAILURE_RECORDED,
+                        result.status(),
+                        policy.required()
+                ));
+            }
+            if (isPublicationFailure(result)) {
+                executionWarnings.add(new FraudScoringExecutionWarning(
+                        policy.engineId(),
+                        FraudScoringExecutionWarningCode.ENGINE_PUBLICATION_FAILURE_RECORDED,
+                        result.status(),
+                        policy.required()
+                ));
+            }
             executionWarnings.add(new FraudScoringExecutionWarning(
                     policy.engineId(),
                     FraudScoringExecutionWarningCode.ENGINE_DEGRADED_RECORDED,
@@ -245,6 +285,17 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
                     policy.required()
             ));
         }
+    }
+
+    private boolean isEvaluationFailure(FraudEngineResult result) {
+        return OrchestrationFailureReasonCode.ORCHESTRATOR_ENGINE_EXCEPTION.wireValue().equals(result.statusReason())
+                || OrchestrationFailureReasonCode.ORCHESTRATOR_ENGINE_NULL_RESULT.wireValue().equals(result.statusReason())
+                || OrchestrationFailureReasonCode.ORCHESTRATOR_ENGINE_REJECTED.wireValue().equals(result.statusReason());
+    }
+
+    private boolean isPublicationFailure(FraudEngineResult result) {
+        return OrchestrationFailureReasonCode.ORCHESTRATOR_ENGINE_PUBLICATION_FAILURE.wireValue()
+                .equals(result.statusReason());
     }
 
     private String failureCategoryFor(FraudEngineResult result) {
@@ -264,6 +315,9 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
         }
         if (normalized.contains("null")) {
             return "null_result";
+        }
+        if (normalized.contains("publication")) {
+            return "publication_failure";
         }
         if (normalized.contains("rejected")) {
             return "rejected";
@@ -329,17 +383,23 @@ public final class FraudScoringOrchestrator implements AutoCloseable {
     }
 
     private Duration measuredLatency(
-            Instant startedAt,
+            long startedNanos,
             Duration deadline,
             BoundedFraudEngineExecutor.ExecutionStatus executionStatus
     ) {
         if (executionStatus == BoundedFraudEngineExecutor.ExecutionStatus.TIMED_OUT) {
             return deadline;
         }
-        Duration elapsed = Duration.between(startedAt, clock.instant());
-        if (elapsed.isNegative()) {
+        long elapsedNanos;
+        try {
+            elapsedNanos = Math.subtractExact(ticker.readNanos(), startedNanos);
+        } catch (ArithmeticException exception) {
+            return deadline;
+        }
+        if (elapsedNanos <= 0L) {
             return Duration.ZERO;
         }
+        Duration elapsed = Duration.ofNanos(elapsedNanos);
         return elapsed.compareTo(deadline) > 0 ? deadline : elapsed;
     }
 

@@ -55,7 +55,7 @@ class FraudScoringOrchestratorExceptionSafetyTest {
                 "raw-token endpoint http://internal stacktrace accountId=123 featureVector=VIP"
         ));
 
-        assertThat(result.executionWarnings()).hasSize(2);
+        assertThat(result.executionWarnings()).hasSize(3);
         assertThat(result.executionWarnings()).allSatisfy(warning -> {
             assertThat(warning.engineId()).isEqualTo("ml.python.primary");
             assertThat(warning.code()).isInstanceOf(FraudScoringExecutionWarningCode.class);

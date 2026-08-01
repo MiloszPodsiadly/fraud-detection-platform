@@ -36,6 +36,7 @@ class EngineIntelligenceConditionalRuntimeGraphTest {
         contextRunner().run(context -> {
             assertThat(context).hasNotFailed();
             assertThat(context).hasSingleBean(EngineIntelligenceEmissionService.class);
+            assertThat(context).hasSingleBean(EngineIntelligenceRuntimeConfigurationValidator.class);
             assertThat(context).hasSingleBean(EngineIntelligenceEmissionMetrics.class);
             assertThat(context).hasSingleBean(NoOpEngineIntelligenceEmissionMetrics.class);
             assertThat(context).doesNotHaveBean(EngineIntelligenceDiagnosticEnrichmentPipeline.class);
@@ -134,26 +135,46 @@ class EngineIntelligenceConditionalRuntimeGraphTest {
     }
 
     @Test
-    void emissionAndVelocityFlagsAreIndependentConfigurationLevers() {
+    void contradictoryDisabledEmissionAndEnabledVelocityFailsFast() {
         contextRunner()
                 .withPropertyValues(
                         "fraud.scoring.events.engine-intelligence.emit-enabled=false",
                         "fraud.scoring.engines.velocity.enabled=true"
                 )
                 .run(context -> {
-                    assertThat(context).hasSingleBean(EngineIntelligenceEmissionService.class);
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .hasRootCauseInstanceOf(IllegalStateException.class)
+                            .hasRootCauseMessage(
+                                    "fraud.scoring.events.engine-intelligence.emit-enabled must be true when "
+                                            + "fraud.scoring.engines.velocity.enabled is true"
+                            );
+                });
+    }
+
+    @Test
+    void emissionAndVelocityFlagMatrixIsExplicit() {
+        contextRunner()
+                .withPropertyValues(
+                        "fraud.scoring.events.engine-intelligence.emit-enabled=false",
+                        "fraud.scoring.engines.velocity.enabled=false"
+                )
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
                     assertThat(context).doesNotHaveBean(FraudSignalEngineRegistry.class);
                     assertThat(context).doesNotHaveBean(VelocitySignalEngine.class);
                 });
         enabledContextRunner()
                 .withPropertyValues("fraud.scoring.engines.velocity.enabled=false")
                 .run(context -> {
+                    assertThat(context).hasNotFailed();
                     assertThat(context).hasSingleBean(FraudSignalEngineRegistry.class);
                     assertThat(context).doesNotHaveBean(VelocitySignalEngine.class);
                 });
         enabledContextRunner()
                 .withPropertyValues("fraud.scoring.engines.velocity.enabled=true")
                 .run(context -> {
+                    assertThat(context).hasNotFailed();
                     assertThat(context).hasSingleBean(FraudSignalEngineRegistry.class);
                     assertThat(context).hasSingleBean(VelocitySignalEngine.class);
                 });

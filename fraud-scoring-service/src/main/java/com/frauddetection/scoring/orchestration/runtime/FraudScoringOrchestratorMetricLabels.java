@@ -22,6 +22,7 @@ final class FraudScoringOrchestratorMetricLabels {
             "timeout",
             "exception",
             "null_result",
+            "publication_failure",
             "rejected",
             "degraded"
     );

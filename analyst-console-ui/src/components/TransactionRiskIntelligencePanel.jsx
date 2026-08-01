@@ -19,7 +19,7 @@ const ENGINE_STATUS_COPY = {
   DEGRADED: "Engine result degraded",
   NOT_APPLICABLE: "Engine not applicable"
 };
-const VELOCITY_SEVERITY_COPY = "Velocity score is a normalized deterministic risk-severity signal. It is not a calibrated fraud probability and must not be directly interpreted as model confidence.";
+const VELOCITY_SEVERITY_COPY = "Velocity score is a deterministic normalized risk-severity signal. It is not a calibrated fraud probability and must not be interpreted as model confidence.";
 
 export function TransactionRiskIntelligencePanel({
   transactionId,
@@ -236,12 +236,14 @@ function ComparisonSummary({ comparison }) {
       {comparison && (
         <>
           <dl>
-            <Field label="Agreement status" value={comparison.agreementStatus} />
+            <Field label="Comparison type" value={comparison.comparisonType} />
+            <Field label="Compared engines" value={listText(comparison.comparedEngineIds)} />
+            <Field label="Rules vs ML agreement" value={comparison.agreementStatus} />
             <Field label="Risk mismatch status" value={comparison.riskMismatchStatus} />
             <Field label="Score delta bucket" value={comparison.scoreDeltaBucket} />
           </dl>
-          <p className="sectionCopy">Agreement status describes projected engine comparison only.</p>
-          <p className="sectionCopy">Risk mismatch describes projected engine risk variance only.</p>
+          <p className="sectionCopy">Agreement status describes the Rules vs ML diagnostic comparison only.</p>
+          <p className="sectionCopy">Velocity remains an independent diagnostic signal and is not part of the Rules vs ML score delta.</p>
           <p className="sectionCopy">Score delta bucket is diagnostic and not a threshold recommendation.</p>
         </>
       )}

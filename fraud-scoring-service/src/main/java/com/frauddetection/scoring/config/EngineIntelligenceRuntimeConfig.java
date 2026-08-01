@@ -19,6 +19,7 @@ import com.frauddetection.scoring.orchestration.runtime.BoundedFraudEngineExecut
 import com.frauddetection.scoring.orchestration.runtime.FraudScoringOrchestratorExecutionPolicy;
 import com.frauddetection.scoring.orchestration.runtime.FraudScoringOrchestratorMetrics;
 import com.frauddetection.scoring.orchestration.runtime.MicrometerFraudScoringOrchestratorMetrics;
+import com.frauddetection.scoring.orchestration.runtime.MonotonicTicker;
 import com.frauddetection.scoring.service.MlFraudScoringEngine;
 import com.frauddetection.scoring.service.RuleBasedFraudScoringEngine;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -32,7 +33,10 @@ import java.time.Clock;
 import java.util.List;
 
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(EngineIntelligenceEmissionProperties.class)
+@EnableConfigurationProperties({
+        EngineIntelligenceEmissionProperties.class,
+        VelocityEngineProperties.class
+})
 public class EngineIntelligenceRuntimeConfig {
 
     @Bean
@@ -47,6 +51,14 @@ public class EngineIntelligenceRuntimeConfig {
     @Bean
     public EngineIntelligenceEmissionMetrics engineIntelligenceEmissionMetrics() {
         return new NoOpEngineIntelligenceEmissionMetrics();
+    }
+
+    @Bean
+    public EngineIntelligenceRuntimeConfigurationValidator engineIntelligenceRuntimeConfigurationValidator(
+            EngineIntelligenceEmissionProperties emissionProperties,
+            VelocityEngineProperties velocityEngineProperties
+    ) {
+        return new EngineIntelligenceRuntimeConfigurationValidator(emissionProperties, velocityEngineProperties);
     }
 
     @Configuration(proxyBeanMethods = false)
@@ -101,9 +113,17 @@ public class EngineIntelligenceRuntimeConfig {
                 FraudScoringOrchestratorExecutionPolicy executionPolicy,
                 BoundedFraudEngineExecutor executor,
                 FraudScoringOrchestratorMetrics metrics,
-                Clock engineIntelligenceClock
+                Clock engineIntelligenceClock,
+                MonotonicTicker engineIntelligenceTicker
         ) {
-            return new FraudScoringOrchestrator(registry, executionPolicy, executor, metrics, engineIntelligenceClock);
+            return new FraudScoringOrchestrator(
+                    registry,
+                    executionPolicy,
+                    executor,
+                    metrics,
+                    engineIntelligenceClock,
+                    engineIntelligenceTicker
+            );
         }
 
         @Bean
@@ -124,6 +144,11 @@ public class EngineIntelligenceRuntimeConfig {
         @Bean
         Clock engineIntelligenceClock() {
             return Clock.systemUTC();
+        }
+
+        @Bean
+        MonotonicTicker engineIntelligenceTicker() {
+            return MonotonicTicker.system();
         }
 
         @Bean

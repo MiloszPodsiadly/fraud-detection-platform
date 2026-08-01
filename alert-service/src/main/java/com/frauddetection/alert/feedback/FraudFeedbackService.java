@@ -170,6 +170,8 @@ public class FraudFeedbackService {
             var response = engineIntelligenceResponseMapper.toResponse(readModel);
             record.setEngineIntelligenceStatus(response.status());
             if (readModel != null && readModel.comparison() != null) {
+                record.setComparisonType(readModel.comparison().comparisonType());
+                record.setComparedEngineIds(readModel.comparison().comparedEngineIds());
                 record.setAgreementStatus(readModel.comparison().agreementStatus());
                 record.setRiskMismatchStatus(readModel.comparison().riskMismatchStatus());
                 record.setScoreDeltaBucket(readModel.comparison().scoreDeltaBucket());

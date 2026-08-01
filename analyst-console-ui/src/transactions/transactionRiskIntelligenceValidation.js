@@ -1,34 +1,6 @@
+import * as engineIntelligenceContract from "../engineIntelligence/engineIntelligenceContractValidation.js";
+
 const DETAIL_STATUSES = new Set(["AVAILABLE", "ABSENT", "UNAVAILABLE", "DEGRADED"]);
-const AGREEMENT_STATUSES = new Set([
-  "AGREEMENT",
-  "ADJACENT_RISK_VARIANCE",
-  "DISAGREEMENT",
-  "PARTIAL",
-  "INSUFFICIENT_DATA",
-  "REQUIRED_ENGINE_NOT_COMPARABLE"
-]);
-const RISK_MISMATCH_STATUSES = new Set([
-  "SAME_RISK_LEVEL",
-  "ADJACENT_RISK_LEVEL",
-  "MATERIAL_RISK_MISMATCH",
-  "NOT_COMPARABLE"
-]);
-const SCORE_DELTA_BUCKETS = new Set(["NONE", "SMALL", "MEDIUM", "LARGE", "UNAVAILABLE"]);
-const ENGINE_TYPES = new Set([
-  "RULES",
-  "ML_MODEL",
-  "VELOCITY",
-  "DEVICE_RISK",
-  "MERCHANT_RISK",
-  "GEO_RISK",
-  "GRAPH_RISK",
-  "BEHAVIORAL_PROFILE",
-  "MANUAL_REVIEW_CONTEXT"
-]);
-const ENGINE_STATUSES = new Set(["AVAILABLE", "UNAVAILABLE", "TIMEOUT", "DEGRADED", "NOT_APPLICABLE"]);
-const RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
-const SCORE_BUCKETS = new Set(["NONE", "LOW", "MEDIUM", "HIGH", "VERY_HIGH", "UNAVAILABLE"]);
-const SIGNAL_CATEGORIES = new Set(["FRAUD_SIGNAL", "OPERATIONAL_SIGNAL"]);
 const ANALYST_RECOMMENDATION_STATUSES = new Set([
   "AVAILABLE",
   "ABSENT",
@@ -63,9 +35,6 @@ const NON_DECISIONING_FLAGS = [
   "notModelPromotion",
   "notThresholdRecommendation"
 ];
-const MAX_ENGINES = 3;
-const ENGINE_INTELLIGENCE_CONTRACT_VERSION = 1;
-const MAX_DIAGNOSTIC_SIGNALS = 5;
 const MAX_WARNINGS = 10;
 const MAX_REASON_CODES = 5;
 
@@ -85,13 +54,6 @@ const UNSAFE_FIELD_NAMES = [
   "token",
   "secret"
 ];
-const ENGINE_TYPE_BY_ID = Object.freeze({
-  "rules.primary": "RULES",
-  "ml.python.primary": "ML_MODEL",
-  "velocity.primary": "VELOCITY"
-});
-const ENGINE_ORDER = Object.freeze(Object.keys(ENGINE_TYPE_BY_ID));
-
 export function validateTransactionRiskIntelligenceDetail(detail) {
   if (!detail || typeof detail !== "object" || Array.isArray(detail)) {
     return invalid("INVALID_DETAIL_RESPONSE");
@@ -113,23 +75,26 @@ export function validateTransactionRiskIntelligenceDetail(detail) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_METADATA");
   }
   if (engineIntelligence.status === "AVAILABLE" || engineIntelligence.status === "DEGRADED") {
-    if (engineIntelligence.contractVersion !== ENGINE_INTELLIGENCE_CONTRACT_VERSION || !parseableDateString(engineIntelligence.generatedAt)) {
+    if (
+      engineIntelligence.contractVersion !== engineIntelligenceContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION
+      || !parseableDateString(engineIntelligence.generatedAt)
+    ) {
       return invalid("INVALID_ENGINE_INTELLIGENCE_METADATA");
     }
   }
   if (engineIntelligence.comparison !== null && !isComparisonShape(engineIntelligence.comparison)) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_COMPARISON");
   }
-  if (!isBoundedArray(engineIntelligence.engines, MAX_ENGINES)) {
+  if (!isBoundedArray(engineIntelligence.engines, engineIntelligenceContract.MAX_ENGINE_INTELLIGENCE_ENGINES)) {
     return invalid("ENGINE_LIMIT_EXCEEDED");
-  }
-  if (!hasUniqueCanonicalEngineOrder(engineIntelligence.engines)) {
-    return invalid("INVALID_ENGINE_INTELLIGENCE_ENGINE_ORDER");
   }
   if (!engineIntelligence.engines.every(isEngineShape)) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_ENGINE");
   }
-  if (!isBoundedArray(engineIntelligence.diagnosticSignals, MAX_DIAGNOSTIC_SIGNALS)) {
+  if (!hasUniqueCanonicalEngineOrder(engineIntelligence.engines)) {
+    return invalid("INVALID_ENGINE_INTELLIGENCE_ENGINE_ORDER");
+  }
+  if (!isBoundedArray(engineIntelligence.diagnosticSignals, engineIntelligenceContract.MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS)) {
     return invalid("DIAGNOSTIC_SIGNAL_LIMIT_EXCEEDED");
   }
   if (!engineIntelligence.diagnosticSignals.every(isDiagnosticSignalShape)) {
@@ -157,41 +122,19 @@ function invalid(reason) {
 }
 
 function isComparisonShape(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value))
-    && hasOnlyKeys(value, ["agreementStatus", "riskMismatchStatus", "scoreDeltaBucket"])
-    && oneOf(value.agreementStatus, AGREEMENT_STATUSES)
-    && oneOf(value.riskMismatchStatus, RISK_MISMATCH_STATUSES)
-    && oneOf(value.scoreDeltaBucket, SCORE_DELTA_BUCKETS);
+  return engineIntelligenceContract.isComparisonShape(value);
 }
 
 function isEngineShape(engine) {
-  return Boolean(engine && typeof engine === "object" && !Array.isArray(engine))
-    && safeString(engine.engineId)
-    && oneOf(engine.engineType, ENGINE_TYPES)
-    && isExpectedEngineType(engine.engineId, engine.engineType)
-    && oneOf(engine.status, ENGINE_STATUSES)
-    && optionalOneOf(engine.riskLevel, RISK_LEVELS)
-    && oneOf(engine.scoreBucket, SCORE_BUCKETS)
-    && safeStringArray(engine.reasonCodes, MAX_REASON_CODES);
+  return engineIntelligenceContract.isEngineShape(engine);
 }
 
 function isDiagnosticSignalShape(signal) {
-  return Boolean(signal && typeof signal === "object" && !Array.isArray(signal))
-    && safeString(signal.engineId)
-    && oneOf(signal.engineType, ENGINE_TYPES)
-    && isExpectedEngineType(signal.engineId, signal.engineType)
-    && oneOf(signal.engineStatus, ENGINE_STATUSES)
-    && oneOf(signal.signalCategory, SIGNAL_CATEGORIES)
-    && safeString(signal.reasonCode)
-    && optionalOneOf(signal.riskLevel, RISK_LEVELS)
-    && oneOf(signal.scoreBucket, SCORE_BUCKETS);
+  return engineIntelligenceContract.isDiagnosticSignalShape(signal);
 }
 
 function isWarningShape(warning) {
-  return Boolean(warning && typeof warning === "object" && !Array.isArray(warning))
-    && safeString(warning.warningCode)
-    && Number.isInteger(warning.count)
-    && warning.count >= 0;
+  return engineIntelligenceContract.isWarningShape(warning);
 }
 
 function validateAnalystRecommendation(value) {
@@ -269,43 +212,15 @@ function safeString(value) {
 }
 
 function parseableDateString(value) {
-  return safeString(value) && !Number.isNaN(Date.parse(value));
+  return engineIntelligenceContract.isCanonicalUtcTimestamp(value);
 }
 
 function oneOf(value, allowedValues) {
   return typeof value === "string" && allowedValues.has(value);
 }
 
-function isExpectedEngineType(engineId, engineType) {
-  return ENGINE_TYPE_BY_ID[engineId] === engineType;
-}
-
 function hasUniqueCanonicalEngineOrder(values) {
-  const seen = new Set();
-  let previousOrder = -1;
-  for (const value of values) {
-    const engineId = typeof value?.engineId === "string" ? value.engineId.trim() : "";
-    const order = ENGINE_ORDER.indexOf(engineId);
-    if (order < 0) {
-      continue;
-    }
-    if (seen.has(engineId) || order <= previousOrder) {
-      return false;
-    }
-    seen.add(engineId);
-    previousOrder = order;
-  }
-  return true;
-}
-
-function optionalOneOf(value, allowedValues) {
-  return value === null || value === undefined || oneOf(value, allowedValues);
-}
-
-function hasOnlyKeys(value, allowedKeys) {
-  const actualKeys = Object.keys(value);
-  return actualKeys.length === allowedKeys.length
-    && allowedKeys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+  return engineIntelligenceContract.hasUniqueCanonicalEngineOrder(values);
 }
 
 function containsUnsafeFieldName(value) {

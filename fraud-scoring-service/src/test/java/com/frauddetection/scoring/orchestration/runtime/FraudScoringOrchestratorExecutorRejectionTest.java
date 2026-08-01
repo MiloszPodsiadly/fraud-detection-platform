@@ -95,7 +95,8 @@ class FraudScoringOrchestratorExecutorRejectionTest {
                 executionPolicy(),
                 new BoundedFraudEngineExecutor(executorService),
                 new NoOpFraudScoringOrchestratorMetrics(),
-                clock
+                clock,
+                RuntimeOrchestratorTestSupport.clockBackedTicker(clock)
         )) {
             result = orchestrator.evaluate(context());
         }

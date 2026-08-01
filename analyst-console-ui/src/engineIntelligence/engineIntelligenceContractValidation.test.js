@@ -1,0 +1,69 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+import {
+  COMPARED_ENGINE_IDS,
+  COMPARISON_TYPE,
+  ENGINE_ORDER,
+  ENGINE_TYPE_BY_ID,
+  MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS,
+  MAX_ENGINE_INTELLIGENCE_ENGINES,
+  MAX_ENGINE_INTELLIGENCE_WARNINGS,
+  hasUniqueCanonicalEngineOrder,
+  isCanonicalUtcTimestamp,
+  isComparisonShape,
+  isDiagnosticSignalShape,
+  isEngineShape,
+  isWarningShape
+} from "./engineIntelligenceContractValidation.js";
+
+describe("engineIntelligenceContractValidation", () => {
+  it("matches shared canonical engine registry fixture", () => {
+    const registry = sharedFixture("engine_registry_contract.json");
+
+    expect(registry.maxEngineCount).toBe(MAX_ENGINE_INTELLIGENCE_ENGINES);
+    expect(registry.order).toEqual(ENGINE_ORDER);
+    expect(registry.comparison.comparisonType).toBe(COMPARISON_TYPE);
+    expect(registry.comparison.comparedEngineIds).toEqual(COMPARED_ENGINE_IDS);
+    expect(Object.fromEntries(registry.engines.map((engine) => [engine.engineId, engine.engineType]))).toEqual(ENGINE_TYPE_BY_ID);
+    expect(new Set(registry.engines.map((engine) => engine.engineId)).size).toBe(registry.engines.length);
+  });
+
+  it("accepts shared three-engine golden fixture", () => {
+    expect(isValidEngineIntelligence(sharedFixture("engine_intelligence_three_engine_golden.json"))).toBe(true);
+  });
+
+  it.each(sharedInvalidEngineIntelligenceCases())("rejects shared invalid semantic case $caseId", ({ engineIntelligence }) => {
+    expect(isValidEngineIntelligence(engineIntelligence)).toBe(false);
+  });
+});
+
+function isValidEngineIntelligence(value) {
+  return Boolean(value)
+    && value.contractVersion === 1
+    && isCanonicalUtcTimestamp(value.generatedAt)
+    && isComparisonShape(value.comparison)
+    && Array.isArray(value.engines)
+    && value.engines.length <= MAX_ENGINE_INTELLIGENCE_ENGINES
+    && value.engines.every(isEngineShape)
+    && hasUniqueCanonicalEngineOrder(value.engines)
+    && Array.isArray(value.diagnosticSignals)
+    && value.diagnosticSignals.length <= MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS
+    && value.diagnosticSignals.every(isDiagnosticSignalShape)
+    && Array.isArray(value.warnings)
+    && value.warnings.length <= MAX_ENGINE_INTELLIGENCE_WARNINGS
+    && value.warnings.every((warning) => isWarningShape(warning));
+}
+
+function sharedInvalidEngineIntelligenceCases() {
+  return sharedFixture("invalid_semantic_cases.json").cases
+    .filter((semanticCase) => semanticCase.category === "engine-intelligence");
+}
+
+function sharedFixture(name) {
+  return JSON.parse(readFileSync(resolve(
+    process.cwd(),
+    "../common-events/src/test/resources/fixtures/engine-intelligence",
+    name
+  ), "utf8"));
+}

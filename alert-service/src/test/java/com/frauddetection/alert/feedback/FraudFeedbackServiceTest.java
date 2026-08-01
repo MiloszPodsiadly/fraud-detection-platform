@@ -18,6 +18,7 @@ import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
@@ -105,6 +106,8 @@ class FraudFeedbackServiceTest {
         assertThat(response.fraudScore()).isEqualTo(0.91d);
         assertThat(response.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
         assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
+        assertThat(response.comparisonType()).isEqualTo(EngineIntelligenceComparisonType.RULES_VS_ML);
+        assertThat(response.comparedEngineIds()).containsExactly("rules.primary", "ml.python.primary");
         assertThat(response.agreementStatus()).isEqualTo(EngineIntelligenceAgreementStatus.PARTIAL);
         assertThat(response.analystRecommendation()).isEqualTo(AnalystRecommendation.RECOMMEND_REVIEW);
         assertThat(savedRecords).hasSize(1);
@@ -404,6 +407,8 @@ class FraudFeedbackServiceTest {
         FraudFeedbackResponse response = service.create("txn-1", request());
 
         assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.UNAVAILABLE);
+        assertThat(response.comparisonType()).isNull();
+        assertThat(response.comparedEngineIds()).isEmpty();
         assertThat(response.agreementStatus()).isNull();
     }
 
@@ -415,6 +420,8 @@ class FraudFeedbackServiceTest {
         FraudFeedbackResponse response = service.create("txn-1", request());
 
         assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.UNAVAILABLE);
+        assertThat(response.comparisonType()).isNull();
+        assertThat(response.comparedEngineIds()).isEmpty();
         assertThat(response.agreementStatus()).isNull();
         assertThat(savedRecords).hasSize(1);
         assertThat(savedRecords.getFirst().toString()).doesNotContain("rawMlRequest", "Customer confirmed fraud");
@@ -440,6 +447,8 @@ class FraudFeedbackServiceTest {
         FraudFeedbackResponse response = mapperFailureService.create("txn-1", request());
 
         assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.UNAVAILABLE);
+        assertThat(response.comparisonType()).isNull();
+        assertThat(response.comparedEngineIds()).isEmpty();
         assertThat(response.agreementStatus()).isNull();
         assertThat(savedRecords).hasSize(1);
         assertThat(savedRecords.getFirst().toString()).doesNotContain("rawEvidence", "Customer confirmed fraud");

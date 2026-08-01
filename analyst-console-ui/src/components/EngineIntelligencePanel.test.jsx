@@ -54,7 +54,7 @@ describe("EngineIntelligencePanel", () => {
     expect(await screen.findByRole("heading", { name: "Engine intelligence" })).toBeInTheDocument();
     expect(screen.getByText("Diagnostic engine output for this transaction.")).toBeInTheDocument();
     expect(screen.getByText("Diagnostic only. Operational statuses and disagreement are investigation context.")).toBeInTheDocument();
-    expect(screen.getByText("Velocity score is a normalized deterministic risk-severity signal. It is not a calibrated fraud probability and must not be directly interpreted as model confidence.")).toBeInTheDocument();
+    expect(screen.getByText("Velocity score is a deterministic normalized risk-severity signal. It is not a calibrated fraud probability and must not be interpreted as model confidence.")).toBeInTheDocument();
     expect(screen.getByText("Rules")).toBeInTheDocument();
     expect(panelText()).toContain("rules.primary / RULES");
     expect(screen.getAllByText("HIGH_VELOCITY").length).toBeGreaterThan(0);
@@ -140,7 +140,7 @@ describe("EngineIntelligencePanel", () => {
 
     const comparison = await screen.findByRole("heading", { name: "Diagnostic comparison" });
     const section = comparison.closest("section");
-    expect(within(section).getByText("Engine agreement")).toBeInTheDocument();
+    expect(within(section).getByText("Rules vs ML agreement")).toBeInTheDocument();
     expect(within(section).getByText("DISAGREEMENT")).toBeInTheDocument();
     expect(within(section).getByText("Risk mismatch")).toBeInTheDocument();
     expect(within(section).getByText("MATERIAL_RISK_MISMATCH")).toBeInTheDocument();
@@ -345,6 +345,8 @@ function availableResult({ engineStatus = "AVAILABLE", engineRiskLevel = "HIGH",
     available: true,
     transactionId: "txn-1",
     comparison: {
+      comparisonType: "RULES_VS_ML",
+      comparedEngineIds: ["rules.primary", "ml.python.primary"],
       agreementStatus: "DISAGREEMENT",
       riskMismatchStatus: "MATERIAL_RISK_MISMATCH",
       scoreDeltaBucket: "LARGE"

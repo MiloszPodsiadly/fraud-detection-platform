@@ -295,11 +295,35 @@ describe("transactionRiskIntelligenceValidation", () => {
     ["missing agreementStatus", { riskMismatchStatus: "NOT_COMPARABLE", scoreDeltaBucket: "UNAVAILABLE" }],
     ["missing riskMismatchStatus", { agreementStatus: "PARTIAL", scoreDeltaBucket: "UNAVAILABLE" }],
     ["missing scoreDeltaBucket", { agreementStatus: "PARTIAL", riskMismatchStatus: "NOT_COMPARABLE" }],
-    ["invalid enum", { agreementStatus: "BANANA", riskMismatchStatus: "NOT_COMPARABLE", scoreDeltaBucket: "UNAVAILABLE" }]
+    ["invalid enum", { comparisonType: "RULES_VS_ML", comparedEngineIds: ["rules.primary", "ml.python.primary"], agreementStatus: "BANANA", riskMismatchStatus: "NOT_COMPARABLE", scoreDeltaBucket: "UNAVAILABLE" }],
+    ["unknown comparison type", { comparisonType: "ALL_ENGINES", comparedEngineIds: ["rules.primary", "ml.python.primary"], agreementStatus: "PARTIAL", riskMismatchStatus: "NOT_COMPARABLE", scoreDeltaBucket: "UNAVAILABLE" }],
+    ["invalid compared engines", { comparisonType: "RULES_VS_ML", comparedEngineIds: ["rules.primary", "velocity.primary"], agreementStatus: "PARTIAL", riskMismatchStatus: "NOT_COMPARABLE", scoreDeltaBucket: "UNAVAILABLE" }]
   ])("rejects comparison %s", (_caseName, comparison) => {
     expect(validateTransactionRiskIntelligenceDetail(detail({
       engineIntelligence: { ...engineIntelligence(), comparison }
     }))).toMatchObject({ valid: false, reason: "INVALID_ENGINE_INTELLIGENCE_COMPARISON" });
+  });
+
+  it.each(sharedInvalidEngineIntelligenceCases())("rejects shared invalid semantic case $caseId", ({ engineIntelligence }) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      engineIntelligence: {
+        status: "AVAILABLE",
+        ...engineIntelligence
+      }
+    })).valid).toBe(false);
+  });
+
+  it.each([
+    ["offset timestamp", "2026-06-02T10:00:00+00:00"],
+    ["twenty-four hour timestamp", "2026-06-02T24:00:00Z"],
+    ["leap second timestamp", "2016-12-31T23:59:60Z"],
+    ["year zero timestamp", "0000-01-01T00:00:00Z"],
+    ["invalid calendar date", "2026-02-30T00:00:00Z"],
+    ["not a date", "not-a-date"]
+  ])("rejects non-canonical engine intelligence generatedAt: %s", (_caseName, generatedAt) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      engineIntelligence: { ...engineIntelligence(), generatedAt }
+    }))).toMatchObject({ valid: false, reason: "INVALID_ENGINE_INTELLIGENCE_METADATA" });
   });
 
   it.each([
@@ -315,9 +339,15 @@ describe("transactionRiskIntelligenceValidation", () => {
     }))).toMatchObject({ valid: false, reason: "INVALID_ENGINE_INTELLIGENCE_ENGINE" });
   });
 
+  it("rejects extra public engine field", () => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      engineIntelligence: { ...engineIntelligence(), engines: [engine({ modelConfidence: "HIGH" })] }
+    }))).toMatchObject({ valid: false, reason: "INVALID_ENGINE_INTELLIGENCE_ENGINE" });
+  });
+
   it("accepts engine null risk level for unavailable projected risk", () => {
     expect(validateTransactionRiskIntelligenceDetail(detail({
-      engineIntelligence: { ...engineIntelligence(), engines: [engine({ riskLevel: null, scoreBucket: "UNAVAILABLE" })] }
+      engineIntelligence: { ...engineIntelligence(), engines: [engine({ status: "UNAVAILABLE", riskLevel: null, scoreBucket: "UNAVAILABLE" })] }
     })).valid).toBe(true);
   });
 
@@ -332,6 +362,12 @@ describe("transactionRiskIntelligenceValidation", () => {
   ])("rejects diagnostic signal %s", (_caseName, signalOverride) => {
     expect(validateTransactionRiskIntelligenceDetail(detail({
       engineIntelligence: { ...engineIntelligence(), diagnosticSignals: [signal(signalOverride)] }
+    }))).toMatchObject({ valid: false, reason: "INVALID_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNAL" });
+  });
+
+  it("rejects extra public diagnostic signal field", () => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      engineIntelligence: { ...engineIntelligence(), diagnosticSignals: [signal({ reasonCodes: ["HIGH_VELOCITY"] })] }
     }))).toMatchObject({ valid: false, reason: "INVALID_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNAL" });
   });
 
@@ -363,6 +399,15 @@ describe("transactionRiskIntelligenceValidation", () => {
     }))).toMatchObject({ valid: false, reason: "INVALID_ENGINE_INTELLIGENCE_WARNING" });
   });
 
+  it("rejects extra public warning field", () => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      engineIntelligence: {
+        ...engineIntelligence(),
+        warnings: [{ warningCode: "ENGINE_RESULT_LIMIT_APPLIED", count: 1, source: "runtime" }]
+      }
+    }))).toMatchObject({ valid: false, reason: "INVALID_ENGINE_INTELLIGENCE_WARNING" });
+  });
+
   it.each([
     "rawMlRequest",
     "rawMLRequest",
@@ -384,6 +429,8 @@ describe("transactionRiskIntelligenceValidation", () => {
 
   it("does not compute comparison values", () => {
     const comparison = {
+      comparisonType: "RULES_VS_ML",
+      comparedEngineIds: ["rules.primary", "ml.python.primary"],
       agreementStatus: "DISAGREEMENT",
       riskMismatchStatus: "MATERIAL_RISK_MISMATCH",
       scoreDeltaBucket: "LARGE"
@@ -455,6 +502,8 @@ function engineIntelligence() {
     contractVersion: 1,
     generatedAt: "2026-06-18T10:00:02Z",
     comparison: {
+      comparisonType: "RULES_VS_ML",
+      comparedEngineIds: ["rules.primary", "ml.python.primary"],
       agreementStatus: "PARTIAL",
       riskMismatchStatus: "NOT_COMPARABLE",
       scoreDeltaBucket: "UNAVAILABLE"
@@ -517,4 +566,12 @@ function goldenEngineIntelligence() {
     process.cwd(),
     "../common-events/src/test/resources/fixtures/engine-intelligence/engine_intelligence_three_engine_golden.json"
   ), "utf8"));
+}
+
+function sharedInvalidEngineIntelligenceCases() {
+  return JSON.parse(readFileSync(resolve(
+    process.cwd(),
+    "../common-events/src/test/resources/fixtures/engine-intelligence/invalid_semantic_cases.json"
+  ), "utf8")).cases
+    .filter((semanticCase) => semanticCase.category === "engine-intelligence");
 }
