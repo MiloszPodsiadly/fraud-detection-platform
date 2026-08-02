@@ -1,59 +1,50 @@
 # Feature Snapshot Consumption Policy
 
-Status: FDP-85 internal adapter-consumption policy only.
+Status: current feature-snapshot consumption policy with historical FDP-85 notes and FDP-129 runtime updates.
 
-## Purpose
+## Historical FDP-85 Scope
 
-This document defines how future `FraudSignalEngine` adapters may safely consume
-`ScoringContext.featureSnapshot`. FDP-82 defines `FraudEngineResult` as the output boundary,
-FDP-83 defines `ScoringContext` as the input boundary, FDP-84 defines `FraudSignalEngine` as
-the internal runtime interface, and FDP-85 defines safe feature snapshot reading. FDP-85 does
-not add adapters.
+FDP-85 introduced the internal typed-reader policy for `ScoringContext.featureSnapshot`. At that historical point it
+did not add runtime adapters, orchestrator wiring, public Engine Intelligence event emission, alert-service
+projection, API exposure, or Analyst Console rendering. Those FDP-85 non-goals remain useful history only; they are
+not a description of the current branch.
 
-## Boundary
+## Current FDP-129 Runtime Architecture
 
-`featureSnapshot` remains internal to `fraud-scoring-service`. It is not a Kafka event, not an
-API DTO, not a storage document, not a public cross-service contract, and not a source of truth.
-`FeatureSnapshotReader` is an internal policy/accessor layer only. It does not compute features,
-does not score risk, does not infer fraud, and does not normalize business meaning. This branch
-introduces no runtime scoring behavior change, no event/API/UI change, and no projection change.
+The current FDP-129 branch has a diagnostic multi-engine runtime. Rules, ML, and optional Velocity execute through
+the current orchestrator path and produce bounded internal engine results that are aggregated into public
+`TransactionScoredEvent.engineIntelligence` when diagnostic emission is enabled. Alert-service can project that
+public summary, expose bounded read DTOs/OpenAPI, and the Analyst Console can render those bounded diagnostics.
 
-## Key Naming And Allowlist
+`featureSnapshot` is transported inside controlled internal Kafka events such as enriched and scored transaction
+events. It remains an internal fact payload, not the public analyst/API Engine Intelligence payload. Engine
+Intelligence exposes bounded summaries, buckets, identities, reason codes, diagnostic signals, and warning counts,
+not raw snapshot data.
 
-The repository already defines canonical feature keys in `FraudFeatureContract`, and those keys
-are established `camelCase` identifiers such as `deviceNovelty`, `recentAmountSumPln`, and
-`rapidTransferFraudCaseCandidate`. FDP-85 therefore selects compatibility with the registered
-`camelCase` contract. It does not create dot-separated aliases or normalize one naming convention
-into another.
+## Wire Boundary And Normalization
 
-Feature snapshot wire typing is owned by `FraudFeatureContract`, `FeatureSnapshotWireValueNormalizer`, and
-`FeatureSnapshotWireValueDeserializer` in `common-events`. Decimal wire values such as `recentAmountSumPln` and
-`rapidTransferThresholdPln` must round-trip as `BigDecimal`; integer and double facts must round-trip as their
-declared scalar types. Scoring adapters consume the normalized map through `ScoringContext` and `FeatureSnapshotReader`
-rather than reparsing JSON or coercing strings locally.
+`common-events` owns the event wire boundary for feature-snapshot values through `FraudFeatureContract`,
+`FeatureSnapshotWireValueNormalizer`, and `FeatureSnapshotWireValueDeserializer`. Decimal wire values such as
+`recentAmountSumPln` and `rapidTransferThresholdPln` must round-trip as `BigDecimal`; integer, double, boolean, and
+string facts must round-trip as their declared scalar types.
 
-`FeatureSnapshotKeyPolicy` permits only currently registered safe keys from the existing
-`FraudFeatureContract` feature name lists. New keys require an intentional contract update before
-they can be consumed by a future adapter.
+Services that consume event payloads must not repair malformed current canonical facts by coercing strings, booleans,
+nested objects, or oversized numeric input into acceptable scalar values. Missing old data is compatibility; present
+invalid canonical data is corruption.
 
-`isAllowedFeatureKey` is not adapter-consumption permission. It means the key is a known feature
-contract key that passed safety checks, not necessarily scalar adapter-consumable. Future adapters
-must use `FeatureSnapshotReader` or `expectedTypeFor`, not `isAllowedFeatureKey` alone.
+## Adapter Consumption Policy
 
-Keys representing raw payloads, request/response bodies, headers, authorization, tokens/secrets,
-passwords, stack traces/exception text, debug metadata, PAN/card/account identifiers,
-SSN/national identifiers, email/phone, raw device fingerprints, raw user-agent values, or
-host/endpoint/url values are forbidden.
+`FraudSignalEngine` adapters consume the normalized snapshot through `ScoringContext` and `FeatureSnapshotReader`,
+not by reparsing JSON, casting raw `Map<String, Object>` values, or calling
+`context.featureSnapshot().get(...)` directly in adapter logic.
 
-`requireAllowedFeatureKey` exceptions must not expose raw rejected keys, including oversized or
-sensitive key input.
-
-## Key And Type Consumption Policy
-
-Adapter consumption is not key-only. A feature is consumable only when both the key and expected
-scalar type are approved by policy. A registered `FraudFeatureContract` key does not automatically
-mean scalar adapter-consumable. Some registered keys are intentionally not consumable by the v1
-scalar reader.
+Adapter consumption is not key-only. Canonical feature keys are declared in `FraudFeatureContract` and remain
+camelCase wire names.
+`FeatureSnapshotKeyPolicy` permits only registered safe keys from `FraudFeatureContract`. A registered key is not
+automatically adapter-consumable: consumption requires both the key and expected scalar type to match policy, through
+an allowed key and the matching scalar accessor.
+`isAllowedFeatureKey` is not adapter-consumption permission. It means the key is known and safe enough for policy
+evaluation; adapters must still use `FeatureSnapshotReader` or `expectedTypeFor`.
 
 Examples:
 
@@ -62,98 +53,113 @@ Examples:
 - `transactionVelocityPerMinute` is double.
 - `currency` is string.
 - `rapidTransferTotalPln` is decimal.
-- `rapidTransferTransactionIds` is not consumable by v1 scalar reader.
-- `featureFlags` is not consumable by v1 scalar reader.
+- `rapidTransferTransactionIds` is not consumable by the v1 scalar reader.
+- `featureFlags` is not consumable by the v1 scalar reader.
 
-Wrong accessor is not valid consumption. `stringValue("deviceNovelty")` is not a valid way to read
-a boolean feature. `booleanValue("currency")` is not a valid way to read a string feature.
+Wrong accessor use is not valid consumption. `stringValue("deviceNovelty")` and
+`booleanValue("currency")` must fail with bounded status rather than silently coercing data.
 
-## Value Semantics
+## Canonical-Versus-Legacy Precedence
+
+Current canonical feature-snapshot values take precedence over legacy top-level facts or legacy flags. When a
+canonical field required by an adapter is present and valid, the adapter uses it and may compare it with retained
+top-level facts for consistency. When that canonical field is present but invalid, wrong-typed, out of domain,
+nested, or contradictory, the adapter must fail closed. It must not activate a legacy fallback and must not publish a
+fake low-risk or zero-score result.
+
+Genuinely absent canonical fields may still use explicitly supported v1 compatibility paths where repository-owned
+current behavior depends on them. This branch intentionally keeps legacy flags and top-level fields still required by
+Rules V1 fallback, replay, and rolling deployment compatibility.
+
+## Invalid, Present, And Missing Semantics
 
 - `PRESENT` means the key exists and its value exactly matches the requested scalar accessor type.
 - `MISSING` means the key is absent.
-- `INVALID_TYPE` means the key exists and the accessor matches policy, but the actual runtime value
-  type does not match the expected Java class.
-- `WRONG_ACCESSOR` means the feature key is scalar-consumable, but the caller used an accessor that
-  does not match the policy-declared scalar type.
+- `INVALID_TYPE` means the key exists and the accessor matches policy, but the runtime value type does not match the
+  expected Java class.
+- `WRONG_ACCESSOR` means the key is scalar-consumable, but the caller used an accessor that does not match the
+  policy-declared scalar type.
 - `NOT_ALLOWED` means the key is forbidden or outside policy.
 
-A missing boolean is not false. A missing number is not zero. A missing string is not empty
-string. An invalid type is not coerced: string `"true"` is not boolean `true`, string `"3"` is
-not integer `3`, and integer `1` is not boolean `true`. `NOT_ALLOWED` is an explicit outcome and
-must not be silently ignored by future adapters. `NOT_ALLOWED` results must not expose raw rejected
-keys.
+A missing boolean is not false. A missing number is not zero. A missing string is not an empty string. An invalid
+type is not coerced: string `"true"` is not boolean `true`, string `"3"` is not integer `3`, and integer `1` is not
+boolean `true`. `NOT_ALLOWED` and exception messages must not expose raw rejected keys.
 
-No `UNAVAILABLE` status is defined in FDP-85 because current upstream feature computation does
-not provide an explicit unavailable marker. That semantic can be added only when upstream
-feature computation explicitly supports it.
+Top-level null keys are invalid. Top-level null values are invalid. Unknown or unavailable values must not be
+represented by null. Arbitrary nested structures are not consumed by the v1 scalar reader. Nested `Map` or `List`
+values are not scalar facts and scalar accessors return `INVALID_TYPE` for them.
 
-## Reader Constructor Policy
+## Evidence And Privacy Restrictions
 
-`FeatureSnapshotReader` accepts the existing internal snapshot shape. The constructor rejects null
-maps, top-level null keys, and top-level null values, then defensively copies the full top-level
-map. It does not filter or reject every disallowed key because upstream snapshots may contain data
-not intended for adapter consumption.
+Feature snapshots may contain useful internal facts, including scalar string values such as `customerSegment` or
+`merchantCategory`. Reading a string feature internally does not authorize exposing the raw value in
+`FraudEngineResult` evidence, Engine Intelligence, analyst explanations, logs, metrics, or UI.
 
-Adapter consumption is controlled at read time by `FeatureSnapshotKeyPolicy`. Disallowed or
-unregistered keys return `NOT_ALLOWED`, and disallowed keys are not exposed as raw output.
-`NOT_ALLOWED` results must not expose raw rejected keys. The raw feature map is never exposed.
-Future adapters must not inspect the raw map directly.
+Engine outputs and public read DTOs must use bounded labels, reason codes, score buckets, warning codes, and safe
+diagnostic signal identifiers. They must not expose raw payloads, raw feature vectors, raw snapshot dumps, request or
+response bodies, headers, authorization data, tokens, secrets, passwords, stack traces, exception text, PAN/card or
+account identifiers, SSNs, email, phone, raw device fingerprints, raw user-agent values, hostnames, endpoints, URLs,
+training labels, ground truth, payment authorization instructions, or final decisioning instructions.
 
-## Evidence And Contribution Safety
+## Velocity PT1M Policy
 
-Some scalar string features such as `customerSegment` and `merchantCategory` may be valid internal
-features. Reading a string feature internally does not authorize exposing the raw value in
-`FraudEngineResult` evidence, analyst explanations, logs, metrics, or UI.
-
-Future adapters must use a bounded/safe evidence policy before including feature values in engine
-outputs. Evidence should prefer bounded labels, reason codes, or safe contribution identifiers
-rather than raw feature values. This belongs to future adapter/result evidence policy, not FDP-85.
-
-## Null And Nested Values
-
-Top-level null keys are invalid. Top-level null values are invalid. Unknown/unavailable values
-must not be represented by null. The reader copies the top-level map defensively and does not
-expose that raw map.
-
-Arbitrary nested structures are not consumed by adapters in v1. Nested `Map` or `List` values
-are not scalar features and scalar accessors return `INVALID_TYPE` for them. Future nested
-feature support requires an explicit policy and tests.
-
-## Runtime Isolation
-
-FDP-85 introduced only the consumption policy and contained no adapters. FDP-87 adds an isolated
-`RuleBasedSignalEngine` adapter that must use this reader policy, remains internal to
-`fraud-scoring-service`, and is not wired into `CompositeFraudScoringEngine`. FDP-88 adds an
-isolated `PythonMlSignalEngine` adapter. The ML source of truth owns feature extraction for this
-branch, so the Python ML adapter does not read `featureSnapshot`, does not use
-`FeatureSnapshotReader`, and does not preflight snapshot keys. The current runtime still contains
-no `FraudScoringOrchestrator`, no `FraudIntelligenceResult`, no `engineResults[]`, and no
-event/API/UI integration. This policy does not change current rule-based or ML scoring behavior.
-
-Future adapters must use `FeatureSnapshotReader` and the policy layer. They must not directly
-cast values from `Map<String, Object>` or call `context.featureSnapshot().get(...)` directly.
-
-## Current Adapters
-
-The current rule adapter boundary is documented in
-`docs/architecture/rule_based_signal_engine_adapter.md`. The current Python ML adapter boundary is
-documented in `docs/architecture/python_ml_signal_engine_adapter.md`, and that adapter remains
-outside feature snapshot consumption for FDP-88 because the existing ML scoring boundary owns
-feature extraction.
-
-FDP-129 adds the optional Velocity V1 adapter. Velocity reads only typed factual scalar features through
-`FeatureSnapshotReader`: `recentTransactionCount`, `recentTransactionCountWindow`, `recentAmountSumPln`, and
-`transactionVelocityPerMinute`. It validates type, finite numeric domain, the exact `PT1M` Velocity V1 observation
-window, and impossible zero-count factual relationships, but it does not recompute producer rounding or require exact double equality for
+FDP-129 adds the optional `velocity.primary` diagnostic adapter. Velocity reads only typed factual scalar features
+through `FeatureSnapshotReader`: `recentTransactionCount`, `recentTransactionCountWindow`, `recentAmountSumPln`, and
 `transactionVelocityPerMinute`.
 
-`recentTransactionCount` and `transactionVelocityPerMinute` have the same official one-minute time basis in Velocity
-V1. A non-`PT1M` window is an invalid contract value and cannot produce an AVAILABLE Velocity V1 result. Changing the
-window requires a versioned policy and contract update.
+Velocity V1 requires `recentTransactionCountWindow=PT1M`; producer meaning, consumer validation, and policy meaning
+all use that one-minute observation window. Changing the window requires a versioned contract and policy update.
+Velocity validates count/window/rate consistency and degrades on impossible present values instead of silently
+choosing one fact. Velocity remains optional, diagnostic-only, and not a calibrated probability, final decision,
+payment authorization, case action, threshold recommendation, or analyst recommendation source.
 
 `rapidTransferFraudCaseCandidate`, `rapidTransferThresholdPln`, `rapidTransferCount`,
 `rapidTransferTotalPln`, and `rapidTransferTransactionIds` remain in the enriched feature snapshot for compatibility
-with existing consumers. Velocity V1 does not consume them. The rapid-transfer count/amount predicate and thresholds
-are owned by `FraudFeatureThresholdContract`; Velocity derives its rapid-burst signal from factual count and PLN
-amount through that contract.
+with existing consumers. Velocity V1 does not consume them as its primary policy input; rapid-transfer threshold
+semantics are owned by `FraudFeatureThresholdContract`.
+
+## Rules Canonical Input Policy
+
+Rules currently use canonical feature-snapshot facts where available and keep a deliberate v1 compatibility path for
+legacy fields still produced or replayed in this repository. Present-invalid canonical Rules inputs fail closed:
+string counts, string decimals, negative counts, negative amounts, partial rapid count/amount pairs,
+canonical/top-level conflicts, nested values, booleans used as numbers, and oversized numeric input must not become
+`AVAILABLE LOW` and must not fall back to legacy flags.
+
+The required Rules engine is part of the diagnostic orchestrator. If required Rules input validation detects current
+canonical corruption, the orchestrator contains that failure as a bounded degraded required-engine result. Raw invalid
+values must not appear in public output, logs, metrics, or diagnostic evidence.
+
+## Retained Compatibility
+
+This branch deliberately retains compatibility that is still needed for durability, replay, and rolling deployments:
+
+- `EngineIntelligenceComparisonV1Compatibility` for historical comparison objects that contain the complete legacy
+  semantic triplet.
+- Old-event `engineIntelligence == null` handling so historical Kafka events remain readable as explicit absence.
+- Retained Kafka and Mongo replay support for existing stored events and projections.
+- Still-produced Feature Enricher compatibility fields required by current downstream readers.
+- Legacy flags and top-level facts still required by the current Rules V1 compatibility path when canonical fields
+  are genuinely absent.
+- Source-compatible constructors used by repository-controlled consumers during staged rollout.
+
+Compatibility is narrow and fail-closed. It is not a SOLID violation merely because it exists; ACID durability,
+historical replay, and rolling deployment safety take precedence over cosmetic removal.
+
+## Legacy Retirement Preconditions
+
+A later branch may retire compatibility only after an explicit gate, not in FDP-129. That follow-up scope should
+include:
+
+- inventory of compatibility readers and writers;
+- canonical-write and dual-read migration plan;
+- metrics proving actual fallback usage;
+- producer and deployment cutover;
+- Kafka retention and replay horizon review;
+- Mongo historical document migration or archival decision;
+- explicit feature/event contract version decision;
+- removal only after zero-use evidence;
+- rejection fixtures after the formal cutoff;
+- repository guards preventing reintroduction.
+
+No new Jira number is assigned here because the next authoritative masterplan ticket is not known.
