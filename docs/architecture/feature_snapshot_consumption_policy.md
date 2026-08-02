@@ -123,12 +123,24 @@ semantics are owned by `FraudFeatureThresholdContract`.
 Rules currently use canonical feature-snapshot facts where available and keep a deliberate v1 compatibility path for
 legacy fields still produced or replayed in this repository. Present-invalid canonical Rules inputs fail closed:
 string counts, string decimals, negative counts, negative amounts, partial rapid count/amount pairs,
-canonical/top-level conflicts, nested values, booleans used as numbers, and oversized numeric input must not become
-`AVAILABLE LOW` and must not fall back to legacy flags.
+canonical/top-level conflicts, invalid or missing required canonical time windows, nested values, booleans used as
+numbers, and oversized numeric input must not become `AVAILABLE LOW` and must not fall back to legacy flags.
 
-The required Rules engine is part of the diagnostic orchestrator. If required Rules input validation detects current
-canonical corruption, the orchestrator contains that failure as a bounded degraded required-engine result. Raw invalid
-values must not appear in public output, logs, metrics, or diagnostic evidence.
+Rules V1 time-dependent canonical facts use the explicit `PT1M` window. `recentTransactionCount` requires
+`recentTransactionCountWindow=PT1M`; `recentAmountSumPln` requires `recentAmountSumWindow=PT1M`;
+`rapidTransferCount` and `rapidTransferTotalPln` require `rapidTransferWindow=PT1M`. Present-invalid window data is
+canonical corruption, not compatibility.
+
+Valid canonical facts are authoritative. Predicate false is not missing: a false canonical high-amount or rapid
+burst predicate cannot be overridden by legacy `HIGH_AMOUNT_ACTIVITY`, legacy
+`RAPID_PLN_20K_BURST`, or `rapidTransferFraudCaseCandidate`. PLN thresholds consume canonical PLN facts or explicitly
+PLN-denominated top-level compatibility facts only.
+
+Primary scoring and diagnostic Engine Intelligence have different failure semantics. The primary
+`RuleBasedFraudScoringEngine` fails closed with a bounded validation exception and no fabricated scored event.
+The diagnostic `RuleBasedSignalEngine` reports bounded `DEGRADED` with null score/risk, while the orchestrator may
+continue eligible diagnostic engines. Raw invalid values must not appear in public output, logs, metrics, or
+diagnostic evidence.
 
 ## Retained Compatibility
 
