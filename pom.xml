@@ -50,6 +50,7 @@
         <lz4-java.version>1.11.1</lz4-java.version>
         <maven-surefire-plugin.version>3.5.5</maven-surefire-plugin.version>
         <swagger-parser.version>2.1.42</swagger-parser.version>
+        <json-schema-validator.version>2.2.14</json-schema-validator.version>
     </properties>
 
     <dependencyManagement>
@@ -167,6 +168,12 @@
                 <groupId>io.prometheus</groupId>
                 <artifactId>prometheus-metrics-tracer-common</artifactId>
                 <version>${prometheus.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.java-json-tools</groupId>
+                <artifactId>json-schema-validator</artifactId>
+                <version>${json-schema-validator.version}</version>
+                <scope>test</scope>
             </dependency>
         </dependencies>
     </dependencyManagement>
