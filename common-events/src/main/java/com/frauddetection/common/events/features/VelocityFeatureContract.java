@@ -6,12 +6,15 @@ import java.time.Duration;
 import java.util.Objects;
 
 public final class VelocityFeatureContract {
-    public static final Duration CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW = Duration.ofMinutes(1);
+    public static final Duration CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW =
+            FraudFeatureValueBoundsContract.RULES_V1_CANONICAL_WINDOW;
     public static final String CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW_TEXT =
-            CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW.toString();
-    public static final int MAX_RECENT_TRANSACTION_COUNT = 1_000_000;
+            FraudFeatureValueBoundsContract.RULES_V1_CANONICAL_WINDOW_TEXT;
+    public static final int MAX_RECENT_TRANSACTION_COUNT =
+            FraudFeatureValueBoundsContract.MAX_RECENT_TRANSACTION_COUNT;
     public static final double MAX_TRANSACTION_VELOCITY_PER_MINUTE = 1_000_000.0d;
-    public static final BigDecimal MAX_RECENT_AMOUNT_SUM_PLN = new BigDecimal("999999999999.99");
+    public static final BigDecimal MAX_RECENT_AMOUNT_SUM_PLN =
+            FraudFeatureValueBoundsContract.MAX_RECENT_AMOUNT_SUM_PLN;
     public static final double RATE_CONSISTENCY_TOLERANCE = 0.0001d;
 
     private VelocityFeatureContract() {
@@ -31,7 +34,7 @@ public final class VelocityFeatureContract {
     }
 
     public static boolean isCanonicalWindowText(String value) {
-        return CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW_TEXT.equals(value);
+        return FraudFeatureValueBoundsContract.isRulesV1CanonicalWindowText(value);
     }
 
     public static boolean isRateConsistentWithCount(int recentTransactionCount, double transactionVelocityPerMinute) {
@@ -43,7 +46,7 @@ public final class VelocityFeatureContract {
     }
 
     public static boolean isWithinBounds(int recentTransactionCount) {
-        return recentTransactionCount >= 0 && recentTransactionCount <= MAX_RECENT_TRANSACTION_COUNT;
+        return FraudFeatureValueBoundsContract.isWithinCountBounds(recentTransactionCount);
     }
 
     public static boolean isWithinBounds(double transactionVelocityPerMinute) {
@@ -54,7 +57,6 @@ public final class VelocityFeatureContract {
 
     public static boolean isWithinBounds(BigDecimal recentAmountSumPln) {
         Objects.requireNonNull(recentAmountSumPln, "recentAmountSumPln is required");
-        return recentAmountSumPln.signum() >= 0
-                && recentAmountSumPln.compareTo(MAX_RECENT_AMOUNT_SUM_PLN) <= 0;
+        return FraudFeatureValueBoundsContract.isWithinAmountBounds(recentAmountSumPln);
     }
 }

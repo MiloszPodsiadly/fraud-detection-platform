@@ -177,6 +177,7 @@ class FraudEngineContractRuntimeIsolationTest {
         assertThat(rulesValidator)
                 .contains("FeatureSnapshotReader")
                 .contains("RulesFeatureInputValidationException")
+                .doesNotContain("VelocityFeatureContract")
                 .doesNotContain("context.featureSnapshot().get(")
                 .doesNotContain("exception.getMessage()");
         assertThat(runtimeOutsidePolicy)

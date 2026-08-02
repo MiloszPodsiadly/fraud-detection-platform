@@ -128,6 +128,20 @@ class FraudScoringOrchestratorRealAdapterCompositionTest {
                 .containsExactly("java", "python");
     }
 
+    @Test
+    void diagnosticRulesDegradationDoesNotStopMlDiagnosticExecution() {
+        RecordingMlClient mlClient = new RecordingMlClient(availableMlOutput());
+        FraudScoringOrchestrationResult result = orchestrator(realRuleEngine(), realMlEngine(mlClient))
+                .evaluate(invalidRulesContext());
+
+        assertThat(result.engineResults()).extracting(FraudEngineResult::status)
+                .containsExactly(FraudEngineStatus.DEGRADED, FraudEngineStatus.AVAILABLE);
+        assertThat(result.engineResults().getFirst().score()).isNull();
+        assertThat(result.engineResults().getFirst().riskLevel()).isNull();
+        assertThat(result.engineResults().getFirst().toString()).doesNotContain("P1D");
+        assertThat(mlClient.calls()).isEqualTo(1);
+    }
+
     private FraudScoringOrchestrator orchestrator(FraudSignalEngine... engines) {
         return new FraudScoringOrchestrator(new FraudSignalEngineRegistry(List.of(engines)));
     }
@@ -160,6 +174,10 @@ class FraudScoringOrchestratorRealAdapterCompositionTest {
                 VelocityFeatureContract.CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW_TEXT
         );
         features.put(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("100.00"));
+        features.put(
+                FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW,
+                VelocityFeatureContract.CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW_TEXT
+        );
         features.put(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 6.0d);
         TransactionEnrichedEvent eventWithVelocityFeatures = new TransactionEnrichedEvent(
                 event.eventId(),
@@ -191,6 +209,45 @@ class FraudScoringOrchestratorRealAdapterCompositionTest {
                 eventWithVelocityFeatures.featureSnapshot(),
                 ScoringMode.ML,
                 eventWithVelocityFeatures.correlationId(),
+                FraudScoringOrchestratorTestSupport.RECEIVED_AT
+        );
+    }
+
+    private ScoringContext invalidRulesContext() {
+        TransactionEnrichedEvent event = TransactionFixtures.enrichedTransaction().build();
+        Map<String, Object> features = new HashMap<>(event.featureSnapshot());
+        features.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5);
+        features.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "P1D");
+        TransactionEnrichedEvent invalid = new TransactionEnrichedEvent(
+                event.eventId(),
+                event.transactionId(),
+                event.correlationId(),
+                event.customerId(),
+                event.accountId(),
+                event.createdAt(),
+                event.transactionTimestamp(),
+                event.transactionAmount(),
+                event.merchantInfo(),
+                event.deviceInfo(),
+                event.locationInfo(),
+                event.customerContext(),
+                event.recentTransactionCount(),
+                event.recentTransactionCountWindow(),
+                event.recentAmountSum(),
+                event.recentAmountSumWindow(),
+                event.transactionVelocityPerMinute(),
+                event.merchantFrequency7d(),
+                event.deviceNovelty(),
+                event.countryMismatch(),
+                event.proxyOrVpnDetected(),
+                event.featureFlags(),
+                Map.copyOf(features)
+        );
+        return new ScoringContext(
+                invalid,
+                invalid.featureSnapshot(),
+                ScoringMode.ML,
+                invalid.correlationId(),
                 FraudScoringOrchestratorTestSupport.RECEIVED_AT
         );
     }

@@ -2,7 +2,7 @@ package com.frauddetection.scoring.service;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.features.FraudFeatureContract;
-import com.frauddetection.common.events.features.VelocityFeatureContract;
+import com.frauddetection.common.events.features.FraudFeatureValueBoundsContract;
 import com.frauddetection.scoring.features.FeatureSnapshotReader;
 import com.frauddetection.scoring.features.FeatureSnapshotValue;
 import com.frauddetection.scoring.features.FeatureSnapshotValueStatus;
@@ -28,27 +28,39 @@ public final class RulesFeatureInputValidator {
         Objects.requireNonNull(reader, "reader is required");
         FeatureSnapshotValue<Integer> recentTransactionCount =
                 reader.integerValue(FraudFeatureContract.RECENT_TRANSACTION_COUNT);
+        FeatureSnapshotValue<String> recentTransactionCountWindow =
+                reader.stringValue(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW);
         FeatureSnapshotValue<BigDecimal> recentAmountSumPln =
                 reader.decimalValue(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN);
+        FeatureSnapshotValue<String> recentAmountSumWindow =
+                reader.stringValue(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW);
         FeatureSnapshotValue<Integer> rapidTransferCount =
                 reader.integerValue(FraudFeatureContract.RAPID_TRANSFER_COUNT);
         FeatureSnapshotValue<BigDecimal> rapidTransferTotalPln =
                 reader.decimalValue(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN);
+        FeatureSnapshotValue<String> rapidTransferWindow =
+                reader.stringValue(FraudFeatureContract.RAPID_TRANSFER_WINDOW);
         FeatureSnapshotValue<Boolean> rapidTransferFraudCaseCandidate =
                 reader.booleanValue(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE);
 
         failFastForAdapterDefects(
                 recentTransactionCount,
+                recentTransactionCountWindow,
                 recentAmountSumPln,
+                recentAmountSumWindow,
                 rapidTransferCount,
                 rapidTransferTotalPln,
+                rapidTransferWindow,
                 rapidTransferFraudCaseCandidate
         );
         if (hasInvalidType(
                 recentTransactionCount,
+                recentTransactionCountWindow,
                 recentAmountSumPln,
+                recentAmountSumWindow,
                 rapidTransferCount,
                 rapidTransferTotalPln,
+                rapidTransferWindow,
                 rapidTransferFraudCaseCandidate
         )) {
             return false;
@@ -57,6 +69,12 @@ public final class RulesFeatureInputValidator {
                 || !validAmount(recentAmountSumPln)
                 || !validCount(rapidTransferCount)
                 || !validAmount(rapidTransferTotalPln)) {
+            return false;
+        }
+        if (!validCanonicalWindow(recentTransactionCount, recentTransactionCountWindow)
+                || !validCanonicalWindow(recentAmountSumPln, recentAmountSumWindow)
+                || !validCanonicalWindow(rapidTransferCount, rapidTransferWindow)
+                || !validCanonicalWindow(rapidTransferTotalPln, rapidTransferWindow)) {
             return false;
         }
         if (present(rapidTransferCount) != present(rapidTransferTotalPln)) {
@@ -102,19 +120,29 @@ public final class RulesFeatureInputValidator {
     }
 
     private static boolean validCount(FeatureSnapshotValue<Integer> value) {
-        return !present(value) || VelocityFeatureContract.isWithinBounds(value.value());
+        return !present(value) || FraudFeatureValueBoundsContract.isWithinCountBounds(value.value());
     }
 
     private static boolean validAmount(FeatureSnapshotValue<BigDecimal> value) {
-        return !present(value) || VelocityFeatureContract.isWithinBounds(value.value());
+        return !present(value) || FraudFeatureValueBoundsContract.isWithinAmountBounds(value.value());
     }
 
     private static boolean validTopLevelCount(Integer value) {
-        return value == null || VelocityFeatureContract.isWithinBounds(value);
+        return value == null || FraudFeatureValueBoundsContract.isWithinCountBounds(value);
     }
 
     private static boolean validTopLevelAmount(BigDecimal value) {
-        return value == null || VelocityFeatureContract.isWithinBounds(value);
+        return value == null || FraudFeatureValueBoundsContract.isWithinAmountBounds(value);
+    }
+
+    private static boolean validCanonicalWindow(
+            FeatureSnapshotValue<?> fact,
+            FeatureSnapshotValue<String> window
+    ) {
+        if (present(window) && !FraudFeatureValueBoundsContract.isRulesV1CanonicalWindowText(window.value())) {
+            return false;
+        }
+        return !present(fact) || present(window);
     }
 
     private static boolean isPln(String currency) {

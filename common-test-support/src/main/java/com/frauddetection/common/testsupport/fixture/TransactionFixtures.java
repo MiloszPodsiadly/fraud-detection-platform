@@ -4,6 +4,7 @@ import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.model.CustomerContext;
 import com.frauddetection.common.events.model.DeviceInfo;
 import com.frauddetection.common.events.model.LocationInfo;
@@ -185,10 +186,11 @@ public final class TransactionFixtures {
                     false,
                     List.of("DEVICE_NOVELTY", "HIGH_VELOCITY"),
                     Map.of(
-                            "recentTransactionCount", 8,
-                            "recentAmountSum", "5830.24",
-                            "deviceNovelty", true,
-                            "merchantFrequency7d", 6
+                            FraudFeatureContract.RECENT_TRANSACTION_COUNT, 8,
+                            FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
+                            FraudFeatureContract.RECENT_AMOUNT_SUM, "5830.24",
+                            FraudFeatureContract.DEVICE_NOVELTY, true,
+                            FraudFeatureContract.MERCHANT_FREQUENCY_7D, 6
                     )
             );
         }

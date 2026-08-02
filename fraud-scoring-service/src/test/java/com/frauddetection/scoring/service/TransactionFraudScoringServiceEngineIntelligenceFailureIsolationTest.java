@@ -1,6 +1,7 @@
 package com.frauddetection.scoring.service;
 
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
+import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.EngineIntelligenceEmissionProperties;
 import com.frauddetection.scoring.config.ScoringMode;
@@ -17,6 +18,7 @@ import org.springframework.beans.factory.ObjectProvider;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.Optional;
 
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.analystRecommendationService;
@@ -136,6 +138,49 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
         assertThatThrownBy(() -> harness.service().score(harness.input()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("baseline-failure");
+        verify(harness.publisher(), never()).publish(any());
+        verify(harness.emissionService(), never()).emitIfEnabled(any());
+    }
+
+    @Test
+    void invalidPrimaryRulesInputFailsClosedBeforePublishOrDiagnosticEnrichment() {
+        var input = TransactionFixtures.enrichedTransaction().build();
+        var invalidInput = new com.frauddetection.common.events.contract.TransactionEnrichedEvent(
+                input.eventId(),
+                input.transactionId(),
+                input.correlationId(),
+                input.customerId(),
+                input.accountId(),
+                input.createdAt(),
+                input.transactionTimestamp(),
+                input.transactionAmount(),
+                input.merchantInfo(),
+                input.deviceInfo(),
+                input.locationInfo(),
+                input.customerContext(),
+                input.recentTransactionCount(),
+                input.recentTransactionCountWindow(),
+                input.recentAmountSum(),
+                input.recentAmountSumWindow(),
+                input.transactionVelocityPerMinute(),
+                input.merchantFrequency7d(),
+                input.deviceNovelty(),
+                input.countryMismatch(),
+                input.proxyOrVpnDetected(),
+                input.featureFlags(),
+                Map.of(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "P1D"
+                )
+        );
+        var harness = harness(Optional.empty());
+        when(harness.scoringEngine().score(FraudScoringRequest.from(invalidInput)))
+                .thenThrow(new RulesFeatureInputValidationException());
+
+        assertThatThrownBy(() -> harness.service().score(invalidInput))
+                .isInstanceOf(RulesFeatureInputValidationException.class)
+                .hasMessage("RULES_FEATURE_INPUT_INVALID")
+                .hasMessageNotContaining("P1D");
         verify(harness.publisher(), never()).publish(any());
         verify(harness.emissionService(), never()).emitIfEnabled(any());
     }

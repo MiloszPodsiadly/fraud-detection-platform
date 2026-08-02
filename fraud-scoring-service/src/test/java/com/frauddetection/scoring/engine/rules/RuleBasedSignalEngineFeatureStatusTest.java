@@ -161,6 +161,8 @@ class RuleBasedSignalEngineFeatureStatusTest {
                 List.of(),
                 Map.of(
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
                         FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.0")
                 ))));
 
@@ -175,6 +177,8 @@ class RuleBasedSignalEngineFeatureStatusTest {
                 List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
                 Map.of(
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
                         FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, BigDecimal.TEN
                 ));
         ObjectNode root = mapper.valueToTree(source);
@@ -211,6 +215,60 @@ class RuleBasedSignalEngineFeatureStatusTest {
         assertThat(result.statusReason()).isNull();
         assertThat(result.reasonCodes()).isEmpty();
         assertThat(result.evidence()).isEmpty();
+    }
+
+    @Test
+    void countWithValidRulesWindowProducesHighVelocity() {
+        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 5, 5.0d, BigDecimal.TEN,
+                List.of(),
+                Map.of(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M"
+                ))));
+
+        assertThat(result.status()).isEqualTo(FraudEngineStatus.AVAILABLE);
+        assertThat(result.reasonCodes()).contains(ReasonCode.HIGH_VELOCITY.wireValue());
+    }
+
+    @Test
+    void countWithInvalidRulesWindowDegradesWithoutRawWindowLeakage() {
+        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 5, 5.0d, BigDecimal.TEN,
+                List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
+                Map.of(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "P1D"
+                ))));
+
+        assertDegradedInvalid(result);
+        assertThat(flatten(result)).doesNotContain("P1D").doesNotContain("5");
+    }
+
+    @Test
+    void countWithWrongWindowTypeDegrades() {
+        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 5, 5.0d, BigDecimal.TEN,
+                List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
+                Map.of(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, 60
+                ))));
+
+        assertDegradedInvalid(result);
+    }
+
+    @Test
+    void rapidTransferWithInvalidRulesWindowDegradesWithoutCandidateFallback() {
+        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 2, 2.0d,
+                new BigDecimal("20000.00"),
+                List.of(FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST),
+                Map.of(
+                        FraudFeatureContract.RAPID_TRANSFER_COUNT, 2,
+                        FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("20000.00"),
+                        FraudFeatureContract.RAPID_TRANSFER_WINDOW, "P7D",
+                        FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true
+                ))));
+
+        assertDegradedInvalid(result);
+        assertThat(flatten(result)).doesNotContain("P7D").doesNotContain("20000.00");
     }
 
     @Test

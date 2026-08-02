@@ -60,25 +60,18 @@ final class RulesScoringPolicyV1 {
     }
 
     static boolean isRecentAmountActivity(TransactionEnrichedEvent event) {
-        Map<String, Object> snapshot = event.featureSnapshot();
-        if (isPresentButInvalid(snapshot, FraudFeatureContract.RECENT_TRANSACTION_COUNT, Integer.class)
-                || isPresentButInvalid(snapshot, FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, BigDecimal.class)) {
-            return false;
-        }
-        Integer recentTransactionCount = canonicalInteger(snapshot, FraudFeatureContract.RECENT_TRANSACTION_COUNT)
-                .orElse(event.recentTransactionCount());
-        BigDecimal recentAmountSum = canonicalDecimal(snapshot, FraudFeatureContract.RECENT_AMOUNT_SUM_PLN)
-                .orElse(event.recentAmountSum() == null ? null : event.recentAmountSum().amount());
-        if (recentTransactionCount != null && recentAmountSum != null && recentTransactionCount >= 2) {
-            return recentAmountSum.compareTo(BigDecimal.valueOf(5000)) >= 0;
-        }
-        return containsFeatureFlag(event.featureFlags(), FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY);
+        PredicateResolution resolved = recentAmountActivity(event);
+        return switch (resolved) {
+            case TRUE -> true;
+            case FALSE -> false;
+            case ABSENT -> containsFeatureFlag(event.featureFlags(), FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY);
+        };
     }
 
     static boolean isRapidPln20kBurst(TransactionEnrichedEvent event) {
-        Optional<Boolean> canonicalBurst = canonicalRapidBurst(event);
-        if (canonicalBurst.isPresent()) {
-            return canonicalBurst.get();
+        PredicateResolution canonicalBurst = canonicalRapidBurst(event);
+        if (canonicalBurst != PredicateResolution.ABSENT) {
+            return canonicalBurst == PredicateResolution.TRUE;
         }
         if (event.featureSnapshot() != null
                 && event.featureSnapshot().containsKey(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE)) {
@@ -87,42 +80,82 @@ final class RulesScoringPolicyV1 {
         return containsFeatureFlag(event.featureFlags(), FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST);
     }
 
-    private static Optional<Boolean> canonicalRapidBurst(TransactionEnrichedEvent event) {
+    private static PredicateResolution recentAmountActivity(TransactionEnrichedEvent event) {
         Map<String, Object> snapshot = event.featureSnapshot();
-        if (snapshot == null) {
-            return Optional.empty();
+        if (isPresentButInvalid(snapshot, FraudFeatureContract.RECENT_TRANSACTION_COUNT, Integer.class)
+                || isPresentButInvalid(snapshot, FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, BigDecimal.class)) {
+            return PredicateResolution.FALSE;
         }
-        String countKey = snapshot.containsKey(FraudFeatureContract.RAPID_TRANSFER_COUNT)
-                ? FraudFeatureContract.RAPID_TRANSFER_COUNT
-                : (snapshot.containsKey(FraudFeatureContract.RECENT_TRANSACTION_COUNT)
-                ? FraudFeatureContract.RECENT_TRANSACTION_COUNT
-                : null);
-        String amountKey = snapshot.containsKey(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN)
-                ? FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN
-                : (snapshot.containsKey(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN)
-                ? FraudFeatureContract.RECENT_AMOUNT_SUM_PLN
-                : null);
-        if (countKey == null && amountKey == null) {
-            return Optional.empty();
-        }
-        if ((countKey != null && isPresentButInvalid(snapshot, countKey, Integer.class))
-                || (amountKey != null && isPresentButInvalid(snapshot, amountKey, BigDecimal.class))) {
-            return Optional.of(false);
-        }
-        Integer count = countKey == null
-                ? event.recentTransactionCount()
-                : canonicalInteger(snapshot, countKey).orElse(null);
-        BigDecimal amount = amountKey == null
-                ? null
-                : canonicalDecimal(snapshot, amountKey).orElse(null);
+        Integer count = canonicalInteger(snapshot, FraudFeatureContract.RECENT_TRANSACTION_COUNT)
+                .orElse(event.recentTransactionCount());
+        BigDecimal amount = canonicalDecimal(snapshot, FraudFeatureContract.RECENT_AMOUNT_SUM_PLN)
+                .orElse(safeTopLevelRecentAmountPln(event).orElse(null));
         if (count == null || amount == null) {
+            return PredicateResolution.ABSENT;
+        }
+        return amount.compareTo(BigDecimal.valueOf(5000)) >= 0 && count >= 2
+                ? PredicateResolution.TRUE
+                : PredicateResolution.FALSE;
+    }
+
+    private static PredicateResolution canonicalRapidBurst(TransactionEnrichedEvent event) {
+        Map<String, Object> snapshot = event.featureSnapshot();
+        PredicateResolution rapidPair = rapidPairBurst(snapshot);
+        if (rapidPair != PredicateResolution.ABSENT) {
+            return rapidPair;
+        }
+        return recentFactsRapidBurst(event);
+    }
+
+    private static PredicateResolution rapidPairBurst(Map<String, Object> snapshot) {
+        if (snapshot == null
+                || (!snapshot.containsKey(FraudFeatureContract.RAPID_TRANSFER_COUNT)
+                && !snapshot.containsKey(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN))) {
+            return PredicateResolution.ABSENT;
+        }
+        if (isPresentButInvalid(snapshot, FraudFeatureContract.RAPID_TRANSFER_COUNT, Integer.class)
+                || isPresentButInvalid(snapshot, FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, BigDecimal.class)) {
+            return PredicateResolution.FALSE;
+        }
+        Integer count = canonicalInteger(snapshot, FraudFeatureContract.RAPID_TRANSFER_COUNT).orElse(null);
+        BigDecimal amount = canonicalDecimal(snapshot, FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN).orElse(null);
+        if (count == null || amount == null) {
+            return PredicateResolution.ABSENT;
+        }
+        return rapidPredicate(count, amount);
+    }
+
+    private static PredicateResolution recentFactsRapidBurst(TransactionEnrichedEvent event) {
+        Map<String, Object> snapshot = event.featureSnapshot();
+        if (isPresentButInvalid(snapshot, FraudFeatureContract.RECENT_TRANSACTION_COUNT, Integer.class)
+                || isPresentButInvalid(snapshot, FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, BigDecimal.class)) {
+            return PredicateResolution.FALSE;
+        }
+        Integer count = canonicalInteger(snapshot, FraudFeatureContract.RECENT_TRANSACTION_COUNT)
+                .orElse(event.recentTransactionCount());
+        BigDecimal amount = canonicalDecimal(snapshot, FraudFeatureContract.RECENT_AMOUNT_SUM_PLN)
+                .orElse(safeTopLevelRecentAmountPln(event).orElse(null));
+        if (count == null || amount == null) {
+            return PredicateResolution.ABSENT;
+        }
+        return rapidPredicate(count, amount);
+    }
+
+    private static PredicateResolution rapidPredicate(int count, BigDecimal amount) {
+        try {
+            return FraudFeatureThresholdContract.isRapidTransferPlnBurst(count, amount)
+                    ? PredicateResolution.TRUE
+                    : PredicateResolution.FALSE;
+        } catch (IllegalArgumentException exception) {
+            return PredicateResolution.FALSE;
+        }
+    }
+
+    private static Optional<BigDecimal> safeTopLevelRecentAmountPln(TransactionEnrichedEvent event) {
+        if (event.recentAmountSum() == null || !"PLN".equalsIgnoreCase(event.recentAmountSum().currency())) {
             return Optional.empty();
         }
-        try {
-            return Optional.of(FraudFeatureThresholdContract.isRapidTransferPlnBurst(count, amount));
-        } catch (IllegalArgumentException exception) {
-            return Optional.of(false);
-        }
+        return Optional.ofNullable(event.recentAmountSum().amount());
     }
 
     private static Optional<Integer> canonicalInteger(Map<String, Object> snapshot, String key) {
@@ -147,5 +180,11 @@ final class RulesScoringPolicyV1 {
 
     private static boolean containsFeatureFlag(List<String> featureFlags, String featureFlag) {
         return featureFlags != null && featureFlags.contains(featureFlag);
+    }
+
+    private enum PredicateResolution {
+        TRUE,
+        FALSE,
+        ABSENT
     }
 }

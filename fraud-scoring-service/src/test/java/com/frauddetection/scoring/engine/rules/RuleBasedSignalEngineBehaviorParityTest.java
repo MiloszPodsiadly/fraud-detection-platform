@@ -62,6 +62,7 @@ class RuleBasedSignalEngineBehaviorParityTest {
                         FraudFeatureContract.COUNTRY_MISMATCH, true,
                         FraudFeatureContract.PROXY_OR_VPN_DETECTED, false,
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
                         FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d
                 ));
 
@@ -90,9 +91,9 @@ class RuleBasedSignalEngineBehaviorParityTest {
 
     @Test
     void rapidTransferFraudCaseCandidateMirrorsProductionSnapshotSignal() {
-        TransactionEnrichedEvent event = event(false, false, false, 1, 0.1d, BigDecimal.TEN,
+        TransactionEnrichedEvent event = withoutFactualInputs(event(false, false, false, 1, 0.1d, BigDecimal.TEN,
                 List.of(),
-                Map.of(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true));
+                Map.of(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true)));
 
         FraudScoreResult production = assertProductionMappingParity(event);
 
@@ -104,7 +105,9 @@ class RuleBasedSignalEngineBehaviorParityTest {
         TransactionEnrichedEvent event = event(false, false, false, 1, 0.1d, BigDecimal.TEN,
                 List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue()),
                 Map.of(
-                        FraudFeatureContract.RAPID_TRANSFER_BURST, true,
+                        FraudFeatureContract.RAPID_TRANSFER_COUNT, 2,
+                        FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("20000.00"),
+                        FraudFeatureContract.RAPID_TRANSFER_WINDOW, "PT1M",
                         FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true
                 ));
 
@@ -182,6 +185,34 @@ class RuleBasedSignalEngineBehaviorParityTest {
                 proxyOrVpn,
                 featureFlags,
                 featureSnapshot
+        );
+    }
+
+    private TransactionEnrichedEvent withoutFactualInputs(TransactionEnrichedEvent source) {
+        return new TransactionEnrichedEvent(
+                source.eventId(),
+                source.transactionId(),
+                source.correlationId(),
+                source.customerId(),
+                source.accountId(),
+                source.createdAt(),
+                source.transactionTimestamp(),
+                source.transactionAmount(),
+                source.merchantInfo(),
+                source.deviceInfo(),
+                source.locationInfo(),
+                source.customerContext(),
+                null,
+                null,
+                null,
+                null,
+                source.transactionVelocityPerMinute(),
+                source.merchantFrequency7d(),
+                source.deviceNovelty(),
+                source.countryMismatch(),
+                source.proxyOrVpnDetected(),
+                source.featureFlags(),
+                source.featureSnapshot()
         );
     }
 }
