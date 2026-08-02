@@ -1,5 +1,6 @@
 package com.frauddetection.common.events.intelligence;
 
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.reason.ReasonCode;
 
@@ -12,16 +13,12 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 final class EngineIntelligenceValuePolicy {
-    static final int MAX_ENGINES = 2;
+    static final int MAX_ENGINES = FraudEngineIdentityContract.MAX_ENGINE_INTELLIGENCE_ENGINES;
     static final int MAX_DIAGNOSTIC_SIGNALS = 5;
     static final int MAX_WARNINGS = 10;
     static final int MAX_REASON_CODES_PER_ENGINE = 5;
     static final int MAX_STRING_LENGTH = 128;
 
-    private static final Map<String, FraudEngineType> ENGINE_TYPES = Map.of(
-            "rules.primary", FraudEngineType.RULES,
-            "ml.python.primary", FraudEngineType.ML_MODEL
-    );
     private static final Set<String> ALLOWED_REASON_CODES = allowedReasonCodes();
     private static final Set<String> FORBIDDEN_COMPACT_TEXT = Set.of(
             "transactionid",
@@ -52,11 +49,10 @@ final class EngineIntelligenceValuePolicy {
 
     static void requireEngineIdentity(String engineId, FraudEngineType engineType) {
         requireBoundedSafeText(engineId, "ENGINE_INTELLIGENCE_ENGINE_ID_INVALID");
-        FraudEngineType expected = ENGINE_TYPES.get(engineId);
-        if (expected == null) {
+        if (!FraudEngineIdentityContract.isKnownEngineId(engineId)) {
             throw new IllegalArgumentException("ENGINE_INTELLIGENCE_UNKNOWN_ENGINE_ID");
         }
-        if (engineType != expected) {
+        if (!FraudEngineIdentityContract.hasExpectedType(engineId, engineType)) {
             throw new IllegalArgumentException("ENGINE_INTELLIGENCE_ENGINE_TYPE_MISMATCH");
         }
     }
@@ -124,7 +120,11 @@ final class EngineIntelligenceValuePolicy {
                 "ORCHESTRATOR_ENGINE_EXCEPTION",
                 "ORCHESTRATOR_ENGINE_NULL_RESULT",
                 "ORCHESTRATOR_ENGINE_REJECTED",
-                "ORCHESTRATOR_ENGINE_TIMEOUT"
+                "ORCHESTRATOR_ENGINE_TIMEOUT",
+                "VELOCITY_FEATURES_UNAVAILABLE",
+                "VELOCITY_FEATURE_TYPE_INVALID",
+                "VELOCITY_FEATURE_VALUE_INVALID",
+                "VELOCITY_FEATURES_INCONSISTENT"
         );
         return Stream.concat(sharedReasonCodes, engineReasonCodes).collect(Collectors.toUnmodifiableSet());
     }

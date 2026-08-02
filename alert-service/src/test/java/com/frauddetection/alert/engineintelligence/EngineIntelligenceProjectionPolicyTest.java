@@ -33,7 +33,7 @@ class EngineIntelligenceProjectionPolicyTest {
     @Test
     void alertServiceStorageLimitsStillApplyAfterPublicContractValidation() {
         EngineIntelligenceSummary source = summaryMock();
-        when(source.engines()).thenReturn(Collections.nCopies(3, EngineIntelligenceProjectionTestFixtures.timeoutMl()));
+        when(source.engines()).thenReturn(Collections.nCopies(4, EngineIntelligenceProjectionTestFixtures.timeoutMl()));
 
         assertOversized(source);
     }
@@ -61,7 +61,7 @@ class EngineIntelligenceProjectionPolicyTest {
     void rejectsTooManyReasonCodes() {
         EngineIntelligenceSummary source = summaryMock();
         EngineIntelligenceEngineResult engine = engineMock("rules.primary", List.of("A", "B", "C", "D", "E", "F"));
-        when(source.engines()).thenReturn(List.of(engine));
+        when(source.engines()).thenReturn(enginesWithRequiredMl(engine));
 
         assertOversized(source);
     }
@@ -79,7 +79,7 @@ class EngineIntelligenceProjectionPolicyTest {
     void rejectsOverlongReasonCode() {
         EngineIntelligenceSummary source = summaryMock();
         EngineIntelligenceEngineResult engine = engineMock("rules.primary", List.of("x".repeat(129)));
-        when(source.engines()).thenReturn(List.of(engine));
+        when(source.engines()).thenReturn(enginesWithRequiredMl(engine));
 
         assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_OVERSIZED);
     }
@@ -97,7 +97,7 @@ class EngineIntelligenceProjectionPolicyTest {
     void supportedPublicReasonCodeProjects() {
         EngineIntelligenceSummary source = summaryMock();
         EngineIntelligenceEngineResult engine = engineMock("rules.primary", List.of("HIGH_VELOCITY"));
-        when(source.engines()).thenReturn(List.of(engine));
+        when(source.engines()).thenReturn(enginesWithRequiredMl(engine));
 
         assertThat(policy.validatedCopy(source).engines().getFirst().reasonCodes())
                 .containsExactly("HIGH_VELOCITY");
@@ -107,7 +107,7 @@ class EngineIntelligenceProjectionPolicyTest {
     void unsupportedReasonCodeRejectedByPublicContract() {
         EngineIntelligenceSummary source = summaryMock();
         EngineIntelligenceEngineResult engine = engineMock("rules.primary", List.of("NOT_ALLOWLISTED"));
-        when(source.engines()).thenReturn(List.of(engine));
+        when(source.engines()).thenReturn(enginesWithRequiredMl(engine));
 
         assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED);
     }
@@ -125,7 +125,7 @@ class EngineIntelligenceProjectionPolicyTest {
     void rawTokenRejectedByAlertServiceStoragePolicy() {
         EngineIntelligenceSummary source = summaryMock();
         EngineIntelligenceEngineResult engine = engineMock("rules.primary", List.of("raw_payload"));
-        when(source.engines()).thenReturn(List.of(engine));
+        when(source.engines()).thenReturn(enginesWithRequiredMl(engine));
 
         assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
     }
@@ -144,7 +144,7 @@ class EngineIntelligenceProjectionPolicyTest {
         for (String value : List.of("endpoint", "token", "secret", "stack trace", "exception", "debug")) {
             EngineIntelligenceSummary source = summaryMock();
             EngineIntelligenceEngineResult engine = engineMock("rules.primary", List.of(value));
-            when(source.engines()).thenReturn(List.of(engine));
+            when(source.engines()).thenReturn(enginesWithRequiredMl(engine));
 
             assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
         }
@@ -155,6 +155,29 @@ class EngineIntelligenceProjectionPolicyTest {
         EngineIntelligenceSummary source = summaryMock();
         EngineIntelligenceEngineResult engine = engineMock("rules.secondary", List.of("HIGH_VELOCITY"));
         when(source.engines()).thenReturn(List.of(engine));
+
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
+    }
+
+    @Test
+    void duplicateCanonicalEngineIdRejectedBySharedPublicContract() {
+        EngineIntelligenceSummary source = summaryMock();
+        List<EngineIntelligenceEngineResult> engines = List.of(
+                engineMock("rules.primary", List.of("HIGH_VELOCITY")),
+                engineMock("rules.primary", List.of("HIGH_VELOCITY"))
+        );
+        when(source.engines()).thenReturn(engines);
+
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
+    }
+
+    @Test
+    void outOfOrderCanonicalEngineIdRejectedBySharedPublicContract() {
+        EngineIntelligenceSummary source = summaryMock();
+        EngineIntelligenceEngineResult ml = engineMock("ml.python.primary", List.of("ML_MODEL_SIGNAL"));
+        when(ml.engineType()).thenReturn(FraudEngineType.ML_MODEL);
+        EngineIntelligenceEngineResult rules = engineMock("rules.primary", List.of("HIGH_VELOCITY"));
+        when(source.engines()).thenReturn(List.of(ml, rules));
 
         assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
     }
@@ -187,7 +210,7 @@ class EngineIntelligenceProjectionPolicyTest {
         EngineIntelligenceSummary source = summaryMock();
         EngineIntelligenceEngineResult engine = engineMock("rules.primary", List.of("HIGH_VELOCITY"));
         when(engine.status()).thenReturn(status);
-        when(source.engines()).thenReturn(List.of(engine));
+        when(source.engines()).thenReturn(enginesWithRequiredMl(engine));
 
         assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
     }
@@ -204,9 +227,12 @@ class EngineIntelligenceProjectionPolicyTest {
     @Test
     void acceptsOperationalStatusWithoutRiskLevel() {
         EngineIntelligenceSummary source = summaryMock();
-        when(source.engines()).thenReturn(List.of(EngineIntelligenceProjectionTestFixtures.timeoutMl()));
+        when(source.engines()).thenReturn(List.of(
+                EngineIntelligenceProjectionTestFixtures.availableRules(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
+                EngineIntelligenceProjectionTestFixtures.timeoutMl()
+        ));
 
-        assertThat(policy.validatedCopy(source).engines().getFirst().riskLevel()).isNull();
+        assertThat(policy.validatedCopy(source).engines().get(1).riskLevel()).isNull();
     }
 
     @Test
@@ -221,7 +247,10 @@ class EngineIntelligenceProjectionPolicyTest {
     void operationalStatusWithRiskLevelRejectedByPublicContract() {
         EngineIntelligenceSummary source = summaryMock();
         EngineIntelligenceEngineResult engine = operationalEngineMock(FraudEngineStatus.TIMEOUT);
-        when(source.engines()).thenReturn(List.of(engine));
+        when(source.engines()).thenReturn(List.of(
+                EngineIntelligenceProjectionTestFixtures.availableRules(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
+                engine
+        ));
 
         assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
     }
@@ -230,7 +259,10 @@ class EngineIntelligenceProjectionPolicyTest {
     void unavailableEngineDoesNotStoreRiskLevel() {
         EngineIntelligenceSummary source = summaryMock();
         EngineIntelligenceEngineResult engine = operationalEngineMock(FraudEngineStatus.UNAVAILABLE);
-        when(source.engines()).thenReturn(List.of(engine));
+        when(source.engines()).thenReturn(List.of(
+                EngineIntelligenceProjectionTestFixtures.availableRules(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
+                engine
+        ));
 
         assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
     }
@@ -261,17 +293,18 @@ class EngineIntelligenceProjectionPolicyTest {
 
     private EngineIntelligenceSummary summaryMock() {
         EngineIntelligenceSummary source = mock(EngineIntelligenceSummary.class);
+        EngineIntelligenceSummary valid = EngineIntelligenceProjectionTestFixtures.fullSummary();
         when(source.contractVersion()).thenReturn(EngineIntelligenceSummary.CONTRACT_VERSION);
         when(source.generatedAt()).thenReturn(EngineIntelligenceProjectionTestFixtures.GENERATED_AT);
-        when(source.engines()).thenReturn(List.of());
-        when(source.comparison()).thenReturn(EngineIntelligenceProjectionTestFixtures.comparison(
-                com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
-                com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
-                com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
-        ));
-        when(source.diagnosticSignals()).thenReturn(List.of());
-        when(source.warnings()).thenReturn(List.of());
+        when(source.engines()).thenReturn(valid.engines());
+        when(source.comparison()).thenReturn(valid.comparison());
+        when(source.diagnosticSignals()).thenReturn(valid.diagnosticSignals());
+        when(source.warnings()).thenReturn(valid.warnings());
         return source;
+    }
+
+    private List<EngineIntelligenceEngineResult> enginesWithRequiredMl(EngineIntelligenceEngineResult rules) {
+        return List.of(rules, EngineIntelligenceProjectionTestFixtures.timeoutMl());
     }
 
     private EngineIntelligenceEngineResult engineMock(String engineId, List<String> reasonCodes) {

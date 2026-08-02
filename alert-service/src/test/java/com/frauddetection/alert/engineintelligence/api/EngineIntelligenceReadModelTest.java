@@ -2,7 +2,12 @@ package com.frauddetection.alert.engineintelligence.api;
 
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
+import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -39,6 +44,29 @@ class EngineIntelligenceReadModelTest {
         EngineIntelligenceEngineReadModel engine = engine(null);
 
         assertThat(engine.reasonCodes()).isEmpty();
+    }
+
+    @Test
+    void comparisonReadModelRejectsPartialIdentity() {
+        assertThatThrownBy(() -> new EngineIntelligenceComparisonReadModel(
+                EngineIntelligenceComparisonType.RULES_VS_ML,
+                null,
+                EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
+                EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
+                EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
+        )).hasMessage("comparedEngineIds is required");
+    }
+
+    @Test
+    void engineReadModelRejectsAvailableWithoutRiskLevel() {
+        assertThatThrownBy(() -> new EngineIntelligenceEngineReadModel(
+                "rules.primary",
+                FraudEngineType.RULES,
+                FraudEngineStatus.AVAILABLE,
+                null,
+                EngineIntelligenceScoreBucket.HIGH,
+                List.of("HIGH_VELOCITY")
+        )).hasMessage("ENGINE_INTELLIGENCE_AVAILABLE_STATUS_RISK_LEVEL_REQUIRED");
     }
 
     @Test
@@ -87,8 +115,8 @@ class EngineIntelligenceReadModelTest {
                 "rules.primary",
                 FraudEngineType.RULES,
                 FraudEngineStatus.AVAILABLE,
-                null,
-                EngineIntelligenceScoreBucket.NONE,
+                RiskLevel.LOW,
+                EngineIntelligenceScoreBucket.LOW,
                 reasonCodes
         );
     }

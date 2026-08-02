@@ -1,6 +1,6 @@
 # FraudEngineResult Contract
 
-Status: FDP-101 bounded shared contract tightening and maintenance.
+Status: current bounded shared engine-result contract with historical FDP-101 foundation.
 
 ## Boundary
 
@@ -8,12 +8,15 @@ Status: FDP-101 bounded shared contract tightening and maintenance.
 banking decision, payment authorization, automatic approve, automatic decline, automatic block, analyst
 recommendation, model training label, ground truth record, feedback dataset record, or platform aggregation result.
 
-FDP-101 tightens and maintains the pre-exposure shared `FraudEngineResult` contract before runtime, Kafka, API, UI,
-projection, orchestration, or dataset-export integration. `FraudEngineResult` is not emitted in Kafka, exposed through
-API/OpenAPI, rendered in UI, or projected by alert-service in this branch. Existing `TransactionScoredEvent` shape
-remains unchanged. This branch is `common-events` contract/docs/tests only; later exposure requires a separate scoped
-PR with compatibility and rollout gates. FDP-101 does not add Kafka, does not add API, does not add UI, and does not
-add dataset export.
+Current runtime orchestration may produce bounded engine outputs, but `FraudEngineResult` remains an internal
+engine-output value. It is not serialized directly to Kafka, API/OpenAPI, UI, alert-service projection documents, or
+dataset exports. Runtime publication maps bounded engine outputs into `EngineIntelligenceSummary`, which is carried
+by `TransactionScoredEvent.engineIntelligence`, projected by alert-service, exposed through bounded read DTOs/OpenAPI,
+and rendered by Analyst Console validators.
+
+Historical FDP-101 introduced the pre-exposure shared contract and did not itself add runtime, Kafka, API, UI,
+projection, orchestration, or dataset-export integration. Those FDP-101 branch limits are superseded by later scoped
+Engine Intelligence work. The current non-goal is still exposing raw `FraudEngineResult` or raw engine payloads.
 
 ## Required Fields
 
@@ -66,7 +69,7 @@ unbounded metadata values in the contract.
 
 | Status | Score and risk level | Confidence | Reason |
 | --- | --- | --- | --- |
-| `AVAILABLE` | Both required | `LOW`, `MEDIUM`, or `HIGH` required | No `statusReason` |
+| `AVAILABLE` | Both required | Required; may be `UNKNOWN` when no authoritative calibration policy exists | No `statusReason` |
 | `UNAVAILABLE` | Both absent | `UNKNOWN` | Required bounded status reason |
 | `TIMEOUT` | Both absent | `UNKNOWN` | Required bounded status reason |
 | `SKIPPED` | Both absent | `UNKNOWN` | Required bounded status reason |
@@ -75,6 +78,10 @@ unbounded metadata values in the contract.
 
 Only `FALLBACK_USED` declares that fallback occurred. `UNAVAILABLE`, `TIMEOUT`, `SKIPPED`, and `DEGRADED` do not imply
 low risk, fallback behavior, or a platform decision.
+
+FDP-129 allows `AVAILABLE` results to use `confidence=UNKNOWN` when the engine does not have an authoritative
+confidence-calibration policy. Confidence is not inferred from engine type, reason-code count, score magnitude, risk
+level, model metadata, or feature presence.
 
 ## Unsafe Content
 

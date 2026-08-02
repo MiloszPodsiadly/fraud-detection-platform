@@ -5,7 +5,7 @@ Status: FDP-84 internal interface foundation only.
 ## Purpose
 
 `FraudSignalEngine` is the internal runtime interface that future fraud engines will implement. It
-connects `ScoringContext` as input, `FraudEngineResult` as output, and
+connects `ScoringContext` as input, `FraudSignalEvaluation` as adapter output, and
 `FraudEngineDescriptor` as static engine identity/capability metadata.
 
 `FraudSignalEngine` belongs in `fraud-scoring-service`. It is not a `common-events` contract, not a
@@ -19,10 +19,12 @@ is a canonical lowercase allowlisted implementation language. Allowed values in 
 `java`, `python`, `go`, `kotlin`, `scala`, `javascript`, and `other`.
 
 `FraudEngineDescriptor.engineLanguage` must remain aligned with
-`FraudEngineResult.engineLanguage` because `FraudSignalEngine.evaluate()` returns
-`FraudEngineResult`. Aliases are rejected instead of normalized. Unsupported implementation
-languages must use `other` until the shared `FraudEngineResult` language policy is intentionally
-expanded; `other` is not a preferred language value.
+public `FraudEngineResult.engineLanguage`. `FraudSignalEngine.evaluate()` returns the internal
+metadata-free `FraudSignalEvaluation`; `FraudScoringOrchestrator` combines that evaluation with
+the descriptor when publishing a bounded `FraudEngineResult`. Aliases are rejected instead of
+normalized. Unsupported implementation languages must use `other` until the shared
+`FraudEngineResult` language policy is intentionally expanded; `other` is not a preferred language
+value.
 
 `engineLanguage` is metadata only. An allowlisted language does not imply runtime support, does
 not imply deployment support, does not imply execution sandboxing, does not imply operational

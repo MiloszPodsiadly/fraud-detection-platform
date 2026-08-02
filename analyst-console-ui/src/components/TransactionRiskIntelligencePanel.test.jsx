@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { TransactionRiskIntelligencePanel } from "./TransactionRiskIntelligencePanel.jsx";
 import { useScoredTransactionDetail } from "../transactions/useScoredTransactionDetail.js";
 import { useFraudFeedback } from "../transactions/useFraudFeedback.js";
@@ -51,6 +53,9 @@ describe("TransactionRiskIntelligencePanel", () => {
     expect(boundary).toHaveTextContent("It does not approve");
     expect(boundary).toHaveTextContent("authorize payment");
     expect(boundary).toHaveTextContent("create cases");
+    expect(boundary).toHaveTextContent("Velocity score is a deterministic normalized risk-severity signal.");
+    expect(boundary).toHaveTextContent("It is not a calibrated fraud probability");
+    expect(boundary).toHaveTextContent("must not be interpreted as model confidence");
   });
 
   it("uses a stable sanitized panel id", () => {
@@ -106,8 +111,8 @@ describe("TransactionRiskIntelligencePanel", () => {
     const { rerender } = renderPanel();
 
     const comparison = screen.getByRole("region", { name: "Projected Comparison" });
-    expect(within(comparison).getByText("PARTIAL")).toBeInTheDocument();
-    expect(within(comparison).getByText("Agreement status describes projected engine comparison only.")).toBeInTheDocument();
+    expect(within(comparison).getByText("DISAGREEMENT")).toBeInTheDocument();
+    expect(within(comparison).getByText("Agreement status describes the Rules vs ML diagnostic comparison only.")).toBeInTheDocument();
 
     useScoredTransactionDetail.mockReturnValue({
       detail: comparisonNullDetail(),
@@ -129,12 +134,50 @@ describe("TransactionRiskIntelligencePanel", () => {
   });
 
   it("renders engine results diagnostic signals and warnings sections", () => {
+    const detail = availableDetail();
+    useScoredTransactionDetail.mockReturnValue({
+      detail: {
+        ...detail,
+        engineIntelligence: {
+          ...detail.engineIntelligence,
+          status: "DEGRADED",
+          warnings: [{ warningCode: "ENGINE_RESULT_LIMIT_APPLIED", count: 1 }]
+        }
+      },
+      isLoading: false,
+      error: null
+    });
+
     renderPanel();
 
     expect(screen.getByRole("region", { name: "Engine Results" })).toHaveTextContent("rules.primary");
     expect(screen.getByRole("region", { name: "Diagnostic Signals" })).toHaveTextContent("FRAUD_SIGNAL");
     expect(screen.getByRole("region", { name: "Warnings and Limitations" })).toHaveTextContent("ENGINE_RESULT_LIMIT_APPLIED");
     expect(screen.getByText("Warnings are not operational instructions.")).toBeInTheDocument();
+  });
+
+  it("renders shared three-engine golden fixture without deriving hidden fields", () => {
+    const golden = sharedEngineIntelligenceFixture("engine_intelligence_three_engine_golden.json");
+    useScoredTransactionDetail.mockReturnValue({
+      detail: availableDetail({
+        transactionId: "txn-golden-detail",
+        engineIntelligence: {
+          status: "AVAILABLE",
+          ...golden
+        }
+      }),
+      isLoading: false,
+      error: null
+    });
+
+    renderPanel({ transactionId: "txn-golden-detail" });
+
+    const engines = screen.getByRole("region", { name: "Engine Results" });
+    expect(within(engines).getByText("rules.primary")).toBeInTheDocument();
+    expect(within(engines).getByText("ml.python.primary")).toBeInTheDocument();
+    expect(within(engines).getByText("velocity.primary")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Projected Comparison" })).toHaveTextContent("RULES_VS_ML");
+    expect(screen.queryByText("modelConfidence")).not.toBeInTheDocument();
   });
 
   it("renders empty bounded arrays safely", () => {
@@ -382,4 +425,12 @@ describe("TransactionRiskIntelligencePanel", () => {
 
 function renderPanel(props = {}) {
   return render(<TransactionRiskIntelligencePanel transactionId="txn-available-1" apiClient={{}} {...props} />);
+}
+
+function sharedEngineIntelligenceFixture(name) {
+  return JSON.parse(readFileSync(resolve(
+    process.cwd(),
+    "../common-events/src/test/resources/fixtures/engine-intelligence",
+    name
+  ), "utf8"));
 }

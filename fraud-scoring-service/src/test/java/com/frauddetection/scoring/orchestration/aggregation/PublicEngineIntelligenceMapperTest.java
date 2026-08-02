@@ -5,9 +5,13 @@ import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceEngineResult;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningSummary;
 import org.junit.jupiter.api.Test;
@@ -20,6 +24,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PublicEngineIntelligenceMapperTest {
     private final FraudEngineAggregationService service =
@@ -28,8 +33,11 @@ class PublicEngineIntelligenceMapperTest {
 
     @Test
     void mapsAgreementWithoutDecisioning() {
-        assertThat(map(0.8d, RiskLevel.HIGH, 0.7d, RiskLevel.HIGH).comparison().agreementStatus())
-                .isEqualTo(EngineIntelligenceAgreementStatus.AGREEMENT);
+        var comparison = map(0.8d, RiskLevel.HIGH, 0.7d, RiskLevel.HIGH).comparison();
+
+        assertThat(comparison.comparisonType()).isEqualTo(EngineIntelligenceComparisonType.RULES_VS_ML);
+        assertThat(comparison.comparedEngineIds()).containsExactly("rules.primary", "ml.python.primary");
+        assertThat(comparison.agreementStatus()).isEqualTo(EngineIntelligenceAgreementStatus.AGREEMENT);
     }
 
     @Test
@@ -60,6 +68,103 @@ class PublicEngineIntelligenceMapperTest {
         )));
 
         assertThat(summary.engines().get(1).scoreBucket()).isEqualTo(EngineIntelligenceScoreBucket.UNAVAILABLE);
+    }
+
+    @Test
+    void mapsAggregationCompatibleWithSharedThreeEngineGoldenFixture() throws Exception {
+        EngineIntelligenceSummary expected = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build()
+                .readValue(Files.readString(goldenFixturePath()), EngineIntelligenceSummary.class);
+        EngineIntelligenceSummary actual = mapper.map(service.aggregate(AggregationTestSupport.orchestration(
+                AggregationTestSupport.available("rules.primary", 0.75d, RiskLevel.HIGH, "HIGH_VELOCITY"),
+                AggregationTestSupport.available("ml.python.primary", 0.25d, RiskLevel.LOW, "LOW_MODEL_RISK"),
+                AggregationTestSupport.available(
+                        "velocity.primary",
+                        0.95d,
+                        RiskLevel.CRITICAL,
+                        "RAPID_PLN_20K_BURST",
+                        "TRANSACTION_VELOCITY"
+                )
+        )));
+
+        assertThat(actual).usingRecursiveComparison().isEqualTo(expected);
+        assertThat(actual.comparison().scoreDeltaBucket()).isEqualTo(EngineIntelligenceScoreDeltaBucket.LARGE);
+    }
+
+    @Test
+    void mapsScoreDeltaBucketFromExactAggregationDeltaNotPublicScoreBuckets() {
+        EngineIntelligenceSummary samePublicBucketMediumDelta =
+                map(0.26d, RiskLevel.HIGH, 0.50d, RiskLevel.HIGH);
+        EngineIntelligenceSummary lowHighLargeDelta =
+                map(0.10d, RiskLevel.HIGH, 0.60d, RiskLevel.LOW);
+
+        assertThat(samePublicBucketMediumDelta.engines()).extracting(EngineIntelligenceEngineResult::scoreBucket)
+                .containsExactly(EngineIntelligenceScoreBucket.MEDIUM, EngineIntelligenceScoreBucket.MEDIUM);
+        assertThat(samePublicBucketMediumDelta.comparison().scoreDeltaBucket())
+                .isEqualTo(EngineIntelligenceScoreDeltaBucket.MEDIUM);
+        assertThat(lowHighLargeDelta.engines()).extracting(EngineIntelligenceEngineResult::scoreBucket)
+                .containsExactly(EngineIntelligenceScoreBucket.LOW, EngineIntelligenceScoreBucket.HIGH);
+        assertThat(lowHighLargeDelta.comparison().scoreDeltaBucket())
+                .isEqualTo(EngineIntelligenceScoreDeltaBucket.LARGE);
+    }
+
+    @Test
+    void mapsExactComparableDeltaBoundaries() {
+        assertScoreDeltaBucket(0.50d, 0.50d, EngineIntelligenceScoreDeltaBucket.NONE);
+        assertScoreDeltaBucket(0.15d, 0.00d, EngineIntelligenceScoreDeltaBucket.SMALL);
+        assertScoreDeltaBucket(0.1501d, 0.00d, EngineIntelligenceScoreDeltaBucket.MEDIUM);
+        assertScoreDeltaBucket(0.35d, 0.00d, EngineIntelligenceScoreDeltaBucket.MEDIUM);
+        assertScoreDeltaBucket(0.3501d, 0.00d, EngineIntelligenceScoreDeltaBucket.LARGE);
+        assertScoreDeltaBucket(1.00d, 0.00d, EngineIntelligenceScoreDeltaBucket.LARGE);
+    }
+
+    @Test
+    void mapsOperationalRulesOrMlDeltaAsUnavailable() {
+        var summary = mapper.map(service.aggregate(AggregationTestSupport.orchestration(
+                AggregationTestSupport.available("rules.primary", 0.8d, RiskLevel.HIGH, "HIGH_VELOCITY"),
+                AggregationTestSupport.unavailable(
+                        "ml.python.primary",
+                        FraudEngineStatus.TIMEOUT,
+                        "ML_MODEL_TIMEOUT"
+                )
+        )));
+
+        assertThat(summary.comparison().scoreDeltaBucket()).isEqualTo(EngineIntelligenceScoreDeltaBucket.UNAVAILABLE);
+    }
+
+    @Test
+    void rejectsAvailableRulesAndMlWhenAggregationDeltaIsUnavailable() {
+        assertThatThrownBy(() -> mapper.map(new FraudEngineAggregationResult(
+                requiredAvailableRulesAndMl(),
+                FraudEngineAgreementStatus.AGREEMENT,
+                new FraudEngineScoreDelta(FraudEngineScoreDeltaStatus.UNAVAILABLE_MISSING_SCORE, null),
+                new FraudEngineRiskMismatch(FraudEngineRiskMismatchStatus.SAME_RISK_LEVEL),
+                List.of(),
+                List.of(),
+                AggregationTestSupport.GENERATED_AT
+        ))).hasMessage("ENGINE_INTELLIGENCE_COMPARISON_DELTA_INCONSISTENT");
+    }
+
+    @Test
+    void rejectsOperationalRulesOrMlWhenAggregationDeltaIsAvailable() {
+        assertThatThrownBy(() -> mapper.map(new FraudEngineAggregationResult(
+                List.of(
+                        availableRules(),
+                        AggregationTestSupport.normalized(
+                                "ml.python.primary",
+                                FraudEngineStatus.TIMEOUT,
+                                null,
+                                null,
+                                "ML_MODEL_TIMEOUT"
+                        )
+                ),
+                FraudEngineAgreementStatus.PARTIAL,
+                new FraudEngineScoreDelta(FraudEngineScoreDeltaStatus.AVAILABLE, 0.1d),
+                new FraudEngineRiskMismatch(FraudEngineRiskMismatchStatus.NOT_COMPARABLE),
+                List.of(),
+                List.of(),
+                AggregationTestSupport.GENERATED_AT
+        ))).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("ENGINE_INTELLIGENCE_COMPARISON_DELTA_INCONSISTENT");
     }
 
     @Test
@@ -132,21 +237,21 @@ class PublicEngineIntelligenceMapperTest {
     }
 
     @Test
-    void serializedOperationalDiagnosticSignalDoesNotContainRiskLevelHigh() throws Exception {
-        String json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build().writeValueAsString(mapper.map(resultWithSignal(signal(
-                FraudEngineStatus.AVAILABLE,
+    void operationalDiagnosticSignalDoesNotExposeRiskLevel() {
+        var summary = mapper.map(resultWithSignal(signal(
+                FraudEngineStatus.TIMEOUT,
                 RiskLevel.HIGH,
                 0.9d,
                 FraudEngineSignalCategory.OPERATIONAL_SIGNAL
-        ))));
+        )));
 
-        assertThat(json).doesNotContain("\"riskLevel\":\"HIGH\"");
+        assertThat(summary.diagnosticSignals().getFirst().riskLevel()).isNull();
     }
 
     @Test
     void mapsOperationalSignalWithScoreToUnavailableBucket() {
         assertThat(mapper.map(resultWithSignal(signal(
-                FraudEngineStatus.AVAILABLE,
+                FraudEngineStatus.TIMEOUT,
                 null,
                 0.9d,
                 FraudEngineSignalCategory.OPERATIONAL_SIGNAL
@@ -154,15 +259,16 @@ class PublicEngineIntelligenceMapperTest {
     }
 
     @Test
-    void serializedOperationalSignalDoesNotContainVeryHighScoreBucket() throws Exception {
-        String json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build().writeValueAsString(mapper.map(resultWithSignal(signal(
-                FraudEngineStatus.AVAILABLE,
+    void operationalSignalDoesNotExposeAvailableScoreBucket() {
+        var summary = mapper.map(resultWithSignal(signal(
+                FraudEngineStatus.TIMEOUT,
                 null,
                 0.9d,
                 FraudEngineSignalCategory.OPERATIONAL_SIGNAL
-        ))));
+        )));
 
-        assertThat(json).doesNotContain("\"scoreBucket\":\"VERY_HIGH\"");
+        assertThat(summary.diagnosticSignals().getFirst().scoreBucket())
+                .isEqualTo(EngineIntelligenceScoreBucket.UNAVAILABLE);
     }
 
     @Test
@@ -182,6 +288,30 @@ class PublicEngineIntelligenceMapperTest {
 
         assertThat(summary.warnings()).containsExactly(new EngineIntelligenceWarningSummary(
                 EngineIntelligenceWarningCode.REASON_CODE_UNSUPPORTED_DROPPED,
+                1
+        ));
+    }
+
+    @Test
+    void limitsReasonCodesBeforeCreatingPublicContract() {
+        var summary = mapper.map(service.aggregate(AggregationTestSupport.orchestration(
+                AggregationTestSupport.available(
+                        "rules.primary",
+                        0.95d,
+                        RiskLevel.CRITICAL,
+                        "DEVICE_NOVELTY",
+                        "COUNTRY_MISMATCH",
+                        "PROXY_OR_VPN",
+                        "HIGH_VELOCITY",
+                        "HIGH_AMOUNT_ACTIVITY",
+                        "RAPID_PLN_20K_BURST"
+                ),
+                AggregationTestSupport.available("ml.python.primary", 0.7d, RiskLevel.HIGH, "MODEL_HIGH_RISK")
+        )));
+
+        assertThat(summary.engines().getFirst().reasonCodes()).hasSize(5);
+        assertThat(summary.warnings()).contains(new EngineIntelligenceWarningSummary(
+                EngineIntelligenceWarningCode.REASON_CODE_LIMIT_APPLIED,
                 1
         ));
     }
@@ -260,11 +390,21 @@ class PublicEngineIntelligenceMapperTest {
         )));
     }
 
+    private void assertScoreDeltaBucket(
+            double rulesScore,
+            double mlScore,
+            EngineIntelligenceScoreDeltaBucket expected
+    ) {
+        assertThat(map(rulesScore, RiskLevel.HIGH, mlScore, RiskLevel.HIGH).comparison().scoreDeltaBucket())
+                .isEqualTo(expected);
+    }
+
     private FraudEngineAggregationResult resultWithNormalizedEngine(NormalizedFraudEngineResult normalized) {
+        List<NormalizedFraudEngineResult> engines = requiredEnginesIncluding(normalized);
         return new FraudEngineAggregationResult(
-                List.of(normalized),
+                engines,
                 FraudEngineAgreementStatus.INSUFFICIENT_DATA,
-                new FraudEngineScoreDelta(FraudEngineScoreDeltaStatus.UNAVAILABLE_MISSING_SCORE, null),
+                scoreDeltaFor(engines),
                 new FraudEngineRiskMismatch(FraudEngineRiskMismatchStatus.NOT_COMPARABLE),
                 List.of(),
                 List.of(),
@@ -280,7 +420,7 @@ class PublicEngineIntelligenceMapperTest {
 
     private FraudEngineAggregationResult resultWithSignal(FraudEngineStrongestSignal signal) {
         return new FraudEngineAggregationResult(
-                List.of(),
+                requiredEnginesFor(signal),
                 FraudEngineAgreementStatus.INSUFFICIENT_DATA,
                 new FraudEngineScoreDelta(FraudEngineScoreDeltaStatus.UNAVAILABLE_MISSING_SCORE, null),
                 new FraudEngineRiskMismatch(FraudEngineRiskMismatchStatus.NOT_COMPARABLE),
@@ -292,9 +432,9 @@ class PublicEngineIntelligenceMapperTest {
 
     private FraudEngineAggregationResult resultWithWarnings(List<FraudEngineAggregationWarning> warnings) {
         return new FraudEngineAggregationResult(
-                List.of(),
+                requiredAvailableRulesAndMl(),
                 FraudEngineAgreementStatus.INSUFFICIENT_DATA,
-                new FraudEngineScoreDelta(FraudEngineScoreDeltaStatus.UNAVAILABLE_MISSING_SCORE, null),
+                new FraudEngineScoreDelta(FraudEngineScoreDeltaStatus.AVAILABLE, 0.0d),
                 new FraudEngineRiskMismatch(FraudEngineRiskMismatchStatus.NOT_COMPARABLE),
                 List.of(),
                 warnings,
@@ -333,5 +473,91 @@ class PublicEngineIntelligenceMapperTest {
         return Files.exists(moduleRelative)
                 ? moduleRelative
                 : Path.of("fraud-scoring-service").resolve(moduleRelative);
+    }
+
+    private List<NormalizedFraudEngineResult> requiredEnginesIncluding(NormalizedFraudEngineResult normalized) {
+        if ("rules.primary".equals(normalized.engineId())) {
+            return List.of(normalized, availableMl());
+        }
+        if ("ml.python.primary".equals(normalized.engineId())) {
+            return List.of(availableRules(), normalized);
+        }
+        return List.of(availableRules(), availableMl(), normalized);
+    }
+
+    private List<NormalizedFraudEngineResult> requiredEnginesFor(FraudEngineStrongestSignal signal) {
+        NormalizedFraudEngineResult matchingEngine = AggregationTestSupport.normalized(
+                signal.engineId(),
+                signal.status(),
+                signal.score(),
+                signal.riskLevel(),
+                signal.reasonCode()
+        );
+        return requiredEnginesIncluding(matchingEngine);
+    }
+
+    private List<NormalizedFraudEngineResult> requiredAvailableRulesAndMl() {
+        return List.of(availableRules(), availableMl());
+    }
+
+    private FraudEngineScoreDelta scoreDeltaFor(List<NormalizedFraudEngineResult> engines) {
+        NormalizedFraudEngineResult rules = normalizedEngine(engines, "rules.primary");
+        NormalizedFraudEngineResult ml = normalizedEngine(engines, "ml.python.primary");
+        if (publiclyAvailable(rules) && publiclyAvailable(ml)) {
+            return new FraudEngineScoreDelta(
+                    FraudEngineScoreDeltaStatus.AVAILABLE,
+                    Math.abs(rules.score() - ml.score())
+            );
+        }
+        return new FraudEngineScoreDelta(FraudEngineScoreDeltaStatus.UNAVAILABLE_MISSING_SCORE, null);
+    }
+
+    private NormalizedFraudEngineResult normalizedEngine(List<NormalizedFraudEngineResult> engines, String engineId) {
+        return engines.stream()
+                .filter(engine -> engineId.equals(engine.engineId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private boolean publiclyAvailable(NormalizedFraudEngineResult engine) {
+        return engine != null
+                && engine.status() == FraudEngineStatus.AVAILABLE
+                && engine.score() != null
+                && engine.riskLevel() != null;
+    }
+
+    private NormalizedFraudEngineResult availableRules() {
+        return AggregationTestSupport.normalized(
+                "rules.primary",
+                FraudEngineStatus.AVAILABLE,
+                0.8d,
+                RiskLevel.HIGH,
+                "HIGH_VELOCITY"
+        );
+    }
+
+    private NormalizedFraudEngineResult availableMl() {
+        return AggregationTestSupport.normalized(
+                "ml.python.primary",
+                FraudEngineStatus.AVAILABLE,
+                0.8d,
+                RiskLevel.HIGH,
+                "MODEL_HIGH_RISK"
+        );
+    }
+
+    private Path goldenFixturePath() {
+        Path fromRoot = Path.of(
+                "common-events",
+                "src/test/resources/fixtures/engine-intelligence/engine_intelligence_three_engine_golden.json"
+        );
+        if (Files.exists(fromRoot)) {
+            return fromRoot;
+        }
+        return Path.of(
+                "..",
+                "common-events",
+                "src/test/resources/fixtures/engine-intelligence/engine_intelligence_three_engine_golden.json"
+        );
     }
 }

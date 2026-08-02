@@ -78,7 +78,10 @@ class FraudScoringOrchestratorLifecycleTest {
         assertThat(Files.readString(reviewedRuntimeConfig))
                 .contains(
                         "@Bean(destroyMethod = \"close\")",
-                        "new FraudScoringOrchestrator(registry, executionPolicy, executor, metrics, engineIntelligenceClock)",
+                        "new FraudScoringOrchestrator(",
+                        "engineIntelligenceClock",
+                        "engineIntelligenceTicker",
+                        "MonotonicTicker.system()",
                         "BoundedFraudEngineExecutor.defaultInternalExecutor()"
                 );
     }

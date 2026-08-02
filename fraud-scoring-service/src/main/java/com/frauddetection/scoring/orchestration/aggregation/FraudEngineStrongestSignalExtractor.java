@@ -1,19 +1,14 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineEvidenceType;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 
 public final class FraudEngineStrongestSignalExtractor {
-    private static final Map<String, Integer> ENGINE_ORDER = Map.of(
-            "rules.primary", 0,
-            "ml.python.primary", 1
-    );
-
     public List<FraudEngineStrongestSignal> extract(
             List<NormalizedFraudEngineResult> results,
             FraudEngineAggregationPolicy policy
@@ -50,7 +45,7 @@ public final class FraudEngineStrongestSignalExtractor {
                         signal.signalCategory() == FraudEngineSignalCategory.FRAUD_SIGNAL ? 0 : 1)
                 .thenComparing(Comparator.comparingInt(this::riskSeverity).reversed())
                 .thenComparing(Comparator.comparingDouble(this::score).reversed())
-                .thenComparingInt(signal -> ENGINE_ORDER.getOrDefault(signal.engineId(), Integer.MAX_VALUE))
+                .thenComparingInt(signal -> FraudEngineIdentityContract.orderOf(signal.engineId()))
                 .thenComparing(FraudEngineStrongestSignal::reasonCode);
     }
 

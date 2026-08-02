@@ -3,6 +3,7 @@ import { isAbortError } from "./apiErrors.js";
 import { authHeadersForSession } from "../auth/authHeaders.js";
 import { getConfiguredAuthProvider } from "../auth/authProvider.js";
 import { isValidPromotionReviewReadinessReport } from "../governance/promotionReviewReadinessReportValidation.js";
+import * as engineIntelligenceContract from "../engineIntelligence/engineIntelligenceContractValidation.js";
 
 export { isAbortError } from "./apiErrors.js";
 
@@ -288,30 +289,6 @@ async function promotionReviewReadinessReportRequest(request, { signal } = {}) {
 }
 
 const ENGINE_INTELLIGENCE_TRANSACTION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
-const MAX_ENGINE_INTELLIGENCE_ENGINES = 2;
-const MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS = 5;
-const MAX_ENGINE_INTELLIGENCE_WARNINGS = 10;
-const MAX_ENGINE_INTELLIGENCE_REASON_CODES = 5;
-const AGREEMENT_STATUSES = new Set([
-  "AGREEMENT",
-  "ADJACENT_RISK_VARIANCE",
-  "DISAGREEMENT",
-  "PARTIAL",
-  "INSUFFICIENT_DATA",
-  "REQUIRED_ENGINE_NOT_COMPARABLE"
-]);
-const RISK_MISMATCH_STATUSES = new Set([
-  "SAME_RISK_LEVEL",
-  "ADJACENT_RISK_LEVEL",
-  "MATERIAL_RISK_MISMATCH",
-  "NOT_COMPARABLE"
-]);
-const SCORE_DELTA_BUCKETS = new Set(["NONE", "SMALL", "MEDIUM", "LARGE", "UNAVAILABLE"]);
-const ENGINE_STATUSES = new Set(["AVAILABLE", "UNAVAILABLE", "DEGRADED", "TIMEOUT", "FALLBACK_USED", "SKIPPED"]);
-const SCORE_BUCKETS = new Set(["NONE", "LOW", "MEDIUM", "HIGH", "VERY_HIGH", "UNAVAILABLE"]);
-const SIGNAL_CATEGORIES = new Set(["FRAUD_SIGNAL", "OPERATIONAL_SIGNAL"]);
-const ENGINE_TYPES = new Set(["RULES", "ML_MODEL"]);
-const RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
 const ENGINE_INTELLIGENCE_FEEDBACK_TYPES = new Set([
   "ENGINE_INTELLIGENCE_USEFULNESS",
   "ENGINE_DISAGREEMENT_REVIEW",
@@ -507,7 +484,15 @@ function normalizeEngineIntelligenceResponse(response, fallbackTransactionId) {
     });
   }
 
-  if (response.available !== true || !isValidComparison(response.comparison)) {
+  if (
+    response.available !== true
+    || response.contractVersion !== engineIntelligenceContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION
+    || !engineIntelligenceContract.isCanonicalUtcTimestamp(response.generatedAt)
+  ) {
+    return unavailableEngineIntelligence(transactionId);
+  }
+  const comparison = engineIntelligenceContract.normalizeComparison(response.comparison);
+  if (!comparison) {
     return unavailableEngineIntelligence(transactionId);
   }
 
@@ -517,18 +502,18 @@ function normalizeEngineIntelligenceResponse(response, fallbackTransactionId) {
   if (!engines || !diagnosticSignals || !warnings) {
     return unavailableEngineIntelligence(transactionId);
   }
+  if (!engineIntelligenceContract.isComparisonCoherent(response.comparison, response.engines)
+    || !engineIntelligenceContract.areDiagnosticSignalsCoherent(response.diagnosticSignals, response.engines)) {
+    return unavailableEngineIntelligence(transactionId);
+  }
 
   return Object.freeze({
     state: "available",
     available: true,
     transactionId,
-    contractVersion: Number.isFinite(Number(response.contractVersion)) ? Number(response.contractVersion) : null,
-    generatedAt: safeString(response.generatedAt),
-    comparison: Object.freeze({
-      agreementStatus: normalizedAllowedValue(response.comparison.agreementStatus, AGREEMENT_STATUSES),
-      riskMismatchStatus: normalizedAllowedValue(response.comparison.riskMismatchStatus, RISK_MISMATCH_STATUSES),
-      scoreDeltaBucket: normalizedAllowedValue(response.comparison.scoreDeltaBucket, SCORE_DELTA_BUCKETS)
-    }),
+    contractVersion: engineIntelligenceContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION,
+    generatedAt: response.generatedAt,
+    comparison,
     engineCount: engines.length,
     diagnosticSignalCount: diagnosticSignals.length,
     warningCount: warnings.length,
@@ -560,32 +545,27 @@ function normalizeEngineResults(values) {
   if (!Array.isArray(values)) {
     return null;
   }
-  if (values.length > MAX_ENGINE_INTELLIGENCE_ENGINES) {
+  if (values.length > engineIntelligenceContract.MAX_ENGINE_INTELLIGENCE_ENGINES) {
+    return null;
+  }
+  if (!engineIntelligenceContract.hasUniqueCanonicalEngineOrder(values)) {
     return null;
   }
   const normalized = [];
   for (const value of values) {
-    const engineId = safeRenderableString(value?.engineId);
-    const engineType = normalizedAllowedValue(value?.engineType, ENGINE_TYPES);
-    const status = normalizedAllowedValue(value?.status, ENGINE_STATUSES);
-    const scoreBucket = normalizedAllowedValue(value?.scoreBucket, SCORE_BUCKETS);
-    if (!engineId || !engineType || !status || !scoreBucket) {
+    if (!engineIntelligenceContract.isEngineShape(value)) {
       return null;
     }
-    const riskLevel = normalizedOptionalAllowedValue(value?.riskLevel, RISK_LEVELS);
-    if (riskLevel === null) {
-      return null;
-    }
-    const reasonCodes = normalizeReasonCodes(value?.reasonCodes);
-    if (!reasonCodes || !isEngineResultOperationallyConsistent(status, scoreBucket, riskLevel)) {
+    const reasonCodes = normalizeReasonCodes(value.reasonCodes);
+    if (!reasonCodes || !safeRenderableString(value.engineId)) {
       return null;
     }
     normalized.push(Object.freeze({
-      engineId,
-      engineType,
-      status,
-      scoreBucket,
-      riskLevel,
+      engineId: value.engineId,
+      engineType: value.engineType,
+      status: value.status,
+      scoreBucket: value.scoreBucket,
+      riskLevel: value.riskLevel ?? "",
       reasonCodes: Object.freeze(reasonCodes)
     }));
   }
@@ -596,40 +576,26 @@ function normalizeDiagnosticSignals(values) {
   if (!Array.isArray(values)) {
     return null;
   }
-  if (values.length > MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS) {
+  if (values.length > engineIntelligenceContract.MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS) {
     return null;
   }
   const normalized = [];
   for (const value of values) {
-    const signalCategory = normalizedAllowedValue(value?.signalCategory, SIGNAL_CATEGORIES);
-    const engineId = safeRenderableString(value?.engineId);
-    const engineType = normalizedAllowedValue(value?.engineType, ENGINE_TYPES);
-    const engineStatus = normalizedAllowedValue(value?.engineStatus, ENGINE_STATUSES);
-    const scoreBucket = normalizedAllowedValue(value?.scoreBucket, SCORE_BUCKETS);
-    if (!signalCategory || !engineId || !engineType || !engineStatus || !scoreBucket) {
+    if (!engineIntelligenceContract.isDiagnosticSignalShape(value)) {
       return null;
     }
-    const riskLevel = normalizedOptionalAllowedValue(value?.riskLevel, RISK_LEVELS);
-    if (riskLevel === null) {
-      return null;
-    }
-    if (value?.reasonCodes !== undefined && !Array.isArray(value.reasonCodes)) {
-      return null;
-    }
-    const reasonCodes = normalizeReasonCodes([
-      ...safeStringArray(value?.reasonCodes),
-      safeString(value?.reasonCode)
-    ].filter(Boolean));
-    if (!reasonCodes || !isDiagnosticSignalOperationallyConsistent(signalCategory, engineStatus, scoreBucket, riskLevel)) {
+    const reasonCode = safeRenderableString(value.reasonCode);
+    const reasonCodes = normalizeReasonCodes([reasonCode]);
+    if (!reasonCodes || !safeRenderableString(value.engineId)) {
       return null;
     }
     normalized.push(Object.freeze({
-      signalCategory,
-      engineId,
-      engineType,
-      engineStatus,
-      scoreBucket,
-      riskLevel,
+      signalCategory: value.signalCategory,
+      engineId: value.engineId,
+      engineType: value.engineType,
+      engineStatus: value.engineStatus,
+      scoreBucket: value.scoreBucket,
+      riskLevel: value.riskLevel ?? "",
       reasonCodes: Object.freeze(reasonCodes)
     }));
   }
@@ -640,34 +606,20 @@ function normalizeEngineWarnings(values) {
   if (!Array.isArray(values)) {
     return null;
   }
-  if (values.length > MAX_ENGINE_INTELLIGENCE_WARNINGS) {
+  if (values.length > engineIntelligenceContract.MAX_ENGINE_INTELLIGENCE_WARNINGS) {
     return null;
   }
   const normalized = [];
   for (const value of values) {
-    const warningCode = normalizedAllowedValue(value?.warningCode, WARNING_CODES);
-    if (!warningCode || !Number.isFinite(Number(value?.count))) {
+    if (!engineIntelligenceContract.isWarningShape(value, WARNING_CODES)) {
       return null;
     }
     normalized.push(Object.freeze({
-      warningCode,
-      count: Number(value.count)
+      warningCode: value.warningCode,
+      count: value.count
     }));
   }
   return normalized;
-}
-
-function isValidComparison(value) {
-  const agreementStatus = normalizedAllowedValue(value?.agreementStatus, AGREEMENT_STATUSES);
-  const riskMismatchStatus = normalizedAllowedValue(value?.riskMismatchStatus, RISK_MISMATCH_STATUSES);
-  const scoreDeltaBucket = normalizedAllowedValue(value?.scoreDeltaBucket, SCORE_DELTA_BUCKETS);
-  return Boolean(
-    value
-      && typeof value === "object"
-      && agreementStatus
-      && riskMismatchStatus
-      && scoreDeltaBucket
-  );
 }
 
 function normalizeEngineIntelligenceTransactionId(transactionId) {
@@ -684,19 +636,8 @@ function normalizedAllowedValue(value, allowedValues) {
   return normalized && allowedValues.has(normalized) ? normalized : "";
 }
 
-function normalizedOptionalAllowedValue(value, allowedValues) {
-  const normalized = safeString(value);
-  if (!normalized) {
-    return "";
-  }
-  if (containsForbiddenEngineIntelligenceTerm(normalized) || !allowedValues.has(normalized)) {
-    return null;
-  }
-  return normalized;
-}
-
 function normalizeReasonCodes(values) {
-  if (!Array.isArray(values) || values.length > MAX_ENGINE_INTELLIGENCE_REASON_CODES) {
+  if (!Array.isArray(values) || values.length > engineIntelligenceContract.MAX_ENGINE_INTELLIGENCE_REASON_CODES) {
     return null;
   }
   const normalized = [];
@@ -710,20 +651,6 @@ function normalizeReasonCodes(values) {
   return normalized;
 }
 
-function isEngineResultOperationallyConsistent(status, scoreBucket, riskLevel) {
-  if (status === "AVAILABLE") {
-    return true;
-  }
-  return scoreBucket === "UNAVAILABLE" && !riskLevel;
-}
-
-function isDiagnosticSignalOperationallyConsistent(signalCategory, engineStatus, scoreBucket, riskLevel) {
-  if (engineStatus !== "AVAILABLE" || signalCategory === "OPERATIONAL_SIGNAL") {
-    return scoreBucket === "UNAVAILABLE" && !riskLevel;
-  }
-  return true;
-}
-
 function safeRenderableString(value) {
   const normalized = safeString(value);
   return normalized && !containsForbiddenEngineIntelligenceTerm(normalized) ? normalized : "";
@@ -733,8 +660,8 @@ function safeString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
-function safeStringArray(values) {
-  return Array.isArray(values) ? values.map(safeString).filter(Boolean) : [];
+function parseableDateString(value) {
+  return engineIntelligenceContract.isCanonicalUtcTimestamp(value);
 }
 
 function containsForbiddenEngineIntelligenceTerm(value) {

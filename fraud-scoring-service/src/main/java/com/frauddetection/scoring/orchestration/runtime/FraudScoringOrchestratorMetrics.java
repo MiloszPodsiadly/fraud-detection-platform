@@ -20,6 +20,11 @@ public interface FraudScoringOrchestratorMetrics {
             Duration latency
     );
 
+    default void recordEngineFailure(String engineId, FraudEngineType engineType, String failureCategory) {
+        FraudScoringOrchestratorMetricLabels.validateEngine(engineId, engineType);
+        FraudScoringOrchestratorMetricLabels.validateFailureCategory(failureCategory);
+    }
+
     void recordTimeout(String engineId, FraudEngineType engineType, boolean required);
 
     void recordRequiredEngineFailed(String engineId);

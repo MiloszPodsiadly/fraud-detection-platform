@@ -15,6 +15,7 @@ class EngineIntelligenceAlertServiceProjectionDocsTest {
         assertThat(readDocs()).contains(
                 "## Purpose",
                 "## Scope",
+                "## Current Scope",
                 "## Non-goals",
                 "## Projection-only Boundary",
                 "## Storage Model",
@@ -26,14 +27,14 @@ class EngineIntelligenceAlertServiceProjectionDocsTest {
                 "## Mongo projection identity and idempotency",
                 "## Operational storage hardening",
                 "## No Raw/Internal Storage",
-                "## No API/UI Exposure",
+                "## API/UI Boundary",
                 "## No Decisioning",
                 "## Failure Isolation Ownership",
                 "## Future Operational Hardening",
-                "## Future FDP-96 API Read Model",
-                "FDP-95 projects bounded engine intelligence internally in alert-service.",
-                "FDP-95 does not expose engine intelligence through API/UI.",
-                "FDP-95 does not use engine intelligence for decisions.",
+                "## Historical FDP-96 API Read Model Gate",
+                "Alert-service projects bounded engine intelligence into a Mongo read model.",
+                "Historical FDP-95 introduced the",
+                "The projection does not use engine intelligence for decisions.",
                 "Old events without engineIntelligence remain compatible.",
                 "Projection failure must not break base alert projection.",
                 "Projection must be idempotent under replay.",
@@ -59,7 +60,9 @@ class EngineIntelligenceAlertServiceProjectionDocsTest {
                 "Metrics must never affect base projection.",
                 "Raw evidence, raw contributions, feature vectors,",
                 "endpoints, tokens, secrets, stack traces, exception messages, and internal aggregation objects must not be stored.",
-                "API/UI exposure is future FDP-96/FDP-97 scope.",
+                "Bounded API/UI exposure exists through later scoped Engine Intelligence work.",
+                "API/UI layers consume",
+                "dedicated read DTOs and validators rather than the projection class directly.",
                 "Final decisioning remains out of scope."
         );
     }
@@ -79,20 +82,21 @@ class EngineIntelligenceAlertServiceProjectionDocsTest {
     }
 
     @Test
-    void fdp96BehaviorLevelApiTestsRequiredBeforeExposure() throws Exception {
+    void historicalFdp96GateRemainsAsCurrentReadModelChecklist() throws Exception {
         assertThat(readDocs()).contains(
-                "FDP-95 source-scan guards are architecture tripwires only.",
-                "FDP-95 does not expose engine intelligence through API/UI.",
-                "FDP-96 API read model must add behavior-level controller/API tests before exposing engine intelligence.",
-                "FDP-96 tests must prove:",
+                "Historical FDP-95 required separate FDP-96/FDP-97 review before API/UI exposure.",
+                "That gate has been superseded by the",
+                "current bounded API, OpenAPI, and UI contracts.",
+                "The guard remains useful as a checklist for any future read-model",
+                "change. API read-model tests must prove:",
+                "API read-model tests must prove:",
                 "a bounded response DTO;",
                 "no raw/internal projection leakage;",
                 "no final decisioning fields;",
                 "old cases without projection remain compatible;",
                 "authorization boundaries;",
                 "no high-cardinality/raw values;",
-                "timeout/unavailable/degraded status semantics remain safe.",
-                "UI rendering remains FDP-97 scope."
+                "timeout/unavailable/degraded status semantics remain safe."
         );
     }
 

@@ -1,34 +1,6 @@
+import * as engineIntelligenceContract from "../engineIntelligence/engineIntelligenceContractValidation.js";
+
 const DETAIL_STATUSES = new Set(["AVAILABLE", "ABSENT", "UNAVAILABLE", "DEGRADED"]);
-const AGREEMENT_STATUSES = new Set([
-  "AGREEMENT",
-  "ADJACENT_RISK_VARIANCE",
-  "DISAGREEMENT",
-  "PARTIAL",
-  "INSUFFICIENT_DATA",
-  "REQUIRED_ENGINE_NOT_COMPARABLE"
-]);
-const RISK_MISMATCH_STATUSES = new Set([
-  "SAME_RISK_LEVEL",
-  "ADJACENT_RISK_LEVEL",
-  "MATERIAL_RISK_MISMATCH",
-  "NOT_COMPARABLE"
-]);
-const SCORE_DELTA_BUCKETS = new Set(["NONE", "SMALL", "MEDIUM", "LARGE", "UNAVAILABLE"]);
-const ENGINE_TYPES = new Set([
-  "RULES",
-  "ML_MODEL",
-  "VELOCITY",
-  "DEVICE_RISK",
-  "MERCHANT_RISK",
-  "GEO_RISK",
-  "GRAPH_RISK",
-  "BEHAVIORAL_PROFILE",
-  "MANUAL_REVIEW_CONTEXT"
-]);
-const ENGINE_STATUSES = new Set(["AVAILABLE", "UNAVAILABLE", "TIMEOUT", "DEGRADED", "NOT_APPLICABLE"]);
-const RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
-const SCORE_BUCKETS = new Set(["NONE", "LOW", "MEDIUM", "HIGH", "VERY_HIGH", "UNAVAILABLE"]);
-const SIGNAL_CATEGORIES = new Set(["FRAUD_SIGNAL", "OPERATIONAL_SIGNAL"]);
 const ANALYST_RECOMMENDATION_STATUSES = new Set([
   "AVAILABLE",
   "ABSENT",
@@ -63,10 +35,43 @@ const NON_DECISIONING_FLAGS = [
   "notModelPromotion",
   "notThresholdRecommendation"
 ];
-const MAX_ENGINES = 2;
-const MAX_DIAGNOSTIC_SIGNALS = 5;
 const MAX_WARNINGS = 10;
 const MAX_REASON_CODES = 5;
+const DETAIL_KEYS = [
+  "transactionId",
+  "customerId",
+  "correlationId",
+  "transactionTimestamp",
+  "scoredAt",
+  "transactionAmount",
+  "merchantInfo",
+  "fraudScore",
+  "riskLevel",
+  "alertRecommended",
+  "reasonCodes",
+  "engineIntelligence",
+  "analystRecommendation"
+];
+const ENGINE_INTELLIGENCE_KEYS = [
+  "status",
+  "contractVersion",
+  "generatedAt",
+  "comparison",
+  "engines",
+  "diagnosticSignals",
+  "warnings"
+];
+const ANALYST_RECOMMENDATION_KEYS = [
+  "status",
+  "recommendation",
+  "recommendationVersion",
+  "generatedAt",
+  "confidence",
+  "source",
+  "reasonCodes",
+  "warnings",
+  "nonDecisioning"
+];
 
 const UNSAFE_FIELD_NAMES = [
   ["raw", "ml", "request"].join(""),
@@ -84,7 +89,6 @@ const UNSAFE_FIELD_NAMES = [
   "token",
   "secret"
 ];
-
 export function validateTransactionRiskIntelligenceDetail(detail) {
   if (!detail || typeof detail !== "object" || Array.isArray(detail)) {
     return invalid("INVALID_DETAIL_RESPONSE");
@@ -92,29 +96,71 @@ export function validateTransactionRiskIntelligenceDetail(detail) {
   if (containsUnsafeFieldName(detail)) {
     return invalid("UNSAFE_DETAIL_RESPONSE");
   }
+  if (!engineIntelligenceContract.hasOnlyKnownKeys(detail, DETAIL_KEYS)) {
+    return invalid("INVALID_DETAIL_RESPONSE");
+  }
   if (!safeString(detail.transactionId)) {
     return invalid("MISSING_TRANSACTION_ID");
+  }
+  if (!validOptionalTimestamp(detail.transactionTimestamp) || !validOptionalTimestamp(detail.scoredAt)) {
+    return invalid("INVALID_DETAIL_TIMESTAMP");
+  }
+  if (!isBoundedArray(detail.reasonCodes, MAX_REASON_CODES) || !detail.reasonCodes.every((reasonCode) => safeString(reasonCode))) {
+    return invalid("INVALID_DETAIL_REASON_CODES");
   }
   if (!detail.engineIntelligence || typeof detail.engineIntelligence !== "object" || Array.isArray(detail.engineIntelligence)) {
     return invalid("MISSING_ENGINE_INTELLIGENCE");
   }
   const engineIntelligence = detail.engineIntelligence;
+  if (!engineIntelligenceContract.hasOnlyKeys(engineIntelligence, ENGINE_INTELLIGENCE_KEYS)) {
+    return invalid("INVALID_ENGINE_INTELLIGENCE_ENVELOPE");
+  }
   if (!DETAIL_STATUSES.has(engineIntelligence.status)) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_STATUS");
   }
   if (!isNumberOrNull(engineIntelligence.contractVersion) || !isStringOrNull(engineIntelligence.generatedAt)) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_METADATA");
   }
+  if (engineIntelligence.status === "AVAILABLE" || engineIntelligence.status === "DEGRADED") {
+    if (
+      engineIntelligence.contractVersion !== engineIntelligenceContract.ENGINE_INTELLIGENCE_CONTRACT_VERSION
+      || !parseableDateString(engineIntelligence.generatedAt)
+    ) {
+      return invalid("INVALID_ENGINE_INTELLIGENCE_METADATA");
+    }
+    if (engineIntelligence.comparison === null) {
+      return invalid("INVALID_ENGINE_INTELLIGENCE_COMPARISON");
+    }
+  } else if (
+    engineIntelligence.contractVersion !== null
+    || engineIntelligence.generatedAt !== null
+    || engineIntelligence.comparison !== null
+    || !Array.isArray(engineIntelligence.engines)
+    || engineIntelligence.engines.length !== 0
+    || !Array.isArray(engineIntelligence.diagnosticSignals)
+    || engineIntelligence.diagnosticSignals.length !== 0
+    || !Array.isArray(engineIntelligence.warnings)
+    || engineIntelligence.warnings.length !== 0
+  ) {
+    return invalid("INVALID_ENGINE_INTELLIGENCE_EMPTY_STATE");
+  }
   if (engineIntelligence.comparison !== null && !isComparisonShape(engineIntelligence.comparison)) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_COMPARISON");
   }
-  if (!isBoundedArray(engineIntelligence.engines, MAX_ENGINES)) {
+  if (!isBoundedArray(engineIntelligence.engines, engineIntelligenceContract.MAX_ENGINE_INTELLIGENCE_ENGINES)) {
     return invalid("ENGINE_LIMIT_EXCEEDED");
   }
   if (!engineIntelligence.engines.every(isEngineShape)) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_ENGINE");
   }
-  if (!isBoundedArray(engineIntelligence.diagnosticSignals, MAX_DIAGNOSTIC_SIGNALS)) {
+  if (!hasUniqueCanonicalEngineOrder(engineIntelligence.engines)) {
+    return invalid("INVALID_ENGINE_INTELLIGENCE_ENGINE_ORDER");
+  }
+  if ((engineIntelligence.status === "AVAILABLE" || engineIntelligence.status === "DEGRADED")
+    && !engineIntelligenceContract.hasRequiredRulesMlEngineSet(engineIntelligence.engines)) {
+    return invalid("INVALID_ENGINE_INTELLIGENCE_ENGINE_ORDER");
+  }
+  if (!isBoundedArray(engineIntelligence.diagnosticSignals, engineIntelligenceContract.MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS)) {
     return invalid("DIAGNOSTIC_SIGNAL_LIMIT_EXCEEDED");
   }
   if (!engineIntelligence.diagnosticSignals.every(isDiagnosticSignalShape)) {
@@ -125,6 +171,20 @@ export function validateTransactionRiskIntelligenceDetail(detail) {
   }
   if (!engineIntelligence.warnings.every(isWarningShape)) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_WARNING");
+  }
+  if ((engineIntelligence.status === "AVAILABLE" || engineIntelligence.status === "DEGRADED")
+    && engineIntelligence.status !== engineIntelligenceContract.deriveEngineIntelligenceResponseStatus(
+      engineIntelligence.engines,
+      engineIntelligence.warnings
+    )) {
+    return invalid("INVALID_ENGINE_INTELLIGENCE_STATUS");
+  }
+  if ((engineIntelligence.status === "AVAILABLE" || engineIntelligence.status === "DEGRADED")
+    && !engineIntelligenceContract.isComparisonCoherent(engineIntelligence.comparison, engineIntelligence.engines)) {
+    return invalid("INVALID_ENGINE_INTELLIGENCE_COMPARISON");
+  }
+  if (!engineIntelligenceContract.areDiagnosticSignalsCoherent(engineIntelligence.diagnosticSignals, engineIntelligence.engines)) {
+    return invalid("INVALID_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNAL");
   }
   const analystRecommendationValidation = validateAnalystRecommendation(detail.analystRecommendation);
   if (!analystRecommendationValidation.valid) {
@@ -142,49 +202,32 @@ function invalid(reason) {
 }
 
 function isComparisonShape(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value))
-    && hasOnlyKeys(value, ["agreementStatus", "riskMismatchStatus", "scoreDeltaBucket"])
-    && oneOf(value.agreementStatus, AGREEMENT_STATUSES)
-    && oneOf(value.riskMismatchStatus, RISK_MISMATCH_STATUSES)
-    && oneOf(value.scoreDeltaBucket, SCORE_DELTA_BUCKETS);
+  return engineIntelligenceContract.isComparisonShape(value);
 }
 
 function isEngineShape(engine) {
-  return Boolean(engine && typeof engine === "object" && !Array.isArray(engine))
-    && safeString(engine.engineId)
-    && oneOf(engine.engineType, ENGINE_TYPES)
-    && oneOf(engine.status, ENGINE_STATUSES)
-    && optionalOneOf(engine.riskLevel, RISK_LEVELS)
-    && oneOf(engine.scoreBucket, SCORE_BUCKETS)
-    && safeStringArray(engine.reasonCodes, MAX_REASON_CODES);
+  return engineIntelligenceContract.isEngineShape(engine);
 }
 
 function isDiagnosticSignalShape(signal) {
-  return Boolean(signal && typeof signal === "object" && !Array.isArray(signal))
-    && safeString(signal.engineId)
-    && oneOf(signal.engineType, ENGINE_TYPES)
-    && oneOf(signal.engineStatus, ENGINE_STATUSES)
-    && oneOf(signal.signalCategory, SIGNAL_CATEGORIES)
-    && safeString(signal.reasonCode)
-    && optionalOneOf(signal.riskLevel, RISK_LEVELS)
-    && oneOf(signal.scoreBucket, SCORE_BUCKETS);
+  return engineIntelligenceContract.isDiagnosticSignalShape(signal);
 }
 
 function isWarningShape(warning) {
-  return Boolean(warning && typeof warning === "object" && !Array.isArray(warning))
-    && safeString(warning.warningCode)
-    && Number.isInteger(warning.count)
-    && warning.count >= 0;
+  return engineIntelligenceContract.isWarningShape(warning);
 }
 
 function validateAnalystRecommendation(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return invalid("MISSING_ANALYST_RECOMMENDATION");
   }
+  if (!engineIntelligenceContract.hasOnlyKnownKeys(value, ANALYST_RECOMMENDATION_KEYS)) {
+    return invalid("INVALID_ANALYST_RECOMMENDATION_ENVELOPE");
+  }
   if (!oneOf(value.status, ANALYST_RECOMMENDATION_STATUSES)) {
     return invalid("INVALID_ANALYST_RECOMMENDATION_STATUS");
   }
-  if (!safeString(value.recommendationVersion)) {
+  if (!safeString(value.recommendationVersion, engineIntelligenceContract.MAX_RECOMMENDATION_VERSION_LENGTH)) {
     return invalid("INVALID_ANALYST_RECOMMENDATION_VERSION");
   }
   if (!oneOf(value.confidence, ANALYST_RECOMMENDATION_CONFIDENCES)) {
@@ -227,7 +270,7 @@ function validateAnalystRecommendation(value) {
 }
 
 function isNonDecisioningShape(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value))
+  return engineIntelligenceContract.hasOnlyKeys(value, NON_DECISIONING_FLAGS)
     && NON_DECISIONING_FLAGS.every((flag) => value[flag] === true);
 }
 
@@ -236,7 +279,11 @@ function isBoundedArray(value, maxLength) {
 }
 
 function safeStringArray(value, maxLength) {
-  return isBoundedArray(value, maxLength) && value.every(safeString);
+  return engineIntelligenceContract.safeStringArray(
+    value,
+    maxLength,
+    engineIntelligenceContract.MAX_PUBLIC_STRING_LENGTH
+  );
 }
 
 function isNumberOrNull(value) {
@@ -247,26 +294,24 @@ function isStringOrNull(value) {
   return value === null || typeof value === "string";
 }
 
-function safeString(value) {
-  return typeof value === "string" && value.trim().length > 0;
+function safeString(value, maxLength = engineIntelligenceContract.MAX_PUBLIC_STRING_LENGTH) {
+  return engineIntelligenceContract.safeString(value, maxLength);
 }
 
 function parseableDateString(value) {
-  return safeString(value) && !Number.isNaN(Date.parse(value));
+  return engineIntelligenceContract.isCanonicalUtcTimestamp(value);
+}
+
+function validOptionalTimestamp(value) {
+  return value === undefined || value === null || parseableDateString(value);
 }
 
 function oneOf(value, allowedValues) {
   return typeof value === "string" && allowedValues.has(value);
 }
 
-function optionalOneOf(value, allowedValues) {
-  return value === null || value === undefined || oneOf(value, allowedValues);
-}
-
-function hasOnlyKeys(value, allowedKeys) {
-  const actualKeys = Object.keys(value);
-  return actualKeys.length === allowedKeys.length
-    && allowedKeys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+function hasUniqueCanonicalEngineOrder(values) {
+  return engineIntelligenceContract.hasUniqueCanonicalEngineOrder(values);
 }
 
 function containsUnsafeFieldName(value) {

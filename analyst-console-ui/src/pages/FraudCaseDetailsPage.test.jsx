@@ -721,6 +721,8 @@ function availableEngineIntelligence() {
     available: true,
     transactionId: "txn-1",
     comparison: {
+      comparisonType: "RULES_VS_ML",
+      comparedEngineIds: ["rules.primary", "ml.python.primary"],
       agreementStatus: "AGREEMENT",
       riskMismatchStatus: "SAME_RISK_LEVEL",
       scoreDeltaBucket: "SMALL"

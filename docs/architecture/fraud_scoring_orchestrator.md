@@ -15,7 +15,8 @@ replace `CompositeFraudScoringEngine`. FDP-90 preserves the same external bounda
 
 ## Execution Model
 
-The orchestrator composes existing `RuleBasedSignalEngine` and `PythonMlSignalEngine` adapters. It
+The orchestrator composes existing `RuleBasedSignalEngine`, `PythonMlSignalEngine`, and optional
+`VelocitySignalEngine` adapters. It
 does not redefine adapters, does not call concrete production scoring engines directly, does not add
 rule thresholds, does not add ML thresholds, and does not reinterpret engine scores or risk levels.
 
@@ -23,6 +24,7 @@ Execution order is deterministic:
 
 1. `rules.primary`
 2. `ml.python.primary`
+3. `velocity.primary` when velocity is registered
 
 The registry is explicit. FDP-89 does not rely on Spring bean order, reflection, classpath discovery,
 `HashMap` order, or `Set` order. Unknown engine IDs fail fast in v1 so the ordered surface stays
@@ -64,8 +66,9 @@ result; it does not guarantee the underlying work was forcibly terminated unless
 cooperates with cancellation.
 
 FDP-90 measures bounded per-engine latency through an injected clock and records the same measured
-duration through an internal metrics abstraction. The default implementation is
-`NoOpFraudScoringOrchestratorMetrics`; FDP-90 adds no vendor-specific metrics integration.
+duration through an internal metrics abstraction. FDP-129 production diagnostic runtime wiring uses
+`MicrometerFraudScoringOrchestratorMetrics` with bounded labels. `NoOpFraudScoringOrchestratorMetrics`
+remains for isolated tests and direct internal construction.
 
 ## Failure Boundary
 

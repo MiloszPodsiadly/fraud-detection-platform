@@ -1,6 +1,6 @@
 package com.frauddetection.scoring.orchestration.runtime;
 
-import com.frauddetection.scoring.orchestration.FraudSignalEngineRegistry;
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 
 import java.time.Duration;
 import java.util.HashSet;
@@ -12,8 +12,9 @@ public record FraudScoringOrchestratorExecutionPolicy(
         List<FraudEngineExecutionPolicy> enginePolicies
 ) {
     private static final Set<String> ALLOWED_ENGINE_IDS = Set.of(
-            FraudSignalEngineRegistry.RULES_PRIMARY_ENGINE_ID,
-            FraudSignalEngineRegistry.PYTHON_ML_PRIMARY_ENGINE_ID
+            FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+            FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
+            FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID
     );
 
     public FraudScoringOrchestratorExecutionPolicy {
@@ -28,21 +29,30 @@ public record FraudScoringOrchestratorExecutionPolicy(
                 throw new IllegalArgumentException("ENGINE_EXECUTION_POLICY_DUPLICATE_ENGINE_ID");
             }
         }
-        requirePolicy(engineIds, FraudSignalEngineRegistry.RULES_PRIMARY_ENGINE_ID);
-        requirePolicy(engineIds, FraudSignalEngineRegistry.PYTHON_ML_PRIMARY_ENGINE_ID);
+        requirePolicy(engineIds, FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID);
+        requirePolicy(engineIds, FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID);
+        if (engineIds.contains(FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID)
+                && policyFor(enginePolicies, FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID).required()) {
+            throw new IllegalArgumentException("ENGINE_EXECUTION_POLICY_OPTIONAL_ENGINE_REQUIRED");
+        }
         enginePolicies = List.copyOf(enginePolicies);
     }
 
     public static FraudScoringOrchestratorExecutionPolicy defaultInternalPolicy() {
         return new FraudScoringOrchestratorExecutionPolicy(List.of(
                 new FraudEngineExecutionPolicy(
-                        FraudSignalEngineRegistry.RULES_PRIMARY_ENGINE_ID,
+                        FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
                         Duration.ofMillis(250),
                         true
                 ),
                 new FraudEngineExecutionPolicy(
-                        FraudSignalEngineRegistry.PYTHON_ML_PRIMARY_ENGINE_ID,
+                        FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
                         Duration.ofSeconds(1),
+                        false
+                ),
+                new FraudEngineExecutionPolicy(
+                        FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID,
+                        Duration.ofMillis(250),
                         false
                 )
         ));
@@ -60,5 +70,12 @@ public record FraudScoringOrchestratorExecutionPolicy(
         if (!engineIds.contains(engineId)) {
             throw new IllegalArgumentException("ENGINE_EXECUTION_POLICY_REQUIRED_ENTRY_MISSING");
         }
+    }
+
+    private static FraudEngineExecutionPolicy policyFor(List<FraudEngineExecutionPolicy> policies, String engineId) {
+        return policies.stream()
+                .filter(policy -> policy.engineId().equals(engineId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("ENGINE_EXECUTION_POLICY_MISSING"));
     }
 }

@@ -48,7 +48,8 @@ schema from that governance foundation, but still does not create a public datas
 
 Allowed governance fields are limited to bounded review and diagnostic fields such as `feedbackId`, `transactionId`,
 `feedbackLabel`, `labelSource`, `feedbackStatus`, `createdAt`, `decisionReasonCodes`, `fraudScore`, `riskLevel`,
-`alertRecommended`, `engineIntelligenceStatus`, agreement/mismatch buckets, and bounded analyst recommendation fields.
+`alertRecommended`, `engineIntelligenceStatus`, Rules-vs-ML agreement/mismatch buckets, and bounded analyst
+recommendation fields.
 
 Dangerous or future-decision fields are not eligible, including notes, raw notes, raw notes export, raw customer payload,
 raw transaction payload, raw ML request/response, raw feature vector, raw evidence, ground truth, training label, final

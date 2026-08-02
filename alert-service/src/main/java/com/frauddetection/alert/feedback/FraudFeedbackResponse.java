@@ -3,6 +3,8 @@ package com.frauddetection.alert.feedback;
 import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparison;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
@@ -30,6 +32,8 @@ public record FraudFeedbackResponse(
         Instant scoredAt,
         Instant transactionTimestamp,
         EngineIntelligenceResponseStatus engineIntelligenceStatus,
+        EngineIntelligenceComparisonType comparisonType,
+        List<String> comparedEngineIds,
         EngineIntelligenceAgreementStatus agreementStatus,
         EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
         EngineIntelligenceScoreDeltaBucket scoreDeltaBucket,
@@ -39,4 +43,49 @@ public record FraudFeedbackResponse(
         Instant analystRecommendationGeneratedAt,
         List<String> analystRecommendationReasonCodes
 ) {
+    public FraudFeedbackResponse {
+        decisionReasonCodes = immutable(decisionReasonCodes);
+        analystRecommendationReasonCodes = immutable(analystRecommendationReasonCodes);
+        if (hasEngineIntelligenceComparisonSnapshot(
+                comparisonType,
+                comparedEngineIds,
+                agreementStatus,
+                riskMismatchStatus,
+                scoreDeltaBucket
+        )) {
+            EngineIntelligenceComparison comparison = new EngineIntelligenceComparison(
+                    comparisonType,
+                    comparedEngineIds,
+                    agreementStatus,
+                    riskMismatchStatus,
+                    scoreDeltaBucket
+            );
+            comparisonType = comparison.comparisonType();
+            comparedEngineIds = comparison.comparedEngineIds();
+        } else {
+            comparisonType = null;
+            comparedEngineIds = List.of();
+            agreementStatus = null;
+            riskMismatchStatus = null;
+            scoreDeltaBucket = null;
+        }
+    }
+
+    private static boolean hasEngineIntelligenceComparisonSnapshot(
+            EngineIntelligenceComparisonType comparisonType,
+            List<String> comparedEngineIds,
+            EngineIntelligenceAgreementStatus agreementStatus,
+            EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
+            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket
+    ) {
+        return comparisonType != null
+                || comparedEngineIds != null && !comparedEngineIds.isEmpty()
+                || agreementStatus != null
+                || riskMismatchStatus != null
+                || scoreDeltaBucket != null;
+    }
+
+    private static <T> List<T> immutable(List<T> values) {
+        return values == null ? List.of() : List.copyOf(values);
+    }
 }

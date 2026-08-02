@@ -4,10 +4,14 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
+import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparison;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceEngineResult;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
@@ -99,9 +103,26 @@ final class TransactionFraudScoringServiceEngineIntelligenceTestSupport {
         return new EngineIntelligenceSummary(
                 EngineIntelligenceSummary.CONTRACT_VERSION,
                 GENERATED_AT,
-                List.of(),
+                List.of(
+                        new EngineIntelligenceEngineResult(
+                                "rules.primary",
+                                FraudEngineType.RULES,
+                                FraudEngineStatus.AVAILABLE,
+                                RiskLevel.HIGH,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("HIGH_VELOCITY")
+                        ),
+                        new EngineIntelligenceEngineResult(
+                                "ml.python.primary",
+                                FraudEngineType.ML_MODEL,
+                                FraudEngineStatus.TIMEOUT,
+                                null,
+                                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                                List.of("ML_MODEL_TIMEOUT")
+                        )
+                ),
                 new EngineIntelligenceComparison(
-                        EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
+                        EngineIntelligenceAgreementStatus.PARTIAL,
                         EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                         EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
                 ),

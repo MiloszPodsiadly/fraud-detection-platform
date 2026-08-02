@@ -2,6 +2,8 @@ package com.frauddetection.scoring.config;
 
 import com.frauddetection.scoring.service.MlFraudScoringEngine;
 import com.frauddetection.scoring.service.RuleBasedFraudScoringEngine;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import static org.mockito.Mockito.mock;
@@ -21,6 +23,7 @@ final class EngineIntelligenceSpringContextTestSupport {
         return contextRunner()
                 .withPropertyValues(EngineIntelligenceEmissionProperties.PROPERTY_NAME + "=true")
                 .withBean(RuleBasedFraudScoringEngine.class, () -> mock(RuleBasedFraudScoringEngine.class))
-                .withBean(MlFraudScoringEngine.class, () -> mock(MlFraudScoringEngine.class));
+                .withBean(MlFraudScoringEngine.class, () -> mock(MlFraudScoringEngine.class))
+                .withBean(MeterRegistry.class, SimpleMeterRegistry::new);
     }
 }

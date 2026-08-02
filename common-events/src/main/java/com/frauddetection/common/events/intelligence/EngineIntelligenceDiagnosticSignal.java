@@ -24,6 +24,20 @@ public record EngineIntelligenceDiagnosticSignal(
         Objects.requireNonNull(engineStatus, "engineStatus is required");
         Objects.requireNonNull(signalCategory, "signalCategory is required");
         Objects.requireNonNull(scoreBucket, "scoreBucket is required");
+        if (engineStatus == FraudEngineStatus.AVAILABLE
+                && signalCategory == EngineIntelligenceSignalCategory.FRAUD_SIGNAL
+                && riskLevel == null) {
+            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_FRAUD_SIGNAL_RISK_LEVEL_REQUIRED");
+        }
+        if (engineStatus == FraudEngineStatus.AVAILABLE
+                && signalCategory == EngineIntelligenceSignalCategory.FRAUD_SIGNAL
+                && !scoreBucket.isUsableAvailableBucket()) {
+            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_FRAUD_SIGNAL_SCORE_BUCKET_INVALID");
+        }
+        if (engineStatus != FraudEngineStatus.AVAILABLE
+                && signalCategory == EngineIntelligenceSignalCategory.FRAUD_SIGNAL) {
+            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_OPERATIONAL_SIGNAL_CATEGORY_INVALID");
+        }
         if (engineStatus != FraudEngineStatus.AVAILABLE && riskLevel != null) {
             throw new IllegalArgumentException("ENGINE_INTELLIGENCE_OPERATIONAL_SIGNAL_RISK_LEVEL_INVALID");
         }

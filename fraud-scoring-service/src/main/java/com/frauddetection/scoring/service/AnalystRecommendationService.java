@@ -64,7 +64,7 @@ public class AnalystRecommendationService {
             return AnalystRecommendationResult.notApplicable("ENGINE_INTELLIGENCE_NO_COMPARABLE_ENGINES", generatedAt);
         }
 
-        boolean degraded = degraded(summary);
+        boolean degraded = degraded(summary, rules, ml);
         Optional<RecommendationDecision> decision = rapidTransferRecommendation(rules, degraded)
                 .or(() -> rulesHighRiskRecommendation(rules, degraded))
                 .or(() -> mlHighRulesLowerRecommendation(rules, ml, degraded))
@@ -161,9 +161,14 @@ public class AnalystRecommendationService {
                 .findFirst();
     }
 
-    private boolean degraded(EngineIntelligenceSummary summary) {
+    private boolean degraded(
+            EngineIntelligenceSummary summary,
+            Optional<EngineIntelligenceEngineResult> rules,
+            Optional<EngineIntelligenceEngineResult> ml
+    ) {
         return !summary.warnings().isEmpty()
-                || summary.engines().stream().anyMatch(engine -> engine.status() != FraudEngineStatus.AVAILABLE);
+                || rules.map(engine -> engine.status() != FraudEngineStatus.AVAILABLE).orElse(false)
+                || ml.map(engine -> engine.status() != FraudEngineStatus.AVAILABLE).orElse(false);
     }
 
     private boolean hasHighRisk(EngineIntelligenceEngineResult engine) {

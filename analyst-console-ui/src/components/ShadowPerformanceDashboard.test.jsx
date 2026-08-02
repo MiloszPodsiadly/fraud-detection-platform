@@ -358,7 +358,9 @@ describe("ShadowPerformanceDashboard", () => {
   it.each([
     ["zeroFractionalDigits", "2026-06-13T02:00:00Z"],
     ["oneFractionalDigit", "2026-06-13T02:00:00.1Z"],
-    ["sixFractionalDigits", "2026-06-13T02:00:00.123456Z"]
+    ["sixFractionalDigits", "2026-06-13T02:00:00.123456Z"],
+    ["sevenFractionalDigits", "2026-06-13T02:00:00.1234567Z"],
+    ["nineFractionalDigits", "2026-06-13T02:00:00.123456789Z"]
   ])("acceptsCanonicalTimestampPrecision: %s", (_name, timestamp) => {
     renderDashboard({ summary: shadowSummary({ generatedAt: timestamp }) });
 
@@ -374,8 +376,7 @@ describe("ShadowPerformanceDashboard", () => {
   });
 
   it.each([
-    ["sevenFractionalDigits", "2026-06-13T02:00:00.1234567Z"],
-    ["nineFractionalDigits", "2026-06-13T02:00:00.123456789Z"],
+    ["tenFractionalDigits", "2026-06-13T02:00:00.1234567890Z"],
     ["offsetTimestamp", "2026-06-13T02:00:00+00:00"],
     ["naiveDateTime", "2026-06-13T02:00:00"],
     ["dateOnly", "2026-06-13"],
@@ -398,7 +399,7 @@ describe("ShadowPerformanceDashboard", () => {
     ["evaluationCardGeneratedAt"]
   ])("rejectsInvalidSourceLineageTimestamp: %s", (field) => {
     expectMalformedSummary((summary) => {
-      summary.evaluation[field] = "2026-06-12T00:00:00.1234567Z";
+      summary.evaluation[field] = "2026-06-12T00:00:00.1234567890Z";
     });
   });
 

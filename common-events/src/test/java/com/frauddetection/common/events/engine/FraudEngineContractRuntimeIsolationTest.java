@@ -49,20 +49,21 @@ class FraudEngineContractRuntimeIsolationTest {
                 scoringRoot,
                 scoringRoot.resolve("engine/rules"),
                 scoringRoot.resolve("engine/ml"),
+                scoringRoot.resolve("engine/velocity"),
                 scoringRoot.resolve("orchestration")
         );
 
         assertThat(scoringRuntime)
-                .doesNotContain("VelocitySignalEngine")
                 .doesNotContain("DeviceSignalEngine")
                 .doesNotContain("MerchantSignalEngine")
+                .doesNotContain("GraphSignalEngine")
                 .doesNotContain("ExperimentalSignalEngine")
                 .doesNotContain("FraudIntelligenceResult")
                 .doesNotContain("engineResults");
     }
 
     @Test
-    void scoringEnginePackageContainsOnlyFdp84FoundationTypes() throws Exception {
+    void scoringEnginePackageContainsOnlyApprovedMultiEngineContractTypes() throws Exception {
         Path engineRoot = repositoryRoot().resolve(
                 "fraud-scoring-service/src/main/java/com/frauddetection/scoring/engine"
         );
@@ -74,12 +75,50 @@ class FraudEngineContractRuntimeIsolationTest {
                     .toList())
                     .containsExactlyInAnyOrder(
                             "FraudSignalEngine.java",
+                            "FraudSignalEvaluation.java",
                             "FraudEngineDescriptor.java",
                             "FraudEngineDescriptorValuePolicy.java",
                             "ml/PythonMlSignalEngine.java",
                             "ml/PythonMlSignalReasonCode.java",
                             "rules/RuleBasedSignalEngine.java",
-                            "rules/RuleBasedSignalReasonCode.java"
+                            "rules/RuleBasedSignalReasonCode.java",
+                            "velocity/ValidatedVelocityInputs.java",
+                            "velocity/VelocityFeatureReader.java",
+                            "velocity/VelocityInputReadiness.java",
+                            "velocity/VelocityInputs.java",
+                            "velocity/VelocityInputValidation.java",
+                            "velocity/VelocityInputValidator.java",
+                            "velocity/VelocityResultFactory.java",
+                            "velocity/VelocitySignalEngine.java",
+                            "velocity/VelocitySignalPolicy.java",
+                            "velocity/VelocitySignalReasonCode.java"
+                    );
+        }
+    }
+
+    @Test
+    void velocityV1HasOneApprovedExecutablePath() throws Exception {
+        Path engineRoot = repositoryRoot().resolve(
+                "fraud-scoring-service/src/main/java/com/frauddetection/scoring/engine"
+        );
+
+        try (Stream<Path> files = Files.walk(engineRoot)) {
+            assertThat(files.filter(Files::isRegularFile)
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .map(path -> engineRoot.relativize(path).toString().replace('\\', '/'))
+                    .filter(path -> path.toLowerCase().contains("velocity"))
+                    .toList())
+                    .containsExactlyInAnyOrder(
+                            "velocity/ValidatedVelocityInputs.java",
+                            "velocity/VelocityFeatureReader.java",
+                            "velocity/VelocityInputReadiness.java",
+                            "velocity/VelocityInputs.java",
+                            "velocity/VelocityInputValidation.java",
+                            "velocity/VelocityInputValidator.java",
+                            "velocity/VelocityResultFactory.java",
+                            "velocity/VelocitySignalEngine.java",
+                            "velocity/VelocitySignalPolicy.java",
+                            "velocity/VelocitySignalReasonCode.java"
                     );
         }
     }
@@ -120,9 +159,11 @@ class FraudEngineContractRuntimeIsolationTest {
         Path engineRoot = scoringRoot.resolve("engine");
         Path orchestrationRoot = scoringRoot.resolve("orchestration");
         Path reviewedProducerWiring = scoringRoot.resolve("config/EngineIntelligenceRuntimeConfig.java");
+        Path rulesFeatureInputValidator = scoringRoot.resolve("service/RulesFeatureInputValidator.java");
         String features = javaSources(featuresRoot);
+        String rulesValidator = Files.readString(rulesFeatureInputValidator);
         String runtimeOutsidePolicy = javaSourcesExcept(
-                scoringRoot, featuresRoot, engineRoot, orchestrationRoot, reviewedProducerWiring
+                scoringRoot, featuresRoot, engineRoot, orchestrationRoot, reviewedProducerWiring, rulesFeatureInputValidator
         );
         String adapterFoundation = javaSources(engineRoot);
 
@@ -133,6 +174,12 @@ class FraudEngineContractRuntimeIsolationTest {
                 .contains("class FeatureSnapshotKeyPolicy")
                 .contains("class FeatureSnapshotReader")
                 .contains("class FeatureSnapshotReaderFactory");
+        assertThat(rulesValidator)
+                .contains("FeatureSnapshotReader")
+                .contains("RulesFeatureInputValidationException")
+                .doesNotContain("VelocityFeatureContract")
+                .doesNotContain("context.featureSnapshot().get(")
+                .doesNotContain("exception.getMessage()");
         assertThat(runtimeOutsidePolicy)
                 .doesNotContain("FeatureSnapshotReader")
                 .doesNotContain("FeatureSnapshotValue")

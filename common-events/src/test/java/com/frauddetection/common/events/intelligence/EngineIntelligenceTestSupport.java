@@ -17,7 +17,7 @@ final class EngineIntelligenceTestSupport {
 
     static EngineIntelligenceSummary summary() {
         return summary(
-                List.of(engine()),
+                List.of(rulesEngine(), mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH)),
                 List.of(signal()),
                 List.of(warning())
         );
@@ -39,10 +39,18 @@ final class EngineIntelligenceTestSupport {
     }
 
     static EngineIntelligenceEngineResult engine() {
-        return engine(List.of("HIGH_VELOCITY"));
+        return rulesEngine();
     }
 
     static EngineIntelligenceEngineResult engine(List<String> reasonCodes) {
+        return rulesEngine(reasonCodes);
+    }
+
+    static EngineIntelligenceEngineResult rulesEngine() {
+        return rulesEngine(List.of("HIGH_VELOCITY"));
+    }
+
+    static EngineIntelligenceEngineResult rulesEngine(List<String> reasonCodes) {
         return new EngineIntelligenceEngineResult(
                 "rules.primary",
                 FraudEngineType.RULES,
@@ -53,11 +61,33 @@ final class EngineIntelligenceTestSupport {
         );
     }
 
+    static EngineIntelligenceEngineResult mlEngine(RiskLevel riskLevel, EngineIntelligenceScoreBucket scoreBucket) {
+        return new EngineIntelligenceEngineResult(
+                "ml.python.primary",
+                FraudEngineType.ML_MODEL,
+                FraudEngineStatus.AVAILABLE,
+                riskLevel,
+                scoreBucket,
+                List.of("MODEL_HIGH_RISK")
+        );
+    }
+
+    static EngineIntelligenceEngineResult operationalMl(FraudEngineStatus status) {
+        return new EngineIntelligenceEngineResult(
+                "ml.python.primary",
+                FraudEngineType.ML_MODEL,
+                status,
+                null,
+                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                List.of("ML_MODEL_TIMEOUT")
+        );
+    }
+
     static EngineIntelligenceComparison comparison() {
         return new EngineIntelligenceComparison(
                 EngineIntelligenceAgreementStatus.AGREEMENT,
                 EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
-                EngineIntelligenceScoreDeltaBucket.SMALL
+                EngineIntelligenceScoreDeltaBucket.NONE
         );
     }
 

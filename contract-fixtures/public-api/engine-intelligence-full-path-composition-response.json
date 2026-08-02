@@ -1,0 +1,68 @@
+{
+  "status": "AVAILABLE",
+  "contractVersion": 1,
+  "generatedAt": "2026-06-18T10:00:02Z",
+  "comparison": {
+    "comparisonType": "RULES_VS_ML",
+    "comparedEngineIds": ["rules.primary", "ml.python.primary"],
+    "agreementStatus": "AGREEMENT",
+    "riskMismatchStatus": "SAME_RISK_LEVEL",
+    "scoreDeltaBucket": "MEDIUM"
+  },
+  "engines": [
+    {
+      "engineId": "rules.primary",
+      "engineType": "RULES",
+      "status": "AVAILABLE",
+      "riskLevel": "MEDIUM",
+      "scoreBucket": "MEDIUM",
+      "reasonCodes": ["HIGH_VELOCITY"]
+    },
+    {
+      "engineId": "ml.python.primary",
+      "engineType": "ML_MODEL",
+      "status": "AVAILABLE",
+      "riskLevel": "MEDIUM",
+      "scoreBucket": "HIGH",
+      "reasonCodes": ["ML_MODEL_SIGNAL"]
+    },
+    {
+      "engineId": "velocity.primary",
+      "engineType": "VELOCITY",
+      "status": "AVAILABLE",
+      "riskLevel": "HIGH",
+      "scoreBucket": "HIGH",
+      "reasonCodes": ["TRANSACTION_VELOCITY"]
+    }
+  ],
+  "diagnosticSignals": [
+    {
+      "engineId": "velocity.primary",
+      "engineType": "VELOCITY",
+      "engineStatus": "AVAILABLE",
+      "signalCategory": "FRAUD_SIGNAL",
+      "riskLevel": "HIGH",
+      "scoreBucket": "HIGH",
+      "reasonCode": "TRANSACTION_VELOCITY"
+    },
+    {
+      "engineId": "ml.python.primary",
+      "engineType": "ML_MODEL",
+      "engineStatus": "AVAILABLE",
+      "signalCategory": "FRAUD_SIGNAL",
+      "riskLevel": "MEDIUM",
+      "scoreBucket": "HIGH",
+      "reasonCode": "ML_MODEL_SIGNAL"
+    },
+    {
+      "engineId": "rules.primary",
+      "engineType": "RULES",
+      "engineStatus": "AVAILABLE",
+      "signalCategory": "FRAUD_SIGNAL",
+      "riskLevel": "MEDIUM",
+      "scoreBucket": "MEDIUM",
+      "reasonCode": "HIGH_VELOCITY"
+    }
+  ],
+  "warnings": []
+}

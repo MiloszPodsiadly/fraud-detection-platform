@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -136,6 +137,34 @@ class AnalystRecommendationServiceTest {
     }
 
     @Test
+    void velocityUnavailableDoesNotChangeRulesMlRecommendation() {
+        var result = service.recommend(scoreResult(RiskLevel.LOW), Optional.of(summary(
+                rules(RiskLevel.LOW, "LOW_MODEL_RISK"),
+                ml(RiskLevel.LOW, "LOW_MODEL_RISK"),
+                velocity(FraudEngineStatus.UNAVAILABLE, null, "VELOCITY_FEATURES_UNAVAILABLE")
+        )));
+
+        assertThat(result.status()).isEqualTo(AnalystRecommendationStatus.AVAILABLE);
+        assertThat(result.recommendation()).isEqualTo(AnalystRecommendation.RECOMMEND_NO_ACTION);
+        assertThat(result.source()).isEqualTo(AnalystRecommendationSource.ENGINE_COMPARISON);
+        assertThat(result.reasonCodes()).containsExactly("BOTH_ENGINES_LOW_RISK", "LOW_RISK_DIAGNOSTIC_CONTEXT");
+    }
+
+    @Test
+    void velocityDegradedDoesNotBecomeRecommendationSourceOrSeverityInput() {
+        var result = service.recommend(scoreResult(RiskLevel.HIGH), Optional.of(summary(
+                rules(RiskLevel.HIGH, "HIGH_VELOCITY"),
+                ml(RiskLevel.LOW, "LOW_MODEL_RISK"),
+                velocity(FraudEngineStatus.DEGRADED, null, "VELOCITY_FEATURE_VALUE_INVALID")
+        )));
+
+        assertThat(result.status()).isEqualTo(AnalystRecommendationStatus.AVAILABLE);
+        assertThat(result.recommendation()).isEqualTo(AnalystRecommendation.RECOMMEND_REVIEW);
+        assertThat(result.source()).isEqualTo(AnalystRecommendationSource.RULES_RISK);
+        assertThat(result.warnings()).isEmpty();
+    }
+
+    @Test
     void unavailableMlEngineAloneDoesNotIncreaseRecommendationSeverity() {
         var result = service.recommend(scoreResult(RiskLevel.LOW), Optional.of(summary(
                 new EngineIntelligenceEngineResult(
@@ -187,15 +216,12 @@ class AnalystRecommendationServiceTest {
             List<EngineIntelligenceWarningSummary> warnings,
             EngineIntelligenceEngineResult... engines
     ) {
+        List<EngineIntelligenceEngineResult> completedEngines = completedRequiredEngines(List.of(engines));
         return new EngineIntelligenceSummary(
                 EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-06-19T10:00:01Z"),
-                List.of(engines),
-                new EngineIntelligenceComparison(
-                        EngineIntelligenceAgreementStatus.PARTIAL,
-                        EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
-                        EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
-                ),
+                completedEngines,
+                comparisonFor(completedEngines),
                 List.of(),
                 warnings
         );
@@ -207,7 +233,7 @@ class AnalystRecommendationServiceTest {
                 FraudEngineType.RULES,
                 FraudEngineStatus.AVAILABLE,
                 riskLevel,
-                EngineIntelligenceScoreBucket.HIGH,
+                scoreBucket(riskLevel),
                 List.of(reasonCode)
         );
     }
@@ -218,8 +244,130 @@ class AnalystRecommendationServiceTest {
                 FraudEngineType.ML_MODEL,
                 FraudEngineStatus.AVAILABLE,
                 riskLevel,
-                EngineIntelligenceScoreBucket.HIGH,
+                scoreBucket(riskLevel),
                 List.of(reasonCode)
         );
+    }
+
+    private EngineIntelligenceEngineResult velocity(
+            FraudEngineStatus status,
+            RiskLevel riskLevel,
+            String reasonCode
+    ) {
+        return new EngineIntelligenceEngineResult(
+                "velocity.primary",
+                FraudEngineType.VELOCITY,
+                status,
+                riskLevel,
+                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                List.of(reasonCode)
+        );
+    }
+
+    private List<EngineIntelligenceEngineResult> completedRequiredEngines(List<EngineIntelligenceEngineResult> engines) {
+        List<EngineIntelligenceEngineResult> completed = new ArrayList<>(engines);
+        if (engine(completed, "rules.primary") == null) {
+            completed.add(0, rules(RiskLevel.LOW, "LOW_MODEL_RISK"));
+        }
+        if (engine(completed, "ml.python.primary") == null) {
+            RiskLevel rulesRisk = Optional.ofNullable(engine(completed, "rules.primary"))
+                    .map(EngineIntelligenceEngineResult::riskLevel)
+                    .orElse(RiskLevel.LOW);
+            completed.add(ml(rulesRisk, rulesRisk == RiskLevel.LOW ? "LOW_MODEL_RISK" : "MODEL_HIGH_RISK"));
+        }
+        return completed;
+    }
+
+    private EngineIntelligenceComparison comparisonFor(List<EngineIntelligenceEngineResult> engines) {
+        EngineIntelligenceEngineResult rules = engine(engines, "rules.primary");
+        EngineIntelligenceEngineResult ml = engine(engines, "ml.python.primary");
+        if (rules.status() != FraudEngineStatus.AVAILABLE) {
+            return new EngineIntelligenceComparison(
+                    EngineIntelligenceAgreementStatus.REQUIRED_ENGINE_NOT_COMPARABLE,
+                    EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
+                    EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
+            );
+        }
+        if (ml.status() != FraudEngineStatus.AVAILABLE) {
+            return new EngineIntelligenceComparison(
+                    EngineIntelligenceAgreementStatus.PARTIAL,
+                    EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
+                    EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
+            );
+        }
+        EngineIntelligenceRiskMismatchStatus riskMismatch = riskMismatch(rules.riskLevel(), ml.riskLevel());
+        return new EngineIntelligenceComparison(
+                agreement(riskMismatch),
+                riskMismatch,
+                deltaBucket(rules.scoreBucket(), ml.scoreBucket())
+        );
+    }
+
+    private EngineIntelligenceEngineResult engine(List<EngineIntelligenceEngineResult> engines, String engineId) {
+        return engines.stream()
+                .filter(engine -> engineId.equals(engine.engineId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private EngineIntelligenceRiskMismatchStatus riskMismatch(RiskLevel rules, RiskLevel ml) {
+        int distance = Math.abs(severity(rules) - severity(ml));
+        if (distance == 0) {
+            return EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL;
+        }
+        if (distance == 1) {
+            return EngineIntelligenceRiskMismatchStatus.ADJACENT_RISK_LEVEL;
+        }
+        return EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH;
+    }
+
+    private EngineIntelligenceAgreementStatus agreement(EngineIntelligenceRiskMismatchStatus riskMismatch) {
+        return switch (riskMismatch) {
+            case SAME_RISK_LEVEL -> EngineIntelligenceAgreementStatus.AGREEMENT;
+            case ADJACENT_RISK_LEVEL -> EngineIntelligenceAgreementStatus.ADJACENT_RISK_VARIANCE;
+            case MATERIAL_RISK_MISMATCH -> EngineIntelligenceAgreementStatus.DISAGREEMENT;
+            case NOT_COMPARABLE -> EngineIntelligenceAgreementStatus.REQUIRED_ENGINE_NOT_COMPARABLE;
+        };
+    }
+
+    private EngineIntelligenceScoreDeltaBucket deltaBucket(
+            EngineIntelligenceScoreBucket rules,
+            EngineIntelligenceScoreBucket ml
+    ) {
+        return switch (Math.abs(scoreBucketSeverity(rules) - scoreBucketSeverity(ml))) {
+            case 0 -> EngineIntelligenceScoreDeltaBucket.NONE;
+            case 1 -> EngineIntelligenceScoreDeltaBucket.SMALL;
+            case 2 -> EngineIntelligenceScoreDeltaBucket.MEDIUM;
+            case 3 -> EngineIntelligenceScoreDeltaBucket.LARGE;
+            default -> EngineIntelligenceScoreDeltaBucket.UNAVAILABLE;
+        };
+    }
+
+    private EngineIntelligenceScoreBucket scoreBucket(RiskLevel riskLevel) {
+        return switch (riskLevel) {
+            case LOW -> EngineIntelligenceScoreBucket.LOW;
+            case MEDIUM -> EngineIntelligenceScoreBucket.MEDIUM;
+            case HIGH -> EngineIntelligenceScoreBucket.HIGH;
+            case CRITICAL -> EngineIntelligenceScoreBucket.VERY_HIGH;
+        };
+    }
+
+    private int severity(RiskLevel riskLevel) {
+        return switch (riskLevel) {
+            case LOW -> 1;
+            case MEDIUM -> 2;
+            case HIGH -> 3;
+            case CRITICAL -> 4;
+        };
+    }
+
+    private int scoreBucketSeverity(EngineIntelligenceScoreBucket bucket) {
+        return switch (bucket) {
+            case LOW -> 0;
+            case MEDIUM -> 1;
+            case HIGH -> 2;
+            case VERY_HIGH -> 3;
+            case NONE, UNAVAILABLE -> -1;
+        };
     }
 }

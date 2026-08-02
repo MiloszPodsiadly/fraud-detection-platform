@@ -1,5 +1,6 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 
 import java.util.List;
@@ -10,8 +11,8 @@ public final class FraudEngineAgreementAnalyzer {
         if (results == null || results.size() < 2) {
             return FraudEngineAgreementStatus.INSUFFICIENT_DATA;
         }
-        NormalizedFraudEngineResult rules = resultFor(results, "rules.primary");
-        NormalizedFraudEngineResult ml = resultFor(results, "ml.python.primary");
+        NormalizedFraudEngineResult rules = resultFor(results, FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID);
+        NormalizedFraudEngineResult ml = resultFor(results, FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID);
         if (rules == null || ml == null) {
             return FraudEngineAgreementStatus.INSUFFICIENT_DATA;
         }

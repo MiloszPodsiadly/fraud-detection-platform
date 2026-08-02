@@ -4,6 +4,7 @@ import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.scoring.engine.FraudEngineDescriptor;
 import com.frauddetection.scoring.engine.FraudSignalEngine;
+import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -16,6 +17,8 @@ import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorT
 import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.mlEngine;
 import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.ruleDescriptor;
 import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.ruleEngine;
+import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.velocityDescriptor;
+import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.velocityEngine;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -90,11 +93,24 @@ class FraudScoringOrchestratorExecutionOrderTest {
     }
 
     @Test
+    void registryAcceptsOptionalVelocityAfterRulesAndMl() {
+        FraudSignalEngineRegistry registry = new FraudSignalEngineRegistry(List.of(
+                velocityEngine(availableResult(velocityDescriptor(), 0.95d, RiskLevel.CRITICAL)),
+                mlEngine(availableResult(mlDescriptor(), 0.72d, RiskLevel.MEDIUM)),
+                ruleEngine(availableResult(ruleDescriptor(), 0.42d, RiskLevel.LOW))
+        ));
+
+        assertThat(registry.orderedEngines().stream()
+                .map(engine -> engine.descriptor().engineId()))
+                .containsExactly("rules.primary", "ml.python.primary", "velocity.primary");
+    }
+
+    @Test
     void registryRejectsUnknownEngineIds() {
         FraudEngineDescriptor unknownDescriptor = new FraudEngineDescriptor(
-                "velocity.primary",
-                FraudEngineType.VELOCITY,
-                "java",
+                "merchant.experimental",
+                FraudEngineType.MERCHANT_RISK,
+                "other",
                 "1.0.0",
                 false
         );
@@ -102,7 +118,7 @@ class FraudScoringOrchestratorExecutionOrderTest {
         assertThatThrownBy(() -> new FraudSignalEngineRegistry(List.of(engineReturningDescriptor(unknownDescriptor))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("ENGINE_REGISTRY_UNKNOWN_ENGINE_ID")
-                .hasMessageNotContaining("velocity.primary");
+                .hasMessageNotContaining("merchant.experimental");
     }
 
     @Test
@@ -132,10 +148,10 @@ class FraudScoringOrchestratorExecutionOrderTest {
     private FraudSignalEngine engineReturningDescriptor(FraudEngineDescriptor descriptor) {
         return new FraudSignalEngine() {
             @Override
-            public com.frauddetection.common.events.engine.FraudEngineResult evaluate(
+            public FraudSignalEvaluation evaluate(
                     com.frauddetection.scoring.context.ScoringContext context
             ) {
-                return availableResult(ruleDescriptor(), 0.42d, RiskLevel.LOW);
+                return evaluation();
             }
 
             @Override
@@ -148,10 +164,10 @@ class FraudScoringOrchestratorExecutionOrderTest {
     private FraudSignalEngine engineWithInvalidDescriptor() {
         return new FraudSignalEngine() {
             @Override
-            public com.frauddetection.common.events.engine.FraudEngineResult evaluate(
+            public FraudSignalEvaluation evaluate(
                     com.frauddetection.scoring.context.ScoringContext context
             ) {
-                return availableResult(ruleDescriptor(), 0.42d, RiskLevel.LOW);
+                return evaluation();
             }
 
             @Override
@@ -159,5 +175,21 @@ class FraudScoringOrchestratorExecutionOrderTest {
                 return new FraudEngineDescriptor(" ", FraudEngineType.RULES, "java", "1.0.0", true);
             }
         };
+    }
+
+    private FraudSignalEvaluation evaluation() {
+        var result = availableResult(ruleDescriptor(), 0.42d, RiskLevel.LOW);
+        return new FraudSignalEvaluation(
+                result.status(),
+                result.score(),
+                result.riskLevel(),
+                result.confidence(),
+                result.reasonCodes(),
+                result.contributions(),
+                result.evidence(),
+                result.modelName(),
+                result.modelVersion(),
+                result.statusReason()
+        );
     }
 }

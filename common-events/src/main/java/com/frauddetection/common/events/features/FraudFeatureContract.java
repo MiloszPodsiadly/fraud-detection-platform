@@ -1,6 +1,8 @@
 package com.frauddetection.common.events.features;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 public final class FraudFeatureContract {
 
@@ -96,6 +98,48 @@ public final class FraudFeatureContract {
             FLAG_RAPID_PLN_20K_BURST
     );
 
+    public static final String TYPE_BOOLEAN = "BOOLEAN";
+    public static final String TYPE_INTEGER = "INTEGER";
+    public static final String TYPE_LONG = "LONG";
+    public static final String TYPE_DOUBLE = "DOUBLE";
+    public static final String TYPE_DECIMAL = "DECIMAL";
+    public static final String TYPE_STRING = "STRING";
+
+    public static final Map<String, String> SCALAR_CONSUMABLE_TYPES = Map.ofEntries(
+            Map.entry(DEVICE_NOVELTY, TYPE_BOOLEAN),
+            Map.entry(COUNTRY_MISMATCH, TYPE_BOOLEAN),
+            Map.entry(PROXY_OR_VPN_DETECTED, TYPE_BOOLEAN),
+            Map.entry(RAPID_TRANSFER_BURST, TYPE_BOOLEAN),
+            Map.entry(RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, TYPE_BOOLEAN),
+            Map.entry(RECENT_TRANSACTION_COUNT, TYPE_INTEGER),
+            Map.entry(RECENT_TRANSACTION_COUNT_WINDOW, TYPE_STRING),
+            Map.entry(RECENT_AMOUNT_SUM_WINDOW, TYPE_STRING),
+            Map.entry(RAPID_TRANSFER_WINDOW, TYPE_STRING),
+            Map.entry(MERCHANT_FREQUENCY_7D, TYPE_INTEGER),
+            Map.entry(HIGH_RISK_FLAG_COUNT, TYPE_INTEGER),
+            Map.entry(RAPID_TRANSFER_COUNT, TYPE_INTEGER),
+            Map.entry(RECENT_AMOUNT_SUM, TYPE_DECIMAL),
+            Map.entry(TRANSACTION_VELOCITY_PER_MINUTE, TYPE_DOUBLE),
+            Map.entry(TRANSACTION_VELOCITY_PER_HOUR, TYPE_DOUBLE),
+            Map.entry(TRANSACTION_VELOCITY_PER_DAY, TYPE_DOUBLE),
+            Map.entry(RECENT_AMOUNT_AVERAGE, TYPE_DOUBLE),
+            Map.entry(RECENT_AMOUNT_STD_DEV, TYPE_DOUBLE),
+            Map.entry(AMOUNT_DEVIATION_FROM_USER_MEAN, TYPE_DOUBLE),
+            Map.entry(MERCHANT_ENTROPY, TYPE_DOUBLE),
+            Map.entry(COUNTRY_ENTROPY, TYPE_DOUBLE),
+            Map.entry(RECENT_AMOUNT_SUM_PLN, TYPE_DECIMAL),
+            Map.entry(CURRENT_TRANSACTION_AMOUNT_PLN, TYPE_DECIMAL),
+            Map.entry(RAPID_TRANSFER_THRESHOLD_PLN, TYPE_DECIMAL),
+            Map.entry(RAPID_TRANSFER_TOTAL_PLN, TYPE_DECIMAL),
+            Map.entry(CUSTOMER_SEGMENT, TYPE_STRING),
+            Map.entry(MERCHANT_CATEGORY, TYPE_STRING),
+            Map.entry(CURRENCY, TYPE_STRING)
+    );
+
     private FraudFeatureContract() {
+    }
+
+    public static Optional<String> expectedScalarTypeFor(String key) {
+        return Optional.ofNullable(SCALAR_CONSUMABLE_TYPES.get(key));
     }
 }

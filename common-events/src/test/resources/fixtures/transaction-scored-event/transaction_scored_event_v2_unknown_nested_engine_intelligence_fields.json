@@ -48,10 +48,21 @@
           "HIGH_VELOCITY"
         ],
         "futureBoundedEngineField": "ignored"
+      },
+      {
+        "engineId": "ml.python.primary",
+        "engineType": "ML_MODEL",
+        "status": "TIMEOUT",
+        "scoreBucket": "UNAVAILABLE",
+        "reasonCodes": [
+          "ML_MODEL_TIMEOUT"
+        ]
       }
     ],
     "comparison": {
-      "agreementStatus": "INSUFFICIENT_DATA",
+      "comparisonType": "RULES_VS_ML",
+      "comparedEngineIds": ["rules.primary", "ml.python.primary"],
+"agreementStatus": "PARTIAL",
       "riskMismatchStatus": "NOT_COMPARABLE",
       "scoreDeltaBucket": "UNAVAILABLE",
       "futureBoundedComparisonField": "ignored"

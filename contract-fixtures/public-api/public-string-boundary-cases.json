@@ -1,0 +1,49 @@
+{
+  "contract": "public-api-bounded-string-v1",
+  "defaultMaxLength": 128,
+  "recommendationVersionMaxLength": 64,
+  "cases": [
+    {
+      "caseId": "exact_default_max",
+      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "maxLength": 128,
+      "valid": true
+    },
+    {
+      "caseId": "default_max_plus_one",
+      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "maxLength": 128,
+      "valid": false
+    },
+    {
+      "caseId": "exact_recommendation_version_max",
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "maxLength": 64,
+      "valid": true
+    },
+    {
+      "caseId": "recommendation_version_max_plus_one",
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "maxLength": 64,
+      "valid": false
+    },
+    {
+      "caseId": "blank",
+      "value": " ",
+      "maxLength": 128,
+      "valid": false
+    },
+    {
+      "caseId": "non_string",
+      "value": 123,
+      "maxLength": 128,
+      "valid": false
+    },
+    {
+      "caseId": "control_character",
+      "value": "HIGH\nVELOCITY",
+      "maxLength": 128,
+      "valid": false
+    }
+  ]
+}

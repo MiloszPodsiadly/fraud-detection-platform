@@ -53,13 +53,32 @@ export function degradedDetail(overrides = {}) {
     transactionId: "txn-degraded-1",
     engineIntelligence: availableEngineIntelligence({
       status: "DEGRADED",
-      engines: [{
+      comparison: {
+        comparisonType: "RULES_VS_ML",
+        comparedEngineIds: ["rules.primary", "ml.python.primary"],
+        agreementStatus: "REQUIRED_ENGINE_NOT_COMPARABLE",
+        riskMismatchStatus: "NOT_COMPARABLE",
+        scoreDeltaBucket: "UNAVAILABLE"
+      },
+      engines: [
+        {
+          engineId: "rules.primary",
+          engineType: "RULES",
+          status: "DEGRADED",
+          riskLevel: null,
+          scoreBucket: "UNAVAILABLE",
+          reasonCodes: ["ORCHESTRATOR_ENGINE_TIMEOUT"]
+        },
+        mlEngine()
+      ],
+      diagnosticSignals: [{
         engineId: "rules.primary",
         engineType: "RULES",
-        status: "DEGRADED",
-        riskLevel: "CRITICAL",
-        scoreBucket: "HIGH",
-        reasonCodes: ["HIGH_VELOCITY"]
+        engineStatus: "DEGRADED",
+        signalCategory: "OPERATIONAL_SIGNAL",
+        riskLevel: null,
+        scoreBucket: "UNAVAILABLE",
+        reasonCode: "ORCHESTRATOR_ENGINE_TIMEOUT"
       }],
       warnings: [{ warningCode: "ENGINE_RESULT_LIMIT_APPLIED", count: 1 }]
     }),
@@ -363,18 +382,13 @@ function availableEngineIntelligence(overrides = {}) {
     contractVersion: 1,
     generatedAt: "2026-06-18T10:00:02Z",
     comparison: {
-      agreementStatus: "PARTIAL",
-      riskMismatchStatus: "NOT_COMPARABLE",
-      scoreDeltaBucket: "UNAVAILABLE"
+      comparisonType: "RULES_VS_ML",
+      comparedEngineIds: ["rules.primary", "ml.python.primary"],
+      agreementStatus: "DISAGREEMENT",
+      riskMismatchStatus: "MATERIAL_RISK_MISMATCH",
+      scoreDeltaBucket: "LARGE"
     },
-    engines: [{
-      engineId: "rules.primary",
-      engineType: "RULES",
-      status: "AVAILABLE",
-      riskLevel: "CRITICAL",
-      scoreBucket: "HIGH",
-      reasonCodes: ["HIGH_VELOCITY"]
-    }],
+    engines: [rulesEngine(), mlEngine()],
     diagnosticSignals: [{
       engineId: "rules.primary",
       engineType: "RULES",
@@ -384,7 +398,31 @@ function availableEngineIntelligence(overrides = {}) {
       scoreBucket: "HIGH",
       reasonCode: "HIGH_VELOCITY"
     }],
-    warnings: [{ warningCode: "ENGINE_RESULT_LIMIT_APPLIED", count: 1 }],
+    warnings: [],
+    ...overrides
+  };
+}
+
+function rulesEngine(overrides = {}) {
+  return {
+    engineId: "rules.primary",
+    engineType: "RULES",
+    status: "AVAILABLE",
+    riskLevel: "CRITICAL",
+    scoreBucket: "HIGH",
+    reasonCodes: ["HIGH_VELOCITY"],
+    ...overrides
+  };
+}
+
+function mlEngine(overrides = {}) {
+  return {
+    engineId: "ml.python.primary",
+    engineType: "ML_MODEL",
+    status: "AVAILABLE",
+    riskLevel: "LOW",
+    scoreBucket: "LOW",
+    reasonCodes: ["LOW_MODEL_RISK"],
     ...overrides
   };
 }

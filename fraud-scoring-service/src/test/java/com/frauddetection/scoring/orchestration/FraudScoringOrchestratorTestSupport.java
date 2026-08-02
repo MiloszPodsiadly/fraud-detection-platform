@@ -11,6 +11,7 @@ import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.context.ScoringContext;
 import com.frauddetection.scoring.engine.FraudEngineDescriptor;
 import com.frauddetection.scoring.engine.FraudSignalEngine;
+import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -35,11 +36,15 @@ final class FraudScoringOrchestratorTestSupport {
     }
 
     static FakeFraudSignalEngine ruleEngine(FraudEngineResult result) {
-        return new FakeFraudSignalEngine(ruleDescriptor(), ignored -> result);
+        return new FakeFraudSignalEngine(ruleDescriptor(), ignored -> nullableEvaluation(result));
     }
 
     static FakeFraudSignalEngine mlEngine(FraudEngineResult result) {
-        return new FakeFraudSignalEngine(mlDescriptor(), ignored -> result);
+        return new FakeFraudSignalEngine(mlDescriptor(), ignored -> nullableEvaluation(result));
+    }
+
+    static FakeFraudSignalEngine velocityEngine(FraudEngineResult result) {
+        return new FakeFraudSignalEngine(velocityDescriptor(), ignored -> nullableEvaluation(result));
     }
 
     static FakeFraudSignalEngine throwingRuleEngine(RuntimeException exception) {
@@ -74,13 +79,23 @@ final class FraudScoringOrchestratorTestSupport {
         );
     }
 
+    static FraudEngineDescriptor velocityDescriptor() {
+        return new FraudEngineDescriptor(
+                FraudSignalEngineRegistry.VELOCITY_PRIMARY_ENGINE_ID,
+                FraudEngineType.VELOCITY,
+                "java",
+                "velocity-v1",
+                false
+        );
+    }
+
     static FraudEngineResult availableResult(FraudEngineDescriptor descriptor, double score, RiskLevel riskLevel) {
         return result(
                 descriptor,
                 FraudEngineStatus.AVAILABLE,
                 score,
                 riskLevel,
-                FraudEngineConfidence.MEDIUM,
+                availableConfidence(descriptor),
                 "ENGINE_SIGNAL",
                 null
         );
@@ -166,18 +181,44 @@ final class FraudScoringOrchestratorTestSupport {
         );
     }
 
+    private static FraudSignalEvaluation evaluation(FraudEngineResult result) {
+        return new FraudSignalEvaluation(
+                result.status(),
+                result.score(),
+                result.riskLevel(),
+                result.confidence(),
+                result.reasonCodes(),
+                result.contributions(),
+                result.evidence(),
+                result.modelName(),
+                result.modelVersion(),
+                result.statusReason()
+        );
+    }
+
+    private static FraudSignalEvaluation nullableEvaluation(FraudEngineResult result) {
+        return result == null ? null : evaluation(result);
+    }
+
+    private static FraudEngineConfidence availableConfidence(FraudEngineDescriptor descriptor) {
+        if (descriptor.engineType() == FraudEngineType.VELOCITY) {
+            return FraudEngineConfidence.UNKNOWN;
+        }
+        return FraudEngineConfidence.MEDIUM;
+    }
+
     static final class FakeFraudSignalEngine implements FraudSignalEngine {
         private final FraudEngineDescriptor descriptor;
-        private final Function<ScoringContext, FraudEngineResult> handler;
+        private final Function<ScoringContext, FraudSignalEvaluation> handler;
         private final List<String> calls;
 
-        FakeFraudSignalEngine(FraudEngineDescriptor descriptor, Function<ScoringContext, FraudEngineResult> handler) {
+        FakeFraudSignalEngine(FraudEngineDescriptor descriptor, Function<ScoringContext, FraudSignalEvaluation> handler) {
             this(descriptor, handler, new ArrayList<>());
         }
 
         FakeFraudSignalEngine(
                 FraudEngineDescriptor descriptor,
-                Function<ScoringContext, FraudEngineResult> handler,
+                Function<ScoringContext, FraudSignalEvaluation> handler,
                 List<String> calls
         ) {
             this.descriptor = descriptor;
@@ -186,7 +227,7 @@ final class FraudScoringOrchestratorTestSupport {
         }
 
         @Override
-        public FraudEngineResult evaluate(ScoringContext context) {
+        public FraudSignalEvaluation evaluate(ScoringContext context) {
             calls.add(descriptor.engineId());
             return handler.apply(context);
         }

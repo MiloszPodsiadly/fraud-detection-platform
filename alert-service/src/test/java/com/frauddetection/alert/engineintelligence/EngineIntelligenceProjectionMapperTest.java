@@ -56,7 +56,7 @@ class EngineIntelligenceProjectionMapperTest {
         EngineIntelligenceProjection projection = mapped(EngineIntelligenceProjectionTestFixtures.minimalSummary());
 
         assertThat(projection.getContractVersion()).isEqualTo(1);
-        assertThat(projection.getEngineCount()).isEqualTo(1);
+        assertThat(projection.getEngineCount()).isEqualTo(2);
         assertThat(projection.getDiagnosticSignalCount()).isZero();
         assertThat(projection.getWarningCount()).isZero();
     }
@@ -84,7 +84,7 @@ class EngineIntelligenceProjectionMapperTest {
     @Test
     void oversizedPayloadUsesTypedOmissionReason() {
         EngineIntelligenceSummary summary = summaryMock();
-        when(summary.engines()).thenReturn(Collections.nCopies(3, EngineIntelligenceProjectionTestFixtures.timeoutMl()));
+        when(summary.engines()).thenReturn(Collections.nCopies(4, EngineIntelligenceProjectionTestFixtures.timeoutMl()));
 
         assertOmitted(
                 mapper.map("txn-1", summary, null),

@@ -1,13 +1,51 @@
 package com.frauddetection.alert.engineintelligence.api;
 
+import com.frauddetection.alert.api.EngineIntelligenceComparisonResponse;
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
+import com.frauddetection.common.events.engine.FraudEngineType;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
+import io.swagger.v3.parser.OpenAPIV3Parser;
+import io.swagger.v3.parser.core.models.ParseOptions;
+import io.swagger.v3.parser.core.models.SwaggerParseResult;
 import org.junit.jupiter.api.Test;
+import org.yaml.snakeyaml.Yaml;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.StreamSupport;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class EngineIntelligenceOpenApiContractTest {
+    private final ObjectMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
+
+    @Test
+    void openApiDocumentIsAcceptedByStandardsCompatibleParser() {
+        ParseOptions options = new ParseOptions();
+        options.setResolve(true);
+        options.setResolveFully(false);
+
+        SwaggerParseResult result = new OpenAPIV3Parser().readLocation(openApiPath().toString(), null, options);
+
+        assertThat(result.getOpenAPI()).isNotNull();
+        assertThat(result.getMessages()).isEmpty();
+        assertThat(result.getOpenAPI().getPaths())
+                .containsKey("/api/v1/transactions/scored/{transactionId}/engine-intelligence");
+        assertThat(result.getOpenAPI().getComponents().getSchemas())
+                .containsKeys(
+                        "EngineIntelligenceResponse",
+                        "EngineIntelligenceEngineResponse",
+                        "EngineIntelligenceDiagnosticSignalResponse"
+                );
+    }
 
     @Test
     void openApiContainsOnlyBoundedEngineIntelligenceSchema() throws Exception {
@@ -21,6 +59,8 @@ class EngineIntelligenceOpenApiContractTest {
                 "contractVersion:",
                 "generatedAt:",
                 "comparison:",
+                "comparisonType:",
+                "comparedEngineIds:",
                 "agreementStatus:",
                 "riskMismatchStatus:",
                 "scoreDeltaBucket:",
@@ -110,10 +150,17 @@ class EngineIntelligenceOpenApiContractTest {
 
         assertThat(schema).contains(
                 "EngineIntelligenceResponse:",
-                "enum: [AVAILABLE, ABSENT, UNAVAILABLE, DEGRADED]",
-                "- contractVersion",
-                "- generatedAt",
-                "- comparison",
+                "EngineIntelligenceAvailableResponse:",
+                "EngineIntelligenceDegradedResponse:",
+                "EngineIntelligenceAbsentResponse:",
+                "EngineIntelligenceUnavailableResponse:",
+                "EngineIntelligenceProjectedResponse:",
+                "enum: [AVAILABLE, DEGRADED]",
+                "enum: [ABSENT]",
+                "enum: [UNAVAILABLE]",
+                "required: [status, contractVersion, generatedAt, comparison, engines, diagnosticSignals, warnings]",
+                "comparisonType:",
+                "comparedEngineIds:",
                 "ABSENT means no projection exists",
                 "UNAVAILABLE means the projection read path degraded",
                 "explicit null contractVersion, generatedAt, and comparison fields",
@@ -226,6 +273,123 @@ class EngineIntelligenceOpenApiContractTest {
     }
 
     @Test
+    void openApiBindsEngineIdsToExactEngineTypes() throws Exception {
+        String openApi = openApi();
+
+        assertThat(openApi).contains(
+                "RulesEngineIdentity:",
+                "enum: [rules.primary]",
+                "enum: [RULES]",
+                "MlEngineIdentity:",
+                "enum: [ml.python.primary]",
+                "enum: [ML_MODEL]",
+                "VelocityEngineIdentity:",
+                "enum: [velocity.primary]",
+                "enum: [VELOCITY]"
+        );
+        assertThat(schema("EngineIntelligenceEngineResponse")).contains(
+                "oneOf:",
+                "$ref: \"#/components/schemas/RulesEngineIdentity\"",
+                "$ref: \"#/components/schemas/MlEngineIdentity\"",
+                "$ref: \"#/components/schemas/VelocityEngineIdentity\""
+        );
+        assertThat(schema("EngineIntelligenceDiagnosticSignalResponse")).contains("oneOf:");
+        assertThat(schema("EngineIntelligenceEngineReadModel")).contains("oneOf:");
+        assertThat(schema("EngineIntelligenceDiagnosticSignalReadModel")).contains("oneOf:");
+    }
+
+    @Test
+    void parsedOpenApiContractMatchesRuntimeEngineIdentityContract() throws Exception {
+        Map<String, Object> schemas = schemas();
+        JsonNode registry = objectMapper.readTree(engineRegistryFixturePath().toFile());
+        Map<String, Object> response = schema(schemas, "EngineIntelligenceProjectedResponse");
+
+        assertThat(registry.get("maxEngineCount").intValue())
+                .isEqualTo(FraudEngineIdentityContract.MAX_ENGINE_INTELLIGENCE_ENGINES);
+        assertThat(StreamSupport.stream(registry.get("order").spliterator(), false)
+                .map(JsonNode::textValue)
+                .toList())
+                .containsExactlyElementsOf(FraudEngineIdentityContract.engineOrder());
+        assertThat(enumValues(property(response, "contractVersion")))
+                .containsExactly(EngineIntelligenceSummaryContract.VERSION);
+        assertThat(property(response, "engines"))
+                .containsEntry("maxItems", FraudEngineIdentityContract.MAX_ENGINE_INTELLIGENCE_ENGINES);
+        Map<String, Object> comparison = schema(schemas, "EngineIntelligenceComparisonResponse");
+        assertThat(list(comparison, "required")).containsExactly(
+                "comparisonType",
+                "comparedEngineIds",
+                "agreementStatus",
+                "riskMismatchStatus",
+                "scoreDeltaBucket"
+        );
+        assertThat(enumValues(property(comparison, "comparisonType"))).containsExactly("RULES_VS_ML");
+        assertThat(registry.get("comparison").get("comparisonType").textValue()).isEqualTo("RULES_VS_ML");
+        assertThat(property(comparison, "comparedEngineIds"))
+                .containsEntry("minItems", 2)
+                .containsEntry("maxItems", 2)
+                .containsEntry("uniqueItems", true);
+        assertThat(registry.get("comparison").get("comparedEngineIds"))
+                .hasSize(FraudEngineIdentityContract.rulesVsMlComparisonEngineIds().size());
+        assertThat(identityOneOfRefs(schema(schemas, "EngineIntelligenceEngineResponse")))
+                .containsExactly(
+                        "#/components/schemas/RulesEngineIdentity",
+                        "#/components/schemas/MlEngineIdentity",
+                        "#/components/schemas/VelocityEngineIdentity"
+                );
+        assertThat(identityOneOfRefs(schema(schemas, "EngineIntelligenceDiagnosticSignalResponse")))
+                .containsExactly(
+                        "#/components/schemas/RulesEngineIdentity",
+                        "#/components/schemas/MlEngineIdentity",
+                        "#/components/schemas/VelocityEngineIdentity"
+                );
+        assertIdentitySchema(
+                schemas,
+                "RulesEngineIdentity",
+                FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                FraudEngineType.RULES
+        );
+        assertIdentitySchema(
+                schemas,
+                "MlEngineIdentity",
+                FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
+                FraudEngineType.ML_MODEL
+        );
+        assertIdentitySchema(
+                schemas,
+                "VelocityEngineIdentity",
+                FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID,
+                FraudEngineType.VELOCITY
+        );
+    }
+
+    @Test
+    void serializedRuntimeComparisonInstanceMatchesParsedOpenApiSchema() throws Exception {
+        EngineIntelligenceComparisonResponse response = new EngineIntelligenceComparisonResponse(
+                EngineIntelligenceComparisonType.RULES_VS_ML,
+                FraudEngineIdentityContract.rulesVsMlComparisonEngineIds(),
+                EngineIntelligenceAgreementStatus.DISAGREEMENT,
+                EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH,
+                EngineIntelligenceScoreDeltaBucket.LARGE
+        );
+        Map<String, Object> comparison = map(new Yaml().load(objectMapper.writeValueAsString(response)));
+        Map<String, Object> comparisonSchema = schema(schemas(), "EngineIntelligenceComparisonResponse");
+
+        assertThat(comparison.keySet()).containsExactlyElementsOf(map(comparisonSchema, "properties").keySet());
+        assertThat(comparison.get("comparisonType")).isEqualTo("RULES_VS_ML");
+        assertThat(comparison.get("comparedEngineIds"))
+                .isEqualTo(FraudEngineIdentityContract.rulesVsMlComparisonEngineIds());
+        assertThat(enumValues(property(comparisonSchema, "comparisonType")))
+                .contains(comparison.get("comparisonType"));
+        assertThat(enumValues(property(comparisonSchema, "agreementStatus")))
+                .contains(comparison.get("agreementStatus"));
+        assertThat(enumValues(property(comparisonSchema, "riskMismatchStatus")))
+                .contains(comparison.get("riskMismatchStatus"));
+        assertThat(enumValues(property(comparisonSchema, "scoreDeltaBucket")))
+                .contains(comparison.get("scoreDeltaBucket"));
+    }
+
+
+    @Test
     void openApiReasonCodesHaveMaxLength() throws Exception {
         assertThat(schema("EngineIntelligenceEngineReadModel")).contains(
                 "reasonCodes:",
@@ -329,5 +493,77 @@ class EngineIntelligenceOpenApiContractTest {
             return fromRoot;
         }
         return Path.of("..", "docs", "openapi", "alert_service.openapi.yaml");
+    }
+
+    private Path engineRegistryFixturePath() {
+        Path fromRoot = Path.of(
+                "common-events",
+                "src/test/resources/fixtures/engine-intelligence/engine_registry_contract.json"
+        );
+        if (Files.exists(fromRoot)) {
+            return fromRoot;
+        }
+        return Path.of(
+                "..",
+                "common-events",
+                "src/test/resources/fixtures/engine-intelligence/engine_registry_contract.json"
+        );
+    }
+
+    private Map<String, Object> schemas() throws Exception {
+        return map(map(new Yaml().load(openApi()), "components"), "schemas");
+    }
+
+    private Map<String, Object> schema(Map<String, Object> schemas, String name) {
+        return map(schemas, name);
+    }
+
+    private Map<String, Object> property(Map<String, Object> schema, String name) {
+        return map(map(schema, "properties"), name);
+    }
+
+    private List<Object> enumValues(Map<String, Object> property) {
+        return list(property, "enum");
+    }
+
+    private List<String> oneOfRefs(Map<String, Object> schema) {
+        return list(schema, "oneOf").stream()
+                .map(item -> map(item).get("$ref").toString())
+                .toList();
+    }
+
+    private List<String> identityOneOfRefs(Map<String, Object> schema) {
+        return oneOfRefs(map(list(schema, "allOf").getFirst()));
+    }
+
+    private void assertIdentitySchema(
+            Map<String, Object> schemas,
+            String schemaName,
+            String engineId,
+            FraudEngineType engineType
+    ) {
+        Map<String, Object> identitySchema = schema(schemas, schemaName);
+
+        assertThat(list(identitySchema, "required")).containsExactly("engineId", "engineType");
+        assertThat(enumValues(property(identitySchema, "engineId"))).containsExactly(engineId);
+        assertThat(enumValues(property(identitySchema, "engineType"))).containsExactly(engineType.name());
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> map(Object source) {
+        return (Map<String, Object>) source;
+    }
+
+    private Map<String, Object> map(Map<String, Object> source, String key) {
+        return map(source.get(key));
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Object> list(Map<String, Object> source, String key) {
+        return (List<Object>) source.get(key);
+    }
+
+    private static final class EngineIntelligenceSummaryContract {
+        private static final int VERSION = com.frauddetection.common.events.intelligence.EngineIntelligenceSummary.CONTRACT_VERSION;
     }
 }

@@ -6,7 +6,7 @@ import com.frauddetection.common.events.evidence.ScoringEvidenceSeverity;
 import com.frauddetection.common.events.evidence.ScoringEvidenceSource;
 import com.frauddetection.common.events.evidence.ScoringEvidenceStatus;
 import com.frauddetection.common.events.evidence.ScoringEvidenceType;
-import com.frauddetection.common.events.engine.FraudEngineResult;
+import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.ScoringMode;
@@ -147,7 +147,7 @@ final class PythonMlSignalEngineTestSupport {
         );
     }
 
-    static String flatten(FraudEngineResult result) {
+    static String flatten(FraudSignalEvaluation result) {
         return result.reasonCodes() + " "
                 + result.contributions() + " "
                 + result.evidence() + " "
