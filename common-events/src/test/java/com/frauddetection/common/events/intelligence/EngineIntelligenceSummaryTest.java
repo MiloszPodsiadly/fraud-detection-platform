@@ -145,6 +145,73 @@ class EngineIntelligenceSummaryTest {
     }
 
     @Test
+    void acceptsSameScoreBucketWithExactMediumDeltaBucket() {
+        EngineIntelligenceSummary summary = new EngineIntelligenceSummary(
+                EngineIntelligenceSummary.CONTRACT_VERSION,
+                EngineIntelligenceTestSupport.GENERATED_AT,
+                List.of(
+                        EngineIntelligenceTestSupport.rulesEngine(),
+                        EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH)
+                ),
+                new EngineIntelligenceComparison(
+                        EngineIntelligenceAgreementStatus.AGREEMENT,
+                        EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                        EngineIntelligenceScoreDeltaBucket.MEDIUM
+                ),
+                List.of(),
+                List.of()
+        );
+
+        assertThat(summary.comparison().scoreDeltaBucket()).isEqualTo(EngineIntelligenceScoreDeltaBucket.MEDIUM);
+    }
+
+    @Test
+    void rejectsBucketDistanceTwoWithSmallScoreDeltaBucket() {
+        assertThatThrownBy(() -> summaryWithScoreBuckets(
+                EngineIntelligenceScoreBucket.LOW,
+                EngineIntelligenceScoreBucket.HIGH,
+                EngineIntelligenceScoreDeltaBucket.SMALL
+        )).hasMessage("ENGINE_INTELLIGENCE_COMPARISON_DELTA_INCONSISTENT");
+    }
+
+    @Test
+    void rejectsLowVeryHighWithMediumScoreDeltaBucket() {
+        assertThatThrownBy(() -> summaryWithScoreBuckets(
+                EngineIntelligenceScoreBucket.LOW,
+                EngineIntelligenceScoreBucket.VERY_HIGH,
+                EngineIntelligenceScoreDeltaBucket.MEDIUM
+        )).hasMessage("ENGINE_INTELLIGENCE_COMPARISON_DELTA_INCONSISTENT");
+    }
+
+    @Test
+    void rejectsAvailableRulesAndMlWithUnavailableScoreDeltaBucket() {
+        assertThatThrownBy(() -> summaryWithScoreBuckets(
+                EngineIntelligenceScoreBucket.LOW,
+                EngineIntelligenceScoreBucket.HIGH,
+                EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
+        )).hasMessage("ENGINE_INTELLIGENCE_COMPARISON_DELTA_INCONSISTENT");
+    }
+
+    @Test
+    void rejectsOperationalRequiredEngineWithNumericScoreDeltaBucket() {
+        assertThatThrownBy(() -> new EngineIntelligenceSummary(
+                EngineIntelligenceSummary.CONTRACT_VERSION,
+                EngineIntelligenceTestSupport.GENERATED_AT,
+                List.of(
+                        EngineIntelligenceTestSupport.rulesEngine(),
+                        EngineIntelligenceTestSupport.operationalMl(FraudEngineStatus.TIMEOUT)
+                ),
+                new EngineIntelligenceComparison(
+                        EngineIntelligenceAgreementStatus.PARTIAL,
+                        EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
+                        EngineIntelligenceScoreDeltaBucket.SMALL
+                ),
+                List.of(),
+                List.of()
+        )).hasMessage("ENGINE_INTELLIGENCE_COMPARISON_OPERATIONAL_INCONSISTENT");
+    }
+
+    @Test
     void rejectsDiagnosticSignalForAbsentOrContradictoryEngine() {
         assertThatThrownBy(() -> new EngineIntelligenceSummary(
                 EngineIntelligenceSummary.CONTRACT_VERSION,
@@ -179,5 +246,34 @@ class EngineIntelligenceSummaryTest {
                 List.of(),
                 List.of()
         )).hasMessage("ENGINE_INTELLIGENCE_UNSUPPORTED_CONTRACT_VERSION");
+    }
+
+    private EngineIntelligenceSummary summaryWithScoreBuckets(
+            EngineIntelligenceScoreBucket rulesBucket,
+            EngineIntelligenceScoreBucket mlBucket,
+            EngineIntelligenceScoreDeltaBucket deltaBucket
+    ) {
+        return new EngineIntelligenceSummary(
+                EngineIntelligenceSummary.CONTRACT_VERSION,
+                EngineIntelligenceTestSupport.GENERATED_AT,
+                List.of(
+                        new EngineIntelligenceEngineResult(
+                                "rules.primary",
+                                FraudEngineType.RULES,
+                                FraudEngineStatus.AVAILABLE,
+                                RiskLevel.HIGH,
+                                rulesBucket,
+                                List.of("HIGH_VELOCITY")
+                        ),
+                        EngineIntelligenceTestSupport.mlEngine(RiskLevel.LOW, mlBucket)
+                ),
+                new EngineIntelligenceComparison(
+                        EngineIntelligenceAgreementStatus.DISAGREEMENT,
+                        EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH,
+                        deltaBucket
+                ),
+                List.of(),
+                List.of()
+        );
     }
 }

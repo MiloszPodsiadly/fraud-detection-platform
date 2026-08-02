@@ -5,7 +5,7 @@ import com.frauddetection.alert.api.EngineIntelligenceDiagnosticSignalResponse;
 import com.frauddetection.alert.api.EngineIntelligenceEngineResponse;
 import com.frauddetection.alert.api.EngineIntelligenceEngineStatusResponse;
 import com.frauddetection.alert.api.EngineIntelligenceResponse;
-import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
+import com.frauddetection.alert.api.EngineIntelligenceResponseStatusPolicy;
 import com.frauddetection.alert.api.EngineIntelligenceWarningResponse;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
@@ -29,14 +29,18 @@ public class EngineIntelligenceResponseMapper {
             return EngineIntelligenceResponse.absent();
         }
         try {
+            EngineIntelligenceComparisonResponse comparison = comparison(readModel);
+            List<EngineIntelligenceEngineResponse> engines = engines(readModel);
+            List<EngineIntelligenceDiagnosticSignalResponse> diagnosticSignals = diagnosticSignals(readModel);
+            List<EngineIntelligenceWarningResponse> warnings = warnings(readModel);
             return new EngineIntelligenceResponse(
-                    status(readModel),
+                    EngineIntelligenceResponseStatusPolicy.derive(engines, warnings),
                     readModel.contractVersion(),
                     readModel.generatedAt(),
-                    comparison(readModel),
-                    engines(readModel),
-                    diagnosticSignals(readModel),
-                    warnings(readModel)
+                    comparison,
+                    engines,
+                    diagnosticSignals,
+                    warnings
             );
         } catch (IllegalArgumentException | NullPointerException exception) {
             return EngineIntelligenceResponse.unavailable();
@@ -45,28 +49,6 @@ public class EngineIntelligenceResponseMapper {
 
     public EngineIntelligenceResponse unavailable() {
         return EngineIntelligenceResponse.unavailable();
-    }
-
-    private EngineIntelligenceResponseStatus status(EngineIntelligenceReadModel readModel) {
-        // This is public exposure health only. It is derived from already-projected engine
-        // statuses and warning presence; it must not use scores, risk levels, agreement,
-        // risk mismatch, score delta, reason ranking, strongest signals, ML invocation,
-        // rules invocation, or scoring logic. ABSENT and UNAVAILABLE are handled outside
-        // this calculation and are never computed from comparison values.
-        if (hasLimitedProjectionData(readModel)) {
-            return EngineIntelligenceResponseStatus.DEGRADED;
-        }
-        return EngineIntelligenceResponseStatus.AVAILABLE;
-    }
-
-    private boolean hasLimitedProjectionData(EngineIntelligenceReadModel readModel) {
-        return list(readModel.engines()).isEmpty()
-                || !list(readModel.warnings()).isEmpty()
-                || list(readModel.engines()).stream()
-                .anyMatch(engine -> engine.status() == FraudEngineStatus.DEGRADED
-                        || engine.status() == FraudEngineStatus.TIMEOUT
-                        || engine.status() == FraudEngineStatus.UNAVAILABLE
-                        || engine.status() == FraudEngineStatus.FALLBACK_USED);
     }
 
     private EngineIntelligenceComparisonResponse comparison(EngineIntelligenceReadModel readModel) {

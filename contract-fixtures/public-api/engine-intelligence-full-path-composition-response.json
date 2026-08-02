@@ -7,7 +7,7 @@
     "comparedEngineIds": ["rules.primary", "ml.python.primary"],
     "agreementStatus": "AGREEMENT",
     "riskMismatchStatus": "SAME_RISK_LEVEL",
-    "scoreDeltaBucket": "SMALL"
+    "scoreDeltaBucket": "MEDIUM"
   },
   "engines": [
     {

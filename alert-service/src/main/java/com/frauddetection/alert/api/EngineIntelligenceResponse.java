@@ -28,7 +28,7 @@ public record EngineIntelligenceResponse(
         if (status == EngineIntelligenceResponseStatus.ABSENT || status == EngineIntelligenceResponseStatus.UNAVAILABLE) {
             requireEmptyUnavailableEnvelope(contractVersion, generatedAt, comparison, engines, diagnosticSignals, warnings);
         } else {
-            validateProjectedEnvelope(contractVersion, generatedAt, comparison, engines, diagnosticSignals, warnings);
+            validateProjectedEnvelope(status, contractVersion, generatedAt, comparison, engines, diagnosticSignals, warnings);
         }
     }
 
@@ -75,6 +75,7 @@ public record EngineIntelligenceResponse(
     }
 
     private static void validateProjectedEnvelope(
+            EngineIntelligenceResponseStatus status,
             Integer contractVersion,
             Instant generatedAt,
             EngineIntelligenceComparisonResponse comparison,
@@ -96,6 +97,10 @@ public record EngineIntelligenceResponse(
                         .map(warning -> new EngineIntelligenceWarningSummary(warning.warningCode(), warning.count()))
                         .toList()
         );
+        EngineIntelligenceResponseStatus expected = EngineIntelligenceResponseStatusPolicy.derive(engines, warnings);
+        if (status != expected) {
+            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_RESPONSE_STATUS_INCONSISTENT");
+        }
     }
 
     private static EngineIntelligenceEngineResult engineResult(EngineIntelligenceEngineResponse engine) {

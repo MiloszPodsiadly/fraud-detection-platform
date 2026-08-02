@@ -334,14 +334,13 @@ class AnalystRecommendationServiceTest {
             EngineIntelligenceScoreBucket rules,
             EngineIntelligenceScoreBucket ml
     ) {
-        if (rules == ml) {
-            return EngineIntelligenceScoreDeltaBucket.NONE;
-        }
-        if ((rules == EngineIntelligenceScoreBucket.LOW && ml == EngineIntelligenceScoreBucket.VERY_HIGH)
-                || (rules == EngineIntelligenceScoreBucket.VERY_HIGH && ml == EngineIntelligenceScoreBucket.LOW)) {
-            return EngineIntelligenceScoreDeltaBucket.LARGE;
-        }
-        return EngineIntelligenceScoreDeltaBucket.SMALL;
+        return switch (Math.abs(scoreBucketSeverity(rules) - scoreBucketSeverity(ml))) {
+            case 0 -> EngineIntelligenceScoreDeltaBucket.NONE;
+            case 1 -> EngineIntelligenceScoreDeltaBucket.SMALL;
+            case 2 -> EngineIntelligenceScoreDeltaBucket.MEDIUM;
+            case 3 -> EngineIntelligenceScoreDeltaBucket.LARGE;
+            default -> EngineIntelligenceScoreDeltaBucket.UNAVAILABLE;
+        };
     }
 
     private EngineIntelligenceScoreBucket scoreBucket(RiskLevel riskLevel) {
@@ -359,6 +358,16 @@ class AnalystRecommendationServiceTest {
             case MEDIUM -> 2;
             case HIGH -> 3;
             case CRITICAL -> 4;
+        };
+    }
+
+    private int scoreBucketSeverity(EngineIntelligenceScoreBucket bucket) {
+        return switch (bucket) {
+            case LOW -> 0;
+            case MEDIUM -> 1;
+            case HIGH -> 2;
+            case VERY_HIGH -> 3;
+            case NONE, UNAVAILABLE -> -1;
         };
     }
 }

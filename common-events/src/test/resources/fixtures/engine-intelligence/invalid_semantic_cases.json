@@ -207,6 +207,150 @@
         "diagnosticSignals": [],
         "warnings": []
       }
+    },
+    {
+      "caseId": "low_high_score_buckets_with_small_delta",
+      "category": "engine-intelligence",
+      "commonReject": true,
+      "engineIntelligence": {
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "LOW", "reasonCodes": ["HIGH_VELOCITY"]},
+          {"engineId": "ml.python.primary", "engineType": "ML_MODEL", "status": "AVAILABLE", "riskLevel": "LOW", "scoreBucket": "HIGH", "reasonCodes": ["LOW_MODEL_RISK"]}
+        ],
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "DISAGREEMENT", "riskMismatchStatus": "MATERIAL_RISK_MISMATCH", "scoreDeltaBucket": "SMALL"},
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "low_very_high_score_buckets_with_medium_delta",
+      "category": "engine-intelligence",
+      "commonReject": true,
+      "engineIntelligence": {
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "LOW", "reasonCodes": ["HIGH_VELOCITY"]},
+          {"engineId": "ml.python.primary", "engineType": "ML_MODEL", "status": "AVAILABLE", "riskLevel": "LOW", "scoreBucket": "VERY_HIGH", "reasonCodes": ["LOW_MODEL_RISK"]}
+        ],
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "DISAGREEMENT", "riskMismatchStatus": "MATERIAL_RISK_MISMATCH", "scoreDeltaBucket": "MEDIUM"},
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "available_rules_ml_with_unavailable_delta",
+      "category": "engine-intelligence",
+      "commonReject": true,
+      "engineIntelligence": {
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "LOW", "reasonCodes": ["HIGH_VELOCITY"]},
+          {"engineId": "ml.python.primary", "engineType": "ML_MODEL", "status": "AVAILABLE", "riskLevel": "LOW", "scoreBucket": "HIGH", "reasonCodes": ["LOW_MODEL_RISK"]}
+        ],
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "DISAGREEMENT", "riskMismatchStatus": "MATERIAL_RISK_MISMATCH", "scoreDeltaBucket": "UNAVAILABLE"},
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "operational_rules_ml_with_numeric_delta_bucket",
+      "category": "engine-intelligence",
+      "commonReject": true,
+      "engineIntelligence": {
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["HIGH_VELOCITY"]},
+          {"engineId": "ml.python.primary", "engineType": "ML_MODEL", "status": "TIMEOUT", "riskLevel": null, "scoreBucket": "UNAVAILABLE", "reasonCodes": ["ML_MODEL_TIMEOUT"]}
+        ],
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "PARTIAL", "riskMismatchStatus": "NOT_COMPARABLE", "scoreDeltaBucket": "SMALL"},
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "response_available_with_degraded_ml",
+      "category": "engine-intelligence-response",
+      "engineIntelligenceResponse": {
+        "status": "AVAILABLE",
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "PARTIAL", "riskMismatchStatus": "NOT_COMPARABLE", "scoreDeltaBucket": "UNAVAILABLE"},
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["HIGH_VELOCITY"]},
+          {"engineId": "ml.python.primary", "engineType": "ML_MODEL", "status": "DEGRADED", "riskLevel": null, "scoreBucket": "UNAVAILABLE", "reasonCodes": ["ML_MODEL_TIMEOUT"]}
+        ],
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "response_available_with_warning",
+      "category": "engine-intelligence-response",
+      "engineIntelligenceResponse": {
+        "status": "AVAILABLE",
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "AGREEMENT", "riskMismatchStatus": "SAME_RISK_LEVEL", "scoreDeltaBucket": "NONE"},
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["HIGH_VELOCITY"]},
+          {"engineId": "ml.python.primary", "engineType": "ML_MODEL", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["MODEL_HIGH_RISK"]}
+        ],
+        "diagnosticSignals": [],
+        "warnings": [{"warningCode": "ENGINE_RESULT_LIMIT_APPLIED", "count": 1}]
+      }
+    },
+    {
+      "caseId": "response_degraded_with_healthy_payload",
+      "category": "engine-intelligence-response",
+      "engineIntelligenceResponse": {
+        "status": "DEGRADED",
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "AGREEMENT", "riskMismatchStatus": "SAME_RISK_LEVEL", "scoreDeltaBucket": "NONE"},
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["HIGH_VELOCITY"]},
+          {"engineId": "ml.python.primary", "engineType": "ML_MODEL", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["MODEL_HIGH_RISK"]}
+        ],
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "response_absent_with_projected_fields",
+      "category": "engine-intelligence-response",
+      "engineIntelligenceResponse": {
+        "status": "ABSENT",
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "AGREEMENT", "riskMismatchStatus": "SAME_RISK_LEVEL", "scoreDeltaBucket": "NONE"},
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["HIGH_VELOCITY"]},
+          {"engineId": "ml.python.primary", "engineType": "ML_MODEL", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["MODEL_HIGH_RISK"]}
+        ],
+        "diagnosticSignals": [],
+        "warnings": []
+      }
+    },
+    {
+      "caseId": "response_unavailable_with_projected_fields",
+      "category": "engine-intelligence-response",
+      "engineIntelligenceResponse": {
+        "status": "UNAVAILABLE",
+        "contractVersion": 1,
+        "generatedAt": "2026-05-31T10:00:00Z",
+        "comparison": {"comparisonType": "RULES_VS_ML", "comparedEngineIds": ["rules.primary", "ml.python.primary"], "agreementStatus": "AGREEMENT", "riskMismatchStatus": "SAME_RISK_LEVEL", "scoreDeltaBucket": "NONE"},
+        "engines": [
+          {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["HIGH_VELOCITY"]},
+          {"engineId": "ml.python.primary", "engineType": "ML_MODEL", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["MODEL_HIGH_RISK"]}
+        ],
+        "diagnosticSignals": [],
+        "warnings": []
+      }
     }
   ]
 }

@@ -1918,7 +1918,7 @@ describe("alertsApi auth headers", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable({
       engines: [
         engineResult(),
-        engineResult({ engineId: "ml.python.primary", engineType: "ML_MODEL", riskLevel: "MEDIUM", scoreBucket: "MEDIUM", reasonCodes: ["MODEL_HIGH_RISK"] }),
+        mlEngineResult(),
         engineResult({ engineId: "velocity.primary", engineType: "VELOCITY", riskLevel: "HIGH", scoreBucket: "HIGH", reasonCodes: ["RAPID_PLN_20K_BURST"] })
       ],
       diagnosticSignals: [
@@ -2006,6 +2006,21 @@ describe("alertsApi auth headers", () => {
 
   it("getEngineIntelligenceAcceptsOperationalSignalWithoutRiskLevel", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable({
+      comparison: {
+        ...comparison(),
+        agreementStatus: "PARTIAL",
+        riskMismatchStatus: "NOT_COMPARABLE",
+        scoreDeltaBucket: "UNAVAILABLE"
+      },
+      engines: [
+        engineResult(),
+        mlEngineResult({
+          status: "TIMEOUT",
+          riskLevel: null,
+          scoreBucket: "UNAVAILABLE",
+          reasonCodes: ["ML_MODEL_TIMEOUT"]
+        })
+      ],
       diagnosticSignals: [diagnosticSignal({
         signalCategory: "OPERATIONAL_SIGNAL",
         engineId: "ml.python.primary",
@@ -2105,7 +2120,7 @@ function engineIntelligenceAvailable(overrides = {}) {
     contractVersion: 1,
     generatedAt: "2026-06-02T10:00:00Z",
     comparison: comparison(),
-    engines: [engineResult()],
+    engines: [engineResult(), mlEngineResult()],
     diagnosticSignals: [diagnosticSignal()],
     warnings: [warning()],
     ...overrides
@@ -2363,6 +2378,17 @@ function engineResult(overrides = {}) {
     reasonCodes: ["HIGH_VELOCITY"],
     ...overrides
   };
+}
+
+function mlEngineResult(overrides = {}) {
+  return engineResult({
+    engineId: "ml.python.primary",
+    engineType: "ML_MODEL",
+    riskLevel: "LOW",
+    scoreBucket: "LOW",
+    reasonCodes: ["LOW_MODEL_RISK"],
+    ...overrides
+  });
 }
 
 function diagnosticSignal(overrides = {}) {

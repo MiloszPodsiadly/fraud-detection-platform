@@ -18,6 +18,20 @@ class EngineIntelligenceScoreDeltaBucketTest {
     }
 
     @Test
+    void comparableDeltaBoundariesAreExact() {
+        assertThat(EngineIntelligenceScoreDeltaBucket.fromComparableDelta(0.15d))
+                .isEqualTo(EngineIntelligenceScoreDeltaBucket.SMALL);
+        assertThat(EngineIntelligenceScoreDeltaBucket.fromComparableDelta(0.1500001d))
+                .isEqualTo(EngineIntelligenceScoreDeltaBucket.MEDIUM);
+        assertThat(EngineIntelligenceScoreDeltaBucket.fromComparableDelta(0.35d))
+                .isEqualTo(EngineIntelligenceScoreDeltaBucket.MEDIUM);
+        assertThat(EngineIntelligenceScoreDeltaBucket.fromComparableDelta(0.3500001d))
+                .isEqualTo(EngineIntelligenceScoreDeltaBucket.LARGE);
+        assertThat(EngineIntelligenceScoreDeltaBucket.fromComparableDelta(1.0d))
+                .isEqualTo(EngineIntelligenceScoreDeltaBucket.LARGE);
+    }
+
+    @Test
     void unavailableDeltaSerializesAsUnavailable() throws Exception {
         assertThat(EngineIntelligenceTestSupport.objectMapper().writeValueAsString(new EngineIntelligenceComparison(
                 EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,

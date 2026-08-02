@@ -502,6 +502,10 @@ function normalizeEngineIntelligenceResponse(response, fallbackTransactionId) {
   if (!engines || !diagnosticSignals || !warnings) {
     return unavailableEngineIntelligence(transactionId);
   }
+  if (!engineIntelligenceContract.isComparisonCoherent(response.comparison, response.engines)
+    || !engineIntelligenceContract.areDiagnosticSignalsCoherent(response.diagnosticSignals, response.engines)) {
+    return unavailableEngineIntelligence(transactionId);
+  }
 
   return Object.freeze({
     state: "available",

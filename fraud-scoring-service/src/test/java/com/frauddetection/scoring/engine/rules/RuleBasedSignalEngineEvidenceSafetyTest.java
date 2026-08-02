@@ -58,22 +58,34 @@ class RuleBasedSignalEngineEvidenceSafetyTest {
                 .doesNotContain("exception");
 
         assertThat(result.reasonCodes()).isNotEmpty().allSatisfy(reasonCode ->
-                assertThat(ReasonCode.known(reasonCode)).isPresent()
+                assertThat(isAllowedRulesReasonCode(reasonCode)).isTrue()
         );
         assertThat(result.evidence()).allSatisfy(this::assertSafeEvidenceText);
         assertThat(result.contributions()).allSatisfy(contribution -> {
-            assertThat(ReasonCode.known(contribution.feature())).isPresent();
+            assertThat(isAllowedRulesReasonCode(contribution.feature())).isTrue();
             assertThat(contribution.value()).isNull();
             assertThat(contribution.weight()).isNull();
         });
     }
 
     private void assertSafeEvidenceText(FraudEngineEvidence evidence) {
-        assertThat(ReasonCode.known(evidence.reasonCode())).isPresent();
+        assertThat(isAllowedRulesReasonCode(evidence.reasonCode())).isTrue();
         assertThat(evidence.title()).hasSizeLessThanOrEqualTo(64);
         assertThat(evidence.description()).hasSizeLessThanOrEqualTo(80);
         assertThat(evidence.title()).doesNotMatch(".*\\s{2,}.*");
         assertThat(evidence.description()).doesNotMatch(".*\\s{2,}.*");
+    }
+
+    private boolean isAllowedRulesReasonCode(String reasonCode) {
+        if (ReasonCode.known(reasonCode).isPresent()) {
+            return true;
+        }
+        try {
+            RuleBasedSignalReasonCode.valueOf(reasonCode);
+            return true;
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
     }
 
     private ScoringContext context(TransactionEnrichedEvent event) {

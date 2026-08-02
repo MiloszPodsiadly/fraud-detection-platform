@@ -9,7 +9,6 @@ import com.frauddetection.common.events.engine.FraudEngineEvidenceType;
 import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
-import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.scoring.context.ScoringContext;
 import com.frauddetection.scoring.domain.FraudScoreResult;
@@ -19,9 +18,9 @@ import com.frauddetection.scoring.engine.FraudSignalEngine;
 import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import com.frauddetection.scoring.features.FeatureSnapshotReader;
 import com.frauddetection.scoring.features.FeatureSnapshotReaderFactory;
-import com.frauddetection.scoring.features.FeatureSnapshotValue;
 import com.frauddetection.scoring.features.FeatureSnapshotValueStatus;
 import com.frauddetection.scoring.service.RuleBasedFraudScoringEngine;
+import com.frauddetection.scoring.service.RulesFeatureInputValidator;
 
 import java.util.List;
 import java.util.Objects;
@@ -48,9 +47,8 @@ public final class RuleBasedSignalEngine implements FraudSignalEngine {
     public FraudSignalEvaluation evaluate(ScoringContext context) {
         Objects.requireNonNull(context, "context is required");
         FeatureSnapshotReader reader = readerFactory.from(context);
-        FeatureSnapshotValueStatus invalidStatus = validateFeatureSnapshot(reader);
-        if (invalidStatus != null) {
-            return degradedResultFor(invalidStatus);
+        if (!RulesFeatureInputValidator.isValid(context.transaction(), reader)) {
+            return degradedResultFor(FeatureSnapshotValueStatus.INVALID_TYPE);
         }
         FraudScoreResult productionResult = productionRuleEngine.score(FraudScoringRequest.from(context.transaction()));
         return availableResult(productionResult);
@@ -105,28 +103,6 @@ public final class RuleBasedSignalEngine implements FraudSignalEngine {
                 productionResult.modelVersion(),
                 null
         );
-    }
-
-    private FeatureSnapshotValueStatus validateFeatureSnapshot(FeatureSnapshotReader reader) {
-        return firstInvalidType(
-                reader.booleanValue(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE)
-        );
-    }
-
-    private FeatureSnapshotValueStatus firstInvalidType(FeatureSnapshotValue<?>... values) {
-        for (FeatureSnapshotValue<?> value : values) {
-            FeatureSnapshotValueStatus status = value.status();
-            if (status == FeatureSnapshotValueStatus.WRONG_ACCESSOR) {
-                throw new IllegalStateException("adapter feature accessor mismatch");
-            }
-            if (status == FeatureSnapshotValueStatus.NOT_ALLOWED) {
-                throw new IllegalStateException("adapter feature access policy violation");
-            }
-            if (status == FeatureSnapshotValueStatus.INVALID_TYPE) {
-                return status;
-            }
-        }
-        return null;
     }
 
     private List<FraudEngineContribution> contributionsFor(List<String> reasonCodes) {

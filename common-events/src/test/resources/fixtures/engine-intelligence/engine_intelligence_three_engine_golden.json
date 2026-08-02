@@ -43,6 +43,33 @@
       "riskLevel": "CRITICAL",
       "scoreBucket": "VERY_HIGH",
       "reasonCode": "RAPID_PLN_20K_BURST"
+    },
+    {
+      "engineId": "velocity.primary",
+      "engineType": "VELOCITY",
+      "engineStatus": "AVAILABLE",
+      "signalCategory": "FRAUD_SIGNAL",
+      "riskLevel": "CRITICAL",
+      "scoreBucket": "VERY_HIGH",
+      "reasonCode": "TRANSACTION_VELOCITY"
+    },
+    {
+      "engineId": "rules.primary",
+      "engineType": "RULES",
+      "engineStatus": "AVAILABLE",
+      "signalCategory": "FRAUD_SIGNAL",
+      "riskLevel": "HIGH",
+      "scoreBucket": "HIGH",
+      "reasonCode": "HIGH_VELOCITY"
+    },
+    {
+      "engineId": "ml.python.primary",
+      "engineType": "ML_MODEL",
+      "engineStatus": "AVAILABLE",
+      "signalCategory": "FRAUD_SIGNAL",
+      "riskLevel": "LOW",
+      "scoreBucket": "LOW",
+      "reasonCode": "LOW_MODEL_RISK"
     }
   ],
   "warnings": []

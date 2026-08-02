@@ -138,6 +138,7 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
         assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> instance.put("engines", List.of(engine(instance, 0)))));
         assertInvalid("EngineIntelligenceResponse", mutate(EngineIntelligenceResponse.unavailable(), instance -> instance.put("generatedAt", "2026-06-18T10:00:02Z")));
         assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> engine(instance, 0).put("engineId", "unknown.primary")));
+        assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> comparison(instance).put("scoreDeltaBucket", "SMALL")));
         assertInvalid("EngineIntelligenceResponse", mutate(threeEngineResponse(), instance -> engines(instance).add(engineMap(
                 "velocity.primary",
                 "VELOCITY",
@@ -146,6 +147,19 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
                 "HIGH",
                 List.of("RAPID_TRANSFER_BURST_SIGNAL")
         ))));
+    }
+
+    @Test
+    void instanceValidationRejectsSharedInvalidResponseStatusCases() throws Exception {
+        for (Map<String, Object> semanticCase : sharedEngineIntelligenceFixture("invalid_semantic_cases.json")) {
+            if (!"engine-intelligence-response".equals(semanticCase.get("category"))) {
+                continue;
+            }
+
+            assertThat(validate("EngineIntelligenceResponse", semanticCase.get("engineIntelligenceResponse")))
+                    .as(semanticCase.get("caseId").toString())
+                    .isNotEmpty();
+        }
     }
 
     @Test
@@ -475,6 +489,10 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
         if (enginesById.containsKey("rules.primary") && enginesById.containsKey("ml.python.primary")) {
             errors.addAll(validateComparisonCoherence(comparison(instance), enginesById.get("rules.primary"), enginesById.get("ml.python.primary")));
         }
+        String expectedStatus = deriveResponseStatus(enginesById, list(instance.get("warnings")));
+        if (!expectedStatus.equals(status)) {
+            errors.add("engine intelligence response status must match projected engine health");
+        }
         for (Object signalObject : list(instance.get("diagnosticSignals"))) {
             Map<String, Object> signal = map(signalObject);
             Map<String, Object> engine = enginesById.get(signal.get("engineId").toString());
@@ -500,6 +518,26 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
             }
         }
         return errors;
+    }
+
+    private String deriveResponseStatus(Map<String, Map<String, Object>> enginesById, List<Object> warnings) {
+        if (!warnings.isEmpty()) {
+            return "DEGRADED";
+        }
+        if (!"AVAILABLE".equals(statusFor(enginesById, FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID))
+                || !"AVAILABLE".equals(statusFor(enginesById, FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID))) {
+            return "DEGRADED";
+        }
+        Object velocityStatus = statusFor(enginesById, FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID);
+        if (velocityStatus == null || "AVAILABLE".equals(velocityStatus) || "NOT_APPLICABLE".equals(velocityStatus)) {
+            return "AVAILABLE";
+        }
+        return "DEGRADED";
+    }
+
+    private Object statusFor(Map<String, Map<String, Object>> enginesById, String engineId) {
+        Map<String, Object> engine = enginesById.get(engineId);
+        return engine == null ? null : engine.get("status");
     }
 
     private List<String> validateComparisonCoherence(
@@ -563,22 +601,38 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
         if ("UNAVAILABLE".equals(scoreDeltaBucket)) {
             return false;
         }
-        if (rulesScoreBucket.equals(mlScoreBucket)) {
-            return !"LARGE".equals(scoreDeltaBucket);
-        }
-        if ("NONE".equals(scoreDeltaBucket)) {
-            return false;
-        }
-        if (("LOW".equals(rulesScoreBucket) && "VERY_HIGH".equals(mlScoreBucket))
-                || ("VERY_HIGH".equals(rulesScoreBucket) && "LOW".equals(mlScoreBucket))) {
-            return "LARGE".equals(scoreDeltaBucket);
-        }
-        return true;
+        int distance = Math.abs(scoreBucketSeverity(rulesScoreBucket) - scoreBucketSeverity(mlScoreBucket));
+        return switch (distance) {
+            case 0 -> !"LARGE".equals(scoreDeltaBucket);
+            case 1 -> !"NONE".equals(scoreDeltaBucket);
+            case 2 -> "MEDIUM".equals(scoreDeltaBucket) || "LARGE".equals(scoreDeltaBucket);
+            case 3 -> "LARGE".equals(scoreDeltaBucket);
+            default -> false;
+        };
+    }
+
+    private int scoreBucketSeverity(String scoreBucket) {
+        return switch (scoreBucket) {
+            case "LOW" -> 0;
+            case "MEDIUM" -> 1;
+            case "HIGH" -> 2;
+            case "VERY_HIGH" -> 3;
+            default -> -1;
+        };
     }
 
     private List<Map<String, Object>> publicApiFixture(String name) throws Exception {
         Map<String, Object> root = objectMapper.readValue(
                 publicApiFixturePath(name).toFile(),
+                new TypeReference<>() {
+                }
+        );
+        return list(root.get("cases"));
+    }
+
+    private List<Map<String, Object>> sharedEngineIntelligenceFixture(String name) throws Exception {
+        Map<String, Object> root = objectMapper.readValue(
+                sharedEngineIntelligenceFixturePath(name).toFile(),
                 new TypeReference<>() {
                 }
         );
@@ -599,6 +653,14 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
             return fromRoot;
         }
         return Path.of("..", "contract-fixtures", "public-api", name);
+    }
+
+    private Path sharedEngineIntelligenceFixturePath(String name) {
+        Path fromRoot = Path.of("common-events", "src", "test", "resources", "fixtures", "engine-intelligence", name);
+        if (Files.exists(fromRoot)) {
+            return fromRoot;
+        }
+        return Path.of("..", "common-events", "src", "test", "resources", "fixtures", "engine-intelligence", name);
     }
 
     private Map<String, Object> schemas() {

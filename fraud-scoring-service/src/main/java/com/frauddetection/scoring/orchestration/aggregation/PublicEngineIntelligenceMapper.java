@@ -31,7 +31,7 @@ public final class PublicEngineIntelligenceMapper {
                 EngineIntelligenceSummary.CONTRACT_VERSION,
                 result.generatedAt(),
                 engines,
-                mapComparison(engines),
+                mapComparison(result, engines),
                 result.strongestSignals().stream().map(this::mapDiagnosticSignal).toList(),
                 FraudEngineAggregationWarningSummarizer.summarize(result.warnings()).stream()
                         .map(summary -> new EngineIntelligenceWarningSummary(
@@ -54,14 +54,22 @@ public final class PublicEngineIntelligenceMapper {
         );
     }
 
-    private EngineIntelligenceComparison mapComparison(List<EngineIntelligenceEngineResult> engines) {
+    private EngineIntelligenceComparison mapComparison(
+            FraudEngineAggregationResult result,
+            List<EngineIntelligenceEngineResult> engines
+    ) {
         EngineIntelligenceEngineResult rules = engine(engines, FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID);
         EngineIntelligenceEngineResult ml = engine(engines, FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID);
         if (rules == null || ml == null || rules.status() != FraudEngineStatus.AVAILABLE) {
+            requireUnavailableDelta(result.scoreDelta());
             return operationalComparison(EngineIntelligenceAgreementStatus.REQUIRED_ENGINE_NOT_COMPARABLE);
         }
         if (ml.status() != FraudEngineStatus.AVAILABLE) {
+            requireUnavailableDelta(result.scoreDelta());
             return operationalComparison(EngineIntelligenceAgreementStatus.PARTIAL);
+        }
+        if (result.scoreDelta().status() != FraudEngineScoreDeltaStatus.AVAILABLE) {
+            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_COMPARISON_DELTA_INCONSISTENT");
         }
         EngineIntelligenceRiskMismatchStatus riskMismatch = riskMismatch(rules.riskLevel(), ml.riskLevel());
         return new EngineIntelligenceComparison(
@@ -69,8 +77,14 @@ public final class PublicEngineIntelligenceMapper {
                 FraudEngineIdentityContract.rulesVsMlComparisonEngineIds(),
                 agreement(riskMismatch),
                 riskMismatch,
-                deltaBucket(rules.scoreBucket(), ml.scoreBucket())
+                EngineIntelligenceScoreDeltaBucket.fromComparableDelta(result.scoreDelta().absoluteDelta())
         );
+    }
+
+    private void requireUnavailableDelta(FraudEngineScoreDelta scoreDelta) {
+        if (scoreDelta.status() == FraudEngineScoreDeltaStatus.AVAILABLE) {
+            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_COMPARISON_DELTA_INCONSISTENT");
+        }
     }
 
     private EngineIntelligenceComparison operationalComparison(EngineIntelligenceAgreementStatus agreementStatus) {
@@ -152,20 +166,6 @@ public final class PublicEngineIntelligenceMapper {
             case MATERIAL_RISK_MISMATCH -> EngineIntelligenceAgreementStatus.DISAGREEMENT;
             case NOT_COMPARABLE -> EngineIntelligenceAgreementStatus.REQUIRED_ENGINE_NOT_COMPARABLE;
         };
-    }
-
-    private EngineIntelligenceScoreDeltaBucket deltaBucket(
-            EngineIntelligenceScoreBucket rules,
-            EngineIntelligenceScoreBucket ml
-    ) {
-        if (rules == ml) {
-            return EngineIntelligenceScoreDeltaBucket.NONE;
-        }
-        if ((rules == EngineIntelligenceScoreBucket.LOW && ml == EngineIntelligenceScoreBucket.VERY_HIGH)
-                || (rules == EngineIntelligenceScoreBucket.VERY_HIGH && ml == EngineIntelligenceScoreBucket.LOW)) {
-            return EngineIntelligenceScoreDeltaBucket.LARGE;
-        }
-        return EngineIntelligenceScoreDeltaBucket.SMALL;
     }
 
     private int riskSeverity(RiskLevel riskLevel) {

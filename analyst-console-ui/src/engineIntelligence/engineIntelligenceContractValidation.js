@@ -127,7 +127,8 @@ export function isEngineIntelligenceResponseShape(value) {
     && value.diagnosticSignals.every(isDiagnosticSignalShape)
     && areDiagnosticSignalsCoherent(value.diagnosticSignals, value.engines)
     && isBoundedArray(value.warnings, MAX_ENGINE_INTELLIGENCE_WARNINGS)
-    && value.warnings.every((warning) => isWarningShape(warning));
+    && value.warnings.every((warning) => isWarningShape(warning))
+    && value.status === deriveEngineIntelligenceResponseStatus(value.engines, value.warnings);
 }
 
 export function isEngineShape(engine) {
@@ -230,6 +231,26 @@ export function areDiagnosticSignalsCoherent(signals, engines) {
       && signal.scoreBucket === "UNAVAILABLE"
       && engine.reasonCodes.includes(signal.reasonCode);
   });
+}
+
+export function deriveEngineIntelligenceResponseStatus(engines, warnings) {
+  if (!Array.isArray(engines) || !Array.isArray(warnings)) {
+    return "DEGRADED";
+  }
+  if (warnings.length > 0) {
+    return "DEGRADED";
+  }
+  const byEngineId = new Map(engines.map((engine) => [engine.engineId, engine]));
+  const rules = byEngineId.get("rules.primary");
+  const ml = byEngineId.get("ml.python.primary");
+  if (rules?.status !== "AVAILABLE" || ml?.status !== "AVAILABLE") {
+    return "DEGRADED";
+  }
+  const velocity = byEngineId.get("velocity.primary");
+  if (!velocity || velocity.status === "AVAILABLE" || velocity.status === "NOT_APPLICABLE") {
+    return "AVAILABLE";
+  }
+  return "DEGRADED";
 }
 
 export function isBoundedArray(value, maxLength) {
@@ -344,17 +365,24 @@ function deltaBucketCanDescribe(rulesScoreBucket, mlScoreBucket, scoreDeltaBucke
   if (scoreDeltaBucket === "UNAVAILABLE") {
     return false;
   }
-  if (rulesScoreBucket === mlScoreBucket) {
+  const distance = Math.abs(scoreBucketSeverity(rulesScoreBucket) - scoreBucketSeverity(mlScoreBucket));
+  if (distance === 0) {
     return scoreDeltaBucket !== "LARGE";
   }
-  if (scoreDeltaBucket === "NONE") {
-    return false;
+  if (distance === 1) {
+    return scoreDeltaBucket !== "NONE";
   }
-  if ((rulesScoreBucket === "LOW" && mlScoreBucket === "VERY_HIGH")
-    || (rulesScoreBucket === "VERY_HIGH" && mlScoreBucket === "LOW")) {
+  if (distance === 2) {
+    return scoreDeltaBucket === "MEDIUM" || scoreDeltaBucket === "LARGE";
+  }
+  if (distance === 3) {
     return scoreDeltaBucket === "LARGE";
   }
-  return true;
+  return false;
+}
+
+function scoreBucketSeverity(scoreBucket) {
+  return ["LOW", "MEDIUM", "HIGH", "VERY_HIGH"].indexOf(scoreBucket);
 }
 
 function hasControlCharacter(value) {

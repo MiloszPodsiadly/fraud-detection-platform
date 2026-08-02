@@ -332,6 +332,12 @@ describe("transactionRiskIntelligenceValidation", () => {
     })).valid).toBe(false);
   });
 
+  it.each(sharedInvalidEngineIntelligenceResponseCases())("rejects shared invalid response status case $caseId", ({ engineIntelligenceResponse }) => {
+    expect(validateTransactionRiskIntelligenceDetail(detail({
+      engineIntelligence: engineIntelligenceResponse
+    })).valid).toBe(false);
+  });
+
   it.each([
     ["offset timestamp", "2026-06-02T10:00:00+00:00"],
     ["twenty-four hour timestamp", "2026-06-02T24:00:00Z"],
@@ -657,6 +663,14 @@ function sharedInvalidEngineIntelligenceCases() {
     "../common-events/src/test/resources/fixtures/engine-intelligence/invalid_semantic_cases.json"
   ), "utf8")).cases
     .filter((semanticCase) => semanticCase.category === "engine-intelligence");
+}
+
+function sharedInvalidEngineIntelligenceResponseCases() {
+  return JSON.parse(readFileSync(resolve(
+    process.cwd(),
+    "../common-events/src/test/resources/fixtures/engine-intelligence/invalid_semantic_cases.json"
+  ), "utf8")).cases
+    .filter((semanticCase) => semanticCase.category === "engine-intelligence-response");
 }
 
 function timestampCases() {

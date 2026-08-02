@@ -33,6 +33,7 @@ public class RuleBasedFraudScoringEngine implements FraudScoringEngine {
     @Override
     public FraudScoreResult score(FraudScoringRequest request) {
         TransactionEnrichedEvent event = request.event();
+        RulesFeatureInputValidator.requireValid(event);
         double score = 0.05d;
         Map<String, Object> scoreDetails = new LinkedHashMap<>();
         Set<String> reasonCodes = new LinkedHashSet<>();

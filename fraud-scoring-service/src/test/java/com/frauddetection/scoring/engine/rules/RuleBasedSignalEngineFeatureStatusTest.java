@@ -17,6 +17,8 @@ import com.frauddetection.scoring.features.FeatureSnapshotReaderFactory;
 import com.frauddetection.scoring.features.FeatureSnapshotValueStatus;
 import com.frauddetection.scoring.service.RuleBasedFraudScoringEngine;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -61,20 +63,127 @@ class RuleBasedSignalEngineFeatureStatusTest {
     }
 
     @Test
-    void invalidSnapshotTypeForTypedEventFieldDoesNotDegradeAdapter() {
+    void invalidSnapshotTypeForTypedEventFieldDegradesWithoutTopLevelFallback() {
         TransactionEnrichedEvent event = event(false, false, false, 1, 0.1d, BigDecimal.TEN,
-                List.of(),
+                List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
                 Map.of(FraudFeatureContract.RECENT_TRANSACTION_COUNT, "5"));
-        FraudScoreResult production = productionEngine.score(FraudScoringRequest.from(event));
 
         FraudSignalEvaluation result = engine.evaluate(context(event));
 
+        assertDegradedInvalid(result);
+        assertThat(flatten(result)).doesNotContain("5");
+    }
+
+    @Test
+    void invalidSnapshotAmountTypeDegradesWithoutTopLevelMoneyFallback() {
+        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 2, 2.0d,
+                new BigDecimal("20000.00"),
+                List.of(FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY),
+                Map.of(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, "20000.00"
+                ))));
+
+        assertDegradedInvalid(result);
+        assertThat(flatten(result)).doesNotContain("20000.00");
+    }
+
+    @Test
+    void negativeCanonicalCountDegrades() {
+        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 5, 5.0d, BigDecimal.TEN,
+                List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
+                Map.of(FraudFeatureContract.RECENT_TRANSACTION_COUNT, -1))));
+
+        assertDegradedInvalid(result);
+    }
+
+    @Test
+    void negativeCanonicalAmountDegrades() {
+        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 2, 2.0d, BigDecimal.TEN,
+                List.of(FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY),
+                Map.of(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("-0.01")
+                ))));
+
+        assertDegradedInvalid(result);
+    }
+
+    @Test
+    void rapidTransferCountWithoutAmountDegradesWithoutCandidateFallback() {
+        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 2, 2.0d,
+                new BigDecimal("20000.00"),
+                List.of(FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST),
+                Map.of(
+                        FraudFeatureContract.RAPID_TRANSFER_COUNT, 2,
+                        FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true
+                ))));
+
+        assertDegradedInvalid(result);
+    }
+
+    @Test
+    void rapidTransferAmountWithoutCountDegrades() {
+        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 2, 2.0d,
+                new BigDecimal("20000.00"),
+                List.of(FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST),
+                Map.of(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("20000.00")))));
+
+        assertDegradedInvalid(result);
+    }
+
+    @Test
+    void canonicalCountConflictingWithTopLevelCountDegrades() {
+        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 5, 5.0d, BigDecimal.TEN,
+                List.of(),
+                Map.of(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 4))));
+
+        assertDegradedInvalid(result);
+    }
+
+    @Test
+    void canonicalAmountConflictingWithTopLevelRecentAmountDegrades() {
+        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 2, 2.0d,
+                new BigDecimal("100.00"),
+                List.of(),
+                Map.of(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("200.00")
+                ))));
+
+        assertDegradedInvalid(result);
+    }
+
+    @Test
+    void canonicalAmountConsistencyIsSemanticNotScaleSensitive() {
+        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 2, 2.0d,
+                new BigDecimal("20000.00"),
+                List.of(),
+                Map.of(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.0")
+                ))));
+
         assertThat(result.status()).isEqualTo(FraudEngineStatus.AVAILABLE);
-        assertThat(result.statusReason()).isNull();
-        assertThat(result.score()).isEqualTo(production.fraudScore());
-        assertThat(result.riskLevel()).isEqualTo(production.riskLevel());
-        assertThat(result.reasonCodes()).containsExactlyElementsOf(production.reasonCodes());
-        assertThat(result.reasonCodes()).isEmpty();
+        assertThat(result.reasonCodes()).contains(ReasonCode.HIGH_AMOUNT_ACTIVITY.wireValue());
+    }
+
+    @Test
+    void kafkaSerdeWrongCanonicalWireTypeRemainsDetectableAndDegrades() throws Exception {
+        JsonMapper mapper = JsonMapper.builder().findAndAddModules().build();
+        TransactionEnrichedEvent source = event(false, false, false, 5, 5.0d, BigDecimal.TEN,
+                List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
+                Map.of(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, BigDecimal.TEN
+                ));
+        ObjectNode root = mapper.valueToTree(source);
+        ((ObjectNode) root.path("featureSnapshot")).put(FraudFeatureContract.RECENT_TRANSACTION_COUNT, "5");
+        TransactionEnrichedEvent decoded = mapper.treeToValue(root, TransactionEnrichedEvent.class);
+
+        FraudSignalEvaluation result = engine.evaluate(context(decoded));
+
+        assertDegradedInvalid(result);
         assertThat(flatten(result)).doesNotContain("5");
     }
 
@@ -186,5 +295,14 @@ class RuleBasedSignalEngineFeatureStatusTest {
 
     private String flatten(FraudSignalEvaluation result) {
         return result.reasonCodes() + " " + result.contributions() + " " + result.evidence() + " " + result.statusReason();
+    }
+
+    private void assertDegradedInvalid(FraudSignalEvaluation result) {
+        assertThat(result.status()).isEqualTo(FraudEngineStatus.DEGRADED);
+        assertThat(result.score()).isNull();
+        assertThat(result.riskLevel()).isNull();
+        assertThat(result.confidence()).isEqualTo(com.frauddetection.common.events.engine.FraudEngineConfidence.UNKNOWN);
+        assertThat(result.statusReason()).isEqualTo(RuleBasedSignalReasonCode.FEATURE_STATUS_INVALID.wireValue());
+        assertThat(result.reasonCodes()).containsExactly(RuleBasedSignalReasonCode.FEATURE_STATUS_INVALID.wireValue());
     }
 }

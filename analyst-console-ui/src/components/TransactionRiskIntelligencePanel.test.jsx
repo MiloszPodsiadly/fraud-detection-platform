@@ -134,6 +134,20 @@ describe("TransactionRiskIntelligencePanel", () => {
   });
 
   it("renders engine results diagnostic signals and warnings sections", () => {
+    const detail = availableDetail();
+    useScoredTransactionDetail.mockReturnValue({
+      detail: {
+        ...detail,
+        engineIntelligence: {
+          ...detail.engineIntelligence,
+          status: "DEGRADED",
+          warnings: [{ warningCode: "ENGINE_RESULT_LIMIT_APPLIED", count: 1 }]
+        }
+      },
+      isLoading: false,
+      error: null
+    });
+
     renderPanel();
 
     expect(screen.getByRole("region", { name: "Engine Results" })).toHaveTextContent("rules.primary");

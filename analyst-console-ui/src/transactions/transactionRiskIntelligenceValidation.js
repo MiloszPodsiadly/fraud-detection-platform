@@ -173,6 +173,13 @@ export function validateTransactionRiskIntelligenceDetail(detail) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_WARNING");
   }
   if ((engineIntelligence.status === "AVAILABLE" || engineIntelligence.status === "DEGRADED")
+    && engineIntelligence.status !== engineIntelligenceContract.deriveEngineIntelligenceResponseStatus(
+      engineIntelligence.engines,
+      engineIntelligence.warnings
+    )) {
+    return invalid("INVALID_ENGINE_INTELLIGENCE_STATUS");
+  }
+  if ((engineIntelligence.status === "AVAILABLE" || engineIntelligence.status === "DEGRADED")
     && !engineIntelligenceContract.isComparisonCoherent(engineIntelligence.comparison, engineIntelligence.engines)) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_COMPARISON");
   }

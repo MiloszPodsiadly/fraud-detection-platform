@@ -184,21 +184,25 @@ final class EngineIntelligenceSummarySemanticPolicy {
         if (delta == EngineIntelligenceScoreDeltaBucket.UNAVAILABLE) {
             return false;
         }
-        if (rules == ml) {
-            return delta != EngineIntelligenceScoreDeltaBucket.LARGE;
-        }
-        if (delta == EngineIntelligenceScoreDeltaBucket.NONE) {
-            return false;
-        }
-        if (isExtremeBucketPair(rules, ml)) {
-            return delta == EngineIntelligenceScoreDeltaBucket.LARGE;
-        }
-        return true;
+        int distance = Math.abs(scoreBucketSeverity(rules) - scoreBucketSeverity(ml));
+        return switch (distance) {
+            case 0 -> delta != EngineIntelligenceScoreDeltaBucket.LARGE;
+            case 1 -> delta != EngineIntelligenceScoreDeltaBucket.NONE;
+            case 2 -> delta == EngineIntelligenceScoreDeltaBucket.MEDIUM
+                    || delta == EngineIntelligenceScoreDeltaBucket.LARGE;
+            case 3 -> delta == EngineIntelligenceScoreDeltaBucket.LARGE;
+            default -> false;
+        };
     }
 
-    private static boolean isExtremeBucketPair(EngineIntelligenceScoreBucket first, EngineIntelligenceScoreBucket second) {
-        return first == EngineIntelligenceScoreBucket.LOW && second == EngineIntelligenceScoreBucket.VERY_HIGH
-                || first == EngineIntelligenceScoreBucket.VERY_HIGH && second == EngineIntelligenceScoreBucket.LOW;
+    private static int scoreBucketSeverity(EngineIntelligenceScoreBucket bucket) {
+        return switch (bucket) {
+            case LOW -> 0;
+            case MEDIUM -> 1;
+            case HIGH -> 2;
+            case VERY_HIGH -> 3;
+            case NONE, UNAVAILABLE -> -1;
+        };
     }
 
     private static boolean isAvailable(EngineIntelligenceEngineResult engine) {

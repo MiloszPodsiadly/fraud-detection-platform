@@ -25,6 +25,7 @@ import java.util.Map;
 import java.util.stream.StreamSupport;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
 class RuleBasedFraudScoringEngineTest {
@@ -248,14 +249,7 @@ class RuleBasedFraudScoringEngineTest {
                 FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true
         ));
 
-        FraudScoreResult result = score(malformedCanonical);
-
-        assertThat(result.reasonCodes()).doesNotContain(
-                ReasonCode.HIGH_AMOUNT_ACTIVITY.wireValue(),
-                ReasonCode.RAPID_PLN_20K_BURST.wireValue()
-        );
-        assertThat(result.reasonCodes()).containsExactly(ReasonCode.HIGH_TRANSACTION_AMOUNT.wireValue());
-        assertThat(result.riskLevel()).isEqualTo(RiskLevel.LOW);
+        assertRulesInputInvalid(malformedCanonical);
     }
 
     @Test
@@ -274,10 +268,114 @@ class RuleBasedFraudScoringEngineTest {
                 FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5.5d
         ));
 
-        FraudScoreResult result = score(malformedCanonical);
+        assertRulesInputInvalid(malformedCanonical);
+    }
 
-        assertThat(result.reasonCodes()).doesNotContain(ReasonCode.HIGH_VELOCITY.wireValue());
-        assertThat(result.fraudScore()).isCloseTo(0.05d, within(0.000001d));
+    @Test
+    void canonicalCountStringWithValidTopLevelCountIsRejectedBeforeLowRiskScoring() {
+        TransactionEnrichedEvent source = event(
+                5,
+                5.0d,
+                new BigDecimal("100.00"),
+                new BigDecimal("500.00"),
+                List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
+                false,
+                false,
+                false
+        );
+        TransactionEnrichedEvent malformedCanonical = withFeatureSnapshot(source, Map.of(
+                FraudFeatureContract.RECENT_TRANSACTION_COUNT, "5"
+        ));
+
+        assertRulesInputInvalid(malformedCanonical);
+    }
+
+    @Test
+    void partialRapidTransferCanonicalPairIsRejectedBeforeLegacyFlagScoring() {
+        TransactionEnrichedEvent source = event(
+                2,
+                2.0d,
+                new BigDecimal("10000.00"),
+                new BigDecimal("20000.00"),
+                List.of(FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST),
+                false,
+                false,
+                false
+        );
+        TransactionEnrichedEvent malformedCanonical = withFeatureSnapshot(source, Map.of(
+                FraudFeatureContract.RAPID_TRANSFER_COUNT, 2,
+                FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true
+        ));
+
+        assertRulesInputInvalid(malformedCanonical);
+    }
+
+    @Test
+    void canonicalAmountEquivalentToTopLevelDifferentScaleIsAccepted() {
+        TransactionEnrichedEvent source = event(
+                2,
+                2.0d,
+                new BigDecimal("10000.00"),
+                new BigDecimal("20000.00"),
+                List.of(),
+                false,
+                false,
+                false
+        );
+        TransactionEnrichedEvent sameSemanticAmount = withFeatureSnapshot(source, Map.of(
+                FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
+                FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.0")
+        ));
+
+        FraudScoreResult result = score(sameSemanticAmount);
+
+        assertThat(result.reasonCodes()).contains(
+                ReasonCode.HIGH_AMOUNT_ACTIVITY.wireValue(),
+                ReasonCode.RAPID_PLN_20K_BURST.wireValue()
+        );
+    }
+
+    @Test
+    void canonicalPlnAmountDoesNotConflictWithNonPlnTopLevelRecentAmount() {
+        TransactionEnrichedEvent source = event(
+                2,
+                2.0d,
+                new BigDecimal("1000.00"),
+                new BigDecimal("6000.00"),
+                List.of(),
+                false,
+                false,
+                false
+        );
+        TransactionEnrichedEvent nonPlnTopLevel = new TransactionEnrichedEvent(
+                source.eventId(),
+                source.transactionId(),
+                source.correlationId(),
+                source.customerId(),
+                source.accountId(),
+                source.createdAt(),
+                source.transactionTimestamp(),
+                new Money(new BigDecimal("1000.00"), "USD"),
+                source.merchantInfo(),
+                source.deviceInfo(),
+                source.locationInfo(),
+                source.customerContext(),
+                source.recentTransactionCount(),
+                source.recentTransactionCountWindow(),
+                new Money(new BigDecimal("1000.00"), "USD"),
+                source.recentAmountSumWindow(),
+                source.transactionVelocityPerMinute(),
+                source.merchantFrequency7d(),
+                source.deviceNovelty(),
+                source.countryMismatch(),
+                source.proxyOrVpnDetected(),
+                source.featureFlags(),
+                source.featureSnapshot()
+        );
+
+        FraudScoreResult result = score(nonPlnTopLevel);
+
+        assertThat(result.reasonCodes()).contains(ReasonCode.HIGH_AMOUNT_ACTIVITY.wireValue());
     }
 
     @Test
@@ -299,6 +397,15 @@ class RuleBasedFraudScoringEngineTest {
 
     private FraudScoreResult score(TransactionEnrichedEvent event) {
         return engine.score(FraudScoringRequest.from(event));
+    }
+
+    private void assertRulesInputInvalid(TransactionEnrichedEvent event) {
+        assertThatThrownBy(() -> score(event))
+                .isInstanceOf(RulesFeatureInputValidationException.class)
+                .hasMessage("RULES_FEATURE_INPUT_INVALID")
+                .hasMessageNotContaining("5")
+                .hasMessageNotContaining("20000.00")
+                .hasMessageNotContaining("featureSnapshot");
     }
 
     private TransactionEnrichedEvent eventFrom(JsonNode baselineCase) {

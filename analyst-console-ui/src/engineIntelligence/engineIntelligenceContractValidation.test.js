@@ -42,6 +42,10 @@ describe("engineIntelligenceContractValidation", () => {
     expect(isValidEngineIntelligence(engineIntelligence)).toBe(false);
   });
 
+  it.each(sharedInvalidEngineIntelligenceResponseCases())("rejects shared invalid response status case $caseId", ({ engineIntelligenceResponse }) => {
+    expect(isEngineIntelligenceResponseShape(engineIntelligenceResponse)).toBe(false);
+  });
+
   it.each(timestampCases())("applies shared timestamp matrix $caseId", ({ value, valid }) => {
     expect(isCanonicalUtcTimestamp(value)).toBe(valid);
   });
@@ -70,6 +74,11 @@ function isValidEngineIntelligence(value) {
 function sharedInvalidEngineIntelligenceCases() {
   return sharedFixture("invalid_semantic_cases.json").cases
     .filter((semanticCase) => semanticCase.category === "engine-intelligence");
+}
+
+function sharedInvalidEngineIntelligenceResponseCases() {
+  return sharedFixture("invalid_semantic_cases.json").cases
+    .filter((semanticCase) => semanticCase.category === "engine-intelligence-response");
 }
 
 function sharedFixture(name) {

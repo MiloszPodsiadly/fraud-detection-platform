@@ -398,7 +398,7 @@ function availableEngineIntelligence(overrides = {}) {
       scoreBucket: "HIGH",
       reasonCode: "HIGH_VELOCITY"
     }],
-    warnings: [{ warningCode: "ENGINE_RESULT_LIMIT_APPLIED", count: 1 }],
+    warnings: [],
     ...overrides
   };
 }

@@ -22,12 +22,14 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCat
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.stream.StreamSupport;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -152,7 +154,7 @@ class EngineIntelligenceResponseMapperTest {
     }
 
     @Test
-    void skippedMapsToNotApplicableWithoutDegradingByItself() {
+    void requiredRulesSkippedMapsToNotApplicableAndDegradesTopLevelStatus() {
         EngineIntelligenceResponse skipped = mapper.toResponse(readModel(
                 FraudEngineStatus.SKIPPED,
                 FraudEngineStatus.AVAILABLE,
@@ -160,9 +162,52 @@ class EngineIntelligenceResponseMapperTest {
                 List.of()
         ));
 
-        assertThat(skipped.status()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
+        assertThat(skipped.status()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
         assertThat(skipped.engines()).extracting("status")
                 .contains(EngineIntelligenceEngineStatusResponse.NOT_APPLICABLE);
+    }
+
+    @Test
+    void requiredMlSkippedDegradesTopLevelStatus() {
+        EngineIntelligenceResponse skipped = mapper.toResponse(readModel(
+                FraudEngineStatus.AVAILABLE,
+                FraudEngineStatus.SKIPPED,
+                EngineIntelligenceAgreementStatus.PARTIAL,
+                List.of()
+        ));
+
+        assertThat(skipped.status()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
+        assertThat(skipped.engines()).extracting("status")
+                .contains(EngineIntelligenceEngineStatusResponse.NOT_APPLICABLE);
+    }
+
+    @Test
+    void optionalVelocitySkippedOrAbsentDoesNotDegradeHealthyRequiredEngines() {
+        EngineIntelligenceResponse absentVelocity = mapper.toResponse(readModel(
+                FraudEngineStatus.AVAILABLE,
+                FraudEngineStatus.AVAILABLE,
+                EngineIntelligenceAgreementStatus.AGREEMENT,
+                List.of()
+        ));
+        EngineIntelligenceResponse skippedVelocity = mapper.toResponse(readModelWithVelocity(
+                FraudEngineStatus.SKIPPED,
+                List.of()
+        ));
+
+        assertThat(absentVelocity.status()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
+        assertThat(skippedVelocity.status()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
+        assertThat(skippedVelocity.engines()).extracting("status")
+                .contains(EngineIntelligenceEngineStatusResponse.NOT_APPLICABLE);
+    }
+
+    @Test
+    void optionalVelocityAvailableKeepsAvailableAndOperationalFailureDegrades() {
+        assertThat(mapper.toResponse(readModelWithVelocity(FraudEngineStatus.AVAILABLE, List.of())).status())
+                .isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
+        assertThat(mapper.toResponse(readModelWithVelocity(FraudEngineStatus.DEGRADED, List.of())).status())
+                .isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
+        assertThat(mapper.toResponse(readModelWithVelocity(FraudEngineStatus.TIMEOUT, List.of())).status())
+                .isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
     }
 
     @Test
@@ -222,7 +267,8 @@ class EngineIntelligenceResponseMapperTest {
         assertThat(response.status()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
         assertThat(response.engines()).extracting("engineId")
                 .containsExactly("rules.primary", "ml.python.primary", "velocity.primary");
-        assertThat(response.diagnosticSignals()).extracting("engineId").containsExactly("velocity.primary");
+        assertThat(response.diagnosticSignals()).extracting("engineId")
+                .containsExactly("velocity.primary", "velocity.primary", "rules.primary", "ml.python.primary");
         assertThat(response.warnings()).isEmpty();
     }
 
@@ -258,6 +304,59 @@ class EngineIntelligenceResponseMapperTest {
         assertThat(fallback.status()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
         assertThat(fallback.engines()).extracting("status").contains(EngineIntelligenceEngineStatusResponse.DEGRADED);
         assertThat(emptyEngines.status()).isEqualTo(EngineIntelligenceResponseStatus.UNAVAILABLE);
+    }
+
+    @Test
+    void constructorRejectsContradictoryProjectedStatus() {
+        EngineIntelligenceResponse healthy = mapper.toResponse(readModel(
+                FraudEngineStatus.AVAILABLE,
+                FraudEngineStatus.AVAILABLE,
+                EngineIntelligenceAgreementStatus.AGREEMENT,
+                List.of()
+        ));
+        EngineIntelligenceResponse warning = mapper.toResponse(readModel(
+                FraudEngineStatus.AVAILABLE,
+                FraudEngineStatus.AVAILABLE,
+                EngineIntelligenceAgreementStatus.AGREEMENT,
+                List.of(new EngineIntelligenceWarningReadModel(EngineIntelligenceWarningCode.ENGINE_RESULT_LIMIT_APPLIED, 1))
+        ));
+        EngineIntelligenceResponse degradedRules = mapper.toResponse(readModel(
+                FraudEngineStatus.DEGRADED,
+                FraudEngineStatus.AVAILABLE,
+                EngineIntelligenceAgreementStatus.REQUIRED_ENGINE_NOT_COMPARABLE,
+                List.of()
+        ));
+        EngineIntelligenceResponse timeoutMl = mapper.toResponse(readModel(
+                FraudEngineStatus.AVAILABLE,
+                FraudEngineStatus.TIMEOUT,
+                EngineIntelligenceAgreementStatus.PARTIAL,
+                List.of()
+        ));
+
+        assertStatusRejected(EngineIntelligenceResponseStatus.AVAILABLE, warning);
+        assertStatusRejected(EngineIntelligenceResponseStatus.AVAILABLE, degradedRules);
+        assertStatusRejected(EngineIntelligenceResponseStatus.AVAILABLE, timeoutMl);
+        assertStatusRejected(EngineIntelligenceResponseStatus.DEGRADED, healthy);
+        assertStatusRejected(EngineIntelligenceResponseStatus.ABSENT, healthy);
+        assertStatusRejected(EngineIntelligenceResponseStatus.UNAVAILABLE, healthy);
+    }
+
+    @Test
+    void publicResponseRejectsSharedInvalidStatusFixtures() throws Exception {
+        JsonNode cases = objectMapper.readTree(fixturePath("invalid_semantic_cases.json").toFile()).get("cases");
+
+        for (JsonNode semanticCase : StreamSupport.stream(cases.spliterator(), false).toList()) {
+            if (!"engine-intelligence-response".equals(semanticCase.get("category").textValue())) {
+                continue;
+            }
+
+            assertThatThrownBy(() -> objectMapper.readValue(
+                    objectMapper.writeValueAsString(semanticCase.get("engineIntelligenceResponse")),
+                    EngineIntelligenceResponse.class
+            ))
+                    .as(semanticCase.get("caseId").textValue())
+                    .isInstanceOf(RuntimeException.class);
+        }
     }
 
     @Test
@@ -402,6 +501,52 @@ class EngineIntelligenceResponseMapperTest {
         );
     }
 
+    private EngineIntelligenceReadModel readModelWithVelocity(
+            FraudEngineStatus velocityStatus,
+            List<EngineIntelligenceWarningReadModel> warnings
+    ) {
+        return EngineIntelligenceReadModel.projected(
+                "txn-velocity",
+                1,
+                Instant.parse("2026-06-18T10:00:00Z"),
+                new EngineIntelligenceComparisonReadModel(
+                        EngineIntelligenceAgreementStatus.AGREEMENT,
+                        EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                        EngineIntelligenceScoreDeltaBucket.NONE
+                ),
+                List.of(
+                        engine("rules.primary", FraudEngineType.RULES, FraudEngineStatus.AVAILABLE, List.of("HIGH_VELOCITY")),
+                        engine("ml.python.primary", FraudEngineType.ML_MODEL, FraudEngineStatus.AVAILABLE, List.of("ML_MODEL_SIGNAL")),
+                        engine("velocity.primary", FraudEngineType.VELOCITY, velocityStatus, reasonCodesFor(FraudEngineType.VELOCITY, velocityStatus))
+                ),
+                List.of(new EngineIntelligenceDiagnosticSignalReadModel(
+                        "rules.primary",
+                        FraudEngineType.RULES,
+                        FraudEngineStatus.AVAILABLE,
+                        EngineIntelligenceSignalCategory.FRAUD_SIGNAL,
+                        RiskLevel.HIGH,
+                        EngineIntelligenceScoreBucket.HIGH,
+                        "HIGH_VELOCITY"
+                )),
+                warnings
+        );
+    }
+
+    private void assertStatusRejected(
+            EngineIntelligenceResponseStatus status,
+            EngineIntelligenceResponse source
+    ) {
+        assertThatThrownBy(() -> new EngineIntelligenceResponse(
+                status,
+                source.contractVersion(),
+                source.generatedAt(),
+                source.comparison(),
+                source.engines(),
+                source.diagnosticSignals(),
+                source.warnings()
+        )).isInstanceOf(IllegalArgumentException.class);
+    }
+
     private EngineIntelligenceReadModel readModelFrom(EngineIntelligenceSummary summary) {
         return EngineIntelligenceReadModel.projected(
                 "txn-golden",
@@ -440,9 +585,14 @@ class EngineIntelligenceResponseMapperTest {
     }
 
     private Path goldenFixturePath() {
+        return fixturePath("engine_intelligence_three_engine_golden.json");
+    }
+
+    private Path fixturePath(String fixtureName) {
         Path fromRoot = Path.of(
                 "common-events",
-                "src/test/resources/fixtures/engine-intelligence/engine_intelligence_three_engine_golden.json"
+                "src/test/resources/fixtures/engine-intelligence",
+                fixtureName
         );
         if (Files.exists(fromRoot)) {
             return fromRoot;
@@ -450,7 +600,8 @@ class EngineIntelligenceResponseMapperTest {
         return Path.of(
                 "..",
                 "common-events",
-                "src/test/resources/fixtures/engine-intelligence/engine_intelligence_three_engine_golden.json"
+                "src/test/resources/fixtures/engine-intelligence",
+                fixtureName
         );
     }
 

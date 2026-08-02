@@ -6,8 +6,10 @@ import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceEngineResult;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
@@ -22,6 +24,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PublicEngineIntelligenceMapperTest {
     private final FraudEngineAggregationService service =
@@ -74,14 +77,94 @@ class PublicEngineIntelligenceMapperTest {
         EngineIntelligenceSummary actual = mapper.map(service.aggregate(AggregationTestSupport.orchestration(
                 AggregationTestSupport.available("rules.primary", 0.75d, RiskLevel.HIGH, "HIGH_VELOCITY"),
                 AggregationTestSupport.available("ml.python.primary", 0.25d, RiskLevel.LOW, "LOW_MODEL_RISK"),
-                AggregationTestSupport.available("velocity.primary", 0.95d, RiskLevel.CRITICAL, "RAPID_PLN_20K_BURST")
+                AggregationTestSupport.available(
+                        "velocity.primary",
+                        0.95d,
+                        RiskLevel.CRITICAL,
+                        "RAPID_PLN_20K_BURST",
+                        "TRANSACTION_VELOCITY"
+                )
         )));
 
-        assertThat(actual.engines()).extracting("engineId")
-                .containsExactlyElementsOf(expected.engines().stream().map(engine -> engine.engineId()).toList());
-        assertThat(actual.engines()).extracting("engineType")
-                .containsExactlyElementsOf(expected.engines().stream().map(engine -> engine.engineType()).toList());
-        assertThat(actual.warnings()).isEqualTo(expected.warnings());
+        assertThat(actual).usingRecursiveComparison().isEqualTo(expected);
+        assertThat(actual.comparison().scoreDeltaBucket()).isEqualTo(EngineIntelligenceScoreDeltaBucket.LARGE);
+    }
+
+    @Test
+    void mapsScoreDeltaBucketFromExactAggregationDeltaNotPublicScoreBuckets() {
+        EngineIntelligenceSummary samePublicBucketMediumDelta =
+                map(0.26d, RiskLevel.HIGH, 0.50d, RiskLevel.HIGH);
+        EngineIntelligenceSummary lowHighLargeDelta =
+                map(0.10d, RiskLevel.HIGH, 0.60d, RiskLevel.LOW);
+
+        assertThat(samePublicBucketMediumDelta.engines()).extracting(EngineIntelligenceEngineResult::scoreBucket)
+                .containsExactly(EngineIntelligenceScoreBucket.MEDIUM, EngineIntelligenceScoreBucket.MEDIUM);
+        assertThat(samePublicBucketMediumDelta.comparison().scoreDeltaBucket())
+                .isEqualTo(EngineIntelligenceScoreDeltaBucket.MEDIUM);
+        assertThat(lowHighLargeDelta.engines()).extracting(EngineIntelligenceEngineResult::scoreBucket)
+                .containsExactly(EngineIntelligenceScoreBucket.LOW, EngineIntelligenceScoreBucket.HIGH);
+        assertThat(lowHighLargeDelta.comparison().scoreDeltaBucket())
+                .isEqualTo(EngineIntelligenceScoreDeltaBucket.LARGE);
+    }
+
+    @Test
+    void mapsExactComparableDeltaBoundaries() {
+        assertScoreDeltaBucket(0.50d, 0.50d, EngineIntelligenceScoreDeltaBucket.NONE);
+        assertScoreDeltaBucket(0.15d, 0.00d, EngineIntelligenceScoreDeltaBucket.SMALL);
+        assertScoreDeltaBucket(0.1501d, 0.00d, EngineIntelligenceScoreDeltaBucket.MEDIUM);
+        assertScoreDeltaBucket(0.35d, 0.00d, EngineIntelligenceScoreDeltaBucket.MEDIUM);
+        assertScoreDeltaBucket(0.3501d, 0.00d, EngineIntelligenceScoreDeltaBucket.LARGE);
+        assertScoreDeltaBucket(1.00d, 0.00d, EngineIntelligenceScoreDeltaBucket.LARGE);
+    }
+
+    @Test
+    void mapsOperationalRulesOrMlDeltaAsUnavailable() {
+        var summary = mapper.map(service.aggregate(AggregationTestSupport.orchestration(
+                AggregationTestSupport.available("rules.primary", 0.8d, RiskLevel.HIGH, "HIGH_VELOCITY"),
+                AggregationTestSupport.unavailable(
+                        "ml.python.primary",
+                        FraudEngineStatus.TIMEOUT,
+                        "ML_MODEL_TIMEOUT"
+                )
+        )));
+
+        assertThat(summary.comparison().scoreDeltaBucket()).isEqualTo(EngineIntelligenceScoreDeltaBucket.UNAVAILABLE);
+    }
+
+    @Test
+    void rejectsAvailableRulesAndMlWhenAggregationDeltaIsUnavailable() {
+        assertThatThrownBy(() -> mapper.map(new FraudEngineAggregationResult(
+                requiredAvailableRulesAndMl(),
+                FraudEngineAgreementStatus.AGREEMENT,
+                new FraudEngineScoreDelta(FraudEngineScoreDeltaStatus.UNAVAILABLE_MISSING_SCORE, null),
+                new FraudEngineRiskMismatch(FraudEngineRiskMismatchStatus.SAME_RISK_LEVEL),
+                List.of(),
+                List.of(),
+                AggregationTestSupport.GENERATED_AT
+        ))).hasMessage("ENGINE_INTELLIGENCE_COMPARISON_DELTA_INCONSISTENT");
+    }
+
+    @Test
+    void rejectsOperationalRulesOrMlWhenAggregationDeltaIsAvailable() {
+        assertThatThrownBy(() -> mapper.map(new FraudEngineAggregationResult(
+                List.of(
+                        availableRules(),
+                        AggregationTestSupport.normalized(
+                                "ml.python.primary",
+                                FraudEngineStatus.TIMEOUT,
+                                null,
+                                null,
+                                "ML_MODEL_TIMEOUT"
+                        )
+                ),
+                FraudEngineAgreementStatus.PARTIAL,
+                new FraudEngineScoreDelta(FraudEngineScoreDeltaStatus.AVAILABLE, 0.1d),
+                new FraudEngineRiskMismatch(FraudEngineRiskMismatchStatus.NOT_COMPARABLE),
+                List.of(),
+                List.of(),
+                AggregationTestSupport.GENERATED_AT
+        ))).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("ENGINE_INTELLIGENCE_COMPARISON_DELTA_INCONSISTENT");
     }
 
     @Test
@@ -307,11 +390,21 @@ class PublicEngineIntelligenceMapperTest {
         )));
     }
 
+    private void assertScoreDeltaBucket(
+            double rulesScore,
+            double mlScore,
+            EngineIntelligenceScoreDeltaBucket expected
+    ) {
+        assertThat(map(rulesScore, RiskLevel.HIGH, mlScore, RiskLevel.HIGH).comparison().scoreDeltaBucket())
+                .isEqualTo(expected);
+    }
+
     private FraudEngineAggregationResult resultWithNormalizedEngine(NormalizedFraudEngineResult normalized) {
+        List<NormalizedFraudEngineResult> engines = requiredEnginesIncluding(normalized);
         return new FraudEngineAggregationResult(
-                requiredEnginesIncluding(normalized),
+                engines,
                 FraudEngineAgreementStatus.INSUFFICIENT_DATA,
-                new FraudEngineScoreDelta(FraudEngineScoreDeltaStatus.UNAVAILABLE_MISSING_SCORE, null),
+                scoreDeltaFor(engines),
                 new FraudEngineRiskMismatch(FraudEngineRiskMismatchStatus.NOT_COMPARABLE),
                 List.of(),
                 List.of(),
@@ -341,7 +434,7 @@ class PublicEngineIntelligenceMapperTest {
         return new FraudEngineAggregationResult(
                 requiredAvailableRulesAndMl(),
                 FraudEngineAgreementStatus.INSUFFICIENT_DATA,
-                new FraudEngineScoreDelta(FraudEngineScoreDeltaStatus.UNAVAILABLE_MISSING_SCORE, null),
+                new FraudEngineScoreDelta(FraudEngineScoreDeltaStatus.AVAILABLE, 0.0d),
                 new FraudEngineRiskMismatch(FraudEngineRiskMismatchStatus.NOT_COMPARABLE),
                 List.of(),
                 warnings,
@@ -405,6 +498,32 @@ class PublicEngineIntelligenceMapperTest {
 
     private List<NormalizedFraudEngineResult> requiredAvailableRulesAndMl() {
         return List.of(availableRules(), availableMl());
+    }
+
+    private FraudEngineScoreDelta scoreDeltaFor(List<NormalizedFraudEngineResult> engines) {
+        NormalizedFraudEngineResult rules = normalizedEngine(engines, "rules.primary");
+        NormalizedFraudEngineResult ml = normalizedEngine(engines, "ml.python.primary");
+        if (publiclyAvailable(rules) && publiclyAvailable(ml)) {
+            return new FraudEngineScoreDelta(
+                    FraudEngineScoreDeltaStatus.AVAILABLE,
+                    Math.abs(rules.score() - ml.score())
+            );
+        }
+        return new FraudEngineScoreDelta(FraudEngineScoreDeltaStatus.UNAVAILABLE_MISSING_SCORE, null);
+    }
+
+    private NormalizedFraudEngineResult normalizedEngine(List<NormalizedFraudEngineResult> engines, String engineId) {
+        return engines.stream()
+                .filter(engine -> engineId.equals(engine.engineId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private boolean publiclyAvailable(NormalizedFraudEngineResult engine) {
+        return engine != null
+                && engine.status() == FraudEngineStatus.AVAILABLE
+                && engine.score() != null
+                && engine.riskLevel() != null;
     }
 
     private NormalizedFraudEngineResult availableRules() {

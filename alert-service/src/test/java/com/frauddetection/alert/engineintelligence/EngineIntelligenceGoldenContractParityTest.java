@@ -63,7 +63,12 @@ class EngineIntelligenceGoldenContractParityTest {
         assertThat(response.comparison().comparedEngineIds())
                 .containsExactlyElementsOf(FraudEngineIdentityContract.rulesVsMlComparisonEngineIds());
         assertThat(response.diagnosticSignals()).extracting(signal -> signal.engineId())
-                .containsExactly(FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID);
+                .containsExactly(
+                        FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID,
+                        FraudEngineIdentityContract.VELOCITY_PRIMARY_ENGINE_ID,
+                        FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                        FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID
+                );
     }
 
     @Test
