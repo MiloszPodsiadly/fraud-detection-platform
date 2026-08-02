@@ -1,5 +1,8 @@
 package com.frauddetection.common.events.intelligence;
 
+import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.common.events.engine.FraudEngineType;
+import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.RecordComponent;
@@ -61,12 +64,15 @@ class EngineIntelligenceSummaryTest {
 
     @Test
     void defensivelyCopiesListsAndRejectsNullEntries() {
-        List<EngineIntelligenceEngineResult> engines = new ArrayList<>(List.of(EngineIntelligenceTestSupport.engine()));
+        List<EngineIntelligenceEngineResult> engines = new ArrayList<>(List.of(
+                EngineIntelligenceTestSupport.rulesEngine(),
+                EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH)
+        ));
         EngineIntelligenceSummary summary = EngineIntelligenceTestSupport.summary(engines, List.of(), List.of());
 
         engines.clear();
 
-        assertThat(summary.engines()).hasSize(1);
+        assertThat(summary.engines()).hasSize(2);
         assertThatThrownBy(() -> EngineIntelligenceTestSupport.summary(
                 Arrays.asList((EngineIntelligenceEngineResult) null),
                 List.of(),
@@ -89,11 +95,86 @@ class EngineIntelligenceSummaryTest {
         )).hasMessage("ENGINE_INTELLIGENCE_COMPARISON_ENGINE_IDS_INVALID");
     }
 
+    @Test
+    void rejectsSummaryMissingRequiredRulesOrMlEngines() {
+        assertThatThrownBy(() -> EngineIntelligenceTestSupport.summary(List.of(), List.of(), List.of()))
+                .hasMessage("ENGINE_INTELLIGENCE_REQUIRED_ENGINES_MISSING");
+        assertThatThrownBy(() -> EngineIntelligenceTestSupport.summary(
+                List.of(EngineIntelligenceTestSupport.rulesEngine()),
+                List.of(),
+                List.of()
+        )).hasMessage("ENGINE_INTELLIGENCE_REQUIRED_ENGINES_MISSING");
+    }
+
+    @Test
+    void rejectsComparisonContradictingAvailableRulesAndMlRisk() {
+        assertThatThrownBy(() -> new EngineIntelligenceSummary(
+                EngineIntelligenceSummary.CONTRACT_VERSION,
+                EngineIntelligenceTestSupport.GENERATED_AT,
+                List.of(
+                        EngineIntelligenceTestSupport.rulesEngine(),
+                        EngineIntelligenceTestSupport.mlEngine(RiskLevel.LOW, EngineIntelligenceScoreBucket.LOW)
+                ),
+                new EngineIntelligenceComparison(
+                        EngineIntelligenceAgreementStatus.AGREEMENT,
+                        EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                        EngineIntelligenceScoreDeltaBucket.LARGE
+                ),
+                List.of(),
+                List.of()
+        )).hasMessage("ENGINE_INTELLIGENCE_COMPARISON_RISK_MISMATCH_INCONSISTENT");
+    }
+
+    @Test
+    void rejectsOrdinaryAgreementWhenRequiredEngineIsOperationallyUnavailable() {
+        assertThatThrownBy(() -> new EngineIntelligenceSummary(
+                EngineIntelligenceSummary.CONTRACT_VERSION,
+                EngineIntelligenceTestSupport.GENERATED_AT,
+                List.of(
+                        EngineIntelligenceTestSupport.rulesEngine(),
+                        EngineIntelligenceTestSupport.operationalMl(FraudEngineStatus.TIMEOUT)
+                ),
+                new EngineIntelligenceComparison(
+                        EngineIntelligenceAgreementStatus.AGREEMENT,
+                        EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                        EngineIntelligenceScoreDeltaBucket.SMALL
+                ),
+                List.of(),
+                List.of()
+        )).hasMessage("ENGINE_INTELLIGENCE_COMPARISON_OPERATIONAL_INCONSISTENT");
+    }
+
+    @Test
+    void rejectsDiagnosticSignalForAbsentOrContradictoryEngine() {
+        assertThatThrownBy(() -> new EngineIntelligenceSummary(
+                EngineIntelligenceSummary.CONTRACT_VERSION,
+                EngineIntelligenceTestSupport.GENERATED_AT,
+                List.of(
+                        EngineIntelligenceTestSupport.rulesEngine(),
+                        EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH)
+                ),
+                EngineIntelligenceTestSupport.comparison(),
+                List.of(new EngineIntelligenceDiagnosticSignal(
+                        "velocity.primary",
+                        FraudEngineType.VELOCITY,
+                        FraudEngineStatus.AVAILABLE,
+                        EngineIntelligenceSignalCategory.FRAUD_SIGNAL,
+                        RiskLevel.HIGH,
+                        EngineIntelligenceScoreBucket.HIGH,
+                        "RAPID_PLN_20K_BURST"
+                )),
+                List.of()
+        )).hasMessage("ENGINE_INTELLIGENCE_DIAGNOSTIC_ENGINE_ABSENT");
+    }
+
     private void assertInvalidVersion(int version) {
         assertThatThrownBy(() -> new EngineIntelligenceSummary(
                 version,
                 EngineIntelligenceTestSupport.GENERATED_AT,
-                List.of(),
+                List.of(
+                        EngineIntelligenceTestSupport.rulesEngine(),
+                        EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH)
+                ),
                 EngineIntelligenceTestSupport.comparison(),
                 List.of(),
                 List.of()

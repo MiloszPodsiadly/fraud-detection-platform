@@ -1,5 +1,6 @@
 package com.frauddetection.alert.feedback;
 
+import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparison;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
@@ -32,7 +33,7 @@ public class FraudFeedbackMapper {
                 record.getAlertRecommended(),
                 record.getScoredAt(),
                 record.getTransactionTimestamp(),
-                record.getEngineIntelligenceStatus(),
+                safeEngineIntelligenceStatus(record, comparison),
                 comparison.comparisonType(),
                 comparison.comparedEngineIds(),
                 comparison.agreementStatus(),
@@ -63,11 +64,24 @@ public class FraudFeedbackMapper {
                     comparison.comparedEngineIds(),
                     comparison.agreementStatus(),
                     comparison.riskMismatchStatus(),
-                    comparison.scoreDeltaBucket()
+                    comparison.scoreDeltaBucket(),
+                    false
             );
         } catch (RuntimeException exception) {
-            return EngineIntelligenceComparisonSnapshot.absent();
+            return EngineIntelligenceComparisonSnapshot.corruptSnapshot();
         }
+    }
+
+    private static EngineIntelligenceResponseStatus safeEngineIntelligenceStatus(
+            FraudFeedbackRecord record,
+            EngineIntelligenceComparisonSnapshot comparison
+    ) {
+        if (comparison.corruptionDetected()
+                && (record.getEngineIntelligenceStatus() == EngineIntelligenceResponseStatus.AVAILABLE
+                || record.getEngineIntelligenceStatus() == EngineIntelligenceResponseStatus.DEGRADED)) {
+            return EngineIntelligenceResponseStatus.UNAVAILABLE;
+        }
+        return record.getEngineIntelligenceStatus();
     }
 
     private static boolean hasComparisonSnapshot(FraudFeedbackRecord record) {
@@ -87,10 +101,15 @@ public class FraudFeedbackMapper {
             List<String> comparedEngineIds,
             EngineIntelligenceAgreementStatus agreementStatus,
             EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
-            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket
+            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket,
+            boolean corruptionDetected
     ) {
         private static EngineIntelligenceComparisonSnapshot absent() {
-            return new EngineIntelligenceComparisonSnapshot(null, List.of(), null, null, null);
+            return new EngineIntelligenceComparisonSnapshot(null, List.of(), null, null, null, false);
+        }
+
+        private static EngineIntelligenceComparisonSnapshot corruptSnapshot() {
+            return new EngineIntelligenceComparisonSnapshot(null, List.of(), null, null, null, true);
         }
 
         private EngineIntelligenceComparisonSnapshot {

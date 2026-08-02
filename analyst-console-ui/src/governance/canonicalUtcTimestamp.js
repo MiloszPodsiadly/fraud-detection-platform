@@ -1,4 +1,4 @@
-const CANONICAL_UTC_TIMESTAMP_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?Z$/;
+const CANONICAL_UTC_TIMESTAMP_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?Z$/;
 
 export function isCanonicalUtcTimestamp(value) {
   return parseCanonicalUtcTimestamp(value) !== null;
@@ -31,7 +31,7 @@ function parseCanonicalUtcTimestamp(value) {
   if (day < 1 || day > daysInMonth(year, month)) {
     return null;
   }
-  return [year, month, day, hour, minute, second, microseconds(fractionText)];
+  return [year, month, day, hour, minute, second, nanoseconds(fractionText)];
 }
 
 function daysInMonth(year, month) {
@@ -45,11 +45,11 @@ function isLeapYear(year) {
   return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
 }
 
-function microseconds(fractionText) {
+function nanoseconds(fractionText) {
   if (!fractionText) {
     return 0;
   }
-  return Number(`${fractionText}000000`.slice(0, 6));
+  return Number(`${fractionText}000000000`.slice(0, 9));
 }
 
 function compareTimestampParts(left, right) {

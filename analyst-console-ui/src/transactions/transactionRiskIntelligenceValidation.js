@@ -128,6 +128,21 @@ export function validateTransactionRiskIntelligenceDetail(detail) {
     ) {
       return invalid("INVALID_ENGINE_INTELLIGENCE_METADATA");
     }
+    if (engineIntelligence.comparison === null) {
+      return invalid("INVALID_ENGINE_INTELLIGENCE_COMPARISON");
+    }
+  } else if (
+    engineIntelligence.contractVersion !== null
+    || engineIntelligence.generatedAt !== null
+    || engineIntelligence.comparison !== null
+    || !Array.isArray(engineIntelligence.engines)
+    || engineIntelligence.engines.length !== 0
+    || !Array.isArray(engineIntelligence.diagnosticSignals)
+    || engineIntelligence.diagnosticSignals.length !== 0
+    || !Array.isArray(engineIntelligence.warnings)
+    || engineIntelligence.warnings.length !== 0
+  ) {
+    return invalid("INVALID_ENGINE_INTELLIGENCE_EMPTY_STATE");
   }
   if (engineIntelligence.comparison !== null && !isComparisonShape(engineIntelligence.comparison)) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_COMPARISON");
@@ -141,6 +156,10 @@ export function validateTransactionRiskIntelligenceDetail(detail) {
   if (!hasUniqueCanonicalEngineOrder(engineIntelligence.engines)) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_ENGINE_ORDER");
   }
+  if ((engineIntelligence.status === "AVAILABLE" || engineIntelligence.status === "DEGRADED")
+    && !engineIntelligenceContract.hasRequiredRulesMlEngineSet(engineIntelligence.engines)) {
+    return invalid("INVALID_ENGINE_INTELLIGENCE_ENGINE_ORDER");
+  }
   if (!isBoundedArray(engineIntelligence.diagnosticSignals, engineIntelligenceContract.MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS)) {
     return invalid("DIAGNOSTIC_SIGNAL_LIMIT_EXCEEDED");
   }
@@ -152,6 +171,13 @@ export function validateTransactionRiskIntelligenceDetail(detail) {
   }
   if (!engineIntelligence.warnings.every(isWarningShape)) {
     return invalid("INVALID_ENGINE_INTELLIGENCE_WARNING");
+  }
+  if ((engineIntelligence.status === "AVAILABLE" || engineIntelligence.status === "DEGRADED")
+    && !engineIntelligenceContract.isComparisonCoherent(engineIntelligence.comparison, engineIntelligence.engines)) {
+    return invalid("INVALID_ENGINE_INTELLIGENCE_COMPARISON");
+  }
+  if (!engineIntelligenceContract.areDiagnosticSignalsCoherent(engineIntelligence.diagnosticSignals, engineIntelligence.engines)) {
+    return invalid("INVALID_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNAL");
   }
   const analystRecommendationValidation = validateAnalystRecommendation(detail.analystRecommendation);
   if (!analystRecommendationValidation.valid) {

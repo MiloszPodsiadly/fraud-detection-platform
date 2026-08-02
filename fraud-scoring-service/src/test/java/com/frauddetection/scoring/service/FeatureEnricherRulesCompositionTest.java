@@ -3,6 +3,8 @@ package com.frauddetection.scoring.service;
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.features.FraudFeatureContract;
+import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
+import com.frauddetection.common.events.kafka.JacksonKafkaSerializer;
 import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
@@ -22,6 +24,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
@@ -34,6 +37,9 @@ class FeatureEnricherRulesCompositionTest {
     private final RuleBasedFraudScoringEngine rules = new RuleBasedFraudScoringEngine(
             new ScoringProperties(0.75d, 0.90d, ScoringMode.RULE_BASED)
     );
+    private final JacksonKafkaSerializer<TransactionEnrichedEvent> serializer = new JacksonKafkaSerializer<>();
+    private final JacksonKafkaDeserializer<TransactionEnrichedEvent> deserializer =
+            new JacksonKafkaDeserializer<>(TransactionEnrichedEvent.class);
 
     @Test
     void officialCountFiveProducerOutputPreservesRulesV1MediumScoreWithoutHighVelocityFlag() {
@@ -100,6 +106,36 @@ class FeatureEnricherRulesCompositionTest {
         assertThat(afterDiagnosticRuntime.reasonCodes()).containsExactlyElementsOf(beforeDiagnosticRuntime.reasonCodes());
     }
 
+    @Test
+    void officialFeatureEnricherKafkaReplayFeedsRulesAndVelocityWithTheSameNormalizedSnapshot() {
+        TransactionEnrichedEvent produced = officialEvent(4, BigDecimal.ZERO, new BigDecimal("100.00"));
+        TransactionEnrichedEvent replayed = kafkaReplay(produced);
+        Map<String, Object> replayedSnapshot = replayed.featureSnapshot();
+
+        FraudScoreResult rulesResult = score(replayed);
+        var velocity = new VelocitySignalEngine(new FeatureSnapshotReaderFactory()).evaluate(new ScoringContext(
+                replayed,
+                replayedSnapshot,
+                ScoringMode.RULE_BASED,
+                replayed.correlationId(),
+                RECEIVED_AT
+        ));
+
+        assertThat(replayedSnapshot.get(FraudFeatureContract.RECENT_TRANSACTION_COUNT))
+                .isEqualTo(5)
+                .isExactlyInstanceOf(Integer.class);
+        assertThat(replayedSnapshot.get(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE))
+                .isEqualTo(5.0d)
+                .isExactlyInstanceOf(Double.class);
+        assertThat(replayedSnapshot.get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN))
+                .isEqualTo(new BigDecimal("100.00"))
+                .isExactlyInstanceOf(BigDecimal.class);
+        assertThat(rulesResult.featureSnapshot()).isEqualTo(replayedSnapshot);
+        assertThat(rulesResult.fraudScore()).isCloseTo(0.47d, within(0.000001d));
+        assertThat(rulesResult.riskLevel()).isEqualTo(RiskLevel.MEDIUM);
+        assertThat(velocity.reasonCodes()).containsExactly("TRANSACTION_VELOCITY");
+    }
+
     private TransactionEnrichedEvent officialEvent(int previousCount, BigDecimal previousAmountPln, BigDecimal currentAmountPln) {
         var raw = TransactionFixtures.rawTransaction()
                 .withAmount(currentAmountPln, "PLN")
@@ -146,6 +182,11 @@ class FeatureEnricherRulesCompositionTest {
                 List.copyOf(flags),
                 source.featureSnapshot()
         );
+    }
+
+    private TransactionEnrichedEvent kafkaReplay(TransactionEnrichedEvent event) {
+        byte[] bytes = serializer.serialize("transactions.enriched", event);
+        return deserializer.deserialize("transactions.enriched", bytes);
     }
 
     private void assertSameCoreResult(TransactionEnrichedEvent left, TransactionEnrichedEvent right) {

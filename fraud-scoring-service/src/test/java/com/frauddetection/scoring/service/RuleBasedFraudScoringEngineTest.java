@@ -209,6 +209,78 @@ class RuleBasedFraudScoringEngineTest {
     }
 
     @Test
+    void absentCanonicalRapidFactStillAllowsLegacyCandidateFallback() {
+        TransactionEnrichedEvent source = event(
+                2,
+                2.0d,
+                new BigDecimal("10000.00"),
+                new BigDecimal("20000.00"),
+                List.of(),
+                false,
+                false,
+                false
+        );
+        TransactionEnrichedEvent legacyCandidateOnly = withFeatureSnapshot(source, Map.of(
+                FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true
+        ));
+
+        FraudScoreResult result = score(legacyCandidateOnly);
+
+        assertThat(result.reasonCodes()).contains(ReasonCode.RAPID_PLN_20K_BURST.wireValue());
+        assertThat(result.fraudScore()).isCloseTo(0.94d, within(0.000001d));
+    }
+
+    @Test
+    void malformedPresentCanonicalRapidFactFailsClosedWithoutLegacyCandidateFallback() {
+        TransactionEnrichedEvent source = event(
+                2,
+                2.0d,
+                new BigDecimal("10000.00"),
+                new BigDecimal("20000.00"),
+                List.of(FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST),
+                false,
+                false,
+                false
+        );
+        TransactionEnrichedEvent malformedCanonical = withFeatureSnapshot(source, Map.of(
+                FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
+                FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, "20000.00",
+                FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true
+        ));
+
+        FraudScoreResult result = score(malformedCanonical);
+
+        assertThat(result.reasonCodes()).doesNotContain(
+                ReasonCode.HIGH_AMOUNT_ACTIVITY.wireValue(),
+                ReasonCode.RAPID_PLN_20K_BURST.wireValue()
+        );
+        assertThat(result.reasonCodes()).containsExactly(ReasonCode.HIGH_TRANSACTION_AMOUNT.wireValue());
+        assertThat(result.riskLevel()).isEqualTo(RiskLevel.LOW);
+    }
+
+    @Test
+    void malformedPresentCanonicalCountFailsClosedWithoutHighVelocityFlagFallback() {
+        TransactionEnrichedEvent source = event(
+                5,
+                5.0d,
+                new BigDecimal("100.00"),
+                new BigDecimal("500.00"),
+                List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
+                false,
+                false,
+                false
+        );
+        TransactionEnrichedEvent malformedCanonical = withFeatureSnapshot(source, Map.of(
+                FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5.5d
+        ));
+
+        FraudScoreResult result = score(malformedCanonical);
+
+        assertThat(result.reasonCodes()).doesNotContain(ReasonCode.HIGH_VELOCITY.wireValue());
+        assertThat(result.fraudScore()).isCloseTo(0.05d, within(0.000001d));
+    }
+
+    @Test
     void shouldUseCanonicalReasonCodeTaxonomyInsteadOfRawReasonCodeStrings() throws IOException {
         String source = Files.readString(Path.of("src/main/java/com/frauddetection/scoring/service/RuleBasedFraudScoringEngine.java"));
 
@@ -315,6 +387,34 @@ class RuleBasedFraudScoringEngineTest {
                 source.proxyOrVpnDetected(),
                 List.copyOf(featureFlags),
                 source.featureSnapshot()
+        );
+    }
+
+    private TransactionEnrichedEvent withFeatureSnapshot(TransactionEnrichedEvent source, Map<String, Object> featureSnapshot) {
+        return new TransactionEnrichedEvent(
+                source.eventId(),
+                source.transactionId(),
+                source.correlationId(),
+                source.customerId(),
+                source.accountId(),
+                source.createdAt(),
+                source.transactionTimestamp(),
+                source.transactionAmount(),
+                source.merchantInfo(),
+                source.deviceInfo(),
+                source.locationInfo(),
+                source.customerContext(),
+                source.recentTransactionCount(),
+                source.recentTransactionCountWindow(),
+                source.recentAmountSum(),
+                source.recentAmountSumWindow(),
+                source.transactionVelocityPerMinute(),
+                source.merchantFrequency7d(),
+                source.deviceNovelty(),
+                source.countryMismatch(),
+                source.proxyOrVpnDetected(),
+                source.featureFlags(),
+                featureSnapshot
         );
     }
 

@@ -63,6 +63,7 @@ public record EngineIntelligenceSummary(
                 EngineIntelligenceValuePolicy.MAX_WARNINGS,
                 "warnings"
         );
+        EngineIntelligenceSummarySemanticPolicy.validate(engines, comparison, diagnosticSignals);
     }
 
     private static void requireUniqueEngineIds(List<EngineIntelligenceEngineResult> engines) {

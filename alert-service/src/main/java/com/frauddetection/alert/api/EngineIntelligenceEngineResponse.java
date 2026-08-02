@@ -7,6 +7,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceEngineRes
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 
 import java.util.List;
+import java.util.Objects;
 
 public record EngineIntelligenceEngineResponse(
         String engineId,
@@ -18,6 +19,7 @@ public record EngineIntelligenceEngineResponse(
 ) {
 
     public EngineIntelligenceEngineResponse {
+        Objects.requireNonNull(status, "status is required");
         EngineIntelligenceEngineResult result = new EngineIntelligenceEngineResult(
                 engineId,
                 engineType,
@@ -34,9 +36,6 @@ public record EngineIntelligenceEngineResponse(
     }
 
     private static FraudEngineStatus contractStatus(EngineIntelligenceEngineStatusResponse status) {
-        if (status == null) {
-            return FraudEngineStatus.UNAVAILABLE;
-        }
         return switch (status) {
             case AVAILABLE -> FraudEngineStatus.AVAILABLE;
             case TIMEOUT -> FraudEngineStatus.TIMEOUT;

@@ -56,7 +56,7 @@ class EngineIntelligenceProjectionMapperTest {
         EngineIntelligenceProjection projection = mapped(EngineIntelligenceProjectionTestFixtures.minimalSummary());
 
         assertThat(projection.getContractVersion()).isEqualTo(1);
-        assertThat(projection.getEngineCount()).isEqualTo(1);
+        assertThat(projection.getEngineCount()).isEqualTo(2);
         assertThat(projection.getDiagnosticSignalCount()).isZero();
         assertThat(projection.getWarningCount()).isZero();
     }

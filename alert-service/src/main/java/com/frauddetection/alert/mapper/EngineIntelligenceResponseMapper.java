@@ -28,15 +28,19 @@ public class EngineIntelligenceResponseMapper {
         if (readModel == null || !readModel.available()) {
             return EngineIntelligenceResponse.absent();
         }
-        return new EngineIntelligenceResponse(
-                status(readModel),
-                readModel.contractVersion(),
-                readModel.generatedAt(),
-                comparison(readModel),
-                engines(readModel),
-                diagnosticSignals(readModel),
-                warnings(readModel)
-        );
+        try {
+            return new EngineIntelligenceResponse(
+                    status(readModel),
+                    readModel.contractVersion(),
+                    readModel.generatedAt(),
+                    comparison(readModel),
+                    engines(readModel),
+                    diagnosticSignals(readModel),
+                    warnings(readModel)
+            );
+        } catch (IllegalArgumentException | NullPointerException exception) {
+            return EngineIntelligenceResponse.unavailable();
+        }
     }
 
     public EngineIntelligenceResponse unavailable() {

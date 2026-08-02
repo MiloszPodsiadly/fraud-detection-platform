@@ -418,8 +418,9 @@ class EngineIntelligenceApiArchitectureGuardTest {
                 .contains("The orchestrator owns optional-engine failure isolation and execution metadata.")
                 .contains("Published `latencyMs` comes from monotonic elapsed")
                 .contains("measurement; `generatedAt` is a wall-clock timestamp")
-                .contains("Version 1 has exactly three public engine")
-                .contains("identities in order: `rules.primary`, `ml.python.primary`, and `velocity.primary`")
+                .contains("Version 1 allows three known engine identities")
+                .contains("Rules and ML are required. Velocity is an optional third")
+                .contains("repository-controlled and migrated atomically")
                 .contains("This ADR does not change authentication, authorization");
     }
 

@@ -8,6 +8,7 @@ import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceComparisonReadModel;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceEngineReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
@@ -17,10 +18,13 @@ import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationConfidence;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationNonDecisioning;
@@ -217,7 +221,7 @@ class FraudFeedbackServiceTest {
     }
 
     @Test
-    void existingFeedbackWithPartialEngineIntelligenceComparisonDoesNotExposeSnapshot() {
+    void existingFeedbackWithCorruptedEngineIntelligenceComparisonDoesNotExposeAvailableStatus() {
         FraudFeedbackRecord record = record();
         record.setEngineIntelligenceStatus(EngineIntelligenceResponseStatus.DEGRADED);
         record.setComparisonType(EngineIntelligenceComparisonType.RULES_VS_ML);
@@ -228,7 +232,7 @@ class FraudFeedbackServiceTest {
 
         FraudFeedbackResponse response = service.get("txn-1");
 
-        assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
+        assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.UNAVAILABLE);
         assertThat(response.comparisonType()).isNull();
         assertThat(response.comparedEngineIds()).isEmpty();
         assertThat(response.agreementStatus()).isNull();
@@ -630,7 +634,24 @@ class FraudFeedbackServiceTest {
                         EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                         EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
                 ),
-                List.of(),
+                List.of(
+                        new EngineIntelligenceEngineReadModel(
+                                "rules.primary",
+                                FraudEngineType.RULES,
+                                FraudEngineStatus.AVAILABLE,
+                                RiskLevel.CRITICAL,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("HIGH_TRANSACTION_AMOUNT")
+                        ),
+                        new EngineIntelligenceEngineReadModel(
+                                "ml.python.primary",
+                                FraudEngineType.ML_MODEL,
+                                FraudEngineStatus.TIMEOUT,
+                                null,
+                                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                                List.of("ML_MODEL_TIMEOUT")
+                        )
+                ),
                 List.of(),
                 List.of()
         );

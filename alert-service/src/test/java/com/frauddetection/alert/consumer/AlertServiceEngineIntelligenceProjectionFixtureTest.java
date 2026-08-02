@@ -32,7 +32,7 @@ class AlertServiceEngineIntelligenceProjectionFixtureTest {
         );
 
         assertThat(projection.getContractVersion()).isEqualTo(1);
-        assertThat(projection.getEngineCount()).isEqualTo(1);
+        assertThat(projection.getEngineCount()).isEqualTo(2);
     }
 
     @Test
@@ -86,7 +86,7 @@ class AlertServiceEngineIntelligenceProjectionFixtureTest {
                 AlertServiceTransactionScoredEventFixtureLoader.unknownNestedEngineIntelligenceFields()
         );
 
-        assertThat(projection.getEngineCount()).isEqualTo(1);
+        assertThat(projection.getEngineCount()).isEqualTo(2);
     }
 
     private EngineIntelligenceProjection project(com.frauddetection.common.events.contract.TransactionScoredEvent event) {

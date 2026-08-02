@@ -1,5 +1,11 @@
 package com.frauddetection.alert.engineintelligence.api;
 
+import com.github.fge.jackson.JsonLoader;
+import com.github.fge.jsonschema.core.exceptions.ProcessingException;
+import com.github.fge.jsonschema.core.report.ProcessingMessage;
+import com.github.fge.jsonschema.core.report.ProcessingReport;
+import com.github.fge.jsonschema.main.JsonSchema;
+import com.github.fge.jsonschema.main.JsonSchemaFactory;
 import com.frauddetection.alert.api.EngineIntelligenceComparisonResponse;
 import com.frauddetection.alert.api.EngineIntelligenceDiagnosticSignalResponse;
 import com.frauddetection.alert.api.EngineIntelligenceEngineResponse;
@@ -44,14 +50,13 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class EngineIntelligenceOpenApiInstanceValidationTest {
 
     private final ObjectMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
-    private final OpenApiInstanceValidator validator = new OpenApiInstanceValidator(schemas());
+    private final OpenApiInstanceValidator validator = new OpenApiInstanceValidator(schemas(), objectMapper);
 
     @Test
     void instanceValidationAcceptsCanonicalValidResponse() {
@@ -59,7 +64,7 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
     }
 
     @Test
-    void instanceValidationAcceptsLegacyNormalizedValidResponseAfterMapping() {
+    void instanceValidationAcceptsLegacyIncompleteResponseAsUnavailableAfterMapping() {
         EngineIntelligenceProjection legacyProjection = new EngineIntelligenceProjection(
                 "txn-legacy-normalized",
                 1,
@@ -81,17 +86,27 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
                 Instant.parse("2026-06-18T10:00:04Z")
         );
 
-        EngineIntelligenceResponse response = new EngineIntelligenceResponseMapper()
-                .toResponse(new EngineIntelligenceReadModelMapper().map(legacyProjection));
+        EngineIntelligenceResponse response;
+        try {
+            response = new EngineIntelligenceResponseMapper()
+                    .toResponse(new EngineIntelligenceReadModelMapper().map(legacyProjection));
+        } catch (EngineIntelligenceProjectionReadUnavailableException exception) {
+            response = new EngineIntelligenceResponseMapper().unavailable();
+        }
 
         assertValid("EngineIntelligenceResponse", response);
-        assertThat(response.comparison().comparedEngineIds())
-                .containsExactly("rules.primary", "ml.python.primary");
+        assertThat(response.status()).isEqualTo(EngineIntelligenceResponseStatus.UNAVAILABLE);
+        assertThat(response.comparison()).isNull();
     }
 
     @Test
     void instanceValidationAcceptsThreeEngineResponse() {
         assertValid("EngineIntelligenceResponse", threeEngineResponse());
+    }
+
+    @Test
+    void instanceValidationAcceptsFullPathCompositionFixture() throws Exception {
+        assertValid("EngineIntelligenceResponse", publicApiFixtureMap("engine-intelligence-full-path-composition-response.json"));
     }
 
     @Test
@@ -119,6 +134,9 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
         assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> engine(instance, 0).put("reasonCodes", List.of("A".repeat(129)))));
         assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> comparison(instance).put("comparedEngineIds", List.of("ml.python.primary", "rules.primary"))));
         assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> engine(instance, 0).put("riskLevel", null)));
+        assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> engine(instance, 0).put("status", null)));
+        assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> instance.put("engines", List.of(engine(instance, 0)))));
+        assertInvalid("EngineIntelligenceResponse", mutate(EngineIntelligenceResponse.unavailable(), instance -> instance.put("generatedAt", "2026-06-18T10:00:02Z")));
         assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> engine(instance, 0).put("engineId", "unknown.primary")));
         assertInvalid("EngineIntelligenceResponse", mutate(threeEngineResponse(), instance -> engines(instance).add(engineMap(
                 "velocity.primary",
@@ -153,7 +171,10 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
             String caseId = stringCase.get("caseId").toString();
             boolean valid = Boolean.TRUE.equals(stringCase.get("valid"));
             Object value = stringCase.get("value");
-            List<String> errors = validate("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> engine(instance, 0).put("reasonCodes", List.of(value))));
+            List<String> errors = validate("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> {
+                engine(instance, 0).put("reasonCodes", List.of(value));
+                instance.put("diagnosticSignals", List.of());
+            }));
 
             assertThat(errors.isEmpty())
                     .as(caseId)
@@ -171,6 +192,9 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
 
     private List<String> validate(String schemaName, Object instance) {
         List<String> errors = new ArrayList<>(validator.validate(schemaName, toMap(instance)));
+        if (!errors.isEmpty()) {
+            return errors;
+        }
         if ("EngineIntelligenceResponse".equals(schemaName)) {
             errors.addAll(validateEngineIntelligenceSemantics(toMap(instance)));
         }
@@ -186,15 +210,29 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
                 EngineIntelligenceResponseStatus.AVAILABLE,
                 1,
                 Instant.parse("2026-06-18T10:00:02Z"),
-                comparisonResponse(EngineIntelligenceAgreementStatus.PARTIAL),
-                List.of(engineResponse(
-                        FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
-                        FraudEngineType.RULES,
-                        EngineIntelligenceEngineStatusResponse.AVAILABLE,
-                        RiskLevel.CRITICAL,
-                        EngineIntelligenceScoreBucket.HIGH,
-                        List.of("HIGH_VELOCITY")
-                )),
+                comparisonResponse(
+                        EngineIntelligenceAgreementStatus.DISAGREEMENT,
+                        EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH,
+                        EngineIntelligenceScoreDeltaBucket.LARGE
+                ),
+                List.of(
+                        engineResponse(
+                                FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
+                                FraudEngineType.RULES,
+                                EngineIntelligenceEngineStatusResponse.AVAILABLE,
+                                RiskLevel.CRITICAL,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("HIGH_VELOCITY")
+                        ),
+                        engineResponse(
+                                FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID,
+                                FraudEngineType.ML_MODEL,
+                                EngineIntelligenceEngineStatusResponse.AVAILABLE,
+                                RiskLevel.LOW,
+                                EngineIntelligenceScoreBucket.LOW,
+                                List.of("LOW_MODEL_RISK")
+                        )
+                ),
                 List.of(signalResponse(
                         FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID,
                         FraudEngineType.RULES,
@@ -213,7 +251,11 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
                 EngineIntelligenceResponseStatus.AVAILABLE,
                 1,
                 Instant.parse("2026-06-18T10:00:02Z"),
-                comparisonResponse(EngineIntelligenceAgreementStatus.AGREEMENT),
+                comparisonResponse(
+                        EngineIntelligenceAgreementStatus.AGREEMENT,
+                        EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                        EngineIntelligenceScoreDeltaBucket.NONE
+                ),
                 List.of(
                         engineResponse("rules.primary", FraudEngineType.RULES, EngineIntelligenceEngineStatusResponse.AVAILABLE, RiskLevel.LOW, EngineIntelligenceScoreBucket.LOW, List.of("HIGH_VELOCITY")),
                         engineResponse("ml.python.primary", FraudEngineType.ML_MODEL, EngineIntelligenceEngineStatusResponse.AVAILABLE, RiskLevel.LOW, EngineIntelligenceScoreBucket.LOW, List.of("ML_MODEL_SIGNAL")),
@@ -229,15 +271,29 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
                 EngineIntelligenceResponseStatus.DEGRADED,
                 1,
                 Instant.parse("2026-06-18T10:00:02Z"),
-                comparisonResponse(EngineIntelligenceAgreementStatus.PARTIAL),
-                List.of(engineResponse(
-                        "ml.python.primary",
-                        FraudEngineType.ML_MODEL,
-                        EngineIntelligenceEngineStatusResponse.TIMEOUT,
-                        null,
-                        EngineIntelligenceScoreBucket.UNAVAILABLE,
-                        List.of("ML_MODEL_TIMEOUT")
-                )),
+                comparisonResponse(
+                        EngineIntelligenceAgreementStatus.PARTIAL,
+                        EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
+                        EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
+                ),
+                List.of(
+                        engineResponse(
+                                "rules.primary",
+                                FraudEngineType.RULES,
+                                EngineIntelligenceEngineStatusResponse.AVAILABLE,
+                                RiskLevel.HIGH,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("HIGH_VELOCITY")
+                        ),
+                        engineResponse(
+                                "ml.python.primary",
+                                FraudEngineType.ML_MODEL,
+                                EngineIntelligenceEngineStatusResponse.TIMEOUT,
+                                null,
+                                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                                List.of("ML_MODEL_TIMEOUT")
+                        )
+                ),
                 List.of(signalResponse(
                         "ml.python.primary",
                         FraudEngineType.ML_MODEL,
@@ -254,13 +310,17 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
         );
     }
 
-    private EngineIntelligenceComparisonResponse comparisonResponse(EngineIntelligenceAgreementStatus agreementStatus) {
+    private EngineIntelligenceComparisonResponse comparisonResponse(
+            EngineIntelligenceAgreementStatus agreementStatus,
+            EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
+            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket
+    ) {
         return new EngineIntelligenceComparisonResponse(
                 EngineIntelligenceComparisonType.RULES_VS_ML,
                 FraudEngineIdentityContract.rulesVsMlComparisonEngineIds(),
                 agreementStatus,
-                EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
-                EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
+                riskMismatchStatus,
+                scoreDeltaBucket
         );
     }
 
@@ -381,10 +441,18 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
         if (!FraudEngineIdentityContract.rulesVsMlComparisonEngineIds().equals(list(comparison(instance).get("comparedEngineIds")))) {
             errors.add("comparison ids must be exact and ordered");
         }
+        Map<String, Map<String, Object>> enginesById = new LinkedHashMap<>();
+        int previousOrder = -1;
         for (Map<String, Object> engine : engines(instance)) {
-            if (!FraudEngineIdentityContract.hasExpectedType(engine.get("engineId").toString(), FraudEngineType.valueOf(engine.get("engineType").toString()))) {
+            String engineId = engine.get("engineId").toString();
+            if (!FraudEngineIdentityContract.hasExpectedType(engineId, FraudEngineType.valueOf(engine.get("engineType").toString()))) {
                 errors.add("unknown or mismatched engine identity");
             }
+            int currentOrder = FraudEngineIdentityContract.orderOf(engineId);
+            if (enginesById.put(engineId, engine) != null || currentOrder <= previousOrder) {
+                errors.add("engine ids must be unique and canonical ordered");
+            }
+            previousOrder = currentOrder;
             boolean available = "AVAILABLE".equals(engine.get("status"));
             boolean riskPresent = engine.get("riskLevel") != null;
             boolean usableBucket = List.of("LOW", "MEDIUM", "HIGH", "VERY_HIGH").contains(engine.get("scoreBucket"));
@@ -395,8 +463,28 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
                 errors.add("non-available engine must not expose risk");
             }
         }
+        if (enginesById.size() != 2 && enginesById.size() != 3) {
+            errors.add("engine set must contain Rules and ML with optional Velocity");
+        }
+        if (!enginesById.containsKey("rules.primary") || !enginesById.containsKey("ml.python.primary")) {
+            errors.add("required Rules and ML engines missing");
+        }
+        if (enginesById.size() == 3 && !enginesById.containsKey("velocity.primary")) {
+            errors.add("third engine must be Velocity");
+        }
+        if (enginesById.containsKey("rules.primary") && enginesById.containsKey("ml.python.primary")) {
+            errors.addAll(validateComparisonCoherence(comparison(instance), enginesById.get("rules.primary"), enginesById.get("ml.python.primary")));
+        }
         for (Object signalObject : list(instance.get("diagnosticSignals"))) {
             Map<String, Object> signal = map(signalObject);
+            Map<String, Object> engine = enginesById.get(signal.get("engineId").toString());
+            if (engine == null) {
+                errors.add("diagnostic signal engine must exist");
+                continue;
+            }
+            if (!signal.get("engineType").equals(engine.get("engineType")) || !signal.get("engineStatus").equals(engine.get("status"))) {
+                errors.add("diagnostic signal must match engine identity and status");
+            }
             boolean fraudSignal = "FRAUD_SIGNAL".equals(signal.get("signalCategory"));
             boolean available = "AVAILABLE".equals(signal.get("engineStatus"));
             boolean riskPresent = signal.get("riskLevel") != null;
@@ -407,8 +495,85 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
             if ((!available || !fraudSignal) && (riskPresent || !"UNAVAILABLE".equals(signal.get("scoreBucket")))) {
                 errors.add("operational signal must not expose fraud risk");
             }
+            if (!list(engine.get("reasonCodes")).contains(signal.get("reasonCode"))) {
+                errors.add("diagnostic signal reason must belong to engine reason codes");
+            }
         }
         return errors;
+    }
+
+    private List<String> validateComparisonCoherence(
+            Map<String, Object> comparison,
+            Map<String, Object> rules,
+            Map<String, Object> ml
+    ) {
+        boolean rulesAvailable = "AVAILABLE".equals(rules.get("status"));
+        boolean mlAvailable = "AVAILABLE".equals(ml.get("status"));
+        if (!rulesAvailable || !mlAvailable) {
+            String expectedAgreement = rulesAvailable ? "PARTIAL" : "REQUIRED_ENGINE_NOT_COMPARABLE";
+            if (!"NOT_COMPARABLE".equals(comparison.get("riskMismatchStatus"))
+                    || !"UNAVAILABLE".equals(comparison.get("scoreDeltaBucket"))
+                    || !expectedAgreement.equals(comparison.get("agreementStatus"))) {
+                return List.of("operational comparison must not expose risk delta");
+            }
+            return List.of();
+        }
+        String expectedRiskMismatch = riskMismatch(rules.get("riskLevel").toString(), ml.get("riskLevel").toString());
+        String expectedAgreement = agreementFor(expectedRiskMismatch);
+        Object delta = comparison.get("scoreDeltaBucket");
+        if (!expectedRiskMismatch.equals(comparison.get("riskMismatchStatus"))
+                || !expectedAgreement.equals(comparison.get("agreementStatus"))
+                || "UNAVAILABLE".equals(delta)
+                || !deltaBucketCanDescribe(rules.get("scoreBucket").toString(), ml.get("scoreBucket").toString(), delta.toString())) {
+            return List.of("available comparison must describe Rules and ML risk/score relationship");
+        }
+        return List.of();
+    }
+
+    private String riskMismatch(String rulesRiskLevel, String mlRiskLevel) {
+        int distance = Math.abs(riskSeverity(rulesRiskLevel) - riskSeverity(mlRiskLevel));
+        if (distance == 0) {
+            return "SAME_RISK_LEVEL";
+        }
+        if (distance == 1) {
+            return "ADJACENT_RISK_LEVEL";
+        }
+        return "MATERIAL_RISK_MISMATCH";
+    }
+
+    private String agreementFor(String riskMismatch) {
+        return switch (riskMismatch) {
+            case "SAME_RISK_LEVEL" -> "AGREEMENT";
+            case "ADJACENT_RISK_LEVEL" -> "ADJACENT_RISK_VARIANCE";
+            default -> "DISAGREEMENT";
+        };
+    }
+
+    private int riskSeverity(String riskLevel) {
+        return switch (riskLevel) {
+            case "LOW" -> 0;
+            case "MEDIUM" -> 1;
+            case "HIGH" -> 2;
+            case "CRITICAL" -> 3;
+            default -> -1;
+        };
+    }
+
+    private boolean deltaBucketCanDescribe(String rulesScoreBucket, String mlScoreBucket, String scoreDeltaBucket) {
+        if ("UNAVAILABLE".equals(scoreDeltaBucket)) {
+            return false;
+        }
+        if (rulesScoreBucket.equals(mlScoreBucket)) {
+            return !"LARGE".equals(scoreDeltaBucket);
+        }
+        if ("NONE".equals(scoreDeltaBucket)) {
+            return false;
+        }
+        if (("LOW".equals(rulesScoreBucket) && "VERY_HIGH".equals(mlScoreBucket))
+                || ("VERY_HIGH".equals(rulesScoreBucket) && "LOW".equals(mlScoreBucket))) {
+            return "LARGE".equals(scoreDeltaBucket);
+        }
+        return true;
     }
 
     private List<Map<String, Object>> publicApiFixture(String name) throws Exception {
@@ -418,6 +583,14 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
                 }
         );
         return list(root.get("cases"));
+    }
+
+    private Map<String, Object> publicApiFixtureMap(String name) throws Exception {
+        return objectMapper.readValue(
+                publicApiFixturePath(name).toFile(),
+                new TypeReference<>() {
+                }
+        );
     }
 
     private Path publicApiFixturePath(String name) {
@@ -468,163 +641,85 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
     }
 
     private static final class OpenApiInstanceValidator {
-        private final Map<String, Object> schemas;
+        private final ObjectMapper objectMapper;
+        private final JsonSchemaFactory schemaFactory = JsonSchemaFactory.byDefault();
+        private final Map<String, Object> definitions;
 
-        private OpenApiInstanceValidator(Map<String, Object> schemas) {
-            this.schemas = schemas;
+        private OpenApiInstanceValidator(Map<String, Object> schemas, ObjectMapper objectMapper) {
+            this.objectMapper = objectMapper;
+            this.definitions = convertSchemas(schemas);
         }
 
         private List<String> validate(String schemaName, Map<String, Object> instance) {
-            return validateSchema(schema(schemaName), instance, schemaName);
+            Map<String, Object> document = new LinkedHashMap<>();
+            document.put("$schema", "http://json-schema.org/draft-04/schema#");
+            document.put("$ref", "#/definitions/" + schemaName);
+            document.put("definitions", definitions);
+            try {
+                JsonSchema schema = schemaFactory.getJsonSchema(JsonLoader.fromString(objectMapper.writeValueAsString(document)));
+                ProcessingReport report = schema.validate(JsonLoader.fromString(objectMapper.writeValueAsString(instance)));
+                if (report.isSuccess()) {
+                    return List.of();
+                }
+                List<String> errors = new ArrayList<>();
+                for (ProcessingMessage message : report) {
+                    errors.add(message.getMessage());
+                }
+                return errors;
+            } catch (ProcessingException | java.io.IOException exception) {
+                throw new IllegalStateException(exception);
+            }
         }
 
-        private List<String> validateSchema(Map<String, Object> schema, Object instance, String path) {
-            if (schema.containsKey("$ref")) {
-                return validateSchema(ref(schema.get("$ref").toString()), instance, path);
-            }
-            if (instance == null) {
-                return Boolean.TRUE.equals(schema.get("nullable")) ? List.of() : List.of(path + " is null");
-            }
-            List<String> errors = new ArrayList<>();
-            errors.addAll(validateEnum(schema, instance, path));
-            errors.addAll(validateAllOf(schema, instance, path));
-            errors.addAll(validateOneOf(schema, instance, path));
-            Object type = schema.get("type");
-            if ("object".equals(type)) {
-                errors.addAll(validateObject(schema, instance, path));
-            } else if ("array".equals(type)) {
-                errors.addAll(validateArray(schema, instance, path));
-            } else if ("string".equals(type)) {
-                errors.addAll(validateString(schema, instance, path));
-            } else if ("integer".equals(type)) {
-                if (!(instance instanceof Integer) && !(instance instanceof Long)) {
-                    errors.add(path + " is not an integer");
-                }
-            } else if ("number".equals(type)) {
-                if (!(instance instanceof Number)) {
-                    errors.add(path + " is not a number");
-                }
-            } else if ("boolean".equals(type) && !(instance instanceof Boolean)) {
-                errors.add(path + " is not a boolean");
-            }
-            return errors;
+        private Map<String, Object> convertSchemas(Map<String, Object> schemas) {
+            Map<String, Object> converted = new LinkedHashMap<>();
+            schemas.forEach((name, schema) -> converted.put(name, convert(schema)));
+            return converted;
         }
 
-        private List<String> validateObject(Map<String, Object> schema, Object instance, String path) {
-            if (!(instance instanceof Map<?, ?> object)) {
-                return List.of(path + " is not an object");
-            }
-            Map<String, Object> properties = map(schema.getOrDefault("properties", Map.of()));
-            List<String> errors = new ArrayList<>();
-            for (Object required : list(schema.get("required"))) {
-                if (!object.containsKey(required)) {
-                    errors.add(path + "." + required + " is required");
-                }
-            }
-            if (Boolean.FALSE.equals(schema.get("additionalProperties"))) {
-                for (Object key : object.keySet()) {
-                    if (!properties.containsKey(key.toString())) {
-                        errors.add(path + "." + key + " is not allowed");
+        private Object convert(Object value) {
+            if (value instanceof Map<?, ?> source) {
+                Map<String, Object> target = new LinkedHashMap<>();
+                boolean nullable = Boolean.TRUE.equals(source.get("nullable"));
+                for (Map.Entry<?, ?> entry : source.entrySet()) {
+                    String key = entry.getKey().toString();
+                    if ("nullable".equals(key)) {
+                        continue;
+                    }
+                    if ("$ref".equals(key)) {
+                        target.put(key, entry.getValue().toString().replace("#/components/schemas/", "#/definitions/"));
+                    } else {
+                        target.put(key, convert(entry.getValue()));
                     }
                 }
-            }
-            for (Map.Entry<String, Object> property : properties.entrySet()) {
-                if (object.containsKey(property.getKey())) {
-                    errors.addAll(validateSchema(map(property.getValue()), object.get(property.getKey()), path + "." + property.getKey()));
+                if (nullable) {
+                    addNullable(target);
                 }
+                return target;
             }
-            return errors;
+            if (value instanceof List<?> source) {
+                return source.stream().map(this::convert).toList();
+            }
+            return value;
         }
 
-        private List<String> validateArray(Map<String, Object> schema, Object instance, String path) {
-            if (!(instance instanceof List<?> values)) {
-                return List.of(path + " is not an array");
+        private void addNullable(Map<String, Object> schema) {
+            Object type = schema.get("type");
+            if (type instanceof String typeName) {
+                schema.put("type", List.of(typeName, "null"));
             }
-            List<String> errors = new ArrayList<>();
-            Integer minItems = integer(schema.get("minItems"));
-            Integer maxItems = integer(schema.get("maxItems"));
-            if (minItems != null && values.size() < minItems) {
-                errors.add(path + " has too few items");
+            if (schema.containsKey("enum")) {
+                List<Object> values = new ArrayList<>(list(schema.get("enum")));
+                if (!values.contains(null)) {
+                    values.add(null);
+                }
+                schema.put("enum", values);
             }
-            if (maxItems != null && values.size() > maxItems) {
-                errors.add(path + " has too many items");
-            }
-            if (Boolean.TRUE.equals(schema.get("uniqueItems")) && values.stream().distinct().count() != values.size()) {
-                errors.add(path + " has duplicate items");
-            }
-            Map<String, Object> itemSchema = map(schema.get("items"));
-            for (int index = 0; index < values.size(); index++) {
-                errors.addAll(validateSchema(itemSchema, values.get(index), path + "[" + index + "]"));
-            }
-            return errors;
-        }
-
-        private List<String> validateString(Map<String, Object> schema, Object instance, String path) {
-            if (!(instance instanceof String value)) {
-                return List.of(path + " is not a string");
-            }
-            List<String> errors = new ArrayList<>();
-            Integer minLength = integer(schema.get("minLength"));
-            Integer maxLength = integer(schema.get("maxLength"));
-            if (minLength != null && value.length() < minLength) {
-                errors.add(path + " is too short");
-            }
-            if (maxLength != null && value.length() > maxLength) {
-                errors.add(path + " is too long");
-            }
-            Object pattern = schema.get("pattern");
-            if (pattern != null && !Pattern.compile(pattern.toString()).matcher(value).matches()) {
-                errors.add(path + " does not match pattern");
-            }
-            return errors;
-        }
-
-        private List<String> validateEnum(Map<String, Object> schema, Object instance, String path) {
-            if (!schema.containsKey("enum")) {
-                return List.of();
-            }
-            return list(schema.get("enum")).contains(instance) ? List.of() : List.of(path + " is not in enum");
-        }
-
-        private List<String> validateAllOf(Map<String, Object> schema, Object instance, String path) {
-            List<String> errors = new ArrayList<>();
-            for (Object child : list(schema.get("allOf"))) {
-                errors.addAll(validateSchema(map(child), instance, path));
-            }
-            return errors;
-        }
-
-        private List<String> validateOneOf(Map<String, Object> schema, Object instance, String path) {
-            List<Object> oneOf = list(schema.get("oneOf"));
-            if (oneOf.isEmpty()) {
-                return List.of();
-            }
-            long matches = oneOf.stream()
-                    .filter(child -> validateSchema(map(child), instance, path).isEmpty())
-                    .count();
-            return matches == 1 ? List.of() : List.of(path + " must match exactly one schema");
-        }
-
-        private Map<String, Object> schema(String name) {
-            return map(schemas.get(name));
-        }
-
-        private Map<String, Object> ref(String ref) {
-            return schema(ref.substring(ref.lastIndexOf('/') + 1));
-        }
-
-        @SuppressWarnings("unchecked")
-        private static Map<String, Object> map(Object value) {
-            return value == null ? Map.of() : (Map<String, Object>) value;
         }
 
         @SuppressWarnings("unchecked")
         private static <T> List<T> list(Object value) {
             return value == null ? List.of() : (List<T>) value;
-        }
-
-        private static Integer integer(Object value) {
-            return value instanceof Number number ? number.intValue() : null;
         }
     }
 }

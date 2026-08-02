@@ -57,13 +57,13 @@ class EngineIntelligenceResponseMapperTest {
         EngineIntelligenceResponse response = mapper.toResponse(readModel(
                 FraudEngineStatus.AVAILABLE,
                 FraudEngineStatus.AVAILABLE,
-                EngineIntelligenceAgreementStatus.DISAGREEMENT,
+                EngineIntelligenceAgreementStatus.AGREEMENT,
                 List.of()
         ));
 
         assertThat(response.status()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
         assertThat(response.contractVersion()).isEqualTo(1);
-        assertThat(response.comparison().agreementStatus()).isEqualTo(EngineIntelligenceAgreementStatus.DISAGREEMENT);
+        assertThat(response.comparison().agreementStatus()).isEqualTo(EngineIntelligenceAgreementStatus.AGREEMENT);
         assertThat(response.engines()).extracting("engineId").containsExactly("rules.primary", "ml.python.primary");
         assertThat(response.engines()).extracting("status")
                 .containsExactly(EngineIntelligenceEngineStatusResponse.AVAILABLE, EngineIntelligenceEngineStatusResponse.AVAILABLE);
@@ -76,15 +76,15 @@ class EngineIntelligenceResponseMapperTest {
         EngineIntelligenceResponse response = mapper.toResponse(readModel(
                 FraudEngineStatus.AVAILABLE,
                 FraudEngineStatus.AVAILABLE,
-                EngineIntelligenceAgreementStatus.DISAGREEMENT,
-                EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH,
-                EngineIntelligenceScoreDeltaBucket.LARGE,
+                EngineIntelligenceAgreementStatus.AGREEMENT,
+                EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                EngineIntelligenceScoreDeltaBucket.NONE,
                 List.of()
         ));
 
-        assertThat(response.comparison().agreementStatus()).isEqualTo(EngineIntelligenceAgreementStatus.DISAGREEMENT);
-        assertThat(response.comparison().riskMismatchStatus()).isEqualTo(EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH);
-        assertThat(response.comparison().scoreDeltaBucket()).isEqualTo(EngineIntelligenceScoreDeltaBucket.LARGE);
+        assertThat(response.comparison().agreementStatus()).isEqualTo(EngineIntelligenceAgreementStatus.AGREEMENT);
+        assertThat(response.comparison().riskMismatchStatus()).isEqualTo(EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL);
+        assertThat(response.comparison().scoreDeltaBucket()).isEqualTo(EngineIntelligenceScoreDeltaBucket.NONE);
     }
 
     @Test
@@ -128,7 +128,7 @@ class EngineIntelligenceResponseMapperTest {
         EngineIntelligenceResponse unavailable = mapper.toResponse(readModel(
                 FraudEngineStatus.AVAILABLE,
                 FraudEngineStatus.UNAVAILABLE,
-                EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
+                EngineIntelligenceAgreementStatus.PARTIAL,
                 List.of()
         ));
 
@@ -142,7 +142,7 @@ class EngineIntelligenceResponseMapperTest {
         EngineIntelligenceResponse timeout = mapper.toResponse(readModel(
                 FraudEngineStatus.TIMEOUT,
                 FraudEngineStatus.AVAILABLE,
-                EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
+                EngineIntelligenceAgreementStatus.REQUIRED_ENGINE_NOT_COMPARABLE,
                 List.of()
         ));
 
@@ -156,7 +156,7 @@ class EngineIntelligenceResponseMapperTest {
         EngineIntelligenceResponse skipped = mapper.toResponse(readModel(
                 FraudEngineStatus.SKIPPED,
                 FraudEngineStatus.AVAILABLE,
-                EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
+                EngineIntelligenceAgreementStatus.REQUIRED_ENGINE_NOT_COMPARABLE,
                 List.of()
         ));
 
@@ -237,7 +237,7 @@ class EngineIntelligenceResponseMapperTest {
         EngineIntelligenceResponse fallback = mapper.toResponse(readModel(
                 FraudEngineStatus.FALLBACK_USED,
                 FraudEngineStatus.AVAILABLE,
-                EngineIntelligenceAgreementStatus.PARTIAL,
+                EngineIntelligenceAgreementStatus.REQUIRED_ENGINE_NOT_COMPARABLE,
                 List.of()
         ));
         EngineIntelligenceResponse emptyEngines = mapper.toResponse(EngineIntelligenceReadModel.projected(
@@ -257,7 +257,7 @@ class EngineIntelligenceResponseMapperTest {
         assertThat(warning.status()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
         assertThat(fallback.status()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
         assertThat(fallback.engines()).extracting("status").contains(EngineIntelligenceEngineStatusResponse.DEGRADED);
-        assertThat(emptyEngines.status()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
+        assertThat(emptyEngines.status()).isEqualTo(EngineIntelligenceResponseStatus.UNAVAILABLE);
     }
 
     @Test
@@ -265,7 +265,7 @@ class EngineIntelligenceResponseMapperTest {
         String serialized = objectMapper.writeValueAsString(mapper.toResponse(readModel(
                 FraudEngineStatus.AVAILABLE,
                 FraudEngineStatus.AVAILABLE,
-                EngineIntelligenceAgreementStatus.PARTIAL,
+                EngineIntelligenceAgreementStatus.AGREEMENT,
                 List.of()
         )));
 
@@ -297,8 +297,8 @@ class EngineIntelligenceResponseMapperTest {
                 rulesStatus,
                 mlStatus,
                 agreementStatus,
-                EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
-                EngineIntelligenceScoreDeltaBucket.UNAVAILABLE,
+                comparisonRiskMismatch(rulesStatus, mlStatus),
+                comparisonScoreDelta(rulesStatus, mlStatus),
                 warnings
         );
     }
@@ -321,8 +321,8 @@ class EngineIntelligenceResponseMapperTest {
                         scoreDeltaBucket
                 ),
                 List.of(
-                        engine("rules.primary", FraudEngineType.RULES, rulesStatus, List.of("HIGH_VELOCITY")),
-                        engine("ml.python.primary", FraudEngineType.ML_MODEL, mlStatus, List.of("ML_MODEL_SIGNAL"))
+                        engine("rules.primary", FraudEngineType.RULES, rulesStatus, reasonCodesFor(FraudEngineType.RULES, rulesStatus)),
+                        engine("ml.python.primary", FraudEngineType.ML_MODEL, mlStatus, reasonCodesFor(FraudEngineType.ML_MODEL, mlStatus))
                 ),
                 diagnosticSignals(rulesStatus),
                 warnings
@@ -352,13 +352,24 @@ class EngineIntelligenceResponseMapperTest {
         ));
     }
 
+    private List<String> reasonCodesFor(FraudEngineType engineType, FraudEngineStatus status) {
+        if (status == FraudEngineStatus.AVAILABLE) {
+            return engineType == FraudEngineType.ML_MODEL ? List.of("ML_MODEL_SIGNAL") : List.of("HIGH_VELOCITY");
+        }
+        return engineType == FraudEngineType.ML_MODEL ? List.of("ML_MODEL_TIMEOUT") : List.of("ORCHESTRATOR_ENGINE_TIMEOUT");
+    }
+
     private EngineIntelligenceReadModel readModelWithManyValues() {
         List<String> reasonCodes = java.util.stream.IntStream.range(0, 5)
                 .mapToObj(index -> "HIGH_VELOCITY")
                 .toList();
-        List<EngineIntelligenceEngineReadModel> engines = java.util.stream.IntStream.range(0, 100)
-                .mapToObj(index -> engine("rules.primary", FraudEngineType.RULES, FraudEngineStatus.AVAILABLE, reasonCodes))
-                .toList();
+        List<EngineIntelligenceEngineReadModel> engines = new java.util.ArrayList<>();
+        engines.add(engine("rules.primary", FraudEngineType.RULES, FraudEngineStatus.AVAILABLE, reasonCodes));
+        engines.add(engine("ml.python.primary", FraudEngineType.ML_MODEL, FraudEngineStatus.AVAILABLE, List.of("ML_MODEL_SIGNAL")));
+        engines.add(engine("velocity.primary", FraudEngineType.VELOCITY, FraudEngineStatus.AVAILABLE, List.of("RAPID_TRANSFER_BURST_SIGNAL")));
+        java.util.stream.IntStream.range(0, 100)
+                .mapToObj(index -> engine("velocity.primary", FraudEngineType.VELOCITY, FraudEngineStatus.AVAILABLE, List.of("RAPID_TRANSFER_BURST_SIGNAL")))
+                .forEach(engines::add);
         List<EngineIntelligenceDiagnosticSignalReadModel> diagnosticSignals = java.util.stream.IntStream.range(0, 100)
                 .mapToObj(index -> new EngineIntelligenceDiagnosticSignalReadModel(
                         "rules.primary",
@@ -381,9 +392,9 @@ class EngineIntelligenceResponseMapperTest {
                 1,
                 Instant.parse("2026-06-18T10:00:00Z"),
                 new EngineIntelligenceComparisonReadModel(
-                        EngineIntelligenceAgreementStatus.DISAGREEMENT,
-                        EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH,
-                        EngineIntelligenceScoreDeltaBucket.LARGE
+                        EngineIntelligenceAgreementStatus.AGREEMENT,
+                        EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                        EngineIntelligenceScoreDeltaBucket.NONE
                 ),
                 engines,
                 diagnosticSignals,
@@ -457,5 +468,17 @@ class EngineIntelligenceResponseMapperTest {
                 status == FraudEngineStatus.AVAILABLE ? EngineIntelligenceScoreBucket.HIGH : EngineIntelligenceScoreBucket.UNAVAILABLE,
                 reasonCodes
         );
+    }
+
+    private EngineIntelligenceRiskMismatchStatus comparisonRiskMismatch(FraudEngineStatus rulesStatus, FraudEngineStatus mlStatus) {
+        return rulesStatus == FraudEngineStatus.AVAILABLE && mlStatus == FraudEngineStatus.AVAILABLE
+                ? EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL
+                : EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE;
+    }
+
+    private EngineIntelligenceScoreDeltaBucket comparisonScoreDelta(FraudEngineStatus rulesStatus, FraudEngineStatus mlStatus) {
+        return rulesStatus == FraudEngineStatus.AVAILABLE && mlStatus == FraudEngineStatus.AVAILABLE
+                ? EngineIntelligenceScoreDeltaBucket.NONE
+                : EngineIntelligenceScoreDeltaBucket.UNAVAILABLE;
     }
 }

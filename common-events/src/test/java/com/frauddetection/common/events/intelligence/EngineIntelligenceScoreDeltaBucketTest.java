@@ -38,7 +38,7 @@ class EngineIntelligenceScoreDeltaBucketTest {
                 .contains(
                         "\"comparisonType\":\"RULES_VS_ML\"",
                         "\"comparedEngineIds\":[\"rules.primary\",\"ml.python.primary\"]",
-                        "\"scoreDeltaBucket\":\"SMALL\""
+                        "\"scoreDeltaBucket\":\"NONE\""
                 );
     }
 }

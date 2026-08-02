@@ -6,13 +6,11 @@ import {
   COMPARISON_TYPE,
   ENGINE_ORDER,
   ENGINE_TYPE_BY_ID,
-  MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS,
   MAX_ENGINE_INTELLIGENCE_ENGINES,
-  MAX_ENGINE_INTELLIGENCE_WARNINGS,
-  hasUniqueCanonicalEngineOrder,
   isCanonicalUtcTimestamp,
   isComparisonShape,
   isDiagnosticSignalShape,
+  isEngineIntelligenceResponseShape,
   isEngineShape,
   isWarningShape,
   safeString
@@ -32,6 +30,12 @@ describe("engineIntelligenceContractValidation", () => {
 
   it("accepts shared three-engine golden fixture", () => {
     expect(isValidEngineIntelligence(sharedFixture("engine_intelligence_three_engine_golden.json"))).toBe(true);
+  });
+
+  it("accepts full-path public API composition fixture", () => {
+    expect(isEngineIntelligenceResponseShape(
+      publicApiFixture("engine-intelligence-full-path-composition-response.json")
+    )).toBe(true);
   });
 
   it.each(sharedInvalidEngineIntelligenceCases())("rejects shared invalid semantic case $caseId", ({ engineIntelligence }) => {
@@ -57,20 +61,10 @@ describe("engineIntelligenceContractValidation", () => {
 });
 
 function isValidEngineIntelligence(value) {
-  return Boolean(value)
-    && value.contractVersion === 1
-    && isCanonicalUtcTimestamp(value.generatedAt)
-    && isComparisonShape(value.comparison)
-    && Array.isArray(value.engines)
-    && value.engines.length <= MAX_ENGINE_INTELLIGENCE_ENGINES
-    && value.engines.every(isEngineShape)
-    && hasUniqueCanonicalEngineOrder(value.engines)
-    && Array.isArray(value.diagnosticSignals)
-    && value.diagnosticSignals.length <= MAX_ENGINE_INTELLIGENCE_DIAGNOSTIC_SIGNALS
-    && value.diagnosticSignals.every(isDiagnosticSignalShape)
-    && Array.isArray(value.warnings)
-    && value.warnings.length <= MAX_ENGINE_INTELLIGENCE_WARNINGS
-    && value.warnings.every((warning) => isWarningShape(warning));
+  return isEngineIntelligenceResponseShape({
+    status: "AVAILABLE",
+    ...value
+  });
 }
 
 function sharedInvalidEngineIntelligenceCases() {

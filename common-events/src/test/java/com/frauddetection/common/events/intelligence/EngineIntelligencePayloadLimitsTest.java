@@ -22,13 +22,9 @@ class EngineIntelligencePayloadLimitsTest {
         assertThat(EngineIntelligenceTestSupport.summary(
                 List.of(
                         EngineIntelligenceTestSupport.engine(),
-                        new EngineIntelligenceEngineResult(
-                                "ml.python.primary",
-                                com.frauddetection.common.events.engine.FraudEngineType.ML_MODEL,
-                                com.frauddetection.common.events.engine.FraudEngineStatus.AVAILABLE,
-                                com.frauddetection.common.events.enums.RiskLevel.MEDIUM,
-                                EngineIntelligenceScoreBucket.MEDIUM,
-                                List.of("MODEL_HIGH_RISK")
+                        EngineIntelligenceTestSupport.mlEngine(
+                                com.frauddetection.common.events.enums.RiskLevel.HIGH,
+                                EngineIntelligenceScoreBucket.HIGH
                         ),
                         new EngineIntelligenceEngineResult(
                                 "velocity.primary",
@@ -46,13 +42,9 @@ class EngineIntelligencePayloadLimitsTest {
         assertThat(EngineIntelligenceTestSupport.summary(
                 List.of(
                         EngineIntelligenceTestSupport.engine(),
-                        new EngineIntelligenceEngineResult(
-                                "ml.python.primary",
-                                com.frauddetection.common.events.engine.FraudEngineType.ML_MODEL,
-                                com.frauddetection.common.events.engine.FraudEngineStatus.AVAILABLE,
-                                com.frauddetection.common.events.enums.RiskLevel.MEDIUM,
-                                EngineIntelligenceScoreBucket.MEDIUM,
-                                List.of("MODEL_HIGH_RISK")
+                        EngineIntelligenceTestSupport.mlEngine(
+                                com.frauddetection.common.events.enums.RiskLevel.HIGH,
+                                EngineIntelligenceScoreBucket.HIGH
                         )
                 ),
                 List.of(),

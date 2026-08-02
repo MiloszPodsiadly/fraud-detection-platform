@@ -1,8 +1,6 @@
 package com.frauddetection.alert.engineintelligence.api;
 
 import com.frauddetection.alert.api.EngineIntelligenceComparisonResponse;
-import com.frauddetection.alert.api.EngineIntelligenceResponse;
-import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
 import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
@@ -20,7 +18,6 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.StreamSupport;
@@ -153,10 +150,15 @@ class EngineIntelligenceOpenApiContractTest {
 
         assertThat(schema).contains(
                 "EngineIntelligenceResponse:",
-                "enum: [AVAILABLE, ABSENT, UNAVAILABLE, DEGRADED]",
-                "- contractVersion",
-                "- generatedAt",
-                "- comparison",
+                "EngineIntelligenceAvailableResponse:",
+                "EngineIntelligenceDegradedResponse:",
+                "EngineIntelligenceAbsentResponse:",
+                "EngineIntelligenceUnavailableResponse:",
+                "EngineIntelligenceProjectedResponse:",
+                "enum: [AVAILABLE, DEGRADED]",
+                "enum: [ABSENT]",
+                "enum: [UNAVAILABLE]",
+                "required: [status, contractVersion, generatedAt, comparison, engines, diagnosticSignals, warnings]",
                 "comparisonType:",
                 "comparedEngineIds:",
                 "ABSENT means no projection exists",
@@ -300,7 +302,7 @@ class EngineIntelligenceOpenApiContractTest {
     void parsedOpenApiContractMatchesRuntimeEngineIdentityContract() throws Exception {
         Map<String, Object> schemas = schemas();
         JsonNode registry = objectMapper.readTree(engineRegistryFixturePath().toFile());
-        Map<String, Object> response = schema(schemas, "EngineIntelligenceResponse");
+        Map<String, Object> response = schema(schemas, "EngineIntelligenceProjectedResponse");
 
         assertThat(registry.get("maxEngineCount").intValue())
                 .isEqualTo(FraudEngineIdentityContract.MAX_ENGINE_INTELLIGENCE_ENGINES);
@@ -328,13 +330,13 @@ class EngineIntelligenceOpenApiContractTest {
                 .containsEntry("uniqueItems", true);
         assertThat(registry.get("comparison").get("comparedEngineIds"))
                 .hasSize(FraudEngineIdentityContract.rulesVsMlComparisonEngineIds().size());
-        assertThat(oneOfRefs(schema(schemas, "EngineIntelligenceEngineResponse")))
+        assertThat(identityOneOfRefs(schema(schemas, "EngineIntelligenceEngineResponse")))
                 .containsExactly(
                         "#/components/schemas/RulesEngineIdentity",
                         "#/components/schemas/MlEngineIdentity",
                         "#/components/schemas/VelocityEngineIdentity"
                 );
-        assertThat(oneOfRefs(schema(schemas, "EngineIntelligenceDiagnosticSignalResponse")))
+        assertThat(identityOneOfRefs(schema(schemas, "EngineIntelligenceDiagnosticSignalResponse")))
                 .containsExactly(
                         "#/components/schemas/RulesEngineIdentity",
                         "#/components/schemas/MlEngineIdentity",
@@ -362,23 +364,14 @@ class EngineIntelligenceOpenApiContractTest {
 
     @Test
     void serializedRuntimeComparisonInstanceMatchesParsedOpenApiSchema() throws Exception {
-        EngineIntelligenceResponse response = new EngineIntelligenceResponse(
-                EngineIntelligenceResponseStatus.AVAILABLE,
-                com.frauddetection.common.events.intelligence.EngineIntelligenceSummary.CONTRACT_VERSION,
-                Instant.parse("2026-06-01T06:00:00Z"),
-                new EngineIntelligenceComparisonResponse(
-                        EngineIntelligenceComparisonType.RULES_VS_ML,
-                        FraudEngineIdentityContract.rulesVsMlComparisonEngineIds(),
-                        EngineIntelligenceAgreementStatus.DISAGREEMENT,
-                        EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH,
-                        EngineIntelligenceScoreDeltaBucket.LARGE
-                ),
-                List.of(),
-                List.of(),
-                List.of()
+        EngineIntelligenceComparisonResponse response = new EngineIntelligenceComparisonResponse(
+                EngineIntelligenceComparisonType.RULES_VS_ML,
+                FraudEngineIdentityContract.rulesVsMlComparisonEngineIds(),
+                EngineIntelligenceAgreementStatus.DISAGREEMENT,
+                EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH,
+                EngineIntelligenceScoreDeltaBucket.LARGE
         );
-        Map<String, Object> serialized = map(new Yaml().load(objectMapper.writeValueAsString(response)));
-        Map<String, Object> comparison = map(serialized, "comparison");
+        Map<String, Object> comparison = map(new Yaml().load(objectMapper.writeValueAsString(response)));
         Map<String, Object> comparisonSchema = schema(schemas(), "EngineIntelligenceComparisonResponse");
 
         assertThat(comparison.keySet()).containsExactlyElementsOf(map(comparisonSchema, "properties").keySet());
@@ -537,6 +530,10 @@ class EngineIntelligenceOpenApiContractTest {
         return list(schema, "oneOf").stream()
                 .map(item -> map(item).get("$ref").toString())
                 .toList();
+    }
+
+    private List<String> identityOneOfRefs(Map<String, Object> schema) {
+        return oneOfRefs(map(list(schema, "allOf").getFirst()));
     }
 
     private void assertIdentitySchema(

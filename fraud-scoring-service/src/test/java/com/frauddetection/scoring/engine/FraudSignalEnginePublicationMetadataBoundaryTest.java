@@ -25,12 +25,12 @@ class FraudSignalEnginePublicationMetadataBoundaryTest {
     }
 
     @Test
-    void orchestratorOwnsPublicFraudEngineResultPublicationMetadata() throws Exception {
-        String orchestrator = Files.readString(Path.of(
-                "src/main/java/com/frauddetection/scoring/orchestration/FraudScoringOrchestrator.java"
+    void orchestrationPublicationFactoryOwnsPublicFraudEngineResultMetadata() throws Exception {
+        String publicationFactory = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/scoring/orchestration/FraudEnginePublicationFactory.java"
         )).toLowerCase(Locale.ROOT);
 
-        assertThat(orchestrator)
+        assertThat(publicationFactory)
                 .contains("new fraudengineresult")
                 .contains("latency.tomillis()")
                 .contains("generatedat");

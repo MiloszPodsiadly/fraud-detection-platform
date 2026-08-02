@@ -86,14 +86,14 @@ class EngineIntelligenceReadModelMapperTest {
 
     @Test
     void unavailableEngineHasRiskLevelNull() {
-        var unavailableEngine = mapper.map(projectionWithStatus(FraudEngineStatus.UNAVAILABLE)).engines().getFirst();
+        var unavailableEngine = mapper.map(projectionWithStatus(FraudEngineStatus.UNAVAILABLE)).engines().get(1);
 
         assertThat(unavailableEngine.riskLevel()).isNull();
     }
 
     @Test
     void degradedEngineDoesNotBecomeLowRisk() {
-        var degradedEngine = mapper.map(projectionWithStatus(FraudEngineStatus.DEGRADED)).engines().getFirst();
+        var degradedEngine = mapper.map(projectionWithStatus(FraudEngineStatus.DEGRADED)).engines().get(1);
 
         assertThat(degradedEngine.riskLevel()).isNull();
         assertThat(degradedEngine.scoreBucket()).isEqualTo(EngineIntelligenceScoreBucket.UNAVAILABLE);
@@ -256,17 +256,27 @@ class EngineIntelligenceReadModelMapperTest {
                 "txn-fdp96-operational",
                 1,
                 now,
-                EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
+                EngineIntelligenceAgreementStatus.PARTIAL,
                 EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                 EngineIntelligenceScoreDeltaBucket.UNAVAILABLE,
-                List.of(new EngineIntelligenceEngineProjection(
-                        "ml.python.primary",
-                        FraudEngineType.ML_MODEL,
-                        status,
-                        null,
-                        EngineIntelligenceScoreBucket.UNAVAILABLE,
-                        List.of("ML_MODEL_TIMEOUT")
-                )),
+                List.of(
+                        new EngineIntelligenceEngineProjection(
+                                "rules.primary",
+                                FraudEngineType.RULES,
+                                FraudEngineStatus.AVAILABLE,
+                                com.frauddetection.common.events.enums.RiskLevel.HIGH,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("HIGH_VELOCITY")
+                        ),
+                        new EngineIntelligenceEngineProjection(
+                                "ml.python.primary",
+                                FraudEngineType.ML_MODEL,
+                                status,
+                                null,
+                                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                                List.of("ML_MODEL_TIMEOUT")
+                        )
+                ),
                 List.of(),
                 List.of(),
                 now,

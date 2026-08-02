@@ -111,7 +111,7 @@ describe("TransactionRiskIntelligencePanel", () => {
     const { rerender } = renderPanel();
 
     const comparison = screen.getByRole("region", { name: "Projected Comparison" });
-    expect(within(comparison).getByText("PARTIAL")).toBeInTheDocument();
+    expect(within(comparison).getByText("DISAGREEMENT")).toBeInTheDocument();
     expect(within(comparison).getByText("Agreement status describes the Rules vs ML diagnostic comparison only.")).toBeInTheDocument();
 
     useScoredTransactionDetail.mockReturnValue({
