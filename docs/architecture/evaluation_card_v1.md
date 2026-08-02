@@ -73,7 +73,7 @@ positiveClassCount + negativeClassCount == recordsEvaluated
 The invariant is enforced at the FDP-124 source boundary and again when validating final Platform Recommendation Evaluation Card
 `evaluationEvidence`. Evidence counts use the single FDP-123 hard limit, `MAX_DATASET_RECORDS = 1000`.
 
-Published governance timestamps must be real RFC3339 UTC date-times ending in `Z`, with optional 1-6 digit fractional
+Published governance timestamps must be real RFC3339 UTC date-times ending in `Z`, with optional 1-9 digit fractional
 seconds. Offset encodings such as `+00:00` are rejected at artifact-set boundaries instead of being silently rewritten.
 The final Platform Recommendation Evaluation Card `generatedAt` instant must be greater than or equal to
 `evaluationEvidence.evaluationGeneratedAt`.

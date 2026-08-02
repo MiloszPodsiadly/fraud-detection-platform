@@ -5,7 +5,7 @@ Status: current FDP-129 decision.
 FDP-129 keeps `EngineIntelligenceSummary.contractVersion=1` while adding optional `velocity.primary` and explicit
 `RULES_VS_ML` comparison identity because the repository-controlled migration is additive for current v1 consumers:
 common-events, fraud-scoring emission, alert-service projection/read/API DTOs, OpenAPI, and Analyst Console validators
-share the same bounded public contract.
+share the same bounded public contract and are migrated atomically inside the repository deployment boundary.
 
 Version 1 requires Rules and ML for comparison semantics. `velocity.primary` is an optional third diagnostic engine.
 When Velocity is present, the canonical engine order is `rules.primary`, `ml.python.primary`, `velocity.primary`.

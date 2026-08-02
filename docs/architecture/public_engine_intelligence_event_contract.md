@@ -34,10 +34,24 @@ wiring requires a consumer-first rollout: consumers must deploy the FDP-92 contr
 producer emits `engineIntelligence`, because historical consumers may reject an unknown top-level
 field.
 
+Compatibility is intentionally narrow. Old events without `engineIntelligence` are accepted as absent. Legacy v1
+comparison objects without both identity fields are normalized only when the three legacy semantic fields are present.
+Partial comparison identity, current summaries missing Rules or ML, and malformed current canonical feature values are
+rejected or fail closed; compatibility adapters must not repair current corruption.
+
 ## Payload Limits
 
 The public payload allows at most three engines, five diagnostic signals, ten warning summaries, five
 reason codes per engine, and 128 characters per bounded string.
+
+Version 1 allows three known engine identities: `rules.primary`, `ml.python.primary`, and `velocity.primary`. Rules
+and ML are required. Velocity is an optional third diagnostic engine. Missing Rules or ML in a current
+`contractVersion=1` summary is corruption, not an operational representation. Operational failure is represented by a
+present engine result with a non-AVAILABLE status and bounded reason code, not by omitting the engine.
+
+Public timestamps use canonical UTC RFC3339 with uppercase `Z`, valid calendar dates from year `0001` through `9999`,
+hour `00-23`, second `00-59`, and optional fractional seconds from 1 through 9 digits. Offsets, timezone-less strings,
+leap seconds, `24:00`, year `0000`, and longer fractions are invalid.
 
 ## Public Field Allowlist
 

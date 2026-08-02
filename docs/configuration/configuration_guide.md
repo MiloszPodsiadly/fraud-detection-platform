@@ -47,8 +47,15 @@ enable production mode and does not replace environment-specific release approva
   source, change thresholds, or change analyst recommended actions.
 - Velocity V1 requires the Feature Enricher recent-transaction window to remain exactly `PT1M`; unsupported windows
   fail startup/configuration or consumer validation rather than silently changing score meaning.
-- The current engine-intelligence contract has max three engines: Rules, ML model, and Velocity. Future Device,
-  Merchant, or Graph engines require a versioned contract update.
+- The current engine-intelligence contract allows three known engine identities: Rules and ML model are required;
+  Velocity is an optional third diagnostic engine. Future Device, Merchant, or Graph engines require a versioned
+  contract update.
+
+## Dependency Posture
+
+- Bouncy Castle `1.85` is an intentional dependency upgrade for the current branch.
+- Caffeine is intentionally removed from the active application dependency graph; do not reintroduce Caffeine beans or
+  cache-specific configuration without a separate scoped design.
 
 ## Release Governance Settings
 

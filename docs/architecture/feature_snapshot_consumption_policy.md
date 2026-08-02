@@ -26,6 +26,12 @@ are established `camelCase` identifiers such as `deviceNovelty`, `recentAmountSu
 `camelCase` contract. It does not create dot-separated aliases or normalize one naming convention
 into another.
 
+Feature snapshot wire typing is owned by `FraudFeatureContract`, `FeatureSnapshotWireValueNormalizer`, and
+`FeatureSnapshotWireValueDeserializer` in `common-events`. Decimal wire values such as `recentAmountSumPln` and
+`rapidTransferThresholdPln` must round-trip as `BigDecimal`; integer and double facts must round-trip as their
+declared scalar types. Scoring adapters consume the normalized map through `ScoringContext` and `FeatureSnapshotReader`
+rather than reparsing JSON or coercing strings locally.
+
 `FeatureSnapshotKeyPolicy` permits only currently registered safe keys from the existing
 `FraudFeatureContract` feature name lists. New keys require an intentional contract update before
 they can be consumed by a future adapter.

@@ -97,7 +97,7 @@ replaces the fresh manifest last. Symlink checks and `O_NOFOLLOW` are misuse har
 fully eliminated on every platform. Atomic replacement alone is not power-loss durability unless files and directories are
 explicitly synchronized, which is outside this local generator scope.
 
-Published report and manifest timestamps must be RFC3339 UTC `Z` strings with optional 1-6 digit fractional seconds.
+Published report and manifest timestamps must be RFC3339 UTC `Z` strings with optional 1-9 digit fractional seconds.
 The manifest `generatedAt` must exactly equal the report `generatedAt`; equivalent offset encodings such as `+00:00`
 are rejected rather than normalized while reading a published artifact set.
 
