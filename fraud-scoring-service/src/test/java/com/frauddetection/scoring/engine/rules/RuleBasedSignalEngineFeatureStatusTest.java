@@ -244,6 +244,17 @@ class RuleBasedSignalEngineFeatureStatusTest {
     }
 
     @Test
+    void topLevelCountWithInvalidRulesWindowDegradesWithoutFlagFallbackOrRawWindowLeakage() {
+        TransactionEnrichedEvent source = event(false, false, false, 5, 5.0d, BigDecimal.TEN,
+                List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
+                Map.of());
+        FraudSignalEvaluation result = engine.evaluate(context(withTopLevelWindows(source, "P1D", "PT1M")));
+
+        assertDegradedInvalid(result);
+        assertThat(flatten(result)).doesNotContain("P1D").doesNotContain("5");
+    }
+
+    @Test
     void countWithWrongWindowTypeDegrades() {
         FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 5, 5.0d, BigDecimal.TEN,
                 List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
@@ -269,6 +280,17 @@ class RuleBasedSignalEngineFeatureStatusTest {
 
         assertDegradedInvalid(result);
         assertThat(flatten(result)).doesNotContain("P7D").doesNotContain("20000.00");
+    }
+
+    @Test
+    void topLevelAmountWithInvalidRulesWindowDegradesWithoutFlagOrCandidateFallback() {
+        TransactionEnrichedEvent source = event(false, false, false, 1, 1.0d, new BigDecimal("6000.00"),
+                List.of(FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY),
+                Map.of(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true));
+        FraudSignalEvaluation result = engine.evaluate(context(withTopLevelWindows(source, "PT1M", "P1D")));
+
+        assertDegradedInvalid(result);
+        assertThat(flatten(result)).doesNotContain("P1D").doesNotContain("6000.00");
     }
 
     @Test
@@ -348,6 +370,38 @@ class RuleBasedSignalEngineFeatureStatusTest {
                 proxyOrVpn,
                 featureFlags,
                 featureSnapshot
+        );
+    }
+
+    private TransactionEnrichedEvent withTopLevelWindows(
+            TransactionEnrichedEvent source,
+            String recentTransactionCountWindow,
+            String recentAmountWindow
+    ) {
+        return new TransactionEnrichedEvent(
+                source.eventId(),
+                source.transactionId(),
+                source.correlationId(),
+                source.customerId(),
+                source.accountId(),
+                source.createdAt(),
+                source.transactionTimestamp(),
+                source.transactionAmount(),
+                source.merchantInfo(),
+                source.deviceInfo(),
+                source.locationInfo(),
+                source.customerContext(),
+                source.recentTransactionCount(),
+                recentTransactionCountWindow,
+                source.recentAmountSum(),
+                recentAmountWindow,
+                source.transactionVelocityPerMinute(),
+                source.merchantFrequency7d(),
+                source.deviceNovelty(),
+                source.countryMismatch(),
+                source.proxyOrVpnDetected(),
+                source.featureFlags(),
+                source.featureSnapshot()
         );
     }
 

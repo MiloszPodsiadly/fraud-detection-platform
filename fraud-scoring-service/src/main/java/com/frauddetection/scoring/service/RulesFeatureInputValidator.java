@@ -3,6 +3,8 @@ package com.frauddetection.scoring.service;
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.features.FraudFeatureValueBoundsContract;
+import com.frauddetection.common.events.model.Money;
+import com.frauddetection.common.events.model.SupportedCurrencyContract;
 import com.frauddetection.scoring.features.FeatureSnapshotReader;
 import com.frauddetection.scoring.features.FeatureSnapshotValue;
 import com.frauddetection.scoring.features.FeatureSnapshotValueStatus;
@@ -10,6 +12,7 @@ import com.frauddetection.scoring.features.FeatureSnapshotValueStatus;
 import java.math.BigDecimal;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 public final class RulesFeatureInputValidator {
 
@@ -18,12 +21,20 @@ public final class RulesFeatureInputValidator {
 
     public static void requireValid(TransactionEnrichedEvent event) {
         Objects.requireNonNull(event, "event is required");
-        if (!isValid(event, new FeatureSnapshotReader(snapshot(event)))) {
+        RulesInputValidationResult validation = validate(event, new FeatureSnapshotReader(snapshot(event)));
+        validation.requireNoAdapterDefect();
+        if (!validation.valid()) {
             throw new RulesFeatureInputValidationException();
         }
     }
 
     public static boolean isValid(TransactionEnrichedEvent event, FeatureSnapshotReader reader) {
+        RulesInputValidationResult validation = validate(event, reader);
+        validation.requireNoAdapterDefect();
+        return validation.valid();
+    }
+
+    public static RulesInputValidationResult validate(TransactionEnrichedEvent event, FeatureSnapshotReader reader) {
         Objects.requireNonNull(event, "event is required");
         Objects.requireNonNull(reader, "reader is required");
         FeatureSnapshotValue<Integer> recentTransactionCount =
@@ -43,7 +54,7 @@ public final class RulesFeatureInputValidator {
         FeatureSnapshotValue<Boolean> rapidTransferFraudCaseCandidate =
                 reader.booleanValue(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE);
 
-        failFastForAdapterDefects(
+        Optional<RulesInputValidationStatus> adapterDefect = adapterDefect(
                 recentTransactionCount,
                 recentTransactionCountWindow,
                 recentAmountSumPln,
@@ -53,6 +64,9 @@ public final class RulesFeatureInputValidator {
                 rapidTransferWindow,
                 rapidTransferFraudCaseCandidate
         );
+        if (adapterDefect.isPresent()) {
+            return RulesInputValidationResult.invalid(adapterDefect.get());
+        }
         if (hasInvalidType(
                 recentTransactionCount,
                 recentTransactionCountWindow,
@@ -63,51 +77,76 @@ public final class RulesFeatureInputValidator {
                 rapidTransferWindow,
                 rapidTransferFraudCaseCandidate
         )) {
-            return false;
+            return RulesInputValidationResult.invalid(RulesInputValidationStatus.INVALID_TYPE);
         }
         if (!validCount(recentTransactionCount)
                 || !validAmount(recentAmountSumPln)
                 || !validCount(rapidTransferCount)
                 || !validAmount(rapidTransferTotalPln)) {
-            return false;
+            return RulesInputValidationResult.invalid(RulesInputValidationStatus.OUT_OF_BOUNDS);
         }
-        if (!validCanonicalWindow(recentTransactionCount, recentTransactionCountWindow)
-                || !validCanonicalWindow(recentAmountSumPln, recentAmountSumWindow)
-                || !validCanonicalWindow(rapidTransferCount, rapidTransferWindow)
-                || !validCanonicalWindow(rapidTransferTotalPln, rapidTransferWindow)) {
-            return false;
+        RulesInputValidationResult canonicalCountWindow =
+                validateCanonicalWindow(recentTransactionCount, recentTransactionCountWindow);
+        if (!canonicalCountWindow.valid()) {
+            return canonicalCountWindow;
         }
-        if (present(rapidTransferCount) != present(rapidTransferTotalPln)) {
-            return false;
+        RulesInputValidationResult canonicalAmountWindow =
+                validateCanonicalWindow(recentAmountSumPln, recentAmountSumWindow);
+        if (!canonicalAmountWindow.valid()) {
+            return canonicalAmountWindow;
+        }
+        RulesInputValidationResult rapidCountWindow = validateCanonicalWindow(rapidTransferCount, rapidTransferWindow);
+        if (!rapidCountWindow.valid()) {
+            return rapidCountWindow;
+        }
+        RulesInputValidationResult rapidAmountWindow = validateCanonicalWindow(rapidTransferTotalPln, rapidTransferWindow);
+        if (!rapidAmountWindow.valid()) {
+            return rapidAmountWindow;
         }
         if (!validTopLevelCount(event.recentTransactionCount())
                 || !validTopLevelAmount(event.recentAmountSum() == null ? null : event.recentAmountSum().amount())) {
-            return false;
+            return RulesInputValidationResult.invalid(RulesInputValidationStatus.OUT_OF_BOUNDS);
+        }
+        if (!validSupportedCurrency(event.transactionAmount())
+                || !validSupportedCurrency(event.recentAmountSum())) {
+            return RulesInputValidationResult.invalid(RulesInputValidationStatus.UNSUPPORTED_CURRENCY_BASIS);
+        }
+        RulesInputValidationResult topLevelCountWindow = validateTopLevelCountWindow(event);
+        if (!topLevelCountWindow.valid()) {
+            return topLevelCountWindow;
+        }
+        RulesInputValidationResult topLevelAmountWindow = validateTopLevelAmountWindow(event);
+        if (!topLevelAmountWindow.valid()) {
+            return topLevelAmountWindow;
         }
         if (present(recentTransactionCount)
                 && event.recentTransactionCount() != null
                 && !recentTransactionCount.value().equals(event.recentTransactionCount())) {
-            return false;
+            return RulesInputValidationResult.invalid(RulesInputValidationStatus.INCONSISTENT_FACTS);
         }
-        return !present(recentAmountSumPln)
-                || event.recentAmountSum() == null
-                || !isPln(event.recentAmountSum().currency())
-                || recentAmountSumPln.value().compareTo(event.recentAmountSum().amount()) == 0;
+        if (present(recentAmountSumPln)
+                && event.recentAmountSum() != null
+                && isPln(event.recentAmountSum().currency())
+                && recentAmountSumPln.value().compareTo(event.recentAmountSum().amount()) != 0) {
+            return RulesInputValidationResult.invalid(RulesInputValidationStatus.INCONSISTENT_FACTS);
+        }
+        return RulesInputValidationResult.ok();
     }
 
     private static Map<String, Object> snapshot(TransactionEnrichedEvent event) {
         return event.featureSnapshot() == null ? Map.of() : event.featureSnapshot();
     }
 
-    private static void failFastForAdapterDefects(FeatureSnapshotValue<?>... values) {
+    private static Optional<RulesInputValidationStatus> adapterDefect(FeatureSnapshotValue<?>... values) {
         for (FeatureSnapshotValue<?> value : values) {
             if (value.status() == FeatureSnapshotValueStatus.WRONG_ACCESSOR) {
-                throw new IllegalStateException("adapter feature accessor mismatch");
+                return Optional.of(RulesInputValidationStatus.ADAPTER_ACCESSOR_DEFECT);
             }
             if (value.status() == FeatureSnapshotValueStatus.NOT_ALLOWED) {
-                throw new IllegalStateException("adapter feature access policy violation");
+                return Optional.of(RulesInputValidationStatus.ACCESS_POLICY_DEFECT);
             }
         }
+        return Optional.empty();
     }
 
     private static boolean hasInvalidType(FeatureSnapshotValue<?>... values) {
@@ -135,14 +174,46 @@ public final class RulesFeatureInputValidator {
         return value == null || FraudFeatureValueBoundsContract.isWithinAmountBounds(value);
     }
 
-    private static boolean validCanonicalWindow(
+    private static boolean validSupportedCurrency(Money money) {
+        return money == null || SupportedCurrencyContract.isSupported(money.currency());
+    }
+
+    private static RulesInputValidationResult validateTopLevelCountWindow(TransactionEnrichedEvent event) {
+        if (event.recentTransactionCountWindow() != null
+                && !FraudFeatureValueBoundsContract.isRulesV1CanonicalWindowText(event.recentTransactionCountWindow())) {
+            return RulesInputValidationResult.invalid(RulesInputValidationStatus.INVALID_WINDOW);
+        }
+        if (event.recentTransactionCount() != null && event.recentTransactionCountWindow() == null) {
+            return RulesInputValidationResult.invalid(RulesInputValidationStatus.INCOMPLETE_FACT_PAIR);
+        }
+        return RulesInputValidationResult.ok();
+    }
+
+    private static RulesInputValidationResult validateTopLevelAmountWindow(TransactionEnrichedEvent event) {
+        if (event.recentAmountSum() == null || !isPln(event.recentAmountSum().currency())) {
+            return RulesInputValidationResult.ok();
+        }
+        if (event.recentAmountSumWindow() != null
+                && !FraudFeatureValueBoundsContract.isRulesV1CanonicalWindowText(event.recentAmountSumWindow())) {
+            return RulesInputValidationResult.invalid(RulesInputValidationStatus.INVALID_WINDOW);
+        }
+        if (event.recentAmountSumWindow() == null) {
+            return RulesInputValidationResult.invalid(RulesInputValidationStatus.INCOMPLETE_FACT_PAIR);
+        }
+        return RulesInputValidationResult.ok();
+    }
+
+    private static RulesInputValidationResult validateCanonicalWindow(
             FeatureSnapshotValue<?> fact,
             FeatureSnapshotValue<String> window
     ) {
         if (present(window) && !FraudFeatureValueBoundsContract.isRulesV1CanonicalWindowText(window.value())) {
-            return false;
+            return RulesInputValidationResult.invalid(RulesInputValidationStatus.INVALID_WINDOW);
         }
-        return !present(fact) || present(window);
+        if (present(fact) && !present(window)) {
+            return RulesInputValidationResult.invalid(RulesInputValidationStatus.INCOMPLETE_FACT_PAIR);
+        }
+        return RulesInputValidationResult.ok();
     }
 
     private static boolean isPln(String currency) {

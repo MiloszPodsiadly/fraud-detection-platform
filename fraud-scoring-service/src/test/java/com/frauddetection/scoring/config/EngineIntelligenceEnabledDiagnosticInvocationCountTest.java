@@ -27,14 +27,14 @@ class EngineIntelligenceEnabledDiagnosticInvocationCountTest {
         enabledContextRunner().run(context -> {
             RuleBasedFraudScoringEngine rules = context.getBean(RuleBasedFraudScoringEngine.class);
             MlFraudScoringEngine ml = context.getBean(MlFraudScoringEngine.class);
-            when(rules.score(any())).thenReturn(result(0.15d, RiskLevel.LOW, Map.of()));
+            when(rules.scoreValidated(any(), any())).thenReturn(result(0.15d, RiskLevel.LOW, Map.of()));
             when(ml.score(any())).thenReturn(result(0.91d, RiskLevel.CRITICAL, Map.of("modelAvailable", true)));
 
             var summary = context.getBean(EngineIntelligenceEmissionService.class)
                     .emitIfEnabled(FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build()));
 
             assertThat(summary).isPresent();
-            verify(rules, times(1)).score(any());
+            verify(rules, times(1)).scoreValidated(any(), any());
             verify(ml, times(1)).score(any());
         });
     }

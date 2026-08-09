@@ -160,10 +160,18 @@ class FraudEngineContractRuntimeIsolationTest {
         Path orchestrationRoot = scoringRoot.resolve("orchestration");
         Path reviewedProducerWiring = scoringRoot.resolve("config/EngineIntelligenceRuntimeConfig.java");
         Path rulesFeatureInputValidator = scoringRoot.resolve("service/RulesFeatureInputValidator.java");
+        Path rulesV1CompatibilityResolver = scoringRoot.resolve("service/RulesV1CompatibilityResolver.java");
         String features = javaSources(featuresRoot);
         String rulesValidator = Files.readString(rulesFeatureInputValidator);
+        String rulesCompatibilityResolver = Files.readString(rulesV1CompatibilityResolver);
         String runtimeOutsidePolicy = javaSourcesExcept(
-                scoringRoot, featuresRoot, engineRoot, orchestrationRoot, reviewedProducerWiring, rulesFeatureInputValidator
+                scoringRoot,
+                featuresRoot,
+                engineRoot,
+                orchestrationRoot,
+                reviewedProducerWiring,
+                rulesFeatureInputValidator,
+                rulesV1CompatibilityResolver
         );
         String adapterFoundation = javaSources(engineRoot);
 
@@ -177,6 +185,13 @@ class FraudEngineContractRuntimeIsolationTest {
         assertThat(rulesValidator)
                 .contains("FeatureSnapshotReader")
                 .contains("RulesFeatureInputValidationException")
+                .doesNotContain("VelocityFeatureContract")
+                .doesNotContain("context.featureSnapshot().get(")
+                .doesNotContain("exception.getMessage()");
+        assertThat(rulesCompatibilityResolver)
+                .contains("FeatureSnapshotReader")
+                .contains("RulesV1ContributionSource")
+                .contains("PredicateResolution")
                 .doesNotContain("VelocityFeatureContract")
                 .doesNotContain("context.featureSnapshot().get(")
                 .doesNotContain("exception.getMessage()");

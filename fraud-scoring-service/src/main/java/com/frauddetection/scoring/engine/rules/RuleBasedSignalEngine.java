@@ -21,6 +21,8 @@ import com.frauddetection.scoring.features.FeatureSnapshotReaderFactory;
 import com.frauddetection.scoring.features.FeatureSnapshotValueStatus;
 import com.frauddetection.scoring.service.RuleBasedFraudScoringEngine;
 import com.frauddetection.scoring.service.RulesFeatureInputValidator;
+import com.frauddetection.scoring.service.RulesInputValidationResult;
+import com.frauddetection.scoring.service.RulesInputValidationStatus;
 
 import java.util.List;
 import java.util.Objects;
@@ -47,10 +49,15 @@ public final class RuleBasedSignalEngine implements FraudSignalEngine {
     public FraudSignalEvaluation evaluate(ScoringContext context) {
         Objects.requireNonNull(context, "context is required");
         FeatureSnapshotReader reader = readerFactory.from(context);
-        if (!RulesFeatureInputValidator.isValid(context.transaction(), reader)) {
-            return degradedResultFor(FeatureSnapshotValueStatus.INVALID_TYPE);
+        RulesInputValidationResult validation = RulesFeatureInputValidator.validate(context.transaction(), reader);
+        validation.requireNoAdapterDefect();
+        if (!validation.valid()) {
+            return degradedResultFor(validation.status());
         }
-        FraudScoreResult productionResult = productionRuleEngine.score(FraudScoringRequest.from(context.transaction()));
+        FraudScoreResult productionResult = productionRuleEngine.scoreValidated(
+                FraudScoringRequest.from(context.transaction()),
+                validation
+        );
         return availableResult(productionResult);
     }
 
@@ -60,11 +67,26 @@ public final class RuleBasedSignalEngine implements FraudSignalEngine {
     }
 
     static FraudSignalEvaluation degradedResultFor(FeatureSnapshotValueStatus status) {
-        RuleBasedSignalReasonCode reasonCode = switch (status) {
-            case INVALID_TYPE -> RuleBasedSignalReasonCode.FEATURE_STATUS_INVALID;
-            case WRONG_ACCESSOR -> throw new IllegalStateException("adapter feature accessor mismatch");
-            case NOT_ALLOWED -> throw new IllegalStateException("adapter feature access policy violation");
+        RulesInputValidationStatus validationStatus = switch (status) {
+            case INVALID_TYPE -> RulesInputValidationStatus.INVALID_TYPE;
+            case WRONG_ACCESSOR -> RulesInputValidationStatus.ADAPTER_ACCESSOR_DEFECT;
+            case NOT_ALLOWED -> RulesInputValidationStatus.ACCESS_POLICY_DEFECT;
             case PRESENT, MISSING -> throw new IllegalArgumentException("status is not a degraded feature status");
+        };
+        return degradedResultFor(validationStatus);
+    }
+
+    static FraudSignalEvaluation degradedResultFor(RulesInputValidationStatus status) {
+        RuleBasedSignalReasonCode reasonCode = switch (status) {
+            case INVALID_TYPE,
+                 INVALID_WINDOW,
+                 OUT_OF_BOUNDS,
+                 INCONSISTENT_FACTS,
+                 INCOMPLETE_FACT_PAIR,
+                 UNSUPPORTED_CURRENCY_BASIS -> RuleBasedSignalReasonCode.FEATURE_STATUS_INVALID;
+            case ADAPTER_ACCESSOR_DEFECT -> throw new IllegalStateException("adapter feature accessor mismatch");
+            case ACCESS_POLICY_DEFECT -> throw new IllegalStateException("adapter feature access policy violation");
+            case VALID -> throw new IllegalArgumentException("status is not a degraded feature status");
         };
         return new FraudSignalEvaluation(
                 FraudEngineStatus.DEGRADED,

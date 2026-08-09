@@ -230,8 +230,11 @@ class RuleBasedFraudScoringEngineTest {
 
         FraudScoreResult result = score(legacyCandidateOnly);
 
-        assertThat(result.reasonCodes()).contains(ReasonCode.RAPID_PLN_20K_BURST.wireValue());
-        assertThat(result.fraudScore()).isCloseTo(0.94d, within(0.000001d));
+        assertThat(result.reasonCodes()).contains(
+                ReasonCode.HIGH_AMOUNT_ACTIVITY.wireValue(),
+                ReasonCode.RAPID_PLN_20K_BURST.wireValue()
+        );
+        assertThat(result.fraudScore()).isCloseTo(0.35d, within(0.000001d));
     }
 
     @Test
@@ -294,23 +297,22 @@ class RuleBasedFraudScoringEngineTest {
     }
 
     @Test
-    void partialRapidTransferCanonicalPairIsRejectedBeforeLegacyFlagScoring() {
-        TransactionEnrichedEvent source = event(
-                2,
-                2.0d,
-                new BigDecimal("10000.00"),
-                new BigDecimal("20000.00"),
-                List.of(FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST),
-                false,
-                false,
-                false
+    void canonicalRapidCountBelowThresholdWinsOverLegacyCandidate() {
+        TransactionEnrichedEvent canonicalFalse = withFeatureSnapshot(
+                topLevelOnly(List.of(), null, null, null, null),
+                Map.of(
+                        FraudFeatureContract.RAPID_TRANSFER_COUNT, 1,
+                        FraudFeatureContract.RAPID_TRANSFER_WINDOW, "PT1M",
+                        FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true
+                )
         );
-        TransactionEnrichedEvent malformedCanonical = withFeatureSnapshot(source, Map.of(
-                FraudFeatureContract.RAPID_TRANSFER_COUNT, 2,
-                FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true
-        ));
 
-        assertRulesInputInvalid(malformedCanonical);
+        FraudScoreResult result = score(canonicalFalse);
+        RulesV1SignalResolution resolution = signal(canonicalFalse, ReasonCode.RAPID_PLN_20K_BURST);
+
+        assertThat(result.reasonCodes()).doesNotContain(ReasonCode.RAPID_PLN_20K_BURST.wireValue());
+        assertThat(resolution.predicateResolution()).isEqualTo(PredicateResolution.FALSE);
+        assertThat(resolution.contributes()).isFalse();
     }
 
     @Test
@@ -403,6 +405,78 @@ class RuleBasedFraudScoringEngineTest {
     }
 
     @Test
+    void canonicalHighAmountCountBelowThresholdWithMissingAmountWinsOverLegacyFlag() {
+        TransactionEnrichedEvent canonicalFalse = withFeatureSnapshot(
+                topLevelOnly(List.of(FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY), null, null, null, null),
+                Map.of(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1,
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M"
+                )
+        );
+
+        FraudScoreResult result = score(canonicalFalse);
+        RulesV1SignalResolution resolution = signal(canonicalFalse, ReasonCode.HIGH_AMOUNT_ACTIVITY);
+
+        assertThat(result.reasonCodes()).doesNotContain(ReasonCode.HIGH_AMOUNT_ACTIVITY.wireValue());
+        assertThat(resolution.predicateResolution()).isEqualTo(PredicateResolution.FALSE);
+        assertThat(resolution.contributes()).isFalse();
+    }
+
+    @Test
+    void canonicalHighAmountAmountBelowThresholdWithMissingCountWinsOverLegacyFlag() {
+        TransactionEnrichedEvent canonicalFalse = withFeatureSnapshot(
+                topLevelOnly(List.of(FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY), null, null, null, null),
+                Map.of(
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("100.00"),
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M"
+                )
+        );
+
+        FraudScoreResult result = score(canonicalFalse);
+        RulesV1SignalResolution resolution = signal(canonicalFalse, ReasonCode.HIGH_AMOUNT_ACTIVITY);
+
+        assertThat(result.reasonCodes()).doesNotContain(ReasonCode.HIGH_AMOUNT_ACTIVITY.wireValue());
+        assertThat(resolution.predicateResolution()).isEqualTo(PredicateResolution.FALSE);
+        assertThat(resolution.contributes()).isFalse();
+    }
+
+    @Test
+    void canonicalHighAmountCountSatisfiedWithMissingAmountAllowsLegacyFallbackAsAbsent() {
+        TransactionEnrichedEvent canonicalAbsent = withFeatureSnapshot(
+                topLevelOnly(List.of(FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY), null, null, null, null),
+                Map.of(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M"
+                )
+        );
+
+        FraudScoreResult result = score(canonicalAbsent);
+        RulesV1SignalResolution resolution = signal(canonicalAbsent, ReasonCode.HIGH_AMOUNT_ACTIVITY);
+
+        assertThat(result.reasonCodes()).contains(ReasonCode.HIGH_AMOUNT_ACTIVITY.wireValue());
+        assertThat(resolution.predicateResolution()).isEqualTo(PredicateResolution.ABSENT);
+        assertThat(resolution.contributes()).isTrue();
+    }
+
+    @Test
+    void canonicalHighAmountAmountSatisfiedWithMissingCountAllowsLegacyFallbackAsAbsent() {
+        TransactionEnrichedEvent canonicalAbsent = withFeatureSnapshot(
+                topLevelOnly(List.of(FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY), null, null, null, null),
+                Map.of(
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("6000.00"),
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M"
+                )
+        );
+
+        FraudScoreResult result = score(canonicalAbsent);
+        RulesV1SignalResolution resolution = signal(canonicalAbsent, ReasonCode.HIGH_AMOUNT_ACTIVITY);
+
+        assertThat(result.reasonCodes()).contains(ReasonCode.HIGH_AMOUNT_ACTIVITY.wireValue());
+        assertThat(resolution.predicateResolution()).isEqualTo(PredicateResolution.ABSENT);
+        assertThat(resolution.contributes()).isTrue();
+    }
+
+    @Test
     void canonicalHighAmountPredicateTrueDoesNotRequireLegacyFlag() {
         FraudScoreResult result = score(event(
                 2,
@@ -440,6 +514,53 @@ class RuleBasedFraudScoringEngineTest {
         FraudScoreResult result = score(canonicalFalse);
 
         assertThat(result.reasonCodes()).doesNotContain(ReasonCode.RAPID_PLN_20K_BURST.wireValue());
+    }
+
+    @Test
+    void canonicalRapidAmountBelowThresholdWithMissingCountWinsOverLegacyFlag() {
+        TransactionEnrichedEvent canonicalFalse = withFeatureSnapshot(
+                topLevelOnly(List.of(FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST), null, null, null, null),
+                Map.of(
+                        FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("100.00"),
+                        FraudFeatureContract.RAPID_TRANSFER_WINDOW, "PT1M"
+                )
+        );
+
+        FraudScoreResult result = score(canonicalFalse);
+        RulesV1SignalResolution resolution = signal(canonicalFalse, ReasonCode.RAPID_PLN_20K_BURST);
+
+        assertThat(result.reasonCodes()).doesNotContain(ReasonCode.RAPID_PLN_20K_BURST.wireValue());
+        assertThat(resolution.predicateResolution()).isEqualTo(PredicateResolution.FALSE);
+        assertThat(resolution.contributes()).isFalse();
+    }
+
+    @Test
+    void malformedCanonicalCountWithLegacyHighAmountFlagIsInvalid() {
+        TransactionEnrichedEvent invalid = withFeatureSnapshot(
+                topLevelOnly(List.of(FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY), null, null, null, null),
+                Map.of(FraudFeatureContract.RECENT_TRANSACTION_COUNT, "2")
+        );
+        RulesV1SignalResolution resolution = signal(invalid, ReasonCode.HIGH_AMOUNT_ACTIVITY);
+
+        assertThat(resolution.predicateResolution()).isEqualTo(PredicateResolution.INVALID);
+        assertThat(resolution.contributes()).isFalse();
+        assertRulesInputInvalid(invalid);
+    }
+
+    @Test
+    void malformedCanonicalRapidAmountWithLegacyCandidateIsInvalid() {
+        TransactionEnrichedEvent invalid = withFeatureSnapshot(
+                topLevelOnly(List.of(), null, null, null, null),
+                Map.of(
+                        FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, "20000.00",
+                        FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true
+                )
+        );
+        RulesV1SignalResolution resolution = signal(invalid, ReasonCode.RAPID_PLN_20K_BURST);
+
+        assertThat(resolution.predicateResolution()).isEqualTo(PredicateResolution.INVALID);
+        assertThat(resolution.contributes()).isFalse();
+        assertRulesInputInvalid(invalid);
     }
 
     @Test
@@ -522,6 +643,243 @@ class RuleBasedFraudScoringEngineTest {
         FraudScoreResult result = score(topLevelEur);
 
         assertThat(result.reasonCodes()).doesNotContain(ReasonCode.RAPID_PLN_20K_BURST.wireValue());
+    }
+
+    @Test
+    void legacyHighVelocityFlagOnlyKeepsHistoricalFlagContribution() {
+        FraudScoreResult result = score(topLevelOnly(
+                List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
+                null,
+                null,
+                null,
+                null
+        ));
+
+        assertThat(result.fraudScore()).isCloseTo(0.25d, within(0.000001d));
+        assertThat(result.reasonCodes()).containsExactly(ReasonCode.HIGH_VELOCITY.wireValue());
+        assertThat(result.scoreDetails()).containsEntry("highVelocityRulesV1Weight", 0.20d);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void nullFeatureFlagsBehaveAsEmptyImmutableListWithoutInventedSignals() {
+        FraudScoreResult result = score(topLevelOnly(null, null, null, null, null));
+        List<String> featureFlags = (List<String>) result.scoreDetails().get("featureFlags");
+
+        assertThat(result.reasonCodes()).isEmpty();
+        assertThat(featureFlags).isEmpty();
+        assertThatThrownBy(() -> featureFlags.add(FraudFeatureContract.FLAG_HIGH_VELOCITY))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void topLevelCountOnlyKeepsHistoricalCountContribution() {
+        FraudScoreResult result = score(topLevelOnly(List.of(), 5, null, null, null));
+
+        assertThat(result.fraudScore()).isCloseTo(0.15d, within(0.000001d));
+        assertThat(result.reasonCodes()).containsExactly(ReasonCode.HIGH_VELOCITY.wireValue());
+        assertThat(result.scoreDetails()).containsEntry("highVelocityRulesV1Weight", 0.10d);
+    }
+
+    @Test
+    void topLevelCountWithP1dWindowFailsClosedWithoutLegacyFlagFallback() {
+        TransactionEnrichedEvent invalidWindow = topLevelOnly(
+                List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
+                5,
+                null,
+                null,
+                null,
+                "P1D",
+                null
+        );
+
+        assertRulesInputInvalid(invalidWindow);
+    }
+
+    @Test
+    void topLevelCountWithPt5mWindowFailsClosed() {
+        TransactionEnrichedEvent invalidWindow = topLevelOnly(List.of(), 5, null, null, null, "PT5M", null);
+
+        assertRulesInputInvalid(invalidWindow);
+    }
+
+    @Test
+    void topLevelCountWithMissingWindowFailsClosed() {
+        TransactionEnrichedEvent missingWindow = topLevelOnly(List.of(), 5, null, null, null, null, null);
+
+        assertRulesInputInvalid(missingWindow);
+    }
+
+    @Test
+    void topLevelRateOnlyKeepsHistoricalVelocityContribution() {
+        FraudScoreResult result = score(topLevelOnly(List.of(), null, 5.0d, null, null));
+
+        assertThat(result.fraudScore()).isCloseTo(0.17d, within(0.000001d));
+        assertThat(result.reasonCodes()).containsExactly(ReasonCode.HIGH_VELOCITY.wireValue());
+        assertThat(result.scoreDetails()).containsEntry("highVelocityRulesV1Weight", 0.12d);
+    }
+
+    @Test
+    void completeHistoricalHighVelocityRepresentationKeepsHistoricalSum() {
+        FraudScoreResult result = score(topLevelOnly(
+                List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
+                5,
+                5.0d,
+                null,
+                null
+        ));
+
+        assertThat(result.fraudScore()).isCloseTo(0.47d, within(0.000001d));
+        assertThat(result.scoreDetails()).containsEntry("highVelocityRulesV1Weight", 0.42d);
+    }
+
+    @Test
+    void legacyHighAmountFlagOnlyKeepsHistoricalFlagContribution() {
+        FraudScoreResult result = score(topLevelOnly(
+                List.of(FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY),
+                null,
+                null,
+                null,
+                null
+        ));
+
+        assertThat(result.fraudScore()).isCloseTo(0.19d, within(0.000001d));
+        assertThat(result.reasonCodes()).containsExactly(ReasonCode.HIGH_AMOUNT_ACTIVITY.wireValue());
+        assertThat(result.scoreDetails()).containsEntry("recentAmountActivityRulesV1Weight", 0.14d);
+    }
+
+    @Test
+    void topLevelAmountOnlyKeepsHistoricalAmountContribution() {
+        FraudScoreResult result = score(topLevelOnly(List.of(), null, null, new BigDecimal("5000.00"), "PLN"));
+
+        assertThat(result.fraudScore()).isCloseTo(0.15d, within(0.000001d));
+        assertThat(result.reasonCodes()).containsExactly(ReasonCode.HIGH_AMOUNT_ACTIVITY.wireValue());
+        assertThat(result.scoreDetails()).containsEntry("recentAmountActivityRulesV1Weight", 0.10d);
+    }
+
+    @Test
+    void topLevelPlnAmountWithP1dWindowFailsClosedWithoutLegacyFlagFallback() {
+        TransactionEnrichedEvent invalidWindow = topLevelOnly(
+                List.of(FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY),
+                null,
+                null,
+                new BigDecimal("6000.00"),
+                "PLN",
+                null,
+                "P1D"
+        );
+
+        assertRulesInputInvalid(invalidWindow);
+    }
+
+    @Test
+    void topLevelPlnAmountWithMissingWindowFailsClosed() {
+        TransactionEnrichedEvent missingWindow = topLevelOnly(
+                List.of(),
+                null,
+                null,
+                new BigDecimal("6000.00"),
+                "PLN",
+                null,
+                null
+        );
+
+        assertRulesInputInvalid(missingWindow);
+    }
+
+    @Test
+    void unsupportedTopLevelRecentAmountCurrencyFailsClosedBeforeRulesThresholdEvaluation() {
+        TransactionEnrichedEvent unsupportedCurrency = topLevelOnly(
+                List.of(FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY),
+                null,
+                null,
+                new BigDecimal("6000.00"),
+                "XXX"
+        );
+
+        assertRulesInputInvalid(unsupportedCurrency);
+    }
+
+    @Test
+    void nullTopLevelRecentAmountCurrencyFailsClosedBeforeRulesThresholdEvaluation() {
+        TransactionEnrichedEvent nullCurrency = topLevelOnly(
+                List.of(FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY),
+                null,
+                null,
+                new BigDecimal("6000.00"),
+                null
+        );
+
+        assertRulesInputInvalid(nullCurrency);
+    }
+
+    @Test
+    void completeHistoricalHighAmountRepresentationKeepsHistoricalSum() {
+        FraudScoreResult result = score(topLevelOnly(
+                List.of(FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY),
+                null,
+                null,
+                new BigDecimal("5000.00"),
+                "PLN"
+        ));
+
+        assertThat(result.fraudScore()).isCloseTo(0.29d, within(0.000001d));
+        assertThat(result.scoreDetails()).containsEntry("recentAmountActivityRulesV1Weight", 0.24d);
+    }
+
+    @Test
+    void legacyRapidCandidateOnlyKeepsHistoricalCandidateContribution() {
+        FraudScoreResult result = score(withFeatureSnapshot(
+                topLevelOnly(List.of(), null, null, null, null),
+                Map.of(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true)
+        ));
+
+        assertThat(result.fraudScore()).isCloseTo(0.25d, within(0.000001d));
+        assertThat(result.reasonCodes()).containsExactly(ReasonCode.RAPID_PLN_20K_BURST.wireValue());
+        assertThat(result.scoreDetails()).containsEntry("rapidPln20kBurstRulesV1Weight", 0.20d);
+    }
+
+    @Test
+    void legacyRapidFlagOnlyKeepsHistoricalFlagContribution() {
+        FraudScoreResult result = score(topLevelOnly(
+                List.of(FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST),
+                null,
+                null,
+                null,
+                null
+        ));
+
+        assertThat(result.fraudScore()).isCloseTo(0.50d, within(0.000001d));
+        assertThat(result.scoreDetails()).containsEntry("rapidPln20kBurstRulesV1Weight", 0.45d);
+    }
+
+    @Test
+    void legacyRapidFlagAndCandidateKeepHistoricalSum() {
+        FraudScoreResult result = score(withFeatureSnapshot(
+                topLevelOnly(List.of(FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST), null, null, null, null),
+                Map.of(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true)
+        ));
+
+        assertThat(result.fraudScore()).isCloseTo(0.70d, within(0.000001d));
+        assertThat(result.scoreDetails()).containsEntry("rapidPln20kBurstRulesV1Weight", 0.65d);
+    }
+
+    @Test
+    void topLevelPlnAmountWithInvalidWindowFailsClosedWithoutRapidCandidateFallback() {
+        TransactionEnrichedEvent invalidWindow = withFeatureSnapshot(
+                topLevelOnly(
+                        List.of(),
+                        null,
+                        null,
+                        new BigDecimal("6000.00"),
+                        "PLN",
+                        null,
+                        "P1D"
+                ),
+                Map.of(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true)
+        );
+
+        assertRulesInputInvalid(invalidWindow);
     }
 
     @Test
@@ -689,12 +1047,23 @@ class RuleBasedFraudScoringEngineTest {
         return engine.score(FraudScoringRequest.from(event));
     }
 
+    private RulesV1SignalResolution signal(TransactionEnrichedEvent event, ReasonCode reasonCode) {
+        return RulesV1CompatibilityResolver.resolve(event).stream()
+                .filter(signal -> signal.reasonCode().equals(reasonCode.wireValue()))
+                .findFirst()
+                .orElseThrow();
+    }
+
     private void assertRulesInputInvalid(TransactionEnrichedEvent event) {
         assertThatThrownBy(() -> score(event))
                 .isInstanceOf(RulesFeatureInputValidationException.class)
                 .hasMessage("RULES_FEATURE_INPUT_INVALID")
                 .hasMessageNotContaining("5")
                 .hasMessageNotContaining("20000.00")
+                .hasMessageNotContaining("P1D")
+                .hasMessageNotContaining("PT5M")
+                .hasMessageNotContaining("XXX")
+                .hasMessageNotContaining("JPY")
                 .hasMessageNotContaining("featureSnapshot");
     }
 
@@ -729,6 +1098,9 @@ class RuleBasedFraudScoringEngineTest {
                 FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
                 FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, recentAmountSumPln,
                 FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
+                FraudFeatureContract.RAPID_TRANSFER_COUNT, recentTransactionCount,
+                FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, recentAmountSumPln,
+                FraudFeatureContract.RAPID_TRANSFER_WINDOW, "PT1M",
                 FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, transactionVelocityPerMinute,
                 FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, rapidTransferCandidate,
                 FraudFeatureContract.FEATURE_FLAGS, List.copyOf(featureFlags)
@@ -834,7 +1206,7 @@ class RuleBasedFraudScoringEngineTest {
                 null,
                 null,
                 null,
-                source.transactionVelocityPerMinute(),
+                null,
                 source.merchantFrequency7d(),
                 source.deviceNovelty(),
                 source.countryMismatch(),
@@ -873,6 +1245,61 @@ class RuleBasedFraudScoringEngineTest {
                 source.countryMismatch(),
                 source.proxyOrVpnDetected(),
                 source.featureFlags(),
+                Map.of()
+        );
+    }
+
+    private TransactionEnrichedEvent topLevelOnly(
+            List<String> featureFlags,
+            Integer recentTransactionCount,
+            Double transactionVelocityPerMinute,
+            BigDecimal recentAmount,
+            String recentAmountCurrency
+    ) {
+        return topLevelOnly(
+                featureFlags,
+                recentTransactionCount,
+                transactionVelocityPerMinute,
+                recentAmount,
+                recentAmountCurrency,
+                recentTransactionCount == null ? null : "PT1M",
+                recentAmount == null ? null : "PT1M"
+        );
+    }
+
+    private TransactionEnrichedEvent topLevelOnly(
+            List<String> featureFlags,
+            Integer recentTransactionCount,
+            Double transactionVelocityPerMinute,
+            BigDecimal recentAmount,
+            String recentAmountCurrency,
+            String recentTransactionCountWindow,
+            String recentAmountWindow
+    ) {
+        TransactionEnrichedEvent base = TransactionFixtures.enrichedTransaction().build();
+        return new TransactionEnrichedEvent(
+                base.eventId(),
+                base.transactionId(),
+                base.correlationId(),
+                base.customerId(),
+                base.accountId(),
+                base.createdAt(),
+                base.transactionTimestamp(),
+                new Money(new BigDecimal("100.00"), "PLN"),
+                base.merchantInfo(),
+                base.deviceInfo(),
+                base.locationInfo(),
+                base.customerContext(),
+                recentTransactionCount,
+                recentTransactionCountWindow,
+                recentAmount == null ? null : new Money(recentAmount, recentAmountCurrency),
+                recentAmountWindow,
+                transactionVelocityPerMinute,
+                base.merchantFrequency7d(),
+                false,
+                false,
+                false,
+                featureFlags,
                 Map.of()
         );
     }

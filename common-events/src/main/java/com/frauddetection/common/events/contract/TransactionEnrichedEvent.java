@@ -40,6 +40,7 @@ public record TransactionEnrichedEvent(
         Map<String, Object> featureSnapshot
 ) {
     public TransactionEnrichedEvent {
+        featureFlags = featureFlags == null ? List.of() : List.copyOf(featureFlags);
         if (featureSnapshot != null) {
             featureSnapshot = FeatureSnapshotWireValueNormalizer.normalize(featureSnapshot);
         }

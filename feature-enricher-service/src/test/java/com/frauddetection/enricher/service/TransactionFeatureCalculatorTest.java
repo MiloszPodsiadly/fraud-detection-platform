@@ -9,6 +9,7 @@ import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
@@ -49,6 +50,58 @@ class TransactionFeatureCalculatorTest {
         );
         assertThat(features.featureFlags()).doesNotContain(FraudFeatureContract.FLAG_HIGH_VELOCITY);
         assertThat(features.featureSnapshot()).containsEntry(FraudFeatureContract.MERCHANT_FREQUENCY_7D, 5);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "PLN,100.00",
+            "EUR,430.00",
+            "USD,400.00",
+            "GBP,500.00"
+    })
+    void shouldConvertSupportedCurrenciesToPln(String currency, String expectedPln) {
+        var event = TransactionFixtures.rawTransaction()
+                .withAmount(new BigDecimal("100.00"), currency)
+                .build();
+        var snapshot = new FeatureStoreSnapshot(
+                0,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                List.of(),
+                0,
+                Instant.parse("2026-04-20T10:12:00Z"),
+                true
+        );
+
+        var features = calculator.calculate(event, snapshot);
+
+        assertThat(features.featureSnapshot())
+                .containsEntry(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal(expectedPln));
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"JPY", "XXX"})
+    void unsupportedCurrencyFailsClosedBeforeProducingPlnFacts(String currency) {
+        var event = TransactionFixtures.rawTransaction()
+                .withAmount(new BigDecimal("50000.00"), currency)
+                .build();
+        var snapshot = new FeatureStoreSnapshot(
+                1,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                List.of(),
+                0,
+                Instant.parse("2026-04-20T10:12:00Z"),
+                true
+        );
+
+        assertThatThrownBy(() -> calculator.calculate(event, snapshot))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("SUPPORTED_CURRENCY_INVALID")
+                .hasMessageNotContaining("JPY")
+                .hasMessageNotContaining("XXX")
+                .hasMessageNotContaining("50000.00");
     }
 
     @Test

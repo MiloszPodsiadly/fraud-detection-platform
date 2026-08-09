@@ -12,12 +12,14 @@ import com.frauddetection.scoring.evidence.ScoringEvidenceFactory;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 @Component
@@ -34,6 +36,19 @@ public class RuleBasedFraudScoringEngine implements FraudScoringEngine {
     public FraudScoreResult score(FraudScoringRequest request) {
         TransactionEnrichedEvent event = request.event();
         RulesFeatureInputValidator.requireValid(event);
+        return scoreInternal(request, event);
+    }
+
+    public FraudScoreResult scoreValidated(FraudScoringRequest request, RulesInputValidationResult validation) {
+        Objects.requireNonNull(validation, "validation is required");
+        validation.requireNoAdapterDefect();
+        if (!validation.valid()) {
+            throw new RulesFeatureInputValidationException();
+        }
+        return scoreInternal(request, request.event());
+    }
+
+    private FraudScoreResult scoreInternal(FraudScoringRequest request, TransactionEnrichedEvent event) {
         double score = 0.05d;
         Map<String, Object> scoreDetails = new LinkedHashMap<>();
         Set<String> reasonCodes = new LinkedHashSet<>();
@@ -63,7 +78,7 @@ public class RuleBasedFraudScoringEngine implements FraudScoringEngine {
             reasonCodes.add(ReasonCode.HIGH_TRANSACTION_AMOUNT.wireValue());
             scoreDetails.put("highTransactionAmountDiagnostic", true);
         }
-        double cappedScore = Math.min(score, 0.99d);
+        double cappedScore = Math.min(roundScore(score), 0.99d);
         RiskLevel riskLevel = mapRiskLevel(cappedScore);
         boolean alertRecommended = riskLevel == RiskLevel.HIGH || riskLevel == RiskLevel.CRITICAL;
         Instant inferenceTimestamp = Instant.now();
@@ -85,7 +100,7 @@ public class RuleBasedFraudScoringEngine implements FraudScoringEngine {
         scoreDetails.put("baseScore", 0.05d);
         scoreDetails.put("finalScore", cappedScore);
         scoreDetails.put("riskLevel", riskLevel.name());
-        scoreDetails.put("featureFlags", List.copyOf(event.featureFlags()));
+        scoreDetails.put("featureFlags", safeFeatureFlags(event.featureFlags()));
         Map<String, Object> explanationMetadata = Map.of(
                 "engineType", "RULE_BASED",
                 "explanationType", "WEIGHTED_REASON_CODES",
@@ -124,6 +139,14 @@ public class RuleBasedFraudScoringEngine implements FraudScoringEngine {
             return currentScore + weight;
         }
         return currentScore;
+    }
+
+    private List<String> safeFeatureFlags(List<String> featureFlags) {
+        return featureFlags == null ? List.of() : List.copyOf(featureFlags);
+    }
+
+    private double roundScore(double score) {
+        return BigDecimal.valueOf(score).setScale(2, RoundingMode.HALF_UP).doubleValue();
     }
 
     private RiskLevel mapRiskLevel(double fraudScore) {

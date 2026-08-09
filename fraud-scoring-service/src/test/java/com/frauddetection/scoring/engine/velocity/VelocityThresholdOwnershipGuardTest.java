@@ -83,6 +83,16 @@ class VelocityThresholdOwnershipGuardTest {
                 "engine",
                 "velocity",
                 "VelocitySignalPolicy.java"
+        )) && !path.endsWith(Path.of(
+                "fraud-scoring-service",
+                "src",
+                "main",
+                "java",
+                "com",
+                "frauddetection",
+                "scoring",
+                "service",
+                "RulesV1CompatibilityResolver.java"
         ));
     }
 

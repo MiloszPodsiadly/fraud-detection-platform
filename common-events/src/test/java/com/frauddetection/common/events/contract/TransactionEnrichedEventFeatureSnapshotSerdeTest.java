@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TransactionEnrichedEventFeatureSnapshotSerdeTest {
     private final ObjectMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
@@ -88,6 +89,37 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
     }
 
     @Test
+    void kafkaSerdeReadsMissingFeatureFlagsAsEmptyImmutableList() throws IOException {
+        String json = featureFlagsJson(event(Map.of()), false);
+
+        TransactionEnrichedEvent replayed = deserializer.deserialize("transactions.enriched", json.getBytes(StandardCharsets.UTF_8));
+
+        assertThat(replayed.featureFlags()).isEmpty();
+        assertThatThrownBy(() -> replayed.featureFlags().add(FraudFeatureContract.FLAG_HIGH_VELOCITY))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void kafkaSerdeReadsNullFeatureFlagsAsEmptyImmutableList() throws IOException {
+        String json = featureFlagsJson(event(Map.of()), true);
+
+        TransactionEnrichedEvent replayed = deserializer.deserialize("transactions.enriched", json.getBytes(StandardCharsets.UTF_8));
+
+        assertThat(replayed.featureFlags()).isEmpty();
+        assertThatThrownBy(() -> replayed.featureFlags().add(FraudFeatureContract.FLAG_HIGH_VELOCITY))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void programmaticallyConstructedNullFeatureFlagsNormalizeToEmptyImmutableList() {
+        TransactionEnrichedEvent event = eventWithFeatureFlags(null);
+
+        assertThat(event.featureFlags()).isEmpty();
+        assertThatThrownBy(() -> event.featureFlags().add(FraudFeatureContract.FLAG_HIGH_VELOCITY))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
     void scoredEventKafkaSerdeUsesTheSameFeatureSnapshotWireTypesAsEnrichedEvent() {
         Map<String, Object> sourceSnapshot = Map.ofEntries(
                 Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5),
@@ -130,12 +162,31 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
         return objectMapper.writeValueAsString(root);
     }
 
+    private String featureFlagsJson(TransactionEnrichedEvent event, boolean explicitNull) throws IOException {
+        String serialized = new String(serializer.serialize("transactions.enriched", event), StandardCharsets.UTF_8);
+        ObjectNode root = (ObjectNode) objectMapper.readTree(serialized);
+        if (explicitNull) {
+            root.putNull("featureFlags");
+        } else {
+            root.remove("featureFlags");
+        }
+        return objectMapper.writeValueAsString(root);
+    }
+
     private TransactionEnrichedEvent deserialize(TransactionEnrichedEvent event) {
         byte[] bytes = serializer.serialize("transactions.enriched", event);
         return deserializer.deserialize("transactions.enriched", bytes);
     }
 
     private TransactionEnrichedEvent event(Map<String, Object> featureSnapshot) {
+        return eventWithFeatureFlags(featureSnapshot, List.of());
+    }
+
+    private TransactionEnrichedEvent eventWithFeatureFlags(List<String> featureFlags) {
+        return eventWithFeatureFlags(Map.of(), featureFlags);
+    }
+
+    private TransactionEnrichedEvent eventWithFeatureFlags(Map<String, Object> featureSnapshot, List<String> featureFlags) {
         return new TransactionEnrichedEvent(
                 "evt-serde",
                 "txn-serde",
@@ -158,7 +209,7 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
                 false,
                 false,
                 false,
-                List.of(),
+                featureFlags,
                 featureSnapshot
         );
     }
