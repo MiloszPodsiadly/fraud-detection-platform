@@ -51,6 +51,19 @@ enable production mode and does not replace environment-specific release approva
   Velocity is an optional third diagnostic engine. Future Device, Merchant, or Graph engines require a versioned
   contract update.
 
+## Rules V1 Input Configuration
+
+- FDP-129 keeps Rules as `rule-based-engine` / `v1`; the diagnostic adapter remains `rules.primary` / `1.0.0`.
+- Feature Enricher producer windows for Rules and Velocity semantics must remain exactly `PT1M`.
+- Top-level Rules compatibility facts are not windowless facts: `recentTransactionCount` requires
+  `recentTransactionCountWindow=PT1M`, and `recentAmountSum` requires `recentAmountSumWindow=PT1M`.
+- Present-invalid snapshot or top-level temporal data fails closed instead of falling back to legacy flags or
+  candidate fields.
+- Supported transaction currencies are `PLN`, `EUR`, `USD`, and `GBP`. Unsupported or null currencies are rejected;
+  enrichment must not convert unknown currencies with a default rate.
+- Legacy Rules V1 compatibility is retained only for replay and rolling-deployment safety. Future removal of legacy
+  flags, `rapidTransferFraudCaseCandidate`, and retired top-level paths requires a separate versioned migration.
+
 ## Dependency Posture
 
 - Bouncy Castle `1.85` is an intentional dependency upgrade for the current branch.

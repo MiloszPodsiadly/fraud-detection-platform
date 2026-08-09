@@ -105,12 +105,21 @@ mutate `ScoringContext`.
 No Kafka event schema change, no alert-service projection, no API/UI, no analyst console, no feedback
 workflow, no final decisioning, and no production migration are included in FDP-89.
 
+For current FDP-129 diagnostic wiring, the orchestrator still does not mutate the primary fraud
+decision. Primary Rules scoring remains owned by `RuleBasedFraudScoringEngine`; diagnostic Rules
+degradation is represented as bounded Engine Intelligence status only. Invalid Rules input in the
+primary Kafka flow fails closed and uses the existing retry/DLT path; it is not transformed by the
+orchestrator into a scored event.
+
 ## FDP-94 Diagnostic Runtime Wiring
 
 FDP-94 Spring-manages the orchestrator for disabled-by-default producer diagnostic enrichment after
 baseline scoring. This does not wire the orchestrator into `CompositeFraudScoringEngine`, replace the
 baseline score result, add public `engineResults[]`, add downstream projection, or add final
 decisioning.
+
+FDP-129 Engine Intelligence comparison remains `RULES_VS_ML` with required `rules.primary` and
+`ml.python.primary`; `velocity.primary` is optional and not part of that comparison identity.
 
 ## Out Of Scope
 

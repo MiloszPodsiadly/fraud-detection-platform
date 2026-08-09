@@ -122,8 +122,8 @@ semantics are owned by `FraudFeatureThresholdContract`.
 
 Rules currently use canonical feature-snapshot facts where available and keep a deliberate v1 compatibility path for
 legacy fields still produced or replayed in this repository. Present-invalid canonical Rules inputs fail closed:
-string counts, string decimals, negative counts, negative amounts, partial rapid count/amount pairs,
-canonical/top-level conflicts, invalid or missing required canonical time windows, nested values, booleans used as
+string counts, string decimals, negative counts, negative amounts,
+canonical/top-level conflicts, invalid or missing required canonical or top-level time windows, nested values, booleans used as
 numbers, and oversized numeric input must not become `AVAILABLE LOW` and must not fall back to legacy flags.
 
 Rules V1 time-dependent canonical facts use the explicit `PT1M` window. `recentTransactionCount` requires
@@ -135,6 +135,35 @@ Valid canonical facts are authoritative. Predicate false is not missing: a false
 burst predicate cannot be overridden by legacy `HIGH_AMOUNT_ACTIVITY`, legacy
 `RAPID_PLN_20K_BURST`, or `rapidTransferFraudCaseCandidate`. PLN thresholds consume canonical PLN facts or explicitly
 PLN-denominated top-level compatibility facts only.
+
+Top-level Rules V1 compatibility facts are time-dependent too. A top-level `recentTransactionCount` can contribute
+only with `recentTransactionCountWindow=PT1M`; a top-level `recentAmountSum` can contribute only with
+`recentAmountSumWindow=PT1M`. Present-invalid top-level windows fail closed and do not activate legacy flag or
+candidate fallback. Missing canonical facts may use legacy compatibility only when the historical representation is
+genuinely absent, not when current data is malformed or temporally ambiguous.
+
+Rules V1 compatibility preserves the historical contribution actually present in the payload. Current canonical
+producer payloads still publish `rule-based-engine` / `v1` and retain the approved V1 total for each semantic fact.
+Historical partial representations do not receive unavailable components. The retained V1 compatibility weights are:
+
+| Rules family | Compatibility input | Contribution |
+| --- | --- | --- |
+| High velocity | `HIGH_VELOCITY` legacy flag | `0.20` |
+| High velocity | top-level `recentTransactionCount >= 5` with `PT1M` window | `0.10` |
+| High velocity | top-level `transactionVelocityPerMinute >= 5` | `0.12` |
+| Recent amount | `HIGH_AMOUNT_ACTIVITY` legacy flag | `0.14` |
+| Recent amount | top-level PLN amount threshold with `PT1M` window | `0.10` |
+| Rapid transfer | `RAPID_PLN_20K_BURST` legacy flag | `0.45` |
+| Rapid transfer | `rapidTransferFraudCaseCandidate=true` | `0.20` |
+
+The authoritative regression fixture is
+`fraud-scoring-service/src/test/resources/fixtures/rules/rules_v1_compatibility_matrix.json`. It freezes full
+canonical payloads, partial historical payloads, redundant matching payloads, contradictory legacy payloads,
+supported currencies, unsupported currency rejection, risk boundaries, and temporal attacks.
+
+Supported monetary currencies for ingest and enrichment are `PLN`, `EUR`, `USD`, and `GBP`. Unsupported or null
+currencies are rejected at the boundary and fail closed in enrichment. Unknown currencies are never converted as PLN
+and are never allowed to produce Rules PLN threshold facts.
 
 Primary scoring and diagnostic Engine Intelligence have different failure semantics. The primary
 `RuleBasedFraudScoringEngine` fails closed with a bounded validation exception and no fabricated scored event.
@@ -174,4 +203,6 @@ include:
 - rejection fixtures after the formal cutoff;
 - repository guards preventing reintroduction.
 
-No new Jira number is assigned here because the next authoritative masterplan ticket is not known.
+The future branch will remove legacy flags, remove `rapidTransferFraudCaseCandidate`, remove retired top-level
+compatibility paths, introduce a clean canonical Rules V2 through explicit version migration, and run V1-versus-V2
+shadow comparison before rollout. FDP-129 does not implement that future policy.

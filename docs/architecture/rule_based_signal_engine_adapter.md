@@ -44,6 +44,16 @@ FDP-129 preflight covers the canonical Rules V1 snapshot facts consumed by produ
 may use only the narrow compatibility paths documented in
 `feature_snapshot_consumption_policy.md`.
 
+Rules V1 compatibility is explicit and component-based. Current canonical producer payloads retain
+the approved V1 semantic totals, while historical partial inputs keep only their historical
+component contribution. A legacy flag alone, a top-level count alone, a top-level rate alone, a
+top-level amount alone, or a rapid candidate alone is not upgraded to a full canonical contribution.
+Canonical false is authoritative, and present-invalid canonical or top-level temporal data prevents
+legacy fallback. Top-level count and amount compatibility inputs require `PT1M` windows.
+
+The adapter exposes no compatibility provenance in public Engine Intelligence. Provenance remains
+bounded internal score detail and fixture evidence only.
+
 Production `RuleBasedFraudScoringEngine` still delegates validation to `RulesFeatureInputValidator`
 before scoring. Primary scoring failure and diagnostic adapter degradation are intentionally
 different runtime boundaries.
@@ -81,6 +91,10 @@ Diagnostic Engine Intelligence:
 - Rules score and risk are null for operational degradation;
 - eligible ML diagnostics can still execute;
 - public Engine Intelligence does not expose raw exception text or raw feature values.
+
+Future removal of legacy flags, `rapidTransferFraudCaseCandidate`, and retired top-level
+compatibility paths belongs to a separate versioned Rules migration branch. FDP-129 keeps
+`rule-based-engine` / `v1` and adapter version `1.0.0`.
 
 ## Historical FDP-87 Out Of Scope
 
