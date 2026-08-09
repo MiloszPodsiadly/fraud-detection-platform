@@ -1,11 +1,12 @@
 # Fraud Intelligence Non-Goals
 
-Status: current boundary for the FDP-82 contract foundation.
+Status: current fraud-intelligence non-goals with historical FDP-82 foundation notes.
 
 ## Scope
 
-FDP-82 creates a shared engine-result vocabulary for the analyst-assisted fraud intelligence platform. It does not
-enable new runtime scoring behavior.
+FDP-82 created the shared engine-result vocabulary for the analyst-assisted fraud intelligence platform. Current
+Engine Intelligence adds bounded diagnostic runtime, event summary, alert-service projection, read API/OpenAPI, and
+Analyst Console rendering, but it still does not enable final decisioning or payment authorization.
 
 ## Explicit Non-Goals
 
@@ -21,9 +22,11 @@ This foundation has:
 - no weighted ensemble in this branch;
 - no model promotion workflow in this branch.
 
-## Runtime Exclusions
+## Runtime Boundaries
 
-This branch does not add orchestration, change a Kafka scored transaction event, project engine results into
-`alert-service`, expose an API, display UI, store feedback, or change any existing scoring mode.
+Current Engine Intelligence does not expose raw `FraudEngineResult`, publish public `engineResults[]`, store raw
+engine payloads, change baseline scoring mode, create a weighted ensemble, or turn diagnostics into final decisions.
+Historical FDP-82 did not add orchestration, Kafka event changes, alert-service projection, API, UI, feedback storage,
+or scoring-mode changes; those branch-specific exclusions are superseded by later scoped Engine Intelligence work.
 
 An engine result is not a final banking decision. It is bounded analyst investigation context.

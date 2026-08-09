@@ -2,32 +2,28 @@ package com.frauddetection.enricher.service;
 
 import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.features.FraudFeatureContract;
+import com.frauddetection.common.events.features.FraudFeatureThresholdContract;
+import com.frauddetection.common.events.features.VelocityFeatureContract;
 import com.frauddetection.common.events.model.Money;
-import com.frauddetection.enricher.config.FeatureStoreProperties;
 import com.frauddetection.enricher.domain.EnrichedTransactionFeatures;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 @Component
 public class TransactionFeatureCalculator {
 
-    private static final BigDecimal RAPID_TRANSFER_PLN_THRESHOLD = BigDecimal.valueOf(20_000);
-    private static final int HIGH_VELOCITY_TRANSACTION_COUNT = 5;
-
-    private final FeatureStoreProperties featureStoreProperties;
     private final CurrencyAmountConverter currencyAmountConverter;
 
-    public TransactionFeatureCalculator(FeatureStoreProperties featureStoreProperties, CurrencyAmountConverter currencyAmountConverter) {
-        this.featureStoreProperties = featureStoreProperties;
-        this.currencyAmountConverter = currencyAmountConverter;
+    public TransactionFeatureCalculator(CurrencyAmountConverter currencyAmountConverter) {
+        this.currencyAmountConverter = Objects.requireNonNull(currencyAmountConverter, "currencyAmountConverter is required");
     }
 
     public EnrichedTransactionFeatures calculate(TransactionRawEvent event, FeatureStoreSnapshot snapshot) {
@@ -44,9 +40,7 @@ public class TransactionFeatureCalculator {
         boolean proxyOrVpnDetected = Boolean.TRUE.equals(event.deviceInfo().proxyDetected())
                 || Boolean.TRUE.equals(event.deviceInfo().vpnDetected());
 
-        double velocityPerMinute = BigDecimal.valueOf(recentTransactionCount)
-                .divide(BigDecimal.valueOf(Math.max(featureStoreProperties.recentTransactionWindow().toMinutes(), 1L)), 4, RoundingMode.HALF_UP)
-                .doubleValue();
+        double velocityPerMinute = VelocityFeatureContract.expectedRatePerMinute(recentTransactionCount);
 
         List<String> featureFlags = new ArrayList<>();
         if (deviceNovelty) {
@@ -58,29 +52,33 @@ public class TransactionFeatureCalculator {
         if (proxyOrVpnDetected) {
             featureFlags.add(FraudFeatureContract.FLAG_PROXY_OR_VPN);
         }
-        if (recentTransactionCount >= HIGH_VELOCITY_TRANSACTION_COUNT) {
-            featureFlags.add(FraudFeatureContract.FLAG_HIGH_VELOCITY);
-        }
         if (merchantFrequency7d >= 5) {
             featureFlags.add(FraudFeatureContract.FLAG_MERCHANT_CONCENTRATION);
         }
         if (recentTransactionCount >= 2 && recentAmountSum.compareTo(BigDecimal.valueOf(5000)) >= 0) {
             featureFlags.add(FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY);
         }
-        boolean rapidPln20kBurst = recentTransactionCount >= 2 && recentAmountSumPln.compareTo(RAPID_TRANSFER_PLN_THRESHOLD) >= 0;
+        boolean rapidPln20kBurst = FraudFeatureThresholdContract.isRapidTransferPlnBurst(
+                recentTransactionCount,
+                recentAmountSumPln
+        );
         if (rapidPln20kBurst) {
             featureFlags.add(FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST);
         }
 
         Map<String, Object> featureSnapshot = new LinkedHashMap<>();
+        String velocityV1ObservationWindow = VelocityFeatureContract.CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW_TEXT;
         featureSnapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT, recentTransactionCount);
-        featureSnapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, featureStoreProperties.recentTransactionWindow().toString());
+        featureSnapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, velocityV1ObservationWindow);
         featureSnapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM, recentAmountSum);
-        featureSnapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, featureStoreProperties.recentTransactionWindow().toString());
+        featureSnapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, velocityV1ObservationWindow);
         featureSnapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, recentAmountSumPln);
         featureSnapshot.put(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, currentAmountPln);
-        featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_WINDOW, featureStoreProperties.recentTransactionWindow().toString());
-        featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN, RAPID_TRANSFER_PLN_THRESHOLD);
+        featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_WINDOW, velocityV1ObservationWindow);
+        featureSnapshot.put(
+                FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN,
+                FraudFeatureThresholdContract.RAPID_TRANSFER_PLN_THRESHOLD
+        );
         featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, rapidPln20kBurst);
         featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_COUNT, recentTransactionCount);
         featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, recentAmountSumPln);
@@ -97,9 +95,9 @@ public class TransactionFeatureCalculator {
 
         return new EnrichedTransactionFeatures(
                 recentTransactionCount,
-                featureStoreProperties.recentTransactionWindow().toString(),
+                velocityV1ObservationWindow,
                 new Money(recentAmountSum, event.transactionAmount().currency()),
-                featureStoreProperties.recentTransactionWindow().toString(),
+                velocityV1ObservationWindow,
                 velocityPerMinute,
                 merchantFrequency7d,
                 deviceNovelty,

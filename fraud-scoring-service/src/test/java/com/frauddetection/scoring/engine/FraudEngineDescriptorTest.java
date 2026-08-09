@@ -78,7 +78,7 @@ class FraudEngineDescriptorTest {
     void descriptorLanguagePolicyMatchesFraudEngineResultLanguagePolicy() {
         for (String language : CANONICAL_LANGUAGES) {
             assertThatCode(() -> result(language))
-                    .as("FraudSignalEngine.evaluate() returns FraudEngineResult; descriptor and result language policies must stay aligned for %s", language)
+                    .as("Orchestrator publication combines descriptor and evaluation; descriptor and result language policies must stay aligned for %s", language)
                     .doesNotThrowAnyException();
         }
     }

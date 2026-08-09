@@ -32,7 +32,7 @@ class AlertServiceEngineIntelligenceProjectionFixtureTest {
         );
 
         assertThat(projection.getContractVersion()).isEqualTo(1);
-        assertThat(projection.getEngineCount()).isEqualTo(1);
+        assertThat(projection.getEngineCount()).isEqualTo(2);
     }
 
     @Test
@@ -44,6 +44,18 @@ class AlertServiceEngineIntelligenceProjectionFixtureTest {
         assertThat(projection.getEngineCount()).isEqualTo(2);
         assertThat(projection.getDiagnosticSignalCount()).isEqualTo(2);
         assertThat(projection.getWarningCount()).isEqualTo(2);
+    }
+
+    @Test
+    void legacyV1EngineIntelligenceComparisonIsProjectedWithCanonicalIdentity() {
+        EngineIntelligenceProjection projection = project(
+                AlertServiceTransactionScoredEventFixtureLoader.legacyV1EngineIntelligence()
+        );
+
+        assertThat(projection.getEngineCount()).isEqualTo(2);
+        assertThat(projection.getComparisonType().name()).isEqualTo("RULES_VS_ML");
+        assertThat(projection.getComparedEngineIds())
+                .containsExactly("rules.primary", "ml.python.primary");
     }
 
     @Test
@@ -74,7 +86,7 @@ class AlertServiceEngineIntelligenceProjectionFixtureTest {
                 AlertServiceTransactionScoredEventFixtureLoader.unknownNestedEngineIntelligenceFields()
         );
 
-        assertThat(projection.getEngineCount()).isEqualTo(1);
+        assertThat(projection.getEngineCount()).isEqualTo(2);
     }
 
     private EngineIntelligenceProjection project(com.frauddetection.common.events.contract.TransactionScoredEvent event) {

@@ -11,6 +11,7 @@ import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.context.ScoringContext;
 import com.frauddetection.scoring.engine.FraudEngineDescriptor;
 import com.frauddetection.scoring.engine.FraudSignalEngine;
+import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import com.frauddetection.scoring.orchestration.FraudScoringExecutionWarning;
 import com.frauddetection.scoring.orchestration.FraudScoringExecutionWarningCode;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrationResult;
@@ -76,6 +77,7 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
         assertThat(result.engineResults().get(1).confidence()).isEqualTo(FraudEngineConfidence.UNKNOWN);
         assertThat(result.engineResults().get(1).statusReason()).isEqualTo("ORCHESTRATOR_ENGINE_TIMEOUT");
         assertThat(result.engineResults().get(1).latencyMs()).isEqualTo(ML_DEADLINE.toMillis());
+        assertThat(result.engineResults().get(1).generatedAt()).isEqualTo(RECEIVED_AT.plusMillis(11));
         assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.PARTIAL);
         assertThat(result.executionWarnings().stream().map(FraudScoringExecutionWarning::code))
                 .contains(FraudScoringExecutionWarningCode.ENGINE_TIMEOUT_RECORDED);
@@ -162,7 +164,7 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
     }
 
     @Test
-    void adapterProducedSuccessfulResultsRemainUnmodifiedWhileMetricsReceiveMeasuredLatency() throws Exception {
+    void adapterProducedSuccessfulResultsReceiveOrchestratorMeasuredLatency() throws Exception {
         MutableClock clock = new MutableClock(RECEIVED_AT);
         RecordingMetrics metrics = new RecordingMetrics();
 
@@ -184,16 +186,19 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
         }
 
         assertThat(result.engineResults()).extracting(FraudEngineResult::latencyMs)
-                .containsExactly(0L, 0L);
+                .containsExactly(7L, 19L);
+        assertThat(result.engineResults()).extracting(FraudEngineResult::generatedAt)
+                .containsExactly(RECEIVED_AT.plusMillis(7), RECEIVED_AT.plusMillis(26));
+        assertThat(result.generatedAt()).isEqualTo(RECEIVED_AT.plusMillis(26));
         assertThat(metrics.latencyCalls).extracting(LatencyMetricCall::latency)
                 .containsExactly(Duration.ofMillis(7), Duration.ofMillis(19));
         assertThat(Files.readString(Path.of("..", "docs", "architecture", "orchestrator_runtime_readiness.md"))
                 .toLowerCase(Locale.ROOT))
-                .contains("does not rewrite adapter-produced successful fraudengineresult latencyms");
+                .contains("publishes completed engine fraudengineresult latencyms and generatedat");
     }
 
     @Test
-    void adapterProducedLatencyIsNotOverwrittenByOrchestrator() {
+    void adapterProducedLatencyIsOverwrittenByOrchestratorMeasuredLatency() {
         MutableClock clock = new MutableClock(RECEIVED_AT);
         RecordingMetrics metrics = new RecordingMetrics();
 
@@ -215,7 +220,9 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
         }
 
         assertThat(result.engineResults()).extracting(FraudEngineResult::latencyMs)
-                .containsExactly(123L, 456L);
+                .containsExactly(7L, 19L);
+        assertThat(result.engineResults()).extracting(FraudEngineResult::generatedAt)
+                .containsExactly(RECEIVED_AT.plusMillis(7), RECEIVED_AT.plusMillis(26));
         assertThat(metrics.latencyCalls).extracting(LatencyMetricCall::latency)
                 .containsExactly(Duration.ofMillis(7), Duration.ofMillis(19));
     }
@@ -241,6 +248,7 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
 
         assertThat(result.engineResults().get(1).status()).isEqualTo(FraudEngineStatus.DEGRADED);
         assertThat(result.engineResults().get(1).latencyMs()).isEqualTo(17L);
+        assertThat(result.engineResults().get(1).generatedAt()).isEqualTo(RECEIVED_AT.plusMillis(17));
         assertThat(metrics.latencyCalls.get(1).latency()).isEqualTo(Duration.ofMillis(17));
         assertThat(result.toString()).doesNotContain("secret raw exception");
     }
@@ -261,7 +269,8 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
                 policy,
                 new BoundedFraudEngineExecutor(new ScriptedExecutorService(modes)),
                 metrics,
-                clock
+                clock,
+                () -> Duration.between(RECEIVED_AT, clock.instant()).toNanos()
         );
     }
 
@@ -276,8 +285,8 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
     ) {
         return new FraudSignalEngine() {
             @Override
-            public FraudEngineResult evaluate(ScoringContext context) {
-                return handler.apply(context);
+            public FraudSignalEvaluation evaluate(ScoringContext context) {
+                return evaluation(handler.apply(context));
             }
 
             @Override
@@ -285,6 +294,21 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
                 return descriptor;
             }
         };
+    }
+
+    private FraudSignalEvaluation evaluation(FraudEngineResult result) {
+        return new FraudSignalEvaluation(
+                result.status(),
+                result.score(),
+                result.riskLevel(),
+                result.confidence(),
+                result.reasonCodes(),
+                result.contributions(),
+                result.evidence(),
+                result.modelName(),
+                result.modelVersion(),
+                result.statusReason()
+        );
     }
 
     private FraudEngineDescriptor ruleDescriptor() {

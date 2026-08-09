@@ -1,0 +1,103 @@
+{
+  "source": {
+    "baseSha": "61cb3052c918d07c57905ca02c859db585f9474b",
+    "producer": "TransactionFeatureCalculator",
+    "rulesEngine": "RuleBasedFraudScoringEngine",
+    "scoringProperties": {
+      "highThreshold": 0.75,
+      "criticalThreshold": 0.90
+    }
+  },
+  "cases": [
+    {
+      "caseId": "normal_activity",
+      "facts": {"count": 1, "rate": 1.0, "currentAmountPln": "100.00", "recentAmountSumPln": "100.00"},
+      "featureFlags": [],
+      "expected": {"score": 0.05, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": []}
+    },
+    {
+      "caseId": "count_4_pt1m_rate_4",
+      "facts": {"count": 4, "rate": 4.0, "currentAmountPln": "100.00", "recentAmountSumPln": "400.00"},
+      "featureFlags": [],
+      "expected": {"score": 0.05, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": []}
+    },
+    {
+      "caseId": "count_5_pt1m_rate_5",
+      "facts": {"count": 5, "rate": 5.0, "currentAmountPln": "100.00", "recentAmountSumPln": "500.00"},
+      "featureFlags": ["HIGH_VELOCITY"],
+      "expected": {"score": 0.47, "riskLevel": "MEDIUM", "alertRecommended": false, "reasonCodes": ["HIGH_VELOCITY"]}
+    },
+    {
+      "caseId": "count_6_pt1m_rate_6",
+      "facts": {"count": 6, "rate": 6.0, "currentAmountPln": "100.00", "recentAmountSumPln": "600.00"},
+      "featureFlags": ["HIGH_VELOCITY"],
+      "expected": {"score": 0.47, "riskLevel": "MEDIUM", "alertRecommended": false, "reasonCodes": ["HIGH_VELOCITY"]}
+    },
+    {
+      "caseId": "rapid_count_2_pln_19999_99",
+      "facts": {"count": 2, "rate": 2.0, "currentAmountPln": "9999.99", "recentAmountSumPln": "19999.99"},
+      "featureFlags": ["HIGH_AMOUNT_ACTIVITY"],
+      "expected": {"score": 0.29, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": ["HIGH_AMOUNT_ACTIVITY", "HIGH_TRANSACTION_AMOUNT"]}
+    },
+    {
+      "caseId": "rapid_count_2_pln_20000",
+      "facts": {"count": 2, "rate": 2.0, "currentAmountPln": "10000.00", "recentAmountSumPln": "20000.00"},
+      "featureFlags": ["HIGH_AMOUNT_ACTIVITY", "RAPID_PLN_20K_BURST"],
+      "expected": {"score": 0.94, "riskLevel": "CRITICAL", "alertRecommended": true, "reasonCodes": ["HIGH_AMOUNT_ACTIVITY", "RAPID_PLN_20K_BURST", "HIGH_TRANSACTION_AMOUNT"]}
+    },
+    {
+      "caseId": "rapid_count_5_high_pln_amount",
+      "facts": {"count": 5, "rate": 5.0, "currentAmountPln": "10000.00", "recentAmountSumPln": "50000.00"},
+      "featureFlags": ["HIGH_VELOCITY", "HIGH_AMOUNT_ACTIVITY", "RAPID_PLN_20K_BURST"],
+      "expected": {"score": 0.99, "riskLevel": "CRITICAL", "alertRecommended": true, "reasonCodes": ["HIGH_VELOCITY", "HIGH_AMOUNT_ACTIVITY", "RAPID_PLN_20K_BURST", "HIGH_TRANSACTION_AMOUNT"]}
+    },
+    {
+      "caseId": "high_recent_amount_without_rapid_burst",
+      "facts": {"count": 2, "rate": 2.0, "currentAmountPln": "2500.00", "recentAmountSumPln": "5000.00"},
+      "featureFlags": ["HIGH_AMOUNT_ACTIVITY"],
+      "expected": {"score": 0.29, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": ["HIGH_AMOUNT_ACTIVITY", "HIGH_TRANSACTION_AMOUNT"]}
+    },
+    {
+      "caseId": "legacy_high_velocity_flag_present",
+      "facts": {"count": 5, "rate": 5.0, "currentAmountPln": "100.00", "recentAmountSumPln": "500.00"},
+      "featureFlags": ["HIGH_VELOCITY"],
+      "expected": {"score": 0.47, "riskLevel": "MEDIUM", "alertRecommended": false, "reasonCodes": ["HIGH_VELOCITY"]}
+    },
+    {
+      "caseId": "legacy_high_velocity_flag_absent",
+      "facts": {"count": 5, "rate": 5.0, "currentAmountPln": "100.00", "recentAmountSumPln": "500.00"},
+      "featureFlags": [],
+      "expected": {"score": 0.47, "riskLevel": "MEDIUM", "alertRecommended": false, "reasonCodes": ["HIGH_VELOCITY"]}
+    },
+    {
+      "caseId": "device_novelty",
+      "facts": {"count": 1, "rate": 1.0, "currentAmountPln": "100.00", "recentAmountSumPln": "100.00", "deviceNovelty": true},
+      "featureFlags": ["DEVICE_NOVELTY"],
+      "expected": {"score": 0.33, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": ["DEVICE_NOVELTY"]}
+    },
+    {
+      "caseId": "country_mismatch",
+      "facts": {"count": 1, "rate": 1.0, "currentAmountPln": "100.00", "recentAmountSumPln": "100.00", "countryMismatch": true},
+      "featureFlags": ["COUNTRY_MISMATCH"],
+      "expected": {"score": 0.41, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": ["COUNTRY_MISMATCH"]}
+    },
+    {
+      "caseId": "proxy_vpn",
+      "facts": {"count": 1, "rate": 1.0, "currentAmountPln": "100.00", "recentAmountSumPln": "100.00", "proxyOrVpn": true},
+      "featureFlags": ["PROXY_OR_VPN"],
+      "expected": {"score": 0.31, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": ["PROXY_OR_VPN"]}
+    },
+    {
+      "caseId": "combined_near_high_threshold",
+      "facts": {"count": 5, "rate": 5.0, "currentAmountPln": "100.00", "recentAmountSumPln": "500.00", "countryMismatch": true},
+      "featureFlags": ["HIGH_VELOCITY", "COUNTRY_MISMATCH"],
+      "expected": {"score": 0.83, "riskLevel": "HIGH", "alertRecommended": true, "reasonCodes": ["COUNTRY_MISMATCH", "HIGH_VELOCITY"]}
+    },
+    {
+      "caseId": "combined_critical_threshold",
+      "facts": {"count": 5, "rate": 5.0, "currentAmountPln": "100.00", "recentAmountSumPln": "500.00", "deviceNovelty": true, "countryMismatch": true, "proxyOrVpn": true},
+      "featureFlags": ["DEVICE_NOVELTY", "COUNTRY_MISMATCH", "PROXY_OR_VPN", "HIGH_VELOCITY"],
+      "expected": {"score": 0.99, "riskLevel": "CRITICAL", "alertRecommended": true, "reasonCodes": ["DEVICE_NOVELTY", "COUNTRY_MISMATCH", "PROXY_OR_VPN", "HIGH_VELOCITY"]}
+    }
+  ]
+}

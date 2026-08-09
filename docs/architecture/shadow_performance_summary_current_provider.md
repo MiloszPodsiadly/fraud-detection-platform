@@ -65,7 +65,7 @@ The manifest is validated before the summary can be returned. Missing, malformed
 
 The SHA-256 value is a local integrity fingerprint for the deployment-controlled artifact set. It is not a digital signature, producer identity, external attestation, or protection against a privileged writer replacing both `current-summary.json` and `manifest.json`.
 
-Published summary and manifest timestamps must be RFC3339 UTC `Z` strings with optional 1-6 digit fractional seconds.
+Published summary and manifest timestamps must be RFC3339 UTC `Z` strings with optional 1-9 digit fractional seconds.
 Equivalent offset encodings such as `+00:00` are rejected instead of normalized while reading a configured artifact set.
 
 ## Failure Semantics

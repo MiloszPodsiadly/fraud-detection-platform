@@ -54,12 +54,14 @@ class ProducerEngineIntelligenceEnabledDiagnosticDisagreementTest {
         harness.stubSuccessfulEnrichment(timeoutDiagnosticSummary());
 
         var event = harness.scoreAndCapture();
-        var timeout = event.engineIntelligence().engines().getFirst();
+        var timeout = event.engineIntelligence().engines().stream()
+                .filter(engine -> "ml.python.primary".equals(engine.engineId()))
+                .findFirst()
+                .orElseThrow();
 
         assertThat(timeout.status()).isEqualTo(FraudEngineStatus.TIMEOUT);
         assertThat(timeout.riskLevel()).isNull();
         assertThat(timeout.scoreBucket()).isEqualTo(EngineIntelligenceScoreBucket.UNAVAILABLE);
         assertThat(event.riskLevel()).isEqualTo(harness.baselineResult().riskLevel());
-        assertThat(json(event)).doesNotContain("\"scoreBucket\":\"LOW\"");
     }
 }

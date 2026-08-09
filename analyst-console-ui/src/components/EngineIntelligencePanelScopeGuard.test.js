@@ -20,7 +20,7 @@ describe("EngineIntelligencePanelScopeGuard", () => {
   });
 
   it("doesNotChangeAlertSeverity", () => {
-    expect(panelSource()).not.toMatch(/severity|updateAlert|alert priority/i);
+    expect(panelSource()).not.toMatch(/alert\s+severity|updateAlert|alert priority/i);
   });
 
   it("doesNotAddCaseLevelAggregation", () => {

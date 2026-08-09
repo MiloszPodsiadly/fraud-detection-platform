@@ -1,6 +1,7 @@
 package com.frauddetection.alert.feedback;
 
 import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
+import com.frauddetection.alert.api.EngineIntelligenceResponse;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditEventMetadataSummary;
 import com.frauddetection.alert.audit.AuditOutcome;
@@ -167,12 +168,14 @@ public class FraudFeedbackService {
     private void snapshotEngineIntelligence(FraudFeedbackRecord record, String transactionId) {
         try {
             EngineIntelligenceReadModel readModel = engineIntelligenceReadService.read(transactionId);
-            var response = engineIntelligenceResponseMapper.toResponse(readModel);
+            EngineIntelligenceResponse response = engineIntelligenceResponseMapper.toResponse(readModel);
             record.setEngineIntelligenceStatus(response.status());
-            if (readModel != null && readModel.comparison() != null) {
-                record.setAgreementStatus(readModel.comparison().agreementStatus());
-                record.setRiskMismatchStatus(readModel.comparison().riskMismatchStatus());
-                record.setScoreDeltaBucket(readModel.comparison().scoreDeltaBucket());
+            if (response.comparison() != null) {
+                record.setComparisonType(response.comparison().comparisonType());
+                record.setComparedEngineIds(response.comparison().comparedEngineIds());
+                record.setAgreementStatus(response.comparison().agreementStatus());
+                record.setRiskMismatchStatus(response.comparison().riskMismatchStatus());
+                record.setScoreDeltaBucket(response.comparison().scoreDeltaBucket());
             }
         } catch (EngineIntelligenceProjectionReadUnavailableException exception) {
             record.setEngineIntelligenceStatus(EngineIntelligenceResponseStatus.UNAVAILABLE);

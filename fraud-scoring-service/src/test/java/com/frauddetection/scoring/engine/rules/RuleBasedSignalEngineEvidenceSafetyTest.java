@@ -2,7 +2,7 @@ package com.frauddetection.scoring.engine.rules;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.engine.FraudEngineEvidence;
-import com.frauddetection.common.events.engine.FraudEngineResult;
+import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.model.Money;
 import com.frauddetection.common.events.reason.ReasonCode;
@@ -30,7 +30,7 @@ class RuleBasedSignalEngineEvidenceSafetyTest {
 
     @Test
     void resultExposesOnlyBoundedReasonCodesAndSafeIdentifiers() {
-        FraudEngineResult result = adapter.evaluate(context(event(Map.of(
+        FraudSignalEvaluation result = adapter.evaluate(context(event(Map.of(
                 FraudFeatureContract.DEVICE_NOVELTY, true,
                 FraudFeatureContract.CUSTOMER_SEGMENT, "VIP",
                 FraudFeatureContract.MERCHANT_CATEGORY, "crypto",
@@ -58,22 +58,34 @@ class RuleBasedSignalEngineEvidenceSafetyTest {
                 .doesNotContain("exception");
 
         assertThat(result.reasonCodes()).isNotEmpty().allSatisfy(reasonCode ->
-                assertThat(ReasonCode.known(reasonCode)).isPresent()
+                assertThat(isAllowedRulesReasonCode(reasonCode)).isTrue()
         );
         assertThat(result.evidence()).allSatisfy(this::assertSafeEvidenceText);
         assertThat(result.contributions()).allSatisfy(contribution -> {
-            assertThat(ReasonCode.known(contribution.feature())).isPresent();
+            assertThat(isAllowedRulesReasonCode(contribution.feature())).isTrue();
             assertThat(contribution.value()).isNull();
             assertThat(contribution.weight()).isNull();
         });
     }
 
     private void assertSafeEvidenceText(FraudEngineEvidence evidence) {
-        assertThat(ReasonCode.known(evidence.reasonCode())).isPresent();
+        assertThat(isAllowedRulesReasonCode(evidence.reasonCode())).isTrue();
         assertThat(evidence.title()).hasSizeLessThanOrEqualTo(64);
         assertThat(evidence.description()).hasSizeLessThanOrEqualTo(80);
         assertThat(evidence.title()).doesNotMatch(".*\\s{2,}.*");
         assertThat(evidence.description()).doesNotMatch(".*\\s{2,}.*");
+    }
+
+    private boolean isAllowedRulesReasonCode(String reasonCode) {
+        if (ReasonCode.known(reasonCode).isPresent()) {
+            return true;
+        }
+        try {
+            RuleBasedSignalReasonCode.valueOf(reasonCode);
+            return true;
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
     }
 
     private ScoringContext context(TransactionEnrichedEvent event) {
@@ -115,7 +127,7 @@ class RuleBasedSignalEngineEvidenceSafetyTest {
         );
     }
 
-    private String flatten(FraudEngineResult result) {
+    private String flatten(FraudSignalEvaluation result) {
         return result.reasonCodes() + " " + result.contributions() + " " + result.evidence() + " " + result.statusReason();
     }
 }

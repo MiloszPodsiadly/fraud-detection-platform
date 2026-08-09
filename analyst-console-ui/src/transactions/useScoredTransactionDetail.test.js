@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/apiError.js";
+import { availableDetail } from "./transactionRiskIntelligenceFixtures.js";
 import { useScoredTransactionDetail } from "./useScoredTransactionDetail.js";
 
 describe("useScoredTransactionDetail", () => {
@@ -160,39 +161,8 @@ function deferred() {
 }
 
 function detail(overrides = {}) {
-  return {
+  return availableDetail({
     transactionId: "txn-1",
-    engineIntelligence: {
-      status: "AVAILABLE",
-      contractVersion: 1,
-      generatedAt: "2026-06-18T10:00:00Z",
-      comparison: {
-        agreementStatus: "PARTIAL",
-        riskMismatchStatus: "NOT_COMPARABLE",
-        scoreDeltaBucket: "UNAVAILABLE"
-      },
-      engines: [],
-      diagnosticSignals: [],
-      warnings: []
-    },
-    analystRecommendation: {
-      status: "AVAILABLE",
-      recommendation: "RECOMMEND_REVIEW",
-      recommendationVersion: "analyst-recommendation-v1",
-      generatedAt: "2026-06-19T10:00:00Z",
-      confidence: "LOW",
-      source: "RULES_RISK",
-      reasonCodes: ["RULES_HIGH_RISK"],
-      warnings: [],
-      nonDecisioning: {
-        notPaymentAuthorization: true,
-        notAutomaticDecisioning: true,
-        notCaseAction: true,
-        notWorkflowAction: true,
-        notModelPromotion: true,
-        notThresholdRecommendation: true
-      }
-    },
     ...overrides
-  };
+  });
 }

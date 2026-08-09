@@ -2,7 +2,9 @@ package com.frauddetection.scoring.engine.ml;
 
 import com.frauddetection.common.events.engine.FraudEngineEvidence;
 import com.frauddetection.common.events.reason.ReasonCode;
+import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.client.RestClientException;
 
 import java.util.Arrays;
 import java.util.HashSet;
@@ -38,7 +40,7 @@ class PythonMlSignalEngineEvidenceSafetyTest {
 
     @Test
     void thrownUnsafeMlDetailsAreNotExposed() {
-        var result = new PythonMlSignalEngine(sourceThrowing(new IllegalStateException(
+        var result = new PythonMlSignalEngine(sourceThrowing(new RestClientException(
                 "VIP crypto EUR 50000 tx-secret acct-secret http://ml-internal token stacktrace raw JSON PythonException"
         ))).evaluate(context());
 
@@ -69,7 +71,7 @@ class PythonMlSignalEngineEvidenceSafetyTest {
         assertThat(evidence.description()).doesNotMatch(".*\\s{2,}.*");
     }
 
-    private void assertNoUnsafeMlData(com.frauddetection.common.events.engine.FraudEngineResult result) {
+    private void assertNoUnsafeMlData(FraudSignalEvaluation result) {
         assertThat(flatten(result))
                 .doesNotContain("VIP")
                 .doesNotContain("crypto")

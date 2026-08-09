@@ -1,6 +1,5 @@
 package com.frauddetection.scoring.engine;
 
-import com.frauddetection.common.events.engine.FraudEngineResult;
 import com.frauddetection.scoring.context.ScoringContext;
 import org.junit.jupiter.api.Test;
 
@@ -23,11 +22,11 @@ class FraudSignalEngineInterfaceShapeTest {
     }
 
     @Test
-    void evaluateUsesScoringContextAndReturnsEngineResult() throws Exception {
+    void evaluateUsesScoringContextAndReturnsInternalEvaluation() throws Exception {
         Method evaluate = FraudSignalEngine.class.getDeclaredMethod("evaluate", ScoringContext.class);
 
         assertThat(evaluate.getParameterTypes()).containsExactly(ScoringContext.class);
-        assertThat(evaluate.getReturnType()).isEqualTo(FraudEngineResult.class);
+        assertThat(evaluate.getReturnType()).isEqualTo(FraudSignalEvaluation.class);
     }
 
     @Test

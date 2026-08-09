@@ -27,9 +27,10 @@ The scored transaction detail read:
 - reads the existing engine intelligence projection after the scored transaction exists
 - maps the existing projection into bounded public DTOs
 
-The controller and mapper do not recompute agreement, risk mismatch, score delta, strongest signals, warning counts,
-engine status, fraud score, risk level, alert recommendation, or reason codes. FDP-115 does not recompute agreement;
-it only maps the already-projected comparison fields.
+The controller and mapper do not recompute Rules-vs-ML agreement, risk mismatch, score delta, strongest signals,
+warning counts, engine status, fraud score, risk level, alert recommendation, or reason codes. In short, it does not recompute agreement
+or comparison; it only maps the already-projected `comparisonType=RULES_VS_ML` and
+`comparedEngineIds=["rules.primary","ml.python.primary"]` fields.
 
 ## Public Contract
 
@@ -37,7 +38,7 @@ The public detail response exposes:
 
 - existing scored transaction fields
 - `engineIntelligence.status`
-- bounded comparison diagnostics
+- bounded `RULES_VS_ML` comparison diagnostics
 - bounded per-engine diagnostics
 - bounded diagnostic signals
 - bounded warnings

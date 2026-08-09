@@ -1,10 +1,10 @@
 package com.frauddetection.enricher.service;
 
+import com.frauddetection.common.events.model.SupportedCurrencyContract;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.Locale;
 import java.util.Map;
 
 @Component
@@ -21,8 +21,10 @@ public class CurrencyAmountConverter {
         if (amount == null) {
             return BigDecimal.ZERO;
         }
-        String normalizedCurrency = currency == null ? "PLN" : currency.toUpperCase(Locale.ROOT);
-        BigDecimal rate = PLN_RATES.getOrDefault(normalizedCurrency, BigDecimal.ONE);
+        if (!SupportedCurrencyContract.isSupported(currency)) {
+            throw new IllegalArgumentException("SUPPORTED_CURRENCY_INVALID");
+        }
+        BigDecimal rate = PLN_RATES.get(SupportedCurrencyContract.normalize(currency));
         return amount.multiply(rate).setScale(2, RoundingMode.HALF_UP);
     }
 }

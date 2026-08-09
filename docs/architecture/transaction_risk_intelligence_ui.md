@@ -57,7 +57,7 @@ The frontend display validator requires:
 - `transactionId`
 - `engineIntelligence`
 - status in `AVAILABLE`, `ABSENT`, `UNAVAILABLE`, or `DEGRADED`
-- bounded arrays: engines max 2, diagnostic signals max 5, warnings max 10, reason codes max 5 per engine
+- bounded arrays: engines max 3, diagnostic signals max 5, warnings max 10, reason codes max 5 per engine
 - `analystRecommendation`
 - analyst recommendation status in `AVAILABLE`, `ABSENT`, `NOT_APPLICABLE`, `INSUFFICIENT_DATA`, `UNAVAILABLE`, or `DEGRADED`
 - recommendation values only for `AVAILABLE` and `DEGRADED`
@@ -70,10 +70,13 @@ The frontend display validator requires:
 
 The panel displays projected comparison fields as-is:
 
+- `comparisonType` (`RULES_VS_ML`)
+- `comparedEngineIds` (`rules.primary`, `ml.python.primary`)
 - `agreementStatus`
 - `riskMismatchStatus`
 - `scoreDeltaBucket`
 
+It labels this as Rules-vs-ML comparison, not all-engine agreement. Velocity remains an independent diagnostic signal.
 It does not compute comparison, rank engines, infer a winning engine, infer a final outcome, infer a recommendation,
 or display raw payloads.
 

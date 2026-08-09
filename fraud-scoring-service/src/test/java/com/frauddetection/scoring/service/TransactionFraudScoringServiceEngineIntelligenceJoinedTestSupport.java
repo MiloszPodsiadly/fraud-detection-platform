@@ -117,14 +117,24 @@ final class TransactionFraudScoringServiceEngineIntelligenceJoinedTestSupport {
         return new EngineIntelligenceSummary(
                 EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-05-31T10:00:01Z"),
-                List.of(new EngineIntelligenceEngineResult(
-                        "rules.primary",
-                        FraudEngineType.RULES,
-                        FraudEngineStatus.AVAILABLE,
-                        RiskLevel.HIGH,
-                        EngineIntelligenceScoreBucket.HIGH,
-                        List.of("HIGH_VELOCITY")
-                )),
+                List.of(
+                        new EngineIntelligenceEngineResult(
+                                "rules.primary",
+                                FraudEngineType.RULES,
+                                FraudEngineStatus.AVAILABLE,
+                                RiskLevel.HIGH,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("HIGH_VELOCITY")
+                        ),
+                        new EngineIntelligenceEngineResult(
+                                "ml.python.primary",
+                                FraudEngineType.ML_MODEL,
+                                FraudEngineStatus.AVAILABLE,
+                                RiskLevel.LOW,
+                                EngineIntelligenceScoreBucket.LOW,
+                                List.of("LOW_MODEL_RISK")
+                        )
+                ),
                 new EngineIntelligenceComparison(
                         EngineIntelligenceAgreementStatus.DISAGREEMENT,
                         EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH,
@@ -139,14 +149,24 @@ final class TransactionFraudScoringServiceEngineIntelligenceJoinedTestSupport {
         return new EngineIntelligenceSummary(
                 EngineIntelligenceSummary.CONTRACT_VERSION,
                 Instant.parse("2026-05-31T10:00:01Z"),
-                List.of(new EngineIntelligenceEngineResult(
-                        "ml.python.primary",
-                        FraudEngineType.ML_MODEL,
-                        FraudEngineStatus.TIMEOUT,
-                        null,
-                        EngineIntelligenceScoreBucket.UNAVAILABLE,
-                        List.of("ML_MODEL_TIMEOUT")
-                )),
+                List.of(
+                        new EngineIntelligenceEngineResult(
+                                "rules.primary",
+                                FraudEngineType.RULES,
+                                FraudEngineStatus.AVAILABLE,
+                                RiskLevel.LOW,
+                                EngineIntelligenceScoreBucket.LOW,
+                                List.of("LOW_MODEL_RISK")
+                        ),
+                        new EngineIntelligenceEngineResult(
+                                "ml.python.primary",
+                                FraudEngineType.ML_MODEL,
+                                FraudEngineStatus.TIMEOUT,
+                                null,
+                                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                                List.of("ML_MODEL_TIMEOUT")
+                        )
+                ),
                 new EngineIntelligenceComparison(
                         EngineIntelligenceAgreementStatus.PARTIAL,
                         EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,

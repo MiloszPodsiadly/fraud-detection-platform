@@ -7,6 +7,7 @@ import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProject
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
@@ -54,6 +55,8 @@ class EngineIntelligenceReadModelMapperTest {
     void mapsComparisonAsAgreementStatusRiskMismatchAndScoreDelta() {
         var comparison = mapper.map(fullProjection()).comparison();
 
+        assertThat(comparison.comparisonType()).isEqualTo(EngineIntelligenceComparisonType.RULES_VS_ML);
+        assertThat(comparison.comparedEngineIds()).containsExactly("rules.primary", "ml.python.primary");
         assertThat(comparison.agreementStatus()).isEqualTo(EngineIntelligenceAgreementStatus.PARTIAL);
         assertThat(comparison.riskMismatchStatus()).isEqualTo(EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE);
         assertThat(comparison.scoreDeltaBucket()).isEqualTo(EngineIntelligenceScoreDeltaBucket.UNAVAILABLE);
@@ -83,14 +86,14 @@ class EngineIntelligenceReadModelMapperTest {
 
     @Test
     void unavailableEngineHasRiskLevelNull() {
-        var unavailableEngine = mapper.map(projectionWithStatus(FraudEngineStatus.UNAVAILABLE)).engines().getFirst();
+        var unavailableEngine = mapper.map(projectionWithStatus(FraudEngineStatus.UNAVAILABLE)).engines().get(1);
 
         assertThat(unavailableEngine.riskLevel()).isNull();
     }
 
     @Test
     void degradedEngineDoesNotBecomeLowRisk() {
-        var degradedEngine = mapper.map(projectionWithStatus(FraudEngineStatus.DEGRADED)).engines().getFirst();
+        var degradedEngine = mapper.map(projectionWithStatus(FraudEngineStatus.DEGRADED)).engines().get(1);
 
         assertThat(degradedEngine.riskLevel()).isNull();
         assertThat(degradedEngine.scoreBucket()).isEqualTo(EngineIntelligenceScoreBucket.UNAVAILABLE);
@@ -214,6 +217,32 @@ class EngineIntelligenceReadModelMapperTest {
         );
     }
 
+    @Test
+    void corruptProjectionWithPartialComparisonIdentityIsNotExposed() {
+        assertRejected(projectionWithComparisonIdentity(
+                EngineIntelligenceComparisonType.RULES_VS_ML,
+                null
+        ));
+    }
+
+    @Test
+    void corruptProjectionWithWrongComparisonEngineOrderIsNotExposed() {
+        assertRejected(projectionWithComparisonIdentity(
+                EngineIntelligenceComparisonType.RULES_VS_ML,
+                List.of("ml.python.primary", "rules.primary")
+        ));
+    }
+
+    @Test
+    void corruptAvailableProjectionWithUnavailableScoreBucketIsNotExposed() {
+        assertRejected(projectionWithAvailableEngineBucket(EngineIntelligenceScoreBucket.UNAVAILABLE));
+    }
+
+    @Test
+    void corruptAvailableProjectionWithNoneScoreBucketIsNotExposed() {
+        assertRejected(projectionWithAvailableEngineBucket(EngineIntelligenceScoreBucket.NONE));
+    }
+
     private EngineIntelligenceProjection fullProjection() {
         return new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy())
                 .map("txn-fdp96-001", EngineIntelligenceProjectionTestFixtures.fullSummary(), null)
@@ -227,17 +256,27 @@ class EngineIntelligenceReadModelMapperTest {
                 "txn-fdp96-operational",
                 1,
                 now,
-                EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
+                EngineIntelligenceAgreementStatus.PARTIAL,
                 EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                 EngineIntelligenceScoreDeltaBucket.UNAVAILABLE,
-                List.of(new EngineIntelligenceEngineProjection(
-                        "ml.python.primary",
-                        FraudEngineType.ML_MODEL,
-                        status,
-                        null,
-                        EngineIntelligenceScoreBucket.UNAVAILABLE,
-                        List.of("ML_MODEL_TIMEOUT")
-                )),
+                List.of(
+                        new EngineIntelligenceEngineProjection(
+                                "rules.primary",
+                                FraudEngineType.RULES,
+                                FraudEngineStatus.AVAILABLE,
+                                com.frauddetection.common.events.enums.RiskLevel.HIGH,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("HIGH_VELOCITY")
+                        ),
+                        new EngineIntelligenceEngineProjection(
+                                "ml.python.primary",
+                                FraudEngineType.ML_MODEL,
+                                status,
+                                null,
+                                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                                List.of("ML_MODEL_TIMEOUT")
+                        )
+                ),
                 List.of(),
                 List.of(),
                 now,
@@ -283,6 +322,59 @@ class EngineIntelligenceReadModelMapperTest {
                 engines,
                 diagnosticSignals,
                 warnings,
+                now,
+                now
+        );
+    }
+
+    private EngineIntelligenceProjection projectionWithComparisonIdentity(
+            EngineIntelligenceComparisonType comparisonType,
+            List<String> comparedEngineIds
+    ) {
+        Instant now = EngineIntelligenceProjectionTestFixtures.GENERATED_AT;
+        return new EngineIntelligenceProjection(
+                "txn-corrupted-comparison",
+                1,
+                now,
+                comparisonType,
+                comparedEngineIds,
+                EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
+                EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
+                EngineIntelligenceScoreDeltaBucket.UNAVAILABLE,
+                List.of(new EngineIntelligenceEngineProjection(
+                        "rules.primary",
+                        FraudEngineType.RULES,
+                        FraudEngineStatus.AVAILABLE,
+                        com.frauddetection.common.events.enums.RiskLevel.LOW,
+                        EngineIntelligenceScoreBucket.LOW,
+                        List.of("HIGH_VELOCITY")
+                )),
+                List.of(),
+                List.of(),
+                now,
+                now
+        );
+    }
+
+    private EngineIntelligenceProjection projectionWithAvailableEngineBucket(EngineIntelligenceScoreBucket scoreBucket) {
+        Instant now = EngineIntelligenceProjectionTestFixtures.GENERATED_AT;
+        return new EngineIntelligenceProjection(
+                "txn-corrupted-available-bucket",
+                1,
+                now,
+                EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
+                EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
+                EngineIntelligenceScoreDeltaBucket.UNAVAILABLE,
+                List.of(new EngineIntelligenceEngineProjection(
+                        "rules.primary",
+                        FraudEngineType.RULES,
+                        FraudEngineStatus.AVAILABLE,
+                        com.frauddetection.common.events.enums.RiskLevel.LOW,
+                        scoreBucket,
+                        List.of("HIGH_VELOCITY")
+                )),
+                List.of(),
+                List.of(),
                 now,
                 now
         );

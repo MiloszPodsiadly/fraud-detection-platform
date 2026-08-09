@@ -150,9 +150,27 @@ class TransactionScoredEventCompatibilityTest {
                 "engineIntelligence": {
                   "contractVersion": 1,
                   "generatedAt": "2026-06-01T06:00:00Z",
-                  "engines": [],
+                  "engines": [
+                    {
+                      "engineId": "rules.primary",
+                      "engineType": "RULES",
+                      "status": "AVAILABLE",
+                      "riskLevel": "HIGH",
+                      "scoreBucket": "HIGH",
+                      "reasonCodes": ["HIGH_VELOCITY"]
+                    },
+                    {
+                      "engineId": "ml.python.primary",
+                      "engineType": "ML_MODEL",
+                      "status": "TIMEOUT",
+                      "scoreBucket": "UNAVAILABLE",
+                      "reasonCodes": ["ML_MODEL_TIMEOUT"]
+                    }
+                  ],
                   "comparison": {
-                    "agreementStatus": "INSUFFICIENT_DATA",
+                    "comparisonType": "RULES_VS_ML",
+                    "comparedEngineIds": ["rules.primary", "ml.python.primary"],
+                    "agreementStatus": "PARTIAL",
                     "riskMismatchStatus": "NOT_COMPARABLE",
                     "scoreDeltaBucket": "UNAVAILABLE"
                   },

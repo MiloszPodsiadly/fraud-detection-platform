@@ -23,6 +23,12 @@ public record EngineIntelligenceEngineResult(
         EngineIntelligenceValuePolicy.requireEngineIdentity(engineId, engineType);
         Objects.requireNonNull(status, "status is required");
         Objects.requireNonNull(scoreBucket, "scoreBucket is required");
+        if (status == FraudEngineStatus.AVAILABLE && riskLevel == null) {
+            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_AVAILABLE_STATUS_RISK_LEVEL_REQUIRED");
+        }
+        if (status == FraudEngineStatus.AVAILABLE && !scoreBucket.isUsableAvailableBucket()) {
+            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_AVAILABLE_STATUS_SCORE_BUCKET_INVALID");
+        }
         if (status != FraudEngineStatus.AVAILABLE && riskLevel != null) {
             throw new IllegalArgumentException("ENGINE_INTELLIGENCE_OPERATIONAL_STATUS_RISK_LEVEL_INVALID");
         }

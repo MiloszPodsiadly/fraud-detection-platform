@@ -1,5 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { EngineIntelligencePanel } from "./EngineIntelligencePanel.jsx";
 
 describe("EngineIntelligencePanel", () => {
@@ -52,8 +54,21 @@ describe("EngineIntelligencePanel", () => {
     expect(await screen.findByRole("heading", { name: "Engine intelligence" })).toBeInTheDocument();
     expect(screen.getByText("Diagnostic engine output for this transaction.")).toBeInTheDocument();
     expect(screen.getByText("Diagnostic only. Operational statuses and disagreement are investigation context.")).toBeInTheDocument();
-    expect(screen.getByText("rules.primary")).toBeInTheDocument();
+    expect(screen.getByText("Velocity score is a deterministic normalized risk-severity signal. It is not a calibrated fraud probability and must not be interpreted as model confidence.")).toBeInTheDocument();
+    expect(screen.getByText("Rules")).toBeInTheDocument();
+    expect(panelText()).toContain("rules.primary / RULES");
     expect(screen.getAllByText("HIGH_VELOCITY").length).toBeGreaterThan(0);
+  });
+
+  it("rendersSharedThreeEngineGoldenFixture", async () => {
+    renderPanel(goldenPanelResult());
+
+    expect(await screen.findByRole("heading", { name: "Engine intelligence" })).toBeInTheDocument();
+    expect(screen.getByText("Rules")).toBeInTheDocument();
+    expect(screen.getByText("ML model")).toBeInTheDocument();
+    expect(screen.getByText("Velocity")).toBeInTheDocument();
+    expect(panelText()).toContain("velocity.primary / VELOCITY");
+    expect(screen.getAllByText("RAPID_PLN_20K_BURST").length).toBeGreaterThan(0);
   });
 
   it("rendersFeedbackControlsBelowEngineIntelligencePanelWhenSubmitClientIsProvided", async () => {
@@ -117,6 +132,7 @@ describe("EngineIntelligencePanel", () => {
 
     expect(await screen.findByRole("heading", { name: "Engine intelligence" })).toBeInTheDocument();
     expect(panelText()).not.toMatch(/recommended action|final result|decision source|approve|decline|block/i);
+    expect(panelText()).not.toMatch(/95% probability/i);
   });
 
   it("rendersComparisonSection", async () => {
@@ -124,7 +140,7 @@ describe("EngineIntelligencePanel", () => {
 
     const comparison = await screen.findByRole("heading", { name: "Diagnostic comparison" });
     const section = comparison.closest("section");
-    expect(within(section).getByText("Engine agreement")).toBeInTheDocument();
+    expect(within(section).getByText("Rules vs ML agreement")).toBeInTheDocument();
     expect(within(section).getByText("DISAGREEMENT")).toBeInTheDocument();
     expect(within(section).getByText("Risk mismatch")).toBeInTheDocument();
     expect(within(section).getByText("MATERIAL_RISK_MISMATCH")).toBeInTheDocument();
@@ -136,8 +152,9 @@ describe("EngineIntelligencePanel", () => {
     renderPanel(availableResult());
 
     expect(await screen.findByRole("heading", { name: "Engine results" })).toBeInTheDocument();
-    expect(screen.getByText("RULES")).toBeInTheDocument();
-    expect(screen.getAllByText("AVAILABLE").length).toBeGreaterThan(0);
+    expect(screen.getByText("Rules")).toBeInTheDocument();
+    expect(panelText()).toContain("rules.primary / RULES");
+    expect(screen.getAllByText("Engine result available").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Score bucket").length).toBeGreaterThan(0);
     expect(screen.getAllByText("HIGH").length).toBeGreaterThan(0);
   });
@@ -167,19 +184,19 @@ describe("EngineIntelligencePanel", () => {
   it("rendersUnavailableAsOperationalStatus", async () => {
     renderPanel(availableResult({ engineStatus: "UNAVAILABLE", engineRiskLevel: "", engineScoreBucket: "UNAVAILABLE" }));
 
-    expect((await screen.findAllByText("Engine unavailable")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("Engine result unavailable")).length).toBeGreaterThan(0);
   });
 
   it("rendersDegradedAsOperationalStatus", async () => {
     renderPanel(availableResult({ engineStatus: "DEGRADED", engineRiskLevel: "", engineScoreBucket: "UNAVAILABLE" }));
 
-    expect(await screen.findByText("Engine response degraded")).toBeInTheDocument();
+    expect(await screen.findByText("Engine result degraded")).toBeInTheDocument();
   });
 
   it("doesNotRenderSafeTransactionForOperationalFailure", async () => {
     renderPanel(availableResult({ engineStatus: "UNAVAILABLE", engineRiskLevel: "", engineScoreBucket: "UNAVAILABLE" }));
 
-    expect((await screen.findAllByText("Engine unavailable")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("Engine result unavailable")).length).toBeGreaterThan(0);
     expect(panelText()).not.toMatch(/LOW risk|\bsafe\b|no fraud|less severe|not suspicious|low risk because ML unavailable/i);
   });
 
@@ -195,7 +212,7 @@ describe("EngineIntelligencePanel", () => {
 
     const operationalSignal = await screen.findByText("OPERATIONAL_SIGNAL");
     const card = operationalSignal.closest("article");
-    expect(within(card).getByText("Engine unavailable")).toBeInTheDocument();
+    expect(within(card).getByText("Engine result unavailable")).toBeInTheDocument();
     expect(within(card).queryByText("Risk level")).not.toBeInTheDocument();
   });
 
@@ -203,7 +220,7 @@ describe("EngineIntelligencePanel", () => {
     renderPanel(availableResult());
 
     const operationalSignal = await screen.findByText("OPERATIONAL_SIGNAL");
-    expect(operationalSignal.closest("article")).toHaveTextContent("Engine unavailable");
+    expect(operationalSignal.closest("article")).toHaveTextContent("Engine result unavailable");
   });
 
   it.each([
@@ -268,7 +285,7 @@ describe("EngineIntelligencePanel", () => {
     renderPanel(availableResult());
 
     expect((await screen.findAllByText("Status")).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("AVAILABLE").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Engine result available").length).toBeGreaterThan(0);
   });
 
   it.each([
@@ -328,6 +345,8 @@ function availableResult({ engineStatus = "AVAILABLE", engineRiskLevel = "HIGH",
     available: true,
     transactionId: "txn-1",
     comparison: {
+      comparisonType: "RULES_VS_ML",
+      comparedEngineIds: ["rules.primary", "ml.python.primary"],
       agreementStatus: "DISAGREEMENT",
       riskMismatchStatus: "MATERIAL_RISK_MISMATCH",
       scoreDeltaBucket: "LARGE"
@@ -358,6 +377,23 @@ function availableResult({ engineStatus = "AVAILABLE", engineRiskLevel = "HIGH",
       count: 1,
       rawPayload: "rawPayload"
     }]
+  };
+}
+
+function goldenPanelResult() {
+  const golden = JSON.parse(readFileSync(resolve(
+    process.cwd(),
+    "../common-events/src/test/resources/fixtures/engine-intelligence/engine_intelligence_three_engine_golden.json"
+  ), "utf8"));
+  return {
+    state: "available",
+    available: true,
+    transactionId: "txn-golden",
+    ...golden,
+    diagnosticSignals: golden.diagnosticSignals.map((signal) => ({
+      ...signal,
+      reasonCodes: [signal.reasonCode]
+    }))
   };
 }
 

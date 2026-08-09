@@ -2964,6 +2964,7 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+          pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
         customerId:
           type: string
           nullable: true
@@ -2973,10 +2974,12 @@ components:
         transactionTimestamp:
           type: string
           format: date-time
+          pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,9})?Z$'
           nullable: true
         scoredAt:
           type: string
           format: date-time
+          pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,9})?Z$'
           nullable: true
         transactionAmount:
           $ref: "#/components/schemas/MoneyResponse"
@@ -2996,6 +2999,7 @@ components:
             type: string
             minLength: 1
             maxLength: 128
+            pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
     ScoredTransactionDetailResponse:
       type: object
       additionalProperties: false
@@ -3017,10 +3021,12 @@ components:
         transactionTimestamp:
           type: string
           format: date-time
+          pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,9})?Z$'
           nullable: true
         scoredAt:
           type: string
           format: date-time
+          pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,9})?Z$'
           nullable: true
         transactionAmount:
           $ref: "#/components/schemas/MoneyResponse"
@@ -3173,15 +3179,33 @@ components:
         scoredAt:
           type: string
           format: date-time
+          pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,9})?Z$'
           nullable: true
         transactionTimestamp:
           type: string
           format: date-time
+          pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,9})?Z$'
           nullable: true
         engineIntelligenceStatus:
           type: string
           nullable: true
           enum: [AVAILABLE, ABSENT, UNAVAILABLE, DEGRADED]
+        comparisonType:
+          type: string
+          nullable: true
+          enum: [RULES_VS_ML]
+        comparedEngineIds:
+          type: array
+          nullable: true
+          minItems: 2
+          maxItems: 2
+          uniqueItems: true
+          enum:
+            - [rules.primary, ml.python.primary]
+          description: Exact ordered engine identities compared by RULES_VS_ML when feedback captured projected engine intelligence.
+          items:
+            type: string
+            enum: [rules.primary, ml.python.primary]
         agreementStatus:
           type: string
           nullable: true
@@ -3233,10 +3257,12 @@ components:
           type: string
           minLength: 1
           maxLength: 64
+          pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
           example: analyst-recommendation-v1
         generatedAt:
           type: string
           format: date-time
+          pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,9})?Z$'
           nullable: true
         confidence:
           type: string
@@ -3251,6 +3277,7 @@ components:
             type: string
             minLength: 1
             maxLength: 128
+            pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
         warnings:
           type: array
           maxItems: 10
@@ -3267,6 +3294,7 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+          pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
         count:
           type: integer
           minimum: 0
@@ -4861,37 +4889,113 @@ components:
         hasMore:
           type: boolean
     EngineIntelligenceResponse:
+      oneOf:
+        - $ref: "#/components/schemas/EngineIntelligenceAvailableResponse"
+        - $ref: "#/components/schemas/EngineIntelligenceDegradedResponse"
+        - $ref: "#/components/schemas/EngineIntelligenceAbsentResponse"
+        - $ref: "#/components/schemas/EngineIntelligenceUnavailableResponse"
+      description: Bounded analyst diagnostic response assembled from the existing alert-service engine intelligence projection. AVAILABLE and DEGRADED responses include exact contractVersion 1, canonical UTC generatedAt, Rules and ML engine results, coherent Rules-vs-ML comparison, bounded arrays, and optional Velocity. ABSENT and UNAVAILABLE responses include explicit null contractVersion, generatedAt, and comparison fields plus empty arrays. It is not a final decision, payment authorization, automatic approve, automatic decline, automatic block, model promotion, threshold recommendation, recommendation layer, workflow action, or bank authorization.
+    EngineIntelligenceAvailableResponse:
+      allOf:
+        - $ref: "#/components/schemas/EngineIntelligenceProjectedResponse"
+        - type: object
+          required: [status]
+          properties:
+            status:
+              type: string
+              enum: [AVAILABLE]
+    EngineIntelligenceDegradedResponse:
+      allOf:
+        - $ref: "#/components/schemas/EngineIntelligenceProjectedResponse"
+        - type: object
+          required: [status]
+          properties:
+            status:
+              type: string
+              enum: [DEGRADED]
+    EngineIntelligenceAbsentResponse:
+      allOf:
+        - $ref: "#/components/schemas/EngineIntelligenceEmptyResponse"
+        - type: object
+          required: [status]
+          properties:
+            status:
+              type: string
+              enum: [ABSENT]
+      description: ABSENT means no projection exists for this scored transaction, which is expected for old transactions and disabled producer periods.
+    EngineIntelligenceUnavailableResponse:
+      allOf:
+        - $ref: "#/components/schemas/EngineIntelligenceEmptyResponse"
+        - type: object
+          required: [status]
+          properties:
+            status:
+              type: string
+              enum: [UNAVAILABLE]
+      description: UNAVAILABLE means the projection read path degraded or the stored projection cannot satisfy the public contract.
+    EngineIntelligenceEmptyResponse:
       type: object
       additionalProperties: false
-      required:
-        - status
-        - contractVersion
-        - generatedAt
-        - comparison
-        - engines
-        - diagnosticSignals
-        - warnings
-      description: Bounded analyst diagnostic response assembled from the existing alert-service engine intelligence projection. ABSENT and UNAVAILABLE responses include explicit null contractVersion, generatedAt, and comparison fields plus empty arrays. It is not a final decision, payment authorization, automatic approve, automatic decline, automatic block, model promotion, threshold recommendation, recommendation layer, workflow action, or bank authorization.
+      required: [status, contractVersion, generatedAt, comparison, engines, diagnosticSignals, warnings]
       properties:
         status:
           type: string
-          enum: [AVAILABLE, ABSENT, UNAVAILABLE, DEGRADED]
-          description: ABSENT means no projection exists for this scored transaction, which is expected for old transactions and disabled producer periods. UNAVAILABLE means the projection read path degraded.
+          enum: [ABSENT, UNAVAILABLE]
+        contractVersion:
+          nullable: true
+          enum: [null]
+          description: Always null for ABSENT and UNAVAILABLE.
+        generatedAt:
+          nullable: true
+          enum: [null]
+          description: Always null for ABSENT and UNAVAILABLE.
+        comparison:
+          nullable: true
+          enum: [null]
+          description: Always null for ABSENT and UNAVAILABLE.
+        engines:
+          type: array
+          minItems: 0
+          maxItems: 0
+          items:
+            $ref: "#/components/schemas/EngineIntelligenceEngineResponse"
+        diagnosticSignals:
+          type: array
+          minItems: 0
+          maxItems: 0
+          items:
+            $ref: "#/components/schemas/EngineIntelligenceDiagnosticSignalResponse"
+        warnings:
+          type: array
+          minItems: 0
+          maxItems: 0
+          items:
+            $ref: "#/components/schemas/EngineIntelligenceWarningResponse"
+    EngineIntelligenceProjectedResponse:
+      type: object
+      additionalProperties: false
+      required: [status, contractVersion, generatedAt, comparison, engines, diagnosticSignals, warnings]
+      properties:
+        status:
+          type: string
+          enum: [AVAILABLE, DEGRADED]
+          description: AVAILABLE and DEGRADED responses must include a complete public engine-intelligence contract. DEGRADED marks bounded public exposure with warning or operational engine state; it does not authorize payment, workflow, scoring, model promotion, or threshold changes.
         contractVersion:
           type: integer
+          enum: [1]
           minimum: 1
-          nullable: true
         generatedAt:
           type: string
           format: date-time
-          nullable: true
+          pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,9})?Z$'
+          description: Canonical UTC RFC3339 timestamp with uppercase Z, year 0001-9999, hour 00-23, second 00-59, optional 1-9 digit fractional seconds, no leap second, no offset, and no timezone-less value.
         comparison:
-          nullable: true
-          allOf:
-            - $ref: "#/components/schemas/EngineIntelligenceComparisonResponse"
+          $ref: "#/components/schemas/EngineIntelligenceComparisonResponse"
         engines:
           type: array
-          maxItems: 2
+          minItems: 2
+          maxItems: 3
+          description: AVAILABLE and DEGRADED contractVersion 1 responses expose exactly Rules and ML, and may include Velocity. Engine order is rules.primary, ml.python.primary, velocity.primary. OpenAPI cannot prove uniqueness by object property or required Rules+ML membership; runtime validators enforce those relations.
           items:
             $ref: "#/components/schemas/EngineIntelligenceEngineResponse"
         diagnosticSignals:
@@ -4907,8 +5011,24 @@ components:
     EngineIntelligenceComparisonResponse:
       type: object
       additionalProperties: false
-      required: [agreementStatus, riskMismatchStatus, scoreDeltaBucket]
+      required: [comparisonType, comparedEngineIds, agreementStatus, riskMismatchStatus, scoreDeltaBucket]
       properties:
+        comparisonType:
+          type: string
+          enum: [RULES_VS_ML]
+          description: Explicit comparison identity. FDP-129 compares only Rules against ML; Velocity is not included in score delta semantics.
+        comparedEngineIds:
+          type: array
+          minItems: 2
+          maxItems: 2
+          uniqueItems: true
+          enum:
+            - [rules.primary, ml.python.primary]
+          description: Exact ordered engine identities compared by RULES_VS_ML.
+          items:
+            type: string
+            enum: [rules.primary, ml.python.primary]
+          example: [rules.primary, ml.python.primary]
         agreementStatus:
           type: string
           enum: [AGREEMENT, ADJACENT_RISK_VARIANCE, DISAGREEMENT, PARTIAL, INSUFFICIENT_DATA, REQUIRED_ENGINE_NOT_COMPARABLE]
@@ -4921,14 +5041,48 @@ components:
     EngineIntelligenceEngineResponse:
       type: object
       additionalProperties: false
-      required: [engineId, engineType, status, scoreBucket, reasonCodes]
+      required: [engineId, engineType, status, riskLevel, scoreBucket, reasonCodes]
+      allOf:
+        - oneOf:
+            - $ref: "#/components/schemas/RulesEngineIdentity"
+            - $ref: "#/components/schemas/MlEngineIdentity"
+            - $ref: "#/components/schemas/VelocityEngineIdentity"
+        - oneOf:
+            - type: object
+              additionalProperties: true
+              required: [status, riskLevel, scoreBucket]
+              properties:
+                status:
+                  type: string
+                  enum: [AVAILABLE]
+                riskLevel:
+                  type: string
+                  enum: [LOW, MEDIUM, HIGH, CRITICAL]
+                scoreBucket:
+                  type: string
+                  enum: [LOW, MEDIUM, HIGH, VERY_HIGH]
+            - type: object
+              additionalProperties: true
+              required: [status, riskLevel, scoreBucket]
+              properties:
+                status:
+                  type: string
+                  enum: [UNAVAILABLE, TIMEOUT, DEGRADED, NOT_APPLICABLE]
+                riskLevel:
+                  nullable: true
+                  enum: [null]
+                scoreBucket:
+                  type: string
+                  enum: [UNAVAILABLE]
       properties:
         engineId:
           type: string
           minLength: 1
           maxLength: 128
+          pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
         engineType:
           type: string
+          enum: [RULES, ML_MODEL, VELOCITY]
         status:
           type: string
           enum: [AVAILABLE, UNAVAILABLE, TIMEOUT, DEGRADED, NOT_APPLICABLE]
@@ -4946,17 +5100,58 @@ components:
             type: string
             minLength: 1
             maxLength: 128
+            pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
     EngineIntelligenceDiagnosticSignalResponse:
       type: object
       additionalProperties: false
-      required: [engineId, engineType, engineStatus, signalCategory, scoreBucket, reasonCode]
+      required: [engineId, engineType, engineStatus, signalCategory, riskLevel, scoreBucket, reasonCode]
+      allOf:
+        - oneOf:
+            - $ref: "#/components/schemas/RulesEngineIdentity"
+            - $ref: "#/components/schemas/MlEngineIdentity"
+            - $ref: "#/components/schemas/VelocityEngineIdentity"
+        - oneOf:
+            - type: object
+              additionalProperties: true
+              required: [engineStatus, signalCategory, riskLevel, scoreBucket]
+              properties:
+                engineStatus:
+                  type: string
+                  enum: [AVAILABLE]
+                signalCategory:
+                  type: string
+                  enum: [FRAUD_SIGNAL]
+                riskLevel:
+                  type: string
+                  enum: [LOW, MEDIUM, HIGH, CRITICAL]
+                scoreBucket:
+                  type: string
+                  enum: [LOW, MEDIUM, HIGH, VERY_HIGH]
+            - type: object
+              additionalProperties: true
+              required: [engineStatus, signalCategory, riskLevel, scoreBucket]
+              properties:
+                engineStatus:
+                  type: string
+                  enum: [AVAILABLE, UNAVAILABLE, TIMEOUT, DEGRADED, NOT_APPLICABLE]
+                signalCategory:
+                  type: string
+                  enum: [OPERATIONAL_SIGNAL]
+                riskLevel:
+                  nullable: true
+                  enum: [null]
+                scoreBucket:
+                  type: string
+                  enum: [UNAVAILABLE]
       properties:
         engineId:
           type: string
           minLength: 1
           maxLength: 128
+          pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
         engineType:
           type: string
+          enum: [RULES, ML_MODEL, VELOCITY]
         engineStatus:
           type: string
           enum: [AVAILABLE, UNAVAILABLE, TIMEOUT, DEGRADED, NOT_APPLICABLE]
@@ -4983,6 +5178,7 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+          enum: [ENGINE_RESULT_LIMIT_APPLIED, REASON_CODE_NULL_DROPPED, REASON_CODE_BLANK_DROPPED, REASON_CODE_UNSUPPORTED_DROPPED, REASON_CODE_LIMIT_APPLIED, EVIDENCE_LIMIT_APPLIED, EVIDENCE_TEXT_TRUNCATED, EVIDENCE_UNSAFE_DROPPED, EVIDENCE_UNSUPPORTED_REASON_CODE_DROPPED, CONTRIBUTION_LIMIT_APPLIED, CONTRIBUTION_TEXT_TRUNCATED, CONTRIBUTION_UNSAFE_DROPPED, CONTRIBUTION_VALUE_DROPPED]
         count:
           type: integer
           minimum: 0
@@ -5008,12 +5204,13 @@ components:
         generatedAt:
           type: string
           format: date-time
+          pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,9})?Z$'
         comparison:
           $ref: "#/components/schemas/EngineIntelligenceComparisonReadModel"
         engineCount:
           type: integer
           minimum: 0
-          maximum: 2
+          maximum: 3
         diagnosticSignalCount:
           type: integer
           minimum: 0
@@ -5024,7 +5221,7 @@ components:
           maximum: 10
         engines:
           type: array
-          maxItems: 2
+          maxItems: 3
           items:
             $ref: "#/components/schemas/EngineIntelligenceEngineReadModel"
         diagnosticSignals:
@@ -5040,8 +5237,24 @@ components:
     EngineIntelligenceComparisonReadModel:
       type: object
       additionalProperties: false
-      required: [agreementStatus, riskMismatchStatus, scoreDeltaBucket]
+      required: [comparisonType, comparedEngineIds, agreementStatus, riskMismatchStatus, scoreDeltaBucket]
       properties:
+        comparisonType:
+          type: string
+          enum: [RULES_VS_ML]
+          description: Explicit comparison identity. FDP-129 compares only Rules against ML; Velocity is not included in score delta semantics.
+        comparedEngineIds:
+          type: array
+          minItems: 2
+          maxItems: 2
+          uniqueItems: true
+          enum:
+            - [rules.primary, ml.python.primary]
+          description: Exact ordered engine identities compared by RULES_VS_ML.
+          items:
+            type: string
+            enum: [rules.primary, ml.python.primary]
+          example: [rules.primary, ml.python.primary]
         agreementStatus:
           type: string
           enum: [AGREEMENT, ADJACENT_RISK_VARIANCE, DISAGREEMENT, PARTIAL, INSUFFICIENT_DATA, REQUIRED_ENGINE_NOT_COMPARABLE]
@@ -5055,6 +5268,10 @@ components:
       type: object
       additionalProperties: false
       required: [engineId, engineType, status, scoreBucket, reasonCodes]
+      oneOf:
+        - $ref: "#/components/schemas/RulesEngineIdentity"
+        - $ref: "#/components/schemas/MlEngineIdentity"
+        - $ref: "#/components/schemas/VelocityEngineIdentity"
       properties:
         engineId:
           type: string
@@ -5062,6 +5279,7 @@ components:
           maxLength: 128
         engineType:
           type: string
+          enum: [RULES, ML_MODEL, VELOCITY]
         status:
           type: string
           enum: [AVAILABLE, UNAVAILABLE, DEGRADED, TIMEOUT, FALLBACK_USED, SKIPPED]
@@ -5083,6 +5301,10 @@ components:
       type: object
       additionalProperties: false
       required: [engineId, engineType, engineStatus, signalCategory, scoreBucket, reasonCode]
+      oneOf:
+        - $ref: "#/components/schemas/RulesEngineIdentity"
+        - $ref: "#/components/schemas/MlEngineIdentity"
+        - $ref: "#/components/schemas/VelocityEngineIdentity"
       properties:
         engineId:
           type: string
@@ -5090,6 +5312,7 @@ components:
           maxLength: 128
         engineType:
           type: string
+          enum: [RULES, ML_MODEL, VELOCITY]
         engineStatus:
           type: string
           enum: [AVAILABLE, UNAVAILABLE, DEGRADED, TIMEOUT, FALLBACK_USED, SKIPPED]
@@ -5107,6 +5330,37 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+          pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
+    RulesEngineIdentity:
+      type: object
+      required: [engineId, engineType]
+      properties:
+        engineId:
+          type: string
+          enum: [rules.primary]
+        engineType:
+          type: string
+          enum: [RULES]
+    MlEngineIdentity:
+      type: object
+      required: [engineId, engineType]
+      properties:
+        engineId:
+          type: string
+          enum: [ml.python.primary]
+        engineType:
+          type: string
+          enum: [ML_MODEL]
+    VelocityEngineIdentity:
+      type: object
+      required: [engineId, engineType]
+      properties:
+        engineId:
+          type: string
+          enum: [velocity.primary]
+        engineType:
+          type: string
+          enum: [VELOCITY]
     EngineIntelligenceWarningReadModel:
       type: object
       additionalProperties: false
@@ -5133,7 +5387,7 @@ components:
         generatedAt:
           type: string
           format: date-time
-          pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,6})?Z$'
+          pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,9})?Z$'
         evaluationSubject:
           $ref: "#/components/schemas/ShadowPerformanceEvaluationSubjectResponse"
         metricBasis:
@@ -5185,7 +5439,7 @@ components:
         generatedAt:
           type: string
           format: date-time
-          pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,6})?Z$'
+          pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,9})?Z$'
         governanceStatus:
           type: string
           enum: [DIAGNOSTIC_ONLY]
@@ -5234,7 +5488,7 @@ components:
                 generatedAt:
                   type: string
                   format: date-time
-                  pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,6})?Z$'
+                  pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,9})?Z$'
             minimumDiagnosticEvidenceRecords:
               type: integer
               minimum: 1
@@ -5268,7 +5522,7 @@ components:
                 generatedAt:
                   type: string
                   format: date-time
-                  pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,6})?Z$'
+                  pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,9})?Z$'
                 sourceEvaluationCardManifestSha256:
                   type: string
                   pattern: '^[a-f0-9]{64}$'
@@ -5461,12 +5715,12 @@ components:
         evaluationReportGeneratedAt:
           type: string
           format: date-time
-          pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,6})?Z$'
+          pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,9})?Z$'
           description: UTC-normalized timestamp from the source FDP-123/FDP-124 evaluation report. Must be less than or equal to evaluationCardGeneratedAt.
         evaluationCardGeneratedAt:
           type: string
           format: date-time
-          pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,6})?Z$'
+          pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,9})?Z$'
           description: UTC-normalized timestamp from the Platform Recommendation Evaluation Card. Must be greater than or equal to evaluationReportGeneratedAt and less than or equal to the summary generatedAt.
         evaluationArtifactSetVersion:
           type: string

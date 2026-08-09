@@ -8,6 +8,7 @@ import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceComparisonReadModel;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceEngineReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
@@ -17,9 +18,13 @@ import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationConfidence;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationNonDecisioning;
@@ -105,6 +110,8 @@ class FraudFeedbackServiceTest {
         assertThat(response.fraudScore()).isEqualTo(0.91d);
         assertThat(response.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
         assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
+        assertThat(response.comparisonType()).isEqualTo(EngineIntelligenceComparisonType.RULES_VS_ML);
+        assertThat(response.comparedEngineIds()).containsExactly("rules.primary", "ml.python.primary");
         assertThat(response.agreementStatus()).isEqualTo(EngineIntelligenceAgreementStatus.PARTIAL);
         assertThat(response.analystRecommendation()).isEqualTo(AnalystRecommendation.RECOMMEND_REVIEW);
         assertThat(savedRecords).hasSize(1);
@@ -211,6 +218,26 @@ class FraudFeedbackServiceTest {
         assertThat(response.feedbackId()).isEqualTo("feedback-1");
         assertThat(response.feedbackLabel()).isEqualTo(FraudFeedbackLabel.CONFIRMED_LEGITIMATE);
         assertThat(response.notesPresent()).isFalse();
+    }
+
+    @Test
+    void existingFeedbackWithCorruptedEngineIntelligenceComparisonDoesNotExposeAvailableStatus() {
+        FraudFeedbackRecord record = record();
+        record.setEngineIntelligenceStatus(EngineIntelligenceResponseStatus.DEGRADED);
+        record.setComparisonType(EngineIntelligenceComparisonType.RULES_VS_ML);
+        record.setAgreementStatus(EngineIntelligenceAgreementStatus.PARTIAL);
+        record.setRiskMismatchStatus(EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE);
+        record.setScoreDeltaBucket(EngineIntelligenceScoreDeltaBucket.UNAVAILABLE);
+        when(repository.findByTransactionId("txn-1")).thenReturn(Optional.of(record));
+
+        FraudFeedbackResponse response = service.get("txn-1");
+
+        assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.UNAVAILABLE);
+        assertThat(response.comparisonType()).isNull();
+        assertThat(response.comparedEngineIds()).isEmpty();
+        assertThat(response.agreementStatus()).isNull();
+        assertThat(response.riskMismatchStatus()).isNull();
+        assertThat(response.scoreDeltaBucket()).isNull();
     }
 
     @Test
@@ -404,6 +431,8 @@ class FraudFeedbackServiceTest {
         FraudFeedbackResponse response = service.create("txn-1", request());
 
         assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.UNAVAILABLE);
+        assertThat(response.comparisonType()).isNull();
+        assertThat(response.comparedEngineIds()).isEmpty();
         assertThat(response.agreementStatus()).isNull();
     }
 
@@ -415,6 +444,8 @@ class FraudFeedbackServiceTest {
         FraudFeedbackResponse response = service.create("txn-1", request());
 
         assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.UNAVAILABLE);
+        assertThat(response.comparisonType()).isNull();
+        assertThat(response.comparedEngineIds()).isEmpty();
         assertThat(response.agreementStatus()).isNull();
         assertThat(savedRecords).hasSize(1);
         assertThat(savedRecords.getFirst().toString()).doesNotContain("rawMlRequest", "Customer confirmed fraud");
@@ -440,6 +471,8 @@ class FraudFeedbackServiceTest {
         FraudFeedbackResponse response = mapperFailureService.create("txn-1", request());
 
         assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.UNAVAILABLE);
+        assertThat(response.comparisonType()).isNull();
+        assertThat(response.comparedEngineIds()).isEmpty();
         assertThat(response.agreementStatus()).isNull();
         assertThat(savedRecords).hasSize(1);
         assertThat(savedRecords.getFirst().toString()).doesNotContain("rawEvidence", "Customer confirmed fraud");
@@ -601,7 +634,24 @@ class FraudFeedbackServiceTest {
                         EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                         EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
                 ),
-                List.of(),
+                List.of(
+                        new EngineIntelligenceEngineReadModel(
+                                "rules.primary",
+                                FraudEngineType.RULES,
+                                FraudEngineStatus.AVAILABLE,
+                                RiskLevel.CRITICAL,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("HIGH_TRANSACTION_AMOUNT")
+                        ),
+                        new EngineIntelligenceEngineReadModel(
+                                "ml.python.primary",
+                                FraudEngineType.ML_MODEL,
+                                FraudEngineStatus.TIMEOUT,
+                                null,
+                                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                                List.of("ML_MODEL_TIMEOUT")
+                        )
+                ),
                 List.of(),
                 List.of()
         );

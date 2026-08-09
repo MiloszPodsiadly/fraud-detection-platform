@@ -3,6 +3,7 @@ package com.frauddetection.scoring.orchestration.aggregation;
 import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.scoring.engine.ml.PythonMlSignalReasonCode;
 import com.frauddetection.scoring.engine.rules.RuleBasedSignalReasonCode;
+import com.frauddetection.scoring.engine.velocity.VelocitySignalReasonCode;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -75,6 +76,7 @@ public final class FraudEngineReasonCodeNormalizer {
                                 .map(ReasonCode::wireValue),
                         Stream.of(PythonMlSignalReasonCode.values()).map(PythonMlSignalReasonCode::wireValue),
                         Stream.of(RuleBasedSignalReasonCode.values()).map(RuleBasedSignalReasonCode::wireValue),
+                        Stream.of(VelocitySignalReasonCode.values()).map(VelocitySignalReasonCode::wireValue),
                         orchestrationCodes.stream()
                 )
                 .flatMap(stream -> stream)

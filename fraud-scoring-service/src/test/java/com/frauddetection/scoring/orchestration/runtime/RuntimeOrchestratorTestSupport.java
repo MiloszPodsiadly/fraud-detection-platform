@@ -11,6 +11,7 @@ import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.context.ScoringContext;
 import com.frauddetection.scoring.engine.FraudEngineDescriptor;
 import com.frauddetection.scoring.engine.FraudSignalEngine;
+import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrator;
 import com.frauddetection.scoring.orchestration.FraudSignalEngineRegistry;
 
@@ -66,8 +67,13 @@ final class RuntimeOrchestratorTestSupport {
                 executionPolicy(),
                 new BoundedFraudEngineExecutor(new ScriptedExecutorService(modes)),
                 metrics,
-                clock
+                clock,
+                clockBackedTicker(clock)
         );
+    }
+
+    static MonotonicTicker clockBackedTicker(Clock clock) {
+        return () -> Duration.between(RECEIVED_AT, clock.instant()).toNanos();
     }
 
     static FraudSignalEngineRegistry registry() {
@@ -99,8 +105,8 @@ final class RuntimeOrchestratorTestSupport {
     ) {
         return new FraudSignalEngine() {
             @Override
-            public FraudEngineResult evaluate(ScoringContext context) {
-                return handler.apply(context);
+            public FraudSignalEvaluation evaluate(ScoringContext context) {
+                return evaluation(handler.apply(context));
             }
 
             @Override
@@ -108,6 +114,21 @@ final class RuntimeOrchestratorTestSupport {
                 return descriptor;
             }
         };
+    }
+
+    private static FraudSignalEvaluation evaluation(FraudEngineResult result) {
+        return new FraudSignalEvaluation(
+                result.status(),
+                result.score(),
+                result.riskLevel(),
+                result.confidence(),
+                result.reasonCodes(),
+                result.contributions(),
+                result.evidence(),
+                result.modelName(),
+                result.modelVersion(),
+                result.statusReason()
+        );
     }
 
     static FraudEngineDescriptor ruleDescriptor() {

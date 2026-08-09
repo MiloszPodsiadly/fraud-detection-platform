@@ -1,0 +1,28 @@
+{
+  "maxEngineCount": 3,
+  "order": ["rules.primary", "ml.python.primary", "velocity.primary"],
+  "comparison": {
+    "comparisonType": "RULES_VS_ML",
+    "comparedEngineIds": ["rules.primary", "ml.python.primary"]
+  },
+  "engines": [
+    {
+      "engineId": "rules.primary",
+      "engineType": "RULES",
+      "requiredForComparison": true,
+      "order": 0
+    },
+    {
+      "engineId": "ml.python.primary",
+      "engineType": "ML_MODEL",
+      "requiredForComparison": true,
+      "order": 1
+    },
+    {
+      "engineId": "velocity.primary",
+      "engineType": "VELOCITY",
+      "requiredForComparison": false,
+      "order": 2
+    }
+  ]
+}

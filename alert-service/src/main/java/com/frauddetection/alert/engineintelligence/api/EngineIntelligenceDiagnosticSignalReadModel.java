@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceDiagnosticSignal;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
 
@@ -17,4 +18,22 @@ public record EngineIntelligenceDiagnosticSignalReadModel(
         EngineIntelligenceScoreBucket scoreBucket,
         String reasonCode
 ) {
+    public EngineIntelligenceDiagnosticSignalReadModel {
+        EngineIntelligenceDiagnosticSignal signal = new EngineIntelligenceDiagnosticSignal(
+                engineId,
+                engineType,
+                engineStatus,
+                signalCategory,
+                riskLevel,
+                scoreBucket,
+                reasonCode
+        );
+        engineId = signal.engineId();
+        engineType = signal.engineType();
+        engineStatus = signal.engineStatus();
+        signalCategory = signal.signalCategory();
+        riskLevel = signal.riskLevel();
+        scoreBucket = signal.scoreBucket();
+        reasonCode = signal.reasonCode();
+    }
 }

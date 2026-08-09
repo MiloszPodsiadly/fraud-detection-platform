@@ -22,6 +22,8 @@ FDP-97 does not add case-level aggregation.
 
 UI consumes only `GET /api/v1/transactions/scored/{transactionId}/engine-intelligence`.
 The read-only display does not call Mongo, scoring, ML, rules, orchestrator, Kafka, alert mutation, fraud case mutation, severity mutation, or status mutation APIs.
+The current contract version accepts at most three engine rows: `rules.primary / RULES`,
+`ml.python.primary / ML_MODEL`, and `velocity.primary / VELOCITY`.
 
 ## UI Placement
 
@@ -50,6 +52,8 @@ Operational status wording must not imply safe, no fraud, less severe, not suspi
 UI wording must avoid final/recommended/winning/safe/approve/decline/block.
 The panel displays this diagnostic-only disclaimer: "Diagnostic only. Operational statuses and disagreement are investigation context."
 Diagnostic comparison is displayed as diagnostic only and must not become a recommendation, action, platform verdict, or decision source.
+Velocity rows are displayed as bounded diagnostic context only. Velocity cannot authorize, block, create cases, alter final decision source, change thresholds, or change analyst recommended actions.
+UI wording must also explain: "Velocity score is a deterministic normalized risk-severity signal. It is not a calibrated fraud probability and must not be interpreted as model confidence."
 
 ## No Raw/Internal Rendering
 

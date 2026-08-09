@@ -1,5 +1,6 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineConfidence;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
@@ -7,7 +8,6 @@ import com.frauddetection.common.events.enums.RiskLevel;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 
 public record NormalizedFraudEngineResult(
         String engineId,
@@ -21,7 +21,6 @@ public record NormalizedFraudEngineResult(
         List<BoundedFraudEngineContributionSummary> contributions,
         Long latencyMs
 ) {
-    private static final Set<String> ALLOWED_ENGINE_IDS = Set.of("rules.primary", "ml.python.primary");
     private static final int MAX_REASON_CODES = 32;
     private static final int MAX_EVIDENCE_ITEMS = 16;
     private static final int MAX_CONTRIBUTIONS = 32;
@@ -30,11 +29,11 @@ public record NormalizedFraudEngineResult(
         if (engineId == null || engineId.isBlank()) {
             throw new IllegalArgumentException("AGGREGATION_ENGINE_ID_REQUIRED");
         }
-        if (!ALLOWED_ENGINE_IDS.contains(engineId)) {
+        if (!FraudEngineIdentityContract.isKnownEngineId(engineId)) {
             throw new IllegalArgumentException("AGGREGATION_UNKNOWN_ENGINE_ID");
         }
         Objects.requireNonNull(engineType, "engineType is required");
-        if (!hasExpectedEngineType(engineId, engineType)) {
+        if (!FraudEngineIdentityContract.hasExpectedType(engineId, engineType)) {
             throw new IllegalArgumentException("AGGREGATION_ENGINE_TYPE_MISMATCH");
         }
         Objects.requireNonNull(status, "status is required");
@@ -64,14 +63,6 @@ public record NormalizedFraudEngineResult(
             Objects.requireNonNull(item, fieldName + " must not contain null entries");
         }
         return List.copyOf(source);
-    }
-
-    private static boolean hasExpectedEngineType(String engineId, FraudEngineType engineType) {
-        return switch (engineId) {
-            case "rules.primary" -> engineType == FraudEngineType.RULES;
-            case "ml.python.primary" -> engineType == FraudEngineType.ML_MODEL;
-            default -> false;
-        };
     }
 
     private static void requireSize(List<?> source, int maximum, String fieldName) {

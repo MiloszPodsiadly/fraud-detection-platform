@@ -3,6 +3,7 @@ package com.frauddetection.scoring.service;
 import com.frauddetection.common.events.evidence.ScoringEvidenceStatus;
 import com.frauddetection.common.events.evidence.ScoringEvidenceType;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.ScoringMode;
@@ -70,7 +71,10 @@ class RuleBasedScoringEvidenceProjectionTest {
                 false,
                 false,
                 java.util.List.of(),
-                java.util.Map.of("recentTransactionCount", 1)
+                java.util.Map.of(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1,
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M"
+                )
         );
 
         var result = engine.score(FraudScoringRequest.from(lowSignalEvent));

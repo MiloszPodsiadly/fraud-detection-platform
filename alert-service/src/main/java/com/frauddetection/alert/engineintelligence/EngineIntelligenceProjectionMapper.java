@@ -42,6 +42,8 @@ public class EngineIntelligenceProjectionMapper {
                     safeTransactionId,
                     safe.contractVersion(),
                     safe.generatedAt(),
+                    safe.comparison().comparisonType(),
+                    safe.comparison().comparedEngineIds(),
                     safe.comparison().agreementStatus(),
                     safe.comparison().riskMismatchStatus(),
                     safe.comparison().scoreDeltaBucket(),

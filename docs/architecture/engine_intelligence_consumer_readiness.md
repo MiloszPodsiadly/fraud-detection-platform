@@ -1,12 +1,14 @@
 # Consumer-first Engine Intelligence Rollout Readiness
 
-Status: FDP-93 consumer-readiness foundation only.
+Status: historical FDP-93 consumer-readiness gate; superseded for current projection/API/UI exposure.
 
 ## Purpose
 
-FDP-93 proves consumers can safely tolerate engineIntelligence before any producer emits it.
+FDP-93 proved consumers could safely tolerate engineIntelligence before any producer emitted it.
 Do not emit what consumers have not proven they can safely tolerate.
-FDP-93 is consumer-readiness, not product exposure.
+FDP-93 was consumer-readiness, not product exposure. Current Engine Intelligence exposure exists through later scoped
+producer, projection, API/OpenAPI, and Analyst Console work; this document remains as historical rollout evidence and
+compatibility guidance.
 
 ## Consumer Inventory
 
@@ -15,10 +17,10 @@ FDP-93 is consumer-readiness, not product exposure.
 | Shared contract | `common-events` `TransactionScoredEvent` and compatibility tests | Shared old, minimal, full-bounded, unknown-nested, and unknown-top-level fixtures |
 | Alert Kafka consumer | `AlertKafkaConfig` -> `TransactionScoredEventListener` | Kafka `JsonDeserializer` compatibility proof |
 | Alert monitoring projection | `TransactionMonitoringService` -> `ScoredTransactionDocumentMapper` -> `ScoredTransactionDocument` | Existing projection compared against the old event shape |
-| Alert creation path | `AlertManagementService` -> `AlertCaseFactory` -> `AlertDocument` | Inventory only; no engine-intelligence projection |
-| Fraud-case path | `FraudCaseManagementService` -> `FraudCaseDocument` and `FraudCaseTransactionDocument` | Inventory only; no engine-intelligence projection |
-| Suspicious transaction path | `SuspiciousTransactionProjectionService` -> `SuspiciousTransactionDocument` | Inventory only; no engine-intelligence projection |
-| Evidence paths | `EvidenceProjectionService` and `AlertEvidenceSnapshotProjectionService` | Inventory only; no engine-intelligence projection |
+| Alert creation path | `AlertManagementService` -> `AlertCaseFactory` -> `AlertDocument` | Historical inventory only; no FDP-93 engine-intelligence projection |
+| Fraud-case path | `FraudCaseManagementService` -> `FraudCaseDocument` and `FraudCaseTransactionDocument` | Historical inventory only; no FDP-93 engine-intelligence projection |
+| Suspicious transaction path | `SuspiciousTransactionProjectionService` -> `SuspiciousTransactionDocument` | Historical inventory only; no FDP-93 engine-intelligence projection |
+| Evidence paths | `EvidenceProjectionService` and `AlertEvidenceSnapshotProjectionService` | Historical inventory only; no FDP-93 engine-intelligence projection |
 | Producer boundary | `TransactionFraudScoringService` -> `TransactionScoredEventMapper` -> `KafkaTransactionScoredEventPublisher` | FDP-94 adds a controlled optional public mapper capability while the live service remains mechanically guarded to keep the old emitted shape |
 | Test fixture helper | `common-test-support` `TransactionFixtures` | Existing test-only builder remains documented separately |
 | Integration tests | `AlertServiceIntegrationTest`, `FraudDetectionPlatformEndToEndIntegrationTest`, and `FraudScoringIntegrationTest` | Existing scored-event integration coverage remains in place |
@@ -69,38 +71,35 @@ FDP-92 proves the DTO is bounded.
 FDP-93 proves consumers tolerate the bounded DTO.
 Alert-service deserializes the full bounded fixture without expanding its projection.
 
-## No Projection / No Persistence Boundary
+## Historical No Projection / No Persistence Boundary
 
-FDP-93 does not add alert-service projection.
-FDP-93 does not persist engineIntelligence.
-Projection requires separate review.
+FDP-93 did not add alert-service projection or persist engineIntelligence. That historical boundary is superseded by
+later scoped projection work. Any future projection behavior change still requires separate review.
 
-## No Producer Emission Boundary
+## Historical No Producer Emission Boundary
 
-FDP-93 does not emit engineIntelligence in production runtime.
-Producer emission must be a separate branch.
-Producer emission requires consumer-readiness proof.
+FDP-93 did not emit engineIntelligence in production runtime. Later producer emission remained a separate reviewed
+branch and required consumer-readiness proof.
 
-## Future Producer-emission Feature Flag Requirement
+## Producer-emission Feature Flag Requirement
 
-Future producer emission must be disabled by default and guarded by an explicit feature flag.
-Do not implement the feature flag in FDP-93.
+Producer emission must be disabled by default and guarded by an explicit feature flag. FDP-93 did not implement that
+flag.
 
 FDP-94 adds the separately reviewed disabled-by-default runtime producer emission documented in
 [Controlled engine intelligence producer emission rollout](engine_intelligence_producer_emission_rollout.md).
 It does not migrate baseline scoring decisions to the orchestrator and does not enable production
 runtime emission by default. Explicit `true` enables separate diagnostic enrichment only.
 
-## Future Producer Emission Gate
+## Historical Producer Emission Gate
 
-Future producer emission of engineIntelligence must be disabled by default.
 Producer emission requires an explicit rollout flag.
-Producer emission must not be enabled until FDP-93 consumer-readiness tests are green.
-Old event shape must remain the default until rollout is explicitly enabled.
-Producer tests in the future branch must cover enabled and disabled modes.
+Producer emission was not allowed until FDP-93 consumer-readiness tests were green.
+Old event shape remained the default until rollout was explicitly enabled.
+Producer tests in later branches had to cover enabled and disabled modes.
 Producer emission must preserve FDP-92 public contract semantics.
 Producer emission must not introduce final decisioning.
-Producer emission must not combine projection/API/UI in the same branch unless explicitly scoped and reviewed.
+Producer emission must not hide projection/API/UI changes unless they are explicitly scoped and reviewed.
 
 ## Merge Gates
 
@@ -108,14 +107,13 @@ Producer emission must not combine projection/API/UI in the same branch unless e
 - Alert-service deserializes old and new fixture shapes through its Kafka deserializer boundary.
 - Alert-service projection remains unchanged for the new and forward-compatible fixture shapes.
 - Source scans remain green for consumer inventory, producer isolation, persistence isolation, and API/UI isolation.
-- FDP-93 does not expose engineIntelligence through API/UI.
+- FDP-93 did not expose engineIntelligence through API/UI.
 - FDP-93 does not add final decisioning.
 
-## Future Roadmap
+## Historical Roadmap
 
-A separate reviewed branch may add producer emission behind a disabled-by-default rollout flag after
-consumer-readiness proof. Any projection, persistence, or API/UI work requires a separate scope and
-review.
+A separate reviewed branch could add producer emission behind a disabled-by-default rollout flag after
+consumer-readiness proof. Later projection, persistence, and API/UI work required separate scope and review.
 FDP-93 fixtures cover valid and forward-compatible event shapes.
 Invalid nested engineIntelligence versions remain a future producer/contract-validation hardening case.
 Future producer emission branch should test that unsupported engineIntelligence contract versions fail safely and boundedly.

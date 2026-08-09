@@ -5,7 +5,7 @@ Status: FDP-88 adapter foundation only.
 ## Purpose
 
 `PythonMlSignalEngine` proves that the existing ML scoring path can be represented as a
-`FraudSignalEngine` using `ScoringContext` and `FraudEngineResult`.
+`FraudSignalEngine` using `ScoringContext` and internal `FraudSignalEvaluation`.
 
 The adapter is internal to `fraud-scoring-service`. It is not a Spring component, is not wired
 into `CompositeFraudScoringEngine`, and is not production scoring path. The existing ML scoring
@@ -39,13 +39,20 @@ When source output explicitly reports `modelAvailable=false`, the adapter return
 does not require those fields.
 
 Unavailable and timeout outputs use bounded `UNAVAILABLE` or `TIMEOUT` status with null score,
-null risk level, `UNKNOWN` confidence, deterministic `generatedAt` from `ScoringContext.receivedAt()`,
-and `latencyMs` equal to `0`.
+null risk level, and `UNKNOWN` confidence. The isolated adapter does not assign public
+`generatedAt` or `latencyMs`; FDP-129 runtime publication is owned by `FraudScoringOrchestrator`,
+which publishes `FraudEngineResult.generatedAt` and `FraudEngineResult.latencyMs` from the injected
+execution `Clock`.
 
-FDP-88 treats unexpected runtime exceptions from the isolated ML boundary as bounded
-`ML_CLIENT_ERROR` because the adapter is not runtime-wired. Timeout-like exceptions are bounded as
-`ML_MODEL_TIMEOUT`. No raw exception message or stacktrace is exposed. Future orchestrator/runtime
-integration may narrow this exception taxonomy.
+Known timeout-like exceptions are bounded as `ML_MODEL_TIMEOUT`. Known ML client/network boundary
+failures are returned as bounded `ML_CLIENT_ERROR`. Programmer defects and other unexpected runtime
+exceptions are not reclassified as client failures; they propagate to the orchestrator isolation
+boundary, which publishes bounded engine-exception diagnostics without exposing raw exception
+message or stacktrace.
+
+Available adapter output uses `UNKNOWN` confidence unless a future authoritative calibration policy
+defines a stronger value. Confidence is not inferred from ML score, risk level, model availability
+metadata, or reason codes.
 
 ## Evidence Safety
 

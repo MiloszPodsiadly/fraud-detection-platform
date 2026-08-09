@@ -6,7 +6,7 @@ import com.frauddetection.common.events.engine.FraudEngineContributionDirection;
 import com.frauddetection.common.events.engine.FraudEngineEvidence;
 import com.frauddetection.common.events.engine.FraudEngineEvidenceStatus;
 import com.frauddetection.common.events.engine.FraudEngineEvidenceType;
-import com.frauddetection.common.events.engine.FraudEngineResult;
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.reason.ReasonCode;
@@ -15,10 +15,13 @@ import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.engine.FraudEngineDescriptor;
 import com.frauddetection.scoring.engine.FraudSignalEngine;
+import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import com.frauddetection.scoring.service.MlFraudScoringEngine;
+import org.springframework.web.client.RestClientException;
 
+import java.net.ConnectException;
+import java.net.SocketException;
 import java.net.SocketTimeoutException;
-import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -26,7 +29,7 @@ import java.util.concurrent.TimeoutException;
 
 public final class PythonMlSignalEngine implements FraudSignalEngine {
 
-    private static final String ENGINE_ID = "ml.python.primary";
+    private static final String ENGINE_ID = FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID;
     private static final String ENGINE_LANGUAGE = "python";
     private static final String ENGINE_VERSION = "1.0.0";
     private static final String EVIDENCE_SOURCE = "ML_MODEL";
@@ -38,17 +41,21 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
     }
 
     @Override
-    public FraudEngineResult evaluate(ScoringContext context) {
+    public FraudSignalEvaluation evaluate(ScoringContext context) {
         Objects.requireNonNull(context, "context is required");
+        FraudScoreResult sourceResult;
         try {
-            FraudScoreResult sourceResult = mlSource.score(FraudScoringRequest.from(context.transaction()));
-            return mapSourceResult(sourceResult, context.receivedAt());
+            sourceResult = mlSource.score(FraudScoringRequest.from(context.transaction()));
         } catch (RuntimeException exception) {
             if (isTimeout(exception)) {
-                return unavailableResult(FraudEngineStatus.TIMEOUT, PythonMlSignalReasonCode.ML_MODEL_TIMEOUT, context.receivedAt());
+                return unavailableResult(FraudEngineStatus.TIMEOUT, PythonMlSignalReasonCode.ML_MODEL_TIMEOUT);
             }
-            return unavailableResult(FraudEngineStatus.UNAVAILABLE, PythonMlSignalReasonCode.ML_CLIENT_ERROR, context.receivedAt());
+            if (isKnownClientFailure(exception)) {
+                return unavailableResult(FraudEngineStatus.UNAVAILABLE, PythonMlSignalReasonCode.ML_CLIENT_ERROR);
+            }
+            throw exception;
         }
+        return mapSourceResult(sourceResult);
     }
 
     @Override
@@ -56,33 +63,33 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
         return new FraudEngineDescriptor(ENGINE_ID, FraudEngineType.ML_MODEL, ENGINE_LANGUAGE, ENGINE_VERSION, false);
     }
 
-    private FraudEngineResult mapSourceResult(FraudScoreResult sourceResult, Instant generatedAt) {
+    private FraudSignalEvaluation mapSourceResult(FraudScoreResult sourceResult) {
         if (sourceResult == null) {
-            return degradedResult(PythonMlSignalReasonCode.ML_MODEL_INVALID_RESPONSE, generatedAt);
+            return degradedResult(PythonMlSignalReasonCode.ML_MODEL_INVALID_RESPONSE);
         }
         ModelAvailabilityStatus availabilityStatus = modelAvailabilityStatus(sourceResult);
         if (availabilityStatus == ModelAvailabilityStatus.UNAVAILABLE) {
-            return unavailableResult(FraudEngineStatus.UNAVAILABLE, PythonMlSignalReasonCode.ML_MODEL_UNAVAILABLE, generatedAt);
+            return unavailableResult(FraudEngineStatus.UNAVAILABLE, PythonMlSignalReasonCode.ML_MODEL_UNAVAILABLE);
         }
         if (availabilityStatus == ModelAvailabilityStatus.MISSING) {
-            return degradedResult(PythonMlSignalReasonCode.ML_AVAILABILITY_METADATA_MISSING, generatedAt);
+            return degradedResult(PythonMlSignalReasonCode.ML_AVAILABILITY_METADATA_MISSING);
         }
         if (availabilityStatus == ModelAvailabilityStatus.INVALID) {
-            return degradedResult(PythonMlSignalReasonCode.ML_AVAILABILITY_METADATA_INVALID, generatedAt);
+            return degradedResult(PythonMlSignalReasonCode.ML_AVAILABILITY_METADATA_INVALID);
         }
         if (sourceResult.fraudScore() == null) {
-            return degradedResult(PythonMlSignalReasonCode.ML_SCORE_MISSING, generatedAt);
+            return degradedResult(PythonMlSignalReasonCode.ML_SCORE_MISSING);
         }
         if (!Double.isFinite(sourceResult.fraudScore()) || sourceResult.fraudScore() < 0.0d || sourceResult.fraudScore() > 1.0d) {
-            return degradedResult(PythonMlSignalReasonCode.ML_SCORE_OUT_OF_RANGE, generatedAt);
+            return degradedResult(PythonMlSignalReasonCode.ML_SCORE_OUT_OF_RANGE);
         }
         if (sourceResult.riskLevel() == null) {
-            return degradedResult(PythonMlSignalReasonCode.ML_MODEL_INVALID_RESPONSE, generatedAt);
+            return degradedResult(PythonMlSignalReasonCode.ML_MODEL_INVALID_RESPONSE);
         }
         if (missingModelMetadata(sourceResult)) {
-            return degradedResult(PythonMlSignalReasonCode.ML_MODEL_METADATA_MISSING, generatedAt);
+            return degradedResult(PythonMlSignalReasonCode.ML_MODEL_METADATA_MISSING);
         }
-        return availableResult(sourceResult, generatedAt);
+        return availableResult(sourceResult);
     }
 
     private ModelAvailabilityStatus modelAvailabilityStatus(FraudScoreResult sourceResult) {
@@ -106,24 +113,19 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
                 || sourceResult.modelVersion().isBlank();
     }
 
-    private FraudEngineResult availableResult(FraudScoreResult sourceResult, Instant generatedAt) {
+    private FraudSignalEvaluation availableResult(FraudScoreResult sourceResult) {
         List<String> reasonCodes = boundedReasonCodes(sourceResult);
-        return new FraudEngineResult(
-                ENGINE_ID,
-                FraudEngineType.ML_MODEL,
-                ENGINE_LANGUAGE,
+        return new FraudSignalEvaluation(
                 FraudEngineStatus.AVAILABLE,
                 sourceResult.fraudScore(),
                 sourceResult.riskLevel(),
-                FraudEngineConfidence.MEDIUM,
+                FraudEngineConfidence.UNKNOWN,
                 reasonCodes,
                 contributions(reasonCodes),
                 evidence(reasonCodes, FraudEngineEvidenceStatus.AVAILABLE),
-                0L,
                 sourceResult.modelName(),
                 sourceResult.modelVersion(),
-                null,
-                generatedAt
+                null
         );
     }
 
@@ -136,15 +138,11 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
                 : reasonCodes;
     }
 
-    private FraudEngineResult unavailableResult(
+    private FraudSignalEvaluation unavailableResult(
             FraudEngineStatus status,
-            PythonMlSignalReasonCode reasonCode,
-            Instant generatedAt
+            PythonMlSignalReasonCode reasonCode
     ) {
-        return new FraudEngineResult(
-                ENGINE_ID,
-                FraudEngineType.ML_MODEL,
-                ENGINE_LANGUAGE,
+        return new FraudSignalEvaluation(
                 status,
                 null,
                 null,
@@ -152,19 +150,14 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
                 List.of(reasonCode.wireValue()),
                 List.of(),
                 evidence(reasonCode, FraudEngineEvidenceStatus.UNAVAILABLE),
-                0L,
                 null,
                 null,
-                reasonCode.wireValue(),
-                generatedAt
+                reasonCode.wireValue()
         );
     }
 
-    private FraudEngineResult degradedResult(PythonMlSignalReasonCode reasonCode, Instant generatedAt) {
-        return new FraudEngineResult(
-                ENGINE_ID,
-                FraudEngineType.ML_MODEL,
-                ENGINE_LANGUAGE,
+    private FraudSignalEvaluation degradedResult(PythonMlSignalReasonCode reasonCode) {
+        return new FraudSignalEvaluation(
                 FraudEngineStatus.DEGRADED,
                 null,
                 null,
@@ -172,11 +165,9 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
                 List.of(reasonCode.wireValue()),
                 List.of(),
                 evidence(reasonCode, FraudEngineEvidenceStatus.PARTIAL),
-                0L,
                 null,
                 null,
-                reasonCode.wireValue(),
-                generatedAt
+                reasonCode.wireValue()
         );
     }
 
@@ -230,6 +221,21 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
                 return true;
             }
             if (current.getClass().getSimpleName().toLowerCase(Locale.ROOT).contains("timeout")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isKnownClientFailure(Throwable throwable) {
+        for (Throwable current = throwable; current != null; current = current.getCause()) {
+            if (current instanceof RestClientException
+                    || current instanceof ConnectException
+                    || current instanceof SocketException) {
+                return true;
+            }
+            String simpleName = current.getClass().getSimpleName().toLowerCase(Locale.ROOT);
+            if (simpleName.contains("connect") || simpleName.contains("client")) {
                 return true;
             }
         }

@@ -1,0 +1,76 @@
+{
+  "contractVersion": 1,
+  "generatedAt": "2026-05-31T10:00:00Z",
+  "engines": [
+    {
+      "engineId": "rules.primary",
+      "engineType": "RULES",
+      "status": "AVAILABLE",
+      "riskLevel": "HIGH",
+      "scoreBucket": "HIGH",
+      "reasonCodes": ["HIGH_VELOCITY"]
+    },
+    {
+      "engineId": "ml.python.primary",
+      "engineType": "ML_MODEL",
+      "status": "AVAILABLE",
+      "riskLevel": "LOW",
+      "scoreBucket": "LOW",
+      "reasonCodes": ["LOW_MODEL_RISK"]
+    },
+    {
+      "engineId": "velocity.primary",
+      "engineType": "VELOCITY",
+      "status": "AVAILABLE",
+      "riskLevel": "CRITICAL",
+      "scoreBucket": "VERY_HIGH",
+      "reasonCodes": ["RAPID_PLN_20K_BURST", "TRANSACTION_VELOCITY"]
+    }
+  ],
+  "comparison": {
+    "comparisonType": "RULES_VS_ML",
+    "comparedEngineIds": ["rules.primary", "ml.python.primary"],
+    "agreementStatus": "DISAGREEMENT",
+    "riskMismatchStatus": "MATERIAL_RISK_MISMATCH",
+    "scoreDeltaBucket": "LARGE"
+  },
+  "diagnosticSignals": [
+    {
+      "engineId": "velocity.primary",
+      "engineType": "VELOCITY",
+      "engineStatus": "AVAILABLE",
+      "signalCategory": "FRAUD_SIGNAL",
+      "riskLevel": "CRITICAL",
+      "scoreBucket": "VERY_HIGH",
+      "reasonCode": "RAPID_PLN_20K_BURST"
+    },
+    {
+      "engineId": "velocity.primary",
+      "engineType": "VELOCITY",
+      "engineStatus": "AVAILABLE",
+      "signalCategory": "FRAUD_SIGNAL",
+      "riskLevel": "CRITICAL",
+      "scoreBucket": "VERY_HIGH",
+      "reasonCode": "TRANSACTION_VELOCITY"
+    },
+    {
+      "engineId": "rules.primary",
+      "engineType": "RULES",
+      "engineStatus": "AVAILABLE",
+      "signalCategory": "FRAUD_SIGNAL",
+      "riskLevel": "HIGH",
+      "scoreBucket": "HIGH",
+      "reasonCode": "HIGH_VELOCITY"
+    },
+    {
+      "engineId": "ml.python.primary",
+      "engineType": "ML_MODEL",
+      "engineStatus": "AVAILABLE",
+      "signalCategory": "FRAUD_SIGNAL",
+      "riskLevel": "LOW",
+      "scoreBucket": "LOW",
+      "reasonCode": "LOW_MODEL_RISK"
+    }
+  ],
+  "warnings": []
+}

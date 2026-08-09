@@ -32,7 +32,7 @@ class EngineIntelligencePublicContractSafetyTest {
         assertFields(EngineIntelligenceEngineResult.class,
                 "engineId", "engineType", "status", "riskLevel", "scoreBucket", "reasonCodes");
         assertFields(EngineIntelligenceComparison.class,
-                "agreementStatus", "riskMismatchStatus", "scoreDeltaBucket");
+                "comparisonType", "comparedEngineIds", "agreementStatus", "riskMismatchStatus", "scoreDeltaBucket");
         assertFields(EngineIntelligenceDiagnosticSignal.class,
                 "engineId", "engineType", "engineStatus", "signalCategory", "riskLevel", "scoreBucket", "reasonCode");
         assertFields(EngineIntelligenceWarningSummary.class, "code", "count");

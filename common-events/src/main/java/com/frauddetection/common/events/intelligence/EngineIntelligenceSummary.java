@@ -5,8 +5,10 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record EngineIntelligenceSummary(
@@ -48,6 +50,8 @@ public record EngineIntelligenceSummary(
                 EngineIntelligenceValuePolicy.MAX_ENGINES,
                 "engines"
         );
+        requireUniqueEngineIds(engines);
+        requireCanonicalEngineOrder(engines);
         Objects.requireNonNull(comparison, "comparison is required");
         diagnosticSignals = EngineIntelligenceValuePolicy.copyBounded(
                 diagnosticSignals,
@@ -59,5 +63,26 @@ public record EngineIntelligenceSummary(
                 EngineIntelligenceValuePolicy.MAX_WARNINGS,
                 "warnings"
         );
+        EngineIntelligenceSummarySemanticPolicy.validate(engines, comparison, diagnosticSignals);
+    }
+
+    private static void requireUniqueEngineIds(List<EngineIntelligenceEngineResult> engines) {
+        Set<String> engineIds = new HashSet<>();
+        for (EngineIntelligenceEngineResult engine : engines) {
+            if (!engineIds.add(engine.engineId())) {
+                throw new IllegalArgumentException("ENGINE_INTELLIGENCE_DUPLICATE_ENGINE_ID");
+            }
+        }
+    }
+
+    private static void requireCanonicalEngineOrder(List<EngineIntelligenceEngineResult> engines) {
+        int previousOrder = -1;
+        for (EngineIntelligenceEngineResult engine : engines) {
+            int currentOrder = com.frauddetection.common.events.engine.FraudEngineIdentityContract.orderOf(engine.engineId());
+            if (currentOrder <= previousOrder) {
+                throw new IllegalArgumentException("ENGINE_INTELLIGENCE_ENGINE_ORDER_INVALID");
+            }
+            previousOrder = currentOrder;
+        }
     }
 }

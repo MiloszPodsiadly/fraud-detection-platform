@@ -10,7 +10,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class EngineIntelligenceApiReadModelDocsTest {
 
     @Test
-    void documentsBoundedTransactionScopedApiWithoutUiOrDecisioningClaims() throws Exception {
+    void documentsBoundedTransactionScopedApiWithUiConsumptionBoundary() throws Exception {
         String documentation = Files.readString(documentationPath());
 
         assertThat(documentation).contains(
@@ -28,9 +28,9 @@ class EngineIntelligenceApiReadModelDocsTest {
                 "## Operational Status Semantics",
                 "## Raw/Internal Leakage Prevention",
                 "## No Decisioning",
-                "## No UI",
+                "## UI Consumption",
                 "## OpenAPI Boundary",
-                "## Future FDP-97 UI",
+                "## Historical FDP-97 UI Gate",
                 "## Future Case-Level Aggregation If Needed",
                 "FDP-96 exposes projected engine intelligence through a bounded read-only API DTO.",
                 "FDP-96 does not return EngineIntelligenceProjection directly.",
@@ -61,12 +61,15 @@ class EngineIntelligenceApiReadModelDocsTest {
                 "Source-scan guards remain architecture tripwires.",
                 "FDP-96 relies on behavior-level controller/API serialization tests for API safety.",
                 "Source scans are supplementary and can false-positive on comments or renames.",
-                "Future FDP-97 UI must add behavior-level UI tests, not only source scans.",
+                "Analyst Console UI consumption must keep behavior-level validator/rendering tests, not only source scans.",
                 "Future feedback workflow must add behavior-level workflow tests.",
                 "TIMEOUT/UNAVAILABLE/DEGRADED must not be represented as LOW risk.",
                 "API must not expose raw/internal fields.",
                 "API must not expose finalDecision/recommendedAction/approve/decline/block.",
-                "UI remains FDP-97 scope."
+                "Analyst Console consumes this bounded read-only API through frontend contract validators.",
+                "UI code must not call",
+                "scoring, ML, rules, orchestrator, Kafka, producer, or projection repositories directly",
+                "FDP-96 originally treated UI rendering as later FDP-97 scope."
         );
     }
 

@@ -2,7 +2,7 @@ package com.frauddetection.scoring.orchestration.runtime;
 
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
-import com.frauddetection.scoring.orchestration.FraudSignalEngineRegistry;
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 
 import java.time.Duration;
 import java.util.Set;
@@ -14,20 +14,30 @@ final class FraudScoringOrchestratorMetricLabels {
             FraudEngineStatus.TIMEOUT,
             FraudEngineStatus.DEGRADED
     );
+    private static final Set<String> ALLOWED_FAILURE_CATEGORIES = Set.of(
+            "missing",
+            "invalid_type",
+            "invalid_value",
+            "inconsistent",
+            "timeout",
+            "client_error",
+            "exception",
+            "null_result",
+            "publication_failure",
+            "rejected",
+            "degraded"
+    );
 
     private FraudScoringOrchestratorMetricLabels() {
     }
 
     static void validateEngine(String engineId, FraudEngineType engineType) {
-        if (FraudSignalEngineRegistry.RULES_PRIMARY_ENGINE_ID.equals(engineId)) {
-            requireType(engineType, FraudEngineType.RULES);
-            return;
+        if (!FraudEngineIdentityContract.isKnownEngineId(engineId)) {
+            throw new IllegalArgumentException("METRICS_UNKNOWN_ENGINE_ID");
         }
-        if (FraudSignalEngineRegistry.PYTHON_ML_PRIMARY_ENGINE_ID.equals(engineId)) {
-            requireType(engineType, FraudEngineType.ML_MODEL);
-            return;
+        if (!FraudEngineIdentityContract.hasExpectedType(engineId, engineType)) {
+            throw new IllegalArgumentException("METRICS_ENGINE_TYPE_MISMATCH");
         }
-        throw new IllegalArgumentException("METRICS_UNKNOWN_ENGINE_ID");
     }
 
     static void validateStatus(FraudEngineStatus status) {
@@ -42,9 +52,9 @@ final class FraudScoringOrchestratorMetricLabels {
         }
     }
 
-    private static void requireType(FraudEngineType actual, FraudEngineType expected) {
-        if (actual != expected) {
-            throw new IllegalArgumentException("METRICS_ENGINE_TYPE_MISMATCH");
+    static void validateFailureCategory(String failureCategory) {
+        if (!ALLOWED_FAILURE_CATEGORIES.contains(failureCategory)) {
+            throw new IllegalArgumentException("METRICS_UNKNOWN_FAILURE_CATEGORY");
         }
     }
 }

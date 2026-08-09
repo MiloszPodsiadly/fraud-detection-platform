@@ -14,7 +14,7 @@ public record BoundedFraudEngineEvidenceSummary(
         String source,
         FraudEngineEvidenceStatus status
 ) {
-    private static final Set<String> ALLOWED_SOURCES = Set.of("RULES", "ML_MODEL", "ORCHESTRATOR");
+    private static final Set<String> ALLOWED_SOURCES = Set.of("RULES", "ML_MODEL", "ORCHESTRATOR", "VELOCITY");
     private static final int MAX_TITLE_LENGTH = 120;
     private static final int MAX_DESCRIPTION_LENGTH = 256;
 

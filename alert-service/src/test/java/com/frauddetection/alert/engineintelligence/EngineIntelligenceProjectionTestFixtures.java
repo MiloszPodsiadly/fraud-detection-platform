@@ -31,9 +31,12 @@ final class EngineIntelligenceProjectionTestFixtures {
         return new EngineIntelligenceSummary(
                 EngineIntelligenceSummary.CONTRACT_VERSION,
                 GENERATED_AT,
-                List.of(availableRules(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH)),
+                List.of(
+                        availableRules(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH),
+                        timeoutMl()
+                ),
                 comparison(
-                        EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
+                        EngineIntelligenceAgreementStatus.PARTIAL,
                         EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                         EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
                 ),

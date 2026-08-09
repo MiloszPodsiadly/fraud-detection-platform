@@ -82,8 +82,9 @@ Required fields:
 - `feedbackCreatedAt`
 
 Optional nullable fields are limited to bounded feedback diagnostics already present on `FraudFeedbackRecord`:
-`fraudScore`, `riskLevel`, `alertRecommended`, Engine Intelligence status/agreement/mismatch/score-delta buckets,
-Analyst Recommendation status/value/version/generated-at/reason codes, `scoredAt`, and `transactionTimestamp`.
+`fraudScore`, `riskLevel`, `alertRecommended`, Engine Intelligence status and Rules-vs-ML
+agreement/mismatch/score-delta buckets, Analyst Recommendation status/value/version/generated-at/reason codes,
+`scoredAt`, and `transactionTimestamp`.
 
 The builder never serializes `FraudFeedbackRecord` directly.
 

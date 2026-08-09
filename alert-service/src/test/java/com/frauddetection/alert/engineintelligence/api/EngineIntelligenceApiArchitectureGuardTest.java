@@ -22,6 +22,7 @@ class EngineIntelligenceApiArchitectureGuardTest {
             "analyst-console-ui/src/components/EngineIntelligenceAnalystUiDisplayDocsTest.test.js",
             "analyst-console-ui/src/components/EngineIntelligenceFeedbackPanel.jsx",
             "analyst-console-ui/src/components/EngineIntelligenceFeedbackPanel.test.jsx",
+            "analyst-console-ui/src/components/EngineIntelligenceDiagnosticView.jsx",
             "analyst-console-ui/src/components/EngineIntelligencePanel.jsx",
             "analyst-console-ui/src/components/EngineIntelligencePanel.test.jsx",
             "analyst-console-ui/src/components/EngineIntelligencePanelScopeGuard.test.js",
@@ -29,6 +30,8 @@ class EngineIntelligenceApiArchitectureGuardTest {
             "analyst-console-ui/src/components/AnalystRecommendationPanel.test.jsx",
             "analyst-console-ui/src/components/TransactionRiskIntelligencePanel.jsx",
             "analyst-console-ui/src/components/TransactionRiskIntelligencePanel.test.jsx",
+            "analyst-console-ui/src/engineIntelligence/engineIntelligenceContractValidation.js",
+            "analyst-console-ui/src/engineIntelligence/engineIntelligenceContractValidation.test.js",
             "analyst-console-ui/src/pages/FraudCaseDetailsPage.jsx",
             "analyst-console-ui/src/pages/FraudCaseDetailsPage.test.jsx",
             "analyst-console-ui/src/transactions/transactionRiskIntelligenceScopeGuard.test.js",
@@ -50,6 +53,7 @@ class EngineIntelligenceApiArchitectureGuardTest {
                         "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceEngineStatusResponse.java",
                         "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceResponse.java",
                         "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceResponseStatus.java",
+                        "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceResponseStatusPolicy.java",
                         "alert-service/src/main/java/com/frauddetection/alert/api/EngineIntelligenceWarningResponse.java",
                         "alert-service/src/main/java/com/frauddetection/alert/api/ScoredTransactionDetailResponse.java",
                         "alert-service/src/main/java/com/frauddetection/alert/api/ScoredTransactionResponse.java"
@@ -396,6 +400,31 @@ class EngineIntelligenceApiArchitectureGuardTest {
                 .contains("FDP-115 does not add");
     }
 
+    @Test
+    void semanticOwnershipAdrDocumentsCurrentEngineIntelligenceOwnership() throws Exception {
+        String architectureIndex = sources("docs/architecture/index.md");
+        String adr = sources("docs/architecture/engine_intelligence_semantic_ownership_adr.md");
+
+        assertThat(architectureIndex)
+                .contains("engine_intelligence_semantic_ownership_adr.md")
+                .contains("Engine Intelligence semantic ownership ADR");
+        assertThat(adr)
+                .contains("Feature Enricher owns factual observations only.")
+                .contains("Rules owns baseline business-rule interpretation and the single Rules contribution")
+                .contains("The current public comparison identity is explicitly `RULES_VS_ML`")
+                .contains("VelocitySignalPolicy owns Velocity V1 semantics.")
+                .contains("Velocity requires `recentTransactionCountWindow=PT1M`")
+                .contains("Velocity score is deterministic normalized risk severity")
+                .contains("not calibrated fraud")
+                .contains("The orchestrator owns optional-engine failure isolation and execution metadata.")
+                .contains("Published `latencyMs` comes from monotonic elapsed")
+                .contains("measurement; `generatedAt` is a wall-clock timestamp")
+                .contains("Version 1 allows three known engine identities")
+                .contains("Rules and ML are required. Velocity is an optional third")
+                .contains("repository-controlled and migrated atomically")
+                .contains("This ADR does not change authentication, authorization");
+    }
+
     private String sources(String... relativePaths) throws IOException {
         StringBuilder sources = new StringBuilder();
         for (String relativePath : relativePaths) {
@@ -436,6 +465,7 @@ class EngineIntelligenceApiArchitectureGuardTest {
                 // FDP-114 Promotion Review Readiness owns governance diagnostics scope guards.
                 // It must not be treated as an Engine Intelligence UI surface.
                 .filter(file -> file.contains("/EngineIntelligence")
+                        || file.contains("/engineIntelligence/")
                         || file.contains("/AnalystRecommendationPanel")
                         || file.contains("/TransactionRiskIntelligence")
                         || file.endsWith("/transactionRiskIntelligenceScopeGuard.test.js")

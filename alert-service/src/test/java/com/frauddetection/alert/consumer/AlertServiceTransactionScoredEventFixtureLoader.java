@@ -12,11 +12,23 @@ import java.util.Set;
 final class AlertServiceTransactionScoredEventFixtureLoader {
 
     private static final String OLD = "transaction_scored_event_v1_without_engine_intelligence.json";
+    private static final String LEGACY_V1_ENGINE_INTELLIGENCE =
+            "transaction_scored_event_v1_legacy_engine_intelligence_comparison.json";
+    private static final String PARTIAL_COMPARISON_TYPE_ONLY =
+            "transaction_scored_event_v1_partial_comparison_type_only.json";
     private static final String MINIMAL = "transaction_scored_event_v2_minimal_engine_intelligence.json";
     private static final String FULL = "transaction_scored_event_v2_full_bounded_engine_intelligence.json";
     private static final String UNKNOWN_NESTED = "transaction_scored_event_v2_unknown_nested_engine_intelligence_fields.json";
     private static final String UNKNOWN_TOP_LEVEL = "transaction_scored_event_v2_unknown_top_level_field.json";
-    private static final Set<String> KNOWN_FIXTURES = Set.of(OLD, MINIMAL, FULL, UNKNOWN_NESTED, UNKNOWN_TOP_LEVEL);
+    private static final Set<String> KNOWN_FIXTURES = Set.of(
+            OLD,
+            LEGACY_V1_ENGINE_INTELLIGENCE,
+            PARTIAL_COMPARISON_TYPE_ONLY,
+            MINIMAL,
+            FULL,
+            UNKNOWN_NESTED,
+            UNKNOWN_TOP_LEVEL
+    );
 
     private static final JacksonKafkaDeserializer<TransactionScoredEvent> DESERIALIZER =
             new JacksonKafkaDeserializer<>(TransactionScoredEvent.class);
@@ -26,6 +38,14 @@ final class AlertServiceTransactionScoredEventFixtureLoader {
 
     static TransactionScoredEvent oldWithoutEngineIntelligence() {
         return deserialize(readFixture(OLD));
+    }
+
+    static TransactionScoredEvent legacyV1EngineIntelligence() {
+        return deserialize(readFixture(LEGACY_V1_ENGINE_INTELLIGENCE));
+    }
+
+    static TransactionScoredEvent partialComparisonTypeOnly() {
+        return deserialize(readFixture(PARTIAL_COMPARISON_TYPE_ONLY));
     }
 
     static TransactionScoredEvent minimalEngineIntelligence() {

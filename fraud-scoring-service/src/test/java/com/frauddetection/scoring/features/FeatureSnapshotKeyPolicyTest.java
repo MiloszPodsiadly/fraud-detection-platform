@@ -83,8 +83,12 @@ class FeatureSnapshotKeyPolicyTest {
                 .contains(FeatureSnapshotScalarType.BOOLEAN);
         assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.RECENT_TRANSACTION_COUNT))
                 .contains(FeatureSnapshotScalarType.INTEGER);
+        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.RECENT_AMOUNT_SUM))
+                .contains(FeatureSnapshotScalarType.DECIMAL);
         assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW))
-                .contains(FeatureSnapshotScalarType.LONG);
+                .contains(FeatureSnapshotScalarType.STRING);
+        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW))
+                .contains(FeatureSnapshotScalarType.STRING);
         assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE))
                 .contains(FeatureSnapshotScalarType.DOUBLE);
         assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.CURRENCY))

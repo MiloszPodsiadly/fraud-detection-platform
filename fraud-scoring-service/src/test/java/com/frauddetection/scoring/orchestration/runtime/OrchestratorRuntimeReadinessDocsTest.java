@@ -31,6 +31,7 @@ class OrchestratorRuntimeReadinessDocsTest {
                         "optional timeout produces `partial`",
                         "latency measurement",
                         "metrics abstraction",
+                        "micrometerfraudscoringorchestratormetrics",
                         "noopfraudscoringorchestratormetrics",
                         "low-cardinality labels",
                         "rules.primary",
@@ -91,7 +92,7 @@ class OrchestratorRuntimeReadinessDocsTest {
                         "runtime wiring injects lifecycle-managed executor",
                         "cancellation is cooperative",
                         "metrics are best-effort",
-                        "no vendor-specific metrics integration"
+                        "production diagnostic runtime telemetry delivery through micrometer"
                 );
     }
 

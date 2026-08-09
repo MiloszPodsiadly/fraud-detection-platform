@@ -1,6 +1,14 @@
 import { useState } from "react";
 import { formatDateTime, formatScore } from "../utils/format.js";
 import { AnalystRecommendationPanel } from "./AnalystRecommendationPanel.jsx";
+import {
+  BoundedEngineResultsView,
+  DiagnosticComparisonView,
+  VELOCITY_SEVERITY_COPY,
+  WarningListView,
+  engineStatusLabel,
+  listText
+} from "./EngineIntelligenceDiagnosticView.jsx";
 import { useScoredTransactionDetail } from "../transactions/useScoredTransactionDetail.js";
 import { useFraudFeedback } from "../transactions/useFraudFeedback.js";
 import { transactionRiskIntelligencePanelId } from "../transactions/transactionRiskIntelligencePanelId.js";
@@ -10,14 +18,6 @@ const STATUS_COPY = {
   ABSENT: "No Engine Intelligence projection exists for this scored transaction. This can happen for older transactions or when Engine Intelligence was not emitted.",
   UNAVAILABLE: "The scored transaction was found, but Engine Intelligence could not be safely read. The transaction detail remains available, but diagnostics are unavailable.",
   DEGRADED: "Engine Intelligence is available with limitations. Review the warnings section for diagnostic constraints."
-};
-
-const ENGINE_STATUS_COPY = {
-  AVAILABLE: "Engine result available",
-  UNAVAILABLE: "Engine result unavailable",
-  TIMEOUT: "Engine timed out",
-  DEGRADED: "Engine result degraded",
-  NOT_APPLICABLE: "Engine not applicable"
 };
 
 export function TransactionRiskIntelligencePanel({
@@ -229,43 +229,35 @@ function ExistingFeedback({ feedback }) {
 
 function ComparisonSummary({ comparison }) {
   return (
-    <section className="detailSection" aria-label="Projected Comparison">
-      <h4>Projected Comparison</h4>
-      {!comparison && <p className="sectionCopy">Projected engine comparison is not available for this transaction.</p>}
-      {comparison && (
-        <>
-          <dl>
-            <Field label="Agreement status" value={comparison.agreementStatus} />
-            <Field label="Risk mismatch status" value={comparison.riskMismatchStatus} />
-            <Field label="Score delta bucket" value={comparison.scoreDeltaBucket} />
-          </dl>
-          <p className="sectionCopy">Agreement status describes projected engine comparison only.</p>
-          <p className="sectionCopy">Risk mismatch describes projected engine risk variance only.</p>
-          <p className="sectionCopy">Score delta bucket is diagnostic and not a threshold recommendation.</p>
-        </>
-      )}
-    </section>
+    <DiagnosticComparisonView
+      comparison={comparison}
+      sectionClassName="detailSection"
+      headingId="transaction-risk-projected-comparison-heading"
+      headingLevel={4}
+      title="Projected Comparison"
+      emptyCopy="Projected engine comparison is not available for this transaction."
+      FieldComponent={Field}
+      comparedEnginesText={listText}
+      includeBoundaryCopy
+      ariaLabel="Projected Comparison"
+    />
   );
 }
 
 function EngineResults({ engines }) {
   return (
-    <section className="detailSection" aria-label="Engine Results">
-      <h4>Engine Results</h4>
-      {engines.length === 0 && <p className="sectionCopy">No bounded engine results are available in the projected diagnostics.</p>}
-      {engines.map((engine) => (
-        <article className="summaryCard" key={`${engine.engineId}-${engine.engineType}`}>
-          <h5>{engine.engineId}</h5>
-          <dl>
-            <Field label="Engine type" value={engine.engineType} />
-            <Field label="Status" value={ENGINE_STATUS_COPY[engine.status] || engine.status} />
-            <Field label="Risk level" value={engine.riskLevel || "Not available"} />
-            <Field label="Score bucket" value={engine.scoreBucket || "Not available"} />
-            <Field label="Reason codes" value={listText(engine.reasonCodes)} />
-          </dl>
-        </article>
-      ))}
-    </section>
+    <BoundedEngineResultsView
+      engines={engines}
+      sectionClassName="detailSection"
+      cardClassName="summaryCard"
+      headingId="transaction-risk-engine-results-heading"
+      headingLevel={4}
+      title="Engine Results"
+      emptyCopy="No bounded engine results are available in the projected diagnostics."
+      FieldComponent={Field}
+      ReasonCodesComponent={() => null}
+      ariaLabel="Engine Results"
+    />
   );
 }
 
@@ -280,7 +272,7 @@ function DiagnosticSignals({ diagnosticSignals }) {
           <dl>
             <Field label="Engine ID" value={signal.engineId} />
             <Field label="Engine type" value={signal.engineType} />
-            <Field label="Engine status" value={ENGINE_STATUS_COPY[signal.engineStatus] || signal.engineStatus} />
+            <Field label="Engine status" value={engineStatusLabel(signal.engineStatus)} />
             <Field label="Signal category" value={signal.signalCategory} />
             <Field label="Risk level" value={signal.riskLevel || "Not available"} />
             <Field label="Score bucket" value={signal.scoreBucket || "Not available"} />
@@ -294,20 +286,17 @@ function DiagnosticSignals({ diagnosticSignals }) {
 
 function Warnings({ warnings }) {
   return (
-    <section className="detailSection" aria-label="Warnings and Limitations">
-      <h4>Warnings and Limitations</h4>
-      <p className="sectionCopy">Warnings describe limitations in the projected diagnostic data.</p>
-      <p className="sectionCopy">Warnings are not operational instructions.</p>
-      {warnings.length === 0 && <p className="sectionCopy">No warnings are present in the projected diagnostics.</p>}
-      {warnings.map((warning) => (
-        <article className="summaryCard" key={warning.warningCode}>
-          <dl>
-            <Field label="Warning code" value={warning.warningCode} />
-            <Field label="Count" value={String(warning.count)} />
-          </dl>
-        </article>
-      ))}
-    </section>
+    <WarningListView
+      warnings={warnings}
+      sectionClassName="detailSection"
+      cardClassName="summaryCard"
+      headingId="transaction-risk-warnings-heading"
+      headingLevel={4}
+      title="Warnings and Limitations"
+      emptyCopy="No warnings are present in the projected diagnostics."
+      FieldComponent={Field}
+      ariaLabel="Warnings and Limitations"
+    />
   );
 }
 
@@ -320,6 +309,7 @@ function DiagnosticBoundaryBanner() {
         It does not approve, decline, block, authorize payment, create cases, trigger workflow, change scoring,
         update recommendations, train models, promote models, or change thresholds.
       </p>
+      <p>{VELOCITY_SEVERITY_COPY}</p>
     </section>
   );
 }
@@ -331,10 +321,6 @@ function Field({ label, value }) {
       <dd>{value || "Not available"}</dd>
     </>
   );
-}
-
-function listText(values) {
-  return Array.isArray(values) && values.length > 0 ? values.join(", ") : "None";
 }
 
 function nullableText(value) {

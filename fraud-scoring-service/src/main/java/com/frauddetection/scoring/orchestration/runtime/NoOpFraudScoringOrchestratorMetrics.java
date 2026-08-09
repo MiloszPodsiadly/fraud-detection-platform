@@ -35,6 +35,12 @@ public final class NoOpFraudScoringOrchestratorMetrics implements FraudScoringOr
     }
 
     @Override
+    public void recordEngineFailure(String engineId, FraudEngineType engineType, String failureCategory) {
+        FraudScoringOrchestratorMetricLabels.validateEngine(engineId, engineType);
+        FraudScoringOrchestratorMetricLabels.validateFailureCategory(failureCategory);
+    }
+
+    @Override
     public void recordTimeout(String engineId, FraudEngineType engineType, boolean required) {
         FraudScoringOrchestratorMetricLabels.validateEngine(engineId, engineType);
     }

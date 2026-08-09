@@ -50,7 +50,7 @@ class FraudScoringOrchestratorRequiredMetadataTest {
         ).evaluate(context());
 
         assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.PARTIAL);
-        assertThat(result.engineResults().getFirst()).isSameAs(ruleResult);
+        assertBusinessSignalPreservedWithPublishedMetadata(result.engineResults().getFirst(), ruleResult);
         assertThat(result.engineResults().get(1).status()).isEqualTo(FraudEngineStatus.UNAVAILABLE);
         assertThat(warningCodes(result)).contains(FraudScoringExecutionWarningCode.OPTIONAL_ENGINE_NOT_AVAILABLE);
         assertNoDecisionSurface();
@@ -65,11 +65,7 @@ class FraudScoringOrchestratorRequiredMetadataTest {
                 mlEngine(availableResult(mlDescriptor(), 0.72d, RiskLevel.MEDIUM))
         ).evaluate(context());
 
-        assertThat(result.engineResults().getFirst()).isSameAs(ruleResult);
-        assertThat(result.engineResults().getFirst().status()).isEqualTo(ruleResult.status());
-        assertThat(result.engineResults().getFirst().score()).isEqualTo(ruleResult.score());
-        assertThat(result.engineResults().getFirst().riskLevel()).isEqualTo(ruleResult.riskLevel());
-        assertThat(result.engineResults().getFirst().reasonCodes()).isEqualTo(ruleResult.reasonCodes());
+        assertBusinessSignalPreservedWithPublishedMetadata(result.engineResults().getFirst(), ruleResult);
         assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.REQUIRED_ENGINE_FAILED);
         assertThat(warningCodes(result)).contains(FraudScoringExecutionWarningCode.REQUIRED_ENGINE_NOT_AVAILABLE);
     }
@@ -81,6 +77,28 @@ class FraudScoringOrchestratorRequiredMetadataTest {
 
     private FraudScoringOrchestrator orchestrator(FraudScoringOrchestratorTestSupport.FakeFraudSignalEngine... engines) {
         return new FraudScoringOrchestrator(new FraudSignalEngineRegistry(List.of(engines)));
+    }
+
+    private void assertBusinessSignalPreservedWithPublishedMetadata(
+            FraudEngineResult published,
+            FraudEngineResult source
+    ) {
+        assertThat(published).isNotSameAs(source);
+        assertThat(published.engineId()).isEqualTo(source.engineId());
+        assertThat(published.engineType()).isEqualTo(source.engineType());
+        assertThat(published.engineLanguage()).isEqualTo(source.engineLanguage());
+        assertThat(published.status()).isEqualTo(source.status());
+        assertThat(published.score()).isEqualTo(source.score());
+        assertThat(published.riskLevel()).isEqualTo(source.riskLevel());
+        assertThat(published.confidence()).isEqualTo(source.confidence());
+        assertThat(published.reasonCodes()).isEqualTo(source.reasonCodes());
+        assertThat(published.contributions()).isEqualTo(source.contributions());
+        assertThat(published.evidence()).isEqualTo(source.evidence());
+        assertThat(published.modelName()).isEqualTo(source.modelName());
+        assertThat(published.modelVersion()).isEqualTo(source.modelVersion());
+        assertThat(published.statusReason()).isEqualTo(source.statusReason());
+        assertThat(published.generatedAt()).isNotEqualTo(source.generatedAt());
+        assertThat(published.latencyMs()).isGreaterThanOrEqualTo(0L);
     }
 
     private void assertNoDecisionSurface() {

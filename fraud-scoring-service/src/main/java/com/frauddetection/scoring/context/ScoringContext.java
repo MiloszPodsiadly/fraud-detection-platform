@@ -1,6 +1,7 @@
 package com.frauddetection.scoring.context;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
+import com.frauddetection.common.events.features.FeatureSnapshotWireValueNormalizer;
 import com.frauddetection.scoring.config.ScoringMode;
 
 import java.time.Instant;
@@ -33,6 +34,6 @@ public record ScoringContext(
                 throw new IllegalArgumentException("featureSnapshot must not contain null values");
             }
         }
-        return Map.copyOf(source);
+        return FeatureSnapshotWireValueNormalizer.normalize(source);
     }
 }

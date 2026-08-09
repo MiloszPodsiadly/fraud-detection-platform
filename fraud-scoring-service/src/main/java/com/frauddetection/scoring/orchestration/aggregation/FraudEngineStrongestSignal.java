@@ -1,12 +1,12 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineEvidenceType;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 
 import java.util.Objects;
-import java.util.Set;
 
 public record FraudEngineStrongestSignal(
         String engineId,
@@ -18,13 +18,14 @@ public record FraudEngineStrongestSignal(
         FraudEngineEvidenceType evidenceType,
         FraudEngineSignalCategory signalCategory
 ) {
-    private static final Set<String> ALLOWED_ENGINE_IDS = Set.of("rules.primary", "ml.python.primary");
-
     public FraudEngineStrongestSignal {
-        if (!ALLOWED_ENGINE_IDS.contains(engineId)) {
+        if (!FraudEngineIdentityContract.isKnownEngineId(engineId)) {
             throw new IllegalArgumentException("AGGREGATION_SIGNAL_UNKNOWN_ENGINE_ID");
         }
         Objects.requireNonNull(engineType, "engineType is required");
+        if (!FraudEngineIdentityContract.hasExpectedType(engineId, engineType)) {
+            throw new IllegalArgumentException("AGGREGATION_SIGNAL_ENGINE_TYPE_MISMATCH");
+        }
         Objects.requireNonNull(status, "status is required");
         Objects.requireNonNull(reasonCode, "reasonCode is required");
         Objects.requireNonNull(signalCategory, "signalCategory is required");

@@ -1,10 +1,13 @@
 package com.frauddetection.common.events.contract;
 
+import com.frauddetection.common.events.features.FeatureSnapshotWireValueDeserializer;
+import com.frauddetection.common.events.features.FeatureSnapshotWireValueNormalizer;
 import com.frauddetection.common.events.model.CustomerContext;
 import com.frauddetection.common.events.model.DeviceInfo;
 import com.frauddetection.common.events.model.LocationInfo;
 import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.model.Money;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
 import java.time.Instant;
 import java.util.List;
@@ -33,6 +36,13 @@ public record TransactionEnrichedEvent(
         Boolean countryMismatch,
         Boolean proxyOrVpnDetected,
         List<String> featureFlags,
+        @JsonDeserialize(using = FeatureSnapshotWireValueDeserializer.class)
         Map<String, Object> featureSnapshot
 ) {
+    public TransactionEnrichedEvent {
+        featureFlags = featureFlags == null ? List.of() : List.copyOf(featureFlags);
+        if (featureSnapshot != null) {
+            featureSnapshot = FeatureSnapshotWireValueNormalizer.normalize(featureSnapshot);
+        }
+    }
 }

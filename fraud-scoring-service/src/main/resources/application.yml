@@ -1,8 +1,6 @@
 spring:
   application:
     name: fraud-scoring-service
-  cache:
-    type: caffeine
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
@@ -80,3 +78,6 @@ fraud:
     events:
       engine-intelligence:
         emit-enabled: ${FRAUD_SCORING_EVENTS_ENGINE_INTELLIGENCE_EMIT_ENABLED:false}
+    engines:
+      velocity:
+        enabled: ${FRAUD_SCORING_ENGINE_VELOCITY_ENABLED:false}

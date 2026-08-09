@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceEngineResult;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 
 import java.util.List;
@@ -18,6 +19,19 @@ public record EngineIntelligenceEngineReadModel(
     List<String> reasonCodes
 ) {
     public EngineIntelligenceEngineReadModel {
-        reasonCodes = reasonCodes == null ? List.of() : List.copyOf(reasonCodes);
+        EngineIntelligenceEngineResult result = new EngineIntelligenceEngineResult(
+                engineId,
+                engineType,
+                status,
+                riskLevel,
+                scoreBucket,
+                reasonCodes == null ? List.of() : reasonCodes
+        );
+        engineId = result.engineId();
+        engineType = result.engineType();
+        status = result.status();
+        riskLevel = result.riskLevel();
+        scoreBucket = result.scoreBucket();
+        reasonCodes = result.reasonCodes();
     }
 }

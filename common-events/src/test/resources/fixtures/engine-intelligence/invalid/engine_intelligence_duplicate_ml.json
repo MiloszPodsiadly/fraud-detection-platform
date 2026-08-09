@@ -1,0 +1,39 @@
+{
+  "contractVersion": 1,
+  "generatedAt": "2026-05-31T10:00:00Z",
+  "engines": [
+    {
+      "engineId": "rules.primary",
+      "engineType": "RULES",
+      "status": "AVAILABLE",
+      "riskLevel": "HIGH",
+      "scoreBucket": "HIGH",
+      "reasonCodes": ["HIGH_VELOCITY"]
+    },
+    {
+      "engineId": "ml.python.primary",
+      "engineType": "ML_MODEL",
+      "status": "AVAILABLE",
+      "riskLevel": "LOW",
+      "scoreBucket": "LOW",
+      "reasonCodes": ["LOW_MODEL_RISK"]
+    },
+    {
+      "engineId": "ml.python.primary",
+      "engineType": "ML_MODEL",
+      "status": "AVAILABLE",
+      "riskLevel": "MEDIUM",
+      "scoreBucket": "MEDIUM",
+      "reasonCodes": ["MODEL_HIGH_RISK"]
+    }
+  ],
+  "comparison": {
+    "comparisonType": "RULES_VS_ML",
+    "comparedEngineIds": ["rules.primary", "ml.python.primary"],
+"agreementStatus": "PARTIAL",
+    "riskMismatchStatus": "NOT_COMPARABLE",
+    "scoreDeltaBucket": "UNAVAILABLE"
+  },
+  "diagnosticSignals": [],
+  "warnings": []
+}

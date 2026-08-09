@@ -21,7 +21,7 @@ FDP-96 uses a dedicated transaction-scoped endpoint first because FDP-95 project
 ## DTO Boundary
 
 FDP-96 does not return EngineIntelligenceProjection directly. Dedicated API DTOs map only persisted FDP-95 fields:
-contract version, generation time, comparison status, bounded engine summaries, bounded diagnostic signals, and
+contract version, generation time, explicit Rules-vs-ML comparison identity/status, bounded engine summaries, bounded diagnostic signals, and
 bounded warning summaries.
 
 ## Authorization Boundary
@@ -66,7 +66,7 @@ Read path remains single-transaction and does not call scoring, ML, rules, orche
 Source-scan guards remain architecture tripwires.
 FDP-96 relies on behavior-level controller/API serialization tests for API safety.
 Source scans are supplementary and can false-positive on comments or renames.
-Future FDP-97 UI must add behavior-level UI tests, not only source scans.
+Analyst Console UI consumption must keep behavior-level validator/rendering tests, not only source scans.
 Future feedback workflow must add behavior-level workflow tests.
 
 ## Operational Status Semantics
@@ -84,18 +84,21 @@ remain outside the DTO boundary.
 API must not expose finalDecision/recommendedAction/approve/decline/block. The read model also does not
 expose a winning engine, platform risk score, or payment authorization.
 
-## No UI
+## UI Consumption
 
-UI remains FDP-97 scope.
+Analyst Console consumes this bounded read-only API through frontend contract validators. UI code must not call
+scoring, ML, rules, orchestrator, Kafka, producer, or projection repositories directly, and must not compute its own
+engine-intelligence semantics.
 
 ## OpenAPI Boundary
 
 OpenAPI documents only the dedicated transaction-scoped endpoint and bounded DTO schemas. It does not expose the
 Mongo projection.
 
-## Future FDP-97 UI
+## Historical FDP-97 UI Gate
 
-FDP-97 may consume the bounded read-only API after a separate UI review.
+FDP-96 originally treated UI rendering as later FDP-97 scope. That historical gate is superseded by the current
+bounded Analyst Console rendering and validator tests.
 
 ## Future Case-Level Aggregation If Needed
 

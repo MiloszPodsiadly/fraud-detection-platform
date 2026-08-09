@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.frauddetection.common.events.evidence.ScoringEvidenceItem;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.features.FeatureSnapshotWireValueDeserializer;
+import com.frauddetection.common.events.features.FeatureSnapshotWireValueNormalizer;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.model.CustomerContext;
 import com.frauddetection.common.events.model.DeviceInfo;
@@ -11,6 +13,7 @@ import com.frauddetection.common.events.model.LocationInfo;
 import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.model.Money;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
 import java.time.Instant;
 import java.util.List;
@@ -38,6 +41,7 @@ public record TransactionScoredEvent(
         Instant inferenceTimestamp,
         List<String> reasonCodes,
         Map<String, Object> scoreDetails,
+        @JsonDeserialize(using = FeatureSnapshotWireValueDeserializer.class)
         Map<String, Object> featureSnapshot,
         Boolean alertRecommended,
         List<ScoringEvidenceItem> scoringEvidence,
@@ -46,6 +50,9 @@ public record TransactionScoredEvent(
 ) {
     public TransactionScoredEvent {
         scoringEvidence = scoringEvidence == null ? List.of() : List.copyOf(scoringEvidence);
+        if (featureSnapshot != null) {
+            featureSnapshot = FeatureSnapshotWireValueNormalizer.normalize(featureSnapshot);
+        }
     }
 
     public TransactionScoredEvent(

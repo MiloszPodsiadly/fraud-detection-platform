@@ -92,7 +92,7 @@ class ScoredTransactionControllerDetailTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.transactionId").value("txn-1"))
                 .andExpect(jsonPath("$.fraudScore").value(0.91d))
-                .andExpect(jsonPath("$.engineIntelligence.status").value("AVAILABLE"))
+                .andExpect(jsonPath("$.engineIntelligence.status").value("DEGRADED"))
                 .andExpect(jsonPath("$.engineIntelligence.contractVersion").value(1))
                 .andExpect(jsonPath("$.engineIntelligence.comparison.agreementStatus").value("PARTIAL"))
                 .andExpect(jsonPath("$.engineIntelligence.engines[0].engineId").value("rules.primary"))
@@ -313,14 +313,24 @@ class ScoredTransactionControllerDetailTest {
                         EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                         EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
                 ),
-                List.of(new EngineIntelligenceEngineReadModel(
-                        "rules.primary",
-                        FraudEngineType.RULES,
-                        FraudEngineStatus.AVAILABLE,
-                        RiskLevel.CRITICAL,
-                        EngineIntelligenceScoreBucket.HIGH,
-                        List.of("HIGH_VELOCITY")
-                )),
+                List.of(
+                        new EngineIntelligenceEngineReadModel(
+                                "rules.primary",
+                                FraudEngineType.RULES,
+                                FraudEngineStatus.AVAILABLE,
+                                RiskLevel.CRITICAL,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("HIGH_VELOCITY")
+                        ),
+                        new EngineIntelligenceEngineReadModel(
+                                "ml.python.primary",
+                                FraudEngineType.ML_MODEL,
+                                FraudEngineStatus.TIMEOUT,
+                                null,
+                                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                                List.of("ML_MODEL_TIMEOUT")
+                        )
+                ),
                 List.of(),
                 List.of()
         );

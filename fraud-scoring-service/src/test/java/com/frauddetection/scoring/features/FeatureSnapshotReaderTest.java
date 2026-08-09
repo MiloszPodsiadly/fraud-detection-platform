@@ -19,7 +19,9 @@ class FeatureSnapshotReaderTest {
         FeatureSnapshotReader reader = new FeatureSnapshotReader(Map.of(
                 FraudFeatureContract.DEVICE_NOVELTY, true,
                 FraudFeatureContract.RECENT_TRANSACTION_COUNT, 3,
-                FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, 60L,
+                FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
+                FraudFeatureContract.RECENT_AMOUNT_SUM, new BigDecimal("125.20"),
+                FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
                 FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 2.5d,
                 FraudFeatureContract.CURRENCY, "PLN",
                 FraudFeatureContract.CUSTOMER_SEGMENT, "retail",
@@ -29,7 +31,10 @@ class FeatureSnapshotReaderTest {
 
         assertThat(reader.booleanValue(FraudFeatureContract.DEVICE_NOVELTY).value()).isTrue();
         assertThat(reader.integerValue(FraudFeatureContract.RECENT_TRANSACTION_COUNT).value()).isEqualTo(3);
-        assertThat(reader.longValue(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW).value()).isEqualTo(60L);
+        assertThat(reader.stringValue(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW).value()).isEqualTo("PT1M");
+        assertThat(reader.decimalValue(FraudFeatureContract.RECENT_AMOUNT_SUM).value())
+                .isEqualByComparingTo("125.20");
+        assertThat(reader.stringValue(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW).value()).isEqualTo("PT1M");
         assertThat(reader.doubleValue(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE).value()).isEqualTo(2.5d);
         assertThat(reader.stringValue(FraudFeatureContract.CURRENCY).value()).isEqualTo("PLN");
         assertThat(reader.stringValue(FraudFeatureContract.CUSTOMER_SEGMENT).value()).isEqualTo("retail");
@@ -63,7 +68,7 @@ class FeatureSnapshotReaderTest {
                 .isEqualTo(FeatureSnapshotValueStatus.INVALID_TYPE);
         assertThat(reader.integerValue(FraudFeatureContract.RECENT_TRANSACTION_COUNT).status())
                 .isEqualTo(FeatureSnapshotValueStatus.INVALID_TYPE);
-        assertThat(reader.longValue(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW).status())
+        assertThat(reader.stringValue(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW).status())
                 .isEqualTo(FeatureSnapshotValueStatus.INVALID_TYPE);
     }
 

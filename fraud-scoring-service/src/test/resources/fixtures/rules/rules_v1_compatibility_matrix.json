@@ -1,0 +1,370 @@
+{
+  "source": {
+    "compatibilityReviewMarker": "FDP-129-COMPATIBILITY-REVIEW",
+    "expectedResultsSha256": "30bd396eaf5c38fe9f23ac16efc327cfe72c163efb30a04b7dbf483296bc74fc",
+    "rulesEngine": "RuleBasedFraudScoringEngine",
+    "modelName": "rule-based-engine",
+    "modelVersion": "v1",
+    "scoringProperties": {
+      "highThreshold": 0.75,
+      "criticalThreshold": 0.90
+    }
+  },
+  "cases": [
+    {
+      "caseId": "canonical_current_producer_low_pln",
+      "representationType": "CANONICAL_CURRENT_PRODUCER",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {"recentTransactionCount": 1, "recentAmountSumPln": "100.00", "rapidTransferCount": 1, "rapidTransferTotalPln": "100.00"},
+      "topLevelFacts": {"recentTransactionCount": 1, "transactionVelocityPerMinute": 1.0, "recentAmountSum": "100.00", "recentAmountCurrency": "PLN", "currentAmount": "100.00"},
+      "legacyFlags": [],
+      "legacyCandidate": false,
+      "windows": {"snapshotCount": "PT1M", "snapshotAmount": "PT1M", "snapshotRapid": "PT1M", "topLevelCount": "PT1M", "topLevelAmount": "PT1M"},
+      "expected": {"score": 0.05, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": [], "contributionKeys": [], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "canonical_high_velocity_count_4_rate_4",
+      "representationType": "CANONICAL_CURRENT_PRODUCER",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {"recentTransactionCount": 4, "recentAmountSumPln": "400.00"},
+      "topLevelFacts": {"recentTransactionCount": 4, "transactionVelocityPerMinute": 4.0, "recentAmountSum": "400.00", "recentAmountCurrency": "PLN", "currentAmount": "100.00"},
+      "legacyFlags": [],
+      "windows": {"snapshotCount": "PT1M", "snapshotAmount": "PT1M", "topLevelCount": "PT1M", "topLevelAmount": "PT1M"},
+      "expected": {"score": 0.05, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": [], "contributionKeys": [], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "canonical_high_velocity_count_5_rate_5",
+      "representationType": "CANONICAL_CURRENT_PRODUCER",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {"recentTransactionCount": 5, "recentAmountSumPln": "500.00"},
+      "topLevelFacts": {"recentTransactionCount": 5, "transactionVelocityPerMinute": 5.0, "recentAmountSum": "500.00", "recentAmountCurrency": "PLN", "currentAmount": "100.00"},
+      "legacyFlags": [],
+      "windows": {"snapshotCount": "PT1M", "snapshotAmount": "PT1M", "topLevelCount": "PT1M", "topLevelAmount": "PT1M"},
+      "expected": {"score": 0.47, "riskLevel": "MEDIUM", "alertRecommended": false, "reasonCodes": ["HIGH_VELOCITY"], "contributionKeys": ["highVelocityRulesV1Weight"], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "top_level_high_velocity_count_only",
+      "representationType": "TOP_LEVEL_ONLY",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {},
+      "topLevelFacts": {"recentTransactionCount": 5, "currentAmount": "100.00"},
+      "legacyFlags": [],
+      "windows": {"topLevelCount": "PT1M"},
+      "expected": {"score": 0.15, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": ["HIGH_VELOCITY"], "contributionKeys": ["highVelocityRulesV1Weight"], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "top_level_high_velocity_rate_only",
+      "representationType": "TOP_LEVEL_ONLY",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {},
+      "topLevelFacts": {"transactionVelocityPerMinute": 5.0, "currentAmount": "100.00"},
+      "legacyFlags": [],
+      "windows": {},
+      "expected": {"score": 0.17, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": ["HIGH_VELOCITY"], "contributionKeys": ["highVelocityRulesV1Weight"], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "flag_only_high_velocity",
+      "representationType": "FLAG_ONLY",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {},
+      "topLevelFacts": {"currentAmount": "100.00"},
+      "legacyFlags": ["HIGH_VELOCITY"],
+      "windows": {},
+      "expected": {"score": 0.25, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": ["HIGH_VELOCITY"], "contributionKeys": ["highVelocityRulesV1Weight"], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "top_level_high_velocity_full_matching_payload",
+      "representationType": "TOP_LEVEL_ONLY",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {},
+      "topLevelFacts": {"recentTransactionCount": 5, "transactionVelocityPerMinute": 5.0, "currentAmount": "100.00"},
+      "legacyFlags": ["HIGH_VELOCITY"],
+      "windows": {"topLevelCount": "PT1M"},
+      "expected": {"score": 0.47, "riskLevel": "MEDIUM", "alertRecommended": false, "reasonCodes": ["HIGH_VELOCITY"], "contributionKeys": ["highVelocityRulesV1Weight"], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "canonical_high_amount_count_1_amount_5000",
+      "representationType": "CONTRADICTORY_LEGACY",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {"recentTransactionCount": 1, "recentAmountSumPln": "5000.00"},
+      "topLevelFacts": {"currentAmount": "100.00"},
+      "legacyFlags": ["HIGH_AMOUNT_ACTIVITY"],
+      "windows": {"snapshotCount": "PT1M", "snapshotAmount": "PT1M"},
+      "expected": {"score": 0.05, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": [], "contributionKeys": [], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "canonical_high_amount_count_2_amount_4999_99",
+      "representationType": "CANONICAL_CURRENT_PRODUCER",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {"recentTransactionCount": 2, "recentAmountSumPln": "4999.99"},
+      "topLevelFacts": {"recentTransactionCount": 2, "recentAmountSum": "4999.99", "recentAmountCurrency": "PLN", "currentAmount": "100.00"},
+      "legacyFlags": [],
+      "windows": {"snapshotCount": "PT1M", "snapshotAmount": "PT1M", "topLevelCount": "PT1M", "topLevelAmount": "PT1M"},
+      "expected": {"score": 0.05, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": [], "contributionKeys": [], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "canonical_high_amount_count_2_amount_5000",
+      "representationType": "CANONICAL_CURRENT_PRODUCER",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {"recentTransactionCount": 2, "recentAmountSumPln": "5000.00"},
+      "topLevelFacts": {"recentTransactionCount": 2, "recentAmountSum": "5000.00", "recentAmountCurrency": "PLN", "currentAmount": "100.00"},
+      "legacyFlags": [],
+      "windows": {"snapshotCount": "PT1M", "snapshotAmount": "PT1M", "topLevelCount": "PT1M", "topLevelAmount": "PT1M"},
+      "expected": {"score": 0.29, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": ["HIGH_AMOUNT_ACTIVITY"], "contributionKeys": ["recentAmountActivityRulesV1Weight"], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "top_level_high_amount_amount_only_legacy",
+      "representationType": "TOP_LEVEL_ONLY",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {},
+      "topLevelFacts": {"recentAmountSum": "5000.00", "recentAmountCurrency": "PLN", "currentAmount": "100.00"},
+      "legacyFlags": [],
+      "windows": {"topLevelAmount": "PT1M"},
+      "expected": {"score": 0.15, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": ["HIGH_AMOUNT_ACTIVITY"], "contributionKeys": ["recentAmountActivityRulesV1Weight"], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "flag_only_high_amount",
+      "representationType": "FLAG_ONLY",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {},
+      "topLevelFacts": {"currentAmount": "100.00"},
+      "legacyFlags": ["HIGH_AMOUNT_ACTIVITY"],
+      "windows": {},
+      "expected": {"score": 0.19, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": ["HIGH_AMOUNT_ACTIVITY"], "contributionKeys": ["recentAmountActivityRulesV1Weight"], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "matching_redundant_high_amount_full_payload",
+      "representationType": "MATCHING_REDUNDANT",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {"recentTransactionCount": 2, "recentAmountSumPln": "5000.00"},
+      "topLevelFacts": {"recentTransactionCount": 2, "recentAmountSum": "5000.00", "recentAmountCurrency": "PLN", "currentAmount": "100.00"},
+      "legacyFlags": ["HIGH_AMOUNT_ACTIVITY"],
+      "windows": {"snapshotCount": "PT1M", "snapshotAmount": "PT1M", "topLevelCount": "PT1M", "topLevelAmount": "PT1M"},
+      "expected": {"score": 0.29, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": ["HIGH_AMOUNT_ACTIVITY"], "contributionKeys": ["recentAmountActivityRulesV1Weight"], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "canonical_rapid_count_1_amount_20000",
+      "representationType": "CONTRADICTORY_LEGACY",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {"rapidTransferCount": 1, "rapidTransferTotalPln": "20000.00"},
+      "topLevelFacts": {"currentAmount": "100.00"},
+      "legacyFlags": ["RAPID_PLN_20K_BURST"],
+      "legacyCandidate": true,
+      "windows": {"snapshotRapid": "PT1M"},
+      "expected": {"score": 0.05, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": [], "contributionKeys": [], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "canonical_rapid_count_2_amount_19999_99",
+      "representationType": "CANONICAL_CURRENT_PRODUCER",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {"rapidTransferCount": 2, "rapidTransferTotalPln": "19999.99"},
+      "topLevelFacts": {"currentAmount": "100.00"},
+      "legacyFlags": [],
+      "windows": {"snapshotRapid": "PT1M"},
+      "expected": {"score": 0.05, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": [], "contributionKeys": [], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "canonical_rapid_count_2_amount_20000",
+      "representationType": "CANONICAL_CURRENT_PRODUCER",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {"rapidTransferCount": 2, "rapidTransferTotalPln": "20000.00"},
+      "topLevelFacts": {"currentAmount": "100.00"},
+      "legacyFlags": [],
+      "windows": {"snapshotRapid": "PT1M"},
+      "expected": {"score": 0.70, "riskLevel": "MEDIUM", "alertRecommended": false, "reasonCodes": ["RAPID_PLN_20K_BURST"], "contributionKeys": ["rapidPln20kBurstRulesV1Weight"], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "candidate_only_rapid",
+      "representationType": "CANDIDATE_ONLY",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {},
+      "topLevelFacts": {"currentAmount": "100.00"},
+      "legacyFlags": [],
+      "legacyCandidate": true,
+      "windows": {},
+      "expected": {"score": 0.25, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": ["RAPID_PLN_20K_BURST"], "contributionKeys": ["rapidPln20kBurstRulesV1Weight"], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "flag_only_rapid",
+      "representationType": "FLAG_ONLY",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {},
+      "topLevelFacts": {"currentAmount": "100.00"},
+      "legacyFlags": ["RAPID_PLN_20K_BURST"],
+      "windows": {},
+      "expected": {"score": 0.50, "riskLevel": "MEDIUM", "alertRecommended": false, "reasonCodes": ["RAPID_PLN_20K_BURST"], "contributionKeys": ["rapidPln20kBurstRulesV1Weight"], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "candidate_and_flag_rapid",
+      "representationType": "CANDIDATE_ONLY",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {},
+      "topLevelFacts": {"currentAmount": "100.00"},
+      "legacyFlags": ["RAPID_PLN_20K_BURST"],
+      "legacyCandidate": true,
+      "windows": {},
+      "expected": {"score": 0.70, "riskLevel": "MEDIUM", "alertRecommended": false, "reasonCodes": ["RAPID_PLN_20K_BURST"], "contributionKeys": ["rapidPln20kBurstRulesV1Weight"], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "supported_currency_usd_low",
+      "representationType": "TOP_LEVEL_ONLY",
+      "sourceCurrency": "USD",
+      "canonicalFacts": {},
+      "topLevelFacts": {"currentAmount": "100.00"},
+      "legacyFlags": [],
+      "windows": {},
+      "expected": {"score": 0.05, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": [], "contributionKeys": [], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "supported_currency_eur_low",
+      "representationType": "TOP_LEVEL_ONLY",
+      "sourceCurrency": "EUR",
+      "canonicalFacts": {},
+      "topLevelFacts": {"currentAmount": "100.00"},
+      "legacyFlags": [],
+      "windows": {},
+      "expected": {"score": 0.05, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": [], "contributionKeys": [], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "supported_currency_gbp_low",
+      "representationType": "TOP_LEVEL_ONLY",
+      "sourceCurrency": "GBP",
+      "canonicalFacts": {},
+      "topLevelFacts": {"currentAmount": "100.00"},
+      "legacyFlags": [],
+      "windows": {},
+      "expected": {"score": 0.05, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": [], "contributionKeys": [], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "unsupported_currency_jpy_rejected",
+      "representationType": "TOP_LEVEL_ONLY",
+      "sourceCurrency": "JPY",
+      "canonicalFacts": {},
+      "topLevelFacts": {"currentAmount": "100.00"},
+      "legacyFlags": ["HIGH_AMOUNT_ACTIVITY"],
+      "windows": {},
+      "expected": {"score": null, "riskLevel": null, "alertRecommended": null, "reasonCodes": [], "contributionKeys": [], "validityResult": "UNSUPPORTED_CURRENCY_BASIS"}
+    },
+    {
+      "caseId": "snapshot_p1d_window_rejected",
+      "representationType": "MALFORMED_CANONICAL",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {"recentTransactionCount": 5},
+      "topLevelFacts": {"currentAmount": "100.00"},
+      "legacyFlags": ["HIGH_VELOCITY"],
+      "windows": {"snapshotCount": "P1D"},
+      "expected": {"score": null, "riskLevel": null, "alertRecommended": null, "reasonCodes": [], "contributionKeys": [], "validityResult": "INVALID_WINDOW"}
+    },
+    {
+      "caseId": "top_level_p1d_window_rejected",
+      "representationType": "MALFORMED_CANONICAL",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {},
+      "topLevelFacts": {"recentTransactionCount": 5, "currentAmount": "100.00"},
+      "legacyFlags": ["HIGH_VELOCITY"],
+      "windows": {"topLevelCount": "P1D"},
+      "expected": {"score": null, "riskLevel": null, "alertRecommended": null, "reasonCodes": [], "contributionKeys": [], "validityResult": "INVALID_WINDOW"}
+    },
+    {
+      "caseId": "snapshot_pt5m_window_rejected",
+      "representationType": "MALFORMED_CANONICAL",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {"recentAmountSumPln": "6000.00"},
+      "topLevelFacts": {"currentAmount": "100.00"},
+      "legacyFlags": ["HIGH_AMOUNT_ACTIVITY"],
+      "windows": {"snapshotAmount": "PT5M"},
+      "expected": {"score": null, "riskLevel": null, "alertRecommended": null, "reasonCodes": [], "contributionKeys": [], "validityResult": "INVALID_WINDOW"}
+    },
+    {
+      "caseId": "top_level_pt5m_window_rejected",
+      "representationType": "MALFORMED_CANONICAL",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {},
+      "topLevelFacts": {"recentAmountSum": "6000.00", "recentAmountCurrency": "PLN", "currentAmount": "100.00"},
+      "legacyFlags": ["HIGH_AMOUNT_ACTIVITY"],
+      "windows": {"topLevelAmount": "PT5M"},
+      "expected": {"score": null, "riskLevel": null, "alertRecommended": null, "reasonCodes": [], "contributionKeys": [], "validityResult": "INVALID_WINDOW"}
+    },
+    {
+      "caseId": "missing_paired_snapshot_window_rejected",
+      "representationType": "MALFORMED_CANONICAL",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {"recentTransactionCount": 5},
+      "topLevelFacts": {"currentAmount": "100.00"},
+      "legacyFlags": [],
+      "windows": {},
+      "expected": {"score": null, "riskLevel": null, "alertRecommended": null, "reasonCodes": [], "contributionKeys": [], "validityResult": "INCOMPLETE_FACT_PAIR"}
+    },
+    {
+      "caseId": "malformed_canonical_count_rejected",
+      "representationType": "MALFORMED_CANONICAL",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {"malformedRecentTransactionCount": "5"},
+      "topLevelFacts": {"currentAmount": "100.00"},
+      "legacyFlags": ["HIGH_VELOCITY"],
+      "windows": {},
+      "expected": {"score": null, "riskLevel": null, "alertRecommended": null, "reasonCodes": [], "contributionKeys": [], "validityResult": "INVALID_TYPE"}
+    },
+    {
+      "caseId": "partial_historical_high_amount_count_satisfied_flag",
+      "representationType": "PARTIAL_HISTORICAL",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {"recentTransactionCount": 2},
+      "topLevelFacts": {"currentAmount": "100.00"},
+      "legacyFlags": ["HIGH_AMOUNT_ACTIVITY"],
+      "windows": {"snapshotCount": "PT1M"},
+      "expected": {"score": 0.19, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": ["HIGH_AMOUNT_ACTIVITY"], "contributionKeys": ["recentAmountActivityRulesV1Weight"], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "partial_historical_high_amount_amount_satisfied_flag",
+      "representationType": "PARTIAL_HISTORICAL",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {"recentAmountSumPln": "6000.00"},
+      "topLevelFacts": {"currentAmount": "100.00"},
+      "legacyFlags": ["HIGH_AMOUNT_ACTIVITY"],
+      "windows": {"snapshotAmount": "PT1M"},
+      "expected": {"score": 0.19, "riskLevel": "LOW", "alertRecommended": false, "reasonCodes": ["HIGH_AMOUNT_ACTIVITY"], "contributionKeys": ["recentAmountActivityRulesV1Weight"], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "risk_exact_high_threshold",
+      "representationType": "MATCHING_REDUNDANT",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {"recentTransactionCount": 5, "recentAmountSumPln": "500.00"},
+      "topLevelFacts": {"recentTransactionCount": 5, "transactionVelocityPerMinute": 5.0, "recentAmountSum": "500.00", "recentAmountCurrency": "PLN", "currentAmount": "100.00", "deviceNovelty": true},
+      "legacyFlags": ["DEVICE_NOVELTY"],
+      "windows": {"snapshotCount": "PT1M", "snapshotAmount": "PT1M", "topLevelCount": "PT1M", "topLevelAmount": "PT1M"},
+      "expected": {"score": 0.75, "riskLevel": "HIGH", "alertRecommended": true, "reasonCodes": ["DEVICE_NOVELTY", "HIGH_VELOCITY"], "contributionKeys": ["device_noveltyWeight", "highVelocityRulesV1Weight", "deviceNoveltyBoost"], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "risk_exact_critical_threshold",
+      "representationType": "CANDIDATE_ONLY",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {},
+      "topLevelFacts": {"currentAmount": "100.00"},
+      "legacyFlags": ["HIGH_VELOCITY", "RAPID_PLN_20K_BURST"],
+      "legacyCandidate": true,
+      "windows": {},
+      "expected": {"score": 0.90, "riskLevel": "CRITICAL", "alertRecommended": true, "reasonCodes": ["HIGH_VELOCITY", "RAPID_PLN_20K_BURST"], "contributionKeys": ["highVelocityRulesV1Weight", "rapidPln20kBurstRulesV1Weight"], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "risk_missing_historical_contribution_changes_risk",
+      "representationType": "TOP_LEVEL_ONLY",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {},
+      "topLevelFacts": {"recentTransactionCount": 5, "transactionVelocityPerMinute": 5.0, "currentAmount": "100.00"},
+      "legacyFlags": ["HIGH_VELOCITY"],
+      "windows": {"topLevelCount": "PT1M"},
+      "expected": {"score": 0.47, "riskLevel": "MEDIUM", "alertRecommended": false, "reasonCodes": ["HIGH_VELOCITY"], "contributionKeys": ["highVelocityRulesV1Weight"], "validityResult": "VALID"}
+    },
+    {
+      "caseId": "risk_extra_compatibility_contribution_changes_risk",
+      "representationType": "MATCHING_REDUNDANT",
+      "sourceCurrency": "PLN",
+      "canonicalFacts": {"recentTransactionCount": 5, "recentAmountSumPln": "500.00"},
+      "topLevelFacts": {"recentTransactionCount": 5, "transactionVelocityPerMinute": 5.0, "recentAmountSum": "500.00", "recentAmountCurrency": "PLN", "currentAmount": "100.00", "deviceNovelty": true},
+      "legacyFlags": ["DEVICE_NOVELTY", "HIGH_VELOCITY"],
+      "windows": {"snapshotCount": "PT1M", "snapshotAmount": "PT1M", "topLevelCount": "PT1M", "topLevelAmount": "PT1M"},
+      "expected": {"score": 0.75, "riskLevel": "HIGH", "alertRecommended": true, "reasonCodes": ["DEVICE_NOVELTY", "HIGH_VELOCITY"], "contributionKeys": ["device_noveltyWeight", "highVelocityRulesV1Weight", "deviceNoveltyBoost"], "validityResult": "VALID"}
+    }
+  ]
+}

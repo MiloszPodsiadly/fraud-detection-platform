@@ -11,7 +11,7 @@ class TimestampContractError(ValueError):
 
 RFC3339_DATETIME_PATTERN = re.compile(
     r"^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})T"
-    r"(?P<hour>\d{2}):(?P<minute>\d{2}):(?P<second>\d{2})(?:\.\d{1,6})?Z$"
+    r"(?P<hour>\d{2}):(?P<minute>\d{2}):(?P<second>\d{2})(?:\.\d{1,9})?Z$"
 )
 
 

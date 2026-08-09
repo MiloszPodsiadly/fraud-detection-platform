@@ -32,7 +32,7 @@ final class AggregationTestSupport {
                 status,
                 score,
                 riskLevel,
-                status == FraudEngineStatus.AVAILABLE ? FraudEngineConfidence.MEDIUM : FraudEngineConfidence.UNKNOWN,
+                confidenceFor(engineType(engineId), status),
                 List.of(reasonCodes),
                 List.of(),
                 List.of(),
@@ -65,11 +65,11 @@ final class AggregationTestSupport {
         return new FraudEngineResult(
                 engineId,
                 engineType,
-                engineId.equals("rules.primary") ? "java" : "python",
+                engineId.equals("ml.python.primary") ? "python" : "java",
                 status,
                 score,
                 riskLevel,
-                status == FraudEngineStatus.AVAILABLE ? FraudEngineConfidence.MEDIUM : FraudEngineConfidence.UNKNOWN,
+                confidenceFor(engineType, status),
                 reasonCodes,
                 contributions,
                 evidence,
@@ -99,6 +99,18 @@ final class AggregationTestSupport {
     }
 
     private static FraudEngineType engineType(String engineId) {
-        return engineId.equals("rules.primary") ? FraudEngineType.RULES : FraudEngineType.ML_MODEL;
+        return switch (engineId) {
+            case "rules.primary" -> FraudEngineType.RULES;
+            case "ml.python.primary" -> FraudEngineType.ML_MODEL;
+            case "velocity.primary" -> FraudEngineType.VELOCITY;
+            default -> FraudEngineType.ML_MODEL;
+        };
+    }
+
+    private static FraudEngineConfidence confidenceFor(FraudEngineType engineType, FraudEngineStatus status) {
+        if (status != FraudEngineStatus.AVAILABLE || engineType == FraudEngineType.VELOCITY) {
+            return FraudEngineConfidence.UNKNOWN;
+        }
+        return FraudEngineConfidence.MEDIUM;
     }
 }

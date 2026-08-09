@@ -17,6 +17,7 @@ import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorT
 import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.mlEngine;
 import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.ruleDescriptor;
 import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.ruleEngine;
+import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.throwingRuleEngine;
 import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.timeoutResult;
 import static com.frauddetection.scoring.orchestration.FraudScoringOrchestratorTestSupport.unavailableResult;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -83,6 +84,22 @@ class FraudScoringOrchestratorRuleAndMlExecutionTest {
         assertThat(result.engineResults()).extracting(engineResult -> engineResult.score())
                 .containsExactly(0.20d, 0.91d);
         assertNoDecisionFields();
+    }
+
+    @Test
+    void requiredRulesInputFailureDoesNotStopOptionalMlOrFabricateRuleScore() {
+        FraudScoringOrchestrationResult result = orchestrator(
+                throwingRuleEngine(new IllegalArgumentException("RULES_FEATURE_INPUT_INVALID")),
+                mlEngine(availableResult(mlDescriptor(), 0.72d, RiskLevel.MEDIUM))
+        ).evaluate(context());
+
+        assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.REQUIRED_ENGINE_FAILED);
+        assertThat(result.engineResults()).extracting(engineResult -> engineResult.status())
+                .containsExactly(FraudEngineStatus.DEGRADED, FraudEngineStatus.AVAILABLE);
+        assertThat(result.engineResults().getFirst().score()).isNull();
+        assertThat(result.engineResults().getFirst().riskLevel()).isNull();
+        assertThat(result.engineResults().get(1).score()).isEqualTo(0.72d);
+        assertThat(flatten(result)).doesNotContain("RULES_FEATURE_INPUT_INVALID");
     }
 
     private FraudScoringOrchestrator orchestrator(FraudScoringOrchestratorTestSupport.FakeFraudSignalEngine... engines) {

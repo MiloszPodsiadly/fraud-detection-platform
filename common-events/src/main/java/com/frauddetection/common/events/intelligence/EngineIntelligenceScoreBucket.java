@@ -13,6 +13,10 @@ public enum EngineIntelligenceScoreBucket {
     VERY_HIGH,
     UNAVAILABLE;
 
+    public boolean isUsableAvailableBucket() {
+        return this == LOW || this == MEDIUM || this == HIGH || this == VERY_HIGH;
+    }
+
     public static EngineIntelligenceScoreBucket from(FraudEngineStatus status, Double score) {
         Objects.requireNonNull(status, "status is required");
         if (status != FraudEngineStatus.AVAILABLE || score == null) {

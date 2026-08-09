@@ -39,6 +39,22 @@ class EngineIntelligenceEngineResultTest {
     }
 
     @Test
+    void rejectsAvailableEngineResultWithoutRiskLevel() {
+        assertThatThrownBy(() -> engine(FraudEngineStatus.AVAILABLE, null, EngineIntelligenceScoreBucket.HIGH))
+                .hasMessage("ENGINE_INTELLIGENCE_AVAILABLE_STATUS_RISK_LEVEL_REQUIRED");
+    }
+
+    @Test
+    void rejectsAvailableEngineResultWithUnavailableScoreBucket() {
+        assertAvailableScoreBucketRejected(EngineIntelligenceScoreBucket.UNAVAILABLE);
+    }
+
+    @Test
+    void rejectsAvailableEngineResultWithNoneScoreBucket() {
+        assertAvailableScoreBucketRejected(EngineIntelligenceScoreBucket.NONE);
+    }
+
+    @Test
     void rejectsOperationalStatusWithHighRiskLevel() {
         assertOperationalRiskRejected(FraudEngineStatus.SKIPPED, RiskLevel.HIGH);
     }
@@ -55,6 +71,11 @@ class EngineIntelligenceEngineResultTest {
     private void assertOperationalRiskRejected(FraudEngineStatus status, RiskLevel riskLevel) {
         assertThatThrownBy(() -> engine(status, riskLevel, EngineIntelligenceScoreBucket.UNAVAILABLE))
                 .hasMessage("ENGINE_INTELLIGENCE_OPERATIONAL_STATUS_RISK_LEVEL_INVALID");
+    }
+
+    private void assertAvailableScoreBucketRejected(EngineIntelligenceScoreBucket scoreBucket) {
+        assertThatThrownBy(() -> engine(FraudEngineStatus.AVAILABLE, RiskLevel.HIGH, scoreBucket))
+                .hasMessage("ENGINE_INTELLIGENCE_AVAILABLE_STATUS_SCORE_BUCKET_INVALID");
     }
 
     private EngineIntelligenceEngineResult engine(

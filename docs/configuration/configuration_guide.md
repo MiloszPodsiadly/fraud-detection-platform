@@ -33,6 +33,43 @@ enable production mode and does not replace environment-specific release approva
 - Consumers must deduplicate by event id where required.
 - Manual outbox confirmation and recovery visibility are operational evidence workflows, not business approval.
 
+## Diagnostic Engine Intelligence
+
+- Producer diagnostic publication is disabled by default with
+  `fraud.scoring.events.engine-intelligence.emit-enabled=false`
+  (`FRAUD_SCORING_EVENTS_ENGINE_INTELLIGENCE_EMIT_ENABLED=false`).
+- Velocity V1 registration is disabled by default with
+  `fraud.scoring.engines.velocity.enabled=false`
+  (`FRAUD_SCORING_ENGINE_VELOCITY_ENABLED=false`).
+- The emission flag controls publication. The Velocity flag controls whether `velocity.primary / VELOCITY` is
+  registered inside the diagnostic runtime after emission is enabled.
+- Velocity is diagnostic-only. It cannot authorize payments, block transactions, create cases, alter final decision
+  source, change thresholds, or change analyst recommended actions.
+- Velocity V1 requires the Feature Enricher recent-transaction window to remain exactly `PT1M`; unsupported windows
+  fail startup/configuration or consumer validation rather than silently changing score meaning.
+- The current engine-intelligence contract allows three known engine identities: Rules and ML model are required;
+  Velocity is an optional third diagnostic engine. Future Device, Merchant, or Graph engines require a versioned
+  contract update.
+
+## Rules V1 Input Configuration
+
+- FDP-129 keeps Rules as `rule-based-engine` / `v1`; the diagnostic adapter remains `rules.primary` / `1.0.0`.
+- Feature Enricher producer windows for Rules and Velocity semantics must remain exactly `PT1M`.
+- Top-level Rules compatibility facts are not windowless facts: `recentTransactionCount` requires
+  `recentTransactionCountWindow=PT1M`, and `recentAmountSum` requires `recentAmountSumWindow=PT1M`.
+- Present-invalid snapshot or top-level temporal data fails closed instead of falling back to legacy flags or
+  candidate fields.
+- Supported transaction currencies are `PLN`, `EUR`, `USD`, and `GBP`. Unsupported or null currencies are rejected;
+  enrichment must not convert unknown currencies with a default rate.
+- Legacy Rules V1 compatibility is retained only for replay and rolling-deployment safety. Future removal of legacy
+  flags, `rapidTransferFraudCaseCandidate`, and retired top-level paths requires a separate versioned migration.
+
+## Dependency Posture
+
+- Bouncy Castle `1.85` is an intentional dependency upgrade for the current branch.
+- Caffeine is intentionally removed from the active application dependency graph; do not reintroduce Caffeine beans or
+  cache-specific configuration without a separate scoped design.
+
 ## Release Governance Settings
 
 - Mutable tag deployment is NO-GO for release proof.

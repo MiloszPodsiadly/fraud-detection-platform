@@ -3,9 +3,13 @@ package com.frauddetection.ingest.controller;
 import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.ingest.api.IngestTransactionRequest;
 import com.frauddetection.ingest.api.IngestTransactionResponse;
+import com.frauddetection.ingest.api.MoneyRequest;
 import com.frauddetection.ingest.exception.TransactionIngestExceptionHandler;
 import com.frauddetection.ingest.service.TransactionIngestUseCase;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
 import org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration;
@@ -21,9 +25,12 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.Instant;
 
 import static com.frauddetection.ingest.observability.CorrelationIdContext.CORRELATION_ID_HEADER;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -73,6 +80,39 @@ class TransactionIngestControllerTest {
                 .andExpect(jsonPath("$.status").value("ACCEPTED"));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"PLN", "EUR", "USD", "GBP"})
+    void shouldAcceptSupportedTransactionCurrencies(String currency) throws Exception {
+        given(transactionIngestUseCase.ingest(any(IngestTransactionRequest.class)))
+                .willReturn(new IngestTransactionResponse(
+                        "txn-1001",
+                        "event-1001",
+                        "corr-1001",
+                        "transactions.raw",
+                        Instant.parse("2026-04-20T10:15:30Z"),
+                        "ACCEPTED"
+                ));
+
+        mockMvc.perform(post("/api/v1/transactions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(requestWithCurrency(currency))))
+                .andExpect(status().isAccepted());
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"JPY", "XXX", "pln"})
+    void shouldRejectUnsupportedTransactionCurrenciesWithoutPayloadLeakage(String currency) throws Exception {
+        mockMvc.perform(post("/api/v1/transactions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(requestWithCurrency(currency))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Request validation failed."))
+                .andExpect(content().string(not(containsString("Northwind Electronics"))))
+                .andExpect(content().string(not(containsString("merchantRiskTier"))))
+                .andExpect(content().string(not(containsString("txn-1001"))));
+    }
+
     @Test
     void shouldRejectInvalidTransactionRequest() throws Exception {
         IngestTransactionRequest invalidRequest = new IngestTransactionRequest(
@@ -109,5 +149,26 @@ class TransactionIngestControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Malformed JSON request."))
                 .andExpect(jsonPath("$.details").isEmpty());
+    }
+
+    private IngestTransactionRequest requestWithCurrency(String currency) {
+        IngestTransactionRequest valid = TransactionIngestRequestTestData.validRequest();
+        return new IngestTransactionRequest(
+                valid.transactionId(),
+                valid.customerId(),
+                valid.accountId(),
+                valid.paymentInstrumentId(),
+                valid.transactionTimestamp(),
+                new MoneyRequest(valid.transactionAmount().amount(), currency),
+                valid.merchantInfo(),
+                valid.deviceInfo(),
+                valid.locationInfo(),
+                valid.customerContext(),
+                valid.transactionType(),
+                valid.authorizationMethod(),
+                valid.sourceSystem(),
+                valid.traceId(),
+                valid.attributes()
+        );
     }
 }

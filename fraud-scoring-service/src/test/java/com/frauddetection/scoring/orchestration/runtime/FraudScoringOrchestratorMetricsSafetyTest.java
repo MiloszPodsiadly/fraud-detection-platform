@@ -24,6 +24,7 @@ class FraudScoringOrchestratorMetricsSafetyTest {
     void metricsUseOnlyAllowlistedEngineIds() {
         metrics.recordEngineResult("rules.primary", FraudEngineType.RULES, FraudEngineStatus.AVAILABLE, true);
         metrics.recordEngineResult("ml.python.primary", FraudEngineType.ML_MODEL, FraudEngineStatus.TIMEOUT, false);
+        metrics.recordEngineResult("velocity.primary", FraudEngineType.VELOCITY, FraudEngineStatus.AVAILABLE, false);
 
         assertThatThrownBy(() -> metrics.recordEngineResult(
                 "unknown.primary", FraudEngineType.RULES, FraudEngineStatus.AVAILABLE, true
@@ -76,6 +77,22 @@ class FraudScoringOrchestratorMetricsSafetyTest {
                 FraudEngineStatus.TIMEOUT,
                 false,
                 Duration.ofMillis(100)
+        );
+        metrics.recordEngineLatency(
+                FraudSignalEngineRegistry.VELOCITY_PRIMARY_ENGINE_ID,
+                FraudEngineType.VELOCITY,
+                FraudEngineStatus.AVAILABLE,
+                false,
+                Duration.ofMillis(12)
+        );
+    }
+
+    @Test
+    void clientFailureMetricCategoryIsLowCardinality() {
+        metrics.recordEngineFailure(
+                FraudSignalEngineRegistry.PYTHON_ML_PRIMARY_ENGINE_ID,
+                FraudEngineType.ML_MODEL,
+                "client_error"
         );
     }
 

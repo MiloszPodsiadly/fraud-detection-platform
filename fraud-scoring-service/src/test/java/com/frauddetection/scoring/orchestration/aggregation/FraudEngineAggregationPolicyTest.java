@@ -11,7 +11,7 @@ class FraudEngineAggregationPolicyTest {
     void defaultPolicyIsBounded() {
         FraudEngineAggregationPolicy policy = FraudEngineAggregationPolicy.defaultInternalPolicy();
 
-        assertThat(policy.maxEngineResults()).isEqualTo(2);
+        assertThat(policy.maxEngineResults()).isEqualTo(3);
         assertThat(policy.maxStrongestSignals()).isEqualTo(5);
         assertThat(policy.maxEvidenceItemsPerEngine()).isEqualTo(5);
         assertThat(policy.maxEvidenceTitleLength()).isEqualTo(120);
@@ -28,7 +28,7 @@ class FraudEngineAggregationPolicyTest {
 
     @Test
     void rejectsExcessiveLimits() {
-        assertThatThrownBy(() -> policy(17, 5, 120, 256))
+        assertThatThrownBy(() -> policy(4, 5, 120, 256))
                 .hasMessage("AGGREGATION_POLICY_INVALID_MAXENGINERESULTS");
         assertThatThrownBy(() -> policy(2, 17, 120, 256))
                 .hasMessage("AGGREGATION_POLICY_INVALID_MAXSTRONGESTSIGNALS");

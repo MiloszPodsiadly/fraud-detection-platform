@@ -17,7 +17,8 @@ class PublicEngineIntelligenceEventContractDocsTest {
                 .replaceAll("\\s+", " ");
 
         assertThat(docs).contains(
-                "safe, bounded, backward-compatible public engine intelligence event",
+                "safe, bounded, backward-compatible optional `transactionscoredevent.engineintelligence` summary",
+                "historical fdp-92 defined the contract-only foundation",
                 "does not publish the internal aggregation model 1:1",
                 "allowlisted projection",
                 "`fraudengineaggregationresult` is internal",
@@ -41,8 +42,9 @@ class PublicEngineIntelligenceEventContractDocsTest {
                 "operational diagnostic signals must not carry fraud risk",
                 "agreement is not approval",
                 "disagreement is not decline",
-                "does not add alert-service projection",
-                "does not add api/ui",
+                "does not expose raw `fraudengineresult`",
+                "generic all-engine comparison",
+                "historical fdp-92 did not add alert-service projection, api/ui, or production publication",
                 "does not add final decisioning",
                 "fdp-93 consumer-first rollout guard",
                 "fdp-94 adds disabled-by-default producer diagnostic enrichment",
@@ -55,11 +57,8 @@ class PublicEngineIntelligenceEventContractDocsTest {
                 "diagnostic signals are not recommendations"
         ).doesNotContain(
                 "production decisioning",
-                "analyst console ready",
-                "ui ready",
-                "alert projection ready",
                 "automatic decline",
-                "payment authorization"
+                "authorize payments"
         );
     }
 
