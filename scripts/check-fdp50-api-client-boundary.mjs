@@ -59,6 +59,9 @@ for (const file of files) {
     if (node.type === "CallExpression" && node.callee.type === "Import" && node.arguments.some((argument) => isAlertsApiLiteral(argument))) {
       fail(file, node, "dynamically imports alertsApi.js from an auth-sensitive boundary");
     }
+    if (node.type === "ImportExpression" && isAlertsApiLiteral(node.source)) {
+      fail(file, node, "dynamically imports alertsApi.js from an auth-sensitive boundary");
+    }
     if (node.type === "VariableDeclarator" && node.id.type === "Identifier" && isFetchReference(node.init)) {
       fetchAliases.add(node.id.name);
       fail(file, node, `aliases raw fetch as ${node.id.name}`);
