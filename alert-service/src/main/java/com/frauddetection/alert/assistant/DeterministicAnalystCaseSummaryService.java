@@ -16,6 +16,18 @@ import java.util.Map;
 @Service
 public class DeterministicAnalystCaseSummaryService implements AnalystCaseSummaryUseCase {
 
+    private static final String DEVICE_NOVELTY_REASON = "DEVICE_NOVELTY";
+    private static final String COUNTRY_MISMATCH_REASON = "COUNTRY_MISMATCH";
+    private static final String PROXY_OR_VPN_REASON = "PROXY_OR_VPN";
+    private static final String HIGH_VELOCITY_REASON = "HIGH_VELOCITY";
+    private static final String TRANSACTION_VELOCITY_REASON = "TRANSACTION_VELOCITY";
+    private static final String HIGH_TRANSACTION_AMOUNT_REASON = "HIGH_TRANSACTION_AMOUNT";
+    private static final String RECENT_AMOUNT_SUM = "recentAmountSum";
+    private static final String TRANSACTION_VELOCITY_PER_MINUTE = "transactionVelocityPerMinute";
+    private static final String DEVICE_NOVELTY = "deviceNovelty";
+    private static final String COUNTRY_MISMATCH = "countryMismatch";
+    private static final String PROXY_OR_VPN_DETECTED = "proxyOrVpnDetected";
+
     private final AlertManagementUseCase alertManagementUseCase;
     private final AssistantProperties assistantProperties;
     private final OllamaCaseNarrativeClient ollamaCaseNarrativeClient;
@@ -106,12 +118,12 @@ public class DeterministicAnalystCaseSummaryService implements AnalystCaseSummar
                 alert.customerContext() == null ? null : alert.customerContext().segment(),
                 alert.customerContext() == null ? null : alert.customerContext().accountAgeDays(),
                 integerValue(snapshot.get("recentTransactionCount")),
-                alert.transactionAmount() == null ? null : moneyValue(snapshot.get("recentAmountSum"), alert.transactionAmount().currency()),
-                numberValue(snapshot.get("transactionVelocityPerMinute")),
+                alert.transactionAmount() == null ? null : moneyValue(snapshot.get(RECENT_AMOUNT_SUM), alert.transactionAmount().currency()),
+                numberValue(snapshot.get(TRANSACTION_VELOCITY_PER_MINUTE)),
                 integerValue(snapshot.get("merchantFrequency7d")),
-                booleanValue(snapshot.get("deviceNovelty")),
-                booleanValue(snapshot.get("countryMismatch")),
-                booleanValue(snapshot.get("proxyOrVpnDetected")),
+                booleanValue(snapshot.get(DEVICE_NOVELTY)),
+                booleanValue(snapshot.get(COUNTRY_MISMATCH)),
+                booleanValue(snapshot.get(PROXY_OR_VPN_DETECTED)),
                 null,
                 snapshot
         );
@@ -126,7 +138,7 @@ public class DeterministicAnalystCaseSummaryService implements AnalystCaseSummar
                     List.of("Verify customer contact signals", "Review device and location history", "Check recent merchant activity")
             );
         }
-        if (contains(alert.reasonCodes(), "COUNTRY_MISMATCH") || contains(alert.reasonCodes(), "DEVICE_NOVELTY")) {
+        if (contains(alert.reasonCodes(), COUNTRY_MISMATCH_REASON) || contains(alert.reasonCodes(), DEVICE_NOVELTY_REASON)) {
             return new RecommendedNextAction(
                     "STEP_UP_REVIEW",
                     "Review identity and device signals",
@@ -192,14 +204,15 @@ public class DeterministicAnalystCaseSummaryService implements AnalystCaseSummar
         Map<String, Object> evidence = new LinkedHashMap<>();
         Map<String, Object> snapshot = alert.featureSnapshot() == null ? Map.of() : alert.featureSnapshot();
         switch (reasonCode) {
-            case "DEVICE_NOVELTY", "deviceNovelty" -> evidence.put("deviceNovelty", snapshot.get("deviceNovelty"));
-            case "COUNTRY_MISMATCH", "countryMismatch" -> {
-                evidence.put("countryMismatch", snapshot.get("countryMismatch"));
+            case DEVICE_NOVELTY_REASON, DEVICE_NOVELTY -> evidence.put(DEVICE_NOVELTY, snapshot.get(DEVICE_NOVELTY));
+            case COUNTRY_MISMATCH_REASON, COUNTRY_MISMATCH -> {
+                evidence.put(COUNTRY_MISMATCH, snapshot.get(COUNTRY_MISMATCH));
                 evidence.put("homeCountryCode", alert.customerContext() == null ? null : alert.customerContext().homeCountryCode());
                 evidence.put("transactionCountryCode", alert.locationInfo() == null ? null : alert.locationInfo().countryCode());
             }
-            case "PROXY_OR_VPN", "proxyOrVpnDetected" -> evidence.put("proxyOrVpnDetected", snapshot.get("proxyOrVpnDetected"));
-            case "HIGH_VELOCITY", "TRANSACTION_VELOCITY", "transactionVelocityPerMinute" -> evidence.put("transactionVelocityPerMinute", snapshot.get("transactionVelocityPerMinute"));
+            case PROXY_OR_VPN_REASON, PROXY_OR_VPN_DETECTED -> evidence.put(PROXY_OR_VPN_DETECTED, snapshot.get(PROXY_OR_VPN_DETECTED));
+            case HIGH_VELOCITY_REASON, TRANSACTION_VELOCITY_REASON, TRANSACTION_VELOCITY_PER_MINUTE ->
+                    evidence.put(TRANSACTION_VELOCITY_PER_MINUTE, snapshot.get(TRANSACTION_VELOCITY_PER_MINUTE));
             default -> evidence.put("featureSnapshot", snapshot);
         }
         return evidence;
@@ -207,22 +220,22 @@ public class DeterministicAnalystCaseSummaryService implements AnalystCaseSummar
 
     private String analystLabel(String reasonCode) {
         return switch (reasonCode) {
-            case "DEVICE_NOVELTY", "deviceNovelty" -> "New or unusual device";
-            case "COUNTRY_MISMATCH", "countryMismatch" -> "Country mismatch";
-            case "PROXY_OR_VPN", "proxyOrVpnDetected" -> "Proxy or VPN detected";
-            case "HIGH_VELOCITY", "TRANSACTION_VELOCITY", "transactionVelocityPerMinute" -> "Transaction velocity";
-            case "HIGH_TRANSACTION_AMOUNT", "recentAmountSum" -> "High amount activity";
+            case DEVICE_NOVELTY_REASON, DEVICE_NOVELTY -> "New or unusual device";
+            case COUNTRY_MISMATCH_REASON, COUNTRY_MISMATCH -> "Country mismatch";
+            case PROXY_OR_VPN_REASON, PROXY_OR_VPN_DETECTED -> "Proxy or VPN detected";
+            case HIGH_VELOCITY_REASON, TRANSACTION_VELOCITY_REASON, TRANSACTION_VELOCITY_PER_MINUTE -> "Transaction velocity";
+            case HIGH_TRANSACTION_AMOUNT_REASON, RECENT_AMOUNT_SUM -> "High amount activity";
             default -> reasonCode.replace('_', ' ');
         };
     }
 
     private String explanation(String reasonCode) {
         return switch (reasonCode) {
-            case "DEVICE_NOVELTY", "deviceNovelty" -> "The transaction used a device signal that differs from the customer's known behavior.";
-            case "COUNTRY_MISMATCH", "countryMismatch" -> "The transaction location differs from the customer's expected country context.";
-            case "PROXY_OR_VPN", "proxyOrVpnDetected" -> "Network indicators suggest anonymized or proxied access.";
-            case "HIGH_VELOCITY", "TRANSACTION_VELOCITY", "transactionVelocityPerMinute" -> "Recent transaction frequency is elevated for this customer.";
-            case "HIGH_TRANSACTION_AMOUNT", "recentAmountSum" -> "The transaction or recent amount accumulation is materially higher than baseline traffic.";
+            case DEVICE_NOVELTY_REASON, DEVICE_NOVELTY -> "The transaction used a device signal that differs from the customer's known behavior.";
+            case COUNTRY_MISMATCH_REASON, COUNTRY_MISMATCH -> "The transaction location differs from the customer's expected country context.";
+            case PROXY_OR_VPN_REASON, PROXY_OR_VPN_DETECTED -> "Network indicators suggest anonymized or proxied access.";
+            case HIGH_VELOCITY_REASON, TRANSACTION_VELOCITY_REASON, TRANSACTION_VELOCITY_PER_MINUTE -> "Recent transaction frequency is elevated for this customer.";
+            case HIGH_TRANSACTION_AMOUNT_REASON, RECENT_AMOUNT_SUM -> "The transaction or recent amount accumulation is materially higher than baseline traffic.";
             default -> "This signal contributed to the alert score and should be reviewed with the supporting evidence.";
         };
     }

@@ -12,6 +12,10 @@ import org.springframework.util.StringUtils;
 
 class BffSessionSecurityConfigurer {
 
+    private static final String JSESSIONID_COOKIE = "JSESSIONID";
+    private static final String XSRF_TOKEN_COOKIE = "XSRF-TOKEN";
+
+    @SuppressWarnings("java:S4502")
     void configure(
             HttpSecurity http,
             boolean bffEnabled,
@@ -19,12 +23,12 @@ class BffSessionSecurityConfigurer {
             BffLogoutSuccessHandler bffLogoutSuccessHandler
     ) throws Exception {
         if (!bffEnabled) {
-            http.csrf(AbstractHttpConfigurer::disable);
+            configureStatelessApiCsrf(http);
             return;
         }
         http
                 .csrf(csrf -> csrf
-                        .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                        .csrfTokenRepository(csrfTokenRepository())
                         .ignoringRequestMatchers(this::isCsrfIgnoredRequest)
                 )
                 .oauth2Login(oauth2 -> oauth2
@@ -35,9 +39,20 @@ class BffSessionSecurityConfigurer {
                 .logout(logout -> logout
                         .logoutUrl("/bff/logout")
                         .invalidateHttpSession(true)
-                        .deleteCookies("JSESSIONID", "XSRF-TOKEN")
+                        .deleteCookies(JSESSIONID_COOKIE, XSRF_TOKEN_COOKIE)
                         .logoutSuccessHandler(bffLogoutSuccessHandler)
                 );
+    }
+
+    @SuppressWarnings("java:S4502")
+    private void configureStatelessApiCsrf(HttpSecurity http) {
+        http.csrf(AbstractHttpConfigurer::disable);
+    }
+
+    private CookieCsrfTokenRepository csrfTokenRepository() {
+        CookieCsrfTokenRepository repository = new CookieCsrfTokenRepository();
+        repository.setCookieCustomizer(cookie -> cookie.httpOnly(true));
+        return repository;
     }
 
     private boolean isStatelessBearerRequest(HttpServletRequest request) {
@@ -52,9 +67,8 @@ class BffSessionSecurityConfigurer {
     }
 
     private boolean hasSessionSignal(HttpServletRequest request) {
-        return hasCookie(request, "JSESSIONID")
-                || StringUtils.hasText(request.getRequestedSessionId())
-                || hasCookieHeader(request, "JSESSIONID");
+        return hasCookie(request, JSESSIONID_COOKIE)
+                || hasCookieHeader(request, JSESSIONID_COOKIE);
     }
 
     private boolean hasCookie(HttpServletRequest request, String cookieName) {
