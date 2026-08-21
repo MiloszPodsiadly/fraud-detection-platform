@@ -27,22 +27,22 @@
   },
   "dependencies": {
     "oidc-client-ts": "3.5.0",
-    "react": "19.2.5",
-    "react-dom": "19.2.5"
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@babel/parser": "7.29.7",
-    "@testing-library/jest-dom": "6.9.1",
+    "@babel/parser": "8.0.4",
+    "@testing-library/jest-dom": "7.0.1",
     "@testing-library/react": "16.3.2",
-    "@vitejs/plugin-react": "6.0.2",
-    "happy-dom": "20.10.6",
-    "vite": "8.0.16",
-    "vitest": "4.1.9"
+    "@vitejs/plugin-react": "6.1.0",
+    "happy-dom": "20.11.6",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
   },
   "overrides": {
-    "postcss": "8.5.23",
-    "undici": "8.5.0",
+    "postcss": "8.5.26",
+    "undici": "8.10.0",
     "minimist": "^1.2.8",
-    "ws": "^8.21.0"
+    "ws": "^8.21.3"
   }
 }
