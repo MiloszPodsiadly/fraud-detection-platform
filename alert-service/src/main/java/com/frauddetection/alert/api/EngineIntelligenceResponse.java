@@ -21,7 +21,7 @@ public record EngineIntelligenceResponse(
 ) {
 
     public EngineIntelligenceResponse {
-        status = Objects.requireNonNull(status, "status is required");
+        Objects.requireNonNull(status, "status is required");
         engines = immutable(engines);
         diagnosticSignals = immutable(diagnosticSignals);
         warnings = immutable(warnings);

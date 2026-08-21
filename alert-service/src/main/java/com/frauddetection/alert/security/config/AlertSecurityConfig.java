@@ -18,10 +18,12 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
+
+import java.util.List;
 
 @Configuration
 @EnableWebSecurity
@@ -48,9 +50,11 @@ public class AlertSecurityConfig {
 
     @Bean
     UserDetailsService userDetailsService() {
-        return username -> {
-            throw new UsernameNotFoundException("Password authentication is not supported.");
-        };
+        return username -> User.withUsername("password-auth-disabled")
+                .password("{noop}password-auth-disabled")
+                .disabled(true)
+                .authorities(List.of())
+                .build();
     }
 
     @Bean
