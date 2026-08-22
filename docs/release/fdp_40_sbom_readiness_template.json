@@ -1,8 +1,12 @@
 {
   "build_workflow": "CI",
   "commit_sha": "0123456789abcdef0123456789abcdef01234567",
-  "generation_tool": "external-sbom-tool-required",
+  "generation_tool": "CycloneDX Maven plugin, @cyclonedx/cyclonedx-npm, cyclonedx-bom",
   "image_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "production_image_sbom_required_before_production_enablement": true,
+  "repository_dependency_sbom_format": "CycloneDX JSON",
+  "repository_dependency_sbom_generated_by_ci": true,
+  "repository_dependency_sbom_workflow": ".github/workflows/sbom.yml",
   "retention_policy_required": true,
   "sbom_format_allowed": [
     "SPDX",
