@@ -1,0 +1,110 @@
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Warsaw
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - java
+    commit-message:
+      prefix: deps
+    groups:
+      spring-platform:
+        patterns:
+          - org.springframework*
+          - org.springframework.boot*
+          - org.springframework.kafka*
+      test-and-security-tooling:
+        patterns:
+          - org.cyclonedx*
+          - org.testcontainers*
+          - org.assertj*
+
+  - package-ecosystem: npm
+    directory: /analyst-console-ui
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:30"
+      timezone: Europe/Warsaw
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - frontend
+    commit-message:
+      prefix: deps
+    groups:
+      frontend-runtime:
+        patterns:
+          - react
+          - react-dom
+          - oidc-client-ts
+      frontend-tooling:
+        dependency-type: development
+        patterns:
+          - "*"
+
+  - package-ecosystem: pip
+    directory: /ml-inference-service
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Europe/Warsaw
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - python
+    commit-message:
+      prefix: deps
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:30"
+      timezone: Europe/Warsaw
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: ci
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: docker
+    directory: /deployment
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: Europe/Warsaw
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - docker
+    commit-message:
+      prefix: deps
+
+  - package-ecosystem: docker-compose
+    directory: /deployment
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:30"
+      timezone: Europe/Warsaw
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - docker
+    commit-message:
+      prefix: deps
