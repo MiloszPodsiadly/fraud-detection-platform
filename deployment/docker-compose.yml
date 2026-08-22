@@ -71,7 +71,7 @@ services:
 
   redis:
     <<: *service-defaults
-    image: redis:7.2-alpine
+    image: redis:8.10-alpine
     volumes:
       - redis-data:/data
     healthcheck:
