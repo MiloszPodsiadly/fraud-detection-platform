@@ -52,7 +52,7 @@
         <lz4-java.version>1.11.2</lz4-java.version>
         <maven-surefire-plugin.version>3.5.5</maven-surefire-plugin.version>
         <swagger-parser.version>2.1.42</swagger-parser.version>
-        <json-schema-validator.version>2.2.14</json-schema-validator.version>
+        <networknt-json-schema-validator.version>2.0.4</networknt-json-schema-validator.version>
         <guava.version>33.7.1-jre</guava.version>
         <guava.failureaccess.version>1.0.3</guava.failureaccess.version>
         <rhino.version>1.9.1</rhino.version>
@@ -189,9 +189,9 @@
                 <version>${prometheus.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.github.java-json-tools</groupId>
+                <groupId>com.networknt</groupId>
                 <artifactId>json-schema-validator</artifactId>
-                <version>${json-schema-validator.version}</version>
+                <version>${networknt-json-schema-validator.version}</version>
                 <scope>test</scope>
             </dependency>
             <dependency>
