@@ -33,7 +33,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 COPY analyst-console-ui/ ./
 RUN npm run build
 
-FROM nginx:1.27-alpine
+FROM nginx:1.30-alpine
 
 RUN rm -f /etc/nginx/conf.d/default.conf \
     && chown -R nginx:nginx /var/cache/nginx /run /usr/share/nginx/html /etc/nginx/conf.d
