@@ -1,11 +1,5 @@
 package com.frauddetection.alert.engineintelligence.api;
 
-import com.github.fge.jackson.JsonLoader;
-import com.github.fge.jsonschema.core.exceptions.ProcessingException;
-import com.github.fge.jsonschema.core.report.ProcessingMessage;
-import com.github.fge.jsonschema.core.report.ProcessingReport;
-import com.github.fge.jsonschema.main.JsonSchema;
-import com.github.fge.jsonschema.main.JsonSchemaFactory;
 import com.frauddetection.alert.api.EngineIntelligenceComparisonResponse;
 import com.frauddetection.alert.api.EngineIntelligenceDiagnosticSignalResponse;
 import com.frauddetection.alert.api.EngineIntelligenceEngineResponse;
@@ -36,6 +30,11 @@ import com.frauddetection.common.events.recommendation.AnalystRecommendationNonD
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationSource;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationStatus;
+import com.networknt.schema.Error;
+import com.networknt.schema.InputFormat;
+import com.networknt.schema.Schema;
+import com.networknt.schema.SchemaRegistry;
+import com.networknt.schema.SpecificationVersion;
 import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 import tools.jackson.core.type.TypeReference;
@@ -704,7 +703,7 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
 
     private static final class OpenApiInstanceValidator {
         private final ObjectMapper objectMapper;
-        private final JsonSchemaFactory schemaFactory = JsonSchemaFactory.byDefault();
+        private final SchemaRegistry schemaRegistry = SchemaRegistry.withDefaultDialect(SpecificationVersion.DRAFT_4);
         private final Map<String, Object> definitions;
 
         private OpenApiInstanceValidator(Map<String, Object> schemas, ObjectMapper objectMapper) {
@@ -717,20 +716,9 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
             document.put("$schema", "http://json-schema.org/draft-04/schema#");
             document.put("$ref", "#/definitions/" + schemaName);
             document.put("definitions", definitions);
-            try {
-                JsonSchema schema = schemaFactory.getJsonSchema(JsonLoader.fromString(objectMapper.writeValueAsString(document)));
-                ProcessingReport report = schema.validate(JsonLoader.fromString(objectMapper.writeValueAsString(instance)));
-                if (report.isSuccess()) {
-                    return List.of();
-                }
-                List<String> errors = new ArrayList<>();
-                for (ProcessingMessage message : report) {
-                    errors.add(message.getMessage());
-                }
-                return errors;
-            } catch (ProcessingException | java.io.IOException exception) {
-                throw new IllegalStateException(exception);
-            }
+            Schema schema = schemaRegistry.getSchema(objectMapper.writeValueAsString(document));
+            List<Error> errors = schema.validate(objectMapper.writeValueAsString(instance), InputFormat.JSON);
+            return errors.stream().map(Error::getMessage).toList();
         }
 
         private Map<String, Object> convertSchemas(Map<String, Object> schemas) {

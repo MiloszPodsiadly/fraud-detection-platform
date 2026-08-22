@@ -6,7 +6,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.1.0</version>
+        <version>4.1.1</version>
         <relativePath/>
     </parent>
 
@@ -35,7 +35,7 @@
         <assertj.version>3.27.7</assertj.version>
         <nimbus-jose-jwt.version>10.9.1</nimbus-jose-jwt.version>
         <log4j2.version>2.26.1</log4j2.version>
-        <spring-kafka.version>4.1.0</spring-kafka.version>
+        <spring-kafka.version>4.1.1</spring-kafka.version>
         <kafka-clients.version>4.3.1</kafka-clients.version>
         <netty.version>4.2.16.Final</netty.version>
         <tomcat.version>11.0.24</tomcat.version>
@@ -52,7 +52,7 @@
         <lz4-java.version>1.11.2</lz4-java.version>
         <maven-surefire-plugin.version>3.5.5</maven-surefire-plugin.version>
         <swagger-parser.version>2.1.42</swagger-parser.version>
-        <json-schema-validator.version>2.2.14</json-schema-validator.version>
+        <networknt-json-schema-validator.version>2.0.4</networknt-json-schema-validator.version>
         <guava.version>33.7.1-jre</guava.version>
         <guava.failureaccess.version>1.0.3</guava.failureaccess.version>
         <rhino.version>1.9.1</rhino.version>
@@ -189,9 +189,9 @@
                 <version>${prometheus.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.github.java-json-tools</groupId>
+                <groupId>com.networknt</groupId>
                 <artifactId>json-schema-validator</artifactId>
-                <version>${json-schema-validator.version}</version>
+                <version>${networknt-json-schema-validator.version}</version>
                 <scope>test</scope>
             </dependency>
             <dependency>

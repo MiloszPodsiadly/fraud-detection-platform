@@ -104,14 +104,17 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
 
         transactionIngestContext = startWebApplication(TransactionIngestServiceApplication.class, Map.of(
                 "server.port", 0,
+                "spring.application.name", "transaction-ingest-service-e2e-" + TOPIC_SUFFIX,
                 "spring.autoconfigure.exclude", DISABLE_DEFAULT_SECURITY_AUTO_CONFIG,
                 "spring.kafka.bootstrap-servers", FraudPlatformContainers.kafka().getBootstrapServers(),
                 "app.kafka.topics.transaction-raw", TRANSACTION_RAW_TOPIC
         ));
 
         featureEnricherContext = startWorkerApplication(FeatureEnricherServiceApplication.class, Map.ofEntries(
+                Map.entry("spring.application.name", "feature-enricher-service-e2e-" + TOPIC_SUFFIX),
                 Map.entry("spring.autoconfigure.exclude", DISABLE_DEFAULT_SECURITY_AUTO_CONFIG),
                 Map.entry("spring.kafka.bootstrap-servers", FraudPlatformContainers.kafka().getBootstrapServers()),
+                Map.entry("spring.kafka.consumer.group-id", "feature-enricher-e2e-" + TOPIC_SUFFIX),
                 Map.entry("spring.data.redis.host", FraudPlatformContainers.redis().getHost()),
                 Map.entry("spring.data.redis.port", FraudPlatformContainers.redis().getMappedPort(6379)),
                 Map.entry("app.kafka.topics.transaction-raw", TRANSACTION_RAW_TOPIC),
@@ -125,8 +128,10 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
         ));
 
         fraudScoringContext = startWorkerApplication(FraudScoringServiceApplication.class, Map.of(
+                "spring.application.name", "fraud-scoring-service-e2e-" + TOPIC_SUFFIX,
                 "spring.autoconfigure.exclude", DISABLE_DEFAULT_SECURITY_AUTO_CONFIG,
                 "spring.kafka.bootstrap-servers", FraudPlatformContainers.kafka().getBootstrapServers(),
+                "spring.kafka.consumer.group-id", "fraud-scoring-e2e-" + TOPIC_SUFFIX,
                 "app.kafka.topics.transaction-enriched", TRANSACTION_ENRICHED_TOPIC,
                 "app.kafka.topics.transaction-scored", TRANSACTION_SCORED_TOPIC,
                 "app.kafka.topics.transactions-dead-letter", DEAD_LETTER_TOPIC,
@@ -135,16 +140,18 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
                 "app.scoring.mode", "RULE_BASED"
         ));
 
-        alertContext = startWebApplication(AlertServiceApplication.class, Map.of(
-                "server.port", 0,
-                "spring.profiles.active", "test",
-                "spring.kafka.bootstrap-servers", FraudPlatformContainers.kafka().getBootstrapServers(),
-                "spring.mongodb.uri", FraudPlatformContainers.mongodb().getReplicaSetUrl(MONGODB_DATABASE),
-                "app.security.demo-auth.enabled", true,
-                "app.kafka.topics.transaction-scored", TRANSACTION_SCORED_TOPIC,
-                "app.kafka.topics.fraud-alerts", FRAUD_ALERTS_TOPIC,
-                "app.kafka.topics.fraud-decisions", FRAUD_DECISIONS_TOPIC,
-                "app.kafka.topics.transactions-dead-letter", DEAD_LETTER_TOPIC
+        alertContext = startWebApplication(AlertServiceApplication.class, Map.ofEntries(
+                Map.entry("server.port", 0),
+                Map.entry("spring.application.name", "alert-service-e2e-" + TOPIC_SUFFIX),
+                Map.entry("spring.profiles.active", "test"),
+                Map.entry("spring.kafka.bootstrap-servers", FraudPlatformContainers.kafka().getBootstrapServers()),
+                Map.entry("spring.kafka.consumer.group-id", "alert-e2e-" + TOPIC_SUFFIX),
+                Map.entry("spring.mongodb.uri", FraudPlatformContainers.mongodb().getReplicaSetUrl(MONGODB_DATABASE)),
+                Map.entry("app.security.demo-auth.enabled", true),
+                Map.entry("app.kafka.topics.transaction-scored", TRANSACTION_SCORED_TOPIC),
+                Map.entry("app.kafka.topics.fraud-alerts", FRAUD_ALERTS_TOPIC),
+                Map.entry("app.kafka.topics.fraud-decisions", FRAUD_DECISIONS_TOPIC),
+                Map.entry("app.kafka.topics.transactions-dead-letter", DEAD_LETTER_TOPIC)
         ));
     }
 

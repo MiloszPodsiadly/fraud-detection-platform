@@ -52,6 +52,8 @@ class Fdp40FinalProofPackTest {
         proof.put("fixture_image_promotion_allowed", false);
         proof.put("sbom_required", true);
         proof.put("sbom_generated_by_fdp40", false);
+        proof.put("repository_dependency_sbom_generated_by_ci", true);
+        proof.put("production_image_sbom_required_before_production", true);
         proof.put("sbom_external_platform_control_required", true);
         proof.put("environment_protection_required", true);
         proof.put("separate_config_pr_required", true);
