@@ -4,6 +4,7 @@
 .m2repo
 .vscode
 documents
+data/generated/*
 **/.DS_Store
 **/.env
 **/.env.local
