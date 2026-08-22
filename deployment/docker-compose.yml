@@ -125,7 +125,7 @@ services:
 
   prometheus:
     <<: *service-defaults
-    image: prom/prometheus:v3.3.0
+    image: prom/prometheus:v3.14.0
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=2d
