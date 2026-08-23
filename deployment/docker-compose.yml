@@ -20,7 +20,7 @@ x-java-healthcheck: &java-healthcheck
 services:
   kafka:
     <<: *service-defaults
-    image: apache/kafka:3.8.0
+    image: apache/kafka:4.3.1
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -41,7 +41,7 @@ services:
       start_period: 20s
 
   kafka-topics-init:
-    image: apache/kafka:3.8.0
+    image: apache/kafka:4.3.1
     depends_on:
       kafka:
         condition: service_healthy
@@ -71,7 +71,7 @@ services:
 
   redis:
     <<: *service-defaults
-    image: redis:7.2-alpine
+    image: redis:8.10-alpine
     volumes:
       - redis-data:/data
     healthcheck:
@@ -125,7 +125,7 @@ services:
 
   prometheus:
     <<: *service-defaults
-    image: prom/prometheus:v3.3.0
+    image: prom/prometheus:v3.14.0
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=2d
@@ -137,7 +137,7 @@ services:
 
   grafana:
     <<: *service-defaults
-    image: grafana/grafana:11.6.1
+    image: grafana/grafana:13.2.0
     depends_on:
       prometheus:
         condition: service_started
