@@ -27,8 +27,14 @@ ENV VITE_OIDC_SCOPE=$VITE_OIDC_SCOPE
 COPY scripts/generate-frontend-authorities.mjs /workspace/scripts/generate-frontend-authorities.mjs
 COPY alert-service/src/main/java/com/frauddetection/alert/security/authorization/AnalystAuthority.java /workspace/alert-service/src/main/java/com/frauddetection/alert/security/authorization/AnalystAuthority.java
 
-COPY analyst-console-ui/package.json analyst-console-ui/package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci
+COPY analyst-console-ui/package.json \
+     analyst-console-ui/package-lock.json \
+     analyst-console-ui/.npmrc \
+     ./
+
+RUN --mount=type=cache,target=/root/.npm \
+    test "$(npm config get ignore-scripts)" = "true" \
+    && npm ci --ignore-scripts
 
 COPY analyst-console-ui/ ./
 RUN npm run build
