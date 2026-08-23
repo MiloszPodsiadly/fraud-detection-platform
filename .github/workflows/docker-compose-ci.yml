@@ -44,7 +44,7 @@ jobs:
             files: -f deployment/docker-compose.yml -f deployment/docker-compose.dev.yml -f deployment/docker-compose.oidc.yml -f deployment/docker-compose.service-identity-mtls.yml -f deployment/docker-compose.trust-authority-jwt.yml -f deployment/docker-compose.hardened.yml -f deployment/docker-compose.shadow-performance-generated.yml
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Generate local identity fixtures for Compose overlays
         run: bash scripts/bootstrap-local-fixtures.sh
@@ -57,7 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Generate local runtime fixture from example
         run: |
@@ -86,7 +86,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Generate local runtime fixture from example
         run: |
@@ -112,7 +112,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Generate local runtime fixture from example
         run: |
@@ -129,7 +129,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Generate local runtime fixture from example
         run: |
@@ -148,13 +148,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Generate local identity fixtures for fixture guard tests
         run: bash scripts/bootstrap-local-fixtures.sh
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -170,7 +170,7 @@ jobs:
         run: mvn -B -pl audit-trust-authority -am -Dsurefire.failIfNoSpecifiedTests=false -Dtest=TrustAuthorityServiceTest test
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
@@ -189,7 +189,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Reject committed private key material
         run: bash scripts/ci/assert-no-committed-private-keys.sh
@@ -213,10 +213,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Java for Trivy Maven analysis
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -251,10 +251,10 @@ jobs:
       security-events: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Java for Trivy Maven analysis
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
@@ -301,13 +301,13 @@ jobs:
           - audit-trust-authority
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build backend module image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: deployment/Dockerfile.backend
@@ -331,13 +331,13 @@ jobs:
             dockerfile: deployment/Dockerfile.frontend
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build service image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ${{ matrix.dockerfile }}
