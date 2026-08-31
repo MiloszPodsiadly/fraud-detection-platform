@@ -25,7 +25,7 @@ COPY audit-trust-authority/src audit-trust-authority/src
 RUN mvn -q -pl alert-service -am -DskipTests install
 RUN mvn -q -pl alert-service -DskipTests dependency:copy-dependencies -DincludeScope=test -DoutputDirectory=/workspace/alert-service/target/dependency
 
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:25-jre
 
 WORKDIR /app
 

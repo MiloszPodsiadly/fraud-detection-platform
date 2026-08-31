@@ -31,7 +31,7 @@ COPY audit-trust-authority/src audit-trust-authority/src
 RUN --mount=type=cache,target=/root/.m2,sharing=locked \
     mvn -B -ntp -pl "${MODULE_NAME}" -am -Dmaven.test.skip=true package
 
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:25-jre
 
 ARG MODULE_NAME
 
