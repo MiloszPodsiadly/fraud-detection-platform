@@ -12,7 +12,6 @@ import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.scoring.context.ScoringContext;
 import com.frauddetection.scoring.domain.FraudScoreResult;
-import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.engine.FraudEngineDescriptor;
 import com.frauddetection.scoring.engine.FraudSignalEngine;
 import com.frauddetection.scoring.engine.FraudSignalEvaluation;
@@ -23,6 +22,7 @@ import com.frauddetection.scoring.service.RuleBasedFraudScoringEngine;
 import com.frauddetection.scoring.service.RulesFeatureInputValidator;
 import com.frauddetection.scoring.service.RulesInputValidationResult;
 import com.frauddetection.scoring.service.RulesInputValidationStatus;
+import com.frauddetection.scoring.service.ValidatedRulesInput;
 
 import java.util.List;
 import java.util.Objects;
@@ -54,10 +54,8 @@ public final class RuleBasedSignalEngine implements FraudSignalEngine {
         if (!validation.valid()) {
             return degradedResultFor(validation.status());
         }
-        FraudScoreResult productionResult = productionRuleEngine.scoreValidated(
-                FraudScoringRequest.from(context.transaction()),
-                validation
-        );
+        ValidatedRulesInput input = RulesFeatureInputValidator.requireValidInput(context.transaction(), reader);
+        FraudScoreResult productionResult = productionRuleEngine.scoreValidated(input);
         return availableResult(productionResult);
     }
 

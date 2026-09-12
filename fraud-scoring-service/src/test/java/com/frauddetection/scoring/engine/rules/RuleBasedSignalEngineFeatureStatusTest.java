@@ -363,7 +363,7 @@ class RuleBasedSignalEngineFeatureStatusTest {
                 "PT1M",
                 new Money(amount, "PLN"),
                 "PT1M",
-                velocityPerMinute,
+                (double) recentTransactionCount,
                 base.merchantFrequency7d(),
                 deviceNovelty,
                 countryMismatch,

@@ -15,11 +15,13 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
+import java.lang.reflect.Modifier;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.StreamSupport;
@@ -41,6 +43,8 @@ class RuleBasedFraudScoringEngineTest {
     void frozenRulesV1BaselineMatrixMatchesCurrentPolicy() throws IOException {
         JsonNode matrix = mapper.readTree(RULES_V1_BASELINE_MATRIX.toFile());
 
+        assertThat(matrix.get("source").get("baseSha").textValue())
+                .isEqualTo("61cb3052c918d07c57905ca02c859db585f9474b");
         assertThat(caseIds(matrix)).contains(
                 "normal_activity",
                 "count_4_pt1m_rate_4",
@@ -61,6 +65,20 @@ class RuleBasedFraudScoringEngineTest {
             assertThat(result.reasonCodes()).containsExactlyElementsOf(textValues(expected.get("reasonCodes")));
             assertThat(result.modelName()).isEqualTo("rule-based-engine");
             assertThat(result.modelVersion()).isEqualTo("v1");
+        }
+    }
+
+    @Test
+    void frozenRulesV1BaselineMatrixHasExplicitContributionWeightAndSourceOracle() throws IOException {
+        JsonNode matrix = mapper.readTree(RULES_V1_BASELINE_MATRIX.toFile());
+
+        for (JsonNode baselineCase : matrix.get("cases")) {
+            String caseId = baselineCase.get("caseId").textValue();
+            FraudScoreResult result = engine.score(FraudScoringRequest.from(eventFrom(baselineCase)));
+
+            assertThat(result.scoreDetails())
+                    .as(caseId)
+                    .containsAllEntriesOf(expectedScoreDetailOracle().get(caseId));
         }
     }
 
@@ -1033,6 +1051,87 @@ class RuleBasedFraudScoringEngineTest {
         assertThat(source).doesNotContain("reasonCodes.add(\"");
     }
 
+    @Test
+    void validatedInputCannotBeDetachedToAuthorizeAnotherEvent() {
+        TransactionEnrichedEvent eventA = event(
+                1,
+                1.0d,
+                new BigDecimal("100.00"),
+                new BigDecimal("100.00"),
+                List.of(),
+                false,
+                false,
+                false
+        );
+        TransactionEnrichedEvent eventB = event(
+                5,
+                4.0d,
+                new BigDecimal("100.00"),
+                new BigDecimal("500.00"),
+                List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
+                false,
+                false,
+                false
+        );
+        ValidatedRulesInput inputA = RulesFeatureInputValidator.requireValidInput(eventA);
+
+        FraudScoreResult result = engine.scoreValidated(inputA);
+
+        assertThat(result.fraudScore()).isEqualTo(0.05d);
+        assertThat(result.reasonCodes()).isEmpty();
+        assertRulesInputInvalid(eventB);
+    }
+
+    @Test
+    void mutationAfterValidationDoesNotAffectValidatedScoringInput() {
+        Map<String, Object> mutableSnapshot = new HashMap<>();
+        mutableSnapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1);
+        mutableSnapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M");
+        TransactionEnrichedEvent event = withFeatureSnapshot(
+                topLevelOnly(List.of(), null, null, null, null),
+                mutableSnapshot
+        );
+        ValidatedRulesInput input = RulesFeatureInputValidator.requireValidInput(event);
+
+        mutableSnapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5);
+        mutableSnapshot.put(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d);
+
+        FraudScoreResult result = engine.scoreValidated(input);
+
+        assertThat(result.reasonCodes()).doesNotContain(ReasonCode.HIGH_VELOCITY.wireValue());
+        assertThat(result.featureSnapshot()).containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1);
+        assertThat(result.featureSnapshot()).doesNotContainKey(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE);
+    }
+
+    @Test
+    void validatedRulesInputHasNoPublicArbitraryConstructor() {
+        assertThat(ValidatedRulesInput.class.getConstructors()).isEmpty();
+        assertThat(ValidatedRulesInput.class.getDeclaredConstructors())
+                .allSatisfy(constructor -> assertThat(Modifier.isPublic(constructor.getModifiers())).isFalse());
+
+        TransactionEnrichedEvent invalid = event(
+                5,
+                4.0d,
+                new BigDecimal("100.00"),
+                new BigDecimal("500.00"),
+                List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
+                false,
+                false,
+                false
+        );
+
+        assertThatThrownBy(() -> RulesFeatureInputValidator.requireValidInput(invalid))
+                .isInstanceOf(RulesFeatureInputValidationException.class);
+    }
+
+    @Test
+    void scoringEngineDoesNotExposeDetachedValidatedRequestSignature() throws IOException {
+        String source = Files.readString(Path.of("src/main/java/com/frauddetection/scoring/service/RuleBasedFraudScoringEngine.java"));
+
+        assertThat(source).doesNotContain("scoreValidated(FraudScoringRequest request, RulesInputValidationResult validation)");
+        assertThat(source).contains("scoreValidated(ValidatedRulesInput input)");
+    }
+
     private void assertSameCoreResult(TransactionEnrichedEvent left, TransactionEnrichedEvent right) {
         FraudScoreResult leftResult = score(left);
         FraudScoreResult rightResult = score(right);
@@ -1308,6 +1407,75 @@ class RuleBasedFraudScoringEngineTest {
         return StreamSupport.stream(matrix.get("cases").spliterator(), false)
                 .map(item -> item.get("caseId").textValue())
                 .toList();
+    }
+
+    private Map<String, Map<String, Object>> expectedScoreDetailOracle() {
+        return Map.ofEntries(
+                Map.entry("normal_activity", Map.of()),
+                Map.entry("count_4_pt1m_rate_4", Map.of()),
+                Map.entry("count_5_pt1m_rate_5", highVelocityOracle()),
+                Map.entry("count_6_pt1m_rate_6", highVelocityOracle()),
+                Map.entry("rapid_count_2_pln_19999_99", highAmountOracle()),
+                Map.entry("rapid_count_2_pln_20000", merge(highAmountOracle(), rapidOracle())),
+                Map.entry("rapid_count_5_high_pln_amount", merge(highVelocityOracle(), highAmountOracle(), rapidOracle())),
+                Map.entry("high_recent_amount_without_rapid_burst", highAmountOracle()),
+                Map.entry("legacy_high_velocity_flag_present", highVelocityOracle()),
+                Map.entry("legacy_high_velocity_flag_absent", highVelocityOracle()),
+                Map.entry("device_novelty", Map.of(
+                        "device_noveltyWeight", 0.18d,
+                        "deviceNoveltyBoost", 0.10d
+                )),
+                Map.entry("country_mismatch", Map.of(
+                        "country_mismatchWeight", 0.24d,
+                        "countryMismatchBoost", 0.12d
+                )),
+                Map.entry("proxy_vpn", Map.of(
+                        "proxy_or_vpnWeight", 0.16d,
+                        "proxyOrVpnBoost", 0.10d
+                )),
+                Map.entry("combined_near_high_threshold", merge(highVelocityOracle(), Map.of(
+                        "country_mismatchWeight", 0.24d,
+                        "countryMismatchBoost", 0.12d
+                ))),
+                Map.entry("combined_critical_threshold", merge(highVelocityOracle(), Map.of(
+                        "device_noveltyWeight", 0.18d,
+                        "deviceNoveltyBoost", 0.10d,
+                        "country_mismatchWeight", 0.24d,
+                        "countryMismatchBoost", 0.12d,
+                        "proxy_or_vpnWeight", 0.16d,
+                        "proxyOrVpnBoost", 0.10d
+                )))
+        );
+    }
+
+    @SafeVarargs
+    private final Map<String, Object> merge(Map<String, Object>... maps) {
+        Map<String, Object> merged = new HashMap<>();
+        for (Map<String, Object> map : maps) {
+            merged.putAll(map);
+        }
+        return Map.copyOf(merged);
+    }
+
+    private Map<String, Object> highVelocityOracle() {
+        return Map.of(
+                "highVelocityRulesV1Weight", 0.42d,
+                "highVelocityRulesV1Sources", List.of("CANONICAL", "TOP_LEVEL_COMPATIBILITY")
+        );
+    }
+
+    private Map<String, Object> highAmountOracle() {
+        return Map.of(
+                "recentAmountActivityRulesV1Weight", 0.24d,
+                "recentAmountActivityRulesV1Sources", List.of("CANONICAL")
+        );
+    }
+
+    private Map<String, Object> rapidOracle() {
+        return Map.of(
+                "rapidPln20kBurstRulesV1Weight", 0.65d,
+                "rapidPln20kBurstRulesV1Sources", List.of("CANONICAL")
+        );
     }
 
     private List<String> textValues(JsonNode node) {

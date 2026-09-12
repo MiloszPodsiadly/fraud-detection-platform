@@ -65,7 +65,7 @@ class RuleBasedScoringEvidenceProjectionTest {
                 "PT1M",
                 new com.frauddetection.common.events.model.Money(new java.math.BigDecimal("45.00"), "USD"),
                 "PT1M",
-                0.01d,
+                1.0d,
                 1,
                 false,
                 false,

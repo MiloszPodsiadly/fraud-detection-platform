@@ -34,21 +34,17 @@ public class RuleBasedFraudScoringEngine implements FraudScoringEngine {
 
     @Override
     public FraudScoreResult score(FraudScoringRequest request) {
-        TransactionEnrichedEvent event = request.event();
-        RulesFeatureInputValidator.requireValid(event);
-        return scoreInternal(request, event);
+        ValidatedRulesInput input = RulesFeatureInputValidator.requireValidInput(request.event());
+        return scoreValidated(input);
     }
 
-    public FraudScoreResult scoreValidated(FraudScoringRequest request, RulesInputValidationResult validation) {
-        Objects.requireNonNull(validation, "validation is required");
-        validation.requireNoAdapterDefect();
-        if (!validation.valid()) {
-            throw new RulesFeatureInputValidationException();
-        }
-        return scoreInternal(request, request.event());
+    public FraudScoreResult scoreValidated(ValidatedRulesInput input) {
+        Objects.requireNonNull(input, "input is required");
+        return scoreInternal(input);
     }
 
-    private FraudScoreResult scoreInternal(FraudScoringRequest request, TransactionEnrichedEvent event) {
+    private FraudScoreResult scoreInternal(ValidatedRulesInput input) {
+        TransactionEnrichedEvent event = input.event();
         double score = 0.05d;
         Map<String, Object> scoreDetails = new LinkedHashMap<>();
         Set<String> reasonCodes = new LinkedHashSet<>();
@@ -117,7 +113,7 @@ public class RuleBasedFraudScoringEngine implements FraudScoringEngine {
                 inferenceTimestamp,
                 new ArrayList<>(reasonCodes),
                 scoreDetails,
-                request.featureSnapshot(),
+                input.featureSnapshot(),
                 explanationMetadata,
                 alertRecommended,
                 scoringEvidence

@@ -203,14 +203,6 @@ final class RulesV1CompatibilityResolver {
         return present(count) && present(amount) ? PredicateResolution.TRUE : PredicateResolution.ABSENT;
     }
 
-    private static boolean rapidPredicate(int count, BigDecimal amount) {
-        try {
-            return FraudFeatureThresholdContract.isRapidTransferPlnBurst(count, amount);
-        } catch (IllegalArgumentException exception) {
-            return false;
-        }
-    }
-
     private static boolean topLevelRateTriggers(TransactionEnrichedEvent event) {
         return event.transactionVelocityPerMinute() != null && event.transactionVelocityPerMinute() >= 5.0d;
     }
@@ -235,11 +227,6 @@ final class RulesV1CompatibilityResolver {
     private static Optional<Integer> canonicalInteger(Map<String, Object> snapshot, String key) {
         Object value = snapshot.get(key);
         return value instanceof Integer integer ? Optional.of(integer) : Optional.empty();
-    }
-
-    private static Optional<BigDecimal> canonicalDecimal(Map<String, Object> snapshot, String key) {
-        Object value = snapshot.get(key);
-        return value instanceof BigDecimal decimal ? Optional.of(decimal) : Optional.empty();
     }
 
     private static boolean present(FeatureSnapshotValue<?> value) {
