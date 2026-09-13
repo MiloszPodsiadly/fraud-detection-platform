@@ -22,7 +22,6 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -42,14 +41,13 @@ class FeatureEnricherRulesCompositionTest {
             new JacksonKafkaDeserializer<>(TransactionEnrichedEvent.class);
 
     @Test
-    void officialCountFiveProducerOutputPreservesRulesV1MediumScoreWithoutHighVelocityFlag() {
+    void officialCountFiveProducerOutputPreservesRulesV2MediumScoreWithoutFeatureFlags() {
         TransactionEnrichedEvent enriched = officialEvent(4, BigDecimal.ZERO, new BigDecimal("100.00"));
 
         FraudScoreResult result = score(enriched);
 
         assertThat(enriched.recentTransactionCount()).isEqualTo(5);
         assertThat(enriched.transactionVelocityPerMinute()).isEqualTo(5.0d);
-        assertThat(enriched.featureFlags()).doesNotContain(FraudFeatureContract.FLAG_HIGH_VELOCITY);
         assertThat(result.fraudScore()).isCloseTo(0.47d, within(0.000001d));
         assertThat(result.riskLevel()).isEqualTo(RiskLevel.MEDIUM);
         assertThat(result.alertRecommended()).isFalse();
@@ -57,22 +55,17 @@ class FeatureEnricherRulesCompositionTest {
     }
 
     @Test
-    void legacyHighVelocityFlagDoesNotChangeCanonicalProducerScore() {
-        TransactionEnrichedEvent canonical = officialEvent(4, BigDecimal.ZERO, new BigDecimal("100.00"));
-        TransactionEnrichedEvent legacy = withAdditionalFlag(canonical, FraudFeatureContract.FLAG_HIGH_VELOCITY);
-
-        assertSameCoreResult(legacy, canonical);
-    }
-
-    @Test
-    void officialRapidTransferProducerOutputPreservesRulesV1CriticalAlert() {
+    void officialRapidTransferProducerOutputPreservesRulesV2CriticalAlertFromCanonicalFacts() {
         TransactionEnrichedEvent enriched = officialEvent(1, new BigDecimal("10000.00"), new BigDecimal("10000.00"));
 
         FraudScoreResult result = score(enriched);
-
-        assertThat(enriched.featureFlags()).contains(
-                FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY,
-                FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST
+        assertThat(enriched.featureSnapshot()).doesNotContainKeys(
+                "featureFlags",
+                "rapidTransferFraudCaseCandidate",
+                FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN,
+                FraudFeatureContract.RAPID_TRANSFER_COUNT,
+                FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN,
+                FraudFeatureContract.RAPID_TRANSFER_WINDOW
         );
         assertThat(result.fraudScore()).isCloseTo(0.94d, within(0.000001d));
         assertThat(result.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
@@ -130,7 +123,19 @@ class FeatureEnricherRulesCompositionTest {
         assertThat(replayedSnapshot.get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN))
                 .isEqualTo(new BigDecimal("100.00"))
                 .isExactlyInstanceOf(BigDecimal.class);
-        assertThat(rulesResult.featureSnapshot()).isEqualTo(replayedSnapshot);
+        assertThat(rulesResult.featureSnapshot())
+                .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5)
+                .containsEntry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d)
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("100.00"))
+                .containsEntry(FraudFeatureContract.CURRENCY, "PLN")
+                .doesNotContainKeys(
+                        "featureFlags",
+                        "rapidTransferFraudCaseCandidate",
+                        FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN,
+                        FraudFeatureContract.RAPID_TRANSFER_COUNT,
+                        FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN,
+                        FraudFeatureContract.RAPID_TRANSFER_WINDOW
+                );
         assertThat(rulesResult.fraudScore()).isCloseTo(0.47d, within(0.000001d));
         assertThat(rulesResult.riskLevel()).isEqualTo(RiskLevel.MEDIUM);
         assertThat(velocity.reasonCodes()).containsExactly("TRANSACTION_VELOCITY");
@@ -152,51 +157,9 @@ class FeatureEnricherRulesCompositionTest {
         return mapper.toEvent(raw, calculator.calculate(raw, snapshot));
     }
 
-    private TransactionEnrichedEvent withAdditionalFlag(TransactionEnrichedEvent source, String flag) {
-        List<String> flags = new ArrayList<>(source.featureFlags());
-        if (!flags.contains(flag)) {
-            flags.add(flag);
-        }
-        return new TransactionEnrichedEvent(
-                source.eventId(),
-                source.transactionId(),
-                source.correlationId(),
-                source.customerId(),
-                source.accountId(),
-                source.createdAt(),
-                source.transactionTimestamp(),
-                source.transactionAmount(),
-                source.merchantInfo(),
-                source.deviceInfo(),
-                source.locationInfo(),
-                source.customerContext(),
-                source.recentTransactionCount(),
-                source.recentTransactionCountWindow(),
-                source.recentAmountSum(),
-                source.recentAmountSumWindow(),
-                source.transactionVelocityPerMinute(),
-                source.merchantFrequency7d(),
-                source.deviceNovelty(),
-                source.countryMismatch(),
-                source.proxyOrVpnDetected(),
-                List.copyOf(flags),
-                source.featureSnapshot()
-        );
-    }
-
     private TransactionEnrichedEvent kafkaReplay(TransactionEnrichedEvent event) {
         byte[] bytes = serializer.serialize("transactions.enriched", event);
         return deserializer.deserialize("transactions.enriched", bytes);
-    }
-
-    private void assertSameCoreResult(TransactionEnrichedEvent left, TransactionEnrichedEvent right) {
-        FraudScoreResult leftResult = score(left);
-        FraudScoreResult rightResult = score(right);
-
-        assertThat(leftResult.fraudScore()).isEqualTo(rightResult.fraudScore());
-        assertThat(leftResult.riskLevel()).isEqualTo(rightResult.riskLevel());
-        assertThat(leftResult.alertRecommended()).isEqualTo(rightResult.alertRecommended());
-        assertThat(leftResult.reasonCodes()).containsExactlyElementsOf(rightResult.reasonCodes());
     }
 
     private FraudScoreResult score(TransactionEnrichedEvent event) {

@@ -70,10 +70,18 @@ class RuleBasedScoringEvidenceProjectionTest {
                 false,
                 false,
                 false,
-                java.util.List.of(),
-                java.util.Map.of(
-                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1,
-                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M"
+                java.util.Map.ofEntries(
+                        java.util.Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1),
+                        java.util.Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M"),
+                        java.util.Map.entry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 1.0d),
+                        java.util.Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new java.math.BigDecimal("45.00")),
+                        java.util.Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M"),
+                        java.util.Map.entry(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new java.math.BigDecimal("45.00")),
+                        java.util.Map.entry(FraudFeatureContract.MERCHANT_FREQUENCY_7D, 1),
+                        java.util.Map.entry(FraudFeatureContract.DEVICE_NOVELTY, false),
+                        java.util.Map.entry(FraudFeatureContract.COUNTRY_MISMATCH, false),
+                        java.util.Map.entry(FraudFeatureContract.PROXY_OR_VPN_DETECTED, false),
+                        java.util.Map.entry(FraudFeatureContract.CURRENCY, "USD")
                 )
         );
 

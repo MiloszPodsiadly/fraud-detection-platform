@@ -32,7 +32,6 @@ class FeatureContract:
         self.version = str(contract.get("version", "fallback"))
         self.ml_feature_names = self._list(contract.get("mlFeatureNames"), _FALLBACK_ML_FEATURE_NAMES)
         self.java_enriched_feature_names = self._list(contract.get("javaEnrichedFeatureNames"), [])
-        self.feature_flags = self._list(contract.get("featureFlags"), [])
         self.production_inference_features = self._list(
             contract.get("productionInferenceFeatures"),
             self.ml_feature_names,

@@ -74,8 +74,8 @@ class FeaturePipeline:
         if self._is_raw_event(event):
             return self._select_features(self._raw_features(event, history=[]), mode)
 
-        feature_flags = event.get("featureFlags") or []
         amount_sum = self._money_amount(event.get("recentAmountSum"))
+        rapid_transfer_burst = self._rapid_transfer_burst(event)
         features = {
             "recentTransactionCount": min(self._number(event.get("recentTransactionCount")) / 10.0, 1.0),
             "recentAmountSum": min(amount_sum / 10000.0, 1.0),
@@ -91,8 +91,8 @@ class FeaturePipeline:
             "deviceNovelty": self._flag(event.get("deviceNovelty")),
             "countryMismatch": self._flag(event.get("countryMismatch")),
             "proxyOrVpnDetected": self._flag(event.get("proxyOrVpnDetected")),
-            "highRiskFlagCount": min(len(feature_flags) / 6.0, 1.0) if isinstance(feature_flags, list) else 0.0,
-            "rapidTransferBurst": self._rapid_transfer_burst(event, feature_flags),
+            "highRiskFlagCount": self._high_risk_fact_count(event, amount_sum, rapid_transfer_burst),
+            "rapidTransferBurst": rapid_transfer_burst,
         }
         return self._select_features(features, mode)
 
@@ -106,7 +106,7 @@ class FeaturePipeline:
                 "trainingOnlyFeatures": self._features_by_availability("trainingOnly"),
             }
         required = [
-            name for name in self.PRODUCTION_FEATURE_NAMES
+            name for name in FEATURE_CONTRACT.java_enriched_feature_names
             if FEATURE_CONTRACT.feature_availability.get(name) == "providedByJava"
         ]
         missing = [name for name in required if name not in event]
@@ -226,12 +226,28 @@ class FeaturePipeline:
         total = len(values)
         return -sum((count / total) * log2(count / total) for count in counts.values())
 
-    def _rapid_transfer_burst(self, event: dict[str, Any], feature_flags: Any) -> float:
-        if isinstance(feature_flags, list) and "RAPID_PLN_20K_BURST" in feature_flags:
-            return 1.0
-        if event.get("rapidTransferFraudCaseCandidate") is True:
-            return 1.0
-        return 1.0 if self._number(event.get("rapidTransferTotalPln")) >= 20_000.0 else 0.0
+    def _high_risk_fact_count(self, event: dict[str, Any], amount_sum: float, rapid_transfer_burst: float) -> float:
+        facts = [
+            self._flag(event.get("deviceNovelty")),
+            self._flag(event.get("countryMismatch")),
+            self._flag(event.get("proxyOrVpnDetected")),
+            1.0 if self._number(event.get("merchantFrequency7d")) >= 5.0 else 0.0,
+            1.0 if self._number(event.get("recentTransactionCount")) >= 2.0 and amount_sum >= 5_000.0 else 0.0,
+            rapid_transfer_burst,
+        ]
+        return min(sum(facts) / 6.0, 1.0)
+
+    def _rapid_transfer_burst(self, event: dict[str, Any]) -> float:
+        if self._number(event.get("recentTransactionCount")) < 2.0:
+            return 0.0
+        if not self._canonical_one_minute_window(event.get("recentTransactionCountWindow")):
+            return 0.0
+        if not self._canonical_one_minute_window(event.get("recentAmountSumWindow")):
+            return 0.0
+        return 1.0 if self._number(event.get("recentAmountSumPln")) >= 20_000.0 else 0.0
+
+    def _canonical_one_minute_window(self, value: Any) -> bool:
+        return str(value) == "PT1M"
 
     def _money_amount(self, value: Any) -> float:
         if isinstance(value, dict):

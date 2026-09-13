@@ -76,8 +76,8 @@ class FraudScoringOrchestratorPublicationBoundaryTest {
                 null,
                 FraudEngineConfidence.UNKNOWN,
                 List.of("ENGINE_DEGRADED"),
-                List.of(),
-                List.of(),
+                null,
+                null,
                 null,
                 null,
                 "raw-token-accountId-stacktrace"
@@ -97,8 +97,8 @@ class FraudScoringOrchestratorPublicationBoundaryTest {
                 RiskLevel.HIGH,
                 FraudEngineConfidence.UNKNOWN,
                 Collections.nCopies(11, "TRANSACTION_VELOCITY"),
-                List.of(),
-                List.of(),
+                null,
+                null,
                 null,
                 null,
                 null
@@ -128,8 +128,8 @@ class FraudScoringOrchestratorPublicationBoundaryTest {
                 RiskLevel.HIGH,
                 FraudEngineConfidence.UNKNOWN,
                 List.of("TRANSACTION_VELOCITY"),
-                List.of(),
-                List.of(),
+                null,
+                null,
                 null,
                 null,
                 null

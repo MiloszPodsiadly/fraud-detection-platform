@@ -167,7 +167,6 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
                 input.deviceNovelty(),
                 input.countryMismatch(),
                 input.proxyOrVpnDetected(),
-                input.featureFlags(),
                 Map.of(
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "P1D"

@@ -208,7 +208,6 @@ class FraudScoringInvalidRulesInputKafkaIntegrationTest extends AbstractIntegrat
                 false,
                 false,
                 false,
-                List.of(),
                 Map.of(
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "P1D"

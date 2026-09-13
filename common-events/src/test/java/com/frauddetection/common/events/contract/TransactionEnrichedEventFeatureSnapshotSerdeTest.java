@@ -22,7 +22,6 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TransactionEnrichedEventFeatureSnapshotSerdeTest {
     private final ObjectMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
@@ -42,7 +41,7 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
                 Map.entry(FraudFeatureContract.RAPID_TRANSFER_COUNT, 5),
                 Map.entry(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("20000.00")),
                 Map.entry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d),
-                Map.entry(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true),
+                Map.entry("rapidTransferFraudCaseCandidate", true),
                 Map.entry(FraudFeatureContract.COUNTRY_MISMATCH, false),
                 Map.entry("futureAdditiveFeature", Map.of("nested", List.of(1, "two")))
         ));
@@ -62,7 +61,7 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
         assertThat(snapshot.get(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN))
                 .isEqualTo(new BigDecimal("20000.00"))
                 .isExactlyInstanceOf(BigDecimal.class);
-        assertThat(snapshot.get(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE))
+        assertThat(snapshot.get("rapidTransferFraudCaseCandidate"))
                 .isEqualTo(true)
                 .isExactlyInstanceOf(Boolean.class);
         assertThat(snapshot.get(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW))
@@ -77,7 +76,7 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
                 FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
                 FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
                 FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d,
-                FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true
+                "rapidTransferFraudCaseCandidate", true
         )));
 
         TransactionEnrichedEvent replayed = deserializer.deserialize("transactions.enriched", json.getBytes(StandardCharsets.UTF_8));
@@ -85,38 +84,25 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
 
         assertThat(snapshot.get(FraudFeatureContract.RECENT_TRANSACTION_COUNT)).isExactlyInstanceOf(BigDecimal.class);
         assertThat(snapshot.get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN)).isExactlyInstanceOf(String.class);
-        assertThat(snapshot.get(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE)).isExactlyInstanceOf(Integer.class);
+        assertThat(snapshot.get("rapidTransferFraudCaseCandidate")).isExactlyInstanceOf(Integer.class);
     }
 
     @Test
-    void kafkaSerdeReadsMissingFeatureFlagsAsEmptyImmutableList() throws IOException {
+    void kafkaSerdeIgnoresMissingLegacyFeatureFlagsField() throws IOException {
         String json = featureFlagsJson(event(Map.of()), false);
 
         TransactionEnrichedEvent replayed = deserializer.deserialize("transactions.enriched", json.getBytes(StandardCharsets.UTF_8));
 
-        assertThat(replayed.featureFlags()).isEmpty();
-        assertThatThrownBy(() -> replayed.featureFlags().add(FraudFeatureContract.FLAG_HIGH_VELOCITY))
-                .isInstanceOf(UnsupportedOperationException.class);
+        assertThat(replayed.featureSnapshot()).isEmpty();
     }
 
     @Test
-    void kafkaSerdeReadsNullFeatureFlagsAsEmptyImmutableList() throws IOException {
+    void kafkaSerdeIgnoresNullLegacyFeatureFlagsField() throws IOException {
         String json = featureFlagsJson(event(Map.of()), true);
 
         TransactionEnrichedEvent replayed = deserializer.deserialize("transactions.enriched", json.getBytes(StandardCharsets.UTF_8));
 
-        assertThat(replayed.featureFlags()).isEmpty();
-        assertThatThrownBy(() -> replayed.featureFlags().add(FraudFeatureContract.FLAG_HIGH_VELOCITY))
-                .isInstanceOf(UnsupportedOperationException.class);
-    }
-
-    @Test
-    void programmaticallyConstructedNullFeatureFlagsNormalizeToEmptyImmutableList() {
-        TransactionEnrichedEvent event = eventWithFeatureFlags(null);
-
-        assertThat(event.featureFlags()).isEmpty();
-        assertThatThrownBy(() -> event.featureFlags().add(FraudFeatureContract.FLAG_HIGH_VELOCITY))
-                .isInstanceOf(UnsupportedOperationException.class);
+        assertThat(replayed.featureSnapshot()).isEmpty();
     }
 
     @Test
@@ -126,7 +112,7 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
                 Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00")),
                 Map.entry(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("20000.00")),
                 Map.entry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d),
-                Map.entry(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true)
+                Map.entry("rapidTransferFraudCaseCandidate", true)
         );
 
         TransactionScoredEvent replayed = scoredDeserializer.deserialize(
@@ -147,7 +133,7 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
         assertThat(snapshot.get(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN))
                 .isEqualTo(new BigDecimal("20000.00"))
                 .isExactlyInstanceOf(BigDecimal.class);
-        assertThat(snapshot.get(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE))
+        assertThat(snapshot.get("rapidTransferFraudCaseCandidate"))
                 .isEqualTo(true)
                 .isExactlyInstanceOf(Boolean.class);
     }
@@ -158,7 +144,7 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
         ObjectNode featureSnapshot = (ObjectNode) root.path("featureSnapshot");
         featureSnapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT, new BigDecimal("5.5"));
         featureSnapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, "20000.00");
-        featureSnapshot.put(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, 1);
+        featureSnapshot.put("rapidTransferFraudCaseCandidate", 1);
         return objectMapper.writeValueAsString(root);
     }
 
@@ -179,14 +165,6 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
     }
 
     private TransactionEnrichedEvent event(Map<String, Object> featureSnapshot) {
-        return eventWithFeatureFlags(featureSnapshot, List.of());
-    }
-
-    private TransactionEnrichedEvent eventWithFeatureFlags(List<String> featureFlags) {
-        return eventWithFeatureFlags(Map.of(), featureFlags);
-    }
-
-    private TransactionEnrichedEvent eventWithFeatureFlags(Map<String, Object> featureSnapshot, List<String> featureFlags) {
         return new TransactionEnrichedEvent(
                 "evt-serde",
                 "txn-serde",
@@ -209,7 +187,6 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
                 false,
                 false,
                 false,
-                featureFlags,
                 featureSnapshot
         );
     }

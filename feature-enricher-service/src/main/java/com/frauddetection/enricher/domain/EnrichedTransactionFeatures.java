@@ -2,7 +2,6 @@ package com.frauddetection.enricher.domain;
 
 import com.frauddetection.common.events.model.Money;
 
-import java.util.List;
 import java.util.Map;
 
 public record EnrichedTransactionFeatures(
@@ -15,7 +14,6 @@ public record EnrichedTransactionFeatures(
         Boolean deviceNovelty,
         Boolean countryMismatch,
         Boolean proxyOrVpnDetected,
-        List<String> featureFlags,
         Map<String, Object> featureSnapshot
 ) {
 }

@@ -184,13 +184,19 @@ public final class TransactionFixtures {
                     true,
                     false,
                     false,
-                    List.of("DEVICE_NOVELTY", "HIGH_VELOCITY"),
-                    Map.of(
-                            FraudFeatureContract.RECENT_TRANSACTION_COUNT, 8,
-                            FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
-                            FraudFeatureContract.RECENT_AMOUNT_SUM, "5830.24",
-                            FraudFeatureContract.DEVICE_NOVELTY, true,
-                            FraudFeatureContract.MERCHANT_FREQUENCY_7D, 6
+                    Map.ofEntries(
+                            Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 8),
+                            Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M"),
+                            Map.entry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 8.0d),
+                            Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM, new BigDecimal("5830.24")),
+                            Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M"),
+                            Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("5830.24")),
+                            Map.entry(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("1249.99")),
+                            Map.entry(FraudFeatureContract.DEVICE_NOVELTY, true),
+                            Map.entry(FraudFeatureContract.COUNTRY_MISMATCH, false),
+                            Map.entry(FraudFeatureContract.PROXY_OR_VPN_DETECTED, false),
+                            Map.entry(FraudFeatureContract.MERCHANT_FREQUENCY_7D, 6),
+                            Map.entry(FraudFeatureContract.CURRENCY, "USD")
                     )
             );
         }
@@ -208,6 +214,7 @@ public final class TransactionFixtures {
         private Money transactionAmount = defaultMoney();
         private Double fraudScore = 0.94d;
         private RiskLevel riskLevel = RiskLevel.HIGH;
+        private List<String> reasonCodes = List.of("HIGH_AMOUNT", "DEVICE_NOVELTY", "HIGH_VELOCITY");
         private Map<String, Object> featureSnapshot = Map.of("recentTransactionCount", 8, "deviceNovelty", true);
 
         public TransactionScoredEventBuilder withTransactionId(String transactionId) {
@@ -232,6 +239,11 @@ public final class TransactionFixtures {
 
         public TransactionScoredEventBuilder withRiskLevel(RiskLevel riskLevel) {
             this.riskLevel = riskLevel;
+            return this;
+        }
+
+        public TransactionScoredEventBuilder withReasonCodes(List<String> reasonCodes) {
+            this.reasonCodes = reasonCodes == null ? List.of() : List.copyOf(reasonCodes);
             return this;
         }
 
@@ -260,7 +272,7 @@ public final class TransactionFixtures {
                     "rule-engine",
                     "v1",
                     Instant.parse("2026-04-20T10:15:33Z"),
-                    List.of("HIGH_AMOUNT", "DEVICE_NOVELTY", "HIGH_VELOCITY"),
+                    reasonCodes,
                     Map.of("baseScore", 0.72d, "velocityBoost", 0.12d, "deviceBoost", 0.10d),
                     featureSnapshot,
                     true

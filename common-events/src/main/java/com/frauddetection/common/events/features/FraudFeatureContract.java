@@ -28,14 +28,12 @@ public final class FraudFeatureContract {
     public static final String RAPID_TRANSFER_BURST = "rapidTransferBurst";
     public static final String RAPID_TRANSFER_WINDOW = "rapidTransferWindow";
     public static final String RAPID_TRANSFER_THRESHOLD_PLN = "rapidTransferThresholdPln";
-    public static final String RAPID_TRANSFER_FRAUD_CASE_CANDIDATE = "rapidTransferFraudCaseCandidate";
     public static final String RAPID_TRANSFER_COUNT = "rapidTransferCount";
     public static final String RAPID_TRANSFER_TOTAL_PLN = "rapidTransferTotalPln";
     public static final String RAPID_TRANSFER_TRANSACTION_IDS = "rapidTransferTransactionIds";
     public static final String CUSTOMER_SEGMENT = "customerSegment";
     public static final String MERCHANT_CATEGORY = "merchantCategory";
     public static final String CURRENCY = "currency";
-    public static final String FEATURE_FLAGS = "featureFlags";
 
     public static final String FLAG_DEVICE_NOVELTY = "DEVICE_NOVELTY";
     public static final String FLAG_COUNTRY_MISMATCH = "COUNTRY_MISMATCH";
@@ -71,11 +69,6 @@ public final class FraudFeatureContract {
             RECENT_AMOUNT_SUM_WINDOW,
             RECENT_AMOUNT_SUM_PLN,
             CURRENT_TRANSACTION_AMOUNT_PLN,
-            RAPID_TRANSFER_WINDOW,
-            RAPID_TRANSFER_THRESHOLD_PLN,
-            RAPID_TRANSFER_FRAUD_CASE_CANDIDATE,
-            RAPID_TRANSFER_COUNT,
-            RAPID_TRANSFER_TOTAL_PLN,
             RAPID_TRANSFER_TRANSACTION_IDS,
             TRANSACTION_VELOCITY_PER_MINUTE,
             MERCHANT_FREQUENCY_7D,
@@ -84,8 +77,7 @@ public final class FraudFeatureContract {
             PROXY_OR_VPN_DETECTED,
             CUSTOMER_SEGMENT,
             MERCHANT_CATEGORY,
-            CURRENCY,
-            FEATURE_FLAGS
+            CURRENCY
     );
 
     public static final List<String> FEATURE_FLAGS_VALUES = List.of(
@@ -110,7 +102,6 @@ public final class FraudFeatureContract {
             Map.entry(COUNTRY_MISMATCH, TYPE_BOOLEAN),
             Map.entry(PROXY_OR_VPN_DETECTED, TYPE_BOOLEAN),
             Map.entry(RAPID_TRANSFER_BURST, TYPE_BOOLEAN),
-            Map.entry(RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, TYPE_BOOLEAN),
             Map.entry(RECENT_TRANSACTION_COUNT, TYPE_INTEGER),
             Map.entry(RECENT_TRANSACTION_COUNT_WINDOW, TYPE_STRING),
             Map.entry(RECENT_AMOUNT_SUM_WINDOW, TYPE_STRING),

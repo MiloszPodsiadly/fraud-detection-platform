@@ -63,9 +63,9 @@ def main() -> None:
             "deviceNovelty": True,
             "countryMismatch": True,
             "proxyOrVpnDetected": True,
-            "featureFlags": ["DEVICE_NOVELTY", "COUNTRY_MISMATCH", "PROXY_OR_VPN", "HIGH_VELOCITY"],
-            "rapidTransferTotalPln": 28_800.0,
-            "rapidTransferFraudCaseCandidate": True,
+            "recentTransactionCountWindow": "PT1M",
+            "recentAmountSumWindow": "PT1M",
+            "recentAmountSumPln": 28_800.0,
         }
     )
     baseline = model.score(
@@ -77,7 +77,9 @@ def main() -> None:
             "deviceNovelty": False,
             "countryMismatch": False,
             "proxyOrVpnDetected": False,
-            "featureFlags": [],
+            "recentTransactionCountWindow": "PT1M",
+            "recentAmountSumWindow": "PT1M",
+            "recentAmountSumPln": 45.0,
         }
     )
     print(f"wrote {args.output}")

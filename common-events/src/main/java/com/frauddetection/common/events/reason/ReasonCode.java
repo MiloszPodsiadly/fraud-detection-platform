@@ -220,7 +220,6 @@ public enum ReasonCode {
         aliases.put(normalize(FraudFeatureContract.DEVICE_NOVELTY), DEVICE_NOVELTY);
         aliases.put(normalize(FraudFeatureContract.PROXY_OR_VPN_DETECTED), PROXY_OR_VPN);
         aliases.put(normalize(FraudFeatureContract.RAPID_TRANSFER_BURST), RAPID_PLN_20K_BURST);
-        aliases.put(normalize(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE), RAPID_TRANSFER_FRAUD_CASE);
         aliases.put(normalize("rapidTransferFraudCase"), RAPID_TRANSFER_FRAUD_CASE);
         return Map.copyOf(aliases);
     }

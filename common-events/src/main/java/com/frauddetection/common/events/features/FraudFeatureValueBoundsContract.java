@@ -6,8 +6,9 @@ import java.time.Duration;
 import java.util.Objects;
 
 public final class FraudFeatureValueBoundsContract {
-    public static final Duration RULES_V1_CANONICAL_WINDOW = Duration.ofMinutes(1);
-    public static final String RULES_V1_CANONICAL_WINDOW_TEXT = RULES_V1_CANONICAL_WINDOW.toString();
+    public static final Duration CANONICAL_RECENT_TRANSACTION_WINDOW = Duration.ofMinutes(1);
+    public static final String CANONICAL_RECENT_TRANSACTION_WINDOW_TEXT =
+            CANONICAL_RECENT_TRANSACTION_WINDOW.toString();
     public static final int MAX_RECENT_TRANSACTION_COUNT = 1_000_000;
     public static final double MAX_TRANSACTION_VELOCITY_PER_MINUTE = 1_000_000.0d;
     public static final double RATE_CONSISTENCY_TOLERANCE = 0.0001d;
@@ -16,8 +17,8 @@ public final class FraudFeatureValueBoundsContract {
     private FraudFeatureValueBoundsContract() {
     }
 
-    public static boolean isRulesV1CanonicalWindowText(String value) {
-        return RULES_V1_CANONICAL_WINDOW_TEXT.equals(value);
+    public static boolean isCanonicalRecentTransactionWindowText(String value) {
+        return CANONICAL_RECENT_TRANSACTION_WINDOW_TEXT.equals(value);
     }
 
     public static boolean isWithinCountBounds(int count) {
@@ -30,7 +31,7 @@ public final class FraudFeatureValueBoundsContract {
         }
         return BigDecimal.valueOf(recentTransactionCount)
                 .divide(
-                        BigDecimal.valueOf(RULES_V1_CANONICAL_WINDOW.toMinutes()),
+                        BigDecimal.valueOf(CANONICAL_RECENT_TRANSACTION_WINDOW.toMinutes()),
                         4,
                         RoundingMode.HALF_UP
                 )

@@ -373,7 +373,8 @@ class MlGovernancePersistenceTest(unittest.TestCase):
                 body=(
                     b'{"features":{"recentTransactionCount":1,"recentAmountSum":{"amount":45.0,"currency":"USD"},'
                     b'"transactionVelocityPerMinute":0.05,"merchantFrequency7d":1,"deviceNovelty":false,'
-                    b'"countryMismatch":false,"proxyOrVpnDetected":false,"featureFlags":[]}}'
+                    b'"countryMismatch":false,"proxyOrVpnDetected":false,'
+                    b'"recentTransactionCountWindow":"PT1M","recentAmountSumWindow":"PT1M","recentAmountSumPln":45.0}}'
                 ),
                 headers={"Content-Type": "application/json"},
             )
@@ -515,7 +516,8 @@ class MlModelLifecycleUnitTest(unittest.TestCase):
                 body=(
                     b'{"features":{"recentTransactionCount":1,"recentAmountSum":{"amount":45.0,"currency":"USD"},'
                     b'"transactionVelocityPerMinute":0.05,"merchantFrequency7d":1,"deviceNovelty":false,'
-                    b'"countryMismatch":false,"proxyOrVpnDetected":false,"featureFlags":[]}}'
+                    b'"countryMismatch":false,"proxyOrVpnDetected":false,'
+                    b'"recentTransactionCountWindow":"PT1M","recentAmountSumWindow":"PT1M","recentAmountSumPln":45.0}}'
                 ),
                 headers={"Content-Type": "application/json"},
             )
@@ -1073,7 +1075,8 @@ class MlGovernanceEndpointTest(unittest.TestCase):
         self.score(
             b'{"features":{"recentTransactionCount":1,"recentAmountSum":{"amount":45.0,"currency":"USD"},'
             b'"transactionVelocityPerMinute":0.05,"merchantFrequency7d":1,"deviceNovelty":false,'
-            b'"countryMismatch":false,"proxyOrVpnDetected":false,"featureFlags":[]}}'
+            b'"countryMismatch":false,"proxyOrVpnDetected":false,'
+            b'"recentTransactionCountWindow":"PT1M","recentAmountSumWindow":"PT1M","recentAmountSumPln":45.0}}'
         )
         after = self.get_json("/governance/profile/inference")["inference_profile"]
 
@@ -1331,7 +1334,7 @@ class MlGovernanceEndpointTest(unittest.TestCase):
             b'{"features":{"recentTransactionCount":8,"recentAmountSum":{"amount":7200.0,"currency":"USD"},'
             b'"transactionVelocityPerMinute":0.7,"merchantFrequency7d":9,"deviceNovelty":true,'
             b'"countryMismatch":true,"proxyOrVpnDetected":true,'
-            b'"featureFlags":["DEVICE_NOVELTY","COUNTRY_MISMATCH","PROXY_OR_VPN","HIGH_VELOCITY"]}}'
+            b'"recentTransactionCountWindow":"PT1M","recentAmountSumWindow":"PT1M","recentAmountSumPln":7200.0}}'
         )
 
         self.assert_json_contract(

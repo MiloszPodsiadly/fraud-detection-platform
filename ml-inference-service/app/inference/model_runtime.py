@@ -82,6 +82,8 @@ class FraudModelRuntime:
     def score(self, features: dict[str, Any]) -> dict[str, Any]:
         """Score a fraud feature payload without changing the public response contract."""
         compatibility = self.feature_pipeline.validate_production_snapshot(features)
+        if not compatibility["compatible"]:
+            return self._incompatible_features_response(compatibility)
         training_mode = getattr(self.model, "training_mode", "production")
         normalized = self.feature_pipeline.transform_single(features, mode=training_mode)
         weights = getattr(self.model, "weights", {}) or getattr(self.model, "feature_importance")()
@@ -121,6 +123,31 @@ class FraudModelRuntime:
                 "modelVersion": self.model_version,
             },
             "fallbackReason": None,
+        }
+
+    def _incompatible_features_response(self, compatibility: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "available": False,
+            "fraudScore": 0.0,
+            "riskLevel": "LOW",
+            "modelName": self.model_name,
+            "modelVersion": self.model_version,
+            "inferenceTimestamp": datetime.now(timezone.utc).isoformat(),
+            "reasonCodes": [],
+            "scoreDetails": {
+                "modelFamily": self.model_family,
+                "featureCompatibility": compatibility,
+                "normalizedFeatures": {},
+                "featureContributions": {},
+            },
+            "explanationMetadata": {
+                "engineType": "PYTHON_ML",
+                "explanationType": "MODEL_FEATURE_CONTRIBUTIONS",
+                "modelAvailable": False,
+                "modelName": self.model_name,
+                "modelVersion": self.model_version,
+            },
+            "fallbackReason": "INCOMPATIBLE_FEATURE_SNAPSHOT",
         }
 
     def compare_with(self, other: FraudModelRuntime, features: dict[str, Any]) -> dict[str, Any]:

@@ -109,22 +109,28 @@ class EngineIntelligenceFullPathCompositionTest {
                 .isEqualByComparingTo(new BigDecimal("100.00"));
         assertThat(enrichedRecentAmount)
                 .isExactlyInstanceOf(BigDecimal.class);
-        assertThat(enriched.featureSnapshot().get(FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN))
-                .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.BIG_DECIMAL)
-                .isEqualByComparingTo(new BigDecimal("20000.00"));
-        assertThat(enriched.featureSnapshot().get(FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN))
-                .isExactlyInstanceOf(BigDecimal.class);
+        assertThat(enriched.featureSnapshot()).doesNotContainKeys(
+                "featureFlags",
+                "rapidTransferFraudCaseCandidate",
+                FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN,
+                FraudFeatureContract.RAPID_TRANSFER_COUNT,
+                FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN,
+                FraudFeatureContract.RAPID_TRANSFER_WINDOW
+        );
         BigDecimal scoredRecentAmount = (BigDecimal) event.featureSnapshot()
                 .get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN);
         assertThat(scoredRecentAmount)
                 .isEqualByComparingTo(enrichedRecentAmount);
         assertThat(scoredRecentAmount)
                 .isExactlyInstanceOf(BigDecimal.class);
-        assertThat(event.featureSnapshot().get(FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN))
-                .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.BIG_DECIMAL)
-                .isEqualByComparingTo(new BigDecimal("20000.00"));
-        assertThat(event.featureSnapshot().get(FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN))
-                .isExactlyInstanceOf(BigDecimal.class);
+        assertThat(event.featureSnapshot()).doesNotContainKeys(
+                "featureFlags",
+                "rapidTransferFraudCaseCandidate",
+                FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN,
+                FraudFeatureContract.RAPID_TRANSFER_COUNT,
+                FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN,
+                FraudFeatureContract.RAPID_TRANSFER_WINDOW
+        );
 
         assertThat(event.fraudScore()).isEqualTo(baselineResult.fraudScore());
         assertThat(event.riskLevel()).isEqualTo(baselineResult.riskLevel());

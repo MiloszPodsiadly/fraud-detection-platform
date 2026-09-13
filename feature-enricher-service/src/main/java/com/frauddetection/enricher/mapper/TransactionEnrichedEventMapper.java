@@ -34,7 +34,6 @@ public class TransactionEnrichedEventMapper {
                 features.deviceNovelty(),
                 features.countryMismatch(),
                 features.proxyOrVpnDetected(),
-                features.featureFlags(),
                 features.featureSnapshot()
         );
     }

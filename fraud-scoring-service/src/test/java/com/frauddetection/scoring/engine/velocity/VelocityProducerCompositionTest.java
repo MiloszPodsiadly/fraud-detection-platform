@@ -75,10 +75,9 @@ class VelocityProducerCompositionTest {
                 features.deviceNovelty(),
                 features.countryMismatch(),
                 features.proxyOrVpnDetected(),
-                features.featureFlags(),
                 features.featureSnapshot()
         );
-        assertThat(enriched.featureFlags()).doesNotContain(FraudFeatureContract.FLAG_HIGH_VELOCITY);
+        assertThat(enriched.featureSnapshot()).doesNotContainKeys("featureFlags");
         return new ScoringContext(enriched, enriched.featureSnapshot(), ScoringMode.ML, enriched.correlationId(), RECEIVED_AT);
     }
 

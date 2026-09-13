@@ -51,18 +51,18 @@ enable production mode and does not replace environment-specific release approva
   Velocity is an optional third diagnostic engine. Future Device, Merchant, or Graph engines require a versioned
   contract update.
 
-## Rules V1 Input Configuration
+## Rules V2 Input Configuration
 
-- FDP-129 keeps Rules as `rule-based-engine` / `v1`; the diagnostic adapter remains `rules.primary` / `1.0.0`.
+- Current Rules scoring is `rule-based-engine` / `v2`; the diagnostic adapter remains `rules.primary` / `2.0.0`.
 - Feature Enricher producer windows for Rules and Velocity semantics must remain exactly `PT1M`.
-- Top-level Rules compatibility facts are not windowless facts: `recentTransactionCount` requires
-  `recentTransactionCountWindow=PT1M`, and `recentAmountSum` requires `recentAmountSumWindow=PT1M`.
-- Present-invalid snapshot or top-level temporal data fails closed instead of falling back to legacy flags or
-  candidate fields.
+- Rules scoring reads its factual input from the canonical `featureSnapshot` only.
+- Retired flags, retired rapid-transfer candidate fields, and retired top-level duplicate facts must not influence a
+  new Rules V2 score.
+- Present-invalid canonical snapshot data fails closed.
 - Supported transaction currencies are `PLN`, `EUR`, `USD`, and `GBP`. Unsupported or null currencies are rejected;
   enrichment must not convert unknown currencies with a default rate.
-- Legacy Rules V1 compatibility is retained only for replay and rolling-deployment safety. Future removal of legacy
-  flags, `rapidTransferFraudCaseCandidate`, and retired top-level paths requires a separate versioned migration.
+- Historical replay compatibility belongs to explicit event/read compatibility boundaries, not to the current Rules V2
+  scoring policy.
 
 ## Dependency Posture
 

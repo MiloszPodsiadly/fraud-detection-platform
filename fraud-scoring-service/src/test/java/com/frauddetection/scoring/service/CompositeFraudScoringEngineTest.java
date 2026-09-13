@@ -202,8 +202,19 @@ class CompositeFraudScoringEngineTest {
                 false,
                 false,
                 false,
-                List.of(),
-                Map.of()
+                Map.ofEntries(
+                        Map.entry(com.frauddetection.common.events.features.FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1),
+                        Map.entry(com.frauddetection.common.events.features.FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M"),
+                        Map.entry(com.frauddetection.common.events.features.FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 1.0d),
+                        Map.entry(com.frauddetection.common.events.features.FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("1500.00")),
+                        Map.entry(com.frauddetection.common.events.features.FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M"),
+                        Map.entry(com.frauddetection.common.events.features.FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("1500.00")),
+                        Map.entry(com.frauddetection.common.events.features.FraudFeatureContract.MERCHANT_FREQUENCY_7D, 1),
+                        Map.entry(com.frauddetection.common.events.features.FraudFeatureContract.DEVICE_NOVELTY, false),
+                        Map.entry(com.frauddetection.common.events.features.FraudFeatureContract.COUNTRY_MISMATCH, false),
+                        Map.entry(com.frauddetection.common.events.features.FraudFeatureContract.PROXY_OR_VPN_DETECTED, false),
+                        Map.entry(com.frauddetection.common.events.features.FraudFeatureContract.CURRENCY, "PLN")
+                )
         ));
     }
 

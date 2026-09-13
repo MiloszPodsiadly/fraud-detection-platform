@@ -10,7 +10,6 @@ import com.frauddetection.common.events.model.Money;
 import tools.jackson.databind.annotation.JsonDeserialize;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 
 public record TransactionEnrichedEvent(
@@ -35,12 +34,10 @@ public record TransactionEnrichedEvent(
         Boolean deviceNovelty,
         Boolean countryMismatch,
         Boolean proxyOrVpnDetected,
-        List<String> featureFlags,
         @JsonDeserialize(using = FeatureSnapshotWireValueDeserializer.class)
         Map<String, Object> featureSnapshot
 ) {
     public TransactionEnrichedEvent {
-        featureFlags = featureFlags == null ? List.of() : List.copyOf(featureFlags);
         if (featureSnapshot != null) {
             featureSnapshot = FeatureSnapshotWireValueNormalizer.normalize(featureSnapshot);
         }

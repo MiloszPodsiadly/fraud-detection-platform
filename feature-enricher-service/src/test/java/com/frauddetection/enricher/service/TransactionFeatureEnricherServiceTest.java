@@ -43,7 +43,6 @@ class TransactionFeatureEnricherServiceTest {
                 false,
                 false,
                 false,
-                List.of(),
                 Map.of("recentTransactionCount", 2)
         );
         TransactionEnrichedEvent enrichedEvent = TransactionFixtures.enrichedTransaction().build();

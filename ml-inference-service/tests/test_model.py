@@ -29,7 +29,9 @@ class FraudModelTest(unittest.TestCase):
                 "deviceNovelty": True,
                 "countryMismatch": True,
                 "proxyOrVpnDetected": True,
-                "featureFlags": ["DEVICE_NOVELTY", "COUNTRY_MISMATCH", "PROXY_OR_VPN", "HIGH_VELOCITY"],
+                "recentTransactionCountWindow": "PT1M",
+                "recentAmountSumWindow": "PT1M",
+                "recentAmountSumPln": 7200.0,
             }
         )
 
@@ -48,7 +50,9 @@ class FraudModelTest(unittest.TestCase):
                 "deviceNovelty": False,
                 "countryMismatch": False,
                 "proxyOrVpnDetected": False,
-                "featureFlags": [],
+                "recentTransactionCountWindow": "PT1M",
+                "recentAmountSumWindow": "PT1M",
+                "recentAmountSumPln": 45.0,
             }
         )
 
@@ -61,14 +65,13 @@ class FraudModelTest(unittest.TestCase):
                 "recentTransactionCount": 2,
                 "recentAmountSum": {"amount": 20000.0, "currency": "PLN"},
                 "recentAmountSumPln": 20000.0,
-                "rapidTransferTotalPln": 20000.0,
-                "rapidTransferFraudCaseCandidate": True,
+                "recentTransactionCountWindow": "PT1M",
+                "recentAmountSumWindow": "PT1M",
                 "transactionVelocityPerMinute": 2.0,
                 "merchantFrequency7d": 1,
                 "deviceNovelty": False,
                 "countryMismatch": False,
                 "proxyOrVpnDetected": False,
-                "featureFlags": ["RAPID_PLN_20K_BURST"],
             }
         )
 
@@ -81,14 +84,13 @@ class FraudModelTest(unittest.TestCase):
                 "recentTransactionCount": 2,
                 "recentAmountSum": {"amount": 10000.0, "currency": "PLN"},
                 "recentAmountSumPln": 10000.0,
-                "rapidTransferTotalPln": 10000.0,
-                "rapidTransferFraudCaseCandidate": False,
+                "recentTransactionCountWindow": "PT1M",
+                "recentAmountSumWindow": "PT1M",
                 "transactionVelocityPerMinute": 2.0,
                 "merchantFrequency7d": 1,
                 "deviceNovelty": False,
                 "countryMismatch": False,
                 "proxyOrVpnDetected": False,
-                "featureFlags": [],
             }
         )
 
@@ -105,8 +107,9 @@ class FraudModelTest(unittest.TestCase):
                 "deviceNovelty": True,
                 "countryMismatch": False,
                 "proxyOrVpnDetected": True,
-                "featureFlags": ["A", "B", "C"],
-                "rapidTransferTotalPln": 20_000.0,
+                "recentTransactionCountWindow": "PT1M",
+                "recentAmountSumWindow": "PT1M",
+                "recentAmountSumPln": 20_000.0,
             }
         )
 
@@ -117,13 +120,14 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(normalized["deviceNovelty"], 1.0)
         self.assertEqual(normalized["countryMismatch"], 0.0)
         self.assertEqual(normalized["proxyOrVpnDetected"], 1.0)
-        self.assertEqual(normalized["highRiskFlagCount"], 0.5)
+        self.assertEqual(normalized["highRiskFlagCount"], 5.0 / 6.0)
         self.assertEqual(normalized["rapidTransferBurst"], 1.0)
 
     def test_python_feature_pipeline_uses_shared_contract_schema(self):
         self.assertEqual(FeaturePipeline.FEATURE_NAMES, FEATURE_CONTRACT.ml_feature_names)
         self.assertIn("recentTransactionCount", FEATURE_CONTRACT.java_enriched_feature_names)
-        self.assertIn("RAPID_PLN_20K_BURST", FEATURE_CONTRACT.feature_flags)
+        self.assertIn("rapidTransferTransactionIds", FEATURE_CONTRACT.java_enriched_feature_names)
+        self.assertNotIn("featureFlags", FEATURE_CONTRACT.java_enriched_feature_names)
 
     def test_java_enriched_snapshot_normalizes_to_contract_features(self):
         payload = {
@@ -134,9 +138,9 @@ class FraudModelTest(unittest.TestCase):
             "deviceNovelty": True,
             "countryMismatch": False,
             "proxyOrVpnDetected": True,
-            "featureFlags": ["DEVICE_NOVELTY", "PROXY_OR_VPN", "HIGH_VELOCITY"],
-            "rapidTransferFraudCaseCandidate": False,
-            "rapidTransferTotalPln": 10000.0,
+            "recentTransactionCountWindow": "PT1M",
+            "recentAmountSumWindow": "PT1M",
+            "recentAmountSumPln": 10000.0,
         }
         pipeline = FeaturePipeline()
         normalized = pipeline.transform_single(payload)
@@ -153,8 +157,35 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(normalized["deviceNovelty"], 1.0)
         self.assertEqual(normalized["countryMismatch"], 0.0)
         self.assertEqual(normalized["proxyOrVpnDetected"], 1.0)
-        self.assertEqual(normalized["highRiskFlagCount"], 0.5)
+        self.assertEqual(normalized["highRiskFlagCount"], 4.0 / 6.0)
         self.assertEqual(normalized["rapidTransferBurst"], 0.0)
+
+    def test_legacy_rules_fields_do_not_affect_production_feature_vector(self):
+        canonical = {
+            "recentTransactionCount": 2,
+            "recentAmountSum": {"amount": 20000.0, "currency": "PLN"},
+            "transactionVelocityPerMinute": 2.0,
+            "merchantFrequency7d": 1,
+            "deviceNovelty": False,
+            "countryMismatch": False,
+            "proxyOrVpnDetected": False,
+            "recentTransactionCountWindow": "PT1M",
+            "recentAmountSumWindow": "PT1M",
+            "recentAmountSumPln": 20000.0,
+        }
+        legacy_overlay = {
+            **canonical,
+            "featureFlags": [],
+            "rapidTransferFraudCaseCandidate": False,
+            "rapidTransferTotalPln": 0.0,
+        }
+
+        pipeline = FeaturePipeline()
+
+        self.assertEqual(
+            pipeline.transform_single(canonical, mode="production"),
+            pipeline.transform_single(legacy_overlay, mode="production"),
+        )
 
     def test_production_training_features_match_java_inference_schema(self):
         dataset = generate_fraud_behavior(count=300, seed=337, user_count=8, fraud_ratio=0.03)
@@ -167,9 +198,9 @@ class FraudModelTest(unittest.TestCase):
             "deviceNovelty": True,
             "countryMismatch": False,
             "proxyOrVpnDetected": True,
-            "featureFlags": ["DEVICE_NOVELTY", "PROXY_OR_VPN", "HIGH_VELOCITY"],
-            "rapidTransferFraudCaseCandidate": False,
-            "rapidTransferTotalPln": 10000.0,
+            "recentTransactionCountWindow": "PT1M",
+            "recentAmountSumWindow": "PT1M",
+            "recentAmountSumPln": 10000.0,
         }
         inference_features = FeaturePipeline().transform_single(payload, mode="production")
 
@@ -191,8 +222,33 @@ class FraudModelTest(unittest.TestCase):
         )
 
         self.assertFalse(compatibility["compatible"])
+        self.assertIn("recentTransactionCountWindow", compatibility["missingRequiredFeatures"])
+        self.assertIn("recentAmountSumWindow", compatibility["missingRequiredFeatures"])
+        self.assertIn("recentAmountSumPln", compatibility["missingRequiredFeatures"])
         self.assertIn("transactionVelocityPerMinute", compatibility["missingRequiredFeatures"])
         self.assertIn("merchantFrequency7d", compatibility["missingRequiredFeatures"])
+
+    def test_runtime_fails_closed_when_canonical_windows_are_missing(self):
+        result = FraudModel().score(
+            {
+                "recentTransactionCount": 2,
+                "recentAmountSum": {"amount": 20000.0, "currency": "PLN"},
+                "recentAmountSumPln": 20000.0,
+                "transactionVelocityPerMinute": 2.0,
+                "merchantFrequency7d": 1,
+                "deviceNovelty": False,
+                "countryMismatch": False,
+                "proxyOrVpnDetected": False,
+            }
+        )
+
+        self.assertFalse(result["available"])
+        self.assertEqual(result["fallbackReason"], "INCOMPATIBLE_FEATURE_SNAPSHOT")
+        self.assertEqual(result["scoreDetails"]["normalizedFeatures"], {})
+        self.assertIn(
+            "recentTransactionCountWindow",
+            result["scoreDetails"]["featureCompatibility"]["missingRequiredFeatures"],
+        )
 
     def test_feature_pipeline_transforms_raw_sequence_features(self):
         dataset = generate_fraud_behavior(count=200, seed=789, user_count=10, fraud_ratio=0.02)
@@ -393,7 +449,6 @@ class FraudModelTest(unittest.TestCase):
                     "deviceNovelty": True,
                     "countryMismatch": False,
                     "proxyOrVpnDetected": True,
-                    "featureFlags": ["DEVICE_NOVELTY", "PROXY_OR_VPN"],
                 },
             },
             "decidedAt": "2026-04-22T18:00:00Z",
@@ -636,7 +691,6 @@ class FraudModelTest(unittest.TestCase):
                     "deviceNovelty": True,
                     "countryMismatch": False,
                     "proxyOrVpnDetected": True,
-                    "featureFlags": ["DEVICE_NOVELTY", "PROXY_OR_VPN"],
                 },
                 artifact_path=Path.cwd() / "missing-artifact.json",
                 registry=registry,

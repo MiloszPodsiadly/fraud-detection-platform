@@ -67,10 +67,18 @@ class EngineIntelligenceEnabledDiagnosticInvocationCountTest {
                 false,
                 false,
                 false,
-                List.of(),
-                Map.of(
-                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1,
-                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M"
+                Map.ofEntries(
+                        Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1),
+                        Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M"),
+                        Map.entry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 1.0d),
+                        Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("100.00")),
+                        Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M"),
+                        Map.entry(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("100.00")),
+                        Map.entry(FraudFeatureContract.MERCHANT_FREQUENCY_7D, base.merchantFrequency7d()),
+                        Map.entry(FraudFeatureContract.DEVICE_NOVELTY, false),
+                        Map.entry(FraudFeatureContract.COUNTRY_MISMATCH, false),
+                        Map.entry(FraudFeatureContract.PROXY_OR_VPN_DETECTED, false),
+                        Map.entry(FraudFeatureContract.CURRENCY, "PLN")
                 )
         );
     }

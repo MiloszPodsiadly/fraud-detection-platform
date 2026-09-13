@@ -54,14 +54,12 @@ class ReasonCodeTest {
     }
 
     @Test
-    void parsesCanonicalAndLegacyValuesWithoutThrowing() {
+    void parsesCanonicalAndSupportedLegacyValuesWithoutThrowing() {
         assertThat(ReasonCode.parseLegacy("HIGH_AMOUNT").reasonCode()).isEqualTo(ReasonCode.HIGH_TRANSACTION_AMOUNT);
         assertThat(ReasonCode.parseLegacy("high_amount").reasonCode()).isEqualTo(ReasonCode.HIGH_TRANSACTION_AMOUNT);
         assertThat(ReasonCode.parseLegacy(" High_Amount ").reasonCode()).isEqualTo(ReasonCode.HIGH_TRANSACTION_AMOUNT);
         assertThat(ReasonCode.parseLegacy("countryMismatch").reasonCode()).isEqualTo(ReasonCode.COUNTRY_MISMATCH);
         assertThat(ReasonCode.parseLegacy("RAPID_PLN_20K_BURST").reasonCode()).isEqualTo(ReasonCode.RAPID_PLN_20K_BURST);
-        assertThat(ReasonCode.parseLegacy("rapidTransferFraudCaseCandidate").reasonCode())
-                .isEqualTo(ReasonCode.RAPID_TRANSFER_FRAUD_CASE);
     }
 
     @Test
@@ -79,6 +77,11 @@ class ReasonCodeTest {
         ));
         assertThat(ReasonCode.parseLegacy("FRAUD_CONFIRMED").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
         assertThat(ReasonCode.parseLegacy("AML_ESCALATION_REQUIRED").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
+        assertThat(ReasonCode.parseLegacy("rapidTransferFraudCaseCandidate")).isEqualTo(new ReasonCodeParseResult(
+                ReasonCode.UNKNOWN,
+                ReasonCodeParseStatus.UNSUPPORTED,
+                "rapidTransferFraudCaseCandidate"
+        ));
         assertThat(ReasonCode.known("UNKNOWN")).isEmpty();
     }
 

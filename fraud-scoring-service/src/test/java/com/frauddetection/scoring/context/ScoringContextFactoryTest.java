@@ -80,7 +80,6 @@ class ScoringContextFactoryTest {
                 validEvent.deviceNovelty(),
                 validEvent.countryMismatch(),
                 validEvent.proxyOrVpnDetected(),
-                validEvent.featureFlags(),
                 validEvent.featureSnapshot()
         );
 

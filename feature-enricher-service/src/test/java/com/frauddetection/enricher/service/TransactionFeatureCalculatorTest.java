@@ -1,7 +1,6 @@
 package com.frauddetection.enricher.service;
 
 import com.frauddetection.common.events.features.FraudFeatureContract;
-import com.frauddetection.common.events.features.FraudFeatureThresholdContract;
 import com.frauddetection.common.events.features.VelocityFeatureContract;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.enricher.config.FeatureStoreProperties;
@@ -25,7 +24,7 @@ class TransactionFeatureCalculatorTest {
     private final TransactionFeatureCalculator calculator = new TransactionFeatureCalculator(new CurrencyAmountConverter());
 
     @Test
-    void shouldCalculateFraudRelevantFeatureFlags() {
+    void shouldCalculateCanonicalFraudRelevantFactsWithoutLegacyFeatureFlags() {
         var event = TransactionFixtures.rawTransaction().build();
         var snapshot = new FeatureStoreSnapshot(
                 4,
@@ -43,13 +42,17 @@ class TransactionFeatureCalculatorTest {
         assertThat(features.recentAmountSum().amount()).isEqualByComparingTo("6149.99");
         assertThat(features.deviceNovelty()).isTrue();
         assertThat(features.countryMismatch()).isFalse();
-        assertThat(features.featureFlags()).contains(
-                FraudFeatureContract.FLAG_DEVICE_NOVELTY,
-                FraudFeatureContract.FLAG_MERCHANT_CONCENTRATION,
-                FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY
-        );
-        assertThat(features.featureFlags()).doesNotContain(FraudFeatureContract.FLAG_HIGH_VELOCITY);
-        assertThat(features.featureSnapshot()).containsEntry(FraudFeatureContract.MERCHANT_FREQUENCY_7D, 5);
+        assertThat(features.featureSnapshot())
+                .containsEntry(FraudFeatureContract.DEVICE_NOVELTY, true)
+                .containsEntry(FraudFeatureContract.COUNTRY_MISMATCH, false)
+                .containsEntry(FraudFeatureContract.MERCHANT_FREQUENCY_7D, 5)
+                .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5)
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("9899.96"))
+                .doesNotContainKeys(
+                        "featureFlags",
+                        "rapidTransferFraudCaseCandidate",
+                        FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN
+                );
     }
 
     @ParameterizedTest
@@ -105,7 +108,7 @@ class TransactionFeatureCalculatorTest {
     }
 
     @Test
-    void shouldFlagRapidTransferBurstWhenShortWindowExceedsTwentyThousandPln() {
+    void shouldEmitCanonicalRapidTransferEvidenceWithoutPolicyCandidate() {
         var event = TransactionFixtures.rawTransaction()
                 .withAmount(new BigDecimal("10000.00"), "PLN")
                 .build();
@@ -121,17 +124,14 @@ class TransactionFeatureCalculatorTest {
 
         var features = calculator.calculate(event, snapshot);
 
-        assertThat(features.featureFlags()).contains(FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST);
         assertThat(features.featureSnapshot())
-                .containsEntry(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true)
-                .containsEntry(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("20000.00"));
+                .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2)
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"))
+                .containsEntry(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("txn-1001"));
         assertThat(features.featureSnapshot().get(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW))
                 .isEqualTo("PT1M")
                 .isInstanceOf(String.class);
         assertThat(features.featureSnapshot().get(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW))
-                .isEqualTo("PT1M")
-                .isInstanceOf(String.class);
-        assertThat(features.featureSnapshot().get(FraudFeatureContract.RAPID_TRANSFER_WINDOW))
                 .isEqualTo("PT1M")
                 .isInstanceOf(String.class);
         assertThat(features.featureSnapshot().get(FraudFeatureContract.RECENT_AMOUNT_SUM))
@@ -140,9 +140,15 @@ class TransactionFeatureCalculatorTest {
         assertThat(features.featureSnapshot().get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN))
                 .isEqualTo(new BigDecimal("20000.00"))
                 .isInstanceOf(BigDecimal.class);
-        assertThat(features.featureSnapshot().get(FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN))
-                .isEqualTo(new BigDecimal("20000"))
-                .isInstanceOf(BigDecimal.class);
+        assertThat(features.featureSnapshot())
+                .doesNotContainKeys(
+                        FraudFeatureContract.RAPID_TRANSFER_WINDOW,
+                        FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN,
+                        "rapidTransferFraudCaseCandidate",
+                        FraudFeatureContract.RAPID_TRANSFER_COUNT,
+                        FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN,
+                        "featureFlags"
+                );
     }
 
     @Test
@@ -162,18 +168,18 @@ class TransactionFeatureCalculatorTest {
 
         var features = calculator.calculate(event, snapshot);
 
-        assertThat(features.featureFlags()).doesNotContain(
-                FraudFeatureContract.FLAG_HIGH_VELOCITY,
-                FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY,
-                FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST
-        );
         assertThat(features.featureSnapshot())
-                .containsEntry(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, false)
-                .containsEntry(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("10000.00"));
+                .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1)
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("10000.00"))
+                .doesNotContainKeys(
+                        "rapidTransferFraudCaseCandidate",
+                        FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN,
+                        "featureFlags"
+                );
     }
 
     @Test
-    void shouldEmitOnlySharedContractFeatureKeysAndFlags() {
+    void shouldEmitOnlyCurrentSharedContractFeatureKeys() {
         var event = TransactionFixtures.rawTransaction().build();
         var snapshot = new FeatureStoreSnapshot(
                 4,
@@ -189,7 +195,6 @@ class TransactionFeatureCalculatorTest {
 
         assertThat(features.featureSnapshot().keySet())
                 .containsExactlyElementsOf(FraudFeatureContract.JAVA_ENRICHED_FEATURE_NAMES);
-        assertThat(FraudFeatureContract.FEATURE_FLAGS_VALUES).containsAll(features.featureFlags());
     }
 
     @Test
@@ -244,7 +249,6 @@ class TransactionFeatureCalculatorTest {
         assertThat(features.recentTransactionCount()).isEqualTo(5);
         assertThat(features.recentTransactionCountWindow()).isEqualTo("PT1M");
         assertThat(features.transactionVelocityPerMinute()).isEqualTo(5.0d);
-        assertThat(features.featureFlags()).doesNotContain(FraudFeatureContract.FLAG_HIGH_VELOCITY);
         assertThat(features.featureSnapshot())
                 .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5)
                 .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M")

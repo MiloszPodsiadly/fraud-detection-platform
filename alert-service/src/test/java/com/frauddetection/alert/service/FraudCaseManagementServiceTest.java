@@ -24,7 +24,9 @@ import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.fraudcase.FraudCaseUpdateMutationHandler;
 import com.frauddetection.alert.security.principal.AnalystActorResolver;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.model.Money;
+import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -60,13 +62,12 @@ class FraudCaseManagementServiceTest {
                 .withCustomerId("rapid-customer-1")
                 .withAmount(new BigDecimal("10000.00"), "PLN")
                 .withRiskLevel(RiskLevel.CRITICAL)
+                .withReasonCodes(List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue()))
                 .withFeatureSnapshot(Map.of(
-                        "rapidTransferFraudCaseCandidate", true,
-                        "rapidTransferTransactionIds", List.of("rapid-txn-1", "rapid-txn-2"),
-                        "rapidTransferTotalPln", new BigDecimal("20000.00"),
-                        "rapidTransferThresholdPln", new BigDecimal("20000.00"),
-                        "rapidTransferWindow", "PT1M",
-                        "currentTransactionAmountPln", new BigDecimal("10000.00")
+                        FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("rapid-txn-1", "rapid-txn-2"),
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
+                        FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("10000.00")
                 ))
                 .build();
 

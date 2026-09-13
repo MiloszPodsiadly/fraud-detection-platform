@@ -1,5 +1,5 @@
 {
-  "version": "2026-04-22.v1",
+  "version": "2026-09-13.rules-v2-canonical",
   "mlFeatureNames": [
     "recentTransactionCount",
     "recentAmountSum",
@@ -25,11 +25,6 @@
     "recentAmountSumWindow",
     "recentAmountSumPln",
     "currentTransactionAmountPln",
-    "rapidTransferWindow",
-    "rapidTransferThresholdPln",
-    "rapidTransferFraudCaseCandidate",
-    "rapidTransferCount",
-    "rapidTransferTotalPln",
     "rapidTransferTransactionIds",
     "transactionVelocityPerMinute",
     "merchantFrequency7d",
@@ -38,17 +33,7 @@
     "proxyOrVpnDetected",
     "customerSegment",
     "merchantCategory",
-    "currency",
-    "featureFlags"
-  ],
-  "featureFlags": [
-    "DEVICE_NOVELTY",
-    "COUNTRY_MISMATCH",
-    "PROXY_OR_VPN",
-    "HIGH_VELOCITY",
-    "MERCHANT_CONCENTRATION",
-    "HIGH_AMOUNT_ACTIVITY",
-    "RAPID_PLN_20K_BURST"
+    "currency"
   ],
   "productionInferenceFeatures": [
     "recentTransactionCount",
@@ -63,7 +48,10 @@
   ],
   "featureAvailability": {
     "recentTransactionCount": "providedByJava",
+    "recentTransactionCountWindow": "providedByJava",
     "recentAmountSum": "providedByJava",
+    "recentAmountSumWindow": "providedByJava",
+    "recentAmountSumPln": "providedByJava",
     "transactionVelocityPerMinute": "providedByJava",
     "transactionVelocityPerHour": "trainingOnly",
     "transactionVelocityPerDay": "trainingOnly",
@@ -94,7 +82,7 @@
     "deviceNovelty": {"source": "boolean"},
     "countryMismatch": {"source": "boolean"},
     "proxyOrVpnDetected": {"source": "boolean"},
-    "highRiskFlagCount": {"source": "featureFlags", "scale": 6.0, "clipMax": 1.0},
-    "rapidTransferBurst": {"source": "rapidTransferFraudCaseCandidate|rapidTransferTotalPln>=20000|RAPID_PLN_20K_BURST"}
+    "highRiskFlagCount": {"source": "canonicalFacts", "scale": 6.0, "clipMax": 1.0},
+    "rapidTransferBurst": {"source": "recentTransactionCount>=2 & recentAmountSumPln>=20000 & PT1M windows"}
   }
 }

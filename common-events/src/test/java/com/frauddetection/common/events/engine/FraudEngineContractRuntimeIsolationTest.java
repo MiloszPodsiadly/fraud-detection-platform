@@ -124,6 +124,17 @@ class FraudEngineContractRuntimeIsolationTest {
     }
 
     @Test
+    void velocityImplementationVersionIsNotUsedAsPublicDocsEngineId() throws Exception {
+        String docsExample = Files.readString(repositoryRoot().resolve(
+                "docs/examples/fraud-engine-result/degraded-engine-result.json"
+        ));
+
+        assertThat(docsExample)
+                .contains("\"engineId\": \"velocity.primary\"")
+                .doesNotContain("\"engineId\": \"velocity-v1\"");
+    }
+
+    @Test
     void existingScoringRuntimeDoesNotWireSignalEngineFoundation() throws Exception {
         Path scoringRoot = repositoryRoot().resolve("fraud-scoring-service/src/main/java/com/frauddetection/scoring");
         Path reviewedProducerWiring = scoringRoot.resolve("config/EngineIntelligenceRuntimeConfig.java");
@@ -159,19 +170,19 @@ class FraudEngineContractRuntimeIsolationTest {
         Path engineRoot = scoringRoot.resolve("engine");
         Path orchestrationRoot = scoringRoot.resolve("orchestration");
         Path reviewedProducerWiring = scoringRoot.resolve("config/EngineIntelligenceRuntimeConfig.java");
-        Path rulesFeatureInputValidator = scoringRoot.resolve("service/RulesFeatureInputValidator.java");
-        Path rulesV1CompatibilityResolver = scoringRoot.resolve("service/RulesV1CompatibilityResolver.java");
+        Path rulesV2InputValidator = scoringRoot.resolve("service/RulesV2InputValidator.java");
+        Path rulesV2FeatureValues = scoringRoot.resolve("service/RulesV2FeatureValues.java");
         String features = javaSources(featuresRoot);
-        String rulesValidator = Files.readString(rulesFeatureInputValidator);
-        String rulesCompatibilityResolver = Files.readString(rulesV1CompatibilityResolver);
+        String rulesV2Validator = Files.readString(rulesV2InputValidator);
+        String rulesV2Values = Files.readString(rulesV2FeatureValues);
         String runtimeOutsidePolicy = javaSourcesExcept(
                 scoringRoot,
                 featuresRoot,
                 engineRoot,
                 orchestrationRoot,
                 reviewedProducerWiring,
-                rulesFeatureInputValidator,
-                rulesV1CompatibilityResolver
+                rulesV2InputValidator,
+                rulesV2FeatureValues
         );
         String adapterFoundation = javaSources(engineRoot);
 
@@ -182,16 +193,14 @@ class FraudEngineContractRuntimeIsolationTest {
                 .contains("class FeatureSnapshotKeyPolicy")
                 .contains("class FeatureSnapshotReader")
                 .contains("class FeatureSnapshotReaderFactory");
-        assertThat(rulesValidator)
+        assertThat(rulesV2Validator)
                 .contains("FeatureSnapshotReader")
                 .contains("RulesFeatureInputValidationException")
                 .doesNotContain("VelocityFeatureContract")
                 .doesNotContain("context.featureSnapshot().get(")
                 .doesNotContain("exception.getMessage()");
-        assertThat(rulesCompatibilityResolver)
-                .contains("FeatureSnapshotReader")
-                .contains("RulesV1ContributionSource")
-                .contains("PredicateResolution")
+        assertThat(rulesV2Values)
+                .contains("FeatureSnapshotValue")
                 .doesNotContain("VelocityFeatureContract")
                 .doesNotContain("context.featureSnapshot().get(")
                 .doesNotContain("exception.getMessage()");
@@ -206,6 +215,24 @@ class FraudEngineContractRuntimeIsolationTest {
                 .doesNotContain("FeatureSnapshotScalarType")
                 .doesNotContain("context.featureSnapshot().get(")
                 .doesNotContain("featureSnapshot().get(");
+    }
+
+    @Test
+    void rulesV1ProductionCompatibilityPathIsRemoved() throws Exception {
+        Path scoringRoot = repositoryRoot().resolve("fraud-scoring-service/src/main/java/com/frauddetection/scoring");
+        String productionSource = javaSources(scoringRoot);
+
+        assertThat(scoringRoot.resolve("service/RulesScoringPolicyV1.java")).doesNotExist();
+        assertThat(scoringRoot.resolve("service/RulesV1CompatibilityResolver.java")).doesNotExist();
+        assertThat(scoringRoot.resolve("service/RulesFeatureInputValidator.java")).doesNotExist();
+        assertThat(scoringRoot.resolve("service/ValidatedRulesInput.java")).doesNotExist();
+        assertThat(productionSource)
+                .doesNotContain("RulesScoringPolicyV1")
+                .doesNotContain("RulesV1CompatibilityResolver")
+                .doesNotContain("RulesFeatureInputValidator")
+                .doesNotContain("ValidatedRulesInput")
+                .doesNotContain("RulesV1ShadowScoringEngine")
+                .doesNotContain("RulesV2ShadowComparator");
     }
 
     @Test

@@ -12,6 +12,7 @@ import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
 import com.frauddetection.enricher.FeatureEnricherServiceApplication;
@@ -135,7 +136,7 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
                 "app.kafka.topics.transaction-enriched", TRANSACTION_ENRICHED_TOPIC,
                 "app.kafka.topics.transaction-scored", TRANSACTION_SCORED_TOPIC,
                 "app.kafka.topics.transactions-dead-letter", DEAD_LETTER_TOPIC,
-                "app.scoring.high-threshold", "0.75",
+                "app.scoring.high-threshold", "0.60",
                 "app.scoring.critical-threshold", "0.90",
                 "app.scoring.mode", "RULE_BASED"
         ));
@@ -213,10 +214,16 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
         assertThat(enrichedRecord.value().deviceNovelty()).isTrue();
         assertThat(enrichedRecord.value().countryMismatch()).isTrue();
         assertThat(enrichedRecord.value().proxyOrVpnDetected()).isTrue();
-        assertThat(enrichedRecord.value().featureFlags()).contains(
-                "DEVICE_NOVELTY",
-                "COUNTRY_MISMATCH",
-                "PROXY_OR_VPN"
+        assertThat(enrichedRecord.value().featureSnapshot()).containsEntry(FraudFeatureContract.DEVICE_NOVELTY, true)
+                .containsEntry(FraudFeatureContract.COUNTRY_MISMATCH, true)
+                .containsEntry(FraudFeatureContract.PROXY_OR_VPN_DETECTED, true)
+                .doesNotContainKeys(
+                        "featureFlags",
+                        "rapidTransferFraudCaseCandidate",
+                        FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN,
+                        FraudFeatureContract.RAPID_TRANSFER_COUNT,
+                        FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN,
+                        FraudFeatureContract.RAPID_TRANSFER_WINDOW
         );
 
         ConsumerRecord<String, TransactionScoredEvent> scoredRecord = awaitKafkaRecord(
@@ -226,8 +233,8 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
         );
         assertThat(scoredRecord.value().transactionId()).isEqualTo(transactionId);
         assertThat(scoredRecord.value().correlationId()).isEqualTo(correlationId);
-        assertThat(scoredRecord.value().riskLevel()).isEqualTo(RiskLevel.CRITICAL);
-        assertThat(scoredRecord.value().fraudScore()).isGreaterThanOrEqualTo(0.90d);
+        assertThat(scoredRecord.value().riskLevel()).isEqualTo(RiskLevel.HIGH);
+        assertThat(scoredRecord.value().fraudScore()).isGreaterThanOrEqualTo(0.60d);
         assertThat(scoredRecord.value().alertRecommended()).isTrue();
         assertThat(scoredRecord.value().reasonCodes()).contains(
                 "DEVICE_NOVELTY",
@@ -242,12 +249,12 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
 
         assertThat(persistedAlert.getTransactionId()).isEqualTo(transactionId);
         assertThat(persistedAlert.getCorrelationId()).isEqualTo(correlationId);
-        assertThat(persistedAlert.getRiskLevel()).isEqualTo(RiskLevel.CRITICAL);
+        assertThat(persistedAlert.getRiskLevel()).isEqualTo(RiskLevel.HIGH);
         assertThat(persistedAlert.getAlertStatus()).isEqualTo(AlertStatus.OPEN);
 
         AlertSummaryResponse summary = awaitCondition(() -> findAlertSummary(transactionId));
         assertThat(summary.transactionId()).isEqualTo(transactionId);
-        assertThat(summary.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
+        assertThat(summary.riskLevel()).isEqualTo(RiskLevel.HIGH);
         assertThat(summary.alertStatus()).isEqualTo(AlertStatus.OPEN);
 
         AlertDetailsResponse details = restTemplate.exchange(
@@ -260,7 +267,7 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
         assertThat(details).isNotNull();
         assertThat(details.transactionId()).isEqualTo(transactionId);
         assertThat(details.correlationId()).isEqualTo(correlationId);
-        assertThat(details.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
+        assertThat(details.riskLevel()).isEqualTo(RiskLevel.HIGH);
         assertThat(details.alertStatus()).isEqualTo(AlertStatus.OPEN);
         assertThat(details.reasonCodes()).contains(
                 "DEVICE_NOVELTY",
