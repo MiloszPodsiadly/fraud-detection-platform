@@ -1,4 +1,4 @@
 prometheus_client==0.26.0
-pymongo==4.17.0
+pymongo==4.18.1
 PyJWT==2.13.0
 cryptography==50.0.1
