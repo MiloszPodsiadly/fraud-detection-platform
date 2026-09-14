@@ -17,9 +17,7 @@ import java.lang.reflect.Modifier;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.function.UnaryOperator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -54,11 +52,8 @@ class RulesScoringPolicyV2Test {
                         FraudFeatureContract.CURRENCY
                 )
                 .doesNotContainKeys(
-                        "featureFlags",
-                        "rapidTransferFraudCaseCandidate",
                         FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN
                 );
-        assertThat(result.scoreDetails()).doesNotContainKey("featureFlags");
     }
 
     @Test
@@ -134,50 +129,6 @@ class RulesScoringPolicyV2Test {
                 .with(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"))
                 .with(FraudFeatureContract.COUNTRY_MISMATCH, true)).riskLevel())
                 .isEqualTo(RiskLevel.CRITICAL);
-    }
-
-    @Test
-    void legacyInputsCannotInfluenceRulesV2Output() {
-        SnapshotBuilder canonicalLow = snapshot();
-        FraudScoreResult baseline = score(canonicalLow);
-        TransactionEnrichedEvent legacyOnly = event(canonicalLow.withExtras(Map.of(
-                "featureFlags", List.of(
-                        FraudFeatureContract.FLAG_HIGH_VELOCITY,
-                        FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY,
-                        FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST
-                ),
-                "rapidTransferFraudCaseCandidate", true,
-                FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN, new BigDecimal("20000.00")
-        )), source -> new TransactionEnrichedEvent(
-                source.eventId(),
-                source.transactionId(),
-                source.correlationId(),
-                source.customerId(),
-                source.accountId(),
-                source.createdAt(),
-                source.transactionTimestamp(),
-                source.transactionAmount(),
-                source.merchantInfo(),
-                source.deviceInfo(),
-                source.locationInfo(),
-                source.customerContext(),
-                99,
-                "PT1M",
-                new Money(new BigDecimal("999999.00"), "PLN"),
-                "PT1M",
-                99.0d,
-                99,
-                true,
-                true,
-                true,
-                source.featureSnapshot()
-        ));
-
-        FraudScoreResult withLegacyOnly = policy.score(RulesV2InputValidator.requireValidInput(legacyOnly));
-
-        assertThat(withLegacyOnly.fraudScore()).isEqualTo(baseline.fraudScore());
-        assertThat(withLegacyOnly.reasonCodes()).isEqualTo(baseline.reasonCodes());
-        assertThat(withLegacyOnly.riskLevel()).isEqualTo(baseline.riskLevel());
     }
 
     @Test
@@ -291,15 +242,8 @@ class RulesScoringPolicyV2Test {
     }
 
     private TransactionEnrichedEvent event(SnapshotBuilder snapshot) {
-        return event(snapshot, UnaryOperator.identity());
-    }
-
-    private TransactionEnrichedEvent event(
-            SnapshotBuilder snapshot,
-            UnaryOperator<TransactionEnrichedEvent> customizer
-    ) {
         TransactionEnrichedEvent base = TransactionFixtures.enrichedTransaction().build();
-        TransactionEnrichedEvent canonical = new TransactionEnrichedEvent(
+        return new TransactionEnrichedEvent(
                 "evt-v2",
                 "txn-v2",
                 "corr-v2",
@@ -312,30 +256,14 @@ class RulesScoringPolicyV2Test {
                 base.deviceInfo(),
                 base.locationInfo(),
                 base.customerContext(),
-                1,
-                "PT1M",
-                new Money(new BigDecimal("100.00"), "PLN"),
-                "PT1M",
-                1.0d,
-                1,
-                false,
-                false,
-                false,
                 snapshot.values
         );
-        return customizer.apply(canonical);
     }
 
     private record SnapshotBuilder(Map<String, Object> values) {
         SnapshotBuilder with(String key, Object value) {
             Map<String, Object> updated = new LinkedHashMap<>(values);
             updated.put(key, value);
-            return new SnapshotBuilder(Map.copyOf(updated));
-        }
-
-        SnapshotBuilder withExtras(Map<String, Object> extras) {
-            Map<String, Object> updated = new LinkedHashMap<>(values);
-            updated.putAll(extras);
             return new SnapshotBuilder(Map.copyOf(updated));
         }
 

@@ -158,15 +158,6 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
                 input.deviceInfo(),
                 input.locationInfo(),
                 input.customerContext(),
-                input.recentTransactionCount(),
-                input.recentTransactionCountWindow(),
-                input.recentAmountSum(),
-                input.recentAmountSumWindow(),
-                input.transactionVelocityPerMinute(),
-                input.merchantFrequency7d(),
-                input.deviceNovelty(),
-                input.countryMismatch(),
-                input.proxyOrVpnDetected(),
                 Map.of(
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "P1D"

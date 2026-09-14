@@ -71,15 +71,6 @@ class ScoringContextFactoryTest {
                 validEvent.deviceInfo(),
                 validEvent.locationInfo(),
                 validEvent.customerContext(),
-                validEvent.recentTransactionCount(),
-                validEvent.recentTransactionCountWindow(),
-                validEvent.recentAmountSum(),
-                validEvent.recentAmountSumWindow(),
-                validEvent.transactionVelocityPerMinute(),
-                validEvent.merchantFrequency7d(),
-                validEvent.deviceNovelty(),
-                validEvent.countryMismatch(),
-                validEvent.proxyOrVpnDetected(),
                 validEvent.featureSnapshot()
         );
 

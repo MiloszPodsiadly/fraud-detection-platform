@@ -64,7 +64,10 @@ class FraudScoringIntegrationTest extends AbstractIntegrationTest {
                         FraudFeatureContract.RECENT_AMOUNT_SUM_PLN,
                         enrichedEvent.featureSnapshot().get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN)
                 )
-                .doesNotContainKey(FraudFeatureContract.RECENT_AMOUNT_SUM);
+                .containsEntry(
+                        FraudFeatureContract.RECENT_AMOUNT_SUM,
+                        enrichedEvent.featureSnapshot().get(FraudFeatureContract.RECENT_AMOUNT_SUM)
+                );
     }
 
     private ConsumerRecord<String, TransactionScoredEvent> pollSingleScoredRecord() {

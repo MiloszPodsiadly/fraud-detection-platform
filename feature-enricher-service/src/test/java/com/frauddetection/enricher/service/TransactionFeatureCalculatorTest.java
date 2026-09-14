@@ -24,7 +24,7 @@ class TransactionFeatureCalculatorTest {
     private final TransactionFeatureCalculator calculator = new TransactionFeatureCalculator(new CurrencyAmountConverter());
 
     @Test
-    void shouldCalculateCanonicalFraudRelevantFactsWithoutLegacyFeatureFlags() {
+    void shouldCalculateCanonicalFraudRelevantFacts() {
         var event = TransactionFixtures.rawTransaction().build();
         var snapshot = new FeatureStoreSnapshot(
                 4,
@@ -38,19 +38,14 @@ class TransactionFeatureCalculatorTest {
 
         var features = calculator.calculate(event, snapshot);
 
-        assertThat(features.recentTransactionCount()).isEqualTo(5);
-        assertThat(features.recentAmountSum().amount()).isEqualByComparingTo("6149.99");
-        assertThat(features.deviceNovelty()).isTrue();
-        assertThat(features.countryMismatch()).isFalse();
         assertThat(features.featureSnapshot())
                 .containsEntry(FraudFeatureContract.DEVICE_NOVELTY, true)
                 .containsEntry(FraudFeatureContract.COUNTRY_MISMATCH, false)
                 .containsEntry(FraudFeatureContract.MERCHANT_FREQUENCY_7D, 5)
                 .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5)
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM, new BigDecimal("6149.99"))
                 .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("9899.96"))
                 .doesNotContainKeys(
-                        "featureFlags",
-                        "rapidTransferFraudCaseCandidate",
                         FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN
                 );
     }
@@ -108,7 +103,7 @@ class TransactionFeatureCalculatorTest {
     }
 
     @Test
-    void shouldEmitCanonicalRapidTransferEvidenceWithoutPolicyCandidate() {
+    void shouldEmitCanonicalRapidTransferEvidence() {
         var event = TransactionFixtures.rawTransaction()
                 .withAmount(new BigDecimal("10000.00"), "PLN")
                 .build();
@@ -144,10 +139,8 @@ class TransactionFeatureCalculatorTest {
                 .doesNotContainKeys(
                         FraudFeatureContract.RAPID_TRANSFER_WINDOW,
                         FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN,
-                        "rapidTransferFraudCaseCandidate",
                         FraudFeatureContract.RAPID_TRANSFER_COUNT,
-                        FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN,
-                        "featureFlags"
+                        FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN
                 );
     }
 
@@ -172,9 +165,7 @@ class TransactionFeatureCalculatorTest {
                 .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1)
                 .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("10000.00"))
                 .doesNotContainKeys(
-                        "rapidTransferFraudCaseCandidate",
-                        FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN,
-                        "featureFlags"
+                        FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN
                 );
     }
 
@@ -246,9 +237,6 @@ class TransactionFeatureCalculatorTest {
 
         var features = calculator.calculate(event, snapshot);
 
-        assertThat(features.recentTransactionCount()).isEqualTo(5);
-        assertThat(features.recentTransactionCountWindow()).isEqualTo("PT1M");
-        assertThat(features.transactionVelocityPerMinute()).isEqualTo(5.0d);
         assertThat(features.featureSnapshot())
                 .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5)
                 .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M")

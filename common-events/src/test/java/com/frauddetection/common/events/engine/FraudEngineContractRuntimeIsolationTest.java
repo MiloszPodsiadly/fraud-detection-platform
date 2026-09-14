@@ -97,7 +97,7 @@ class FraudEngineContractRuntimeIsolationTest {
     }
 
     @Test
-    void velocityV1HasOneApprovedExecutablePath() throws Exception {
+    void currentVelocityContractHasOneApprovedExecutablePath() throws Exception {
         Path engineRoot = repositoryRoot().resolve(
                 "fraud-scoring-service/src/main/java/com/frauddetection/scoring/engine"
         );
@@ -121,6 +121,21 @@ class FraudEngineContractRuntimeIsolationTest {
                             "velocity/VelocitySignalReasonCode.java"
                     );
         }
+    }
+
+    @Test
+    void currentVelocityContractIsIndependentFromRulesV1ProductionRuntime() throws Exception {
+        Path velocityRoot = repositoryRoot().resolve(
+                "fraud-scoring-service/src/main/java/com/frauddetection/scoring/engine/velocity"
+        );
+        String velocitySources = javaSources(velocityRoot);
+
+        assertThat(velocitySources)
+                .contains("velocity-v1")
+                .doesNotContain("RulesScoringPolicyV1")
+                .doesNotContain("RulesV1CompatibilityResolver")
+                .doesNotContain("RulesV1ShadowScoringEngine")
+                .doesNotContain("RulesV1Contribution");
     }
 
     @Test

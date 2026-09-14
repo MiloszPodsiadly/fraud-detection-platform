@@ -136,7 +136,7 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
                 "app.kafka.topics.transaction-enriched", TRANSACTION_ENRICHED_TOPIC,
                 "app.kafka.topics.transaction-scored", TRANSACTION_SCORED_TOPIC,
                 "app.kafka.topics.transactions-dead-letter", DEAD_LETTER_TOPIC,
-                "app.scoring.high-threshold", "0.60",
+                "app.scoring.high-threshold", "0.75",
                 "app.scoring.critical-threshold", "0.90",
                 "app.scoring.mode", "RULE_BASED"
         ));
@@ -166,27 +166,41 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
 
     @Test
     void shouldProcessHighRiskTransactionAcrossTheFullPlatformFlow() {
+        String seedTransactionId = "txn-e2e-seed-" + TOPIC_SUFFIX;
         String transactionId = "txn-e2e-" + TOPIC_SUFFIX;
         String customerId = "cust-e2e-" + TOPIC_SUFFIX;
         String accountId = "acct-e2e-" + TOPIC_SUFFIX;
         String paymentInstrumentId = "card-e2e-" + TOPIC_SUFFIX;
+        String seedDeviceId = "device-e2e-seed-" + TOPIC_SUFFIX;
         String deviceId = "device-e2e-" + TOPIC_SUFFIX;
         String correlationId = "corr-e2e-" + TOPIC_SUFFIX;
+
+        IngestTransactionRequest seedRequest = buildHighRiskRequest(
+                seedTransactionId,
+                customerId,
+                accountId,
+                paymentInstrumentId,
+                seedDeviceId,
+                Instant.now().minusSeconds(45),
+                new BigDecimal("2000.00"),
+                "PLN"
+        );
+        ResponseEntity<IngestTransactionResponse> seedResponse = submitTransaction(seedRequest, correlationId + "-seed");
+        assertThat(seedResponse.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        awaitKafkaRecord(TRANSACTION_ENRICHED_TOPIC, TransactionEnrichedEvent.class, seedTransactionId);
 
         IngestTransactionRequest request = buildHighRiskRequest(
                 transactionId,
                 customerId,
                 accountId,
                 paymentInstrumentId,
-                deviceId
+                deviceId,
+                Instant.now().minusSeconds(15),
+                new BigDecimal("4000.00"),
+                "PLN"
         );
 
-        ResponseEntity<IngestTransactionResponse> response = restTemplate.exchange(
-                RequestEntity.post(URI.create(ingestUrl("/api/v1/transactions")))
-                        .header("X-Correlation-Id", correlationId)
-                        .body(request),
-                IngestTransactionResponse.class
-        );
+        ResponseEntity<IngestTransactionResponse> response = submitTransaction(request, correlationId);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(response.getBody()).isNotNull();
@@ -211,15 +225,13 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
         );
         assertThat(enrichedRecord.value().transactionId()).isEqualTo(transactionId);
         assertThat(enrichedRecord.value().correlationId()).isEqualTo(correlationId);
-        assertThat(enrichedRecord.value().deviceNovelty()).isTrue();
-        assertThat(enrichedRecord.value().countryMismatch()).isTrue();
-        assertThat(enrichedRecord.value().proxyOrVpnDetected()).isTrue();
         assertThat(enrichedRecord.value().featureSnapshot()).containsEntry(FraudFeatureContract.DEVICE_NOVELTY, true)
                 .containsEntry(FraudFeatureContract.COUNTRY_MISMATCH, true)
                 .containsEntry(FraudFeatureContract.PROXY_OR_VPN_DETECTED, true)
+                .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2)
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("6000.00"))
+                .containsEntry(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of(seedTransactionId, transactionId))
                 .doesNotContainKeys(
-                        "featureFlags",
-                        "rapidTransferFraudCaseCandidate",
                         FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN,
                         FraudFeatureContract.RAPID_TRANSFER_COUNT,
                         FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN,
@@ -234,12 +246,14 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
         assertThat(scoredRecord.value().transactionId()).isEqualTo(transactionId);
         assertThat(scoredRecord.value().correlationId()).isEqualTo(correlationId);
         assertThat(scoredRecord.value().riskLevel()).isEqualTo(RiskLevel.HIGH);
-        assertThat(scoredRecord.value().fraudScore()).isGreaterThanOrEqualTo(0.60d);
+        assertThat(scoredRecord.value().fraudScore()).isGreaterThanOrEqualTo(0.75d);
+        assertThat(scoredRecord.value().fraudScore()).isLessThan(0.90d);
         assertThat(scoredRecord.value().alertRecommended()).isTrue();
         assertThat(scoredRecord.value().reasonCodes()).contains(
                 "DEVICE_NOVELTY",
                 "COUNTRY_MISMATCH",
                 "PROXY_OR_VPN",
+                "HIGH_AMOUNT_ACTIVITY",
                 "HIGH_TRANSACTION_AMOUNT"
         );
 
@@ -353,15 +367,18 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
             String customerId,
             String accountId,
             String paymentInstrumentId,
-            String deviceId
+            String deviceId,
+            Instant transactionTimestamp,
+            BigDecimal amount,
+            String currency
     ) {
         return new IngestTransactionRequest(
                 transactionId,
                 customerId,
                 accountId,
                 paymentInstrumentId,
-                Instant.now().minusSeconds(30),
-                new MoneyRequest(new BigDecimal("1500.00"), "USD"),
+                transactionTimestamp,
+                new MoneyRequest(amount, currency),
                 new MerchantInfoRequest(
                         "merchant-e2e-" + TOPIC_SUFFIX,
                         "High Risk Travel Outlet",
@@ -412,6 +429,18 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
                 "PAYMENT_GATEWAY",
                 "trace-e2e-" + TOPIC_SUFFIX,
                 Map.of("channel", "web")
+        );
+    }
+
+    private ResponseEntity<IngestTransactionResponse> submitTransaction(
+            IngestTransactionRequest request,
+            String correlationId
+    ) {
+        return restTemplate.exchange(
+                RequestEntity.post(URI.create(ingestUrl("/api/v1/transactions")))
+                        .header("X-Correlation-Id", correlationId)
+                        .body(request),
+                IngestTransactionResponse.class
         );
     }
 

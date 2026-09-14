@@ -2,6 +2,7 @@ package com.frauddetection.scoring.service;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.model.Money;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.ScoringMode;
@@ -73,6 +74,14 @@ class CompositeFraudScoringEngineTest {
                 .containsEntry("mode", "SHADOW")
                 .containsEntry("modelVersion", "unavailable")
                 .containsEntry("finalDecisionSource", "RULE_BASED")
+                .containsEntry("modelAvailable", false)
+                .containsEntry("mlScore", null)
+                .containsEntry("mlRiskLevel", null)
+                .containsEntry("mlScoreBucket", "UNAVAILABLE")
+                .containsEntry("scoreDelta", null)
+                .containsEntry("absoluteScoreDelta", null)
+                .containsEntry("decisionDisagreementSample", 0)
+                .containsEntry("riskLevelMismatchSample", 0)
                 .containsKey("prometheusSamples")
                 .containsKey("modelPerformanceByVersion");
     }
@@ -119,10 +128,17 @@ class CompositeFraudScoringEngineTest {
                 .containsKey("riskLevelMatch");
         assertThat(modelMonitoring(result))
                 .containsEntry("mode", "COMPARE")
-                .containsKey("scoreDelta")
-                .containsKey("absoluteScoreDelta")
-                .containsKey("decisionDisagreementSample")
-                .containsKey("riskLevelMismatchSample");
+                .containsEntry("modelAvailable", false)
+                .containsEntry("mlScore", null)
+                .containsEntry("mlRiskLevel", null)
+                .containsEntry("mlScoreBucket", "UNAVAILABLE")
+                .containsEntry("scoreDelta", null)
+                .containsEntry("absoluteScoreDelta", null)
+                .containsEntry("decisionDisagreementSample", 0)
+                .containsEntry("riskLevelMismatchSample", 0);
+        assertThat(mlDiagnostics(result))
+                .containsEntry("scoreDelta", null)
+                .containsEntry("riskLevelMatch", null);
     }
 
     @Test
@@ -160,6 +176,33 @@ class CompositeFraudScoringEngineTest {
                 .count()).isEqualTo(1.0d);
     }
 
+    @Test
+    void primaryEngineSelectionDoesNotChangeFactualSnapshotPropagatedDownstream() {
+        FraudScoringRequest request = rapidTransferRequestWithEvidence();
+        MlModelScoringClient availableMl = input -> new MlModelOutput(
+                true,
+                0.82d,
+                RiskLevel.HIGH,
+                "python-logistic-fraud-model",
+                "test-version",
+                Instant.now(),
+                List.of("MODEL_HIGH_RISK"),
+                Map.of("modelAvailable", true),
+                Map.of("modelAvailable", true),
+                null
+        );
+
+        var rulesPrimary = engine(ScoringMode.RULE_BASED, availableMl).score(request);
+        var mlPrimary = engine(ScoringMode.ML, availableMl).score(request);
+        var shadowMode = engine(ScoringMode.SHADOW, availableMl).score(request);
+
+        assertThat(rulesPrimary.featureSnapshot()).containsExactlyInAnyOrderEntriesOf(request.featureSnapshot());
+        assertThat(mlPrimary.featureSnapshot()).containsExactlyInAnyOrderEntriesOf(request.featureSnapshot());
+        assertThat(shadowMode.featureSnapshot()).containsExactlyInAnyOrderEntriesOf(request.featureSnapshot());
+        assertThat(rulesPrimary.featureSnapshot().get(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS))
+                .isEqualTo(List.of("rapid-txn-1", "rapid-txn-2"));
+    }
+
     private CompositeFraudScoringEngine engine(ScoringMode mode) {
         return engine(mode, new PlaceholderMlModelScoringClient(), new ScoringMetrics(new SimpleMeterRegistry()));
     }
@@ -193,15 +236,6 @@ class CompositeFraudScoringEngineTest {
                 base.deviceInfo(),
                 base.locationInfo(),
                 base.customerContext(),
-                1,
-                "PT1M",
-                new Money(new BigDecimal("1500.00"), "PLN"),
-                "PT1M",
-                1.0d,
-                base.merchantFrequency7d(),
-                false,
-                false,
-                false,
                 Map.ofEntries(
                         Map.entry(com.frauddetection.common.events.features.FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1),
                         Map.entry(com.frauddetection.common.events.features.FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M"),
@@ -214,6 +248,39 @@ class CompositeFraudScoringEngineTest {
                         Map.entry(com.frauddetection.common.events.features.FraudFeatureContract.COUNTRY_MISMATCH, false),
                         Map.entry(com.frauddetection.common.events.features.FraudFeatureContract.PROXY_OR_VPN_DETECTED, false),
                         Map.entry(com.frauddetection.common.events.features.FraudFeatureContract.CURRENCY, "PLN")
+                )
+        ));
+    }
+
+    private FraudScoringRequest rapidTransferRequestWithEvidence() {
+        TransactionEnrichedEvent base = TransactionFixtures.enrichedTransaction().build();
+        return FraudScoringRequest.from(new TransactionEnrichedEvent(
+                base.eventId(),
+                base.transactionId(),
+                base.correlationId(),
+                base.customerId(),
+                base.accountId(),
+                base.createdAt(),
+                base.transactionTimestamp(),
+                new Money(new BigDecimal("10000.00"), "PLN"),
+                base.merchantInfo(),
+                base.deviceInfo(),
+                base.locationInfo(),
+                base.customerContext(),
+                Map.ofEntries(
+                        Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2),
+                        Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M"),
+                        Map.entry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 2.0d),
+                        Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM, new BigDecimal("20000.00")),
+                        Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00")),
+                        Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M"),
+                        Map.entry(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("10000.00")),
+                        Map.entry(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("rapid-txn-1", "rapid-txn-2")),
+                        Map.entry(FraudFeatureContract.MERCHANT_FREQUENCY_7D, 1),
+                        Map.entry(FraudFeatureContract.DEVICE_NOVELTY, false),
+                        Map.entry(FraudFeatureContract.COUNTRY_MISMATCH, false),
+                        Map.entry(FraudFeatureContract.PROXY_OR_VPN_DETECTED, false),
+                        Map.entry(FraudFeatureContract.CURRENCY, "PLN")
                 )
         ));
     }

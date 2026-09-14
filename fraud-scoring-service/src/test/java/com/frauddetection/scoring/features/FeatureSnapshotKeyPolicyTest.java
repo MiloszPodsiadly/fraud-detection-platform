@@ -99,8 +99,6 @@ class FeatureSnapshotKeyPolicyTest {
     void excludesNonScalarOrIdentifierBearingKeysFromAdapterConsumption() {
         assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS))
                 .isEqualTo(Optional.empty());
-        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor("featureFlags"))
-                .isEqualTo(Optional.empty());
     }
 
     @Test
@@ -112,10 +110,8 @@ class FeatureSnapshotKeyPolicyTest {
     }
 
     @Test
-    void retiredPolicyFieldsAreNotCurrentAdapterKeys() {
-        assertThat(FeatureSnapshotKeyPolicy.isAllowedFeatureKey("featureFlags"))
-                .isFalse();
-        assertThat(FeatureSnapshotKeyPolicy.isAllowedFeatureKey("rapidTransferFraudCaseCandidate"))
+    void oldOrUnsupportedPolicyFieldsAreNotCurrentAdapterKeys() {
+        assertThat(FeatureSnapshotKeyPolicy.isAllowedFeatureKey("unsupportedPolicyMarker"))
                 .isFalse();
         assertThat(FeatureSnapshotKeyPolicy.isAllowedFeatureKey(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN))
                 .isFalse();
@@ -125,7 +121,7 @@ class FeatureSnapshotKeyPolicyTest {
     void scalarConsumptionMustUseExpectedTypePolicy() {
         assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.CURRENCY))
                 .contains(FeatureSnapshotScalarType.STRING);
-        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor("featureFlags"))
+        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor("unsupportedPolicyMarker"))
                 .isEmpty();
     }
 }

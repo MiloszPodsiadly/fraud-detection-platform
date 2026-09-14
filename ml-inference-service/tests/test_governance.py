@@ -39,6 +39,8 @@ from app.governance.persistence import (
     UnavailableGovernanceSnapshotRepository,
 )
 from app.governance.profile import InferenceProfile, load_reference_profile
+from app.features.feature_contract import FEATURE_CONTRACT
+from app.features.feature_pipeline import FeaturePipeline
 
 
 SENSITIVE_FIELDS = (
@@ -205,6 +207,9 @@ class MlGovernanceUnitTest(unittest.TestCase):
         self.assertIn("generated_by", profile)
         self.assertIn("numeric_feature_stats", profile)
         self.assertIn("score_distribution", profile)
+        self.assertEqual(profile["feature_schema_version"], FEATURE_CONTRACT.version)
+        self.assertEqual(profile["model_version"], server.MODEL_VERSION)
+        self.assertEqual(set(profile["numeric_feature_stats"]), set(FeaturePipeline.PRODUCTION_FEATURE_NAMES))
 
     def test_missing_reference_profile_returns_unknown_safe_status(self):
         profile = load_reference_profile(Path("missing-reference-profile.json"))

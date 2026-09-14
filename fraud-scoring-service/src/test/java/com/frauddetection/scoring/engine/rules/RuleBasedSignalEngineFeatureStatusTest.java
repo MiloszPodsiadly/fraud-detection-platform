@@ -22,7 +22,6 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -63,7 +62,6 @@ class RuleBasedSignalEngineFeatureStatusTest {
     @Test
     void invalidSnapshotTypeForTypedEventFieldDegradesWithoutTopLevelFallback() {
         TransactionEnrichedEvent event = event(false, false, false, 1, 0.1d, BigDecimal.TEN,
-                List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
                 Map.of(FraudFeatureContract.RECENT_TRANSACTION_COUNT, "5"));
 
         FraudSignalEvaluation result = engine.evaluate(context(event));
@@ -76,7 +74,6 @@ class RuleBasedSignalEngineFeatureStatusTest {
     void invalidSnapshotAmountTypeDegradesWithoutTopLevelMoneyFallback() {
         FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 2, 2.0d,
                 new BigDecimal("20000.00"),
-                List.of(FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY),
                 Map.of(
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
                         FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, "20000.00"
@@ -89,7 +86,6 @@ class RuleBasedSignalEngineFeatureStatusTest {
     @Test
     void negativeCanonicalCountDegrades() {
         FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 5, 5.0d, BigDecimal.TEN,
-                List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
                 Map.of(FraudFeatureContract.RECENT_TRANSACTION_COUNT, -1))));
 
         assertDegradedInvalid(result);
@@ -98,46 +94,12 @@ class RuleBasedSignalEngineFeatureStatusTest {
     @Test
     void negativeCanonicalAmountDegrades() {
         FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 2, 2.0d, BigDecimal.TEN,
-                List.of(FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY),
                 Map.of(
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
                         FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("-0.01")
                 ))));
 
         assertDegradedInvalid(result);
-    }
-
-    @Test
-    void retiredRapidTransferCountWithoutAmountDoesNotDegradeOrFallback() {
-        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 2, 2.0d,
-                new BigDecimal("20000.00"),
-                List.of(FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST),
-                Map.of(
-                        FraudFeatureContract.RAPID_TRANSFER_COUNT, 2,
-                        "rapidTransferFraudCaseCandidate", true
-                ))));
-
-        assertThat(result.status()).isEqualTo(FraudEngineStatus.AVAILABLE);
-        assertThat(result.reasonCodes()).containsExactly(
-                ReasonCode.HIGH_AMOUNT_ACTIVITY.wireValue(),
-                ReasonCode.RAPID_PLN_20K_BURST.wireValue(),
-                ReasonCode.HIGH_TRANSACTION_AMOUNT.wireValue()
-        );
-    }
-
-    @Test
-    void retiredRapidTransferAmountWithoutCountDoesNotDegrade() {
-        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 2, 2.0d,
-                new BigDecimal("20000.00"),
-                List.of(FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST),
-                Map.of(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("20000.00")))));
-
-        assertThat(result.status()).isEqualTo(FraudEngineStatus.AVAILABLE);
-        assertThat(result.reasonCodes()).containsExactly(
-                ReasonCode.HIGH_AMOUNT_ACTIVITY.wireValue(),
-                ReasonCode.RAPID_PLN_20K_BURST.wireValue(),
-                ReasonCode.HIGH_TRANSACTION_AMOUNT.wireValue()
-        );
     }
 
     @Test
@@ -180,7 +142,6 @@ class RuleBasedSignalEngineFeatureStatusTest {
     void kafkaSerdeWrongCanonicalWireTypeRemainsDetectableAndDegrades() throws Exception {
         JsonMapper mapper = JsonMapper.builder().findAndAddModules().build();
         TransactionEnrichedEvent source = event(false, false, false, 5, 5.0d, BigDecimal.TEN,
-                List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
                 Map.of(
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
@@ -198,28 +159,6 @@ class RuleBasedSignalEngineFeatureStatusTest {
     }
 
     @Test
-    void invalidRapidTransferFraudCaseCandidateSnapshotTypeIsIgnoredByRulesV2() {
-        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 1, 0.1d, BigDecimal.TEN,
-                Map.of("rapidTransferFraudCaseCandidate", "true"))));
-
-        assertThat(result.status()).isEqualTo(FraudEngineStatus.AVAILABLE);
-        assertThat(result.statusReason()).isNull();
-        assertThat(flatten(result)).doesNotContain("true");
-        assertThat(result.reasonCodes()).isEmpty();
-    }
-
-    @Test
-    void missingRapidTransferFraudCaseCandidateDoesNotDegrade() {
-        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 1, 0.1d, BigDecimal.TEN,
-                Map.of())));
-
-        assertThat(result.status()).isEqualTo(FraudEngineStatus.AVAILABLE);
-        assertThat(result.statusReason()).isNull();
-        assertThat(result.reasonCodes()).isEmpty();
-        assertThat(result.evidence()).isEmpty();
-    }
-
-    @Test
     void countWithValidRulesWindowProducesHighVelocity() {
         FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 5, 5.0d, BigDecimal.TEN,
                 Map.of(
@@ -234,7 +173,6 @@ class RuleBasedSignalEngineFeatureStatusTest {
     @Test
     void countWithInvalidRulesWindowDegradesWithoutRawWindowLeakage() {
         FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 5, 5.0d, BigDecimal.TEN,
-                List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
                 Map.of(
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "P1D"
@@ -245,11 +183,10 @@ class RuleBasedSignalEngineFeatureStatusTest {
     }
 
     @Test
-    void topLevelCountWithInvalidRulesWindowCannotInfluenceRulesV2() {
+    void removedTopLevelCountWindowCannotInfluenceRulesV2() {
         TransactionEnrichedEvent source = event(false, false, false, 5, 5.0d, BigDecimal.TEN,
-                List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
                 Map.of());
-        FraudSignalEvaluation result = engine.evaluate(context(withTopLevelWindows(source, "P1D", "PT1M")));
+        FraudSignalEvaluation result = engine.evaluate(context(source));
 
         assertThat(result.status()).isEqualTo(FraudEngineStatus.AVAILABLE);
         assertThat(result.reasonCodes()).containsExactly(ReasonCode.HIGH_VELOCITY.wireValue());
@@ -259,7 +196,6 @@ class RuleBasedSignalEngineFeatureStatusTest {
     @Test
     void countWithWrongWindowTypeDegrades() {
         FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 5, 5.0d, BigDecimal.TEN,
-                List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
                 Map.of(
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, 60
@@ -269,32 +205,10 @@ class RuleBasedSignalEngineFeatureStatusTest {
     }
 
     @Test
-    void retiredRapidTransferWithInvalidRulesWindowCannotInfluenceRulesV2() {
-        FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 2, 2.0d,
-                new BigDecimal("20000.00"),
-                List.of(FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST),
-                Map.of(
-                        FraudFeatureContract.RAPID_TRANSFER_COUNT, 2,
-                        FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("20000.00"),
-                        FraudFeatureContract.RAPID_TRANSFER_WINDOW, "P7D",
-                        "rapidTransferFraudCaseCandidate", true
-                ))));
-
-        assertThat(result.status()).isEqualTo(FraudEngineStatus.AVAILABLE);
-        assertThat(result.reasonCodes()).containsExactly(
-                ReasonCode.HIGH_AMOUNT_ACTIVITY.wireValue(),
-                ReasonCode.RAPID_PLN_20K_BURST.wireValue(),
-                ReasonCode.HIGH_TRANSACTION_AMOUNT.wireValue()
-        );
-        assertThat(flatten(result)).doesNotContain("P7D").doesNotContain("20000.00");
-    }
-
-    @Test
-    void topLevelAmountWithInvalidRulesWindowCannotInfluenceRulesV2() {
+    void removedTopLevelAmountWindowCannotInfluenceRulesV2() {
         TransactionEnrichedEvent source = event(false, false, false, 1, 1.0d, new BigDecimal("6000.00"),
-                List.of(FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY),
-                Map.of("rapidTransferFraudCaseCandidate", true));
-        FraudSignalEvaluation result = engine.evaluate(context(withTopLevelWindows(source, "PT1M", "P1D")));
+                Map.of());
+        FraudSignalEvaluation result = engine.evaluate(context(source));
 
         assertThat(result.status()).isEqualTo(FraudEngineStatus.AVAILABLE);
         assertThat(result.reasonCodes()).containsExactly(ReasonCode.HIGH_TRANSACTION_AMOUNT.wireValue());
@@ -351,28 +265,6 @@ class RuleBasedSignalEngineFeatureStatusTest {
             BigDecimal amount,
             Map<String, Object> featureSnapshot
     ) {
-        return event(
-                deviceNovelty,
-                countryMismatch,
-                proxyOrVpn,
-                recentTransactionCount,
-                velocityPerMinute,
-                amount,
-                List.of(),
-                featureSnapshot
-        );
-    }
-
-    private TransactionEnrichedEvent event(
-            boolean deviceNovelty,
-            boolean countryMismatch,
-            boolean proxyOrVpn,
-            int recentTransactionCount,
-            double velocityPerMinute,
-            BigDecimal amount,
-            List<String> featureFlags,
-            Map<String, Object> featureSnapshot
-    ) {
         TransactionEnrichedEvent base = TransactionFixtures.enrichedTransaction().build();
         return new TransactionEnrichedEvent(
                 base.eventId(),
@@ -387,15 +279,6 @@ class RuleBasedSignalEngineFeatureStatusTest {
                 base.deviceInfo(),
                 base.locationInfo(),
                 base.customerContext(),
-                recentTransactionCount,
-                "PT1M",
-                new Money(amount, "PLN"),
-                "PT1M",
-                (double) recentTransactionCount,
-                base.merchantFrequency7d(),
-                deviceNovelty,
-                countryMismatch,
-                proxyOrVpn,
                 canonicalSnapshot(
                         deviceNovelty,
                         countryMismatch,
@@ -429,37 +312,6 @@ class RuleBasedSignalEngineFeatureStatusTest {
         snapshot.put(FraudFeatureContract.CURRENCY, "PLN");
         snapshot.putAll(overrides);
         return Map.copyOf(snapshot);
-    }
-
-    private TransactionEnrichedEvent withTopLevelWindows(
-            TransactionEnrichedEvent source,
-            String recentTransactionCountWindow,
-            String recentAmountWindow
-    ) {
-        return new TransactionEnrichedEvent(
-                source.eventId(),
-                source.transactionId(),
-                source.correlationId(),
-                source.customerId(),
-                source.accountId(),
-                source.createdAt(),
-                source.transactionTimestamp(),
-                source.transactionAmount(),
-                source.merchantInfo(),
-                source.deviceInfo(),
-                source.locationInfo(),
-                source.customerContext(),
-                source.recentTransactionCount(),
-                recentTransactionCountWindow,
-                source.recentAmountSum(),
-                recentAmountWindow,
-                source.transactionVelocityPerMinute(),
-                source.merchantFrequency7d(),
-                source.deviceNovelty(),
-                source.countryMismatch(),
-                source.proxyOrVpnDetected(),
-                source.featureSnapshot()
-        );
     }
 
     private String flatten(FraudSignalEvaluation result) {

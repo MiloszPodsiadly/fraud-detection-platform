@@ -68,7 +68,7 @@ class AnalystRecommendationServiceTest {
     @Test
     void rapidTransferHighRiskProducesAdvisoryCaseCreationRecommendationOnly() {
         var result = service.recommend(scoreResult(RiskLevel.CRITICAL), Optional.of(summary(
-                rules(RiskLevel.CRITICAL, "RAPID_TRANSFER_FRAUD_CASE")
+                rules(RiskLevel.CRITICAL, "RAPID_PLN_20K_BURST")
         )));
 
         assertThat(result.recommendation()).isEqualTo(AnalystRecommendation.RECOMMEND_CASE_CREATION);

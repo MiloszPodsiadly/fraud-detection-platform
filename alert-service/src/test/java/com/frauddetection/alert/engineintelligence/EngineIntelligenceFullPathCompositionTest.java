@@ -110,8 +110,8 @@ class EngineIntelligenceFullPathCompositionTest {
         assertThat(enrichedRecentAmount)
                 .isExactlyInstanceOf(BigDecimal.class);
         assertThat(enriched.featureSnapshot()).doesNotContainKeys(
-                "featureFlags",
-                "rapidTransferFraudCaseCandidate",
+                "unsupportedPolicyMarker",
+                "unsupportedRapidMarker",
                 FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN,
                 FraudFeatureContract.RAPID_TRANSFER_COUNT,
                 FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN,
@@ -124,8 +124,8 @@ class EngineIntelligenceFullPathCompositionTest {
         assertThat(scoredRecentAmount)
                 .isExactlyInstanceOf(BigDecimal.class);
         assertThat(event.featureSnapshot()).doesNotContainKeys(
-                "featureFlags",
-                "rapidTransferFraudCaseCandidate",
+                "unsupportedPolicyMarker",
+                "unsupportedRapidMarker",
                 FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN,
                 FraudFeatureContract.RAPID_TRANSFER_COUNT,
                 FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN,

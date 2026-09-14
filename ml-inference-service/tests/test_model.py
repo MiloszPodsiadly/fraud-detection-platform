@@ -15,7 +15,14 @@ from app.models.model_loader import ModelConfigurationError, load_model_from_art
 from app.registry.model_registry import ModelRegistry
 from app.models.xgboost_model import XGBoostFraudModel
 from app.training.retraining import PromotionThresholds, _promotion_decision, compare_retrained_model
-from app.training.train import train, train_model, train_model_with_evaluation, train_with_evaluation, write_artifact
+from app.training.train import (
+    CANONICAL_MODEL_VERSION,
+    train,
+    train_model,
+    train_model_with_evaluation,
+    train_with_evaluation,
+    write_artifact,
+)
 
 
 class FraudModelTest(unittest.TestCase):
@@ -127,7 +134,9 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(FeaturePipeline.FEATURE_NAMES, FEATURE_CONTRACT.ml_feature_names)
         self.assertIn("recentTransactionCount", FEATURE_CONTRACT.java_enriched_feature_names)
         self.assertIn("rapidTransferTransactionIds", FEATURE_CONTRACT.java_enriched_feature_names)
-        self.assertNotIn("featureFlags", FEATURE_CONTRACT.java_enriched_feature_names)
+        self.assertIn("recentTransactionCountWindow", FEATURE_CONTRACT.java_enriched_feature_names)
+        self.assertIn("recentAmountSumWindow", FEATURE_CONTRACT.java_enriched_feature_names)
+        self.assertIn("recentAmountSumPln", FEATURE_CONTRACT.java_enriched_feature_names)
 
     def test_java_enriched_snapshot_normalizes_to_contract_features(self):
         payload = {
@@ -160,7 +169,7 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(normalized["highRiskFlagCount"], 4.0 / 6.0)
         self.assertEqual(normalized["rapidTransferBurst"], 0.0)
 
-    def test_legacy_rules_fields_do_not_affect_production_feature_vector(self):
+    def test_production_feature_vector_is_derived_from_current_canonical_fields(self):
         canonical = {
             "recentTransactionCount": 2,
             "recentAmountSum": {"amount": 20000.0, "currency": "PLN"},
@@ -173,18 +182,16 @@ class FraudModelTest(unittest.TestCase):
             "recentAmountSumWindow": "PT1M",
             "recentAmountSumPln": 20000.0,
         }
-        legacy_overlay = {
+        additive_transport_overlay = {
             **canonical,
-            "featureFlags": [],
-            "rapidTransferFraudCaseCandidate": False,
-            "rapidTransferTotalPln": 0.0,
+            "unsupportedPolicyMarker": "ignored",
         }
 
         pipeline = FeaturePipeline()
 
         self.assertEqual(
             pipeline.transform_single(canonical, mode="production"),
-            pipeline.transform_single(legacy_overlay, mode="production"),
+            pipeline.transform_single(additive_transport_overlay, mode="production"),
         )
 
     def test_production_training_features_match_java_inference_schema(self):
@@ -266,6 +273,11 @@ class FraudModelTest(unittest.TestCase):
             if source["metadata"]["scenario"] == "account_takeover"
         ]
         self.assertTrue(any(row["deviceNovelty"] == 1.0 or row["countryMismatch"] == 1.0 for row in fraud_rows))
+        rapid_rows = [
+            features for source, features in zip(dataset.X, transformed)
+            if source["metadata"]["scenario"] == "rapid_transfer_burst"
+        ]
+        self.assertTrue(any(row["rapidTransferBurst"] == 1.0 for row in rapid_rows))
 
     def test_dataset_rejects_mismatched_features_and_labels(self):
         with self.assertRaises(ValueError):
@@ -327,9 +339,19 @@ class FraudModelTest(unittest.TestCase):
         self.assertIn("outOfTimeEvaluation", artifact["evaluation"])
         self.assertIn("evaluationComparison", artifact["evaluation"])
         self.assertEqual(artifact["evaluation"]["selectedThresholdSource"], "validation")
+        self.assertEqual(artifact["evaluation"]["modelVersion"], CANONICAL_MODEL_VERSION)
+        self.assertEqual(artifact["evaluation"]["featureContractVersion"], FEATURE_CONTRACT.version)
+        self.assertEqual(artifact["evaluation"]["featureSchemaVersion"], FEATURE_CONTRACT.version)
+        self.assertEqual(artifact["evaluation"]["featureSetVersion"], FEATURE_CONTRACT.version)
+        self.assertEqual(artifact["modelVersion"], CANONICAL_MODEL_VERSION)
         self.assertEqual(artifact["trainingMode"], "production")
         self.assertEqual(artifact["featureSetUsed"], list(weights))
         self.assertEqual(set(artifact["featureSchema"]), set(weights))
+        self.assertEqual(artifact["featureContractVersion"], FEATURE_CONTRACT.version)
+        self.assertEqual(artifact["featureSchemaVersion"], FEATURE_CONTRACT.version)
+        self.assertEqual(artifact["featureSetVersion"], FEATURE_CONTRACT.version)
+        self.assertEqual(artifact["training"]["featureContractVersion"], FEATURE_CONTRACT.version)
+        self.assertEqual(artifact["training"]["featureSetVersion"], FEATURE_CONTRACT.version)
 
     def test_model_lifecycle_report_schema_is_consistent_for_logistic(self):
         dataset = generate_fraud_behavior(count=300, seed=322, user_count=8, fraud_ratio=0.03)

@@ -11,6 +11,7 @@ import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.model.Money;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.annotation.JsonDeserialize;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -41,7 +42,6 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
                 Map.entry(FraudFeatureContract.RAPID_TRANSFER_COUNT, 5),
                 Map.entry(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("20000.00")),
                 Map.entry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d),
-                Map.entry("rapidTransferFraudCaseCandidate", true),
                 Map.entry(FraudFeatureContract.COUNTRY_MISMATCH, false),
                 Map.entry("futureAdditiveFeature", Map.of("nested", List.of(1, "two")))
         ));
@@ -61,9 +61,6 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
         assertThat(snapshot.get(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN))
                 .isEqualTo(new BigDecimal("20000.00"))
                 .isExactlyInstanceOf(BigDecimal.class);
-        assertThat(snapshot.get("rapidTransferFraudCaseCandidate"))
-                .isEqualTo(true)
-                .isExactlyInstanceOf(Boolean.class);
         assertThat(snapshot.get(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW))
                 .isEqualTo("PT1M")
                 .isExactlyInstanceOf(String.class);
@@ -71,12 +68,76 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
     }
 
     @Test
+    void currentProducerWritesFeatureSnapshotWithoutDuplicateTopLevelFraudFacts() throws IOException {
+        String serialized = new String(serializer.serialize("transactions.enriched", event(Map.ofEntries(
+                Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5),
+                Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M"),
+                Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00")),
+                Map.entry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d)
+        ))), StandardCharsets.UTF_8);
+        ObjectNode root = (ObjectNode) objectMapper.readTree(serialized);
+
+        assertThat(root.has("featureSnapshot")).isTrue();
+        assertThat(root.has("recentTransactionCount")).isFalse();
+        assertThat(root.has("recentTransactionCountWindow")).isFalse();
+        assertThat(root.has("recentAmountSum")).isFalse();
+        assertThat(root.has("recentAmountSumWindow")).isFalse();
+        assertThat(root.has("transactionVelocityPerMinute")).isFalse();
+        assertThat(root.has("merchantFrequency7d")).isFalse();
+        assertThat(root.has("deviceNovelty")).isFalse();
+        assertThat(root.has("countryMismatch")).isFalse();
+        assertThat(root.has("proxyOrVpnDetected")).isFalse();
+    }
+
+    @Test
+    void oldPayloadWithDuplicateTopLevelFraudFactsDeserializesIntoCurrentConsumerSnapshot() throws IOException {
+        String serialized = new String(serializer.serialize("transactions.enriched", event(Map.of(
+                FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
+                FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00")
+        ))), StandardCharsets.UTF_8);
+        ObjectNode root = (ObjectNode) objectMapper.readTree(serialized);
+        root.put("recentTransactionCount", 5);
+        root.put("recentTransactionCountWindow", "PT1M");
+        root.set("recentAmountSum", objectMapper.valueToTree(new Money(new BigDecimal("20000.00"), "PLN")));
+        root.put("recentAmountSumWindow", "PT1M");
+        root.put("transactionVelocityPerMinute", 5.0d);
+        root.put("merchantFrequency7d", 1);
+        root.put("deviceNovelty", false);
+        root.put("countryMismatch", false);
+        root.put("proxyOrVpnDetected", false);
+
+        TransactionEnrichedEvent replayed = deserializer.deserialize(
+                "transactions.enriched",
+                objectMapper.writeValueAsBytes(root)
+        );
+
+        assertThat(replayed.featureSnapshot())
+                .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5);
+        assertThat((BigDecimal) replayed.featureSnapshot().get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN))
+                .isEqualByComparingTo("20000.00");
+    }
+
+    @Test
+    void currentPayloadCanBeReadByPrompt2SnapshotBasedConsumerDuringCoordinatedCutover() throws IOException {
+        byte[] payload = serializer.serialize("transactions.enriched", event(Map.of(
+                FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
+                FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00")
+        )));
+
+        Prompt2SnapshotBasedConsumerEvent replayed = objectMapper.readValue(payload, Prompt2SnapshotBasedConsumerEvent.class);
+
+        assertThat(replayed.featureSnapshot())
+                .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5);
+        assertThat((BigDecimal) replayed.featureSnapshot().get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN))
+                .isEqualByComparingTo("20000.00");
+    }
+
+    @Test
     void kafkaSerdeKeepsMalformedPresentCanonicalValuesInvalidInsteadOfCoercingStringsOrFractions() throws IOException {
         String json = malformedFeatureSnapshotJson(event(Map.of(
                 FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
                 FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
-                FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d,
-                "rapidTransferFraudCaseCandidate", true
+                FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d
         )));
 
         TransactionEnrichedEvent replayed = deserializer.deserialize("transactions.enriched", json.getBytes(StandardCharsets.UTF_8));
@@ -84,25 +145,6 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
 
         assertThat(snapshot.get(FraudFeatureContract.RECENT_TRANSACTION_COUNT)).isExactlyInstanceOf(BigDecimal.class);
         assertThat(snapshot.get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN)).isExactlyInstanceOf(String.class);
-        assertThat(snapshot.get("rapidTransferFraudCaseCandidate")).isExactlyInstanceOf(Integer.class);
-    }
-
-    @Test
-    void kafkaSerdeIgnoresMissingLegacyFeatureFlagsField() throws IOException {
-        String json = featureFlagsJson(event(Map.of()), false);
-
-        TransactionEnrichedEvent replayed = deserializer.deserialize("transactions.enriched", json.getBytes(StandardCharsets.UTF_8));
-
-        assertThat(replayed.featureSnapshot()).isEmpty();
-    }
-
-    @Test
-    void kafkaSerdeIgnoresNullLegacyFeatureFlagsField() throws IOException {
-        String json = featureFlagsJson(event(Map.of()), true);
-
-        TransactionEnrichedEvent replayed = deserializer.deserialize("transactions.enriched", json.getBytes(StandardCharsets.UTF_8));
-
-        assertThat(replayed.featureSnapshot()).isEmpty();
     }
 
     @Test
@@ -111,8 +153,7 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
                 Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5),
                 Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00")),
                 Map.entry(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("20000.00")),
-                Map.entry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d),
-                Map.entry("rapidTransferFraudCaseCandidate", true)
+                Map.entry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d)
         );
 
         TransactionScoredEvent replayed = scoredDeserializer.deserialize(
@@ -133,9 +174,6 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
         assertThat(snapshot.get(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN))
                 .isEqualTo(new BigDecimal("20000.00"))
                 .isExactlyInstanceOf(BigDecimal.class);
-        assertThat(snapshot.get("rapidTransferFraudCaseCandidate"))
-                .isEqualTo(true)
-                .isExactlyInstanceOf(Boolean.class);
     }
 
     private String malformedFeatureSnapshotJson(TransactionEnrichedEvent event) throws IOException {
@@ -144,18 +182,6 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
         ObjectNode featureSnapshot = (ObjectNode) root.path("featureSnapshot");
         featureSnapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT, new BigDecimal("5.5"));
         featureSnapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, "20000.00");
-        featureSnapshot.put("rapidTransferFraudCaseCandidate", 1);
-        return objectMapper.writeValueAsString(root);
-    }
-
-    private String featureFlagsJson(TransactionEnrichedEvent event, boolean explicitNull) throws IOException {
-        String serialized = new String(serializer.serialize("transactions.enriched", event), StandardCharsets.UTF_8);
-        ObjectNode root = (ObjectNode) objectMapper.readTree(serialized);
-        if (explicitNull) {
-            root.putNull("featureFlags");
-        } else {
-            root.remove("featureFlags");
-        }
         return objectMapper.writeValueAsString(root);
     }
 
@@ -178,15 +204,6 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
                 new DeviceInfo("d-1", "fp", "127.0.0.1", "agent", "web", "browser", true, false, false, Map.of()),
                 new LocationInfo("PL", "MZ", "Warsaw", "00-001", 52.2297d, 21.0122d, "Europe/Warsaw", false),
                 new CustomerContext("cust-serde", "acct-serde", "retail", "example.test", 365, true, true, "PL", "PLN", List.of("d-1"), Map.of()),
-                5,
-                "PT1M",
-                new Money(new BigDecimal("20000.00"), "PLN"),
-                "PT1M",
-                5.0d,
-                1,
-                false,
-                false,
-                false,
                 featureSnapshot
         );
     }
@@ -217,5 +234,32 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
                 true,
                 List.of()
         );
+    }
+
+    private record Prompt2SnapshotBasedConsumerEvent(
+            String eventId,
+            String transactionId,
+            String correlationId,
+            String customerId,
+            String accountId,
+            Instant createdAt,
+            Instant transactionTimestamp,
+            Money transactionAmount,
+            MerchantInfo merchantInfo,
+            DeviceInfo deviceInfo,
+            LocationInfo locationInfo,
+            CustomerContext customerContext,
+            Integer recentTransactionCount,
+            String recentTransactionCountWindow,
+            Money recentAmountSum,
+            String recentAmountSumWindow,
+            Double transactionVelocityPerMinute,
+            Integer merchantFrequency7d,
+            Boolean deviceNovelty,
+            Boolean countryMismatch,
+            Boolean proxyOrVpnDetected,
+            @JsonDeserialize(using = com.frauddetection.common.events.features.FeatureSnapshotWireValueDeserializer.class)
+            Map<String, Object> featureSnapshot
+    ) {
     }
 }

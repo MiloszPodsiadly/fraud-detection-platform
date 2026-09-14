@@ -18,7 +18,6 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,15 +31,14 @@ class RuleBasedSignalEngineBehaviorParityTest {
 
     @Test
     void baselineScenarioMapsProductionScoreRiskAndReasonsExactly() {
-        TransactionEnrichedEvent event = event(false, false, false, 1, 0.1d, BigDecimal.TEN, List.of(), Map.of());
+        TransactionEnrichedEvent event = event(false, false, false, 1, 0.1d, BigDecimal.TEN, Map.of());
 
         assertProductionMappingParity(event);
     }
 
     @Test
-    void featureFlagAndEventBooleanDedupeReasonButPreserveProductionScore() {
+    void canonicalBooleanReasonPreservesProductionScore() {
         TransactionEnrichedEvent event = event(true, false, false, 1, 0.1d, BigDecimal.TEN,
-                List.of(ReasonCode.DEVICE_NOVELTY.wireValue()),
                 Map.of(FraudFeatureContract.DEVICE_NOVELTY, true));
 
         FraudScoreResult production = assertProductionMappingParity(event);
@@ -52,11 +50,6 @@ class RuleBasedSignalEngineBehaviorParityTest {
     @Test
     void consolidatedRulesV2ThresholdRiskAndAlertRecommendationMirrorProduction() {
         TransactionEnrichedEvent event = event(true, true, false, 5, 5.0d, BigDecimal.TEN,
-                List.of(
-                        ReasonCode.DEVICE_NOVELTY.wireValue(),
-                        ReasonCode.COUNTRY_MISMATCH.wireValue(),
-                        ReasonCode.HIGH_VELOCITY.wireValue()
-                ),
                 Map.of(
                         FraudFeatureContract.DEVICE_NOVELTY, true,
                         FraudFeatureContract.COUNTRY_MISMATCH, true,
@@ -89,24 +82,12 @@ class RuleBasedSignalEngineBehaviorParityTest {
     }
 
     @Test
-    void rapidTransferFraudCaseCandidateCannotInfluenceRulesV2ProductionSignal() {
-        TransactionEnrichedEvent event = event(false, false, false, 1, 1.0d, BigDecimal.TEN,
-                Map.of("rapidTransferFraudCaseCandidate", true));
-
-        FraudScoreResult production = assertProductionMappingParity(event);
-
-        assertThat(production.reasonCodes()).isEmpty();
-    }
-
-    @Test
     void rapidTransferSignalsKeepSingleMappedEvidenceAndContributionForOneFact() {
         TransactionEnrichedEvent event = event(false, false, false, 2, 2.0d, new BigDecimal("20000.00"),
-                List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue()),
                 Map.of(
                         FraudFeatureContract.RAPID_TRANSFER_COUNT, 2,
                         FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("20000.00"),
-                        FraudFeatureContract.RAPID_TRANSFER_WINDOW, "PT1M",
-                        "rapidTransferFraudCaseCandidate", true
+                        FraudFeatureContract.RAPID_TRANSFER_WINDOW, "PT1M"
                 ));
 
         FraudScoreResult production = assertProductionMappingParity(event);
@@ -161,28 +142,6 @@ class RuleBasedSignalEngineBehaviorParityTest {
             BigDecimal amount,
             Map<String, Object> featureSnapshot
     ) {
-        return event(
-                deviceNovelty,
-                countryMismatch,
-                proxyOrVpn,
-                recentTransactionCount,
-                velocityPerMinute,
-                amount,
-                List.of(),
-                featureSnapshot
-        );
-    }
-
-    private TransactionEnrichedEvent event(
-            boolean deviceNovelty,
-            boolean countryMismatch,
-            boolean proxyOrVpn,
-            int recentTransactionCount,
-            double velocityPerMinute,
-            BigDecimal amount,
-            List<String> featureFlags,
-            Map<String, Object> featureSnapshot
-    ) {
         TransactionEnrichedEvent base = TransactionFixtures.enrichedTransaction().build();
         return new TransactionEnrichedEvent(
                 base.eventId(),
@@ -197,15 +156,6 @@ class RuleBasedSignalEngineBehaviorParityTest {
                 base.deviceInfo(),
                 base.locationInfo(),
                 base.customerContext(),
-                recentTransactionCount,
-                "PT1M",
-                new Money(amount, "PLN"),
-                "PT1M",
-                (double) recentTransactionCount,
-                base.merchantFrequency7d(),
-                deviceNovelty,
-                countryMismatch,
-                proxyOrVpn,
                 canonicalSnapshot(
                         deviceNovelty,
                         countryMismatch,

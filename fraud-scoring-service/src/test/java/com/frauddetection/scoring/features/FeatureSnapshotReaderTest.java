@@ -163,13 +163,13 @@ class FeatureSnapshotReaderTest {
     }
 
     @Test
-    void retiredPolicyFieldsReadAsRedactedNotAllowedInCurrentReader() {
+    void unsupportedPolicyFieldsReadAsRedactedNotAllowedInCurrentReader() {
         FeatureSnapshotReader reader = new FeatureSnapshotReader(Map.of(
-                "featureFlags", List.of("DEVICE_NOVELTY"),
+                "unsupportedPolicyMarker", List.of("DEVICE_NOVELTY"),
                 FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("125.20")
         ));
 
-        assertThat(reader.stringValue("featureFlags").status())
+        assertThat(reader.stringValue("unsupportedPolicyMarker").status())
                 .isEqualTo(FeatureSnapshotValueStatus.NOT_ALLOWED);
         assertThat(reader.decimalValue(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN).status())
                 .isEqualTo(FeatureSnapshotValueStatus.NOT_ALLOWED);
@@ -194,7 +194,7 @@ class FeatureSnapshotReaderTest {
         FeatureSnapshotReader reader = new FeatureSnapshotReader(Map.of(
                 "rawPayload", "secret",
                 FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("tx-1"),
-                "featureFlags", List.of("DEVICE_NOVELTY")
+                "unsupportedPolicyMarker", List.of("DEVICE_NOVELTY")
         ));
 
         assertThat(reader.stringValue("rawPayload").key())
@@ -203,9 +203,9 @@ class FeatureSnapshotReaderTest {
         assertThat(reader.stringValue(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS).key())
                 .isEqualTo(FeatureSnapshotValue.NOT_ALLOWED_REDACTED_KEY)
                 .doesNotContain(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS);
-        assertThat(reader.stringValue("featureFlags").key())
+        assertThat(reader.stringValue("unsupportedPolicyMarker").key())
                 .isEqualTo(FeatureSnapshotValue.NOT_ALLOWED_REDACTED_KEY)
-                .doesNotContain("featureFlags");
+                .doesNotContain("unsupportedPolicyMarker");
     }
 
     @Test

@@ -18,7 +18,7 @@ class ScoringEvidenceDoesNotMeanFraudTest {
         ScoringEvidenceFactory factory = new ScoringEvidenceFactory();
 
         var evidence = factory.supported(
-                ReasonCode.RAPID_TRANSFER_FRAUD_CASE,
+                ReasonCode.RAPID_PLN_20K_BURST,
                 ScoringEvidenceSource.RULE_BASED_SCORING,
                 RiskLevel.HIGH,
                 Instant.now(),

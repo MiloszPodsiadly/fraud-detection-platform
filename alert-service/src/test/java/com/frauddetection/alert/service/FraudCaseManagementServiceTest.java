@@ -65,6 +65,8 @@ class FraudCaseManagementServiceTest {
                 .withReasonCodes(List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue()))
                 .withFeatureSnapshot(Map.of(
                         FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("rapid-txn-1", "rapid-txn-2"),
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
                         FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
                         FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
                         FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("10000.00")
@@ -94,6 +96,61 @@ class FraudCaseManagementServiceTest {
         assertThat(savedCase.getTransactions())
                 .extracting("amountPln")
                 .containsExactly(new BigDecimal("10000.00"), new BigDecimal("10000.00"));
+    }
+
+    @Test
+    void shouldCreateRapidTransferCaseFromCanonicalFactsRegardlessOfPrimaryEngineReasonCodes() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+
+        when(fraudCaseRepository.findByCaseKey(any())).thenReturn(Optional.empty());
+        when(scoredTransactionRepository.findAllById(any())).thenReturn(List.of());
+
+        service.handleScoredTransaction(rapidTransferEvent("rules-txn-2", List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue())));
+        service.handleScoredTransaction(rapidTransferEvent("ml-txn-2", List.of("MODEL_HIGH_RISK")));
+        service.handleScoredTransaction(rapidTransferEvent("shadow-txn-2", List.of()));
+
+        ArgumentCaptor<FraudCaseDocument> captor = ArgumentCaptor.forClass(FraudCaseDocument.class);
+        verify(fraudCaseRepository, org.mockito.Mockito.times(3)).save(captor.capture());
+        assertThat(captor.getAllValues())
+                .allSatisfy(savedCase -> {
+                    assertThat(savedCase.getSuspicionType()).isEqualTo("RAPID_TRANSFER_BURST_20K_PLN");
+                    assertThat(savedCase.getTotalAmountPln()).isEqualByComparingTo("20000.00");
+                    assertThat(savedCase.getThresholdPln()).isEqualByComparingTo("20000");
+                });
+    }
+
+    @Test
+    void shouldNotCreateRapidTransferCaseFromReasonCodeWithoutCompleteCanonicalEvidence() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                mock(ScoredTransactionRepository.class),
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        var event = TransactionFixtures.scoredTransaction()
+                .withReasonCodes(List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue()))
+                .withFeatureSnapshot(Map.of(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M"
+                ))
+                .build();
+
+        service.handleScoredTransaction(event);
+
+        verify(fraudCaseRepository, never()).findByCaseKey(any());
+        verify(fraudCaseRepository, never()).save(any());
     }
 
     @Test
@@ -366,6 +423,26 @@ class FraudCaseManagementServiceTest {
         document.setFraudScore(0.42d);
         document.setRiskLevel(RiskLevel.LOW);
         return document;
+    }
+
+    private com.frauddetection.common.events.contract.TransactionScoredEvent rapidTransferEvent(
+            String transactionId,
+            List<String> reasonCodes
+    ) {
+        return TransactionFixtures.scoredTransaction()
+                .withTransactionId(transactionId)
+                .withCustomerId("rapid-customer-" + transactionId)
+                .withAmount(new BigDecimal("10000.00"), "PLN")
+                .withReasonCodes(reasonCodes)
+                .withFeatureSnapshot(Map.of(
+                        FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of(transactionId.replace("-2", "-1"), transactionId),
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
+                        FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("10000.00")
+                ))
+                .build();
     }
 
     private com.frauddetection.alert.persistence.FraudCaseTransactionDocument scoredCaseTransaction(String transactionId, BigDecimal amountPln) {

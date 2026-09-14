@@ -64,9 +64,10 @@ class FeatureEnricherIntegrationTest extends AbstractIntegrationTest {
 
         assertThat(record.value().transactionId()).isEqualTo(rawEvent.transactionId());
         assertThat(record.value().correlationId()).isEqualTo(rawEvent.correlationId());
-        assertThat(record.value().recentTransactionCount()).isEqualTo(1);
-        assertThat(record.value().merchantFrequency7d()).isEqualTo(1);
-        assertThat(record.value().featureSnapshot()).containsEntry("currency", rawEvent.transactionAmount().currency());
+        assertThat(record.value().featureSnapshot())
+                .containsEntry("recentTransactionCount", 1)
+                .containsEntry("merchantFrequency7d", 1)
+                .containsEntry("currency", rawEvent.transactionAmount().currency());
 
         String deviceKey = "feature:customer:" + rawEvent.customerId() + ":devices";
         assertThat(stringRedisTemplate.opsForSet().isMember(deviceKey, rawEvent.deviceInfo().deviceId())).isTrue();

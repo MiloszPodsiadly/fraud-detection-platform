@@ -18,7 +18,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -63,47 +62,10 @@ class RuleBasedFraudScoringEngineTest {
     }
 
     @Test
-    void legacyTopLevelAndFlagInputsDoNotInfluenceRulesV2PrimaryScore() {
-        SnapshotBuilder canonicalLow = snapshot();
-        FraudScoreResult baseline = score(canonicalLow);
-        TransactionEnrichedEvent withLegacyOnly = event(
-                canonicalLow.withExtras(Map.of(
-                        "featureFlags", List.of(
-                                FraudFeatureContract.FLAG_HIGH_VELOCITY,
-                                FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY,
-                                FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST
-                        ),
-                        "rapidTransferFraudCaseCandidate", true,
-                        FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN, new BigDecimal("20000.00")
-                )),
-                99,
-                "PT1M",
-                new Money(new BigDecimal("999999.00"), "PLN"),
-                "PT1M",
-                99.0d,
-                99,
-                true,
-                true,
-                true
-        );
-
-        FraudScoreResult result = engine.score(FraudScoringRequest.from(withLegacyOnly));
-
-        assertThat(result.fraudScore()).isEqualTo(baseline.fraudScore());
-        assertThat(result.riskLevel()).isEqualTo(baseline.riskLevel());
-        assertThat(result.reasonCodes()).isEqualTo(baseline.reasonCodes());
-        assertThat(result.featureSnapshot()).containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1);
-    }
-
-    @Test
-    void invalidCanonicalFactsFailClosedWithoutLegacyFallback() {
+    void invalidCanonicalFactsFailClosed() {
         TransactionEnrichedEvent invalidCanonical = event(snapshot()
                 .with(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5)
-                .with(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 4.0d)
-                .withExtras(Map.of(
-                        "featureFlags", List.of(FraudFeatureContract.FLAG_HIGH_VELOCITY),
-                        "rapidTransferFraudCaseCandidate", true
-                )));
+                .with(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 4.0d));
 
         assertThat(RulesV2InputValidator.validate(invalidCanonical).status())
                 .isEqualTo(RulesInputValidationStatus.INCONSISTENT_FACTS);
@@ -140,32 +102,6 @@ class RuleBasedFraudScoringEngineTest {
     }
 
     private TransactionEnrichedEvent event(SnapshotBuilder snapshot) {
-        return event(
-                snapshot,
-                1,
-                "PT1M",
-                new Money(new BigDecimal("100.00"), "PLN"),
-                "PT1M",
-                1.0d,
-                1,
-                false,
-                false,
-                false
-        );
-    }
-
-    private TransactionEnrichedEvent event(
-            SnapshotBuilder snapshot,
-            Integer topLevelCount,
-            String topLevelCountWindow,
-            Money topLevelRecentAmount,
-            String topLevelRecentAmountWindow,
-            Double topLevelVelocity,
-            Integer merchantFrequency7d,
-            Boolean deviceNovelty,
-            Boolean countryMismatch,
-            Boolean proxyOrVpnDetected
-    ) {
         TransactionEnrichedEvent base = TransactionFixtures.enrichedTransaction().build();
         return new TransactionEnrichedEvent(
                 "evt-v2-primary",
@@ -180,15 +116,6 @@ class RuleBasedFraudScoringEngineTest {
                 base.deviceInfo(),
                 base.locationInfo(),
                 base.customerContext(),
-                topLevelCount,
-                topLevelCountWindow,
-                topLevelRecentAmount,
-                topLevelRecentAmountWindow,
-                topLevelVelocity,
-                merchantFrequency7d,
-                deviceNovelty,
-                countryMismatch,
-                proxyOrVpnDetected,
                 snapshot.values
         );
     }
@@ -216,10 +143,5 @@ class RuleBasedFraudScoringEngineTest {
             return new SnapshotBuilder(Map.copyOf(updated));
         }
 
-        SnapshotBuilder withExtras(Map<String, Object> extras) {
-            Map<String, Object> updated = new LinkedHashMap<>(values);
-            updated.putAll(extras);
-            return new SnapshotBuilder(Map.copyOf(updated));
-        }
     }
 }

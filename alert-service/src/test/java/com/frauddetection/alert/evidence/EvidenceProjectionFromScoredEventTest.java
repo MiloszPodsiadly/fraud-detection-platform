@@ -43,23 +43,23 @@ class EvidenceProjectionFromScoredEventTest {
         assertThat(item.getCreatedAt()).isEqualTo(CREATED_AT);
         assertThat(item.getScoringStrategy()).isEqualTo("RULE_BASED");
         assertThat(item.getModelName()).isEqualTo("rule-based-engine");
-        assertThat(item.getModelVersion()).isEqualTo("v1");
+        assertThat(item.getModelVersion()).isEqualTo("v2");
         assertThat(item.getEntityType()).isEqualTo(EvidenceEntityType.SCORED_TRANSACTION);
         assertThat(item.getEntityId()).isEqualTo("txn-1");
     }
 
     @Test
-    void rapidTransferFraudCaseIsProjectedAsCandidateVelocitySignalOnly() {
+    void rapidPln20kBurstIsProjectedAsAvailableVelocityEvidenceOnly() {
         List<EvidenceDocument> evidence = service.projectFromScoredEvent(scoredEvent(
                 RiskLevel.CRITICAL,
-                List.of("RAPID_TRANSFER_FRAUD_CASE")
+                List.of("RAPID_PLN_20K_BURST")
         ));
 
         EvidenceDocument item = evidence.getFirst();
         String text = (item.getTitle() + " " + item.getDescription()).toLowerCase(java.util.Locale.ROOT);
         assertThat(item.getEvidenceType()).isEqualTo(EvidenceType.VELOCITY_SIGNAL);
         assertThat(item.getStatus()).isEqualTo(EvidenceStatus.AVAILABLE);
-        assertThat(text).containsAnyOf("candidate", "signal");
+        assertThat(text).contains("rapid", "burst");
         assertThat(text).doesNotContain("confirmed");
         assertThat(text).doesNotContain("fraud case exists");
         assertThat(text).doesNotContain("verdict");

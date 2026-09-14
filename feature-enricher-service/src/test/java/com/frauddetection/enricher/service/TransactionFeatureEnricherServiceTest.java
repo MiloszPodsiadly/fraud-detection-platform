@@ -1,7 +1,6 @@
 package com.frauddetection.enricher.service;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
-import com.frauddetection.common.events.model.Money;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.enricher.domain.EnrichedTransactionFeatures;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
@@ -33,18 +32,7 @@ class TransactionFeatureEnricherServiceTest {
         var service = new TransactionFeatureEnricherService(featureStore, calculator, mapper, publisher);
         var event = TransactionFixtures.rawTransaction().build();
         var snapshot = new FeatureStoreSnapshot(1, BigDecimal.TEN, BigDecimal.TEN, List.of(), 2, Instant.now(), true);
-        var features = new EnrichedTransactionFeatures(
-                2,
-                "PT1M",
-                new Money(new BigDecimal("20.00"), "USD"),
-                "PT1M",
-                0.13d,
-                3,
-                false,
-                false,
-                false,
-                Map.of("recentTransactionCount", 2)
-        );
+        var features = new EnrichedTransactionFeatures(Map.of("recentTransactionCount", 2));
         TransactionEnrichedEvent enrichedEvent = TransactionFixtures.enrichedTransaction().build();
 
         when(featureStore.loadSnapshot(event)).thenReturn(snapshot);

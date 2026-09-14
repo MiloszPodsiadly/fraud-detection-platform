@@ -38,7 +38,7 @@ class RuleBasedSignalEngineEvidenceSafetyTest {
                 FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("50000"),
                 FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("99999"),
                 FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("tx-secret-1"),
-                "featureFlags", List.of("SENSITIVE_FLAG")
+                "unsupportedPolicyMarker", List.of("SENSITIVE_FLAG")
         ))));
 
         String flattened = flatten(result);
@@ -113,15 +113,6 @@ class RuleBasedSignalEngineEvidenceSafetyTest {
                 base.deviceInfo(),
                 base.locationInfo(),
                 base.customerContext(),
-                1,
-                "PT1M",
-                new Money(new BigDecimal("50000.00"), "PLN"),
-                "PT1M",
-                0.1d,
-                base.merchantFrequency7d(),
-                true,
-                false,
-                false,
                 featureSnapshot
         );
     }

@@ -11,7 +11,7 @@ import java.util.List;
 import static com.frauddetection.alert.evidence.EvidenceProjectionTestSupport.scoredEvent;
 import static org.assertj.core.api.Assertions.assertThat;
 
-class LegacyScoredTransactionEvidenceCompatibilityTest {
+class SupportedAliasScoredTransactionEvidenceCompatibilityTest {
 
     private final EvidenceProjectionService service = new EvidenceProjectionService(
             new ReasonCodeEvidenceTypeMapper(),
@@ -19,7 +19,7 @@ class LegacyScoredTransactionEvidenceCompatibilityTest {
     );
 
     @Test
-    void legacyAliasesParseSafelyAndCanCreateAvailableEvidence() {
+    void supportedAliasesParseSafelyAndCanCreateAvailableEvidence() {
         List<EvidenceDocument> evidence = service.projectFromScoredEvent(scoredEvent(
                 RiskLevel.HIGH,
                 List.of("countryMismatch")
@@ -30,14 +30,14 @@ class LegacyScoredTransactionEvidenceCompatibilityTest {
         assertThat(item.getReasonCode()).isEqualTo("COUNTRY_MISMATCH");
         assertThat(item.getStatus()).isEqualTo(EvidenceStatus.AVAILABLE);
         assertThat(item.getEvidenceType()).isEqualTo(EvidenceType.GEO_SIGNAL);
-        assertThat(item.getAttributes()).containsEntry("reasonCodeParseStatus", "LEGACY_MAPPED");
+        assertThat(item.getAttributes()).containsEntry("reasonCodeParseStatus", "SUPPORTED_ALIAS");
     }
 
     @Test
-    void unsupportedLegacyDataDoesNotBecomeAvailableEvidence() {
+    void unsupportedReasonCodeDataDoesNotBecomeAvailableEvidence() {
         List<EvidenceDocument> evidence = service.projectFromScoredEvent(scoredEvent(
                 RiskLevel.HIGH,
-                List.of("legacy-risk-marker")
+                List.of("unsupported-risk-marker")
         ));
 
         assertThat(evidence).hasSize(1);

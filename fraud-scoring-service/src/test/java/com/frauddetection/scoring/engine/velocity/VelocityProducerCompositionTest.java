@@ -66,18 +66,9 @@ class VelocityProducerCompositionTest {
                 raw.deviceInfo(),
                 raw.locationInfo(),
                 raw.customerContext(),
-                features.recentTransactionCount(),
-                features.recentTransactionCountWindow(),
-                features.recentAmountSum(),
-                features.recentAmountSumWindow(),
-                features.transactionVelocityPerMinute(),
-                features.merchantFrequency7d(),
-                features.deviceNovelty(),
-                features.countryMismatch(),
-                features.proxyOrVpnDetected(),
                 features.featureSnapshot()
         );
-        assertThat(enriched.featureSnapshot()).doesNotContainKeys("featureFlags");
+        assertThat(enriched.featureSnapshot()).containsKey(FraudFeatureContract.RECENT_TRANSACTION_COUNT);
         return new ScoringContext(enriched, enriched.featureSnapshot(), ScoringMode.ML, enriched.correlationId(), RECEIVED_AT);
     }
 
