@@ -38,14 +38,16 @@ enable production mode and does not replace environment-specific release approva
 - Producer diagnostic publication is disabled by default with
   `fraud.scoring.events.engine-intelligence.emit-enabled=false`
   (`FRAUD_SCORING_EVENTS_ENGINE_INTELLIGENCE_EMIT_ENABLED=false`).
-- Velocity V1 registration is disabled by default with
+- Current Velocity v1 diagnostic registration is disabled by default with
   `fraud.scoring.engines.velocity.enabled=false`
   (`FRAUD_SCORING_ENGINE_VELOCITY_ENABLED=false`).
 - The emission flag controls publication. The Velocity flag controls whether `velocity.primary / VELOCITY` is
   registered inside the diagnostic runtime after emission is enabled.
+- `velocity-v1` is the current version of the independent Velocity diagnostic contract; it is not Rules V1 and is not
+  bumped merely because Rules scoring is `rule-based-engine` / `v2`.
 - Velocity is diagnostic-only. It cannot authorize payments, block transactions, create cases, alter final decision
   source, change thresholds, or change analyst recommended actions.
-- Velocity V1 requires the Feature Enricher recent-transaction window to remain exactly `PT1M`; unsupported windows
+- Velocity v1 requires the Feature Enricher recent-transaction window to remain exactly `PT1M`; unsupported windows
   fail startup/configuration or consumer validation rather than silently changing score meaning.
 - The current engine-intelligence contract allows three known engine identities: Rules and ML model are required;
   Velocity is an optional third diagnostic engine. Future Device, Merchant, or Graph engines require a versioned
@@ -56,8 +58,8 @@ enable production mode and does not replace environment-specific release approva
 - Current Rules scoring is `rule-based-engine` / `v2`; the diagnostic adapter remains `rules.primary` / `2.0.0`.
 - Feature Enricher producer windows for Rules and Velocity semantics must remain exactly `PT1M`.
 - Rules scoring reads its factual input from the canonical `featureSnapshot` only.
-- Retired flags, retired rapid-transfer candidate fields, and retired top-level duplicate facts must not influence a
-  new Rules V2 score.
+- Removed feature-flag, case-candidate, and top-level duplicate facts are not part of the current Rules V2 score
+  input.
 - Present-invalid canonical snapshot data fails closed.
 - Supported transaction currencies are `PLN`, `EUR`, `USD`, and `GBP`. Unsupported or null currencies are rejected;
   enrichment must not convert unknown currencies with a default rate.

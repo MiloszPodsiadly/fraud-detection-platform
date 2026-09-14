@@ -21,16 +21,17 @@ adapter descriptor is `rules.primary` / `2.0.0`. Rules may use the same official
 other components, but it must not double-count redundant representations of the same semantic signal.
 
 Canonical Rules facts are authoritative. Canonical true contributes through the canonical policy. Canonical false is
-not missing and cannot be overridden by retired flags, retired rapid-transfer candidate fields, or retired top-level
-duplicate facts. Present-invalid canonical facts fail closed and do not activate legacy fallback. Unsupported
-currencies are rejected instead of being converted with a default rate.
+not missing and cannot be overridden by removed feature-flag, case-candidate, or top-level duplicate representations.
+Present-invalid canonical facts fail closed and do not activate a scoring fallback. Unsupported currencies are
+rejected instead of being converted with a default rate.
 
 Python ML owns bounded ML score context only. The current public comparison identity is explicitly `RULES_VS_ML` with
 `comparedEngineIds=["rules.primary","ml.python.primary"]`; it is not generic all-engine agreement.
 
-VelocitySignalPolicy owns Velocity V1 semantics. Velocity requires `recentTransactionCountWindow=PT1M`; count, window,
-and per-minute rate must be mutually consistent when all are present. Inconsistent present values degrade Velocity
-with `VELOCITY_FEATURES_INCONSISTENT`. Velocity score is deterministic normalized risk severity, not calibrated fraud
+VelocitySignalPolicy owns current Velocity v1 semantics. `velocity-v1` is Velocity lineage only, independent from
+Rules V1/V2 naming. Velocity requires `recentTransactionCountWindow=PT1M`; count, window, and per-minute rate must be
+mutually consistent when all are present. Inconsistent present values degrade Velocity with
+`VELOCITY_FEATURES_INCONSISTENT`. Velocity score is deterministic normalized risk severity, not calibrated fraud
 probability and not model confidence.
 
 The orchestrator owns optional-engine failure isolation and execution metadata. Optional Velocity failures must not
@@ -58,5 +59,5 @@ This ADR does not change authentication, authorization, tenant isolation, paymen
 approve/decline/block behavior, fraud-case workflow, model retraining, rule update workflow, external attestation, or
 compatibility guarantees for unknown external consumers.
 
-Historical Rules compatibility remains an event/read compatibility concern only. It is not part of current Rules V2
+Historical event compatibility remains an event/read compatibility concern only. It is not part of current Rules V2
 production scoring and must not be reintroduced as a scoring fallback.

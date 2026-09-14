@@ -43,9 +43,8 @@ The adapter and production scoring both consume the canonical Rules V2 snapshot 
 `merchantFrequency7d`, `deviceNovelty`, `countryMismatch`, `proxyOrVpnDetected`, and `currency`.
 Present-invalid canonical facts fail closed.
 
-Retired flags, retired rapid-transfer candidate fields, and retired top-level duplicate event facts
-do not influence a new Rules V2 score. Historical replay compatibility belongs to event/read
-compatibility boundaries and historical evidence, not to the current production scoring policy.
+Rules V2 scoring reads only current canonical feature facts. Removed feature-flag, case-candidate, and top-level
+duplicate event representations are not part of the current production scoring policy.
 
 Production `RuleBasedFraudScoringEngine` and diagnostic `RuleBasedSignalEngine` both delegate input
 validation to `RulesV2InputValidator` before scoring. Primary scoring failure and diagnostic adapter

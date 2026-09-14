@@ -28,38 +28,40 @@ export also requires authorization, sensitive-read audit, rate limits, privacy r
 | --- | --- |
 | Java rules engine | Produces explainable rule-driven risk context. |
 | Python ML engine | Produces model risk context and bounded explanations; it is not a final decision source. |
-| Velocity engine | FDP-129 optional Java diagnostic engine for transaction-rate and rapid PLN burst context; disabled by default and not a decision source. |
+| Velocity engine | Current optional Java diagnostic engine for transaction-rate and rapid PLN burst context; disabled by default and not a decision source. |
 | Device risk engine | Declared device-context risk category; not integrated by FDP-101. |
 | Merchant risk engine | Declared merchant-context risk category; not integrated by FDP-101. |
 | Graph risk engine | Declared relationship-context risk category; not integrated by FDP-101. |
 
-## FDP-129 Velocity Boundary
+## Current Velocity Boundary
 
-FDP-129 adds exactly one optional Velocity implementation: `velocity.primary` with `engineType=VELOCITY`,
-`engineLanguage=java`, `version=velocity-v1`, and `required=false`. It is enabled only by
+FDP-129 introduced exactly one optional Velocity implementation. That implementation remains the current independent
+Velocity diagnostic contract: `velocity.primary` with `engineType=VELOCITY`, `engineLanguage=java`,
+`version=velocity-v1`, and `required=false`. The `velocity-v1` version belongs to Velocity lineage only; it is not
+Rules V1, is not replaced by Rules V2, and must not be renamed to `velocity-v2` just because Rules scoring is V2.
+It is enabled only by
 `fraud.scoring.engines.velocity.enabled=true` inside the disabled-by-default diagnostic runtime. The producer
 emission flag remains `fraud.scoring.events.engine-intelligence.emit-enabled`; emission controls publication,
 Velocity enablement controls registration inside that diagnostic runtime.
 
 Velocity consumes factual bounded feature snapshot inputs only: `recentTransactionCount`,
 `recentTransactionCountWindow`, `recentAmountSumPln`, and `transactionVelocityPerMinute`.
-Velocity V1 requires `recentTransactionCountWindow=PT1M`; producer meaning, consumer validation, and policy meaning
+Velocity v1 requires `recentTransactionCountWindow=PT1M`; producer meaning, consumer validation, and policy meaning
 all use that one-minute observation window. Changing the window is a versioned contract change, not a configuration
 override.
 Velocity validates count/window/rate consistency: when count, window, and per-minute rate are present, the rate must
 match the PT1M count within bounded tolerance. Inconsistent present values degrade Velocity with
 `VELOCITY_FEATURES_INCONSISTENT` rather than silently choosing one fact over another.
-`rapidTransferFraudCaseCandidate` remains an upstream compatibility feature for existing consumers, but Velocity does
-not use it as a scoring input or validation oracle. Rapid-transfer minimum count and PLN threshold semantics are owned
-by `FraudFeatureThresholdContract`.
+Velocity does not use case-candidate fields as scoring input or validation oracle. Rapid-transfer minimum count and
+PLN threshold semantics are owned by `FraudFeatureThresholdContract`.
 
 Velocity score is a deterministic normalized risk-severity signal. It is not a calibrated fraud probability and must
 not be interpreted as model confidence. It is not a payment authorization decision or threshold
-recommendation. Velocity V1 confidence is `UNKNOWN`.
+recommendation. Velocity v1 confidence is `UNKNOWN`.
 The orchestrator owns published engine-result `latencyMs` and `generatedAt`.
-The reachable Velocity V1 score table is: rapid burst plus high rate -> `0.95`, rapid burst -> `0.80`, high rate ->
+The reachable Velocity v1 score table is: rapid burst plus high rate -> `0.95`, rapid burst -> `0.80`, high rate ->
 `0.75`, high amount activity -> `0.50`, and valid baseline -> `0.10`. `RECENT_TRANSACTION_SPIKE` is not emitted by
-Velocity V1 because the PT1M count threshold is the same official fact as the per-minute rate threshold.
+Velocity v1 because the PT1M count threshold is the same official fact as the per-minute rate threshold.
 
 The current public engine-intelligence contract allows three known engine identities: `rules.primary`,
 `ml.python.primary`, and `velocity.primary`. Rules and ML are required. Velocity is an optional third diagnostic
