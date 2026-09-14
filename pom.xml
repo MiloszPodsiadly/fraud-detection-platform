@@ -43,7 +43,7 @@
         <commons-codec.version>1.22.1</commons-codec.version>
         <commons-io.version>2.22.0</commons-io.version>
         <archunit.version>1.5.0</archunit.version>
-        <bouncycastle.version>1.85.2</bouncycastle.version>
+        <bouncycastle.version>1.86</bouncycastle.version>
         <xz.version>1.12</xz.version>
         <jackson.version>3.2.2</jackson.version>
         <jackson2.version>2.22.2</jackson2.version>
