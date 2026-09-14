@@ -56,7 +56,7 @@ public final class FeatureSnapshotKeyPolicy {
 
     /**
      * Adapter-consumption gate for scalar reads. {@link Optional#empty()} means a registered key
-     * may exist in the internal snapshot, but is not v1 scalar-consumable.
+     * may exist in the internal snapshot, but is not scalar-consumable by adapters.
      */
     public static Optional<FeatureSnapshotScalarType> expectedTypeFor(String key) {
         if (!isAllowedFeatureKey(key)) {

@@ -109,7 +109,7 @@ public final class RuleBasedSignalEngine implements FraudSignalEngine {
 
     private FraudSignalEvaluation availableResult(FraudScoreResult productionResult) {
         List<String> reasonCodes = ReasonCode.supportedWireValues(
-                ReasonCode.parseLegacyList(productionResult.reasonCodes())
+                ReasonCode.parseInputList(productionResult.reasonCodes())
         );
         return new FraudSignalEvaluation(
                 FraudEngineStatus.AVAILABLE,

@@ -3,7 +3,6 @@ package com.frauddetection.enricher.service;
 import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.features.VelocityFeatureContract;
-import com.frauddetection.common.events.model.Money;
 import com.frauddetection.enricher.domain.EnrichedTransactionFeatures;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
 import org.springframework.stereotype.Component;
@@ -58,18 +57,7 @@ public class TransactionFeatureCalculator {
         featureSnapshot.put(FraudFeatureContract.MERCHANT_CATEGORY, event.merchantInfo().merchantCategory());
         featureSnapshot.put(FraudFeatureContract.CURRENCY, event.transactionAmount().currency().toUpperCase(Locale.ROOT));
 
-        return new EnrichedTransactionFeatures(
-                recentTransactionCount,
-                canonicalObservationWindow,
-                new Money(recentAmountSum, event.transactionAmount().currency()),
-                canonicalObservationWindow,
-                velocityPerMinute,
-                merchantFrequency7d,
-                deviceNovelty,
-                countryMismatch,
-                proxyOrVpnDetected,
-                featureSnapshot
-        );
+        return new EnrichedTransactionFeatures(featureSnapshot);
     }
 
     private java.util.List<String> rapidTransferTransactionIds(FeatureStoreSnapshot snapshot, TransactionRawEvent event) {

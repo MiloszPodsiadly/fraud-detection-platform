@@ -30,7 +30,7 @@ public class MlFraudScoringEngine implements FraudScoringEngine {
     @Override
     public FraudScoreResult score(FraudScoringRequest request) {
         MlModelOutput output = mlModelScoringClient.score(MlModelInput.from(request));
-        List<ReasonCodeParseResult> parsedReasonCodes = ReasonCode.parseLegacyList(output.reasonCodes());
+        List<ReasonCodeParseResult> parsedReasonCodes = ReasonCode.parseInputList(output.reasonCodes());
         int unsupportedReasonCodeCount = unsupportedReasonCodeCount(parsedReasonCodes);
         Map<String, Object> scoreDetails = copyOf(output.scoreDetails());
         Map<String, Object> explanationMetadata = copyOf(output.explanationMetadata());
@@ -38,7 +38,7 @@ public class MlFraudScoringEngine implements FraudScoringEngine {
         if (unsupportedReasonCodeCount > 0) {
             scoreDetails.put("unsupportedReasonCodeCount", unsupportedReasonCodeCount);
             explanationMetadata.put("unsupportedReasonCodeCount", unsupportedReasonCodeCount);
-            scoringMetrics.recordReasonCodeParseUnsupported("ml_model", "legacy", unsupportedReasonCodeCount);
+            scoringMetrics.recordReasonCodeParseUnsupported("ml_model", "canonical", unsupportedReasonCodeCount);
         }
         List<ScoringEvidenceItem> scoringEvidence = scoringEvidenceFactory.modelEvidence(
                 parsedReasonCodes,

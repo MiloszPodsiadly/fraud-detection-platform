@@ -149,11 +149,12 @@ class FeaturePipeline:
         raw = event["raw_transaction"]
         occurred_at = self._timestamp(event)
         amount = self._number(raw.get("amount"))
-        recent_minute = self._recent(history, occurred_at, seconds=60)
-        recent_hour = self._recent(history, occurred_at, seconds=3600)
-        recent_day = self._recent(history, occurred_at, seconds=86400)
-        recent_week = self._recent(history, occurred_at, seconds=604800)
+        recent_minute = [*self._recent(history, occurred_at, seconds=60), event]
+        recent_hour = [*self._recent(history, occurred_at, seconds=3600), event]
+        recent_day = [*self._recent(history, occurred_at, seconds=86400), event]
+        recent_week = [*self._recent(history, occurred_at, seconds=604800), event]
         recent_amounts = [self._number(row["raw_transaction"].get("amount")) for row in recent_day]
+        recent_minute_amount = sum(self._number(row["raw_transaction"].get("amount")) for row in recent_minute)
         user_id = str(event.get("user_id", "unknown"))
         historical_amounts = [self._number(row["raw_transaction"].get("amount")) for row in history]
         user_mean = self._user_mean_amounts.get(user_id) or self._mean(historical_amounts) or amount
@@ -161,7 +162,19 @@ class FeaturePipeline:
         countries = [str(row["raw_transaction"].get("country", "")) for row in recent_week]
         known_devices = {str(row["raw_transaction"].get("deviceId", "")) for row in history} or self._known_devices.get(user_id, set())
         known_countries = {str(row["raw_transaction"].get("country", "")) for row in history} or self._known_countries.get(user_id, set())
-        scenario = str(event.get("metadata", {}).get("scenario", ""))
+        merchant_frequency = self._merchant_frequency(raw, recent_week)
+        device_novelty = 1.0 if known_devices and str(raw.get("deviceId", "")) not in known_devices else 0.0
+        country_mismatch = 1.0 if known_countries and str(raw.get("country", "")) not in known_countries else 0.0
+        proxy_or_vpn = self._flag(raw.get("proxyOrVpnDetected"))
+        rapid_transfer_burst = 1.0 if len(recent_minute) >= 2 and recent_minute_amount >= 20_000.0 else 0.0
+        high_risk_fact_count = min(sum([
+            device_novelty,
+            country_mismatch,
+            proxy_or_vpn,
+            1.0 if merchant_frequency >= 5.0 else 0.0,
+            1.0 if len(recent_day) >= 2 and sum(recent_amounts) >= 5_000.0 else 0.0,
+            rapid_transfer_burst,
+        ]) / 6.0, 1.0)
 
         return {
             "recentTransactionCount": min(len(recent_day) / 10.0, 1.0),
@@ -174,12 +187,12 @@ class FeaturePipeline:
             "amountDeviationFromUserMean": min(abs(amount - user_mean) / max(user_mean, 1.0) / 5.0, 1.0),
             "merchantEntropy": min(self._entropy(merchants) / 4.0, 1.0),
             "countryEntropy": min(self._entropy(countries) / 3.0, 1.0),
-            "merchantFrequency7d": min(self._merchant_frequency(raw, recent_week) / 12.0, 1.0),
-            "deviceNovelty": 1.0 if known_devices and str(raw.get("deviceId", "")) not in known_devices else 0.0,
-            "countryMismatch": 1.0 if known_countries and str(raw.get("country", "")) not in known_countries else 0.0,
-            "proxyOrVpnDetected": self._flag(raw.get("proxyOrVpnDetected")),
-            "highRiskFlagCount": self._raw_high_risk_flags(event, amount, user_mean),
-            "rapidTransferBurst": 1.0 if scenario == "rapid_transfer_burst" else 0.0,
+            "merchantFrequency7d": min(merchant_frequency / 12.0, 1.0),
+            "deviceNovelty": device_novelty,
+            "countryMismatch": country_mismatch,
+            "proxyOrVpnDetected": proxy_or_vpn,
+            "highRiskFlagCount": high_risk_fact_count,
+            "rapidTransferBurst": rapid_transfer_burst,
         }
 
     def _recent(self, history: list[dict[str, Any]], occurred_at: datetime, seconds: int) -> list[dict[str, Any]]:
@@ -195,15 +208,6 @@ class FeaturePipeline:
     def _merchant_frequency(self, raw: dict[str, Any], recent_week: list[dict[str, Any]]) -> float:
         merchant_id = raw.get("merchantId")
         return sum(1 for row in recent_week if row["raw_transaction"].get("merchantId") == merchant_id)
-
-    def _raw_high_risk_flags(self, event: dict[str, Any], amount: float, user_mean: float) -> float:
-        raw = event["raw_transaction"]
-        flags = [
-            self._flag(raw.get("proxyOrVpnDetected")),
-            1.0 if amount > user_mean * 3.0 else 0.0,
-            1.0 if str(event.get("metadata", {}).get("scenario", "")) in {"account_takeover", "card_testing"} else 0.0,
-        ]
-        return min(sum(flags) / 6.0, 1.0)
 
     def _is_raw_event(self, event: dict[str, Any]) -> bool:
         return isinstance(event.get("raw_transaction"), dict)

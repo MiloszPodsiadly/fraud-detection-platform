@@ -28,10 +28,7 @@ import java.util.Optional;
 public class AnalystRecommendationService {
 
     private static final List<String> RAPID_TRANSFER_CODES = List.of(
-            ReasonCode.RAPID_PLN_20K_BURST.wireValue(),
-            ReasonCode.RAPID_TRANSFER_FRAUD_CASE.wireValue(),
-            "RAPID_TRANSFER_BURST_SIGNAL",
-            "RAPID_TRANSFER_PATTERN_MATCHED"
+            ReasonCode.RAPID_PLN_20K_BURST.wireValue()
     );
 
     private final Clock clock;

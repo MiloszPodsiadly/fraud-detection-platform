@@ -17,8 +17,7 @@ public class ReasonCodeScoringEvidenceTypeMapper {
             case HIGH_VELOCITY,
                  TRANSACTION_VELOCITY,
                  RECENT_TRANSACTION_SPIKE,
-                 RAPID_PLN_20K_BURST,
-                 RAPID_TRANSFER_FRAUD_CASE -> ScoringEvidenceType.VELOCITY_SIGNAL;
+                 RAPID_PLN_20K_BURST -> ScoringEvidenceType.VELOCITY_SIGNAL;
             case HIGH_TRANSACTION_AMOUNT,
                  RECENT_AMOUNT_ACCUMULATION,
                  HIGH_AMOUNT_ACTIVITY -> ScoringEvidenceType.TRANSACTION_FEATURE;

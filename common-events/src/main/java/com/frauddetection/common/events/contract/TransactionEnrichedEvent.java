@@ -1,5 +1,6 @@
 package com.frauddetection.common.events.contract;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.frauddetection.common.events.features.FeatureSnapshotWireValueDeserializer;
 import com.frauddetection.common.events.features.FeatureSnapshotWireValueNormalizer;
 import com.frauddetection.common.events.model.CustomerContext;
@@ -12,6 +13,7 @@ import tools.jackson.databind.annotation.JsonDeserialize;
 import java.time.Instant;
 import java.util.Map;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public record TransactionEnrichedEvent(
         String eventId,
         String transactionId,
@@ -25,15 +27,6 @@ public record TransactionEnrichedEvent(
         DeviceInfo deviceInfo,
         LocationInfo locationInfo,
         CustomerContext customerContext,
-        Integer recentTransactionCount,
-        String recentTransactionCountWindow,
-        Money recentAmountSum,
-        String recentAmountSumWindow,
-        Double transactionVelocityPerMinute,
-        Integer merchantFrequency7d,
-        Boolean deviceNovelty,
-        Boolean countryMismatch,
-        Boolean proxyOrVpnDetected,
         @JsonDeserialize(using = FeatureSnapshotWireValueDeserializer.class)
         Map<String, Object> featureSnapshot
 ) {

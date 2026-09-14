@@ -18,43 +18,43 @@ public enum ReasonCode {
             "Compatibility marker for unsupported, malformed, or future reason-code input. It is not a scoring signal."
     ),
     DEVICE_NOVELTY(
-            FraudFeatureContract.FLAG_DEVICE_NOVELTY,
+            "DEVICE_NOVELTY",
             ReasonCodeCategory.DEVICE_AND_NETWORK,
             "Device novelty",
             "Device context differed from previously observed customer behavior."
     ),
     COUNTRY_MISMATCH(
-            FraudFeatureContract.FLAG_COUNTRY_MISMATCH,
+            "COUNTRY_MISMATCH",
             ReasonCodeCategory.CUSTOMER_BEHAVIOR,
             "Country mismatch",
             "Transaction geography differed from expected customer context."
     ),
     PROXY_OR_VPN(
-            FraudFeatureContract.FLAG_PROXY_OR_VPN,
+            "PROXY_OR_VPN",
             ReasonCodeCategory.DEVICE_AND_NETWORK,
             "Proxy or VPN",
             "Network context indicated proxy or VPN usage."
     ),
     HIGH_VELOCITY(
-            FraudFeatureContract.FLAG_HIGH_VELOCITY,
+            "HIGH_VELOCITY",
             ReasonCodeCategory.VELOCITY,
             "High velocity",
             "Recent transaction frequency contributed to the score."
     ),
     MERCHANT_CONCENTRATION(
-            FraudFeatureContract.FLAG_MERCHANT_CONCENTRATION,
+            "MERCHANT_CONCENTRATION",
             ReasonCodeCategory.MERCHANT,
             "Merchant concentration",
             "Recent merchant activity was concentrated enough to contribute to the score."
     ),
     HIGH_AMOUNT_ACTIVITY(
-            FraudFeatureContract.FLAG_HIGH_AMOUNT_ACTIVITY,
+            "HIGH_AMOUNT_ACTIVITY",
             ReasonCodeCategory.AMOUNT,
             "High amount activity",
             "Recent amount activity contributed to the score."
     ),
     RAPID_PLN_20K_BURST(
-            FraudFeatureContract.FLAG_RAPID_PLN_20K_BURST,
+            "RAPID_PLN_20K_BURST",
             ReasonCodeCategory.VELOCITY,
             "Rapid PLN 20K burst",
             "A bounded rapid-transfer amount pattern contributed to the score."
@@ -83,14 +83,6 @@ public enum ReasonCode {
             "Recent amount accumulation",
             "Recent accumulated amount contributed to the score."
     ),
-    // Legacy-compatible wire value. This is a rapid-transfer case-candidate scoring signal only.
-    // It does not mean a fraud case exists or fraud is confirmed.
-    RAPID_TRANSFER_FRAUD_CASE(
-            "RAPID_TRANSFER_FRAUD_CASE",
-            ReasonCodeCategory.VELOCITY,
-            "Rapid transfer case signal",
-            "Rapid-transfer case candidate signal contributed to the score."
-    ),
     ML_MODEL_UNAVAILABLE(
             "ML_MODEL_UNAVAILABLE",
             ReasonCodeCategory.MODEL_RUNTIME,
@@ -111,7 +103,7 @@ public enum ReasonCode {
     );
 
     private static final Map<String, ReasonCode> CANONICAL_BY_WIRE_VALUE = canonicalWireValues();
-    private static final Map<String, ReasonCode> LEGACY_ALIASES = legacyAliases();
+    private static final Map<String, ReasonCode> SUPPORTED_ALIASES = supportedAliases();
 
     private final String wireValue;
     private final ReasonCodeCategory category;
@@ -142,11 +134,11 @@ public enum ReasonCode {
     }
 
     public static Optional<ReasonCode> known(String rawValue) {
-        ReasonCodeParseResult result = parseLegacy(rawValue);
+        ReasonCodeParseResult result = parseInput(rawValue);
         return result.supported() && result.reasonCode() != UNKNOWN ? Optional.of(result.reasonCode()) : Optional.empty();
     }
 
-    public static ReasonCodeParseResult parseLegacy(String rawValue) {
+    public static ReasonCodeParseResult parseInput(String rawValue) {
         if (rawValue == null) {
             return new ReasonCodeParseResult(UNKNOWN, ReasonCodeParseStatus.NULL_ITEM, null);
         }
@@ -158,20 +150,20 @@ public enum ReasonCode {
         if (canonical != null) {
             return new ReasonCodeParseResult(canonical, ReasonCodeParseStatus.KNOWN, rawValue);
         }
-        ReasonCode legacy = LEGACY_ALIASES.get(normalize(trimmed));
-        if (legacy != null) {
-            return new ReasonCodeParseResult(legacy, ReasonCodeParseStatus.LEGACY_MAPPED, rawValue);
+        ReasonCode alias = SUPPORTED_ALIASES.get(normalize(trimmed));
+        if (alias != null) {
+            return new ReasonCodeParseResult(alias, ReasonCodeParseStatus.SUPPORTED_ALIAS, rawValue);
         }
         return new ReasonCodeParseResult(UNKNOWN, ReasonCodeParseStatus.UNSUPPORTED, rawValue);
     }
 
-    public static List<ReasonCodeParseResult> parseLegacyList(List<String> rawValues) {
+    public static List<ReasonCodeParseResult> parseInputList(List<String> rawValues) {
         if (rawValues == null || rawValues.isEmpty()) {
             return List.of();
         }
         List<ReasonCodeParseResult> results = new ArrayList<>();
         for (String rawValue : rawValues) {
-            results.add(parseLegacy(rawValue));
+            results.add(parseInput(rawValue));
         }
         return List.copyOf(results);
     }
@@ -213,14 +205,18 @@ public enum ReasonCode {
         return Map.copyOf(values);
     }
 
-    private static Map<String, ReasonCode> legacyAliases() {
+    private static Map<String, ReasonCode> supportedAliases() {
         Map<String, ReasonCode> aliases = new LinkedHashMap<>();
         aliases.put(normalize("HIGH_AMOUNT"), HIGH_TRANSACTION_AMOUNT);
-        aliases.put(normalize(FraudFeatureContract.COUNTRY_MISMATCH), COUNTRY_MISMATCH);
         aliases.put(normalize(FraudFeatureContract.DEVICE_NOVELTY), DEVICE_NOVELTY);
+        aliases.put(normalize(FraudFeatureContract.COUNTRY_MISMATCH), COUNTRY_MISMATCH);
         aliases.put(normalize(FraudFeatureContract.PROXY_OR_VPN_DETECTED), PROXY_OR_VPN);
+        aliases.put(normalize(FraudFeatureContract.MERCHANT_FREQUENCY_7D), MERCHANT_CONCENTRATION);
+        aliases.put(normalize(FraudFeatureContract.RECENT_TRANSACTION_COUNT), RECENT_TRANSACTION_SPIKE);
+        aliases.put(normalize(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE), TRANSACTION_VELOCITY);
+        aliases.put(normalize(FraudFeatureContract.RECENT_AMOUNT_SUM), RECENT_AMOUNT_ACCUMULATION);
+        aliases.put(normalize(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN), RECENT_AMOUNT_ACCUMULATION);
         aliases.put(normalize(FraudFeatureContract.RAPID_TRANSFER_BURST), RAPID_PLN_20K_BURST);
-        aliases.put(normalize("rapidTransferFraudCase"), RAPID_TRANSFER_FRAUD_CASE);
         return Map.copyOf(aliases);
     }
 

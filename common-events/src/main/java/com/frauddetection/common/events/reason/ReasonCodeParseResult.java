@@ -19,6 +19,6 @@ public record ReasonCodeParseResult(
     }
 
     public boolean supported() {
-        return status == ReasonCodeParseStatus.KNOWN || status == ReasonCodeParseStatus.LEGACY_MAPPED;
+        return status == ReasonCodeParseStatus.KNOWN || status == ReasonCodeParseStatus.SUPPORTED_ALIAS;
     }
 }

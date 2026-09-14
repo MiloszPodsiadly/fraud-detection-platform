@@ -35,14 +35,6 @@ public final class FraudFeatureContract {
     public static final String MERCHANT_CATEGORY = "merchantCategory";
     public static final String CURRENCY = "currency";
 
-    public static final String FLAG_DEVICE_NOVELTY = "DEVICE_NOVELTY";
-    public static final String FLAG_COUNTRY_MISMATCH = "COUNTRY_MISMATCH";
-    public static final String FLAG_PROXY_OR_VPN = "PROXY_OR_VPN";
-    public static final String FLAG_HIGH_VELOCITY = "HIGH_VELOCITY";
-    public static final String FLAG_MERCHANT_CONCENTRATION = "MERCHANT_CONCENTRATION";
-    public static final String FLAG_HIGH_AMOUNT_ACTIVITY = "HIGH_AMOUNT_ACTIVITY";
-    public static final String FLAG_RAPID_PLN_20K_BURST = "RAPID_PLN_20K_BURST";
-
     public static final List<String> ML_FEATURE_NAMES = List.of(
             RECENT_TRANSACTION_COUNT,
             RECENT_AMOUNT_SUM,
@@ -78,16 +70,6 @@ public final class FraudFeatureContract {
             CUSTOMER_SEGMENT,
             MERCHANT_CATEGORY,
             CURRENCY
-    );
-
-    public static final List<String> FEATURE_FLAGS_VALUES = List.of(
-            FLAG_DEVICE_NOVELTY,
-            FLAG_COUNTRY_MISMATCH,
-            FLAG_PROXY_OR_VPN,
-            FLAG_HIGH_VELOCITY,
-            FLAG_MERCHANT_CONCENTRATION,
-            FLAG_HIGH_AMOUNT_ACTIVITY,
-            FLAG_RAPID_PLN_20K_BURST
     );
 
     public static final String TYPE_BOOLEAN = "BOOLEAN";

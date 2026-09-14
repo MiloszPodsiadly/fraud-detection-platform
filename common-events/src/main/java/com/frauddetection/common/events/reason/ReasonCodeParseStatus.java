@@ -2,7 +2,7 @@ package com.frauddetection.common.events.reason;
 
 public enum ReasonCodeParseStatus {
     KNOWN,
-    LEGACY_MAPPED,
+    SUPPORTED_ALIAS,
     UNSUPPORTED,
     BLANK,
     NULL_ITEM

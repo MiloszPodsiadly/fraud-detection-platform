@@ -57,7 +57,7 @@ public class EvidenceProjectionService {
 
         int index = 0;
         for (String rawReasonCode : reasonCodes) {
-            ReasonCodeParseResult parsed = ReasonCode.parseLegacy(rawReasonCode);
+            ReasonCodeParseResult parsed = ReasonCode.parseInput(rawReasonCode);
             ReasonCode reasonCode = parsed.reasonCode();
             int currentIndex = index;
             if (parsed.supported() && reasonCode != ReasonCode.UNKNOWN) {
@@ -164,7 +164,7 @@ public class EvidenceProjectionService {
     private EvidenceStatus diagnosticStatus(ReasonCodeParseStatus status) {
         return switch (status) {
             case KNOWN, UNSUPPORTED -> EvidenceStatus.ERROR;
-            case LEGACY_MAPPED -> EvidenceStatus.LEGACY;
+            case SUPPORTED_ALIAS -> EvidenceStatus.AVAILABLE;
             case BLANK, NULL_ITEM -> EvidenceStatus.UNAVAILABLE;
         };
     }
