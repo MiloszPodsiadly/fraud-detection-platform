@@ -1,7 +1,5 @@
 package com.frauddetection.common.events.reason;
 
-import com.frauddetection.common.events.features.FraudFeatureContract;
-
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -103,7 +101,6 @@ public enum ReasonCode {
     );
 
     private static final Map<String, ReasonCode> CANONICAL_BY_WIRE_VALUE = canonicalWireValues();
-    private static final Map<String, ReasonCode> SUPPORTED_ALIASES = supportedAliases();
 
     private final String wireValue;
     private final ReasonCodeCategory category;
@@ -149,10 +146,6 @@ public enum ReasonCode {
         ReasonCode canonical = CANONICAL_BY_WIRE_VALUE.get(normalize(trimmed));
         if (canonical != null) {
             return new ReasonCodeParseResult(canonical, ReasonCodeParseStatus.KNOWN, rawValue);
-        }
-        ReasonCode alias = SUPPORTED_ALIASES.get(normalize(trimmed));
-        if (alias != null) {
-            return new ReasonCodeParseResult(alias, ReasonCodeParseStatus.SUPPORTED_ALIAS, rawValue);
         }
         return new ReasonCodeParseResult(UNKNOWN, ReasonCodeParseStatus.UNSUPPORTED, rawValue);
     }
@@ -203,21 +196,6 @@ public enum ReasonCode {
             }
         }
         return Map.copyOf(values);
-    }
-
-    private static Map<String, ReasonCode> supportedAliases() {
-        Map<String, ReasonCode> aliases = new LinkedHashMap<>();
-        aliases.put(normalize("HIGH_AMOUNT"), HIGH_TRANSACTION_AMOUNT);
-        aliases.put(normalize(FraudFeatureContract.DEVICE_NOVELTY), DEVICE_NOVELTY);
-        aliases.put(normalize(FraudFeatureContract.COUNTRY_MISMATCH), COUNTRY_MISMATCH);
-        aliases.put(normalize(FraudFeatureContract.PROXY_OR_VPN_DETECTED), PROXY_OR_VPN);
-        aliases.put(normalize(FraudFeatureContract.MERCHANT_FREQUENCY_7D), MERCHANT_CONCENTRATION);
-        aliases.put(normalize(FraudFeatureContract.RECENT_TRANSACTION_COUNT), RECENT_TRANSACTION_SPIKE);
-        aliases.put(normalize(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE), TRANSACTION_VELOCITY);
-        aliases.put(normalize(FraudFeatureContract.RECENT_AMOUNT_SUM), RECENT_AMOUNT_ACCUMULATION);
-        aliases.put(normalize(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN), RECENT_AMOUNT_ACCUMULATION);
-        aliases.put(normalize(FraudFeatureContract.RAPID_TRANSFER_BURST), RAPID_PLN_20K_BURST);
-        return Map.copyOf(aliases);
     }
 
     private static String normalize(String value) {

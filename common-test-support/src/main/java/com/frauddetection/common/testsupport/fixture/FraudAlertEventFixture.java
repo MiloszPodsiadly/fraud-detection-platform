@@ -31,7 +31,7 @@ public final class FraudAlertEventFixture {
         private Double fraudScore = 0.94d;
         private AlertStatus alertStatus = AlertStatus.OPEN;
         private String alertReason = "High-risk transaction detected";
-        private List<String> reasonCodes = List.of("HIGH_AMOUNT", "DEVICE_NOVELTY");
+        private List<String> reasonCodes = List.of("HIGH_TRANSACTION_AMOUNT", "DEVICE_NOVELTY");
         private Map<String, Object> scoreDetails = Map.of("ruleScore", 0.94d);
         private Map<String, Object> featureSnapshot = Map.of("deviceNovelty", true, "recentTransactionCount", 8);
 

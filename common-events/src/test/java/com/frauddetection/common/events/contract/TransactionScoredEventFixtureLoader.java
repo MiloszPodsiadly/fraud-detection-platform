@@ -8,25 +8,25 @@ import java.util.Set;
 final class TransactionScoredEventFixtureLoader {
 
     private static final String ROOT = "fixtures/transaction-scored-event/";
-    private static final String OLD = "transaction_scored_event_v1_without_engine_intelligence.json";
+    private static final String OLD = "transaction_scored_event_historical_without_engine_intelligence.json";
     private static final String LEGACY_V1_ENGINE_INTELLIGENCE =
-            "transaction_scored_event_v1_legacy_engine_intelligence_comparison.json";
+            "transaction_scored_event_historical_engine_intelligence_v1_legacy_comparison.json";
     private static final String EXPLICIT_V1_ENGINE_INTELLIGENCE =
-            "transaction_scored_event_v1_explicit_engine_intelligence_comparison.json";
+            "transaction_scored_event_historical_engine_intelligence_v1_explicit_comparison.json";
     private static final String UNKNOWN_ADDITIVE_V1_ENGINE_INTELLIGENCE =
-            "transaction_scored_event_v1_unknown_additive_engine_intelligence_fields.json";
+            "transaction_scored_event_historical_engine_intelligence_v1_unknown_additive_fields.json";
     private static final String PARTIAL_COMPARISON_TYPE_ONLY =
-            "transaction_scored_event_v1_partial_comparison_type_only.json";
+            "transaction_scored_event_historical_engine_intelligence_v1_partial_comparison_type_only.json";
     private static final String PARTIAL_COMPARED_ENGINE_IDS_ONLY =
-            "transaction_scored_event_v1_partial_compared_engine_ids_only.json";
+            "transaction_scored_event_historical_engine_intelligence_v1_partial_compared_engine_ids_only.json";
     private static final String WRONG_COMPARISON_TYPE =
-            "transaction_scored_event_v1_wrong_comparison_type.json";
+            "transaction_scored_event_historical_engine_intelligence_v1_wrong_comparison_type.json";
     private static final String REVERSED_COMPARISON_ENGINE_IDS =
-            "transaction_scored_event_v1_reversed_comparison_engine_ids.json";
+            "transaction_scored_event_historical_engine_intelligence_v1_reversed_comparison_engine_ids.json";
     private static final String VELOCITY_COMPARISON_ENGINE_IDS =
-            "transaction_scored_event_v1_velocity_comparison_engine_ids.json";
+            "transaction_scored_event_historical_engine_intelligence_v1_velocity_comparison_engine_ids.json";
     private static final String UNKNOWN_COMPARISON_ENGINE_IDS =
-            "transaction_scored_event_v1_unknown_comparison_engine_ids.json";
+            "transaction_scored_event_historical_engine_intelligence_v1_unknown_comparison_engine_ids.json";
     private static final String MINIMAL = "transaction_scored_event_v2_minimal_engine_intelligence.json";
     private static final String FULL = "transaction_scored_event_v2_full_bounded_engine_intelligence.json";
     private static final String UNKNOWN_NESTED = "transaction_scored_event_v2_unknown_nested_engine_intelligence_fields.json";

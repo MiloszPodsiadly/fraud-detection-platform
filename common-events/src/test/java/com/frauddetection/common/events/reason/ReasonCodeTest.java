@@ -1,7 +1,5 @@
 package com.frauddetection.common.events.reason;
 
-import com.frauddetection.common.events.features.FraudFeatureContract;
-
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -56,34 +54,22 @@ class ReasonCodeTest {
     }
 
     @Test
-    void parsesCanonicalAndSupportedAliasValuesWithoutThrowing() {
-        assertThat(ReasonCode.parseInput("HIGH_AMOUNT").reasonCode()).isEqualTo(ReasonCode.HIGH_TRANSACTION_AMOUNT);
-        assertThat(ReasonCode.parseInput("high_amount").reasonCode()).isEqualTo(ReasonCode.HIGH_TRANSACTION_AMOUNT);
-        assertThat(ReasonCode.parseInput(" High_Amount ").reasonCode()).isEqualTo(ReasonCode.HIGH_TRANSACTION_AMOUNT);
+    void parsesCanonicalValuesWithoutThrowing() {
+        assertThat(ReasonCode.parseInput("HIGH_TRANSACTION_AMOUNT").reasonCode()).isEqualTo(ReasonCode.HIGH_TRANSACTION_AMOUNT);
         assertThat(ReasonCode.parseInput("COUNTRY_MISMATCH").reasonCode()).isEqualTo(ReasonCode.COUNTRY_MISMATCH);
         assertThat(ReasonCode.parseInput("RAPID_PLN_20K_BURST").reasonCode()).isEqualTo(ReasonCode.RAPID_PLN_20K_BURST);
     }
 
     @Test
-    void parsesCurrentMlFeatureContributionKeysAsCanonicalReasonCodes() {
-        assertThat(ReasonCode.parseInput(FraudFeatureContract.DEVICE_NOVELTY).reasonCode())
-                .isEqualTo(ReasonCode.DEVICE_NOVELTY);
-        assertThat(ReasonCode.parseInput(FraudFeatureContract.COUNTRY_MISMATCH).reasonCode())
-                .isEqualTo(ReasonCode.COUNTRY_MISMATCH);
-        assertThat(ReasonCode.parseInput(FraudFeatureContract.PROXY_OR_VPN_DETECTED).reasonCode())
-                .isEqualTo(ReasonCode.PROXY_OR_VPN);
-        assertThat(ReasonCode.parseInput(FraudFeatureContract.MERCHANT_FREQUENCY_7D).reasonCode())
-                .isEqualTo(ReasonCode.MERCHANT_CONCENTRATION);
-        assertThat(ReasonCode.parseInput(FraudFeatureContract.RECENT_TRANSACTION_COUNT).reasonCode())
-                .isEqualTo(ReasonCode.RECENT_TRANSACTION_SPIKE);
-        assertThat(ReasonCode.parseInput(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE).reasonCode())
-                .isEqualTo(ReasonCode.TRANSACTION_VELOCITY);
-        assertThat(ReasonCode.parseInput(FraudFeatureContract.RECENT_AMOUNT_SUM).reasonCode())
-                .isEqualTo(ReasonCode.RECENT_AMOUNT_ACCUMULATION);
-        assertThat(ReasonCode.parseInput(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN).reasonCode())
-                .isEqualTo(ReasonCode.RECENT_AMOUNT_ACCUMULATION);
-        assertThat(ReasonCode.parseInput(FraudFeatureContract.RAPID_TRANSFER_BURST).reasonCode())
-                .isEqualTo(ReasonCode.RAPID_PLN_20K_BURST);
+    void featureNamesAreNotPublicReasonCodeAliases() {
+        assertThat(ReasonCode.parseInput("deviceNovelty").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
+        assertThat(ReasonCode.parseInput("countryMismatch").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
+        assertThat(ReasonCode.parseInput("proxyOrVpnDetected").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
+        assertThat(ReasonCode.parseInput("merchantFrequency7d").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
+        assertThat(ReasonCode.parseInput("recentTransactionCount").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
+        assertThat(ReasonCode.parseInput("transactionVelocityPerMinute").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
+        assertThat(ReasonCode.parseInput("recentAmountSumPln").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
+        assertThat(ReasonCode.parseInput("rapidTransferBurst").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
     }
 
     @Test

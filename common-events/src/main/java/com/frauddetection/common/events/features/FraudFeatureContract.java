@@ -26,10 +26,6 @@ public final class FraudFeatureContract {
     public static final String PROXY_OR_VPN_DETECTED = "proxyOrVpnDetected";
     public static final String HIGH_RISK_FLAG_COUNT = "highRiskFlagCount";
     public static final String RAPID_TRANSFER_BURST = "rapidTransferBurst";
-    public static final String RAPID_TRANSFER_WINDOW = "rapidTransferWindow";
-    public static final String RAPID_TRANSFER_THRESHOLD_PLN = "rapidTransferThresholdPln";
-    public static final String RAPID_TRANSFER_COUNT = "rapidTransferCount";
-    public static final String RAPID_TRANSFER_TOTAL_PLN = "rapidTransferTotalPln";
     public static final String RAPID_TRANSFER_TRANSACTION_IDS = "rapidTransferTransactionIds";
     public static final String CUSTOMER_SEGMENT = "customerSegment";
     public static final String MERCHANT_CATEGORY = "merchantCategory";
@@ -37,15 +33,8 @@ public final class FraudFeatureContract {
 
     public static final List<String> ML_FEATURE_NAMES = List.of(
             RECENT_TRANSACTION_COUNT,
-            RECENT_AMOUNT_SUM,
+            RECENT_AMOUNT_SUM_PLN,
             TRANSACTION_VELOCITY_PER_MINUTE,
-            TRANSACTION_VELOCITY_PER_HOUR,
-            TRANSACTION_VELOCITY_PER_DAY,
-            RECENT_AMOUNT_AVERAGE,
-            RECENT_AMOUNT_STD_DEV,
-            AMOUNT_DEVIATION_FROM_USER_MEAN,
-            MERCHANT_ENTROPY,
-            COUNTRY_ENTROPY,
             MERCHANT_FREQUENCY_7D,
             DEVICE_NOVELTY,
             COUNTRY_MISMATCH,
@@ -87,10 +76,8 @@ public final class FraudFeatureContract {
             Map.entry(RECENT_TRANSACTION_COUNT, TYPE_INTEGER),
             Map.entry(RECENT_TRANSACTION_COUNT_WINDOW, TYPE_STRING),
             Map.entry(RECENT_AMOUNT_SUM_WINDOW, TYPE_STRING),
-            Map.entry(RAPID_TRANSFER_WINDOW, TYPE_STRING),
             Map.entry(MERCHANT_FREQUENCY_7D, TYPE_INTEGER),
             Map.entry(HIGH_RISK_FLAG_COUNT, TYPE_INTEGER),
-            Map.entry(RAPID_TRANSFER_COUNT, TYPE_INTEGER),
             Map.entry(RECENT_AMOUNT_SUM, TYPE_DECIMAL),
             Map.entry(TRANSACTION_VELOCITY_PER_MINUTE, TYPE_DOUBLE),
             Map.entry(TRANSACTION_VELOCITY_PER_HOUR, TYPE_DOUBLE),
@@ -102,8 +89,6 @@ public final class FraudFeatureContract {
             Map.entry(COUNTRY_ENTROPY, TYPE_DOUBLE),
             Map.entry(RECENT_AMOUNT_SUM_PLN, TYPE_DECIMAL),
             Map.entry(CURRENT_TRANSACTION_AMOUNT_PLN, TYPE_DECIMAL),
-            Map.entry(RAPID_TRANSFER_THRESHOLD_PLN, TYPE_DECIMAL),
-            Map.entry(RAPID_TRANSFER_TOTAL_PLN, TYPE_DECIMAL),
             Map.entry(CUSTOMER_SEGMENT, TYPE_STRING),
             Map.entry(MERCHANT_CATEGORY, TYPE_STRING),
             Map.entry(CURRENCY, TYPE_STRING)

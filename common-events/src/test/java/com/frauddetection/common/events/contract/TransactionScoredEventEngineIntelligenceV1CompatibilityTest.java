@@ -7,12 +7,10 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMisma
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -67,24 +65,7 @@ class TransactionScoredEventEngineIntelligenceV1CompatibilityTest {
     }
 
     @Test
-    void legacyV1SerializesBackAsCanonicalNewV1ComparisonIdentity() throws Exception {
-        TransactionScoredEvent event = read(TransactionScoredEventFixtureLoader.legacyV1EngineIntelligenceJson());
-
-        JsonNode serialized = objectMapper.readTree(objectMapper.writeValueAsString(event));
-        JsonNode comparison = serialized.path("engineIntelligence").path("comparison");
-
-        assertThat(comparison.path("comparisonType").textValue()).isEqualTo("RULES_VS_ML");
-        assertThat(textValues(comparison.path("comparedEngineIds")))
-                .containsExactly("rules.primary", "ml.python.primary");
-        assertThat(comparison.path("agreementStatus").textValue()).isEqualTo("AGREEMENT");
-        assertThat(comparison.path("riskMismatchStatus").textValue()).isEqualTo("SAME_RISK_LEVEL");
-        assertThat(comparison.path("scoreDeltaBucket").textValue()).isEqualTo("SMALL");
-        assertThat(serialized.path("fraudScore").doubleValue()).isEqualTo(0.82d);
-        assertThat(serialized.path("riskLevel").textValue()).isEqualTo("HIGH");
-    }
-
-    @Test
-    void newV1ComparisonWithExplicitIdentityDeserializes() throws Exception {
+    void currentComparisonWithExplicitIdentityDeserializes() throws Exception {
         TransactionScoredEvent event = read(TransactionScoredEventFixtureLoader.explicitV1EngineIntelligenceJson());
 
         assertThat(event.engineIntelligence().comparison().comparisonType())
@@ -94,7 +75,7 @@ class TransactionScoredEventEngineIntelligenceV1CompatibilityTest {
     }
 
     @Test
-    void newV1UnknownAdditiveFieldsFollowExistingIgnorePolicy() throws Exception {
+    void currentComparisonUnknownAdditiveFieldsFollowExistingIgnorePolicy() throws Exception {
         TransactionScoredEvent event = read(TransactionScoredEventFixtureLoader.unknownAdditiveV1EngineIntelligenceJson());
 
         assertThat(event.transactionId()).isEqualTo("txn-fdp129-stage2-001");
@@ -135,7 +116,4 @@ class TransactionScoredEventEngineIntelligenceV1CompatibilityTest {
         return objectMapper.readValue(json, TransactionScoredEvent.class);
     }
 
-    private List<String> textValues(JsonNode node) {
-        return node.values().stream().map(JsonNode::textValue).toList();
-    }
 }

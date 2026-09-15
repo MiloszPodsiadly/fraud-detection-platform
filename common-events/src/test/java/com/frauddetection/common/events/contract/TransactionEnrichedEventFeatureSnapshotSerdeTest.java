@@ -39,8 +39,7 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
                 Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5),
                 Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M"),
                 Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00")),
-                Map.entry(FraudFeatureContract.RAPID_TRANSFER_COUNT, 5),
-                Map.entry(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("20000.00")),
+                Map.entry(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("10000.00")),
                 Map.entry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d),
                 Map.entry(FraudFeatureContract.COUNTRY_MISMATCH, false),
                 Map.entry("futureAdditiveFeature", Map.of("nested", List.of(1, "two")))
@@ -58,8 +57,8 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
         assertThat(snapshot.get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN))
                 .isEqualTo(new BigDecimal("20000.00"))
                 .isExactlyInstanceOf(BigDecimal.class);
-        assertThat(snapshot.get(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN))
-                .isEqualTo(new BigDecimal("20000.00"))
+        assertThat(snapshot.get(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN))
+                .isEqualTo(new BigDecimal("10000.00"))
                 .isExactlyInstanceOf(BigDecimal.class);
         assertThat(snapshot.get(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW))
                 .isEqualTo("PT1M")
@@ -118,13 +117,13 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
     }
 
     @Test
-    void currentPayloadCanBeReadByPrompt2SnapshotBasedConsumerDuringCoordinatedCutover() throws IOException {
+    void currentPayloadCanBeReadBySnapshotBasedConsumerDuringCoordinatedCutover() throws IOException {
         byte[] payload = serializer.serialize("transactions.enriched", event(Map.of(
                 FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
                 FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00")
         )));
 
-        Prompt2SnapshotBasedConsumerEvent replayed = objectMapper.readValue(payload, Prompt2SnapshotBasedConsumerEvent.class);
+        SnapshotBasedConsumerEvent replayed = objectMapper.readValue(payload, SnapshotBasedConsumerEvent.class);
 
         assertThat(replayed.featureSnapshot())
                 .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5);
@@ -152,7 +151,7 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
         Map<String, Object> sourceSnapshot = Map.ofEntries(
                 Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5),
                 Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00")),
-                Map.entry(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("20000.00")),
+                Map.entry(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("10000.00")),
                 Map.entry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d)
         );
 
@@ -171,8 +170,8 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
         assertThat(snapshot.get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN))
                 .isEqualTo(new BigDecimal("20000.00"))
                 .isExactlyInstanceOf(BigDecimal.class);
-        assertThat(snapshot.get(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN))
-                .isEqualTo(new BigDecimal("20000.00"))
+        assertThat(snapshot.get(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN))
+                .isEqualTo(new BigDecimal("10000.00"))
                 .isExactlyInstanceOf(BigDecimal.class);
     }
 
@@ -236,7 +235,7 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
         );
     }
 
-    private record Prompt2SnapshotBasedConsumerEvent(
+    private record SnapshotBasedConsumerEvent(
             String eventId,
             String transactionId,
             String correlationId,

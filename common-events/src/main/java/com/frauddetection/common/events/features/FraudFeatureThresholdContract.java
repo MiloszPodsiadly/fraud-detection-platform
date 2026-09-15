@@ -12,13 +12,13 @@ public final class FraudFeatureThresholdContract {
     private FraudFeatureThresholdContract() {
     }
 
-    public static boolean isRapidTransferPlnBurst(int rapidTransferCount, BigDecimal rapidTransferTotalPln) {
-        Objects.requireNonNull(rapidTransferTotalPln, "rapidTransferTotalPln is required");
-        if (rapidTransferCount < 0 || rapidTransferTotalPln.signum() < 0) {
+    public static boolean isRapidTransferPlnBurst(int transactionCount, BigDecimal amountPln) {
+        Objects.requireNonNull(amountPln, "amountPln is required");
+        if (transactionCount < 0 || amountPln.signum() < 0) {
             throw new IllegalArgumentException("rapid transfer facts must be non-negative");
         }
-        return rapidTransferCount >= RAPID_TRANSFER_MIN_COUNT
-                && rapidTransferTotalPln.compareTo(RAPID_TRANSFER_PLN_THRESHOLD) >= 0;
+        return transactionCount >= RAPID_TRANSFER_MIN_COUNT
+                && amountPln.compareTo(RAPID_TRANSFER_PLN_THRESHOLD) >= 0;
     }
 
     public static boolean isRapidTransferPlnBurst(Map<String, Object> featureSnapshot) {

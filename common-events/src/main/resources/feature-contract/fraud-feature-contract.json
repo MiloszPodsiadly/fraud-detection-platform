@@ -1,16 +1,9 @@
 {
-  "version": "2026-09-13.rules-v2-canonical",
+  "version": "2026-09-15.rules-v2-canonical-ml-pln",
   "mlFeatureNames": [
     "recentTransactionCount",
-    "recentAmountSum",
+    "recentAmountSumPln",
     "transactionVelocityPerMinute",
-    "transactionVelocityPerHour",
-    "transactionVelocityPerDay",
-    "recentAmountAverage",
-    "recentAmountStdDev",
-    "amountDeviationFromUserMean",
-    "merchantEntropy",
-    "countryEntropy",
     "merchantFrequency7d",
     "deviceNovelty",
     "countryMismatch",
@@ -37,7 +30,7 @@
   ],
   "productionInferenceFeatures": [
     "recentTransactionCount",
-    "recentAmountSum",
+    "recentAmountSumPln",
     "transactionVelocityPerMinute",
     "merchantFrequency7d",
     "deviceNovelty",
@@ -49,9 +42,10 @@
   "featureAvailability": {
     "recentTransactionCount": "providedByJava",
     "recentTransactionCountWindow": "providedByJava",
-    "recentAmountSum": "providedByJava",
     "recentAmountSumWindow": "providedByJava",
     "recentAmountSumPln": "providedByJava",
+    "currentTransactionAmountPln": "providedByJava",
+    "currency": "providedByJava",
     "transactionVelocityPerMinute": "providedByJava",
     "transactionVelocityPerHour": "trainingOnly",
     "transactionVelocityPerDay": "trainingOnly",
@@ -67,9 +61,115 @@
     "highRiskFlagCount": "derivedInPython",
     "rapidTransferBurst": "derivedInPython"
   },
+  "supportedCurrencies": [
+    "PLN",
+    "EUR",
+    "USD",
+    "GBP"
+  ],
+  "productionFeatureSemantics": {
+    "recentTransactionCount": {
+      "type": "integer",
+      "unit": "count",
+      "window": "PT1M",
+      "source": "Feature Store recent transaction count including the current transaction",
+      "bounds": {"min": 0, "max": 1000000},
+      "missing": "incompatible",
+      "invalid": "incompatible"
+    },
+    "recentAmountSumPln": {
+      "type": "decimal",
+      "unit": "PLN",
+      "currencyBasis": "PLN",
+      "window": "PT1M",
+      "source": "Feature Store recent amount sum normalized to PLN including the current transaction",
+      "bounds": {"min": 0.0, "max": 999999999999.99},
+      "missing": "incompatible",
+      "invalid": "incompatible"
+    },
+    "transactionVelocityPerMinute": {
+      "type": "double",
+      "unit": "transactions_per_minute",
+      "window": "PT1M",
+      "source": "recentTransactionCount over the one-minute canonical window",
+      "bounds": {"min": 0.0, "max": 1000000.0},
+      "consistency": "equals recentTransactionCount for PT1M within 0.0001",
+      "missing": "incompatible",
+      "invalid": "incompatible"
+    },
+    "merchantFrequency7d": {
+      "type": "integer",
+      "unit": "count",
+      "window": "P7D",
+      "source": "merchant activity count for the cardholder",
+      "bounds": {"min": 0, "max": 1000000},
+      "missing": "incompatible",
+      "invalid": "incompatible"
+    },
+    "deviceNovelty": {
+      "type": "boolean",
+      "unit": "flag",
+      "window": "current_transaction",
+      "source": "Feature Enricher canonical device novelty fact",
+      "missing": "incompatible",
+      "invalid": "incompatible"
+    },
+    "countryMismatch": {
+      "type": "boolean",
+      "unit": "flag",
+      "window": "current_transaction",
+      "source": "Feature Enricher canonical country mismatch fact",
+      "missing": "incompatible",
+      "invalid": "incompatible"
+    },
+    "proxyOrVpnDetected": {
+      "type": "boolean",
+      "unit": "flag",
+      "window": "current_transaction",
+      "source": "Feature Enricher canonical proxy or VPN fact",
+      "missing": "incompatible",
+      "invalid": "incompatible"
+    },
+    "highRiskFlagCount": {
+      "type": "double",
+      "unit": "normalized_count",
+      "window": "derived_from_current_production_facts",
+      "source": "Python production derivation from strict canonical inputs",
+      "bounds": {"min": 0.0, "max": 1.0},
+      "missing": "derived",
+      "invalid": "incompatible"
+    },
+    "rapidTransferBurst": {
+      "type": "boolean_numeric",
+      "unit": "flag",
+      "window": "PT1M",
+      "currencyBasis": "PLN",
+      "source": "recentTransactionCount >= 2 and recentAmountSumPln >= 20000 over PT1M",
+      "threshold": {"count": 2, "amountPln": 20000},
+      "bounds": {"min": 0.0, "max": 1.0},
+      "missing": "derived",
+      "invalid": "incompatible"
+    }
+  },
+  "strictTypingExpectations": {
+    "integerRejects": ["string", "fractional", "boolean", "negative", "object", "array"],
+    "decimalRejects": ["string", "boolean", "negative", "nan", "infinity", "object", "array"],
+    "booleanRejects": ["string", "number", "object", "array", "null"],
+    "windows": {
+      "recentTransactionCountWindow": "PT1M",
+      "recentAmountSumWindow": "PT1M"
+    },
+    "rateConsistency": "transactionVelocityPerMinute == recentTransactionCount / PT1M",
+    "currentTransactionAmountPln": {
+      "type": "decimal",
+      "unit": "PLN",
+      "currencyBasis": "PLN",
+      "bounds": {"min": 0.0, "max": 999999999999.99}
+    }
+  },
   "normalization": {
     "recentTransactionCount": {"source": "count", "scale": 10.0, "clipMax": 1.0},
-    "recentAmountSum": {"source": "money.amount", "scale": 10000.0, "clipMax": 1.0},
+    "recentAmountSumPln": {"source": "money.amount.pln", "scale": 10000.0, "clipMax": 1.0},
     "transactionVelocityPerMinute": {"source": "rate", "scale": 5.0, "clipMax": 1.0},
     "transactionVelocityPerHour": {"source": "rate", "scale": 20.0, "clipMax": 1.0},
     "transactionVelocityPerDay": {"source": "rate", "scale": 80.0, "clipMax": 1.0},

@@ -25,7 +25,7 @@ not raw snapshot data.
 
 `common-events` owns the event wire boundary for feature-snapshot values through `FraudFeatureContract`,
 `FeatureSnapshotWireValueNormalizer`, and `FeatureSnapshotWireValueDeserializer`. Decimal wire values such as
-`recentAmountSumPln` and `rapidTransferThresholdPln` must round-trip as `BigDecimal`; integer, double, boolean, and
+`recentAmountSumPln` and `currentTransactionAmountPln` must round-trip as `BigDecimal`; integer, double, boolean, and
 string facts must round-trip as their declared scalar types.
 
 `transactions.enriched` uses the shared Jackson JSON serializer/deserializer in `common-events`; there is no Schema
@@ -34,11 +34,22 @@ the event envelope plus `featureSnapshot`. Fraud fact fields such as `recentTran
 `recentAmountSum`, `transactionVelocityPerMinute`, `merchantFrequency7d`, `deviceNovelty`, `countryMismatch`, and
 `proxyOrVpnDetected` must not be dual-written as top-level event fields.
 
-The hard cutover line is the Prompt 2 snapshot-consumer boundary: deployed consumers must already read canonical
-facts from `featureSnapshot` before the current producer shape is used. Current consumers ignore unknown duplicate
-top-level fields when reading older enriched-event JSON during replay, but current producers no longer write those
-duplicates and no active consumer may depend on them. Retry and dead-letter handling preserves the same canonical
-payload shape; invalid current canonical facts are dead-lettered rather than repaired from removed duplicates.
+The hard cutover line is the canonical snapshot consumer cutover boundary: deployed consumers must already read
+canonical facts from `featureSnapshot` before the current producer shape is used. Current consumers ignore unknown
+duplicate top-level fields when reading older enriched-event JSON during replay, but current producers no longer write
+those duplicates and no active consumer may depend on them. Retry and dead-letter handling preserves the same
+canonical payload shape; invalid current canonical facts are dead-lettered rather than repaired from removed
+duplicates.
+
+The rollout order is consumer-first:
+
+1. all independently deployed consumers become `featureSnapshot`-ready;
+2. deploy those consumers;
+3. verify no active dependency on removed top-level fraud facts remains;
+4. deploy the producer that writes the snapshot-only current shape;
+5. observe retry, DLT, and replay paths;
+6. wait the agreed Kafka retention period or migrate retained durable data where necessary;
+7. delete temporary replay compatibility after the explicit cutoff.
 
 Services that consume event payloads must not repair malformed current canonical facts by coercing strings, booleans,
 nested objects, or oversized numeric input into acceptable scalar values. Missing old data is compatibility; present
@@ -64,7 +75,6 @@ Examples:
 - `recentTransactionCount` is integer.
 - `transactionVelocityPerMinute` is double.
 - `currency` is string.
-- `rapidTransferTotalPln` is decimal when read by historical consumers.
 - `rapidTransferTransactionIds` is not consumable by current Rules scoring.
 - Unsupported policy marker fields are not consumable by current Rules scoring.
 

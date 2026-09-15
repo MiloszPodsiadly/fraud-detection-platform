@@ -30,9 +30,8 @@ case-candidate reason code.
 
 ## Compatibility
 
-Legacy aliases:
-
-- `HIGH_AMOUNT` -> `HIGH_TRANSACTION_AMOUNT`
+Feature names and retired aliases are not public reason codes. Unsupported input remains diagnostic-only and is not
+projected as supported scoring evidence.
 
 ## Out Of Scope
 
