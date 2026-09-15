@@ -44,10 +44,7 @@ class TransactionFeatureCalculatorTest {
                 .containsEntry(FraudFeatureContract.MERCHANT_FREQUENCY_7D, 5)
                 .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5)
                 .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM, new BigDecimal("6149.99"))
-                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("9899.96"))
-                .doesNotContainKeys(
-                        FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN
-                );
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("9899.96"));
     }
 
     @ParameterizedTest
@@ -135,13 +132,8 @@ class TransactionFeatureCalculatorTest {
         assertThat(features.featureSnapshot().get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN))
                 .isEqualTo(new BigDecimal("20000.00"))
                 .isInstanceOf(BigDecimal.class);
-        assertThat(features.featureSnapshot())
-                .doesNotContainKeys(
-                        FraudFeatureContract.RAPID_TRANSFER_WINDOW,
-                        FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN,
-                        FraudFeatureContract.RAPID_TRANSFER_COUNT,
-                        FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN
-                );
+        assertThat(features.featureSnapshot().keySet())
+                .containsExactlyElementsOf(FraudFeatureContract.JAVA_ENRICHED_FEATURE_NAMES);
     }
 
     @Test
@@ -163,10 +155,7 @@ class TransactionFeatureCalculatorTest {
 
         assertThat(features.featureSnapshot())
                 .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1)
-                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("10000.00"))
-                .doesNotContainKeys(
-                        FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN
-                );
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("10000.00"));
     }
 
     @Test

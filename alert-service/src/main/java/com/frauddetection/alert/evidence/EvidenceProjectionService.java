@@ -164,7 +164,6 @@ public class EvidenceProjectionService {
     private EvidenceStatus diagnosticStatus(ReasonCodeParseStatus status) {
         return switch (status) {
             case KNOWN, UNSUPPORTED -> EvidenceStatus.ERROR;
-            case SUPPORTED_ALIAS -> EvidenceStatus.AVAILABLE;
             case BLANK, NULL_ITEM -> EvidenceStatus.UNAVAILABLE;
         };
     }

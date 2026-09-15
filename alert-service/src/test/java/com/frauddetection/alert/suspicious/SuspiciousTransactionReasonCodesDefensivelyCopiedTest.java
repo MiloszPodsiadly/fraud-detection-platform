@@ -12,11 +12,11 @@ class SuspiciousTransactionReasonCodesDefensivelyCopiedTest {
     @Test
     void setterAndGetterAreDefensive() {
         SuspiciousTransactionDocument document = new SuspiciousTransactionDocument();
-        List<String> reasonCodes = new ArrayList<>(List.of("HIGH_AMOUNT"));
+        List<String> reasonCodes = new ArrayList<>(List.of("HIGH_TRANSACTION_AMOUNT"));
 
         document.setReasonCodes(reasonCodes);
         reasonCodes.clear();
 
-        assertThat(document.getReasonCodes()).containsExactly("HIGH_AMOUNT");
+        assertThat(document.getReasonCodes()).containsExactly("HIGH_TRANSACTION_AMOUNT");
     }
 }

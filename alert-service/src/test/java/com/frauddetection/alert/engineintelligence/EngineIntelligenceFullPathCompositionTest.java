@@ -12,6 +12,7 @@ import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.features.FraudFeatureContract;
+import com.frauddetection.common.events.features.FraudFeatureThresholdContract;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparison;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
@@ -111,11 +112,7 @@ class EngineIntelligenceFullPathCompositionTest {
                 .isExactlyInstanceOf(BigDecimal.class);
         assertThat(enriched.featureSnapshot()).doesNotContainKeys(
                 "unsupportedPolicyMarker",
-                "unsupportedRapidMarker",
-                FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN,
-                FraudFeatureContract.RAPID_TRANSFER_COUNT,
-                FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN,
-                FraudFeatureContract.RAPID_TRANSFER_WINDOW
+                "unsupportedRapidMarker"
         );
         BigDecimal scoredRecentAmount = (BigDecimal) event.featureSnapshot()
                 .get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN);
@@ -125,11 +122,7 @@ class EngineIntelligenceFullPathCompositionTest {
                 .isExactlyInstanceOf(BigDecimal.class);
         assertThat(event.featureSnapshot()).doesNotContainKeys(
                 "unsupportedPolicyMarker",
-                "unsupportedRapidMarker",
-                FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN,
-                FraudFeatureContract.RAPID_TRANSFER_COUNT,
-                FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN,
-                FraudFeatureContract.RAPID_TRANSFER_WINDOW
+                "unsupportedRapidMarker"
         );
 
         assertThat(event.fraudScore()).isEqualTo(baselineResult.fraudScore());
@@ -174,6 +167,50 @@ class EngineIntelligenceFullPathCompositionTest {
                         "recommendedAction"
                 );
         assertThat(toMap(response)).isEqualTo(publicApiFixture("engine-intelligence-full-path-composition-response.json"));
+    }
+
+    @Test
+    void rapidTransferCanonicalFactsSurviveFeatureStoreRulesKafkaSerdeAndScoredEvent() {
+        TransactionEnrichedEvent enriched = enrichedKafkaRoundTrip(rapidTransferEventFromRealFeatureCalculator());
+
+        assertThat(enriched.featureSnapshot())
+                .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2)
+                .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M")
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"))
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M")
+                .containsEntry(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("10000.00"))
+                .containsEntry(
+                        FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS,
+                        List.of("rapid-full-path-seed", "txn-full-path-rapid")
+                );
+        assertThat(FraudFeatureThresholdContract.isRapidTransferPlnBurst(enriched.featureSnapshot())).isTrue();
+
+        FraudScoringRequest request = FraudScoringRequest.from(enriched);
+        FraudScoreResult result = ruleBasedFraudScoringEngine().score(request);
+
+        assertThat(result.reasonCodes()).contains("RAPID_PLN_20K_BURST", "HIGH_AMOUNT_ACTIVITY", "HIGH_TRANSACTION_AMOUNT");
+        assertThat(FraudFeatureThresholdContract.isRapidTransferPlnBurst(result.featureSnapshot())).isTrue();
+        assertThat(result.featureSnapshot().get(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS))
+                .isEqualTo(List.of("rapid-full-path-seed", "txn-full-path-rapid"));
+
+        TransactionScoredEvent scored = scoredKafkaRoundTrip(new TransactionScoredEventMapper().toEvent(
+                request,
+                result,
+                Optional.empty()
+        ));
+
+        assertThat(scored.featureSnapshot())
+                .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2)
+                .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M")
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"))
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M")
+                .containsEntry(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("10000.00"))
+                .containsEntry(
+                        FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS,
+                        List.of("rapid-full-path-seed", "txn-full-path-rapid")
+                );
+        assertThat(FraudFeatureThresholdContract.isRapidTransferPlnBurst(scored.featureSnapshot())).isTrue();
+        assertThat(scored.reasonCodes()).contains("RAPID_PLN_20K_BURST");
     }
 
     @Test
@@ -237,6 +274,28 @@ class EngineIntelligenceFullPathCompositionTest {
         return new TransactionEnrichedEventMapper().toEvent(raw, features);
     }
 
+    private TransactionEnrichedEvent rapidTransferEventFromRealFeatureCalculator() {
+        TransactionRawEvent raw = TransactionFixtures.rawTransaction()
+                .withTransactionId("txn-full-path-rapid")
+                .withAmount(new BigDecimal("10000.00"), "PLN")
+                .build();
+        EnrichedTransactionFeatures features = new TransactionFeatureCalculator(new CurrencyAmountConverter())
+                .calculate(raw, rapidTransferSnapshot());
+        return new TransactionEnrichedEventMapper().toEvent(raw, features);
+    }
+
+    private FeatureStoreSnapshot rapidTransferSnapshot() {
+        return new FeatureStoreSnapshot(
+                1,
+                new BigDecimal("10000.00"),
+                new BigDecimal("10000.00"),
+                List.of(recentTransaction("rapid-full-path-seed", new BigDecimal("10000.00"))),
+                0,
+                Instant.parse("2026-06-18T09:59:30Z"),
+                true
+        );
+    }
+
     private FeatureStoreSnapshot velocityReadySnapshot() {
         return new FeatureStoreSnapshot(
                 4,
@@ -255,12 +314,16 @@ class EngineIntelligenceFullPathCompositionTest {
     }
 
     private RecentTransaction recentTransaction(String transactionId) {
+        return recentTransaction(transactionId, BigDecimal.ZERO);
+    }
+
+    private RecentTransaction recentTransaction(String transactionId, BigDecimal amountPln) {
         return new RecentTransaction(
                 transactionId,
                 Instant.parse("2026-06-18T09:59:30Z"),
-                BigDecimal.ZERO,
+                amountPln,
                 "PLN",
-                BigDecimal.ZERO
+                amountPln
         );
     }
 

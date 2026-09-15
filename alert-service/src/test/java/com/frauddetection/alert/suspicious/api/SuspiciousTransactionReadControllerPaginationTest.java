@@ -107,7 +107,7 @@ class SuspiciousTransactionReadControllerPaginationTest {
     @Test
     void resultWithExtraItemReturnsHasNextTrue() throws Exception {
         when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(
-                List.of(SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))),
+                List.of(SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_TRANSACTION_AMOUNT"))),
                 1,
                 true,
                 "next-cursor"

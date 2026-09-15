@@ -287,7 +287,7 @@ class SuspiciousTransactionReadServiceTest {
         document.setRiskScore(0.91);
         document.setRiskLevel(RiskLevel.HIGH);
         document.setDetectionSource(DetectionSource.RULE_ENGINE);
-        document.setReasonCodes(List.of("HIGH_AMOUNT"));
+        document.setReasonCodes(List.of("HIGH_TRANSACTION_AMOUNT"));
         document.setEvidenceStatus(EvidenceStatus.PARTIAL);
         document.setEvidenceSnapshotItemCount(1);
         document.setEvidenceProjectionState("PARTIAL_METADATA");

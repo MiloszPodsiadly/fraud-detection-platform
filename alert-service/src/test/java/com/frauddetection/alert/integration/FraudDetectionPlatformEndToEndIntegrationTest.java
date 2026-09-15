@@ -4,8 +4,11 @@ import com.frauddetection.alert.AlertServiceApplication;
 import com.frauddetection.alert.api.AlertDetailsResponse;
 import com.frauddetection.alert.api.AlertSummaryResponse;
 import com.frauddetection.alert.api.PagedResponse;
+import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.persistence.FraudCaseDocument;
+import com.frauddetection.alert.persistence.FraudCaseRepository;
 import com.frauddetection.alert.security.auth.DemoAuthHeaders;
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionRawEvent;
@@ -13,6 +16,7 @@ import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.features.FraudFeatureContract;
+import com.frauddetection.common.events.features.FraudFeatureThresholdContract;
 import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
 import com.frauddetection.enricher.FeatureEnricherServiceApplication;
@@ -182,7 +186,7 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
                 paymentInstrumentId,
                 seedDeviceId,
                 Instant.now().minusSeconds(45),
-                new BigDecimal("2000.00"),
+                new BigDecimal("10000.00"),
                 "PLN"
         );
         ResponseEntity<IngestTransactionResponse> seedResponse = submitTransaction(seedRequest, correlationId + "-seed");
@@ -196,7 +200,7 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
                 paymentInstrumentId,
                 deviceId,
                 Instant.now().minusSeconds(15),
-                new BigDecimal("4000.00"),
+                new BigDecimal("10000.00"),
                 "PLN"
         );
 
@@ -229,14 +233,12 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
                 .containsEntry(FraudFeatureContract.COUNTRY_MISMATCH, true)
                 .containsEntry(FraudFeatureContract.PROXY_OR_VPN_DETECTED, true)
                 .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2)
-                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("6000.00"))
-                .containsEntry(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of(seedTransactionId, transactionId))
-                .doesNotContainKeys(
-                        FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN,
-                        FraudFeatureContract.RAPID_TRANSFER_COUNT,
-                        FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN,
-                        FraudFeatureContract.RAPID_TRANSFER_WINDOW
-        );
+                .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M")
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"))
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M")
+                .containsEntry(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("10000.00"))
+                .containsEntry(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of(seedTransactionId, transactionId));
+        assertThat(FraudFeatureThresholdContract.isRapidTransferPlnBurst(enrichedRecord.value().featureSnapshot())).isTrue();
 
         ConsumerRecord<String, TransactionScoredEvent> scoredRecord = awaitKafkaRecord(
                 TRANSACTION_SCORED_TOPIC,
@@ -245,17 +247,25 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
         );
         assertThat(scoredRecord.value().transactionId()).isEqualTo(transactionId);
         assertThat(scoredRecord.value().correlationId()).isEqualTo(correlationId);
-        assertThat(scoredRecord.value().riskLevel()).isEqualTo(RiskLevel.HIGH);
-        assertThat(scoredRecord.value().fraudScore()).isGreaterThanOrEqualTo(0.75d);
-        assertThat(scoredRecord.value().fraudScore()).isLessThan(0.90d);
+        assertThat(scoredRecord.value().riskLevel()).isEqualTo(RiskLevel.CRITICAL);
+        assertThat(scoredRecord.value().fraudScore()).isGreaterThanOrEqualTo(0.90d);
         assertThat(scoredRecord.value().alertRecommended()).isTrue();
         assertThat(scoredRecord.value().reasonCodes()).contains(
                 "DEVICE_NOVELTY",
                 "COUNTRY_MISMATCH",
                 "PROXY_OR_VPN",
                 "HIGH_AMOUNT_ACTIVITY",
+                "RAPID_PLN_20K_BURST",
                 "HIGH_TRANSACTION_AMOUNT"
         );
+        assertThat(scoredRecord.value().featureSnapshot())
+                .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2)
+                .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M")
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"))
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M")
+                .containsEntry(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("10000.00"))
+                .containsEntry(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of(seedTransactionId, transactionId));
+        assertThat(FraudFeatureThresholdContract.isRapidTransferPlnBurst(scoredRecord.value().featureSnapshot())).isTrue();
 
         AlertDocument persistedAlert = awaitCondition(() -> alertRepository().findAll().stream()
                 .filter(alert -> transactionId.equals(alert.getTransactionId()))
@@ -263,12 +273,22 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
 
         assertThat(persistedAlert.getTransactionId()).isEqualTo(transactionId);
         assertThat(persistedAlert.getCorrelationId()).isEqualTo(correlationId);
-        assertThat(persistedAlert.getRiskLevel()).isEqualTo(RiskLevel.HIGH);
+        assertThat(persistedAlert.getRiskLevel()).isEqualTo(RiskLevel.CRITICAL);
         assertThat(persistedAlert.getAlertStatus()).isEqualTo(AlertStatus.OPEN);
+
+        FraudCaseDocument fraudCase = awaitCondition(() -> fraudCaseRepository().findAll().stream()
+                .filter(caseDocument -> caseDocument.getTransactionIds() != null
+                        && caseDocument.getTransactionIds().contains(transactionId))
+                .findFirst());
+        assertThat(fraudCase.getStatus()).isEqualTo(FraudCaseStatus.OPEN);
+        assertThat(fraudCase.getTransactionIds()).contains(seedTransactionId, transactionId);
+        assertThat(fraudCase.getTotalAmountPln()).isEqualByComparingTo("20000.00");
+        assertThat(fraudCase.getThresholdPln()).isEqualByComparingTo(FraudFeatureThresholdContract.RAPID_TRANSFER_PLN_THRESHOLD);
+        assertThat(fraudCase.getAggregationWindow()).isEqualTo("PT1M");
 
         AlertSummaryResponse summary = awaitCondition(() -> findAlertSummary(transactionId));
         assertThat(summary.transactionId()).isEqualTo(transactionId);
-        assertThat(summary.riskLevel()).isEqualTo(RiskLevel.HIGH);
+        assertThat(summary.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
         assertThat(summary.alertStatus()).isEqualTo(AlertStatus.OPEN);
 
         AlertDetailsResponse details = restTemplate.exchange(
@@ -281,12 +301,13 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
         assertThat(details).isNotNull();
         assertThat(details.transactionId()).isEqualTo(transactionId);
         assertThat(details.correlationId()).isEqualTo(correlationId);
-        assertThat(details.riskLevel()).isEqualTo(RiskLevel.HIGH);
+        assertThat(details.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
         assertThat(details.alertStatus()).isEqualTo(AlertStatus.OPEN);
         assertThat(details.reasonCodes()).contains(
                 "DEVICE_NOVELTY",
                 "COUNTRY_MISMATCH",
                 "PROXY_OR_VPN",
+                "RAPID_PLN_20K_BURST",
                 "HIGH_TRANSACTION_AMOUNT"
         );
         assertThat(details.featureSnapshot()).containsEntry("countryMismatch", true);
@@ -325,6 +346,10 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
 
     private AlertRepository alertRepository() {
         return alertContext.getBean(AlertRepository.class);
+    }
+
+    private FraudCaseRepository fraudCaseRepository() {
+        return alertContext.getBean(FraudCaseRepository.class);
     }
 
     private String ingestUrl(String path) {
