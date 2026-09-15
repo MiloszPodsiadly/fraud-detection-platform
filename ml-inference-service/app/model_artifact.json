@@ -1,16 +1,16 @@
 {
-  "bias": -3.907934,
+  "bias": -4.463733,
   "evaluation": {
     "evaluationComparison": {
-      "outOfTimePrAuc": 0.0,
-      "prAucDelta": 0.669704,
-      "temporalPrAuc": 0.669704
+      "outOfTimePrAuc": 0.678297,
+      "prAucDelta": 0.02782,
+      "temporalPrAuc": 0.706117
     },
-    "featureContractVersion": "2026-09-13.rules-v2-canonical",
-    "featureSchemaVersion": "2026-09-13.rules-v2-canonical",
+    "featureContractVersion": "2026-09-15.rules-v2-canonical-ml-pln",
+    "featureSchemaVersion": "2026-09-15.rules-v2-canonical-ml-pln",
     "featureSetUsed": [
       "recentTransactionCount",
-      "recentAmountSum",
+      "recentAmountSumPln",
       "transactionVelocityPerMinute",
       "merchantFrequency7d",
       "deviceNovelty",
@@ -19,78 +19,78 @@
       "highRiskFlagCount",
       "rapidTransferBurst"
     ],
-    "featureSetVersion": "2026-09-13.rules-v2-canonical",
+    "featureSetVersion": "2026-09-15.rules-v2-canonical-ml-pln",
     "modelFamily": "LOGISTIC_REGRESSION",
     "modelType": "logistic",
-    "modelVersion": "2026-09-14.rules-v2-canonical.v1",
-    "negativeLabels": 9800,
+    "modelVersion": "2026-09-15.rules-v2-canonical-ml-pln.v1",
+    "negativeLabels": 980,
     "optimalThreshold": {
-      "alertRate": 0.0166,
-      "f1": 0.710383,
-      "falsePositiveRate": 0.003673,
+      "alertRate": 0.013,
+      "f1": 0.787879,
+      "falsePositiveRate": 0.0,
       "fraudCaptureRate": 0.65,
-      "precision": 0.783133,
+      "precision": 1.0,
       "recall": 0.65,
-      "threshold": 0.3
+      "threshold": 0.1
     },
     "outOfTimeEvaluation": {
       "optimalThreshold": {
-        "alertRate": 0.0151,
+        "alertRate": 0.0,
         "f1": 0.0,
-        "falsePositiveRate": 0.0151,
+        "falsePositiveRate": 0.0,
         "fraudCaptureRate": 0.0,
         "precision": 0.0,
         "recall": 0.0,
         "threshold": 0.1
       },
-      "prAuc": 0.0,
-      "rocAuc": 0.0,
+      "prAuc": 0.678297,
+      "rocAuc": 0.788807,
       "splitMetadata": {
         "classDistribution": {
           "test": {
-            "fraud": 0,
-            "legitimate": 10000
+            "fraud": 85,
+            "legitimate": 915
           },
           "train": {
-            "fraud": 1000,
-            "legitimate": 29000
+            "fraud": 8,
+            "legitimate": 2992
           },
           "validation": {
-            "fraud": 0,
-            "legitimate": 10000
+            "fraud": 7,
+            "legitimate": 993
           }
         },
         "fraudRate": {
-          "test": 0.0,
-          "train": 0.033333,
-          "validation": 0.0
+          "test": 0.085,
+          "train": 0.002667,
+          "validation": 0.007
         },
         "mode": "out_of_time",
-        "rows": 50000,
+        "rows": 5000,
         "strategy": "out_of_time",
-        "testRows": 10000,
-        "trainRows": 30000,
-        "validationRows": 10000
+        "testRows": 1000,
+        "trainRows": 3000,
+        "validationRows": 1000
       }
     },
-    "positiveLabels": 200,
-    "prAuc": 0.669704,
-    "rocAuc": 0.961412,
-    "rows": 10000,
+    "positiveLabels": 20,
+    "prAuc": 0.706117,
+    "rocAuc": 0.738316,
+    "rows": 1000,
     "selectedThresholdSource": "validation",
     "splitMetadata": {
       "classDistribution": {
         "test": {
-          "fraud": 200,
-          "legitimate": 9800
+          "fraud": 20,
+          "legitimate": 980
         },
         "train": {
-          "fraud": 600,
-          "legitimate": 29400
+          "fraud": 60,
+          "legitimate": 2940
         },
         "validation": {
-          "fraud": 200,
-          "legitimate": 9800
+          "fraud": 20,
+          "legitimate": 980
         }
       },
       "fraudRate": {
@@ -99,35 +99,35 @@
         "validation": 0.02
       },
       "mode": "temporal",
-      "rows": 50000,
+      "rows": 5000,
       "strategy": "stratified_temporal",
-      "testRows": 10000,
-      "trainRows": 30000,
-      "validationRows": 10000
+      "testRows": 1000,
+      "trainRows": 3000,
+      "validationRows": 1000
     },
     "stabilityAssessment": {
-      "expectedCostDelta": -32125.0,
-      "falsePositiveRateDelta": 0.011427,
+      "expectedCostDelta": 39000.0,
+      "falsePositiveRateDelta": 0.0,
       "fraudCaptureDelta": 0.65,
-      "prAucDelta": 0.669704
+      "prAucDelta": 0.02782
     },
     "trainingMode": "production"
   },
-  "featureContractVersion": "2026-09-13.rules-v2-canonical",
+  "featureContractVersion": "2026-09-15.rules-v2-canonical-ml-pln",
   "featureImportance": {
-    "countryMismatch": 2.303241,
-    "deviceNovelty": 0.854475,
-    "highRiskFlagCount": 1.664315,
-    "merchantFrequency7d": 0.426872,
-    "proxyOrVpnDetected": 1.376218,
-    "rapidTransferBurst": 2.110646,
-    "recentAmountSum": 3.578935,
-    "recentTransactionCount": 1.72385,
-    "transactionVelocityPerMinute": 0.363358
+    "countryMismatch": 1.573151,
+    "deviceNovelty": 0.191654,
+    "highRiskFlagCount": 1.194273,
+    "merchantFrequency7d": 0.407398,
+    "proxyOrVpnDetected": 1.659997,
+    "rapidTransferBurst": 1.870417,
+    "recentAmountSumPln": 4.85083,
+    "recentTransactionCount": 0.259332,
+    "transactionVelocityPerMinute": 0.518663
   },
   "featureSchema": [
     "recentTransactionCount",
-    "recentAmountSum",
+    "recentAmountSumPln",
     "transactionVelocityPerMinute",
     "merchantFrequency7d",
     "deviceNovelty",
@@ -136,10 +136,10 @@
     "highRiskFlagCount",
     "rapidTransferBurst"
   ],
-  "featureSchemaVersion": "2026-09-13.rules-v2-canonical",
+  "featureSchemaVersion": "2026-09-15.rules-v2-canonical-ml-pln",
   "featureSetUsed": [
     "recentTransactionCount",
-    "recentAmountSum",
+    "recentAmountSumPln",
     "transactionVelocityPerMinute",
     "merchantFrequency7d",
     "deviceNovelty",
@@ -148,11 +148,11 @@
     "highRiskFlagCount",
     "rapidTransferBurst"
   ],
-  "featureSetVersion": "2026-09-13.rules-v2-canonical",
+  "featureSetVersion": "2026-09-15.rules-v2-canonical-ml-pln",
   "modelFamily": "LOGISTIC_REGRESSION",
   "modelName": "python-logistic-fraud-model",
   "modelType": "logistic",
-  "modelVersion": "2026-09-14.rules-v2-canonical.v1",
+  "modelVersion": "2026-09-15.rules-v2-canonical-ml-pln.v1",
   "thresholds": {
     "critical": 0.9,
     "high": 0.75,
@@ -160,11 +160,11 @@
   },
   "training": {
     "algorithm": "batch-gradient-descent",
-    "examples": 50000,
-    "featureContractVersion": "2026-09-13.rules-v2-canonical",
+    "examples": 5000,
+    "featureContractVersion": "2026-09-15.rules-v2-canonical-ml-pln",
     "featureSetUsed": [
       "recentTransactionCount",
-      "recentAmountSum",
+      "recentAmountSumPln",
       "transactionVelocityPerMinute",
       "merchantFrequency7d",
       "deviceNovelty",
@@ -173,20 +173,20 @@
       "highRiskFlagCount",
       "rapidTransferBurst"
     ],
-    "featureSetVersion": "2026-09-13.rules-v2-canonical",
+    "featureSetVersion": "2026-09-15.rules-v2-canonical-ml-pln",
     "source": "synthetic-fraud-scenarios",
     "trainingMode": "production"
   },
   "trainingMode": "production",
   "weights": {
-    "countryMismatch": 2.303241,
-    "deviceNovelty": 0.854475,
-    "highRiskFlagCount": 1.664315,
-    "merchantFrequency7d": -0.426872,
-    "proxyOrVpnDetected": 1.376218,
-    "rapidTransferBurst": 2.110646,
-    "recentAmountSum": 3.578935,
-    "recentTransactionCount": -1.72385,
-    "transactionVelocityPerMinute": -0.363358
+    "countryMismatch": 1.573151,
+    "deviceNovelty": 0.191654,
+    "highRiskFlagCount": 1.194273,
+    "merchantFrequency7d": -0.407398,
+    "proxyOrVpnDetected": 1.659997,
+    "rapidTransferBurst": 1.870417,
+    "recentAmountSumPln": 4.85083,
+    "recentTransactionCount": -0.259332,
+    "transactionVelocityPerMinute": -0.518663
   }
 }

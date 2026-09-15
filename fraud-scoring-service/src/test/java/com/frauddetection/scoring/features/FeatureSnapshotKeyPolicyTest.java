@@ -113,8 +113,6 @@ class FeatureSnapshotKeyPolicyTest {
     void oldOrUnsupportedPolicyFieldsAreNotCurrentAdapterKeys() {
         assertThat(FeatureSnapshotKeyPolicy.isAllowedFeatureKey("unsupportedPolicyMarker"))
                 .isFalse();
-        assertThat(FeatureSnapshotKeyPolicy.isAllowedFeatureKey(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN))
-                .isFalse();
     }
 
     @Test

@@ -429,7 +429,7 @@ def example_for(scenario: str, rng: random.Random) -> tuple[dict[str, float], in
         return (
             {
                 "recentTransactionCount": rng.uniform(0.0, 0.25),
-                "recentAmountSum": rng.uniform(0.0, 0.18),
+                "recentAmountSumPln": rng.uniform(0.0, 0.18),
                 "transactionVelocityPerMinute": rng.uniform(0.0, 0.12),
                 "merchantFrequency7d": rng.uniform(0.0, 0.35),
                 "deviceNovelty": 0.0,
@@ -444,7 +444,7 @@ def example_for(scenario: str, rng: random.Random) -> tuple[dict[str, float], in
         return (
             {
                 "recentTransactionCount": rng.uniform(0.05, 0.35),
-                "recentAmountSum": rng.uniform(0.03, 0.25),
+                "recentAmountSumPln": rng.uniform(0.03, 0.25),
                 "transactionVelocityPerMinute": rng.uniform(0.04, 0.20),
                 "merchantFrequency7d": rng.uniform(0.0, 0.45),
                 "deviceNovelty": 1.0,
@@ -459,7 +459,7 @@ def example_for(scenario: str, rng: random.Random) -> tuple[dict[str, float], in
         return (
             {
                 "recentTransactionCount": rng.uniform(0.10, 0.20),
-                "recentAmountSum": rng.uniform(0.45, 0.55),
+                "recentAmountSumPln": rng.uniform(0.45, 0.55),
                 "transactionVelocityPerMinute": rng.uniform(0.20, 0.40),
                 "merchantFrequency7d": rng.uniform(0.0, 0.20),
                 "deviceNovelty": 0.0,
@@ -474,7 +474,7 @@ def example_for(scenario: str, rng: random.Random) -> tuple[dict[str, float], in
         return (
             {
                 "recentTransactionCount": rng.uniform(0.05, 0.45),
-                "recentAmountSum": rng.uniform(0.05, 0.35),
+                "recentAmountSumPln": rng.uniform(0.05, 0.35),
                 "transactionVelocityPerMinute": rng.uniform(0.05, 0.35),
                 "merchantFrequency7d": rng.uniform(0.0, 0.50),
                 "deviceNovelty": 1.0,
@@ -489,7 +489,7 @@ def example_for(scenario: str, rng: random.Random) -> tuple[dict[str, float], in
         return (
             {
                 "recentTransactionCount": rng.uniform(0.35, 0.80),
-                "recentAmountSum": rng.uniform(0.35, 0.95),
+                "recentAmountSumPln": rng.uniform(0.35, 0.95),
                 "transactionVelocityPerMinute": rng.uniform(0.30, 0.80),
                 "merchantFrequency7d": rng.uniform(0.25, 0.85),
                 "deviceNovelty": 1.0,
@@ -504,7 +504,7 @@ def example_for(scenario: str, rng: random.Random) -> tuple[dict[str, float], in
         return (
             {
                 "recentTransactionCount": rng.uniform(0.20, 0.35),
-                "recentAmountSum": rng.uniform(0.95, 1.0),
+                "recentAmountSumPln": rng.uniform(0.95, 1.0),
                 "transactionVelocityPerMinute": rng.uniform(0.40, 0.65),
                 "merchantFrequency7d": rng.uniform(0.0, 0.20),
                 "deviceNovelty": rng.choice([0.0, 0.0, 1.0]),
@@ -518,7 +518,7 @@ def example_for(scenario: str, rng: random.Random) -> tuple[dict[str, float], in
     return (
         {
             "recentTransactionCount": rng.uniform(0.55, 1.0),
-            "recentAmountSum": rng.uniform(0.45, 1.0),
+            "recentAmountSumPln": rng.uniform(0.45, 1.0),
             "transactionVelocityPerMinute": rng.uniform(0.45, 1.0),
             "merchantFrequency7d": rng.uniform(0.20, 1.0),
             "deviceNovelty": 1.0,

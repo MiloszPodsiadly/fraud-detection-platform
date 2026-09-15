@@ -11,6 +11,19 @@ from app.models.model_loader import load_model_from_artifact
 from app.registry.model_registry import ModelRegistry, default_registry_path
 
 
+REASON_CODE_BY_FEATURE = {
+    "recentTransactionCount": "RECENT_TRANSACTION_SPIKE",
+    "recentAmountSumPln": "RECENT_AMOUNT_ACCUMULATION",
+    "transactionVelocityPerMinute": "TRANSACTION_VELOCITY",
+    "merchantFrequency7d": "MERCHANT_CONCENTRATION",
+    "deviceNovelty": "DEVICE_NOVELTY",
+    "countryMismatch": "COUNTRY_MISMATCH",
+    "proxyOrVpnDetected": "PROXY_OR_VPN",
+    "highRiskFlagCount": "MODEL_HIGH_RISK",
+    "rapidTransferBurst": "RAPID_PLN_20K_BURST",
+}
+
+
 @dataclass(frozen=True)
 class FeatureContribution:
     """Feature-level contribution used for reason-code generation."""
@@ -100,6 +113,7 @@ class FraudModelRuntime:
             "available": True,
             "fraudScore": fraud_score,
             "riskLevel": risk_level,
+            "alertRecommended": self._alert(risk_level),
             "modelName": self.model_name,
             "modelVersion": self.model_version,
             "inferenceTimestamp": datetime.now(timezone.utc).isoformat(),
@@ -128,8 +142,9 @@ class FraudModelRuntime:
     def _incompatible_features_response(self, compatibility: dict[str, Any]) -> dict[str, Any]:
         return {
             "available": False,
-            "fraudScore": 0.0,
-            "riskLevel": "LOW",
+            "fraudScore": None,
+            "riskLevel": None,
+            "alertRecommended": False,
             "modelName": self.model_name,
             "modelVersion": self.model_version,
             "inferenceTimestamp": datetime.now(timezone.utc).isoformat(),
@@ -156,14 +171,17 @@ class FraudModelRuntime:
         model_b = other.score(features)
         threshold_a = getattr(self.model, "thresholds", {})
         threshold_b = getattr(other.model, "thresholds", {})
+        score_delta = _score_delta(model_a, model_b)
+        risk_level_mismatch = _risk_level_mismatch(model_a, model_b)
+        decision_disagreement = _decision_disagreement(model_a, model_b)
         return {
             "mode": "ML_COMPARE",
             "modelA": _model_summary(model_a),
             "modelB": _model_summary(model_b),
-            "scoreDelta": round(float(model_a["fraudScore"]) - float(model_b["fraudScore"]), 6),
-            "absoluteScoreDelta": round(abs(float(model_a["fraudScore"]) - float(model_b["fraudScore"])), 6),
-            "riskLevelMismatch": model_a["riskLevel"] != model_b["riskLevel"],
-            "decisionDisagreement": self._alert(model_a["riskLevel"]) != self._alert(model_b["riskLevel"]),
+            "scoreDelta": score_delta,
+            "absoluteScoreDelta": round(abs(score_delta), 6) if score_delta is not None else None,
+            "riskLevelMismatch": risk_level_mismatch,
+            "decisionDisagreement": decision_disagreement,
             "thresholdDifferences": {
                 name: round(float(threshold_a.get(name, 0.0)) - float(threshold_b.get(name, 0.0)), 6)
                 for name in sorted(set(threshold_a) | set(threshold_b))
@@ -176,7 +194,14 @@ class FraudModelRuntime:
 
     def _reason_codes(self, contributions: list[FeatureContribution]) -> list[str]:
         sorted_contributions = sorted(contributions, key=lambda item: item.contribution, reverse=True)
-        return [item.reason_code for item in sorted_contributions[:5]]
+        codes: list[str] = []
+        for item in sorted_contributions:
+            code = REASON_CODE_BY_FEATURE.get(item.reason_code)
+            if code and code not in codes:
+                codes.append(code)
+            if len(codes) == 5:
+                break
+        return codes
 
     def _risk_level(self, fraud_score: float) -> str:
         if fraud_score >= self.model.thresholds["critical"]:
@@ -193,8 +218,32 @@ class FraudModelRuntime:
 
 def _model_summary(result: dict[str, Any]) -> dict[str, Any]:
     return {
+        "available": result["available"],
         "modelName": result["modelName"],
         "modelVersion": result["modelVersion"],
         "fraudScore": result["fraudScore"],
         "riskLevel": result["riskLevel"],
+        "fallbackReason": result["fallbackReason"],
     }
+
+
+def _score_delta(model_a: dict[str, Any], model_b: dict[str, Any]) -> float | None:
+    if model_a["fraudScore"] is None or model_b["fraudScore"] is None:
+        return None
+    return round(float(model_a["fraudScore"]) - float(model_b["fraudScore"]), 6)
+
+
+def _risk_level_mismatch(model_a: dict[str, Any], model_b: dict[str, Any]) -> bool | None:
+    if model_a["riskLevel"] is None or model_b["riskLevel"] is None:
+        return None
+    return model_a["riskLevel"] != model_b["riskLevel"]
+
+
+def _decision_disagreement(model_a: dict[str, Any], model_b: dict[str, Any]) -> bool | None:
+    if model_a["riskLevel"] is None or model_b["riskLevel"] is None:
+        return None
+    return _alert_from_risk_level(model_a["riskLevel"]) != _alert_from_risk_level(model_b["riskLevel"])
+
+
+def _alert_from_risk_level(risk_level: str) -> bool:
+    return risk_level in {"HIGH", "CRITICAL"}

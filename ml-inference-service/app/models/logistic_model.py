@@ -14,15 +14,8 @@ class LogisticFraudModel:
 
     DEFAULT_WEIGHTS = {
         "recentTransactionCount": 0.35,
-        "recentAmountSum": 0.45,
+        "recentAmountSumPln": 0.45,
         "transactionVelocityPerMinute": 0.80,
-        "transactionVelocityPerHour": 0.0,
-        "transactionVelocityPerDay": 0.0,
-        "recentAmountAverage": 0.0,
-        "recentAmountStdDev": 0.0,
-        "amountDeviationFromUserMean": 0.0,
-        "merchantEntropy": 0.0,
-        "countryEntropy": 0.0,
         "merchantFrequency7d": 0.16,
         "deviceNovelty": 1.10,
         "countryMismatch": 1.30,

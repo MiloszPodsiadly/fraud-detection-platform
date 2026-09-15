@@ -11,7 +11,7 @@ from app.features.feature_pipeline import FeaturePipeline
 from app.models.logistic_model import LogisticFraudModel
 from app.models.xgboost_model import XGBoostFraudModel
 
-CANONICAL_MODEL_VERSION = "2026-09-14.rules-v2-canonical.v1"
+CANONICAL_MODEL_VERSION = "2026-09-15.rules-v2-canonical-ml-pln.v1"
 
 
 def train(
@@ -53,8 +53,10 @@ def train_model_with_evaluation(
 ) -> tuple[LogisticFraudModel | XGBoostFraudModel, dict[str, object]]:
     """Train and evaluate any supported model through the same lifecycle."""
     splits = split_dataset(dataset, mode="temporal")
+    _require_binary_evaluation_splits(splits, "temporal")
     model, test_report = _train_on_splits(splits, model_type, epochs, learning_rate, training_mode)
     out_of_time_splits = split_dataset(dataset, mode="out_of_time", cutoff_ratio=0.6)
+    _require_binary_evaluation_splits(out_of_time_splits, "out_of_time")
     _, out_of_time_report = _train_on_splits(out_of_time_splits, model_type, epochs, learning_rate, training_mode)
     test_report["outOfTimeEvaluation"] = {
         "prAuc": out_of_time_report["prAuc"],
@@ -113,6 +115,17 @@ def _train_on_splits(
     test_report["featureSchemaVersion"] = FEATURE_CONTRACT.version
     test_report["featureSetVersion"] = FEATURE_CONTRACT.version
     return model, test_report
+
+
+def _require_binary_evaluation_splits(splits, split_name: str) -> None:
+    distribution = splits.metadata["classDistribution"]
+    for partition in ("validation", "test"):
+        counts = distribution[partition]
+        if counts["fraud"] <= 0 or counts["legitimate"] <= 0:
+            raise ValueError(
+                f"{split_name} {partition} split must contain fraud and legitimate examples; "
+                f"distribution={counts}"
+            )
 
 
 def train_model(

@@ -7,15 +7,8 @@ from typing import Any
 
 _FALLBACK_ML_FEATURE_NAMES = [
     "recentTransactionCount",
-    "recentAmountSum",
+    "recentAmountSumPln",
     "transactionVelocityPerMinute",
-    "transactionVelocityPerHour",
-    "transactionVelocityPerDay",
-    "recentAmountAverage",
-    "recentAmountStdDev",
-    "amountDeviationFromUserMean",
-    "merchantEntropy",
-    "countryEntropy",
     "merchantFrequency7d",
     "deviceNovelty",
     "countryMismatch",
@@ -38,6 +31,17 @@ class FeatureContract:
         )
         self.normalization = contract.get("normalization") if isinstance(contract.get("normalization"), dict) else {}
         self.feature_availability = contract.get("featureAvailability") if isinstance(contract.get("featureAvailability"), dict) else {}
+        self.supported_currencies = self._list(contract.get("supportedCurrencies"), [])
+        self.production_feature_semantics = (
+            contract.get("productionFeatureSemantics")
+            if isinstance(contract.get("productionFeatureSemantics"), dict)
+            else {}
+        )
+        self.strict_typing_expectations = (
+            contract.get("strictTypingExpectations")
+            if isinstance(contract.get("strictTypingExpectations"), dict)
+            else {}
+        )
 
     @staticmethod
     def load() -> FeatureContract:

@@ -1,10 +1,10 @@
 {
   "data_window": "1000 deterministic local synthetic canonical fraud-behavior examples generated with seed 7307; not production traffic",
-  "feature_schema_version": "2026-09-13.rules-v2-canonical",
+  "feature_schema_version": "2026-09-15.rules-v2-canonical-ml-pln",
   "generated_at": "2026-09-14T00:00:00+00:00",
   "generated_by": "ml-inference-service canonical rules-v2 feature pipeline",
   "model_name": "python-logistic-fraud-model",
-  "model_version": "2026-09-14.rules-v2-canonical.v1",
+  "model_version": "2026-09-15.rules-v2-canonical-ml-pln.v1",
   "numeric_feature_stats": {
     "countryMismatch": {
       "count": 1000,
@@ -66,25 +66,25 @@
       "p95": 0.025,
       "std": 0.063119
     },
-    "recentAmountSum": {
+    "recentAmountSumPln": {
       "count": 1000,
       "max": 1.0,
-      "mean": 0.032746,
-      "min": 0.00091,
+      "mean": 0.017628,
+      "min": 0.000864,
       "p50": 0.025,
-      "p90": 0.075,
-      "p95": 0.075,
-      "std": 0.090108
+      "p90": 0.025,
+      "p95": 0.025,
+      "std": 0.088818
     },
     "recentTransactionCount": {
       "count": 1000,
-      "max": 1.0,
-      "mean": 0.2724,
+      "max": 0.2,
+      "mean": 0.1004,
       "min": 0.1,
-      "p50": 0.225,
-      "p90": 0.525,
-      "p95": 0.625,
-      "std": 0.167267
+      "p50": 0.125,
+      "p90": 0.125,
+      "p95": 0.125,
+      "std": 0.006312
     },
     "transactionVelocityPerMinute": {
       "count": 1000,
@@ -101,22 +101,22 @@
   "profileVersion": "2026-09-14.rules-v2-canonical.synthetic.v1",
   "reference_quality": "SYNTHETIC",
   "risk_level_distribution": {
-    "CRITICAL": 0.0,
-    "HIGH": 0.009,
-    "LOW": 0.989,
-    "MEDIUM": 0.002
+    "CRITICAL": 0.004,
+    "HIGH": 0.0,
+    "LOW": 0.992,
+    "MEDIUM": 0.004
   },
   "sample_size": 1000,
   "score_distribution": {
     "count": 1000,
-    "high_risk_rate": 0.009,
-    "max": 0.85945,
-    "mean": 0.033536,
-    "min": 0.004631,
+    "high_risk_rate": 0.004,
+    "max": 0.913909,
+    "mean": 0.022209,
+    "min": 0.009455,
     "p50": 0.025,
     "p90": 0.025,
-    "p95": 0.125,
-    "std": 0.093137
+    "p95": 0.075,
+    "std": 0.073518
   },
   "source": "synthetic",
   "source_metadata": {

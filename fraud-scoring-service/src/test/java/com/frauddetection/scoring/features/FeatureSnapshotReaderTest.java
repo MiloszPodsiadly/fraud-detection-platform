@@ -165,13 +165,10 @@ class FeatureSnapshotReaderTest {
     @Test
     void unsupportedPolicyFieldsReadAsRedactedNotAllowedInCurrentReader() {
         FeatureSnapshotReader reader = new FeatureSnapshotReader(Map.of(
-                "unsupportedPolicyMarker", List.of("DEVICE_NOVELTY"),
-                FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("125.20")
+                "unsupportedPolicyMarker", List.of("DEVICE_NOVELTY")
         ));
 
         assertThat(reader.stringValue("unsupportedPolicyMarker").status())
-                .isEqualTo(FeatureSnapshotValueStatus.NOT_ALLOWED);
-        assertThat(reader.decimalValue(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN).status())
                 .isEqualTo(FeatureSnapshotValueStatus.NOT_ALLOWED);
     }
 

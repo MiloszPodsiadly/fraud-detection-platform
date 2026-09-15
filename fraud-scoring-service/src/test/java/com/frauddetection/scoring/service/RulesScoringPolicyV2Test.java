@@ -50,9 +50,6 @@ class RulesScoringPolicyV2Test {
                         FraudFeatureContract.COUNTRY_MISMATCH,
                         FraudFeatureContract.PROXY_OR_VPN_DETECTED,
                         FraudFeatureContract.CURRENCY
-                )
-                .doesNotContainKeys(
-                        FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN
                 );
     }
 

@@ -67,12 +67,8 @@ class FeatureEnricherRulesCompositionTest {
         TransactionEnrichedEvent enriched = officialEvent(1, new BigDecimal("10000.00"), new BigDecimal("10000.00"));
 
         FraudScoreResult result = score(enriched);
-        assertThat(enriched.featureSnapshot()).doesNotContainKeys(
-                FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN,
-                FraudFeatureContract.RAPID_TRANSFER_COUNT,
-                FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN,
-                FraudFeatureContract.RAPID_TRANSFER_WINDOW
-        );
+        assertThat(enriched.featureSnapshot().keySet())
+                .containsExactlyInAnyOrderElementsOf(FraudFeatureContract.JAVA_ENRICHED_FEATURE_NAMES);
         assertThat(result.fraudScore()).isCloseTo(0.94d, within(0.000001d));
         assertThat(result.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
         assertThat(result.alertRecommended()).isTrue();
@@ -134,13 +130,7 @@ class FeatureEnricherRulesCompositionTest {
                 .containsEntry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d)
                 .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM, new BigDecimal("100.00"))
                 .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("100.00"))
-                .containsEntry(FraudFeatureContract.CURRENCY, "PLN")
-                .doesNotContainKeys(
-                        FraudFeatureContract.RAPID_TRANSFER_THRESHOLD_PLN,
-                        FraudFeatureContract.RAPID_TRANSFER_COUNT,
-                        FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN,
-                        FraudFeatureContract.RAPID_TRANSFER_WINDOW
-                );
+                .containsEntry(FraudFeatureContract.CURRENCY, "PLN");
         assertThat(rulesResult.fraudScore()).isCloseTo(0.47d, within(0.000001d));
         assertThat(rulesResult.riskLevel()).isEqualTo(RiskLevel.MEDIUM);
         assertThat(velocity.reasonCodes()).containsExactly("TRANSACTION_VELOCITY");

@@ -9,7 +9,14 @@ from app.data.splitting import split_dataset
 from app.evaluation.evaluate import cli_summary, evaluate_scores
 from app.feedback.feedback_dataset import FeedbackDatasetStore, dataset_from_feedback, feedback_from_decision_event
 from app.features.feature_contract import FEATURE_CONTRACT
-from app.features.feature_pipeline import FeaturePipeline
+from app.features.feature_pipeline import (
+    FeaturePipeline,
+    MAX_RECENT_AMOUNT_SUM_PLN,
+    MAX_RECENT_TRANSACTION_COUNT,
+    MAX_TRANSACTION_VELOCITY_PER_MINUTE,
+    RATE_CONSISTENCY_TOLERANCE,
+    SUPPORTED_CURRENCIES,
+)
 from app.model import FraudModel
 from app.models.model_loader import ModelConfigurationError, load_model_from_artifact
 from app.registry.model_registry import ModelRegistry
@@ -31,35 +38,39 @@ class FraudModelTest(unittest.TestCase):
             {
                 "recentTransactionCount": 8,
                 "recentAmountSum": {"amount": 7200.0, "currency": "USD"},
-                "transactionVelocityPerMinute": 0.7,
+                "currentTransactionAmountPln": 28_800.0,
+                "currency": "USD",
+                "transactionVelocityPerMinute": 8.0,
                 "merchantFrequency7d": 9,
                 "deviceNovelty": True,
                 "countryMismatch": True,
                 "proxyOrVpnDetected": True,
                 "recentTransactionCountWindow": "PT1M",
                 "recentAmountSumWindow": "PT1M",
-                "recentAmountSumPln": 7200.0,
+                "recentAmountSumPln": 28_800.0,
             }
         )
 
         self.assertTrue(result["available"])
         self.assertIn(result["riskLevel"], {"HIGH", "CRITICAL"})
         self.assertGreaterEqual(result["fraudScore"], 0.75)
-        self.assertIn("proxyOrVpnDetected", result["reasonCodes"])
+        self.assertIn("PROXY_OR_VPN", result["reasonCodes"])
 
     def test_scores_baseline_signal_as_low(self):
         result = FraudModel().score(
             {
                 "recentTransactionCount": 1,
                 "recentAmountSum": {"amount": 45.0, "currency": "USD"},
-                "transactionVelocityPerMinute": 0.05,
+                "currentTransactionAmountPln": 180.0,
+                "currency": "USD",
+                "transactionVelocityPerMinute": 1.0,
                 "merchantFrequency7d": 1,
                 "deviceNovelty": False,
                 "countryMismatch": False,
                 "proxyOrVpnDetected": False,
                 "recentTransactionCountWindow": "PT1M",
                 "recentAmountSumWindow": "PT1M",
-                "recentAmountSumPln": 45.0,
+                "recentAmountSumPln": 180.0,
             }
         )
 
@@ -72,6 +83,8 @@ class FraudModelTest(unittest.TestCase):
                 "recentTransactionCount": 2,
                 "recentAmountSum": {"amount": 20000.0, "currency": "PLN"},
                 "recentAmountSumPln": 20000.0,
+                "currentTransactionAmountPln": 10000.0,
+                "currency": "PLN",
                 "recentTransactionCountWindow": "PT1M",
                 "recentAmountSumWindow": "PT1M",
                 "transactionVelocityPerMinute": 2.0,
@@ -83,17 +96,19 @@ class FraudModelTest(unittest.TestCase):
         )
 
         self.assertIn(result["riskLevel"], {"HIGH", "CRITICAL"})
-        self.assertIn("rapidTransferBurst", result["reasonCodes"])
+        self.assertIn("RAPID_PLN_20K_BURST", result["reasonCodes"])
 
     def test_keeps_rapid_transfer_seed_without_aggregate_signal_low(self):
         result = FraudModel().score(
             {
-                "recentTransactionCount": 2,
-                "recentAmountSum": {"amount": 10000.0, "currency": "PLN"},
-                "recentAmountSumPln": 10000.0,
+                "recentTransactionCount": 1,
+                "recentAmountSum": {"amount": 1000.0, "currency": "PLN"},
+                "recentAmountSumPln": 1000.0,
+                "currentTransactionAmountPln": 500.0,
+                "currency": "PLN",
                 "recentTransactionCountWindow": "PT1M",
                 "recentAmountSumWindow": "PT1M",
-                "transactionVelocityPerMinute": 2.0,
+                "transactionVelocityPerMinute": 1.0,
                 "merchantFrequency7d": 1,
                 "deviceNovelty": False,
                 "countryMismatch": False,
@@ -102,14 +117,14 @@ class FraudModelTest(unittest.TestCase):
         )
 
         self.assertEqual(result["riskLevel"], "LOW")
-        self.assertNotIn("rapidTransferBurst", result["reasonCodes"])
+        self.assertNotIn("RAPID_PLN_20K_BURST", result["reasonCodes"])
 
     def test_feature_pipeline_normalizes_single_event(self):
         normalized = FeaturePipeline().transform_single(
             {
                 "recentTransactionCount": 20,
                 "recentAmountSum": {"amount": 15000.0, "currency": "PLN"},
-                "transactionVelocityPerMinute": 10,
+                "transactionVelocityPerMinute": 20,
                 "merchantFrequency7d": 24,
                 "deviceNovelty": True,
                 "countryMismatch": False,
@@ -121,7 +136,7 @@ class FraudModelTest(unittest.TestCase):
         )
 
         self.assertEqual(normalized["recentTransactionCount"], 1.0)
-        self.assertEqual(normalized["recentAmountSum"], 1.0)
+        self.assertEqual(normalized["recentAmountSumPln"], 1.0)
         self.assertEqual(normalized["transactionVelocityPerMinute"], 1.0)
         self.assertEqual(normalized["merchantFrequency7d"], 1.0)
         self.assertEqual(normalized["deviceNovelty"], 1.0)
@@ -138,10 +153,67 @@ class FraudModelTest(unittest.TestCase):
         self.assertIn("recentAmountSumWindow", FEATURE_CONTRACT.java_enriched_feature_names)
         self.assertIn("recentAmountSumPln", FEATURE_CONTRACT.java_enriched_feature_names)
 
+    def test_shared_contract_defines_java_python_semantics_not_just_names(self):
+        semantics = FEATURE_CONTRACT.production_feature_semantics
+        strict_typing = FEATURE_CONTRACT.strict_typing_expectations
+
+        self.assertEqual(FeaturePipeline.PRODUCTION_FEATURE_NAMES, FEATURE_CONTRACT.production_inference_features)
+        self.assertEqual(set(semantics), set(FEATURE_CONTRACT.production_inference_features))
+        self.assertEqual(set(FEATURE_CONTRACT.supported_currencies), SUPPORTED_CURRENCIES)
+        self.assertNotIn("recentAmountSum", FEATURE_CONTRACT.production_inference_features)
+
+        expected = {
+            "recentTransactionCount": ("integer", "count", "PT1M"),
+            "recentAmountSumPln": ("decimal", "PLN", "PT1M"),
+            "transactionVelocityPerMinute": ("double", "transactions_per_minute", "PT1M"),
+            "merchantFrequency7d": ("integer", "count", "P7D"),
+            "deviceNovelty": ("boolean", "flag", "current_transaction"),
+            "countryMismatch": ("boolean", "flag", "current_transaction"),
+            "proxyOrVpnDetected": ("boolean", "flag", "current_transaction"),
+            "highRiskFlagCount": ("double", "normalized_count", "derived_from_current_production_facts"),
+            "rapidTransferBurst": ("boolean_numeric", "flag", "PT1M"),
+        }
+        for name, (feature_type, unit, window) in expected.items():
+            with self.subTest(feature=name):
+                self.assertEqual(semantics[name]["type"], feature_type)
+                self.assertEqual(semantics[name]["unit"], unit)
+                self.assertEqual(semantics[name]["window"], window)
+                self.assertIn("source", semantics[name])
+
+        self.assertEqual(semantics["recentTransactionCount"]["bounds"]["max"], MAX_RECENT_TRANSACTION_COUNT)
+        self.assertEqual(semantics["merchantFrequency7d"]["bounds"]["max"], MAX_RECENT_TRANSACTION_COUNT)
+        self.assertEqual(semantics["transactionVelocityPerMinute"]["bounds"]["max"], MAX_TRANSACTION_VELOCITY_PER_MINUTE)
+        self.assertAlmostEqual(semantics["recentAmountSumPln"]["bounds"]["max"], MAX_RECENT_AMOUNT_SUM_PLN)
+        self.assertEqual(semantics["recentAmountSumPln"]["currencyBasis"], "PLN")
+        self.assertEqual(semantics["rapidTransferBurst"]["currencyBasis"], "PLN")
+        self.assertEqual(semantics["rapidTransferBurst"]["threshold"]["count"], 2)
+        self.assertEqual(semantics["rapidTransferBurst"]["threshold"]["amountPln"], 20000)
+        self.assertIn(str(RATE_CONSISTENCY_TOLERANCE), semantics["transactionVelocityPerMinute"]["consistency"])
+
+        self.assertEqual(
+            strict_typing["integerRejects"],
+            ["string", "fractional", "boolean", "negative", "object", "array"],
+        )
+        self.assertEqual(
+            strict_typing["decimalRejects"],
+            ["string", "boolean", "negative", "nan", "infinity", "object", "array"],
+        )
+        self.assertEqual(
+            strict_typing["booleanRejects"],
+            ["string", "number", "object", "array", "null"],
+        )
+        self.assertEqual(strict_typing["windows"]["recentTransactionCountWindow"], "PT1M")
+        self.assertEqual(strict_typing["windows"]["recentAmountSumWindow"], "PT1M")
+        self.assertEqual(strict_typing["rateConsistency"], "transactionVelocityPerMinute == recentTransactionCount / PT1M")
+        self.assertEqual(strict_typing["currentTransactionAmountPln"]["currencyBasis"], "PLN")
+        self.assertAlmostEqual(strict_typing["currentTransactionAmountPln"]["bounds"]["max"], MAX_RECENT_AMOUNT_SUM_PLN)
+
     def test_java_enriched_snapshot_normalizes_to_contract_features(self):
         payload = {
             "recentTransactionCount": 5,
             "recentAmountSum": {"amount": 5000.0, "currency": "PLN"},
+            "currentTransactionAmountPln": 5000.0,
+            "currency": "PLN",
             "transactionVelocityPerMinute": 5.0,
             "merchantFrequency7d": 6,
             "deviceNovelty": True,
@@ -160,7 +232,7 @@ class FraudModelTest(unittest.TestCase):
         self.assertIn("transactionVelocityPerHour", compatibility["trainingOnlyFeatures"])
         self.assertIn("highRiskFlagCount", compatibility["derivedInPython"])
         self.assertEqual(normalized["recentTransactionCount"], 0.5)
-        self.assertEqual(normalized["recentAmountSum"], 0.5)
+        self.assertEqual(normalized["recentAmountSumPln"], 1.0)
         self.assertEqual(normalized["transactionVelocityPerMinute"], 1.0)
         self.assertEqual(normalized["merchantFrequency7d"], 0.5)
         self.assertEqual(normalized["deviceNovelty"], 1.0)
@@ -173,6 +245,8 @@ class FraudModelTest(unittest.TestCase):
         canonical = {
             "recentTransactionCount": 2,
             "recentAmountSum": {"amount": 20000.0, "currency": "PLN"},
+            "currentTransactionAmountPln": 10000.0,
+            "currency": "PLN",
             "transactionVelocityPerMinute": 2.0,
             "merchantFrequency7d": 1,
             "deviceNovelty": False,
@@ -194,12 +268,38 @@ class FraudModelTest(unittest.TestCase):
             pipeline.transform_single(additive_transport_overlay, mode="production"),
         )
 
+    def test_production_monetary_feature_uses_normalized_pln_basis_for_supported_currencies(self):
+        payload = {
+            "recentTransactionCount": 2,
+            "recentAmountSum": {"amount": 200.0, "currency": "GBP"},
+            "recentAmountSumPln": 1000.0,
+            "currentTransactionAmountPln": 500.0,
+            "currency": "GBP",
+            "transactionVelocityPerMinute": 2.0,
+            "merchantFrequency7d": 1,
+            "deviceNovelty": False,
+            "countryMismatch": False,
+            "proxyOrVpnDetected": False,
+            "recentTransactionCountWindow": "PT1M",
+            "recentAmountSumWindow": "PT1M",
+        }
+
+        pipeline = FeaturePipeline()
+        compatibility = pipeline.validate_production_snapshot(payload)
+        normalized = pipeline.transform_single(payload, mode="production")
+
+        self.assertTrue(compatibility["compatible"])
+        self.assertEqual(normalized["recentAmountSumPln"], 0.1)
+        self.assertNotIn("recentAmountSum", normalized)
+
     def test_production_training_features_match_java_inference_schema(self):
         dataset = generate_fraud_behavior(count=300, seed=337, user_count=8, fraud_ratio=0.03)
         _, weights, evaluation = train_with_evaluation(dataset, epochs=2, learning_rate=0.1)
         payload = {
             "recentTransactionCount": 5,
             "recentAmountSum": {"amount": 5000.0, "currency": "PLN"},
+            "currentTransactionAmountPln": 5000.0,
+            "currency": "PLN",
             "transactionVelocityPerMinute": 5.0,
             "merchantFrequency7d": 6,
             "deviceNovelty": True,
@@ -241,6 +341,8 @@ class FraudModelTest(unittest.TestCase):
                 "recentTransactionCount": 2,
                 "recentAmountSum": {"amount": 20000.0, "currency": "PLN"},
                 "recentAmountSumPln": 20000.0,
+                "currentTransactionAmountPln": 10000.0,
+                "currency": "PLN",
                 "transactionVelocityPerMinute": 2.0,
                 "merchantFrequency7d": 1,
                 "deviceNovelty": False,
@@ -257,15 +359,86 @@ class FraudModelTest(unittest.TestCase):
             result["scoreDetails"]["featureCompatibility"]["missingRequiredFeatures"],
         )
 
+    def test_runtime_rejects_raw_sequence_payload_in_production_inference(self):
+        result = FraudModel().score(
+            {
+                "raw_transaction": {
+                    "amount": 10000.0,
+                    "currency": "PLN",
+                    "deviceId": "raw-device",
+                    "country": "PL",
+                    "merchantId": "raw-merchant",
+                    "proxyOrVpnDetected": True,
+                },
+                "timestamp": "2026-09-15T10:00:00",
+                "user_id": "raw-user",
+            }
+        )
+
+        self.assertFalse(result["available"])
+        self.assertIsNone(result["fraudScore"])
+        self.assertIsNone(result["riskLevel"])
+        self.assertFalse(result["alertRecommended"])
+        self.assertEqual(result["fallbackReason"], "INCOMPATIBLE_FEATURE_SNAPSHOT")
+        self.assertEqual(result["scoreDetails"]["normalizedFeatures"], {})
+        self.assertEqual(
+            result["scoreDetails"]["featureCompatibility"]["invalidFeatures"]["raw_transaction"],
+            "raw_sequence_not_allowed_for_production_inference",
+        )
+
+    def test_runtime_fails_closed_for_present_invalid_canonical_features(self):
+        valid = {
+            "recentTransactionCount": 2,
+            "recentAmountSum": {"amount": 20000.0, "currency": "PLN"},
+            "recentAmountSumPln": 20000.0,
+            "currentTransactionAmountPln": 10000.0,
+            "currency": "PLN",
+            "transactionVelocityPerMinute": 2.0,
+            "merchantFrequency7d": 1,
+            "deviceNovelty": False,
+            "countryMismatch": False,
+            "proxyOrVpnDetected": False,
+            "recentTransactionCountWindow": "PT1M",
+            "recentAmountSumWindow": "PT1M",
+        }
+        invalid_cases = {
+            "string_count": {"recentTransactionCount": "2"},
+            "fractional_count": {"recentTransactionCount": 2.5},
+            "bool_count": {"recentTransactionCount": True},
+            "negative_count": {"recentTransactionCount": -1},
+            "nan_amount": {"recentAmountSumPln": float("nan")},
+            "infinite_amount": {"recentAmountSumPln": float("inf")},
+            "negative_amount": {"recentAmountSumPln": -1.0},
+            "nested_amount": {"recentAmountSumPln": {"amount": 20000.0}},
+            "list_amount": {"recentAmountSumPln": [20000.0]},
+            "invalid_window": {"recentTransactionCountWindow": "PT5M"},
+            "inconsistent_rate": {"transactionVelocityPerMinute": 3.0},
+            "unsupported_currency": {"currency": "CHF"},
+            "null_currency": {"currency": None},
+            "wrong_boolean": {"deviceNovelty": "true"},
+        }
+
+        for case_name, mutation in invalid_cases.items():
+            with self.subTest(case_name=case_name):
+                result = FraudModel().score({**valid, **mutation})
+
+                self.assertFalse(result["available"])
+                self.assertEqual(result["fallbackReason"], "INCOMPATIBLE_FEATURE_SNAPSHOT")
+                self.assertIsNone(result["fraudScore"])
+                self.assertIsNone(result["riskLevel"])
+                self.assertFalse(result["alertRecommended"])
+                self.assertEqual(result["scoreDetails"]["normalizedFeatures"], {})
+                self.assertTrue(result["scoreDetails"]["featureCompatibility"]["invalidFeatures"])
+
     def test_feature_pipeline_transforms_raw_sequence_features(self):
         dataset = generate_fraud_behavior(count=200, seed=789, user_count=10, fraud_ratio=0.02)
         transformed = FeaturePipeline().fit(dataset).transform(dataset)
 
         self.assertEqual(len(transformed), dataset.size)
-        self.assertTrue(all("transactionVelocityPerHour" in row for row in transformed))
-        self.assertTrue(all("recentAmountAverage" in row for row in transformed))
-        self.assertTrue(all("amountDeviationFromUserMean" in row for row in transformed))
-        self.assertTrue(all("merchantEntropy" in row for row in transformed))
+        self.assertTrue(all("recentAmountSumPln" in row for row in transformed))
+        self.assertTrue(all("transactionVelocityPerHour" not in row for row in transformed))
+        self.assertTrue(all("recentAmountAverage" not in row for row in transformed))
+        self.assertTrue(all("merchantEntropy" not in row for row in transformed))
         self.assertTrue(all(0.0 <= value <= 1.0 for row in transformed for value in row.values()))
 
         fraud_rows = [
@@ -707,8 +880,31 @@ class FraudModelTest(unittest.TestCase):
             comparison = model.compare_with(
                 {
                     "recentTransactionCount": 5,
-                    "recentAmountSum": {"amount": 5000.0},
-                    "transactionVelocityPerMinute": 2.0,
+                    "recentAmountSum": {"amount": 5000.0, "currency": "PLN"},
+                    "recentAmountSumPln": 5000.0,
+                    "currentTransactionAmountPln": 5000.0,
+                    "currency": "PLN",
+                    "recentTransactionCountWindow": "PT1M",
+                    "recentAmountSumWindow": "PT1M",
+                    "transactionVelocityPerMinute": 5.0,
+                    "merchantFrequency7d": 4,
+                    "deviceNovelty": True,
+                    "countryMismatch": False,
+                    "proxyOrVpnDetected": True,
+                },
+                artifact_path=Path.cwd() / "missing-artifact.json",
+                registry=registry,
+            )
+            invalid_comparison = model.compare_with(
+                {
+                    "recentTransactionCount": "5",
+                    "recentAmountSum": {"amount": 5000.0, "currency": "PLN"},
+                    "recentAmountSumPln": 5000.0,
+                    "currentTransactionAmountPln": 5000.0,
+                    "currency": "PLN",
+                    "recentTransactionCountWindow": "PT1M",
+                    "recentAmountSumWindow": "PT1M",
+                    "transactionVelocityPerMinute": 5.0,
                     "merchantFrequency7d": 4,
                     "deviceNovelty": True,
                     "countryMismatch": False,
@@ -734,6 +930,16 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(comparison["modelB"]["modelVersion"], "challenger-v2")
         self.assertIn("thresholdDifferences", comparison)
         self.assertIn("comparisonMetricsByVersion", comparison)
+        self.assertIsNone(invalid_comparison["scoreDelta"])
+        self.assertIsNone(invalid_comparison["absoluteScoreDelta"])
+        self.assertIsNone(invalid_comparison["riskLevelMismatch"])
+        self.assertIsNone(invalid_comparison["decisionDisagreement"])
+        self.assertFalse(invalid_comparison["modelA"]["available"])
+        self.assertFalse(invalid_comparison["modelB"]["available"])
+        self.assertIsNone(invalid_comparison["modelA"]["fraudScore"])
+        self.assertIsNone(invalid_comparison["modelB"]["fraudScore"])
+        self.assertEqual(invalid_comparison["modelA"]["fallbackReason"], "INCOMPATIBLE_FEATURE_SNAPSHOT")
+        self.assertEqual(invalid_comparison["modelB"]["fallbackReason"], "INCOMPATIBLE_FEATURE_SNAPSHOT")
 
     def test_model_loader_uses_logistic_artifact_type(self):
         artifact_path = Path.cwd() / "loader-logistic-artifact.json"

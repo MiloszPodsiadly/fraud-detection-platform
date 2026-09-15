@@ -84,11 +84,7 @@ class RuleBasedSignalEngineBehaviorParityTest {
     @Test
     void rapidTransferSignalsKeepSingleMappedEvidenceAndContributionForOneFact() {
         TransactionEnrichedEvent event = event(false, false, false, 2, 2.0d, new BigDecimal("20000.00"),
-                Map.of(
-                        FraudFeatureContract.RAPID_TRANSFER_COUNT, 2,
-                        FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("20000.00"),
-                        FraudFeatureContract.RAPID_TRANSFER_WINDOW, "PT1M"
-                ));
+                Map.of(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, java.util.List.of("txn-1", "txn-2")));
 
         FraudScoreResult production = assertProductionMappingParity(event);
         var adapterResult = adapter.evaluate(context(event));

@@ -75,8 +75,10 @@ def main() -> None:
     high_risk = model.score(
         {
             "recentTransactionCount": 8,
-            "recentAmountSum": {"amount": 7200.0},
-            "transactionVelocityPerMinute": 0.7,
+            "recentAmountSum": {"amount": 7200.0, "currency": "USD"},
+            "currentTransactionAmountPln": 28_800.0,
+            "currency": "USD",
+            "transactionVelocityPerMinute": 8.0,
             "merchantFrequency7d": 9,
             "deviceNovelty": True,
             "countryMismatch": True,
@@ -89,8 +91,10 @@ def main() -> None:
     baseline = model.score(
         {
             "recentTransactionCount": 1,
-            "recentAmountSum": {"amount": 45.0},
-            "transactionVelocityPerMinute": 0.05,
+            "recentAmountSum": {"amount": 45.0, "currency": "PLN"},
+            "currentTransactionAmountPln": 45.0,
+            "currency": "PLN",
+            "transactionVelocityPerMinute": 1.0,
             "merchantFrequency7d": 1,
             "deviceNovelty": False,
             "countryMismatch": False,

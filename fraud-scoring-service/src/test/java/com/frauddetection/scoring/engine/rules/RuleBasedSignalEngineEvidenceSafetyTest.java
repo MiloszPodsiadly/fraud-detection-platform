@@ -36,7 +36,6 @@ class RuleBasedSignalEngineEvidenceSafetyTest {
                 FraudFeatureContract.MERCHANT_CATEGORY, "crypto",
                 FraudFeatureContract.CURRENCY, "EUR",
                 FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("50000"),
-                FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("99999"),
                 FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("tx-secret-1"),
                 "unsupportedPolicyMarker", List.of("SENSITIVE_FLAG")
         ))));
@@ -47,7 +46,6 @@ class RuleBasedSignalEngineEvidenceSafetyTest {
                 .doesNotContain("crypto")
                 .doesNotContain("EUR")
                 .doesNotContain("50000")
-                .doesNotContain("99999")
                 .doesNotContain("tx-secret")
                 .doesNotContain("SENSITIVE_FLAG")
                 .doesNotContain("customerSegment=VIP")

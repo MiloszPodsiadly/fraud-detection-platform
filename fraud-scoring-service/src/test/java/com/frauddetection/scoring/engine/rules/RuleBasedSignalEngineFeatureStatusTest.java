@@ -60,7 +60,7 @@ class RuleBasedSignalEngineFeatureStatusTest {
     }
 
     @Test
-    void invalidSnapshotTypeForTypedEventFieldDegradesWithoutTopLevelFallback() {
+    void invalidSnapshotTypeForCanonicalEventFieldDegradesWithoutFallback() {
         TransactionEnrichedEvent event = event(false, false, false, 1, 0.1d, BigDecimal.TEN,
                 Map.of(FraudFeatureContract.RECENT_TRANSACTION_COUNT, "5"));
 
@@ -71,7 +71,7 @@ class RuleBasedSignalEngineFeatureStatusTest {
     }
 
     @Test
-    void invalidSnapshotAmountTypeDegradesWithoutTopLevelMoneyFallback() {
+    void invalidSnapshotAmountTypeDegradesWithoutMoneyFallback() {
         FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 2, 2.0d,
                 new BigDecimal("20000.00"),
                 Map.of(
@@ -103,7 +103,7 @@ class RuleBasedSignalEngineFeatureStatusTest {
     }
 
     @Test
-    void canonicalCountConflictingWithTopLevelCountDegrades() {
+    void canonicalCountConflictingWithProducedCountDegrades() {
         FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 5, 5.0d, BigDecimal.TEN,
                 Map.of(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 4))));
 
@@ -111,7 +111,7 @@ class RuleBasedSignalEngineFeatureStatusTest {
     }
 
     @Test
-    void topLevelRecentAmountCannotContradictCanonicalRulesV2Amount() {
+    void transactionAmountCannotContradictCanonicalRulesV2Amount() {
         FraudSignalEvaluation result = engine.evaluate(context(event(false, false, false, 2, 2.0d,
                 new BigDecimal("100.00"),
                 Map.of(
@@ -183,7 +183,7 @@ class RuleBasedSignalEngineFeatureStatusTest {
     }
 
     @Test
-    void removedTopLevelCountWindowCannotInfluenceRulesV2() {
+    void missingCanonicalCountWindowUsesProducedCurrentWindowSemantics() {
         TransactionEnrichedEvent source = event(false, false, false, 5, 5.0d, BigDecimal.TEN,
                 Map.of());
         FraudSignalEvaluation result = engine.evaluate(context(source));
@@ -205,7 +205,7 @@ class RuleBasedSignalEngineFeatureStatusTest {
     }
 
     @Test
-    void removedTopLevelAmountWindowCannotInfluenceRulesV2() {
+    void missingCanonicalAmountWindowUsesProducedCurrentWindowSemantics() {
         TransactionEnrichedEvent source = event(false, false, false, 1, 1.0d, new BigDecimal("6000.00"),
                 Map.of());
         FraudSignalEvaluation result = engine.evaluate(context(source));

@@ -109,6 +109,30 @@ class RulesV2PrimaryRuntimeArchitectureGuardTest {
     }
 
     @Test
+    void productionRulesRuntimeHasExactlyOneAuthoritativeV2DecisionPath() throws Exception {
+        String productionSource = sourceFiles(moduleRoot().resolve("src/main/java/com/frauddetection/scoring"));
+        String scoringEngine = source("RuleBasedFraudScoringEngine");
+
+        assertThat(countOccurrences(productionSource, "new RulesScoringPolicyV2("))
+                .isEqualTo(1);
+        assertThat(countOccurrences(productionSource, "public FraudScoreResult scoreValidated(RulesV2ValidatedInput input)"))
+                .isEqualTo(1);
+        assertThat(countOccurrences(productionSource, "scoreValidated(FraudScoringRequest"))
+                .isZero();
+        assertThat(scoringEngine)
+                .contains(
+                        "return withFeatureSnapshot(scoreValidated(input), request.featureSnapshot());",
+                        "return rulesV2Policy.score(input);"
+                )
+                .doesNotContain("new RuleBasedFraudScoringEngine(");
+        assertThat(countOccurrences(scoringEngine, "new RulesScoringPolicyV2("))
+                .isEqualTo(1);
+        assertThat(source("RuleBasedSignalEngine"))
+                .contains("productionRuleEngine.scoreValidated(input)")
+                .doesNotContain("new RulesScoringPolicyV2(");
+    }
+
+    @Test
     void commonFeatureContractsDoNotExposeRulesV1CanonicalWindowAliases() throws Exception {
         String source = sourceFiles(moduleRoot().resolve("../common-events/src/main/java/com/frauddetection/common/events/features"));
 
@@ -147,5 +171,15 @@ class RulesV2PrimaryRuntimeArchitectureGuardTest {
             source.append(Files.readString(file)).append('\n');
         }
         return source.toString();
+    }
+
+    private long countOccurrences(String source, String token) {
+        long count = 0;
+        int index = source.indexOf(token);
+        while (index >= 0) {
+            count++;
+            index = source.indexOf(token, index + token.length());
+        }
+        return count;
     }
 }
