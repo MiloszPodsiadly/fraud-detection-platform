@@ -21,8 +21,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class TransactionFraudScoringServiceTest {
@@ -86,6 +88,39 @@ class TransactionFraudScoringServiceTest {
         inOrder.verify(publisher).publish(scoredEvent);
         org.assertj.core.api.Assertions.assertThat(meterRegistry.get("fraud.scoring.requests")
                 .tags("mode", "rule_based", "outcome", "success", "fallback_used", "false", "risk_level", "critical")
+                .counter()
+                .count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void invalidRulesInputFailsWithoutPublishingFabricatedScoredEvent() {
+        FraudScoringEngine scoringEngine = mock(FraudScoringEngine.class);
+        TransactionScoredEventMapper mapper = mock(TransactionScoredEventMapper.class);
+        TransactionScoredEventPublisher publisher = mock(TransactionScoredEventPublisher.class);
+        EngineIntelligenceEmissionService emissionService = mock(EngineIntelligenceEmissionService.class);
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+
+        var service = new TransactionFraudScoringService(
+                scoringEngine,
+                mapper,
+                publisher,
+                new ScoringProperties(0.75d, 0.90d, ScoringMode.RULE_BASED),
+                new ScoringMetrics(meterRegistry),
+                emissionService,
+                new AnalystRecommendationService(FIXED_CLOCK)
+        );
+        var event = TransactionFixtures.enrichedTransaction().build();
+        var request = FraudScoringRequest.from(event);
+
+        when(scoringEngine.score(request)).thenThrow(new IllegalArgumentException("invalid canonical feature snapshot"));
+
+        assertThatThrownBy(() -> service.score(event))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("invalid canonical feature snapshot");
+
+        verifyNoInteractions(emissionService, mapper, publisher);
+        org.assertj.core.api.Assertions.assertThat(meterRegistry.get("fraud.scoring.requests")
+                .tags("mode", "rule_based", "outcome", "failure", "fallback_used", "false", "risk_level", "unknown")
                 .counter()
                 .count()).isEqualTo(1.0d);
     }

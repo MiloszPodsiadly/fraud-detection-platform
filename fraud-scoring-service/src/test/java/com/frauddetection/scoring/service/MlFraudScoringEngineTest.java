@@ -47,7 +47,7 @@ class MlFraudScoringEngineTest {
         assertThat(result.scoreDetails()).containsEntry("unsupportedReasonCodeCount", 5);
         assertThat(result.explanationMetadata()).containsEntry("unsupportedReasonCodeCount", 5);
         assertThat(meterRegistry.get("fraud.scoring.reason_code.parse.unsupported")
-                .tags("service", "fraud-scoring-service", "source", "ml_model", "parser_mode", "legacy")
+                .tags("service", "fraud-scoring-service", "source", "ml_model", "parser_mode", "canonical")
                 .counter()
                 .count()).isEqualTo(5.0d);
     }

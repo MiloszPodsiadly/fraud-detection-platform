@@ -16,7 +16,7 @@ class ScoringEvidenceNoRawUnsupportedReasonCodeLeakTest {
     void unsupportedModelReasonCodesCreateDiagnosticWithoutStoringRawValues() {
         ScoringEvidenceFactory factory = new ScoringEvidenceFactory();
         var evidence = factory.modelEvidence(
-                ReasonCode.parseLegacyList(Arrays.asList("FRAUD_CONFIRMED", "AML_ESCALATION_REQUIRED", "future-code")),
+                ReasonCode.parseInputList(Arrays.asList("FRAUD_CONFIRMED", "AML_ESCALATION_REQUIRED", "future-code")),
                 true,
                 RiskLevel.HIGH,
                 Instant.now(),

@@ -45,7 +45,7 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
         Objects.requireNonNull(context, "context is required");
         FraudScoreResult sourceResult;
         try {
-            sourceResult = mlSource.score(FraudScoringRequest.from(context.transaction()));
+            sourceResult = mlSource.score(new FraudScoringRequest(context.transaction(), context.featureSnapshot()));
         } catch (RuntimeException exception) {
             if (isTimeout(exception)) {
                 return unavailableResult(FraudEngineStatus.TIMEOUT, PythonMlSignalReasonCode.ML_MODEL_TIMEOUT);
@@ -131,7 +131,7 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
 
     private List<String> boundedReasonCodes(FraudScoreResult sourceResult) {
         List<String> reasonCodes = ReasonCode.supportedWireValues(
-                ReasonCode.parseLegacyList(sourceResult.reasonCodes())
+                ReasonCode.parseInputList(sourceResult.reasonCodes())
         );
         return reasonCodes.isEmpty()
                 ? List.of(PythonMlSignalReasonCode.ML_MODEL_SIGNAL.wireValue())

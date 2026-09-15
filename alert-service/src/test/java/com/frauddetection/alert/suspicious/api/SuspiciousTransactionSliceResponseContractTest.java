@@ -14,7 +14,7 @@ class SuspiciousTransactionSliceResponseContractTest {
     @Test
     void contentIsDefensivelyCopied() {
         ArrayList<SuspiciousTransactionResponse> content = new ArrayList<>();
-        content.add(SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT")));
+        content.add(SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_TRANSACTION_AMOUNT")));
 
         SuspiciousTransactionSliceResponse response = new SuspiciousTransactionSliceResponse(content, 20, true, "cursor-1");
         content.clear();

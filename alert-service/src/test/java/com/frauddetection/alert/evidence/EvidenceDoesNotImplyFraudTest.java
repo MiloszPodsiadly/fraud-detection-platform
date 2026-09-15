@@ -25,7 +25,7 @@ class EvidenceDoesNotImplyFraudTest {
 
         List<EvidenceDocument> evidence = service.projectFromScoredEvent(scoredEvent(
                 RiskLevel.CRITICAL,
-                List.of("COUNTRY_MISMATCH", "RAPID_TRANSFER_FRAUD_CASE", "FRAUD_CONFIRMED")
+                List.of("COUNTRY_MISMATCH", "RAPID_PLN_20K_BURST", "FRAUD_CONFIRMED")
         ));
 
         assertThat(evidence).allSatisfy(item -> {

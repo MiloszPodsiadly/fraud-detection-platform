@@ -26,7 +26,7 @@ class ScoringEvidenceFactoryTest {
     @Test
     void unsupportedDiagnosticWithNoUnsupportedInputsDoesNotCrashAndUsesNone() {
         var evidence = factory.unsupportedReasonCodeDiagnostic(
-                ReasonCode.parseLegacyList(List.of(ReasonCode.COUNTRY_MISMATCH.wireValue())),
+                ReasonCode.parseInputList(List.of(ReasonCode.COUNTRY_MISMATCH.wireValue())),
                 ScoringEvidenceSource.ML_MODEL,
                 Instant.now(),
                 0

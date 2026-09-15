@@ -4,14 +4,19 @@ import com.frauddetection.alert.AlertServiceApplication;
 import com.frauddetection.alert.api.AlertDetailsResponse;
 import com.frauddetection.alert.api.AlertSummaryResponse;
 import com.frauddetection.alert.api.PagedResponse;
+import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.persistence.FraudCaseDocument;
+import com.frauddetection.alert.persistence.FraudCaseRepository;
 import com.frauddetection.alert.security.auth.DemoAuthHeaders;
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.features.FraudFeatureContract;
+import com.frauddetection.common.events.features.FraudFeatureThresholdContract;
 import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
 import com.frauddetection.enricher.FeatureEnricherServiceApplication;
@@ -165,27 +170,41 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
 
     @Test
     void shouldProcessHighRiskTransactionAcrossTheFullPlatformFlow() {
+        String seedTransactionId = "txn-e2e-seed-" + TOPIC_SUFFIX;
         String transactionId = "txn-e2e-" + TOPIC_SUFFIX;
         String customerId = "cust-e2e-" + TOPIC_SUFFIX;
         String accountId = "acct-e2e-" + TOPIC_SUFFIX;
         String paymentInstrumentId = "card-e2e-" + TOPIC_SUFFIX;
+        String seedDeviceId = "device-e2e-seed-" + TOPIC_SUFFIX;
         String deviceId = "device-e2e-" + TOPIC_SUFFIX;
         String correlationId = "corr-e2e-" + TOPIC_SUFFIX;
+
+        IngestTransactionRequest seedRequest = buildHighRiskRequest(
+                seedTransactionId,
+                customerId,
+                accountId,
+                paymentInstrumentId,
+                seedDeviceId,
+                Instant.now().minusSeconds(45),
+                new BigDecimal("10000.00"),
+                "PLN"
+        );
+        ResponseEntity<IngestTransactionResponse> seedResponse = submitTransaction(seedRequest, correlationId + "-seed");
+        assertThat(seedResponse.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        awaitKafkaRecord(TRANSACTION_ENRICHED_TOPIC, TransactionEnrichedEvent.class, seedTransactionId);
 
         IngestTransactionRequest request = buildHighRiskRequest(
                 transactionId,
                 customerId,
                 accountId,
                 paymentInstrumentId,
-                deviceId
+                deviceId,
+                Instant.now().minusSeconds(15),
+                new BigDecimal("10000.00"),
+                "PLN"
         );
 
-        ResponseEntity<IngestTransactionResponse> response = restTemplate.exchange(
-                RequestEntity.post(URI.create(ingestUrl("/api/v1/transactions")))
-                        .header("X-Correlation-Id", correlationId)
-                        .body(request),
-                IngestTransactionResponse.class
-        );
+        ResponseEntity<IngestTransactionResponse> response = submitTransaction(request, correlationId);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(response.getBody()).isNotNull();
@@ -210,14 +229,16 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
         );
         assertThat(enrichedRecord.value().transactionId()).isEqualTo(transactionId);
         assertThat(enrichedRecord.value().correlationId()).isEqualTo(correlationId);
-        assertThat(enrichedRecord.value().deviceNovelty()).isTrue();
-        assertThat(enrichedRecord.value().countryMismatch()).isTrue();
-        assertThat(enrichedRecord.value().proxyOrVpnDetected()).isTrue();
-        assertThat(enrichedRecord.value().featureFlags()).contains(
-                "DEVICE_NOVELTY",
-                "COUNTRY_MISMATCH",
-                "PROXY_OR_VPN"
-        );
+        assertThat(enrichedRecord.value().featureSnapshot()).containsEntry(FraudFeatureContract.DEVICE_NOVELTY, true)
+                .containsEntry(FraudFeatureContract.COUNTRY_MISMATCH, true)
+                .containsEntry(FraudFeatureContract.PROXY_OR_VPN_DETECTED, true)
+                .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2)
+                .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M")
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"))
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M")
+                .containsEntry(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("10000.00"))
+                .containsEntry(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of(seedTransactionId, transactionId));
+        assertThat(FraudFeatureThresholdContract.isRapidTransferPlnBurst(enrichedRecord.value().featureSnapshot())).isTrue();
 
         ConsumerRecord<String, TransactionScoredEvent> scoredRecord = awaitKafkaRecord(
                 TRANSACTION_SCORED_TOPIC,
@@ -233,8 +254,18 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
                 "DEVICE_NOVELTY",
                 "COUNTRY_MISMATCH",
                 "PROXY_OR_VPN",
+                "HIGH_AMOUNT_ACTIVITY",
+                "RAPID_PLN_20K_BURST",
                 "HIGH_TRANSACTION_AMOUNT"
         );
+        assertThat(scoredRecord.value().featureSnapshot())
+                .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2)
+                .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M")
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"))
+                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M")
+                .containsEntry(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("10000.00"))
+                .containsEntry(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of(seedTransactionId, transactionId));
+        assertThat(FraudFeatureThresholdContract.isRapidTransferPlnBurst(scoredRecord.value().featureSnapshot())).isTrue();
 
         AlertDocument persistedAlert = awaitCondition(() -> alertRepository().findAll().stream()
                 .filter(alert -> transactionId.equals(alert.getTransactionId()))
@@ -244,6 +275,16 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
         assertThat(persistedAlert.getCorrelationId()).isEqualTo(correlationId);
         assertThat(persistedAlert.getRiskLevel()).isEqualTo(RiskLevel.CRITICAL);
         assertThat(persistedAlert.getAlertStatus()).isEqualTo(AlertStatus.OPEN);
+
+        FraudCaseDocument fraudCase = awaitCondition(() -> fraudCaseRepository().findAll().stream()
+                .filter(caseDocument -> caseDocument.getTransactionIds() != null
+                        && caseDocument.getTransactionIds().contains(transactionId))
+                .findFirst());
+        assertThat(fraudCase.getStatus()).isEqualTo(FraudCaseStatus.OPEN);
+        assertThat(fraudCase.getTransactionIds()).contains(seedTransactionId, transactionId);
+        assertThat(fraudCase.getTotalAmountPln()).isEqualByComparingTo("20000.00");
+        assertThat(fraudCase.getThresholdPln()).isEqualByComparingTo(FraudFeatureThresholdContract.RAPID_TRANSFER_PLN_THRESHOLD);
+        assertThat(fraudCase.getAggregationWindow()).isEqualTo("PT1M");
 
         AlertSummaryResponse summary = awaitCondition(() -> findAlertSummary(transactionId));
         assertThat(summary.transactionId()).isEqualTo(transactionId);
@@ -266,6 +307,7 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
                 "DEVICE_NOVELTY",
                 "COUNTRY_MISMATCH",
                 "PROXY_OR_VPN",
+                "RAPID_PLN_20K_BURST",
                 "HIGH_TRANSACTION_AMOUNT"
         );
         assertThat(details.featureSnapshot()).containsEntry("countryMismatch", true);
@@ -304,6 +346,10 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
 
     private AlertRepository alertRepository() {
         return alertContext.getBean(AlertRepository.class);
+    }
+
+    private FraudCaseRepository fraudCaseRepository() {
+        return alertContext.getBean(FraudCaseRepository.class);
     }
 
     private String ingestUrl(String path) {
@@ -346,15 +392,18 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
             String customerId,
             String accountId,
             String paymentInstrumentId,
-            String deviceId
+            String deviceId,
+            Instant transactionTimestamp,
+            BigDecimal amount,
+            String currency
     ) {
         return new IngestTransactionRequest(
                 transactionId,
                 customerId,
                 accountId,
                 paymentInstrumentId,
-                Instant.now().minusSeconds(30),
-                new MoneyRequest(new BigDecimal("1500.00"), "USD"),
+                transactionTimestamp,
+                new MoneyRequest(amount, currency),
                 new MerchantInfoRequest(
                         "merchant-e2e-" + TOPIC_SUFFIX,
                         "High Risk Travel Outlet",
@@ -405,6 +454,18 @@ class FraudDetectionPlatformEndToEndIntegrationTest {
                 "PAYMENT_GATEWAY",
                 "trace-e2e-" + TOPIC_SUFFIX,
                 Map.of("channel", "web")
+        );
+    }
+
+    private ResponseEntity<IngestTransactionResponse> submitTransaction(
+            IngestTransactionRequest request,
+            String correlationId
+    ) {
+        return restTemplate.exchange(
+                RequestEntity.post(URI.create(ingestUrl("/api/v1/transactions")))
+                        .header("X-Correlation-Id", correlationId)
+                        .body(request),
+                IngestTransactionResponse.class
         );
     }
 

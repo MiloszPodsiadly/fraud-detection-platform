@@ -9,8 +9,8 @@
   "fraudScore": 0.82,
   "riskLevel": "HIGH",
   "scoringStrategy": "RULE_BASED",
-  "modelName": "rule-engine",
-  "modelVersion": "v1",
+  "modelName": "rule-based-engine",
+  "modelVersion": "v2",
   "inferenceTimestamp": "2026-06-01T06:00:01Z",
   "reasonCodes": ["HIGH_VELOCITY"],
   "scoreDetails": {},
@@ -25,7 +25,8 @@
       {"engineId": "ml.python.primary", "engineType": "ML_MODEL", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["ML_MODEL_SIGNAL"]}
     ],
     "comparison": {
-      "comparedEngineIds": ["rules.primary", "ml.python.primary"],
+      "comparisonType": "RULES_VS_ML",
+      "comparedEngineIds": ["rules.primary", "graph.primary"],
       "agreementStatus": "AGREEMENT",
       "riskMismatchStatus": "SAME_RISK_LEVEL",
       "scoreDeltaBucket": "SMALL"

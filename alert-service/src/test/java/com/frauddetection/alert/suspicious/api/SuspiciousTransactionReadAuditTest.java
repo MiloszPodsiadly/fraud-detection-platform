@@ -52,7 +52,7 @@ class SuspiciousTransactionReadAuditTest {
     @Test
     void singleReadAuditMayUseSuspiciousTransactionIdAsResourceId() {
         when(service.findById("suspicious-1")).thenReturn(Optional.of(
-                SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))
+                SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_TRANSACTION_AMOUNT"))
         ));
 
         controller.findById("suspicious-1", new MockHttpServletRequest());
@@ -85,7 +85,7 @@ class SuspiciousTransactionReadAuditTest {
     @Test
     void suspiciousTransactionSearchAuditedExactlyOnce() {
         when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(
-                List.of(SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))),
+                List.of(SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_TRANSACTION_AMOUNT"))),
                 20,
                 false,
                 null
@@ -170,7 +170,7 @@ class SuspiciousTransactionReadAuditTest {
     void searchAuditUsesContentSizeForResultCount() {
         when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(
                 List.of(
-                        SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT")),
+                        SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_TRANSACTION_AMOUNT")),
                         SuspiciousTransactionResponseContractTest.minimalResponse(List.of("RAPID_TRANSFER"))
                 ),
                 20,
@@ -218,7 +218,7 @@ class SuspiciousTransactionReadAuditTest {
 
     @Test
     void searchAuditDoesNotIncludeFullResponseBody() {
-        SuspiciousTransactionResponse response = SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"));
+        SuspiciousTransactionResponse response = SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_TRANSACTION_AMOUNT"));
         when(service.search(any())).thenReturn(new SuspiciousTransactionSliceResponse(List.of(response), 20, false, null));
 
         controller.search(new org.springframework.util.LinkedMultiValueMap<>(), new MockHttpServletRequest());
@@ -235,7 +235,7 @@ class SuspiciousTransactionReadAuditTest {
     @Test
     void suspiciousTransactionReadAuditedExactlyOnce() {
         when(service.findById("suspicious-1")).thenReturn(Optional.of(
-                SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))
+                SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_TRANSACTION_AMOUNT"))
         ));
 
         controller.findById("suspicious-1", new MockHttpServletRequest());
@@ -293,7 +293,7 @@ class SuspiciousTransactionReadAuditTest {
                         0.91,
                         com.frauddetection.common.events.enums.RiskLevel.HIGH,
                         com.frauddetection.common.events.enums.AlertStatus.OPEN,
-                        List.of("HIGH_AMOUNT"),
+                        List.of("HIGH_TRANSACTION_AMOUNT"),
                         java.time.Instant.parse("2026-05-19T10:00:00Z"),
                         null,
                         "corr-1",

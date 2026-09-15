@@ -39,6 +39,8 @@ from app.governance.persistence import (
     UnavailableGovernanceSnapshotRepository,
 )
 from app.governance.profile import InferenceProfile, load_reference_profile
+from app.features.feature_contract import FEATURE_CONTRACT
+from app.features.feature_pipeline import FeaturePipeline
 
 
 SENSITIVE_FIELDS = (
@@ -205,6 +207,9 @@ class MlGovernanceUnitTest(unittest.TestCase):
         self.assertIn("generated_by", profile)
         self.assertIn("numeric_feature_stats", profile)
         self.assertIn("score_distribution", profile)
+        self.assertEqual(profile["feature_schema_version"], FEATURE_CONTRACT.version)
+        self.assertEqual(profile["model_version"], server.MODEL_VERSION)
+        self.assertEqual(set(profile["numeric_feature_stats"]), set(FeaturePipeline.PRODUCTION_FEATURE_NAMES))
 
     def test_missing_reference_profile_returns_unknown_safe_status(self):
         profile = load_reference_profile(Path("missing-reference-profile.json"))
@@ -372,8 +377,10 @@ class MlGovernancePersistenceTest(unittest.TestCase):
                 "/v1/fraud/score",
                 body=(
                     b'{"features":{"recentTransactionCount":1,"recentAmountSum":{"amount":45.0,"currency":"USD"},'
-                    b'"transactionVelocityPerMinute":0.05,"merchantFrequency7d":1,"deviceNovelty":false,'
-                    b'"countryMismatch":false,"proxyOrVpnDetected":false,"featureFlags":[]}}'
+                    b'"currentTransactionAmountPln":180.0,"currency":"USD",'
+                    b'"transactionVelocityPerMinute":1.0,"merchantFrequency7d":1,"deviceNovelty":false,'
+                    b'"countryMismatch":false,"proxyOrVpnDetected":false,'
+                    b'"recentTransactionCountWindow":"PT1M","recentAmountSumWindow":"PT1M","recentAmountSumPln":180.0}}'
                 ),
                 headers={"Content-Type": "application/json"},
             )
@@ -514,8 +521,10 @@ class MlModelLifecycleUnitTest(unittest.TestCase):
                 "/v1/fraud/score",
                 body=(
                     b'{"features":{"recentTransactionCount":1,"recentAmountSum":{"amount":45.0,"currency":"USD"},'
-                    b'"transactionVelocityPerMinute":0.05,"merchantFrequency7d":1,"deviceNovelty":false,'
-                    b'"countryMismatch":false,"proxyOrVpnDetected":false,"featureFlags":[]}}'
+                    b'"currentTransactionAmountPln":180.0,"currency":"USD",'
+                    b'"transactionVelocityPerMinute":1.0,"merchantFrequency7d":1,"deviceNovelty":false,'
+                    b'"countryMismatch":false,"proxyOrVpnDetected":false,'
+                    b'"recentTransactionCountWindow":"PT1M","recentAmountSumWindow":"PT1M","recentAmountSumPln":180.0}}'
                 ),
                 headers={"Content-Type": "application/json"},
             )
@@ -1072,8 +1081,10 @@ class MlGovernanceEndpointTest(unittest.TestCase):
         before = self.get_json("/governance/profile/inference")["inference_profile"]["observation_count"]
         self.score(
             b'{"features":{"recentTransactionCount":1,"recentAmountSum":{"amount":45.0,"currency":"USD"},'
-            b'"transactionVelocityPerMinute":0.05,"merchantFrequency7d":1,"deviceNovelty":false,'
-            b'"countryMismatch":false,"proxyOrVpnDetected":false,"featureFlags":[]}}'
+            b'"currentTransactionAmountPln":180.0,"currency":"USD",'
+            b'"transactionVelocityPerMinute":1.0,"merchantFrequency7d":1,"deviceNovelty":false,'
+            b'"countryMismatch":false,"proxyOrVpnDetected":false,'
+            b'"recentTransactionCountWindow":"PT1M","recentAmountSumWindow":"PT1M","recentAmountSumPln":180.0}}'
         )
         after = self.get_json("/governance/profile/inference")["inference_profile"]
 
@@ -1329,9 +1340,10 @@ class MlGovernanceEndpointTest(unittest.TestCase):
     def test_existing_scoring_response_contract_remains_compatible(self):
         response = self.score(
             b'{"features":{"recentTransactionCount":8,"recentAmountSum":{"amount":7200.0,"currency":"USD"},'
-            b'"transactionVelocityPerMinute":0.7,"merchantFrequency7d":9,"deviceNovelty":true,'
+            b'"currentTransactionAmountPln":28800.0,"currency":"USD",'
+            b'"transactionVelocityPerMinute":8.0,"merchantFrequency7d":9,"deviceNovelty":true,'
             b'"countryMismatch":true,"proxyOrVpnDetected":true,'
-            b'"featureFlags":["DEVICE_NOVELTY","COUNTRY_MISMATCH","PROXY_OR_VPN","HIGH_VELOCITY"]}}'
+            b'"recentTransactionCountWindow":"PT1M","recentAmountSumWindow":"PT1M","recentAmountSumPln":28800.0}}'
         )
 
         self.assert_json_contract(

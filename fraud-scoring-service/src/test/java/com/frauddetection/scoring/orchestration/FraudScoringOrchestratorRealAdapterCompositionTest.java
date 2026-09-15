@@ -167,7 +167,6 @@ class FraudScoringOrchestratorRealAdapterCompositionTest {
     private ScoringContext velocityReadyContext() {
         TransactionEnrichedEvent event = TransactionFixtures.enrichedTransaction().build();
         Map<String, Object> features = new HashMap<>(event.featureSnapshot());
-        features.put(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, false);
         features.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 6);
         features.put(
                 FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW,
@@ -192,16 +191,6 @@ class FraudScoringOrchestratorRealAdapterCompositionTest {
                 event.deviceInfo(),
                 event.locationInfo(),
                 event.customerContext(),
-                6,
-                VelocityFeatureContract.CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW_TEXT,
-                new Money(new BigDecimal("100.00"), "PLN"),
-                VelocityFeatureContract.CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW_TEXT,
-                6.0d,
-                event.merchantFrequency7d(),
-                false,
-                false,
-                false,
-                List.of(),
                 Map.copyOf(features)
         );
         return new ScoringContext(
@@ -231,16 +220,6 @@ class FraudScoringOrchestratorRealAdapterCompositionTest {
                 event.deviceInfo(),
                 event.locationInfo(),
                 event.customerContext(),
-                event.recentTransactionCount(),
-                event.recentTransactionCountWindow(),
-                event.recentAmountSum(),
-                event.recentAmountSumWindow(),
-                event.transactionVelocityPerMinute(),
-                event.merchantFrequency7d(),
-                event.deviceNovelty(),
-                event.countryMismatch(),
-                event.proxyOrVpnDetected(),
-                event.featureFlags(),
                 Map.copyOf(features)
         );
         return new ScoringContext(

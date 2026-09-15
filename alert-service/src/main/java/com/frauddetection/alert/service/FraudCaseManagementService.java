@@ -26,6 +26,8 @@ import com.frauddetection.alert.security.principal.AnalystActorResolver;
 import com.frauddetection.alert.mapper.FraudCaseResponseMapper;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.features.FraudFeatureContract;
+import com.frauddetection.common.events.features.FraudFeatureThresholdContract;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -45,7 +47,6 @@ import java.util.stream.Collectors;
 public class FraudCaseManagementService {
 
     private static final String SUSPICION_TYPE = "RAPID_TRANSFER_BURST_20K_PLN";
-    private static final BigDecimal DEFAULT_THRESHOLD_PLN = BigDecimal.valueOf(20_000);
 
     private final FraudCaseRepository fraudCaseRepository;
     private final ScoredTransactionRepository scoredTransactionRepository;
@@ -75,12 +76,12 @@ public class FraudCaseManagementService {
 
     public void handleScoredTransaction(TransactionScoredEvent event) {
         // System-generated candidate ingestion; not an analyst lifecycle mutation.
-        if (event.featureSnapshot() == null
-                || !Boolean.TRUE.equals(event.featureSnapshot().get("rapidTransferFraudCaseCandidate"))) {
+        Map<String, Object> snapshot = event.featureSnapshot() == null ? Map.of() : event.featureSnapshot();
+        if (!FraudFeatureThresholdContract.isRapidTransferPlnBurst(snapshot)) {
             return;
         }
 
-        List<String> transactionIds = transactionIds(event.featureSnapshot(), event.transactionId());
+        List<String> transactionIds = transactionIds(snapshot, event.transactionId());
         String firstTransactionId = transactionIds.isEmpty() ? event.transactionId() : transactionIds.get(0);
         String caseKey = event.customerId() + ":" + SUSPICION_TYPE + ":" + firstTransactionId;
         FraudCaseDocument document = fraudCaseRepository.findByCaseKey(caseKey).orElseGet(() -> newCase(caseKey, event));
@@ -88,9 +89,12 @@ public class FraudCaseManagementService {
         LinkedHashSet<String> mergedIds = new LinkedHashSet<>(document.getTransactionIds() == null ? List.of() : document.getTransactionIds());
         mergedIds.addAll(transactionIds);
         document.setTransactionIds(List.copyOf(mergedIds));
-        document.setTotalAmountPln(decimal(event.featureSnapshot().get("rapidTransferTotalPln"), DEFAULT_THRESHOLD_PLN));
-        document.setThresholdPln(decimal(event.featureSnapshot().get("rapidTransferThresholdPln"), DEFAULT_THRESHOLD_PLN));
-        document.setAggregationWindow(String.valueOf(event.featureSnapshot().getOrDefault("rapidTransferWindow", "PT1M")));
+        document.setTotalAmountPln(decimal(
+                snapshot.get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN),
+                FraudFeatureThresholdContract.RAPID_TRANSFER_PLN_THRESHOLD
+        ));
+        document.setThresholdPln(FraudFeatureThresholdContract.RAPID_TRANSFER_PLN_THRESHOLD);
+        document.setAggregationWindow(String.valueOf(snapshot.getOrDefault(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M")));
         document.setUpdatedAt(Instant.now());
 
         List<FraudCaseTransactionDocument> transactions = caseTransactions(document.getTransactionIds(), event);
@@ -271,7 +275,8 @@ public class FraudCaseManagementService {
         document.setCorrelationId(event.correlationId());
         document.setTransactionTimestamp(event.transactionTimestamp());
         document.setTransactionAmount(event.transactionAmount());
-        document.setAmountPln(decimal(event.featureSnapshot().get("currentTransactionAmountPln"), BigDecimal.ZERO));
+        Map<String, Object> snapshot = event.featureSnapshot() == null ? Map.of() : event.featureSnapshot();
+        document.setAmountPln(decimal(snapshot.get(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN), BigDecimal.ZERO));
         document.setFraudScore(event.fraudScore());
         document.setRiskLevel(event.riskLevel());
         return document;
@@ -322,7 +327,7 @@ public class FraudCaseManagementService {
     }
 
     private List<String> transactionIds(Map<String, Object> featureSnapshot, String currentTransactionId) {
-        Object value = featureSnapshot.get("rapidTransferTransactionIds");
+        Object value = featureSnapshot.get(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS);
         if (value instanceof List<?> list) {
             return list.stream().map(String::valueOf).toList();
         }

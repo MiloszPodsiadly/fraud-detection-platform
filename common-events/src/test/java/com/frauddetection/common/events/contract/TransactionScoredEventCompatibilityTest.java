@@ -16,9 +16,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class TransactionScoredEventCompatibilityTest {
 
     @Test
-    void oldTransactionScoredEventJsonWithoutEngineIntelligenceDeserializes() throws Exception {
-        assertThat(objectMapper().readValue(oldJson(), TransactionScoredEvent.class).engineIntelligence()).isNull();
-        assertThat(objectMapper().readValue(oldJson(), TransactionScoredEvent.class).analystRecommendation()).isNull();
+    void currentTransactionScoredEventJsonWithoutEngineIntelligenceDeserializes() throws Exception {
+        assertThat(objectMapper().readValue(currentJson(), TransactionScoredEvent.class).engineIntelligence()).isNull();
+        assertThat(objectMapper().readValue(currentJson(), TransactionScoredEvent.class).analystRecommendation()).isNull();
     }
 
     @Test
@@ -31,12 +31,12 @@ class TransactionScoredEventCompatibilityTest {
 
     @Test
     void missingEngineIntelligenceIsAccepted() throws Exception {
-        assertThat(objectMapper().readValue(oldJson(), TransactionScoredEvent.class).riskLevel()).isEqualTo(RiskLevel.HIGH);
+        assertThat(objectMapper().readValue(currentJson(), TransactionScoredEvent.class).riskLevel()).isEqualTo(RiskLevel.HIGH);
     }
 
     @Test
     void nullEngineIntelligenceIsAccepted() throws Exception {
-        assertThat(objectMapper().readValue(oldJson().replace(
+        assertThat(objectMapper().readValue(currentJson().replace(
                 "\"alertRecommended\": true",
                 "\"alertRecommended\": true, \"engineIntelligence\": null"
         ), TransactionScoredEvent.class).engineIntelligence()).isNull();
@@ -109,7 +109,7 @@ class TransactionScoredEventCompatibilityTest {
         return new TransactionScoredEvent(
                 "evt-1", "txn-1", "corr-1", "cust-1", "acct-1",
                 Instant.parse("2026-06-01T06:00:00Z"), Instant.parse("2026-06-01T06:00:00Z"),
-                null, null, null, null, null, 0.82d, RiskLevel.HIGH, "RULE_BASED", "rules", "v1",
+                null, null, null, null, null, 0.82d, RiskLevel.HIGH, "RULE_BASED", "rule-based-engine", "v2",
                 Instant.parse("2026-06-01T06:00:01Z"), List.of("HIGH_VELOCITY"), Map.of(), Map.of(), true
         );
     }
@@ -118,7 +118,7 @@ class TransactionScoredEventCompatibilityTest {
         return tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
     }
 
-    private String oldJson() {
+    private String currentJson() {
         return """
                 {
                   "eventId": "evt-1",
@@ -131,8 +131,8 @@ class TransactionScoredEventCompatibilityTest {
                   "fraudScore": 0.82,
                   "riskLevel": "HIGH",
                   "scoringStrategy": "RULE_BASED",
-                  "modelName": "rules",
-                  "modelVersion": "v1",
+                  "modelName": "rule-based-engine",
+                  "modelVersion": "v2",
                   "inferenceTimestamp": "2026-06-01T06:00:01Z",
                   "reasonCodes": ["HIGH_VELOCITY"],
                   "scoreDetails": {},
@@ -143,7 +143,7 @@ class TransactionScoredEventCompatibilityTest {
     }
 
     private String newJson(String futureField) {
-        return oldJson().replace(
+        return currentJson().replace(
                 "\"alertRecommended\": true",
                 """
                 "alertRecommended": true,
@@ -183,7 +183,7 @@ class TransactionScoredEventCompatibilityTest {
     }
 
     private String newJsonWithAnalystRecommendation() {
-        return oldJson().replace(
+        return currentJson().replace(
                 "\"alertRecommended\": true",
                 """
                 "alertRecommended": true,

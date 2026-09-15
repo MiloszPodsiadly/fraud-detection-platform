@@ -3,6 +3,9 @@ package com.frauddetection.scoring.engine.ml;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.reason.ReasonCode;
+import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
+import com.frauddetection.scoring.config.ScoringMode;
+import com.frauddetection.scoring.context.ScoringContext;
 import org.junit.jupiter.api.Test;
 
 import static com.frauddetection.scoring.engine.ml.PythonMlSignalEngineTestSupport.context;
@@ -27,6 +30,26 @@ class PythonMlSignalEngineSourceOfTruthMappingTest {
         assertThat(source.lastRequest()).isNotNull();
         assertThat(result.score()).isEqualTo(0.73d);
         assertThat(result.riskLevel()).isEqualTo(RiskLevel.MEDIUM);
+    }
+
+    @Test
+    void adapterUsesCanonicalSnapshotFromScoringContext() {
+        PythonMlSignalEngineTestSupport.RecordingMlSource source = sourceReturning(validResult(0.73d, RiskLevel.MEDIUM));
+        PythonMlSignalEngine adapter = new PythonMlSignalEngine(source);
+        var transaction = TransactionFixtures.enrichedTransaction().build();
+        var contextSnapshot = java.util.Map.<String, Object>of("contextOnlyFeature", "canonical-source");
+        ScoringContext context = new ScoringContext(
+                transaction,
+                contextSnapshot,
+                ScoringMode.ML,
+                transaction.correlationId(),
+                PythonMlSignalEngineTestSupport.RECEIVED_AT
+        );
+
+        adapter.evaluate(context);
+
+        assertThat(source.lastRequest().featureSnapshot()).containsExactlyEntriesOf(contextSnapshot);
+        assertThat(source.lastRequest().featureSnapshot()).isNotSameAs(transaction.featureSnapshot());
     }
 
     @Test

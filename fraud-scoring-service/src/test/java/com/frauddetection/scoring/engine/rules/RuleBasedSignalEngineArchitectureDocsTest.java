@@ -16,8 +16,8 @@ class RuleBasedSignalEngineArchitectureDocsTest {
         String docs = document.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
 
         assertThat(docs)
-                .contains("historical fdp-87 adapter foundation")
-                .contains("superseded for fdp-129 runtime semantics")
+                .contains("current rules v2 diagnostic adapter contract")
+                .contains("historical fdp-87 notes retained only as background")
                 .contains("rulebasedsignalengine")
                 .contains("fraudsignalengine")
                 .contains("scoringcontext")
@@ -32,13 +32,17 @@ class RuleBasedSignalEngineArchitectureDocsTest {
                 .contains("high thresholds")
                 .contains("critical thresholds")
                 .contains("local score calculations")
-                .contains("fdp-129 supersedes that historical non-goal")
-                .contains("must not be used to claim that those fdp-129 runtime components are absent")
+                .contains("the current runtime supersedes that historical non-goal")
+                .contains("must not be used to claim that those runtime components are absent")
                 .contains("must use `featuresnapshotreader`")
                 .contains("must not call `context.featuresnapshot().get")
                 .contains("must not cast raw `map<string, object>`")
                 .contains("must not use `featuresnapshotkeypolicy.isallowedfeaturekey` as permission")
-                .contains("fdp-129 preflight covers the canonical rules v1 snapshot facts")
+                .contains("canonical rules v2 snapshot facts")
+                .contains("removed feature-flag")
+                .contains("case-candidate")
+                .contains("top-level duplicate event representations are not part of the current production scoring policy")
+                .contains("rulesv2inputvalidator")
                 .contains("primary scoring failure and diagnostic adapter degradation are intentionally different runtime boundaries")
                 .contains("present")
                 .contains("missing")
@@ -60,7 +64,8 @@ class RuleBasedSignalEngineArchitectureDocsTest {
                 .contains("amount raw values")
                 .contains("transaction ids")
                 .contains("no fake scored event is fabricated")
-                .contains("eligible ml diagnostics can still execute");
+                .contains("eligible ml diagnostics can still execute")
+                .contains("current rules scoring uses `rule-based-engine` / `v2` and adapter version `2.0.0`");
 
         assertThat(docs)
                 .doesNotContain("adapter is production scoring source")
@@ -71,7 +76,9 @@ class RuleBasedSignalEngineArchitectureDocsTest {
                 .doesNotContain("automatic approve is included")
                 .doesNotContain("automatic decline is included")
                 .doesNotContain("includes final banking decisioning")
-                .doesNotContain("ml final decision source");
+                .doesNotContain("ml final decision source")
+                .doesNotContain("rulesfeatureinputvalidator")
+                .doesNotContain("rules v1 compatibility is explicit");
     }
 
     private Path docsRoot() {

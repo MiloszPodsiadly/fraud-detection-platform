@@ -278,7 +278,7 @@ class SuspiciousTransactionLinkedAlertContextControllerTest {
                                 0.93,
                                 com.frauddetection.common.events.enums.RiskLevel.HIGH,
                                 com.frauddetection.common.events.enums.AlertStatus.OPEN,
-                                java.util.List.of("HIGH_AMOUNT"),
+                                java.util.List.of("HIGH_TRANSACTION_AMOUNT"),
                                 java.time.Instant.parse("2026-05-19T10:00:00Z"),
                                 null,
                                 "corr-1",

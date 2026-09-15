@@ -30,7 +30,7 @@ class ReasonCodeTest {
         assertThat(wireValues).contains(
                 "COUNTRY_MISMATCH",
                 "HIGH_TRANSACTION_AMOUNT",
-                "RAPID_TRANSFER_FRAUD_CASE",
+                "RAPID_PLN_20K_BURST",
                 "ML_MODEL_UNAVAILABLE",
                 "UNKNOWN"
         );
@@ -54,56 +54,69 @@ class ReasonCodeTest {
     }
 
     @Test
-    void parsesCanonicalAndLegacyValuesWithoutThrowing() {
-        assertThat(ReasonCode.parseLegacy("HIGH_AMOUNT").reasonCode()).isEqualTo(ReasonCode.HIGH_TRANSACTION_AMOUNT);
-        assertThat(ReasonCode.parseLegacy("high_amount").reasonCode()).isEqualTo(ReasonCode.HIGH_TRANSACTION_AMOUNT);
-        assertThat(ReasonCode.parseLegacy(" High_Amount ").reasonCode()).isEqualTo(ReasonCode.HIGH_TRANSACTION_AMOUNT);
-        assertThat(ReasonCode.parseLegacy("countryMismatch").reasonCode()).isEqualTo(ReasonCode.COUNTRY_MISMATCH);
-        assertThat(ReasonCode.parseLegacy("RAPID_PLN_20K_BURST").reasonCode()).isEqualTo(ReasonCode.RAPID_PLN_20K_BURST);
-        assertThat(ReasonCode.parseLegacy("rapidTransferFraudCaseCandidate").reasonCode())
-                .isEqualTo(ReasonCode.RAPID_TRANSFER_FRAUD_CASE);
+    void parsesCanonicalValuesWithoutThrowing() {
+        assertThat(ReasonCode.parseInput("HIGH_TRANSACTION_AMOUNT").reasonCode()).isEqualTo(ReasonCode.HIGH_TRANSACTION_AMOUNT);
+        assertThat(ReasonCode.parseInput("COUNTRY_MISMATCH").reasonCode()).isEqualTo(ReasonCode.COUNTRY_MISMATCH);
+        assertThat(ReasonCode.parseInput("RAPID_PLN_20K_BURST").reasonCode()).isEqualTo(ReasonCode.RAPID_PLN_20K_BURST);
+    }
+
+    @Test
+    void featureNamesAreNotPublicReasonCodeAliases() {
+        assertThat(ReasonCode.parseInput("deviceNovelty").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
+        assertThat(ReasonCode.parseInput("countryMismatch").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
+        assertThat(ReasonCode.parseInput("proxyOrVpnDetected").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
+        assertThat(ReasonCode.parseInput("merchantFrequency7d").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
+        assertThat(ReasonCode.parseInput("recentTransactionCount").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
+        assertThat(ReasonCode.parseInput("transactionVelocityPerMinute").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
+        assertThat(ReasonCode.parseInput("recentAmountSumPln").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
+        assertThat(ReasonCode.parseInput("rapidTransferBurst").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
     }
 
     @Test
     void handlesNullBlankAndFutureValuesExplicitly() {
-        assertThat(ReasonCode.parseLegacy(null)).isEqualTo(new ReasonCodeParseResult(
+        assertThat(ReasonCode.parseInput(null)).isEqualTo(new ReasonCodeParseResult(
                 ReasonCode.UNKNOWN,
                 ReasonCodeParseStatus.NULL_ITEM,
                 null
         ));
-        assertThat(ReasonCode.parseLegacy("   ").status()).isEqualTo(ReasonCodeParseStatus.BLANK);
-        assertThat(ReasonCode.parseLegacy("some-new-future-code")).isEqualTo(new ReasonCodeParseResult(
+        assertThat(ReasonCode.parseInput("   ").status()).isEqualTo(ReasonCodeParseStatus.BLANK);
+        assertThat(ReasonCode.parseInput("some-new-future-code")).isEqualTo(new ReasonCodeParseResult(
                 ReasonCode.UNKNOWN,
                 ReasonCodeParseStatus.UNSUPPORTED,
                 "some-new-future-code"
         ));
-        assertThat(ReasonCode.parseLegacy("FRAUD_CONFIRMED").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
-        assertThat(ReasonCode.parseLegacy("AML_ESCALATION_REQUIRED").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
+        assertThat(ReasonCode.parseInput("FRAUD_CONFIRMED").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
+        assertThat(ReasonCode.parseInput("AML_ESCALATION_REQUIRED").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
+        assertThat(ReasonCode.parseInput("UNSUPPORTED_FUTURE_CASE_SIGNAL")).isEqualTo(new ReasonCodeParseResult(
+                ReasonCode.UNKNOWN,
+                ReasonCodeParseStatus.UNSUPPORTED,
+                "UNSUPPORTED_FUTURE_CASE_SIGNAL"
+        ));
         assertThat(ReasonCode.known("UNKNOWN")).isEmpty();
     }
 
     @Test
     void unknownCompatibilityMarkerIsNotKnownScoringSignal() {
-        List<ReasonCodeParseResult> parsed = ReasonCode.parseLegacyList(List.of("UNKNOWN"));
+        List<ReasonCodeParseResult> parsed = ReasonCode.parseInputList(List.of("UNKNOWN"));
 
         assertThat(ReasonCode.known("UNKNOWN")).isEmpty();
-        assertThat(ReasonCode.parseLegacy("UNKNOWN").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
+        assertThat(ReasonCode.parseInput("UNKNOWN").reasonCode()).isEqualTo(ReasonCode.UNKNOWN);
         assertThat(ReasonCode.supportedWireValues(parsed)).isEmpty();
     }
 
     @Test
     void nullListMeansNoReasonCodeDataRatherThanConcreteUnknownSignal() {
-        assertThat(ReasonCode.parseLegacyList(null)).isEmpty();
-        assertThat(ReasonCode.parseLegacyList(List.of())).isEmpty();
+        assertThat(ReasonCode.parseInputList(null)).isEmpty();
+        assertThat(ReasonCode.parseInputList(List.of())).isEmpty();
     }
 
     @Test
     void preservesUnsupportedRawValueInParseResultAndEmitsCompatibilityWireValues() {
-        List<ReasonCodeParseResult> parsed = ReasonCode.parseLegacyList(Arrays.asList(
+        List<ReasonCodeParseResult> parsed = ReasonCode.parseInputList(Arrays.asList(
                 "COUNTRY_MISMATCH",
                 "some-new-future-code",
                 null,
-                "countryMismatch"
+                "COUNTRY_MISMATCH"
         ));
 
         assertThat(parsed).extracting(ReasonCodeParseResult::rawValue)
@@ -114,7 +127,7 @@ class ReasonCodeTest {
 
     @Test
     void supportedWireValuesOnlyEmitKnownScoringSignals() {
-        List<ReasonCodeParseResult> parsed = ReasonCode.parseLegacyList(Arrays.asList(
+        List<ReasonCodeParseResult> parsed = ReasonCode.parseInputList(Arrays.asList(
                 "COUNTRY_MISMATCH",
                 "some-new-future-code",
                 " ",
@@ -128,17 +141,4 @@ class ReasonCodeTest {
                 .containsExactly("COUNTRY_MISMATCH");
     }
 
-    @Test
-    void rapidTransferFraudCaseIsCandidateSignalOnly() {
-        ReasonCode reasonCode = ReasonCode.RAPID_TRANSFER_FRAUD_CASE;
-        String definition = (reasonCode.title() + " " + reasonCode.description()).toLowerCase(Locale.ROOT);
-
-        assertThat(reasonCode.category()).isEqualTo(ReasonCodeCategory.VELOCITY);
-        assertThat(reasonCode.description()).containsAnyOf("candidate", "signal");
-        assertThat(definition).doesNotContain("confirmed");
-        assertThat(definition).doesNotContain("exists");
-        assertThat(definition).doesNotContain("created");
-        assertThat(definition).doesNotContain("verdict");
-        assertThat(definition).doesNotContain("final");
-    }
 }

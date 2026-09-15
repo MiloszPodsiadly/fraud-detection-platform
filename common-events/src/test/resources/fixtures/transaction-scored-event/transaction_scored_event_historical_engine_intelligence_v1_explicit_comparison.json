@@ -23,8 +23,8 @@
   "fraudScore": 0.82,
   "riskLevel": "HIGH",
   "scoringStrategy": "RULE_BASED",
-  "modelName": "rule-engine",
-  "modelVersion": "v1",
+  "modelName": "rule-based-engine",
+  "modelVersion": "v2",
   "inferenceTimestamp": "2026-06-01T06:00:01Z",
   "reasonCodes": [
     "HIGH_VELOCITY"
@@ -36,7 +36,6 @@
   "engineIntelligence": {
     "contractVersion": 1,
     "generatedAt": "2026-06-01T06:00:01Z",
-    "futureBoundedSummaryField": "ignored",
     "engines": [
       {
         "engineId": "rules.primary",
@@ -46,8 +45,7 @@
         "scoreBucket": "HIGH",
         "reasonCodes": [
           "HIGH_VELOCITY"
-        ],
-        "futureBoundedEngineField": "ignored"
+        ]
       },
       {
         "engineId": "ml.python.primary",
@@ -57,8 +55,7 @@
         "scoreBucket": "HIGH",
         "reasonCodes": [
           "ML_MODEL_SIGNAL"
-        ],
-        "futureBoundedEngineField": "ignored"
+        ]
       }
     ],
     "comparison": {
@@ -66,8 +63,7 @@
       "comparedEngineIds": ["rules.primary", "ml.python.primary"],
       "agreementStatus": "AGREEMENT",
       "riskMismatchStatus": "SAME_RISK_LEVEL",
-      "scoreDeltaBucket": "SMALL",
-      "futureBoundedComparisonField": "ignored"
+      "scoreDeltaBucket": "SMALL"
     },
     "diagnosticSignals": [
       {
@@ -77,12 +73,9 @@
         "signalCategory": "FRAUD_SIGNAL",
         "riskLevel": "HIGH",
         "scoreBucket": "HIGH",
-        "reasonCode": "HIGH_VELOCITY",
-        "futureBoundedDiagnosticSignalField": "ignored"
+        "reasonCode": "HIGH_VELOCITY"
       }
     ],
-    "warnings": [],
-    "futureBoundedTrailingSummaryField": "ignored"
-  },
-  "futureTopLevelField": "ignored"
+    "warnings": []
+  }
 }

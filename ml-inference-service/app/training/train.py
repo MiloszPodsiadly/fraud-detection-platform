@@ -6,9 +6,12 @@ from pathlib import Path
 from app.data.dataset import Dataset
 from app.data.splitting import split_dataset
 from app.evaluation.evaluate import evaluate_scores
+from app.features.feature_contract import FEATURE_CONTRACT
 from app.features.feature_pipeline import FeaturePipeline
 from app.models.logistic_model import LogisticFraudModel
 from app.models.xgboost_model import XGBoostFraudModel
+
+CANONICAL_MODEL_VERSION = "2026-09-15.rules-v2-canonical-ml-pln.v1"
 
 
 def train(
@@ -50,8 +53,10 @@ def train_model_with_evaluation(
 ) -> tuple[LogisticFraudModel | XGBoostFraudModel, dict[str, object]]:
     """Train and evaluate any supported model through the same lifecycle."""
     splits = split_dataset(dataset, mode="temporal")
+    _require_binary_evaluation_splits(splits, "temporal")
     model, test_report = _train_on_splits(splits, model_type, epochs, learning_rate, training_mode)
     out_of_time_splits = split_dataset(dataset, mode="out_of_time", cutoff_ratio=0.6)
+    _require_binary_evaluation_splits(out_of_time_splits, "out_of_time")
     _, out_of_time_report = _train_on_splits(out_of_time_splits, model_type, epochs, learning_rate, training_mode)
     test_report["outOfTimeEvaluation"] = {
         "prAuc": out_of_time_report["prAuc"],
@@ -105,7 +110,22 @@ def _train_on_splits(
     test_report["featureSetUsed"] = feature_set
     test_report["modelType"] = model_type
     test_report["modelFamily"] = model.model_family
+    test_report["modelVersion"] = model.model_version
+    test_report["featureContractVersion"] = FEATURE_CONTRACT.version
+    test_report["featureSchemaVersion"] = FEATURE_CONTRACT.version
+    test_report["featureSetVersion"] = FEATURE_CONTRACT.version
     return model, test_report
+
+
+def _require_binary_evaluation_splits(splits, split_name: str) -> None:
+    distribution = splits.metadata["classDistribution"]
+    for partition in ("validation", "test"):
+        counts = distribution[partition]
+        if counts["fraud"] <= 0 or counts["legitimate"] <= 0:
+            raise ValueError(
+                f"{split_name} {partition} split must contain fraud and legitimate examples; "
+                f"distribution={counts}"
+            )
 
 
 def train_model(
@@ -149,7 +169,7 @@ def write_artifact(
     """Persist a trained model artifact compatible with the inference service."""
     artifact = {
         "modelName": "python-logistic-fraud-model",
-        "modelVersion": "2026-04-21.trained.v1",
+        "modelVersion": CANONICAL_MODEL_VERSION,
         "modelType": model_type,
         "modelFamily": "LOGISTIC_REGRESSION",
         "bias": bias,
@@ -165,12 +185,17 @@ def write_artifact(
             "examples": examples,
             "trainingMode": training_mode,
             "featureSetUsed": list(weights),
+            "featureContractVersion": FEATURE_CONTRACT.version,
+            "featureSetVersion": FEATURE_CONTRACT.version,
         },
         "trainingMode": training_mode,
         "featureSetUsed": list(weights),
         "featureSchema": list(weights),
+        "featureContractVersion": FEATURE_CONTRACT.version,
+        "featureSchemaVersion": FEATURE_CONTRACT.version,
+        "featureSetVersion": FEATURE_CONTRACT.version,
         "featureImportance": {name: abs(weight) for name, weight in weights.items()},
-        "evaluation": evaluation or {},
+        "evaluation": _artifact_evaluation_summary(evaluation or {}),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -183,6 +208,7 @@ def write_model_artifact(
         evaluation: dict[str, object],
 ) -> None:
     """Persist any supported model with aligned artifact metadata."""
+    model.model_version = CANONICAL_MODEL_VERSION
     if isinstance(model, LogisticFraudModel):
         write_artifact(
             path,
@@ -197,6 +223,55 @@ def write_model_artifact(
     model.save(path, metadata={"examples": examples, "evaluation": evaluation})
 
 
+def _artifact_evaluation_summary(evaluation: dict[str, object]) -> dict[str, object]:
+    summary_keys = [
+        "rows",
+        "positiveLabels",
+        "negativeLabels",
+        "prAuc",
+        "rocAuc",
+        "optimalThreshold",
+        "selectedThresholdSource",
+        "trainingMode",
+        "featureSetUsed",
+        "modelType",
+        "modelFamily",
+        "modelVersion",
+        "featureContractVersion",
+        "featureSchemaVersion",
+        "featureSetVersion",
+        "evaluationComparison",
+        "stabilityAssessment",
+    ]
+    summary = {
+        key: evaluation[key]
+        for key in summary_keys
+        if key in evaluation
+    }
+    split_metadata = evaluation.get("splitMetadata")
+    if isinstance(split_metadata, dict):
+        summary["splitMetadata"] = _compact_split_metadata(split_metadata)
+    out_of_time = evaluation.get("outOfTimeEvaluation")
+    if isinstance(out_of_time, dict):
+        summary["outOfTimeEvaluation"] = {
+            key: out_of_time[key]
+            for key in ["prAuc", "rocAuc", "optimalThreshold"]
+            if key in out_of_time
+        }
+        out_of_time_split = out_of_time.get("splitMetadata")
+        if isinstance(out_of_time_split, dict):
+            summary["outOfTimeEvaluation"]["splitMetadata"] = _compact_split_metadata(out_of_time_split)
+    return summary
+
+
+def _compact_split_metadata(split_metadata: dict[str, object]) -> dict[str, object]:
+    return {
+        key: value
+        for key, value in split_metadata.items()
+        if key not in {"trainIndices", "validationIndices", "testIndices"}
+    }
+
+
 def _new_model(
         model_type: str,
         training_mode: str,
@@ -208,6 +283,7 @@ def _new_model(
         model = XGBoostFraudModel()
     else:
         raise ValueError("model_type must be 'logistic' or 'xgboost'.")
+    model.model_version = CANONICAL_MODEL_VERSION
     model.training_mode = training_mode
     model.feature_schema = list(feature_schema)
     if hasattr(model, "weights") and not getattr(model, "weights"):

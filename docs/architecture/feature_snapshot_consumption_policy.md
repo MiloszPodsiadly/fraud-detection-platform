@@ -1,6 +1,6 @@
 # Feature Snapshot Consumption Policy
 
-Status: current feature-snapshot consumption policy with historical FDP-85 notes and FDP-129 runtime updates.
+Status: current feature-snapshot consumption policy with historical FDP-85/FDP-129 notes retained only as background.
 
 ## Historical FDP-85 Scope
 
@@ -9,9 +9,9 @@ did not add runtime adapters, orchestrator wiring, public Engine Intelligence ev
 projection, API exposure, or Analyst Console rendering. Those FDP-85 non-goals remain useful history only; they are
 not a description of the current branch.
 
-## Current FDP-129 Runtime Architecture
+## Current Runtime Architecture
 
-The current FDP-129 branch has a diagnostic multi-engine runtime. Rules, ML, and optional Velocity execute through
+The current branch has a diagnostic multi-engine runtime. Rules, ML, and optional Velocity execute through
 the current orchestrator path and produce bounded internal engine results that are aggregated into public
 `TransactionScoredEvent.engineIntelligence` when diagnostic emission is enabled. Alert-service can project that
 public summary, expose bounded read DTOs/OpenAPI, and the Analyst Console can render those bounded diagnostics.
@@ -25,8 +25,31 @@ not raw snapshot data.
 
 `common-events` owns the event wire boundary for feature-snapshot values through `FraudFeatureContract`,
 `FeatureSnapshotWireValueNormalizer`, and `FeatureSnapshotWireValueDeserializer`. Decimal wire values such as
-`recentAmountSumPln` and `rapidTransferThresholdPln` must round-trip as `BigDecimal`; integer, double, boolean, and
+`recentAmountSumPln` and `currentTransactionAmountPln` must round-trip as `BigDecimal`; integer, double, boolean, and
 string facts must round-trip as their declared scalar types.
+
+`transactions.enriched` uses the shared Jackson JSON serializer/deserializer in `common-events`; there is no Schema
+Registry, Avro, or Protobuf contract in the current implementation. The `TransactionEnrichedEvent` JSON contract is
+the event envelope plus `featureSnapshot`. Fraud fact fields such as `recentTransactionCount`,
+`recentAmountSum`, `transactionVelocityPerMinute`, `merchantFrequency7d`, `deviceNovelty`, `countryMismatch`, and
+`proxyOrVpnDetected` must not be dual-written as top-level event fields.
+
+The hard cutover line is the canonical snapshot consumer cutover boundary: deployed consumers must already read
+canonical facts from `featureSnapshot` before the current producer shape is used. Current consumers ignore unknown
+duplicate top-level fields when reading older enriched-event JSON during replay, but current producers no longer write
+those duplicates and no active consumer may depend on them. Retry and dead-letter handling preserves the same
+canonical payload shape; invalid current canonical facts are dead-lettered rather than repaired from removed
+duplicates.
+
+The rollout order is consumer-first:
+
+1. all independently deployed consumers become `featureSnapshot`-ready;
+2. deploy those consumers;
+3. verify no active dependency on removed top-level fraud facts remains;
+4. deploy the producer that writes the snapshot-only current shape;
+5. observe retry, DLT, and replay paths;
+6. wait the agreed Kafka retention period or migrate retained durable data where necessary;
+7. delete temporary replay compatibility after the explicit cutoff.
 
 Services that consume event payloads must not repair malformed current canonical facts by coercing strings, booleans,
 nested objects, or oversized numeric input into acceptable scalar values. Missing old data is compatibility; present
@@ -52,24 +75,21 @@ Examples:
 - `recentTransactionCount` is integer.
 - `transactionVelocityPerMinute` is double.
 - `currency` is string.
-- `rapidTransferTotalPln` is decimal.
-- `rapidTransferTransactionIds` is not consumable by the v1 scalar reader.
-- `featureFlags` is not consumable by the v1 scalar reader.
+- `rapidTransferTransactionIds` is not consumable by current Rules scoring.
+- Unsupported policy marker fields are not consumable by current Rules scoring.
 
 Wrong accessor use is not valid consumption. `stringValue("deviceNovelty")` and
 `booleanValue("currency")` must fail with bounded status rather than silently coercing data.
 
 ## Canonical-Versus-Legacy Precedence
 
-Current canonical feature-snapshot values take precedence over legacy top-level facts or legacy flags. When a
-canonical field required by an adapter is present and valid, the adapter uses it and may compare it with retained
-top-level facts for consistency. When that canonical field is present but invalid, wrong-typed, out of domain,
-nested, or contradictory, the adapter must fail closed. It must not activate a legacy fallback and must not publish a
-fake low-risk or zero-score result.
+Current canonical feature-snapshot values are authoritative for new scoring. When a canonical field required by an
+adapter is present and valid, the adapter uses it. When that canonical field is present but invalid, wrong-typed, out
+of domain, nested, or contradictory, the adapter must fail closed. It must not activate a scoring fallback and must
+not publish a fake low-risk or zero-score result.
 
-Genuinely absent canonical fields may still use explicitly supported v1 compatibility paths where repository-owned
-current behavior depends on them. This branch intentionally keeps legacy flags and top-level fields still required by
-Rules V1 fallback, replay, and rolling deployment compatibility.
+Historical replay compatibility belongs to explicit event/read compatibility boundaries. It must not be implemented
+as a current Rules scoring fallback from removed feature-flag, case-candidate, or top-level duplicate facts.
 
 ## Invalid, Present, And Missing Semantics
 
@@ -86,7 +106,7 @@ type is not coerced: string `"true"` is not boolean `true`, string `"3"` is not 
 boolean `true`. `NOT_ALLOWED` and exception messages must not expose raw rejected keys.
 
 Top-level null keys are invalid. Top-level null values are invalid. Unknown or unavailable values must not be
-represented by null. Arbitrary nested structures are not consumed by the v1 scalar reader. Nested `Map` or `List`
+represented by null. Arbitrary nested structures are not consumed by the scalar reader. Nested `Map` or `List`
 values are not scalar facts and scalar accessors return `INVALID_TYPE` for them.
 
 ## Evidence And Privacy Restrictions
@@ -103,63 +123,38 @@ training labels, ground truth, payment authorization instructions, or final deci
 
 ## Velocity PT1M Policy
 
-FDP-129 adds the optional `velocity.primary` diagnostic adapter. Velocity reads only typed factual scalar features
+The optional `velocity.primary` diagnostic adapter reads only typed factual scalar features
 through `FeatureSnapshotReader`: `recentTransactionCount`, `recentTransactionCountWindow`, `recentAmountSumPln`, and
 `transactionVelocityPerMinute`.
 
-Velocity V1 requires `recentTransactionCountWindow=PT1M`; producer meaning, consumer validation, and policy meaning
+Velocity v1 is the current independent Velocity diagnostic contract, not a Rules V1 compatibility path. It requires
+`recentTransactionCountWindow=PT1M`; producer meaning, consumer validation, and policy meaning
 all use that one-minute observation window. Changing the window requires a versioned contract and policy update.
 Velocity validates count/window/rate consistency and degrades on impossible present values instead of silently
 choosing one fact. Velocity remains optional, diagnostic-only, and not a calibrated probability, final decision,
 payment authorization, case action, threshold recommendation, or analyst recommendation source.
 
-`rapidTransferFraudCaseCandidate`, `rapidTransferThresholdPln`, `rapidTransferCount`,
-`rapidTransferTotalPln`, and `rapidTransferTransactionIds` remain in the enriched feature snapshot for compatibility
-with existing consumers. Velocity V1 does not consume them as its primary policy input; rapid-transfer threshold
-semantics are owned by `FraudFeatureThresholdContract`.
+Velocity v1 consumes current canonical count/window/rate/amount facts only; rapid-transfer threshold semantics are
+owned by `FraudFeatureThresholdContract`.
 
 ## Rules Canonical Input Policy
 
-Rules currently use canonical feature-snapshot facts where available and keep a deliberate v1 compatibility path for
-legacy fields still produced or replayed in this repository. Present-invalid canonical Rules inputs fail closed:
-string counts, string decimals, negative counts, negative amounts,
-canonical/top-level conflicts, invalid or missing required canonical or top-level time windows, nested values, booleans used as
-numbers, and oversized numeric input must not become `AVAILABLE LOW` and must not fall back to legacy flags.
+Rules V2 uses canonical feature-snapshot facts only. Required input is:
+`recentTransactionCount`, `recentTransactionCountWindow`, `transactionVelocityPerMinute`,
+`recentAmountSumPln`, `recentAmountSumWindow`, `currentTransactionAmountPln`, `merchantFrequency7d`,
+`deviceNovelty`, `countryMismatch`, `proxyOrVpnDetected`, and `currency`.
 
-Rules V1 time-dependent canonical facts use the explicit `PT1M` window. `recentTransactionCount` requires
-`recentTransactionCountWindow=PT1M`; `recentAmountSumPln` requires `recentAmountSumWindow=PT1M`;
-`rapidTransferCount` and `rapidTransferTotalPln` require `rapidTransferWindow=PT1M`. Present-invalid window data is
-canonical corruption, not compatibility.
+Present-invalid canonical Rules inputs fail closed: string counts, string decimals, negative counts, negative
+amounts, invalid or missing required canonical time windows, nested values, booleans used as numbers, and oversized
+numeric input must not become `AVAILABLE LOW` and must not fall back to removed feature-flag or case-candidate
+representations.
 
-Valid canonical facts are authoritative. Predicate false is not missing: a false canonical high-amount or rapid
-burst predicate cannot be overridden by legacy `HIGH_AMOUNT_ACTIVITY`, legacy
-`RAPID_PLN_20K_BURST`, or `rapidTransferFraudCaseCandidate`. PLN thresholds consume canonical PLN facts or explicitly
-PLN-denominated top-level compatibility facts only.
+Rules V2 time-dependent canonical facts use the explicit `PT1M` window. `recentTransactionCount` requires
+`recentTransactionCountWindow=PT1M`; `recentAmountSumPln` requires `recentAmountSumWindow=PT1M`. Present-invalid
+window data is canonical corruption, not compatibility.
 
-Top-level Rules V1 compatibility facts are time-dependent too. A top-level `recentTransactionCount` can contribute
-only with `recentTransactionCountWindow=PT1M`; a top-level `recentAmountSum` can contribute only with
-`recentAmountSumWindow=PT1M`. Present-invalid top-level windows fail closed and do not activate legacy flag or
-candidate fallback. Missing canonical facts may use legacy compatibility only when the historical representation is
-genuinely absent, not when current data is malformed or temporally ambiguous.
-
-Rules V1 compatibility preserves the historical contribution actually present in the payload. Current canonical
-producer payloads still publish `rule-based-engine` / `v1` and retain the approved V1 total for each semantic fact.
-Historical partial representations do not receive unavailable components. The retained V1 compatibility weights are:
-
-| Rules family | Compatibility input | Contribution |
-| --- | --- | --- |
-| High velocity | `HIGH_VELOCITY` legacy flag | `0.20` |
-| High velocity | top-level `recentTransactionCount >= 5` with `PT1M` window | `0.10` |
-| High velocity | top-level `transactionVelocityPerMinute >= 5` | `0.12` |
-| Recent amount | `HIGH_AMOUNT_ACTIVITY` legacy flag | `0.14` |
-| Recent amount | top-level PLN amount threshold with `PT1M` window | `0.10` |
-| Rapid transfer | `RAPID_PLN_20K_BURST` legacy flag | `0.45` |
-| Rapid transfer | `rapidTransferFraudCaseCandidate=true` | `0.20` |
-
-The authoritative regression fixture is
-`fraud-scoring-service/src/test/resources/fixtures/rules/rules_v1_compatibility_matrix.json`. It freezes full
-canonical payloads, partial historical payloads, redundant matching payloads, contradictory legacy payloads,
-supported currencies, unsupported currency rejection, risk boundaries, and temporal attacks.
+Valid canonical facts are authoritative. Predicate false is not missing, and PLN thresholds consume canonical PLN
+facts only.
 
 Supported monetary currencies for ingest and enrichment are `PLN`, `EUR`, `USD`, and `GBP`. Unsupported or null
 currencies are rejected at the boundary and fail closed in enrichment. Unknown currencies are never converted as PLN
@@ -179,30 +174,14 @@ This branch deliberately retains compatibility that is still needed for durabili
   semantic triplet.
 - Old-event `engineIntelligence == null` handling so historical Kafka events remain readable as explicit absence.
 - Retained Kafka and Mongo replay support for existing stored events and projections.
-- Still-produced Feature Enricher compatibility fields required by current downstream readers.
-- Legacy flags and top-level facts still required by the current Rules V1 compatibility path when canonical fields
-  are genuinely absent.
-- Source-compatible constructors used by repository-controlled consumers during staged rollout.
+- Old enriched-event JSON with duplicate top-level fraud facts can still be deserialized because unknown JSON
+  properties are ignored, but those duplicates are not part of the current Java record contract.
 
 Compatibility is narrow and fail-closed. It is not a SOLID violation merely because it exists; ACID durability,
 historical replay, and rolling deployment safety take precedence over cosmetic removal.
 
-## Legacy Retirement Preconditions
+## Retired Rules Inputs
 
-A later branch may retire compatibility only after an explicit gate, not in FDP-129. That follow-up scope should
-include:
-
-- inventory of compatibility readers and writers;
-- canonical-write and dual-read migration plan;
-- metrics proving actual fallback usage;
-- producer and deployment cutover;
-- Kafka retention and replay horizon review;
-- Mongo historical document migration or archival decision;
-- explicit feature/event contract version decision;
-- removal only after zero-use evidence;
-- rejection fixtures after the formal cutoff;
-- repository guards preventing reintroduction.
-
-The future branch will remove legacy flags, remove `rapidTransferFraudCaseCandidate`, remove retired top-level
-compatibility paths, introduce a clean canonical Rules V2 through explicit version migration, and run V1-versus-V2
-shadow comparison before rollout. FDP-129 does not implement that future policy.
+The current Rules scoring policy consumes current canonical feature facts only. Removed feature-flag,
+case-candidate, and top-level duplicate enriched-event facts have been physically removed from the current record
+contract; any historical duplicate JSON fields are tolerated only as ignored unknown properties during replay.

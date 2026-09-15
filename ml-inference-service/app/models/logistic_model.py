@@ -5,6 +5,7 @@ from math import exp
 from pathlib import Path
 from typing import Any
 
+from app.features.feature_contract import FEATURE_CONTRACT
 from app.features.feature_pipeline import FeaturePipeline
 
 
@@ -13,15 +14,8 @@ class LogisticFraudModel:
 
     DEFAULT_WEIGHTS = {
         "recentTransactionCount": 0.35,
-        "recentAmountSum": 0.45,
+        "recentAmountSumPln": 0.45,
         "transactionVelocityPerMinute": 0.80,
-        "transactionVelocityPerHour": 0.0,
-        "transactionVelocityPerDay": 0.0,
-        "recentAmountAverage": 0.0,
-        "recentAmountStdDev": 0.0,
-        "amountDeviationFromUserMean": 0.0,
-        "merchantEntropy": 0.0,
-        "countryEntropy": 0.0,
         "merchantFrequency7d": 0.16,
         "deviceNovelty": 1.10,
         "countryMismatch": 1.30,
@@ -88,11 +82,16 @@ class LogisticFraudModel:
             "weights": self.weights,
             "thresholds": self.thresholds,
             "featureSchema": self.runtime_feature_names(),
+            "featureContractVersion": FEATURE_CONTRACT.version,
+            "featureSchemaVersion": FEATURE_CONTRACT.version,
+            "featureSetVersion": FEATURE_CONTRACT.version,
             "featureImportance": self.feature_importance(),
             "training": {
                 **(metadata or {}),
                 "trainingMode": self.training_mode,
                 "featureSetUsed": self.runtime_feature_names(),
+                "featureContractVersion": FEATURE_CONTRACT.version,
+                "featureSetVersion": FEATURE_CONTRACT.version,
             },
         }
         path.parent.mkdir(parents=True, exist_ok=True)

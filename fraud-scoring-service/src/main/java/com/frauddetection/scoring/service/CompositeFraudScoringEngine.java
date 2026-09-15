@@ -83,7 +83,7 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
         diagnostics.put("shadowModelName", mlResult.modelName());
         diagnostics.put("shadowModelVersion", mlResult.modelVersion());
         diagnostics.put("shadowFraudScore", mlResult.fraudScore());
-        diagnostics.put("shadowRiskLevel", mlResult.riskLevel().name());
+        diagnostics.put("shadowRiskLevel", riskLevelName(mlResult));
         diagnostics.put("modelMonitoring", ModelMonitoringMetrics.from(ScoringMode.SHADOW, ruleResult, mlResult, isModelAvailable(mlResult)));
         if (!isModelAvailable(mlResult)) {
             diagnostics.put("shadowFallbackReasonCode", FallbackReasonCodes.from(fallbackReason(mlResult)));
@@ -109,9 +109,9 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
         diagnostics.put("mlModelName", mlResult.modelName());
         diagnostics.put("mlModelVersion", mlResult.modelVersion());
         diagnostics.put("mlFraudScore", mlResult.fraudScore());
-        diagnostics.put("mlRiskLevel", mlResult.riskLevel().name());
-        diagnostics.put("scoreDelta", score(ruleResult) - score(mlResult));
-        diagnostics.put("riskLevelMatch", ruleResult.riskLevel() == mlResult.riskLevel());
+        diagnostics.put("mlRiskLevel", riskLevelName(mlResult));
+        diagnostics.put("scoreDelta", isModelAvailable(mlResult) ? score(ruleResult) - score(mlResult) : null);
+        diagnostics.put("riskLevelMatch", isModelAvailable(mlResult) ? ruleResult.riskLevel() == mlResult.riskLevel() : null);
         diagnostics.put("modelMonitoring", ModelMonitoringMetrics.from(ScoringMode.COMPARE, ruleResult, mlResult, isModelAvailable(mlResult)));
         if (!isModelAvailable(mlResult)) {
             diagnostics.put("mlFallbackReasonCode", FallbackReasonCodes.from(fallbackReason(mlResult)));
@@ -137,6 +137,10 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
 
     private double score(FraudScoreResult result) {
         return result.fraudScore() == null ? 0.0d : result.fraudScore();
+    }
+
+    private String riskLevelName(FraudScoreResult result) {
+        return result.riskLevel() == null ? null : result.riskLevel().name();
     }
 
     private void recordDisagreements(ScoringMode mode, FraudScoreResult ruleResult, FraudScoreResult mlResult) {

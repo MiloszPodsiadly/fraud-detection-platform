@@ -167,7 +167,7 @@ public final class RegulatedMutationAlertServiceProcessChaosHarness implements A
         servicePort = freePort();
         try {
             Files.createDirectories(logDirectory);
-            serviceProcess = new ProcessBuilder(alertServiceCommand(additionalArgs))
+            serviceProcess = new ProcessBuilder(alertServiceCommand(logName, additionalArgs))
                     .directory(Path.of("").toAbsolutePath().toFile())
                     .redirectOutput(logDirectory.resolve(logName + "-stdout.log").toFile())
                     .redirectError(logDirectory.resolve(logName + "-stderr.log").toFile())
@@ -253,9 +253,20 @@ public final class RegulatedMutationAlertServiceProcessChaosHarness implements A
         }
     }
 
-    private List<String> alertServiceCommand(List<String> additionalArgs) {
+    private List<String> alertServiceCommand(String logName, List<String> additionalArgs) {
+        List<String> args = alertServiceArgs(additionalArgs);
+        if (isWindows()) {
+            Path argFile = writeJavaArgFile(logName, args);
+            return List.of(javaExecutable(), "@" + argFile.toAbsolutePath());
+        }
         List<String> command = new ArrayList<>();
         command.add(javaExecutable());
+        command.addAll(args);
+        return command;
+    }
+
+    private List<String> alertServiceArgs(List<String> additionalArgs) {
+        List<String> command = new ArrayList<>();
         command.add("-cp");
         command.add(testClasspath());
         command.add(ALERT_SERVICE_MAIN_CLASS);
@@ -277,6 +288,17 @@ public final class RegulatedMutationAlertServiceProcessChaosHarness implements A
         command.add("--logging.level.root=WARN");
         command.addAll(additionalArgs);
         return command;
+    }
+
+    private Path writeJavaArgFile(String logName, List<String> args) {
+        try {
+            Files.createDirectories(logDirectory);
+            Path argFile = logDirectory.resolve(logName + "-java.args");
+            Files.write(argFile, args, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            return argFile;
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Unable to write FDP-36 alert-service JVM argument file", exception);
+        }
     }
 
     private JsonNode requestJson(HttpRequest request) {

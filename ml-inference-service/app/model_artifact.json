@@ -1,8 +1,158 @@
 {
-  "bias": -6.732499,
+  "bias": -4.463733,
+  "evaluation": {
+    "evaluationComparison": {
+      "outOfTimePrAuc": 0.678297,
+      "prAucDelta": 0.02782,
+      "temporalPrAuc": 0.706117
+    },
+    "featureContractVersion": "2026-09-15.rules-v2-canonical-ml-pln",
+    "featureSchemaVersion": "2026-09-15.rules-v2-canonical-ml-pln",
+    "featureSetUsed": [
+      "recentTransactionCount",
+      "recentAmountSumPln",
+      "transactionVelocityPerMinute",
+      "merchantFrequency7d",
+      "deviceNovelty",
+      "countryMismatch",
+      "proxyOrVpnDetected",
+      "highRiskFlagCount",
+      "rapidTransferBurst"
+    ],
+    "featureSetVersion": "2026-09-15.rules-v2-canonical-ml-pln",
+    "modelFamily": "LOGISTIC_REGRESSION",
+    "modelType": "logistic",
+    "modelVersion": "2026-09-15.rules-v2-canonical-ml-pln.v1",
+    "negativeLabels": 980,
+    "optimalThreshold": {
+      "alertRate": 0.013,
+      "f1": 0.787879,
+      "falsePositiveRate": 0.0,
+      "fraudCaptureRate": 0.65,
+      "precision": 1.0,
+      "recall": 0.65,
+      "threshold": 0.1
+    },
+    "outOfTimeEvaluation": {
+      "optimalThreshold": {
+        "alertRate": 0.0,
+        "f1": 0.0,
+        "falsePositiveRate": 0.0,
+        "fraudCaptureRate": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "threshold": 0.1
+      },
+      "prAuc": 0.678297,
+      "rocAuc": 0.788807,
+      "splitMetadata": {
+        "classDistribution": {
+          "test": {
+            "fraud": 85,
+            "legitimate": 915
+          },
+          "train": {
+            "fraud": 8,
+            "legitimate": 2992
+          },
+          "validation": {
+            "fraud": 7,
+            "legitimate": 993
+          }
+        },
+        "fraudRate": {
+          "test": 0.085,
+          "train": 0.002667,
+          "validation": 0.007
+        },
+        "mode": "out_of_time",
+        "rows": 5000,
+        "strategy": "out_of_time",
+        "testRows": 1000,
+        "trainRows": 3000,
+        "validationRows": 1000
+      }
+    },
+    "positiveLabels": 20,
+    "prAuc": 0.706117,
+    "rocAuc": 0.738316,
+    "rows": 1000,
+    "selectedThresholdSource": "validation",
+    "splitMetadata": {
+      "classDistribution": {
+        "test": {
+          "fraud": 20,
+          "legitimate": 980
+        },
+        "train": {
+          "fraud": 60,
+          "legitimate": 2940
+        },
+        "validation": {
+          "fraud": 20,
+          "legitimate": 980
+        }
+      },
+      "fraudRate": {
+        "test": 0.02,
+        "train": 0.02,
+        "validation": 0.02
+      },
+      "mode": "temporal",
+      "rows": 5000,
+      "strategy": "stratified_temporal",
+      "testRows": 1000,
+      "trainRows": 3000,
+      "validationRows": 1000
+    },
+    "stabilityAssessment": {
+      "expectedCostDelta": 39000.0,
+      "falsePositiveRateDelta": 0.0,
+      "fraudCaptureDelta": 0.65,
+      "prAucDelta": 0.02782
+    },
+    "trainingMode": "production"
+  },
+  "featureContractVersion": "2026-09-15.rules-v2-canonical-ml-pln",
+  "featureImportance": {
+    "countryMismatch": 1.573151,
+    "deviceNovelty": 0.191654,
+    "highRiskFlagCount": 1.194273,
+    "merchantFrequency7d": 0.407398,
+    "proxyOrVpnDetected": 1.659997,
+    "rapidTransferBurst": 1.870417,
+    "recentAmountSumPln": 4.85083,
+    "recentTransactionCount": 0.259332,
+    "transactionVelocityPerMinute": 0.518663
+  },
+  "featureSchema": [
+    "recentTransactionCount",
+    "recentAmountSumPln",
+    "transactionVelocityPerMinute",
+    "merchantFrequency7d",
+    "deviceNovelty",
+    "countryMismatch",
+    "proxyOrVpnDetected",
+    "highRiskFlagCount",
+    "rapidTransferBurst"
+  ],
+  "featureSchemaVersion": "2026-09-15.rules-v2-canonical-ml-pln",
+  "featureSetUsed": [
+    "recentTransactionCount",
+    "recentAmountSumPln",
+    "transactionVelocityPerMinute",
+    "merchantFrequency7d",
+    "deviceNovelty",
+    "countryMismatch",
+    "proxyOrVpnDetected",
+    "highRiskFlagCount",
+    "rapidTransferBurst"
+  ],
+  "featureSetVersion": "2026-09-15.rules-v2-canonical-ml-pln",
   "modelFamily": "LOGISTIC_REGRESSION",
   "modelName": "python-logistic-fraud-model",
-  "modelVersion": "2026-04-21.trained.v1",
+  "modelType": "logistic",
+  "modelVersion": "2026-09-15.rules-v2-canonical-ml-pln.v1",
   "thresholds": {
     "critical": 0.9,
     "high": 0.75,
@@ -10,18 +160,33 @@
   },
   "training": {
     "algorithm": "batch-gradient-descent",
-    "examples": 50000,
-    "source": "synthetic-fraud-scenarios"
+    "examples": 5000,
+    "featureContractVersion": "2026-09-15.rules-v2-canonical-ml-pln",
+    "featureSetUsed": [
+      "recentTransactionCount",
+      "recentAmountSumPln",
+      "transactionVelocityPerMinute",
+      "merchantFrequency7d",
+      "deviceNovelty",
+      "countryMismatch",
+      "proxyOrVpnDetected",
+      "highRiskFlagCount",
+      "rapidTransferBurst"
+    ],
+    "featureSetVersion": "2026-09-15.rules-v2-canonical-ml-pln",
+    "source": "synthetic-fraud-scenarios",
+    "trainingMode": "production"
   },
+  "trainingMode": "production",
   "weights": {
-    "countryMismatch": 0.174,
-    "deviceNovelty": 1.50195,
-    "highRiskFlagCount": 2.138746,
-    "merchantFrequency7d": -0.260885,
-    "proxyOrVpnDetected": 2.036939,
-    "rapidTransferBurst": 3.715112,
-    "recentAmountSum": 3.128722,
-    "recentTransactionCount": 0.871211,
-    "transactionVelocityPerMinute": 2.096025
+    "countryMismatch": 1.573151,
+    "deviceNovelty": 0.191654,
+    "highRiskFlagCount": 1.194273,
+    "merchantFrequency7d": -0.407398,
+    "proxyOrVpnDetected": 1.659997,
+    "rapidTransferBurst": 1.870417,
+    "recentAmountSumPln": 4.85083,
+    "recentTransactionCount": -0.259332,
+    "transactionVelocityPerMinute": -0.518663
   }
 }

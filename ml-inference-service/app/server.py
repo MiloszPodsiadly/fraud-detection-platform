@@ -1535,7 +1535,6 @@ class FraudInferenceHandler(BaseHTTPRequestHandler):
             fraudScore=response.get("fraudScore"),
             riskLevel=response.get("riskLevel"),
             reasonCodes=response.get("reasonCodes", []),
-            featureFlags=features.get("featureFlags", []),
             latencyMs=elapsed_ms,
         )
 

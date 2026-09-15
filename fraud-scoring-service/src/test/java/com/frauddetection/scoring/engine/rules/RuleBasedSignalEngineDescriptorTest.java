@@ -22,7 +22,7 @@ class RuleBasedSignalEngineDescriptorTest {
         assertThat(descriptor.engineId()).isEqualTo("rules.primary");
         assertThat(descriptor.engineType()).isEqualTo(FraudEngineType.RULES);
         assertThat(descriptor.engineLanguage()).isEqualTo("java");
-        assertThat(descriptor.version()).isEqualTo("1.0.0");
+        assertThat(descriptor.version()).isEqualTo("2.0.0");
         assertThat(descriptor.required()).isTrue();
         assertThatCode(() -> new FraudEngineDescriptor(
                 descriptor.engineId(),

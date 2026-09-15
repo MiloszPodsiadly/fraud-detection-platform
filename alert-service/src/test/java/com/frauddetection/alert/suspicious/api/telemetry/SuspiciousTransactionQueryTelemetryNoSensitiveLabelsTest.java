@@ -46,7 +46,7 @@ class SuspiciousTransactionQueryTelemetryNoSensitiveLabelsTest {
                 "account-123",
                 "source-event-123",
                 "correlation-123",
-                "HIGH_AMOUNT"
+                "HIGH_TRANSACTION_AMOUNT"
         );
         assertThat(String.join("\n", meterText)).doesNotContain(
                 "customer-secret-123",
@@ -56,7 +56,7 @@ class SuspiciousTransactionQueryTelemetryNoSensitiveLabelsTest {
                 "account-123",
                 "source-event-123",
                 "correlation-123",
-                "HIGH_AMOUNT",
+                "HIGH_TRANSACTION_AMOUNT",
                 "rawFilters",
                 "rawException"
         );

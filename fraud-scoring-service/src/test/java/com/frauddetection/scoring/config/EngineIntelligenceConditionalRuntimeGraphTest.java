@@ -1,9 +1,10 @@
 package com.frauddetection.scoring.config;
 
+import com.frauddetection.common.events.engine.FraudEngineType;
+import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.engine.ml.PythonMlSignalEngine;
 import com.frauddetection.scoring.engine.rules.RuleBasedSignalEngine;
 import com.frauddetection.scoring.engine.velocity.VelocitySignalEngine;
-import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrator;
 import com.frauddetection.scoring.orchestration.FraudSignalEngineRegistry;
@@ -110,6 +111,10 @@ class EngineIntelligenceConditionalRuntimeGraphTest {
                 .withPropertyValues("fraud.scoring.engines.velocity.enabled=true")
                 .run(context -> {
                     assertThat(context).hasSingleBean(VelocitySignalEngine.class);
+                    assertThat(context.getBean(VelocitySignalEngine.class).descriptor().engineType())
+                            .isEqualTo(FraudEngineType.VELOCITY);
+                    assertThat(context.getBean(VelocitySignalEngine.class).descriptor().version())
+                            .isEqualTo("velocity-v1");
                     assertThat(context.getBean(VelocitySignalEngine.class).descriptor().required()).isFalse();
                     assertThat(context.getBean(FraudSignalEngineRegistry.class).orderedEngines())
                             .extracting(engine -> engine.descriptor().engineId())

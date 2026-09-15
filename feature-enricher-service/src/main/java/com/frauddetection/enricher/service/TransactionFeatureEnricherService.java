@@ -60,7 +60,7 @@ public class TransactionFeatureEnricherService implements TransactionFeatureEnri
         log.atInfo()
                 .addKeyValue("transactionId", event.transactionId())
                 .addKeyValue("correlationId", event.correlationId())
-                .addKeyValue("featureFlags", features.featureFlags())
+                .addKeyValue("featureSnapshotKeys", features.featureSnapshot().keySet())
                 .log("Completed transaction feature enrichment.");
     }
 }

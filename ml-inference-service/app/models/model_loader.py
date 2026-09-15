@@ -27,7 +27,7 @@ def load_model_from_artifact(artifact_path: Path) -> LogisticFraudModel | XGBoos
 
 
 def model_type_from_artifact(artifact_path: Path) -> str:
-    """Read modelType from an artifact, defaulting legacy artifacts to logistic."""
+    """Read modelType from an artifact, defaulting missing metadata to logistic."""
     return str(_read_artifact(artifact_path).get("modelType", "logistic")).lower()
 
 

@@ -10,6 +10,7 @@ import com.frauddetection.common.events.model.DeviceInfo;
 import com.frauddetection.common.events.model.LocationInfo;
 import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.model.Money;
+import com.frauddetection.common.events.reason.ReasonCode;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -175,22 +176,19 @@ public final class TransactionFixtures {
                     defaultDeviceInfo(),
                     defaultLocationInfo(),
                     defaultCustomerContext(),
-                    8,
-                    "PT1M",
-                    new Money(new BigDecimal("5830.24"), "USD"),
-                    "PT24H",
-                    1.9d,
-                    6,
-                    true,
-                    false,
-                    false,
-                    List.of("DEVICE_NOVELTY", "HIGH_VELOCITY"),
-                    Map.of(
-                            FraudFeatureContract.RECENT_TRANSACTION_COUNT, 8,
-                            FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
-                            FraudFeatureContract.RECENT_AMOUNT_SUM, "5830.24",
-                            FraudFeatureContract.DEVICE_NOVELTY, true,
-                            FraudFeatureContract.MERCHANT_FREQUENCY_7D, 6
+                    Map.ofEntries(
+                            Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 8),
+                            Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M"),
+                            Map.entry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 8.0d),
+                            Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM, new BigDecimal("5830.24")),
+                            Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M"),
+                            Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("5830.24")),
+                            Map.entry(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("1249.99")),
+                            Map.entry(FraudFeatureContract.DEVICE_NOVELTY, true),
+                            Map.entry(FraudFeatureContract.COUNTRY_MISMATCH, false),
+                            Map.entry(FraudFeatureContract.PROXY_OR_VPN_DETECTED, false),
+                            Map.entry(FraudFeatureContract.MERCHANT_FREQUENCY_7D, 6),
+                            Map.entry(FraudFeatureContract.CURRENCY, "USD")
                     )
             );
         }
@@ -208,7 +206,14 @@ public final class TransactionFixtures {
         private Money transactionAmount = defaultMoney();
         private Double fraudScore = 0.94d;
         private RiskLevel riskLevel = RiskLevel.HIGH;
-        private Map<String, Object> featureSnapshot = Map.of("recentTransactionCount", 8, "deviceNovelty", true);
+        private List<String> reasonCodes = List.of(
+                ReasonCode.DEVICE_NOVELTY.wireValue(),
+                ReasonCode.HIGH_VELOCITY.wireValue()
+        );
+        private Map<String, Object> featureSnapshot = Map.of(
+                FraudFeatureContract.RECENT_TRANSACTION_COUNT, 8,
+                FraudFeatureContract.DEVICE_NOVELTY, true
+        );
 
         public TransactionScoredEventBuilder withTransactionId(String transactionId) {
             this.transactionId = transactionId;
@@ -235,6 +240,11 @@ public final class TransactionFixtures {
             return this;
         }
 
+        public TransactionScoredEventBuilder withReasonCodes(List<String> reasonCodes) {
+            this.reasonCodes = reasonCodes == null ? List.of() : List.copyOf(reasonCodes);
+            return this;
+        }
+
         public TransactionScoredEventBuilder withFeatureSnapshot(Map<String, Object> featureSnapshot) {
             this.featureSnapshot = featureSnapshot;
             return this;
@@ -257,10 +267,10 @@ public final class TransactionFixtures {
                     fraudScore,
                     riskLevel,
                     "RULE_BASED",
-                    "rule-engine",
-                    "v1",
+                    "rule-based-engine",
+                    "v2",
                     Instant.parse("2026-04-20T10:15:33Z"),
-                    List.of("HIGH_AMOUNT", "DEVICE_NOVELTY", "HIGH_VELOCITY"),
+                    reasonCodes,
                     Map.of("baseScore", 0.72d, "velocityBoost", 0.12d, "deviceBoost", 0.10d),
                     featureSnapshot,
                     true
