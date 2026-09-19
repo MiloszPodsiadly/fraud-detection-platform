@@ -27,7 +27,15 @@ class MlFraudScoringEngineTest {
                 "python-logistic-fraud-model",
                 "test-version",
                 Instant.now(),
-                Arrays.asList("countryMismatch", "some-new-future-code", " ", null, "FRAUD_CONFIRMED", "AML_ESCALATION_REQUIRED"),
+                Arrays.asList(
+                        ReasonCode.COUNTRY_MISMATCH.wireValue(),
+                        "countryMismatch",
+                        "some-new-future-code",
+                        " ",
+                        null,
+                        "FRAUD_CONFIRMED",
+                        "AML_ESCALATION_REQUIRED"
+                ),
                 Map.of("modelAvailable", true),
                 Map.of("modelAvailable", true),
                 null
@@ -44,12 +52,12 @@ class MlFraudScoringEngineTest {
                 "FRAUD_CONFIRMED",
                 "AML_ESCALATION_REQUIRED"
         );
-        assertThat(result.scoreDetails()).containsEntry("unsupportedReasonCodeCount", 5);
-        assertThat(result.explanationMetadata()).containsEntry("unsupportedReasonCodeCount", 5);
+        assertThat(result.scoreDetails()).containsEntry("unsupportedReasonCodeCount", 6);
+        assertThat(result.explanationMetadata()).containsEntry("unsupportedReasonCodeCount", 6);
         assertThat(meterRegistry.get("fraud.scoring.reason_code.parse.unsupported")
                 .tags("service", "fraud-scoring-service", "source", "ml_model", "parser_mode", "canonical")
                 .counter()
-                .count()).isEqualTo(5.0d);
+                .count()).isEqualTo(6.0d);
     }
 
     @Test

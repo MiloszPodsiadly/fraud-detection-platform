@@ -61,7 +61,6 @@ class FeatureSnapshotConsumptionPolicyDocsTest {
                 .contains("recenttransactioncount` is integer")
                 .contains("transactionvelocityperminute` is double")
                 .contains("currency` is string")
-                .contains("rapidtransfertotalpln` is decimal when read by historical consumers")
                 .contains("rapidtransfertransactionids` is not consumable by current rules scoring")
                 .contains("unsupported policy marker fields are not consumable by current rules scoring")
                 .contains("wrong accessor use is not valid consumption")

@@ -28,7 +28,13 @@ class MlScoringEvidenceProjectionTest {
                 "python-logistic-fraud-model",
                 "test-version",
                 Instant.now(),
-                Arrays.asList("MODEL_HIGH_RISK", "countryMismatch", "FRAUD_CONFIRMED", "AML_ESCALATION_REQUIRED"),
+                Arrays.asList(
+                        "MODEL_HIGH_RISK",
+                        "COUNTRY_MISMATCH",
+                        "countryMismatch",
+                        "FRAUD_CONFIRMED",
+                        "AML_ESCALATION_REQUIRED"
+                ),
                 Map.of("modelAvailable", true),
                 Map.of("modelAvailable", true),
                 null
@@ -49,9 +55,17 @@ class MlScoringEvidenceProjectionTest {
                     assertThat(item.evidenceType()).isEqualTo(ScoringEvidenceType.DIAGNOSTIC);
                     assertThat(item.status()).isEqualTo(ScoringEvidenceStatus.PARTIAL);
                     assertThat(item.reasonCode()).isNull();
-                    assertThat(item.attributes()).containsEntry("unsupportedReasonCodeCount", 2);
-                    assertThat(item.attributes().toString()).doesNotContain("FRAUD_CONFIRMED", "AML_ESCALATION_REQUIRED");
+                    assertThat(item.attributes()).containsEntry("unsupportedReasonCodeCount", 3);
+                    assertThat(item.attributes().toString()).doesNotContain(
+                            "countryMismatch",
+                            "FRAUD_CONFIRMED",
+                            "AML_ESCALATION_REQUIRED"
+                    );
                 });
-        assertThat(result.scoringEvidence()).noneMatch(item -> ReasonCode.UNKNOWN.wireValue().equals(item.reasonCode()));
+        assertThat(result.scoringEvidence())
+                .noneMatch(item -> ReasonCode.UNKNOWN.wireValue().equals(item.reasonCode()))
+                .noneMatch(item -> "countryMismatch".equals(item.reasonCode()))
+                .noneMatch(item -> "FRAUD_CONFIRMED".equals(item.reasonCode()))
+                .noneMatch(item -> "AML_ESCALATION_REQUIRED".equals(item.reasonCode()));
     }
 }

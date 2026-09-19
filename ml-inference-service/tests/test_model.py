@@ -378,7 +378,7 @@ class FraudModelTest(unittest.TestCase):
         self.assertFalse(result["available"])
         self.assertIsNone(result["fraudScore"])
         self.assertIsNone(result["riskLevel"])
-        self.assertFalse(result["alertRecommended"])
+        self.assertNotIn("alertRecommended", result)
         self.assertEqual(result["fallbackReason"], "INCOMPATIBLE_FEATURE_SNAPSHOT")
         self.assertEqual(result["scoreDetails"]["normalizedFeatures"], {})
         self.assertEqual(
@@ -426,7 +426,7 @@ class FraudModelTest(unittest.TestCase):
                 self.assertEqual(result["fallbackReason"], "INCOMPATIBLE_FEATURE_SNAPSHOT")
                 self.assertIsNone(result["fraudScore"])
                 self.assertIsNone(result["riskLevel"])
-                self.assertFalse(result["alertRecommended"])
+                self.assertNotIn("alertRecommended", result)
                 self.assertEqual(result["scoreDetails"]["normalizedFeatures"], {})
                 self.assertTrue(result["scoreDetails"]["featureCompatibility"]["invalidFeatures"])
 
