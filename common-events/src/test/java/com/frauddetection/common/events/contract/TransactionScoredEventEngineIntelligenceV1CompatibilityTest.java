@@ -26,6 +26,7 @@ class TransactionScoredEventEngineIntelligenceV1CompatibilityTest {
         TransactionScoredEvent event = read(TransactionScoredEventFixtureLoader.oldWithoutEngineIntelligenceJson());
 
         assertThat(event.engineIntelligence()).isNull();
+        assertThat(event.modelVersion()).isEqualTo("v1");
         assertThat(event.fraudScore()).isEqualTo(0.82d);
         assertThat(event.riskLevel()).isEqualTo(RiskLevel.HIGH);
     }
@@ -44,6 +45,7 @@ class TransactionScoredEventEngineIntelligenceV1CompatibilityTest {
                 .isEqualTo(EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL);
         assertThat(event.engineIntelligence().comparison().scoreDeltaBucket())
                 .isEqualTo(EngineIntelligenceScoreDeltaBucket.SMALL);
+        assertThat(event.modelVersion()).isEqualTo("v1");
         assertThat(event.fraudScore()).isEqualTo(0.82d);
         assertThat(event.riskLevel()).isEqualTo(RiskLevel.HIGH);
     }
@@ -60,14 +62,16 @@ class TransactionScoredEventEngineIntelligenceV1CompatibilityTest {
                 .containsExactly("rules.primary", "ml.python.primary");
         assertThat(secondReplay.engineIntelligence().comparison())
                 .isEqualTo(firstReplay.engineIntelligence().comparison());
+        assertThat(secondReplay.modelVersion()).isEqualTo("v1");
         assertThat(secondReplay.fraudScore()).isEqualTo(firstReplay.fraudScore());
         assertThat(secondReplay.riskLevel()).isEqualTo(firstReplay.riskLevel());
     }
 
     @Test
-    void currentComparisonWithExplicitIdentityDeserializes() throws Exception {
+    void historicalV1ComparisonWithExplicitIdentityDeserializes() throws Exception {
         TransactionScoredEvent event = read(TransactionScoredEventFixtureLoader.explicitV1EngineIntelligenceJson());
 
+        assertThat(event.modelVersion()).isEqualTo("v1");
         assertThat(event.engineIntelligence().comparison().comparisonType())
                 .isEqualTo(EngineIntelligenceComparisonType.RULES_VS_ML);
         assertThat(event.engineIntelligence().comparison().comparedEngineIds())
@@ -75,10 +79,11 @@ class TransactionScoredEventEngineIntelligenceV1CompatibilityTest {
     }
 
     @Test
-    void currentComparisonUnknownAdditiveFieldsFollowExistingIgnorePolicy() throws Exception {
+    void historicalV1ComparisonUnknownAdditiveFieldsFollowExistingIgnorePolicy() throws Exception {
         TransactionScoredEvent event = read(TransactionScoredEventFixtureLoader.unknownAdditiveV1EngineIntelligenceJson());
 
         assertThat(event.transactionId()).isEqualTo("txn-fdp129-stage2-001");
+        assertThat(event.modelVersion()).isEqualTo("v1");
         assertThat(event.engineIntelligence().engines()).hasSize(2);
         assertThat(event.engineIntelligence().comparison().comparedEngineIds())
                 .containsExactly("rules.primary", "ml.python.primary");

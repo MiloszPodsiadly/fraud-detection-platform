@@ -17,18 +17,25 @@ class TransactionScoredEventFixtureCompatibilityTest {
 
     @Test
     void oldFixtureDeserializes() throws Exception {
-        assertThat(read(TransactionScoredEventFixtureLoader.oldWithoutEngineIntelligenceJson()).engineIntelligence()).isNull();
+        TransactionScoredEvent event = read(TransactionScoredEventFixtureLoader.oldWithoutEngineIntelligenceJson());
+
+        assertThat(event.engineIntelligence()).isNull();
+        assertThat(event.modelVersion()).isEqualTo("v1");
     }
 
     @Test
     void minimalEngineIntelligenceFixtureDeserializes() throws Exception {
-        assertThat(read(TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson()).engineIntelligence()).isNotNull();
+        TransactionScoredEvent event = read(TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson());
+
+        assertThat(event.engineIntelligence()).isNotNull();
+        assertThat(event.modelVersion()).isEqualTo("v2");
     }
 
     @Test
     void fullBoundedEngineIntelligenceFixtureDeserializes() throws Exception {
         TransactionScoredEvent event = read(TransactionScoredEventFixtureLoader.fullBoundedEngineIntelligenceJson());
 
+        assertThat(event.modelVersion()).isEqualTo("v2");
         assertThat(event.engineIntelligence().engines()).hasSize(2);
         assertThat(event.engineIntelligence().diagnosticSignals()).hasSize(2);
     }
@@ -67,12 +74,12 @@ class TransactionScoredEventFixtureCompatibilityTest {
     }
 
     @Test
-    void allFdp93FixturesHaveIdenticalBaseTransactionFieldsExceptEngineIntelligenceAndUnknownFields() throws Exception {
+    void currentCanonicalFixturesHaveIdenticalBaseTransactionFieldsExceptEngineIntelligenceAndUnknownFields() throws Exception {
         JsonNode baseline = reviewedBaseTransactionFields(
-                TransactionScoredEventFixtureLoader.oldWithoutEngineIntelligenceJson()
+                TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson()
         );
 
-        for (String fixture : fdp93Fixtures()) {
+        for (String fixture : currentCanonicalFixtures()) {
             assertThat(reviewedBaseTransactionFields(fixture)).isEqualTo(baseline);
         }
     }
@@ -126,6 +133,15 @@ class TransactionScoredEventFixtureCompatibilityTest {
     private List<String> fdp93Fixtures() {
         return List.of(
                 TransactionScoredEventFixtureLoader.oldWithoutEngineIntelligenceJson(),
+                TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson(),
+                TransactionScoredEventFixtureLoader.fullBoundedEngineIntelligenceJson(),
+                TransactionScoredEventFixtureLoader.unknownNestedEngineIntelligenceFieldsJson(),
+                TransactionScoredEventFixtureLoader.unknownTopLevelFieldJson()
+        );
+    }
+
+    private List<String> currentCanonicalFixtures() {
+        return List.of(
                 TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson(),
                 TransactionScoredEventFixtureLoader.fullBoundedEngineIntelligenceJson(),
                 TransactionScoredEventFixtureLoader.unknownNestedEngineIntelligenceFieldsJson(),
