@@ -20,7 +20,7 @@ class FeatureSnapshotReaderTest {
                 FraudFeatureContract.DEVICE_NOVELTY, true,
                 FraudFeatureContract.RECENT_TRANSACTION_COUNT, 3,
                 FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
-                FraudFeatureContract.RECENT_AMOUNT_SUM, new BigDecimal("125.20"),
+                FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("125.20"),
                 FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
                 FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 2.5d,
                 FraudFeatureContract.CURRENCY, "PLN",
@@ -31,7 +31,7 @@ class FeatureSnapshotReaderTest {
         assertThat(reader.booleanValue(FraudFeatureContract.DEVICE_NOVELTY).value()).isTrue();
         assertThat(reader.integerValue(FraudFeatureContract.RECENT_TRANSACTION_COUNT).value()).isEqualTo(3);
         assertThat(reader.stringValue(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW).value()).isEqualTo("PT1M");
-        assertThat(reader.decimalValue(FraudFeatureContract.RECENT_AMOUNT_SUM).value())
+        assertThat(reader.decimalValue(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN).value())
                 .isEqualByComparingTo("125.20");
         assertThat(reader.stringValue(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW).value()).isEqualTo("PT1M");
         assertThat(reader.doubleValue(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE).value()).isEqualTo(2.5d);

@@ -29,7 +29,6 @@ class TransactionFeatureCalculatorTest {
         var snapshot = new FeatureStoreSnapshot(
                 4,
                 new BigDecimal("4900.00"),
-                new BigDecimal("4900.00"),
                 List.of(),
                 4,
                 Instant.parse("2026-04-20T10:12:00Z"),
@@ -43,7 +42,6 @@ class TransactionFeatureCalculatorTest {
                 .containsEntry(FraudFeatureContract.COUNTRY_MISMATCH, false)
                 .containsEntry(FraudFeatureContract.MERCHANT_FREQUENCY_7D, 5)
                 .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5)
-                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM, new BigDecimal("6149.99"))
                 .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("9899.96"));
     }
 
@@ -60,7 +58,6 @@ class TransactionFeatureCalculatorTest {
                 .build();
         var snapshot = new FeatureStoreSnapshot(
                 0,
-                BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 List.of(),
                 0,
@@ -84,7 +81,6 @@ class TransactionFeatureCalculatorTest {
         var snapshot = new FeatureStoreSnapshot(
                 1,
                 BigDecimal.ZERO,
-                BigDecimal.ZERO,
                 List.of(),
                 0,
                 Instant.parse("2026-04-20T10:12:00Z"),
@@ -107,7 +103,6 @@ class TransactionFeatureCalculatorTest {
         var snapshot = new FeatureStoreSnapshot(
                 1,
                 new BigDecimal("10000.00"),
-                new BigDecimal("10000.00"),
                 List.of(),
                 1,
                 Instant.parse("2026-04-20T10:12:00Z"),
@@ -126,9 +121,6 @@ class TransactionFeatureCalculatorTest {
         assertThat(features.featureSnapshot().get(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW))
                 .isEqualTo("PT1M")
                 .isInstanceOf(String.class);
-        assertThat(features.featureSnapshot().get(FraudFeatureContract.RECENT_AMOUNT_SUM))
-                .isEqualTo(new BigDecimal("20000.00"))
-                .isInstanceOf(BigDecimal.class);
         assertThat(features.featureSnapshot().get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN))
                 .isEqualTo(new BigDecimal("20000.00"))
                 .isInstanceOf(BigDecimal.class);
@@ -143,7 +135,6 @@ class TransactionFeatureCalculatorTest {
                 .build();
         var snapshot = new FeatureStoreSnapshot(
                 0,
-                BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 List.of(),
                 1,
@@ -163,7 +154,6 @@ class TransactionFeatureCalculatorTest {
         var event = TransactionFixtures.rawTransaction().build();
         var snapshot = new FeatureStoreSnapshot(
                 4,
-                new BigDecimal("4900.00"),
                 new BigDecimal("4900.00"),
                 List.of(),
                 4,
@@ -216,7 +206,6 @@ class TransactionFeatureCalculatorTest {
                 .build();
         var snapshot = new FeatureStoreSnapshot(
                 4,
-                BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 List.of(),
                 0,

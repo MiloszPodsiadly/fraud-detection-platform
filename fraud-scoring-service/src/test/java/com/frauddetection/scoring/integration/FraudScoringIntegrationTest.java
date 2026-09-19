@@ -63,10 +63,6 @@ class FraudScoringIntegrationTest extends AbstractIntegrationTest {
                 .containsEntry(
                         FraudFeatureContract.RECENT_AMOUNT_SUM_PLN,
                         enrichedEvent.featureSnapshot().get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN)
-                )
-                .containsEntry(
-                        FraudFeatureContract.RECENT_AMOUNT_SUM,
-                        enrichedEvent.featureSnapshot().get(FraudFeatureContract.RECENT_AMOUNT_SUM)
                 );
     }
 

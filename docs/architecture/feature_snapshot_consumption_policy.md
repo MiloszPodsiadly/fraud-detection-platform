@@ -31,7 +31,7 @@ string facts must round-trip as their declared scalar types.
 `transactions.enriched` uses the shared Jackson JSON serializer/deserializer in `common-events`; there is no Schema
 Registry, Avro, or Protobuf contract in the current implementation. The `TransactionEnrichedEvent` JSON contract is
 the event envelope plus `featureSnapshot`. Fraud fact fields such as `recentTransactionCount`,
-`recentAmountSum`, `transactionVelocityPerMinute`, `merchantFrequency7d`, `deviceNovelty`, `countryMismatch`, and
+`recentAmountSumPln`, `transactionVelocityPerMinute`, `merchantFrequency7d`, `deviceNovelty`, `countryMismatch`, and
 `proxyOrVpnDetected` must not be dual-written as top-level event fields.
 
 The hard cutover line is the canonical snapshot consumer cutover boundary: deployed consumers must already read
@@ -68,6 +68,9 @@ automatically adapter-consumable: consumption requires both the key and expected
 an allowed key and the matching scalar accessor.
 `isAllowedFeatureKey` is not adapter-consumption permission. It means the key is known and safe enough for policy
 evaluation; adapters must still use `FeatureSnapshotReader` or `expectedTypeFor`.
+Java adapter keys are the Java-enriched `featureSnapshot` transport keys only. Python-derived model vector features
+such as `suspiciousFactRatio` and `rapidTransferBurst` remain ML model features and must not become Java snapshot
+adapter keys just because the ML model contract names them.
 
 Examples:
 
@@ -170,8 +173,9 @@ diagnostic evidence.
 
 This branch deliberately retains compatibility that is still needed for durability, replay, and rolling deployments:
 
-- `EngineIntelligenceComparisonV1Compatibility` for historical comparison objects that contain the complete legacy
-  semantic triplet.
+- `EngineIntelligenceComparisonV1Compatibility` for historical comparison objects read through a
+  `TransactionScoredEvent` whose outer event proves `modelVersion=v1` and whose comparison contains the complete
+  legacy semantic triplet.
 - Old-event `engineIntelligence == null` handling so historical Kafka events remain readable as explicit absence.
 - Retained Kafka and Mongo replay support for existing stored events and projections.
 - Old enriched-event JSON with duplicate top-level fraud facts can still be deserialized because unknown JSON

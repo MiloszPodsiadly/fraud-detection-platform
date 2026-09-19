@@ -1,14 +1,17 @@
 import unittest
 import json
 import importlib.util
+import os
 from pathlib import Path
+from unittest.mock import patch
 
 from app.data.dataset import Dataset
 from app.data.generator import generate_fraud_behavior, generate_normal_behavior
 from app.data.splitting import split_dataset
 from app.evaluation.evaluate import cli_summary, evaluate_scores
 from app.feedback.feedback_dataset import FeedbackDatasetStore, dataset_from_feedback, feedback_from_decision_event
-from app.features.feature_contract import FEATURE_CONTRACT
+from app.features import feature_contract as feature_contract_module
+from app.features.feature_contract import ALLOW_FALLBACK_ENV, FEATURE_CONTRACT, PRODUCTION_CONTRACT_ENV, FeatureContract
 from app.features.feature_pipeline import (
     FeaturePipeline,
     MAX_RECENT_AMOUNT_SUM_PLN,
@@ -17,8 +20,10 @@ from app.features.feature_pipeline import (
     RATE_CONSISTENCY_TOLERANCE,
     SUPPORTED_CURRENCIES,
 )
+from app.inference.model_runtime import FraudModelRuntime
 from app.model import FraudModel
 from app.models.model_loader import ModelConfigurationError, load_model_from_artifact
+from app.models.logistic_model import LogisticFraudModel
 from app.registry.model_registry import ModelRegistry
 from app.models.xgboost_model import XGBoostFraudModel
 from app.training.retraining import PromotionThresholds, _promotion_decision, compare_retrained_model
@@ -33,6 +38,70 @@ from app.training.train import (
 
 
 class FraudModelTest(unittest.TestCase):
+    def _artifact_payload(
+            self,
+            model_version: str = "test-model-v1",
+            model_type: str = "logistic",
+            training_mode: str = "production",
+            feature_schema: list[str] | None = None,
+            weights: dict[str, float] | None = None,
+    ) -> dict[str, object]:
+        schema = feature_schema or (
+            list(FeaturePipeline.PRODUCTION_FEATURE_NAMES)
+            if training_mode == "production"
+            else list(FeaturePipeline.FEATURE_NAMES)
+        )
+        payload: dict[str, object] = {
+            "modelName": "python-logistic-fraud-model",
+            "modelVersion": model_version,
+            "modelType": model_type,
+            "modelFamily": "LOGISTIC_REGRESSION" if model_type == "logistic" else "XGBOOST",
+            "trainingMode": training_mode,
+            "featureSchema": schema,
+            "featureSetUsed": schema,
+            "featureContractVersion": FEATURE_CONTRACT.version,
+            "featureSchemaVersion": FEATURE_CONTRACT.version,
+            "featureSetVersion": FEATURE_CONTRACT.version,
+            "thresholds": {"medium": 0.45, "high": 0.75, "critical": 0.9},
+            "training": {
+                "trainingMode": training_mode,
+                "featureSetUsed": schema,
+                "featureContractVersion": FEATURE_CONTRACT.version,
+                "featureSetVersion": FEATURE_CONTRACT.version,
+            },
+        }
+        if model_type == "logistic":
+            payload["bias"] = -2.0
+            payload["weights"] = weights or {name: 0.0 for name in schema}
+        return payload
+
+    def _production_payload(self, **overrides: object) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "recentTransactionCount": 1,
+            "recentAmountSum": {"amount": 100.0, "currency": "PLN"},
+            "recentAmountSumPln": 100.0,
+            "currentTransactionAmountPln": 100.0,
+            "currency": "PLN",
+            "recentTransactionCountWindow": "PT1M",
+            "recentAmountSumWindow": "PT1M",
+            "transactionVelocityPerMinute": 1.0,
+            "merchantFrequency7d": 1,
+            "deviceNovelty": False,
+            "countryMismatch": False,
+            "proxyOrVpnDetected": False,
+        }
+        payload.update(overrides)
+        return payload
+
+    def _runtime_with_weights(self, weights: dict[str, float]) -> FraudModelRuntime:
+        schema_weights = {name: 0.0 for name in FeaturePipeline.PRODUCTION_FEATURE_NAMES}
+        schema_weights.update(weights)
+        artifact = self._artifact_payload(weights=schema_weights)
+        return FraudModelRuntime(
+            Path.cwd() / "missing-runtime-artifact.json",
+            model=LogisticFraudModel(artifact),
+        )
+
     def test_scores_high_risk_signal_as_high_or_critical(self):
         result = FraudModel().score(
             {
@@ -119,6 +188,101 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(result["riskLevel"], "LOW")
         self.assertNotIn("RAPID_PLN_20K_BURST", result["reasonCodes"])
 
+    def test_negative_model_contribution_does_not_become_fraud_reason_code(self):
+        runtime = self._runtime_with_weights({"suspiciousFactRatio": -3.0})
+
+        result = runtime.score(
+            self._production_payload(
+                recentTransactionCount=2,
+                recentAmountSumPln=6_000.0,
+                currentTransactionAmountPln=3_000.0,
+                transactionVelocityPerMinute=2.0,
+                merchantFrequency7d=6,
+                deviceNovelty=True,
+                countryMismatch=True,
+                proxyOrVpnDetected=True,
+            )
+        )
+
+        self.assertTrue(result["available"])
+        self.assertNotIn("MODEL_HIGH_RISK", result["reasonCodes"])
+        self.assertLess(result["scoreDetails"]["featureContributions"]["suspiciousFactRatio"], 0.0)
+
+    def test_positive_model_contribution_can_become_canonical_fraud_reason_code(self):
+        runtime = self._runtime_with_weights({"suspiciousFactRatio": 3.0})
+
+        result = runtime.score(
+            self._production_payload(
+                recentTransactionCount=2,
+                recentAmountSumPln=6_000.0,
+                currentTransactionAmountPln=3_000.0,
+                transactionVelocityPerMinute=2.0,
+                merchantFrequency7d=6,
+                deviceNovelty=True,
+                countryMismatch=True,
+                proxyOrVpnDetected=True,
+            )
+        )
+
+        self.assertTrue(result["available"])
+        self.assertIn("MODEL_HIGH_RISK", result["reasonCodes"])
+        self.assertGreater(result["scoreDetails"]["featureContributions"]["suspiciousFactRatio"], 0.0)
+
+    def test_low_risk_baseline_does_not_emit_negative_signals_as_fraud_reasons(self):
+        runtime = self._runtime_with_weights(
+            {
+                "recentTransactionCount": -2.0,
+                "recentAmountSumPln": -2.0,
+                "transactionVelocityPerMinute": -2.0,
+            }
+        )
+
+        result = runtime.score(self._production_payload())
+
+        self.assertEqual(result["riskLevel"], "LOW")
+        self.assertEqual(result["reasonCodes"], [])
+        self.assertLess(result["scoreDetails"]["featureContributions"]["recentTransactionCount"], 0.0)
+        self.assertLess(result["scoreDetails"]["featureContributions"]["recentAmountSumPln"], 0.0)
+        self.assertLess(result["scoreDetails"]["featureContributions"]["transactionVelocityPerMinute"], 0.0)
+
+    def test_negative_contribution_still_affects_logit_and_fraud_score(self):
+        neutral = self._runtime_with_weights({})
+        negative = self._runtime_with_weights({"recentTransactionCount": -4.0})
+        payload = self._production_payload(recentTransactionCount=5, transactionVelocityPerMinute=5.0)
+
+        neutral_result = neutral.score(payload)
+        negative_result = negative.score(payload)
+
+        self.assertLess(
+            negative_result["scoreDetails"]["logit"],
+            neutral_result["scoreDetails"]["logit"],
+        )
+        self.assertLess(negative_result["fraudScore"], neutral_result["fraudScore"])
+        self.assertLess(negative_result["scoreDetails"]["featureContributions"]["recentTransactionCount"], 0.0)
+        self.assertNotIn("RECENT_TRANSACTION_SPIKE", negative_result["reasonCodes"])
+
+    def test_reason_code_ordering_uses_positive_contribution_magnitude(self):
+        runtime = self._runtime_with_weights(
+            {
+                "deviceNovelty": 0.2,
+                "countryMismatch": 0.9,
+                "proxyOrVpnDetected": 0.5,
+            }
+        )
+
+        result = runtime.score(
+            self._production_payload(
+                deviceNovelty=True,
+                countryMismatch=True,
+                proxyOrVpnDetected=True,
+            )
+        )
+
+        self.assertEqual(
+            result["reasonCodes"][:3],
+            ["COUNTRY_MISMATCH", "PROXY_OR_VPN", "DEVICE_NOVELTY"],
+        )
+
     def test_feature_pipeline_normalizes_single_event(self):
         normalized = FeaturePipeline().transform_single(
             {
@@ -142,7 +306,7 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(normalized["deviceNovelty"], 1.0)
         self.assertEqual(normalized["countryMismatch"], 0.0)
         self.assertEqual(normalized["proxyOrVpnDetected"], 1.0)
-        self.assertEqual(normalized["highRiskFlagCount"], 5.0 / 6.0)
+        self.assertEqual(normalized["suspiciousFactRatio"], 5.0 / 6.0)
         self.assertEqual(normalized["rapidTransferBurst"], 1.0)
 
     def test_python_feature_pipeline_uses_shared_contract_schema(self):
@@ -152,6 +316,66 @@ class FraudModelTest(unittest.TestCase):
         self.assertIn("recentTransactionCountWindow", FEATURE_CONTRACT.java_enriched_feature_names)
         self.assertIn("recentAmountSumWindow", FEATURE_CONTRACT.java_enriched_feature_names)
         self.assertIn("recentAmountSumPln", FEATURE_CONTRACT.java_enriched_feature_names)
+        self.assertNotEqual(FEATURE_CONTRACT.version, "fallback")
+
+    def test_production_contract_can_load_from_explicit_packaged_path(self):
+        contract_path = Path.cwd() / "explicit-fraud-feature-contract.json"
+        canonical_path = (
+            Path(__file__).resolve().parents[2]
+            / "common-events"
+            / "src"
+            / "main"
+            / "resources"
+            / "feature-contract"
+            / "fraud-feature-contract.json"
+        )
+        try:
+            contract_path.write_text(canonical_path.read_text(encoding="utf-8"), encoding="utf-8")
+            with patch.dict(os.environ, {PRODUCTION_CONTRACT_ENV: str(contract_path)}, clear=False):
+                loaded = FeatureContract.load()
+        finally:
+            if contract_path.exists():
+                contract_path.unlink()
+
+        self.assertEqual(loaded.version, FEATURE_CONTRACT.version)
+        self.assertEqual(loaded.production_inference_features, FEATURE_CONTRACT.production_inference_features)
+
+    def test_missing_production_contract_fails_startup(self):
+        missing_path = Path.cwd() / "missing-fraud-feature-contract.json"
+        with patch.dict(os.environ, {PRODUCTION_CONTRACT_ENV: str(missing_path)}, clear=False):
+            with self.assertRaisesRegex(RuntimeError, "Configured feature contract does not exist"):
+                FeatureContract.load()
+
+    def test_invalid_production_contract_fails_startup(self):
+        contract_path = Path.cwd() / "invalid-fraud-feature-contract.json"
+        try:
+            contract_path.write_text("{not-json", encoding="utf-8")
+            with patch.dict(os.environ, {PRODUCTION_CONTRACT_ENV: str(contract_path)}, clear=False):
+                with self.assertRaisesRegex(RuntimeError, "Feature contract JSON is invalid"):
+                    FeatureContract.load()
+        finally:
+            if contract_path.exists():
+                contract_path.unlink()
+
+    def test_production_contract_fallback_requires_explicit_test_opt_in(self):
+        with patch.object(feature_contract_module, "_contract_path", return_value=None):
+            with patch.dict(os.environ, {ALLOW_FALLBACK_ENV: "true"}, clear=False):
+                self.assertEqual(FeatureContract.load().version, "fallback")
+            with patch.dict(os.environ, {ALLOW_FALLBACK_ENV: ""}, clear=False):
+                with self.assertRaisesRegex(RuntimeError, "Canonical fraud feature contract is required"):
+                    FeatureContract.load()
+
+    def test_ml_production_image_packages_canonical_feature_contract(self):
+        dockerfile = (Path(__file__).resolve().parents[2] / "deployment" / "Dockerfile.ml-inference").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('ENV FRAUD_FEATURE_CONTRACT_PATH="/app/contracts/fraud-feature-contract.json"', dockerfile)
+        self.assertIn(
+            "COPY --chown=10001:10001 common-events/src/main/resources/feature-contract/fraud-feature-contract.json "
+            "/app/contracts/fraud-feature-contract.json",
+            dockerfile,
+        )
 
     def test_shared_contract_defines_java_python_semantics_not_just_names(self):
         semantics = FEATURE_CONTRACT.production_feature_semantics
@@ -170,7 +394,7 @@ class FraudModelTest(unittest.TestCase):
             "deviceNovelty": ("boolean", "flag", "current_transaction"),
             "countryMismatch": ("boolean", "flag", "current_transaction"),
             "proxyOrVpnDetected": ("boolean", "flag", "current_transaction"),
-            "highRiskFlagCount": ("double", "normalized_count", "derived_from_current_production_facts"),
+            "suspiciousFactRatio": ("double", "ratio", "derived_from_current_production_facts"),
             "rapidTransferBurst": ("boolean_numeric", "flag", "PT1M"),
         }
         for name, (feature_type, unit, window) in expected.items():
@@ -230,7 +454,7 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(set(normalized), set(FEATURE_CONTRACT.ml_feature_names))
         self.assertTrue(compatibility["compatible"])
         self.assertIn("transactionVelocityPerHour", compatibility["trainingOnlyFeatures"])
-        self.assertIn("highRiskFlagCount", compatibility["derivedInPython"])
+        self.assertIn("suspiciousFactRatio", compatibility["derivedInPython"])
         self.assertEqual(normalized["recentTransactionCount"], 0.5)
         self.assertEqual(normalized["recentAmountSumPln"], 1.0)
         self.assertEqual(normalized["transactionVelocityPerMinute"], 1.0)
@@ -238,7 +462,7 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(normalized["deviceNovelty"], 1.0)
         self.assertEqual(normalized["countryMismatch"], 0.0)
         self.assertEqual(normalized["proxyOrVpnDetected"], 1.0)
-        self.assertEqual(normalized["highRiskFlagCount"], 4.0 / 6.0)
+        self.assertEqual(normalized["suspiciousFactRatio"], 4.0 / 6.0)
         self.assertEqual(normalized["rapidTransferBurst"], 0.0)
 
     def test_production_feature_vector_is_derived_from_current_canonical_fields(self):
@@ -511,7 +735,11 @@ class FraudModelTest(unittest.TestCase):
         self.assertIn("splitMetadata", artifact["evaluation"])
         self.assertIn("outOfTimeEvaluation", artifact["evaluation"])
         self.assertIn("evaluationComparison", artifact["evaluation"])
-        self.assertEqual(artifact["evaluation"]["selectedThresholdSource"], "validation")
+        self.assertEqual(artifact["evaluation"]["selectedThresholdSource"], "fixed_business_risk_thresholds")
+        self.assertEqual(artifact["thresholdPolicy"], artifact["evaluation"]["thresholdPolicy"])
+        self.assertEqual(artifact["productionReadiness"], artifact["evaluation"]["productionReadiness"])
+        self.assertIn("deployedAlertThresholdMetrics", artifact["evaluation"])
+        self.assertIn("deployedAlertThresholdMetrics", artifact["evaluation"]["outOfTimeEvaluation"])
         self.assertEqual(artifact["evaluation"]["modelVersion"], CANONICAL_MODEL_VERSION)
         self.assertEqual(artifact["evaluation"]["featureContractVersion"], FEATURE_CONTRACT.version)
         self.assertEqual(artifact["evaluation"]["featureSchemaVersion"], FEATURE_CONTRACT.version)
@@ -525,6 +753,116 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(artifact["featureSetVersion"], FEATURE_CONTRACT.version)
         self.assertEqual(artifact["training"]["featureContractVersion"], FEATURE_CONTRACT.version)
         self.assertEqual(artifact["training"]["featureSetVersion"], FEATURE_CONTRACT.version)
+
+    def test_artifact_threshold_policy_matches_evaluation_policy(self):
+        dataset = generate_fraud_behavior(count=300, seed=323, user_count=8, fraud_ratio=0.03)
+        bias, weights, evaluation = train_with_evaluation(dataset, epochs=2, learning_rate=0.1)
+        artifact_path = Path.cwd() / "threshold-policy-artifact.json"
+        try:
+            write_artifact(artifact_path, bias, weights, dataset.size, model_type="logistic", evaluation=evaluation)
+            artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+        finally:
+            if artifact_path.exists():
+                artifact_path.unlink()
+
+        self.assertEqual(artifact["thresholdPolicy"], artifact["evaluation"]["thresholdPolicy"])
+        self.assertEqual(artifact["thresholds"], artifact["thresholdPolicy"]["thresholds"])
+        self.assertEqual(artifact["thresholdPolicy"]["deployedAlertThresholdName"], "high")
+        self.assertEqual(artifact["thresholdPolicy"]["deployedAlertThreshold"], artifact["thresholds"]["high"])
+
+    def test_deployed_alert_threshold_has_recorded_temporal_metrics(self):
+        dataset = generate_fraud_behavior(count=300, seed=324, user_count=8, fraud_ratio=0.03)
+        _, _, evaluation = train_with_evaluation(dataset, epochs=2, learning_rate=0.1)
+
+        deployed = evaluation["deployedAlertThresholdMetrics"]
+
+        self.assertEqual(deployed["threshold"], evaluation["thresholdPolicy"]["deployedAlertThreshold"])
+        self.assertIn("precision", deployed)
+        self.assertIn("fraudCaptureRate", deployed)
+        self.assertIn("falsePositiveRate", deployed)
+        self.assertIn("alertRate", deployed)
+
+    def test_deployed_alert_threshold_has_recorded_out_of_time_metrics(self):
+        dataset = generate_fraud_behavior(count=300, seed=325, user_count=8, fraud_ratio=0.03)
+        _, _, evaluation = train_with_evaluation(dataset, epochs=2, learning_rate=0.1)
+
+        deployed = evaluation["outOfTimeEvaluation"]["deployedAlertThresholdMetrics"]
+
+        self.assertEqual(deployed["threshold"], evaluation["thresholdPolicy"]["deployedAlertThreshold"])
+        self.assertIn("precision", deployed)
+        self.assertIn("fraudCaptureRate", deployed)
+        self.assertIn("falsePositiveRate", deployed)
+        self.assertIn("alertRate", deployed)
+
+    def test_selected_threshold_source_matches_runtime_semantics(self):
+        dataset = generate_fraud_behavior(count=300, seed=326, user_count=8, fraud_ratio=0.03)
+        _, _, evaluation = train_with_evaluation(dataset, epochs=2, learning_rate=0.1)
+
+        self.assertEqual(evaluation["selectedThresholdSource"], "fixed_business_risk_thresholds")
+        self.assertEqual(evaluation["thresholdPolicy"]["ownership"], "fixed_business_risk_thresholds")
+        self.assertNotEqual(
+            evaluation["deployedAlertThresholdMetrics"]["threshold"],
+            evaluation["validationEvaluation"]["optimalThreshold"]["threshold"],
+        )
+
+    def test_production_artifact_cannot_hide_zero_capture_behind_ranking_metrics(self):
+        evaluation = {
+            "prAuc": 0.85,
+            "rocAuc": 0.9,
+            "selectedThresholdSource": "fixed_business_risk_thresholds",
+            "thresholdPolicy": {
+                "policyVersion": "fixed-business-risk-thresholds-v1",
+                "deployedAlertThresholdName": "high",
+                "deployedAlertThreshold": 0.75,
+                "thresholds": {"medium": 0.45, "high": 0.75, "critical": 0.9},
+            },
+            "deployedAlertThresholdMetrics": {
+                "threshold": 0.75,
+                "fraudCaptureRate": 0.5,
+                "precision": 1.0,
+                "falsePositiveRate": 0.0,
+                "alertRate": 0.01,
+            },
+            "outOfTimeEvaluation": {
+                "prAuc": 0.85,
+                "rocAuc": 0.9,
+                "deployedAlertThresholdMetrics": {
+                    "threshold": 0.75,
+                    "fraudCaptureRate": 0.0,
+                    "precision": 0.0,
+                    "falsePositiveRate": 0.0,
+                    "alertRate": 0.0,
+                },
+            },
+            "productionReadiness": {
+                "status": "NOT_READY",
+                "reasons": ["OUT_OF_TIME_DEPLOYED_ALERT_THRESHOLD_ZERO_FRAUD_CAPTURE"],
+                "rankingMetricsAreNotSufficient": True,
+            },
+        }
+        schema = list(FeaturePipeline.PRODUCTION_FEATURE_NAMES)
+        artifact_path = Path.cwd() / "not-ready-artifact.json"
+        try:
+            write_artifact(
+                artifact_path,
+                bias=-2.0,
+                weights={name: 0.0 for name in schema},
+                examples=100,
+                model_type="logistic",
+                evaluation=evaluation,
+            )
+            artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+            with self.assertRaisesRegex(ModelConfigurationError, "production readiness failed"):
+                load_model_from_artifact(artifact_path)
+        finally:
+            if artifact_path.exists():
+                artifact_path.unlink()
+
+        self.assertEqual(artifact["productionReadiness"]["status"], "NOT_READY")
+        self.assertIn(
+            "OUT_OF_TIME_DEPLOYED_ALERT_THRESHOLD_ZERO_FRAUD_CAPTURE",
+            artifact["productionReadiness"]["reasons"],
+        )
 
     def test_model_lifecycle_report_schema_is_consistent_for_logistic(self):
         dataset = generate_fraud_behavior(count=300, seed=322, user_count=8, fraud_ratio=0.03)
@@ -799,17 +1137,7 @@ class FraudModelTest(unittest.TestCase):
         try:
             artifact_path.write_text(
                 json.dumps(
-                    {
-                        "modelName": "python-logistic-fraud-model",
-                        "modelVersion": "registry-runtime-v1",
-                        "modelType": "logistic",
-                        "modelFamily": "LOGISTIC_REGRESSION",
-                        "bias": -2.0,
-                        "weights": {
-                            name: 0.0 for name in FeaturePipeline.FEATURE_NAMES
-                        },
-                        "thresholds": {"medium": 0.45, "high": 0.75, "critical": 0.9},
-                    }
+                    self._artifact_payload("registry-runtime-v1")
                 ),
                 encoding="utf-8",
             )
@@ -842,33 +1170,17 @@ class FraudModelTest(unittest.TestCase):
         try:
             champion_artifact.write_text(
                 json.dumps(
-                    {
-                        "modelName": "python-logistic-fraud-model",
-                        "modelVersion": "champion-v1",
-                        "modelType": "logistic",
-                        "modelFamily": "LOGISTIC_REGRESSION",
-                        "trainingMode": "production",
-                        "bias": -2.0,
-                        "weights": {name: 0.0 for name in feature_schema},
-                        "featureSchema": feature_schema,
-                        "thresholds": {"medium": 0.45, "high": 0.75, "critical": 0.9},
-                    }
+                    self._artifact_payload("champion-v1", feature_schema=feature_schema)
                 ),
                 encoding="utf-8",
             )
             challenger_artifact.write_text(
                 json.dumps(
-                    {
-                        "modelName": "python-logistic-fraud-model",
-                        "modelVersion": "challenger-v2",
-                        "modelType": "logistic",
-                        "modelFamily": "LOGISTIC_REGRESSION",
-                        "trainingMode": "production",
-                        "bias": -1.0,
-                        "weights": {name: 0.1 for name in feature_schema},
-                        "featureSchema": feature_schema,
-                        "thresholds": {"medium": 0.40, "high": 0.70, "critical": 0.88},
-                    }
+                    self._artifact_payload(
+                        "challenger-v2",
+                        feature_schema=feature_schema,
+                        weights={name: 0.1 for name in feature_schema},
+                    )
                 ),
                 encoding="utf-8",
             )
@@ -946,11 +1258,7 @@ class FraudModelTest(unittest.TestCase):
         try:
             artifact_path.write_text(
                 json.dumps(
-                    {
-                        "modelType": "logistic",
-                        "modelVersion": "loader-logistic-v1",
-                        "weights": {name: 0.0 for name in FeaturePipeline.FEATURE_NAMES},
-                    }
+                    self._artifact_payload("loader-logistic-v1")
                 ),
                 encoding="utf-8",
             )
@@ -974,12 +1282,59 @@ class FraudModelTest(unittest.TestCase):
     def test_model_loader_does_not_fallback_from_xgboost_to_logistic(self):
         artifact_path = Path.cwd() / "loader-xgboost-artifact.json"
         try:
-            artifact_path.write_text(json.dumps({"modelType": "xgboost"}), encoding="utf-8")
+            artifact_path.write_text(json.dumps(self._artifact_payload("xgboost-v1", model_type="xgboost")), encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "xgboost"):
                 load_model_from_artifact(artifact_path)
         finally:
             if artifact_path.exists():
                 artifact_path.unlink()
+
+    def test_artifact_feature_contract_version_must_match_runtime_contract(self):
+        artifact_path = Path.cwd() / "loader-version-mismatch-artifact.json"
+        artifact = self._artifact_payload("loader-version-mismatch-v1")
+        artifact["featureContractVersion"] = "old-contract"
+        try:
+            artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+            with self.assertRaisesRegex(ModelConfigurationError, "featureContractVersion mismatch"):
+                load_model_from_artifact(artifact_path)
+        finally:
+            if artifact_path.exists():
+                artifact_path.unlink()
+
+    def test_artifact_feature_schema_must_match_production_schema(self):
+        artifact_path = Path.cwd() / "loader-schema-mismatch-artifact.json"
+        artifact = self._artifact_payload("loader-schema-mismatch-v1")
+        artifact["featureSchema"] = list(reversed(FeaturePipeline.PRODUCTION_FEATURE_NAMES))
+        try:
+            artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+            with self.assertRaisesRegex(ModelConfigurationError, "featureSchema mismatch"):
+                load_model_from_artifact(artifact_path)
+        finally:
+            if artifact_path.exists():
+                artifact_path.unlink()
+
+    def test_registry_artifact_cannot_bypass_contract_validation(self):
+        artifact_path = Path.cwd() / "registry-invalid-artifact.json"
+        registry_path = Path.cwd() / "registry-invalid"
+        artifact = self._artifact_payload("registry-invalid-v1")
+        artifact["featureSetVersion"] = "old-contract"
+        try:
+            artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+            registry = ModelRegistry(registry_path)
+            registry.register(artifact_path, "registry-invalid-v1", "logistic", role="champion")
+
+            with self.assertRaisesRegex(ModelConfigurationError, "featureSetVersion mismatch"):
+                FraudModel(artifact_path=Path.cwd() / "missing-artifact.json", registry=registry)
+        finally:
+            if artifact_path.exists():
+                artifact_path.unlink()
+            if registry_path.exists():
+                for child in sorted(registry_path.rglob("*"), reverse=True):
+                    if child.is_file():
+                        child.unlink()
+                    elif child.is_dir():
+                        child.rmdir()
+                registry_path.rmdir()
 
     def test_optional_xgboost_model_fails_clearly_when_dependency_is_missing(self):
         if importlib.util.find_spec("xgboost") is None:

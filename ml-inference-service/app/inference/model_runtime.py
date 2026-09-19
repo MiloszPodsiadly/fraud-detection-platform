@@ -19,7 +19,7 @@ REASON_CODE_BY_FEATURE = {
     "deviceNovelty": "DEVICE_NOVELTY",
     "countryMismatch": "COUNTRY_MISMATCH",
     "proxyOrVpnDetected": "PROXY_OR_VPN",
-    "highRiskFlagCount": "MODEL_HIGH_RISK",
+    "suspiciousFactRatio": "MODEL_HIGH_RISK",
     "rapidTransferBurst": "RAPID_PLN_20K_BURST",
 }
 
@@ -191,7 +191,11 @@ class FraudModelRuntime:
         }
 
     def _reason_codes(self, contributions: list[FeatureContribution]) -> list[str]:
-        sorted_contributions = sorted(contributions, key=lambda item: item.contribution, reverse=True)
+        sorted_contributions = sorted(
+            [item for item in contributions if item.contribution > 0],
+            key=lambda item: item.contribution,
+            reverse=True,
+        )
         codes: list[str] = []
         for item in sorted_contributions:
             code = REASON_CODE_BY_FEATURE.get(item.reason_code)

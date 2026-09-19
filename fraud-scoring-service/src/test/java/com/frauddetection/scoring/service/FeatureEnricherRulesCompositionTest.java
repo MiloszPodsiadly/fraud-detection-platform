@@ -128,7 +128,6 @@ class FeatureEnricherRulesCompositionTest {
         assertThat(rulesResult.featureSnapshot())
                 .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5)
                 .containsEntry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d)
-                .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM, new BigDecimal("100.00"))
                 .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("100.00"))
                 .containsEntry(FraudFeatureContract.CURRENCY, "PLN");
         assertThat(rulesResult.fraudScore()).isCloseTo(0.47d, within(0.000001d));
@@ -161,7 +160,6 @@ class FeatureEnricherRulesCompositionTest {
         var snapshot = new FeatureStoreSnapshot(
                 previousCount,
                 previousAmountPln,
-                previousAmountPln,
                 List.of(),
                 0,
                 Instant.parse("2026-04-20T10:12:00Z"),
@@ -177,7 +175,6 @@ class FeatureEnricherRulesCompositionTest {
                 .build();
         var snapshot = new FeatureStoreSnapshot(
                 2,
-                new BigDecimal("20000.00"),
                 new BigDecimal("20000.00"),
                 List.of(
                         new RecentTransaction(

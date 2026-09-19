@@ -31,7 +31,7 @@ class TransactionFeatureEnricherServiceTest {
 
         var service = new TransactionFeatureEnricherService(featureStore, calculator, mapper, publisher);
         var event = TransactionFixtures.rawTransaction().build();
-        var snapshot = new FeatureStoreSnapshot(1, BigDecimal.TEN, BigDecimal.TEN, List.of(), 2, Instant.now(), true);
+        var snapshot = new FeatureStoreSnapshot(1, BigDecimal.TEN, List.of(), 2, Instant.now(), true);
         var features = new EnrichedTransactionFeatures(Map.of("recentTransactionCount", 2));
         TransactionEnrichedEvent enrichedEvent = TransactionFixtures.enrichedTransaction().build();
 

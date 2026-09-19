@@ -271,7 +271,6 @@ class CompositeFraudScoringEngineTest {
                         Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2),
                         Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M"),
                         Map.entry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 2.0d),
-                        Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM, new BigDecimal("20000.00")),
                         Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00")),
                         Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M"),
                         Map.entry(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("10000.00")),

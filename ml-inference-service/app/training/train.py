@@ -11,7 +11,14 @@ from app.features.feature_pipeline import FeaturePipeline
 from app.models.logistic_model import LogisticFraudModel
 from app.models.xgboost_model import XGBoostFraudModel
 
-CANONICAL_MODEL_VERSION = "2026-09-15.rules-v2-canonical-ml-pln.v1"
+CANONICAL_MODEL_VERSION = "2026-09-19.rules-v2-canonical-ml-pln.suspicious-fact-ratio.v1"
+RUNTIME_RISK_THRESHOLDS = {
+    "medium": 0.45,
+    "high": 0.75,
+    "critical": 0.90,
+}
+THRESHOLD_POLICY_VERSION = "fixed-business-risk-thresholds-v1"
+DEPLOYED_ALERT_THRESHOLD_NAME = "high"
 
 
 def train(
@@ -57,11 +64,19 @@ def train_model_with_evaluation(
     model, test_report = _train_on_splits(splits, model_type, epochs, learning_rate, training_mode)
     out_of_time_splits = split_dataset(dataset, mode="out_of_time", cutoff_ratio=0.6)
     _require_binary_evaluation_splits(out_of_time_splits, "out_of_time")
-    _, out_of_time_report = _train_on_splits(out_of_time_splits, model_type, epochs, learning_rate, training_mode)
+    out_of_time_report = _evaluate_model_on_splits(model, out_of_time_splits, training_mode)
     test_report["outOfTimeEvaluation"] = {
+        "rows": out_of_time_report["rows"],
+        "positiveLabels": out_of_time_report["positiveLabels"],
+        "negativeLabels": out_of_time_report["negativeLabels"],
         "prAuc": out_of_time_report["prAuc"],
         "rocAuc": out_of_time_report["rocAuc"],
         "optimalThreshold": out_of_time_report["optimalThreshold"],
+        "selectedThresholdSource": out_of_time_report["selectedThresholdSource"],
+        "thresholdPolicy": out_of_time_report["thresholdPolicy"],
+        "thresholds": out_of_time_report["thresholds"],
+        "runtimeThresholdMetrics": out_of_time_report["runtimeThresholdMetrics"],
+        "deployedAlertThresholdMetrics": out_of_time_report["deployedAlertThresholdMetrics"],
         "costEvaluation": out_of_time_report["costEvaluation"],
         "budgetEvaluation": out_of_time_report["budgetEvaluation"],
         "segmentEvaluation": out_of_time_report.get("segmentEvaluation", {}),
@@ -73,6 +88,7 @@ def train_model_with_evaluation(
         "prAucDelta": round(float(test_report["prAuc"]) - float(out_of_time_report["prAuc"]), 6),
     }
     test_report["stabilityAssessment"] = _stability_assessment(test_report, out_of_time_report)
+    test_report["productionReadiness"] = _production_readiness(test_report, out_of_time_report)
     return model, test_report
 
 
@@ -98,14 +114,20 @@ def _train_on_splits(
     else:
         model.fit(train_rows, splits.train.y)
         model.weights = model.feature_importance()
+    thresholds = _runtime_threshold_values()
     validation_scores = [model.predict_proba(features) for features in validation_rows]
-    validation_report = evaluate_scores(splits.validation.y, validation_scores, segment_rows=splits.validation.X)
-    selected_threshold = float(validation_report["optimalThreshold"]["threshold"])
+    validation_report = evaluate_scores(
+        splits.validation.y,
+        validation_scores,
+        thresholds=thresholds,
+        segment_rows=splits.validation.X,
+    )
+    _attach_threshold_policy(validation_report)
     test_scores = [model.predict_proba(features) for features in test_rows]
-    test_report = evaluate_scores(splits.test.y, test_scores, thresholds=[selected_threshold], segment_rows=splits.test.X)
+    test_report = evaluate_scores(splits.test.y, test_scores, thresholds=thresholds, segment_rows=splits.test.X)
+    _attach_threshold_policy(test_report)
     test_report["validationEvaluation"] = validation_report
     test_report["splitMetadata"] = splits.metadata
-    test_report["selectedThresholdSource"] = "validation"
     test_report["trainingMode"] = training_mode
     test_report["featureSetUsed"] = feature_set
     test_report["modelType"] = model_type
@@ -115,6 +137,27 @@ def _train_on_splits(
     test_report["featureSchemaVersion"] = FEATURE_CONTRACT.version
     test_report["featureSetVersion"] = FEATURE_CONTRACT.version
     return model, test_report
+
+
+def _evaluate_model_on_splits(
+        model: LogisticFraudModel | XGBoostFraudModel,
+        splits,
+        training_mode: str,
+) -> dict[str, object]:
+    feature_pipeline = FeaturePipeline().fit(splits.train)
+    feature_set = feature_pipeline.get_training_features(training_mode)
+    test_rows = feature_pipeline.transform(splits.test, mode=training_mode)
+    _validate_feature_set(test_rows, feature_set, training_mode)
+    scores = [model.predict_proba(features) for features in test_rows]
+    report = evaluate_scores(
+        splits.test.y,
+        scores,
+        thresholds=_runtime_threshold_values(),
+        segment_rows=splits.test.X,
+    )
+    _attach_threshold_policy(report)
+    report["splitMetadata"] = splits.metadata
+    return report
 
 
 def _require_binary_evaluation_splits(splits, split_name: str) -> None:
@@ -174,11 +217,8 @@ def write_artifact(
         "modelFamily": "LOGISTIC_REGRESSION",
         "bias": bias,
         "weights": weights,
-        "thresholds": {
-            "medium": 0.45,
-            "high": 0.75,
-            "critical": 0.90,
-        },
+        "thresholds": dict(RUNTIME_RISK_THRESHOLDS),
+        "thresholdPolicy": _threshold_policy(),
         "training": {
             "source": "synthetic-fraud-scenarios",
             "algorithm": "batch-gradient-descent",
@@ -196,6 +236,7 @@ def write_artifact(
         "featureSetVersion": FEATURE_CONTRACT.version,
         "featureImportance": {name: abs(weight) for name, weight in weights.items()},
         "evaluation": _artifact_evaluation_summary(evaluation or {}),
+        "productionReadiness": _production_readiness_from_evaluation(evaluation or {}),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -232,6 +273,10 @@ def _artifact_evaluation_summary(evaluation: dict[str, object]) -> dict[str, obj
         "rocAuc",
         "optimalThreshold",
         "selectedThresholdSource",
+        "thresholdPolicy",
+        "runtimeThresholdMetrics",
+        "deployedAlertThresholdMetrics",
+        "productionReadiness",
         "trainingMode",
         "featureSetUsed",
         "modelType",
@@ -255,7 +300,18 @@ def _artifact_evaluation_summary(evaluation: dict[str, object]) -> dict[str, obj
     if isinstance(out_of_time, dict):
         summary["outOfTimeEvaluation"] = {
             key: out_of_time[key]
-            for key in ["prAuc", "rocAuc", "optimalThreshold"]
+            for key in [
+                "rows",
+                "positiveLabels",
+                "negativeLabels",
+                "prAuc",
+                "rocAuc",
+                "optimalThreshold",
+                "selectedThresholdSource",
+                "thresholdPolicy",
+                "runtimeThresholdMetrics",
+                "deployedAlertThresholdMetrics",
+            ]
             if key in out_of_time
         }
         out_of_time_split = out_of_time.get("splitMetadata")
@@ -292,15 +348,86 @@ def _new_model(
 
 
 def _stability_assessment(temporal_report: dict[str, object], out_of_time_report: dict[str, object]) -> dict[str, object]:
-    temporal_optimal = temporal_report["optimalThreshold"]
-    out_of_time_optimal = out_of_time_report["optimalThreshold"]
-    temporal_cost = temporal_report["costEvaluation"]["optimalCostThreshold"]
-    out_of_time_cost = out_of_time_report["costEvaluation"]["optimalCostThreshold"]
+    temporal_deployed = temporal_report["deployedAlertThresholdMetrics"]
+    out_of_time_deployed = out_of_time_report["deployedAlertThresholdMetrics"]
     return {
         "prAucDelta": round(float(temporal_report["prAuc"]) - float(out_of_time_report["prAuc"]), 6),
-        "fraudCaptureDelta": round(float(temporal_optimal["fraudCaptureRate"]) - float(out_of_time_optimal["fraudCaptureRate"]), 6),
-        "falsePositiveRateDelta": round(float(out_of_time_optimal["falsePositiveRate"]) - float(temporal_optimal["falsePositiveRate"]), 6),
-        "expectedCostDelta": round(float(out_of_time_cost["totalCost"]) - float(temporal_cost["totalCost"]), 6),
+        "deployedFraudCaptureDelta": round(float(temporal_deployed["fraudCaptureRate"]) - float(out_of_time_deployed["fraudCaptureRate"]), 6),
+        "deployedFalsePositiveRateDelta": round(
+            float(out_of_time_deployed["falsePositiveRate"]) - float(temporal_deployed["falsePositiveRate"]),
+            6,
+        ),
+        "deployedAlertRateDelta": round(float(out_of_time_deployed["alertRate"]) - float(temporal_deployed["alertRate"]), 6),
+    }
+
+
+def _threshold_policy() -> dict[str, object]:
+    deployed_threshold = RUNTIME_RISK_THRESHOLDS[DEPLOYED_ALERT_THRESHOLD_NAME]
+    return {
+        "policyVersion": THRESHOLD_POLICY_VERSION,
+        "ownership": "fixed_business_risk_thresholds",
+        "runtimeSemantics": "riskLevel bands are business-owned; alertRecommended is true for HIGH or CRITICAL",
+        "deployedAlertThresholdName": DEPLOYED_ALERT_THRESHOLD_NAME,
+        "deployedAlertThreshold": deployed_threshold,
+        "thresholds": dict(RUNTIME_RISK_THRESHOLDS),
+    }
+
+
+def _runtime_threshold_values() -> list[float]:
+    return list(dict.fromkeys(RUNTIME_RISK_THRESHOLDS.values()))
+
+
+def _attach_threshold_policy(report: dict[str, object]) -> None:
+    report["selectedThresholdSource"] = "fixed_business_risk_thresholds"
+    report["thresholdPolicy"] = _threshold_policy()
+    report["runtimeThresholdMetrics"] = {
+        name: _threshold_metric(report, threshold)
+        for name, threshold in RUNTIME_RISK_THRESHOLDS.items()
+    }
+    report["deployedAlertThresholdMetrics"] = report["runtimeThresholdMetrics"][DEPLOYED_ALERT_THRESHOLD_NAME]
+
+
+def _threshold_metric(report: dict[str, object], threshold: float) -> dict[str, object]:
+    thresholds = report.get("thresholds")
+    if not isinstance(thresholds, list):
+        raise ValueError("evaluation report is missing threshold metrics.")
+    for entry in thresholds:
+        if isinstance(entry, dict) and abs(float(entry.get("threshold", -1.0)) - threshold) < 0.000001:
+            return dict(entry)
+    raise ValueError(f"evaluation report is missing metrics for threshold {threshold}.")
+
+
+def _production_readiness(temporal_report: dict[str, object], out_of_time_report: dict[str, object]) -> dict[str, object]:
+    temporal = temporal_report["deployedAlertThresholdMetrics"]
+    out_of_time = out_of_time_report["deployedAlertThresholdMetrics"]
+    reasons = []
+    if float(temporal.get("fraudCaptureRate", 0.0)) <= 0.0:
+        reasons.append("TEMPORAL_DEPLOYED_ALERT_THRESHOLD_ZERO_FRAUD_CAPTURE")
+    if float(out_of_time.get("fraudCaptureRate", 0.0)) <= 0.0:
+        reasons.append("OUT_OF_TIME_DEPLOYED_ALERT_THRESHOLD_ZERO_FRAUD_CAPTURE")
+    return {
+        "status": "READY" if not reasons else "NOT_READY",
+        "reasons": reasons,
+        "policyVersion": THRESHOLD_POLICY_VERSION,
+        "deployedAlertThresholdName": DEPLOYED_ALERT_THRESHOLD_NAME,
+        "deployedAlertThreshold": RUNTIME_RISK_THRESHOLDS[DEPLOYED_ALERT_THRESHOLD_NAME],
+        "temporalFraudCaptureRate": temporal.get("fraudCaptureRate"),
+        "outOfTimeFraudCaptureRate": out_of_time.get("fraudCaptureRate"),
+        "rankingMetricsAreNotSufficient": True,
+    }
+
+
+def _production_readiness_from_evaluation(evaluation: dict[str, object]) -> dict[str, object]:
+    readiness = evaluation.get("productionReadiness")
+    if isinstance(readiness, dict):
+        return readiness
+    return {
+        "status": "UNKNOWN",
+        "reasons": ["PRODUCTION_READINESS_NOT_EVALUATED"],
+        "policyVersion": THRESHOLD_POLICY_VERSION,
+        "deployedAlertThresholdName": DEPLOYED_ALERT_THRESHOLD_NAME,
+        "deployedAlertThreshold": RUNTIME_RISK_THRESHOLDS[DEPLOYED_ALERT_THRESHOLD_NAME],
+        "rankingMetricsAreNotSufficient": True,
     }
 
 

@@ -76,7 +76,6 @@ class VelocityProducerCompositionTest {
         return new FeatureStoreSnapshot(
                 4,
                 BigDecimal.ZERO,
-                BigDecimal.ZERO,
                 List.of(
                         recentTransaction("hist-1"),
                         recentTransaction("hist-2"),

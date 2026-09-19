@@ -422,7 +422,7 @@ class AlertControllerTest {
                         alert.riskLevel()
                 ),
                 List.of(new FraudReasonSummary("DEVICE_NOVELTY", "New or unusual device", "Device differs from known behavior.", 0.4d, Map.of())),
-                new CustomerRecentBehaviorSummary(alert.customerId(), "STANDARD", 500, 6, alert.transactionAmount(), 0.4d, 3, true, false, false, null, Map.of()),
+                new CustomerRecentBehaviorSummary(alert.customerId(), "STANDARD", 500, 6, alert.transactionAmount(), 0.4d, 3, true, false, false, null),
                 new RecommendedNextAction("STEP_UP_REVIEW", "Review identity and device signals", "Device signal requires review.", List.of("Inspect device novelty")),
                 Map.of(),
                 Instant.parse("2026-04-20T10:01:00Z")

@@ -6,7 +6,6 @@ import java.util.List;
 
 public record FeatureStoreSnapshot(
         int recentTransactionCount,
-        BigDecimal recentAmountSum,
         BigDecimal recentAmountSumPln,
         List<RecentTransaction> recentTransactions,
         int merchantFrequency7d,

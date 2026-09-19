@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from app.features.feature_contract import FEATURE_CONTRACT
 from app.features.feature_pipeline import FeaturePipeline
 
 
@@ -79,12 +80,17 @@ class XGBoostFraudModel:
             "trainingMode": self.training_mode,
             "featureSetUsed": self.feature_schema,
             "featureSchema": self.feature_schema,
+            "featureContractVersion": FEATURE_CONTRACT.version,
+            "featureSchemaVersion": FEATURE_CONTRACT.version,
+            "featureSetVersion": FEATURE_CONTRACT.version,
             "thresholds": self.thresholds,
             "featureImportance": self.feature_importance(),
             "training": {
                 **training_metadata,
                 "trainingMode": self.training_mode,
                 "featureSetUsed": self.feature_schema,
+                "featureContractVersion": FEATURE_CONTRACT.version,
+                "featureSetVersion": FEATURE_CONTRACT.version,
             },
             "evaluation": evaluation,
             "modelDataBase64": base64.b64encode(self._booster_bytes()).decode("ascii"),

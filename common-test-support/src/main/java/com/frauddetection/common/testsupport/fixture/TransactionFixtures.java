@@ -180,7 +180,6 @@ public final class TransactionFixtures {
                             Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 8),
                             Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M"),
                             Map.entry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 8.0d),
-                            Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM, new BigDecimal("5830.24")),
                             Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M"),
                             Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("5830.24")),
                             Map.entry(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("1249.99")),

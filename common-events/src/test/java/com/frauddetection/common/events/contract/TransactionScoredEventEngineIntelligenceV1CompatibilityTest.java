@@ -7,8 +7,10 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMisma
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -32,7 +34,7 @@ class TransactionScoredEventEngineIntelligenceV1CompatibilityTest {
     }
 
     @Test
-    void legacyV1ComparisonWithoutIdentityDeserializesAndNormalizesIdentity() throws Exception {
+    void historicalV1ComparisonWithoutIdentityIsAccepted() throws Exception {
         TransactionScoredEvent event = read(TransactionScoredEventFixtureLoader.legacyV1EngineIntelligenceJson());
 
         assertThat(event.engineIntelligence().comparison().comparisonType())
@@ -90,6 +92,70 @@ class TransactionScoredEventEngineIntelligenceV1CompatibilityTest {
     }
 
     @Test
+    void currentComparisonWithoutIdentityIsRejected() throws Exception {
+        String currentWithoutIdentity = removeCurrentComparisonIdentity(
+                TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson(),
+                "comparisonType",
+                "comparedEngineIds"
+        );
+
+        assertThatThrownBy(() -> read(currentWithoutIdentity))
+                .isInstanceOf(Exception.class)
+                .hasRootCauseInstanceOf(NullPointerException.class)
+                .hasMessageContaining("comparisonType is required");
+    }
+
+    @Test
+    void currentComparisonWithPartialIdentityIsRejected() throws Exception {
+        String currentWithoutIds = removeCurrentComparisonIdentity(
+                TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson(),
+                "comparedEngineIds"
+        );
+        String currentWithoutType = removeCurrentComparisonIdentity(
+                TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson(),
+                "comparisonType"
+        );
+
+        assertThatThrownBy(() -> read(currentWithoutIds))
+                .isInstanceOf(Exception.class)
+                .hasRootCauseInstanceOf(NullPointerException.class)
+                .hasMessageContaining("comparedEngineIds is required");
+        assertThatThrownBy(() -> read(currentWithoutType))
+                .isInstanceOf(Exception.class)
+                .hasRootCauseInstanceOf(NullPointerException.class)
+                .hasMessageContaining("comparisonType is required");
+    }
+
+    @Test
+    void currentComparisonWithValidIdentityIsAccepted() throws Exception {
+        TransactionScoredEvent event = read(TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson());
+
+        assertThat(event.modelVersion()).isEqualTo("v2");
+        assertThat(event.engineIntelligence().comparison().comparisonType())
+                .isEqualTo(EngineIntelligenceComparisonType.RULES_VS_ML);
+        assertThat(event.engineIntelligence().comparison().comparedEngineIds())
+                .containsExactly("rules.primary", "ml.python.primary");
+    }
+
+    @Test
+    void historicalCompatibilityCannotBeInvokedByCurrentContract() throws Exception {
+        String currentWithoutIdentity = removeCurrentComparisonIdentity(
+                TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson(),
+                "comparisonType",
+                "comparedEngineIds"
+        );
+
+        assertThat(objectMapper.readTree(currentWithoutIdentity).get("modelVersion").textValue()).isEqualTo("v2");
+        assertThatThrownBy(() -> kafkaDeserializer.deserialize(
+                "transactions.scored",
+                currentWithoutIdentity.getBytes(StandardCharsets.UTF_8)
+        ))
+                .isInstanceOf(org.apache.kafka.common.errors.SerializationException.class)
+                .hasRootCauseInstanceOf(NullPointerException.class)
+                .hasRootCauseMessage("comparisonType is required");
+    }
+
+    @Test
     void partialComparisonIdentityIsRejectedInsteadOfSilentlyCompleted() {
         Map<String, String> invalidFixtures = Map.of(
                 "comparisonTypeOnly", TransactionScoredEventFixtureLoader.partialComparisonTypeOnlyJson(),
@@ -119,6 +185,15 @@ class TransactionScoredEventEngineIntelligenceV1CompatibilityTest {
 
     private TransactionScoredEvent read(String json) throws Exception {
         return objectMapper.readValue(json, TransactionScoredEvent.class);
+    }
+
+    private String removeCurrentComparisonIdentity(String json, String... fields) throws Exception {
+        JsonNode root = objectMapper.readTree(json);
+        ObjectNode comparison = (ObjectNode) root.path("engineIntelligence").path("comparison");
+        for (String field : fields) {
+            comparison.remove(field);
+        }
+        return root.toString();
     }
 
 }

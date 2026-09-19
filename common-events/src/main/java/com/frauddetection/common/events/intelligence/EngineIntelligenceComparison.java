@@ -24,14 +24,9 @@ public record EngineIntelligenceComparison(
             @JsonProperty("riskMismatchStatus") EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
             @JsonProperty("scoreDeltaBucket") EngineIntelligenceScoreDeltaBucket scoreDeltaBucket
     ) {
-        EngineIntelligenceComparisonV1Compatibility.NormalizedComparisonIdentity identity =
-                EngineIntelligenceComparisonV1Compatibility.normalizeLegacyV1Identity(
-                        comparisonType,
-                        comparedEngineIds
-                );
         return new EngineIntelligenceComparison(
-                identity.comparisonType(),
-                identity.comparedEngineIds(),
+                comparisonType,
+                comparedEngineIds,
                 agreementStatus,
                 riskMismatchStatus,
                 scoreDeltaBucket

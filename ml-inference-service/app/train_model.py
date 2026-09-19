@@ -9,11 +9,11 @@ from app.evaluation.evaluate import cli_summary, write_report
 from app.features.feature_contract import FEATURE_CONTRACT
 from app.features.feature_pipeline import FeaturePipeline
 from app.governance.profile import NumericProfile, RISK_LEVELS
-from app.model import DEFAULT_ARTIFACT_PATH, FraudModel
 from app.registry.model_registry import ModelRegistry, default_registry_path
 from app.training.train import train_model_with_evaluation, write_model_artifact
 
 
+DEFAULT_ARTIFACT_PATH = Path(__file__).with_name("model_artifact.json")
 DEFAULT_REFERENCE_PROFILE_PATH = Path(__file__).parent / "governance" / "reference_profile.local.json"
 
 
@@ -70,6 +70,8 @@ def main() -> None:
             },
             role=args.registry_role,
         )
+
+    from app.model import FraudModel
 
     model = FraudModel(args.output)
     high_risk = model.score(

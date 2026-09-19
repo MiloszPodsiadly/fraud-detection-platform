@@ -6,7 +6,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 public final class FeatureSnapshotKeyPolicy {
 
@@ -18,10 +17,7 @@ public final class FeatureSnapshotKeyPolicy {
             "cardnumber", "accountnumber", "email", "phone", "host", "endpoint", "url",
             "useragent", "fingerprint"
     );
-    private static final Set<String> ALLOWED_CONTRACT_KEYS = Stream.concat(
-                    FraudFeatureContract.JAVA_ENRICHED_FEATURE_NAMES.stream(),
-                    FraudFeatureContract.ML_FEATURE_NAMES.stream()
-            )
+    private static final Set<String> ALLOWED_CONTRACT_KEYS = FraudFeatureContract.JAVA_ENRICHED_FEATURE_NAMES.stream()
             .collect(Collectors.toUnmodifiableSet());
     private FeatureSnapshotKeyPolicy() {
     }

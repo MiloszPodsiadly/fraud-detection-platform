@@ -25,7 +25,6 @@ public class TransactionFeatureCalculator {
 
     public EnrichedTransactionFeatures calculate(TransactionRawEvent event, FeatureStoreSnapshot snapshot) {
         int recentTransactionCount = snapshot.recentTransactionCount() + 1;
-        BigDecimal recentAmountSum = snapshot.recentAmountSum().add(event.transactionAmount().amount());
         BigDecimal currentAmountPln = currencyAmountConverter.toPln(event.transactionAmount().amount(), event.transactionAmount().currency());
         BigDecimal recentAmountSumPln = snapshot.recentAmountSumPln().add(currentAmountPln);
         int merchantFrequency7d = snapshot.merchantFrequency7d() + 1;
@@ -43,7 +42,6 @@ public class TransactionFeatureCalculator {
         String canonicalObservationWindow = VelocityFeatureContract.CANONICAL_RECENT_TRANSACTION_COUNT_WINDOW_TEXT;
         featureSnapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT, recentTransactionCount);
         featureSnapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, canonicalObservationWindow);
-        featureSnapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM, recentAmountSum);
         featureSnapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, canonicalObservationWindow);
         featureSnapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, recentAmountSumPln);
         featureSnapshot.put(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, currentAmountPln);

@@ -20,7 +20,7 @@ class LogisticFraudModel:
         "deviceNovelty": 1.10,
         "countryMismatch": 1.30,
         "proxyOrVpnDetected": 0.95,
-        "highRiskFlagCount": 0.42,
+        "suspiciousFactRatio": 0.42,
         "rapidTransferBurst": 5.25,
     }
     DEFAULT_THRESHOLDS = {

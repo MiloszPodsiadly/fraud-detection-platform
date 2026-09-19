@@ -154,6 +154,47 @@ class FraudCaseManagementServiceTest {
     }
 
     @Test
+    void shouldNotCreateRapidTransferCaseFromMalformedCurrentCanonicalFacts() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                mock(ScoredTransactionRepository.class),
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+
+        List<Map<String, Object>> malformedSnapshots = List.of(
+                rapidTransferSnapshotWith(FraudFeatureContract.RECENT_TRANSACTION_COUNT, new BigDecimal("2.9")),
+                rapidTransferSnapshotWith(FraudFeatureContract.RECENT_TRANSACTION_COUNT, "2"),
+                rapidTransferSnapshotWith(FraudFeatureContract.RECENT_TRANSACTION_COUNT, true),
+                rapidTransferSnapshotWith(FraudFeatureContract.RECENT_TRANSACTION_COUNT, -1),
+                rapidTransferSnapshotWith(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT,
+                        com.frauddetection.common.events.features.FraudFeatureValueBoundsContract.MAX_RECENT_TRANSACTION_COUNT + 1
+                ),
+                rapidTransferSnapshotWith(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, "20000.00"),
+                rapidTransferSnapshotWith(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("-0.01")),
+                rapidTransferSnapshotWith(
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_PLN,
+                        com.frauddetection.common.events.features.FraudFeatureValueBoundsContract.MAX_RECENT_AMOUNT_SUM_PLN.add(new BigDecimal("0.01"))
+                ),
+                rapidTransferSnapshotWith(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT2M"),
+                rapidTransferSnapshotWith(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("rapid-txn-1")),
+                rapidTransferSnapshotWith(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("rapid-txn-1", " "))
+        );
+        malformedSnapshots.forEach(snapshot -> service.handleScoredTransaction(
+                TransactionFixtures.scoredTransaction()
+                        .withReasonCodes(List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue()))
+                        .withFeatureSnapshot(snapshot)
+                        .build()
+        ));
+
+        verify(fraudCaseRepository, never()).findByCaseKey(any());
+        verify(fraudCaseRepository, never()).save(any());
+    }
+
+    @Test
     void shouldNotBackfillMissingGroupedTransactionsWhenCaseIsRead() {
         FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
         ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
@@ -443,6 +484,18 @@ class FraudCaseManagementServiceTest {
                         FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("10000.00")
                 ))
                 .build();
+    }
+
+    private Map<String, Object> rapidTransferSnapshotWith(String key, Object value) {
+        java.util.LinkedHashMap<String, Object> snapshot = new java.util.LinkedHashMap<>();
+        snapshot.put(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("rapid-txn-1", "rapid-txn-2"));
+        snapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2);
+        snapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M");
+        snapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"));
+        snapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M");
+        snapshot.put(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("10000.00"));
+        snapshot.put(key, value);
+        return Map.copyOf(snapshot);
     }
 
     private com.frauddetection.alert.persistence.FraudCaseTransactionDocument scoredCaseTransaction(String transactionId, BigDecimal amountPln) {

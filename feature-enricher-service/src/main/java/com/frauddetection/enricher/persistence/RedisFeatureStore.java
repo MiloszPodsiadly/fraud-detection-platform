@@ -70,7 +70,6 @@ public class RedisFeatureStore implements FeatureStore {
 
             return new FeatureStoreSnapshot(
                     recentCount == null ? 0 : recentCount.intValue(),
-                    sumAmounts(recentTransactions),
                     sumAmountsPln(recentTransactions),
                     parseTransactions(recentTransactions),
                     merchantFrequency == null ? 0 : merchantFrequency.intValue(),
@@ -111,24 +110,6 @@ public class RedisFeatureStore implements FeatureStore {
         } catch (Exception exception) {
             throw new FeatureEnrichmentException("Failed to persist feature snapshot to Redis.", exception);
         }
-    }
-
-    private BigDecimal sumAmounts(Set<ZSetOperations.TypedTuple<String>> entries) {
-        if (entries == null || entries.isEmpty()) {
-            return BigDecimal.ZERO;
-        }
-
-        BigDecimal total = BigDecimal.ZERO;
-        for (ZSetOperations.TypedTuple<String> entry : entries) {
-            if (entry == null || entry.getValue() == null) {
-                continue;
-            }
-            String[] parts = entry.getValue().split("\\|");
-            if (parts.length >= 2) {
-                total = total.add(new BigDecimal(parts[1]));
-            }
-        }
-        return total;
     }
 
     private BigDecimal sumAmountsPln(Set<ZSetOperations.TypedTuple<String>> entries) {

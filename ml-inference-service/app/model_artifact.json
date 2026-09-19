@@ -1,13 +1,25 @@
 {
   "bias": -4.463733,
   "evaluation": {
+    "deployedAlertThresholdMetrics": {
+      "alertRate": 0.004,
+      "f1": 0.333333,
+      "falseNegatives": 16,
+      "falsePositiveRate": 0.0,
+      "falsePositives": 0,
+      "fraudCaptureRate": 0.2,
+      "precision": 1.0,
+      "recall": 0.2,
+      "threshold": 0.75,
+      "totalCost": 8000.0
+    },
     "evaluationComparison": {
-      "outOfTimePrAuc": 0.678297,
-      "prAucDelta": 0.02782,
+      "outOfTimePrAuc": 0.683863,
+      "prAucDelta": 0.022254,
       "temporalPrAuc": 0.706117
     },
-    "featureContractVersion": "2026-09-15.rules-v2-canonical-ml-pln",
-    "featureSchemaVersion": "2026-09-15.rules-v2-canonical-ml-pln",
+    "featureContractVersion": "2026-09-19.rules-v2-canonical-ml-pln.suspicious-fact-ratio",
+    "featureSchemaVersion": "2026-09-19.rules-v2-canonical-ml-pln.suspicious-fact-ratio",
     "featureSetUsed": [
       "recentTransactionCount",
       "recentAmountSumPln",
@@ -16,35 +28,89 @@
       "deviceNovelty",
       "countryMismatch",
       "proxyOrVpnDetected",
-      "highRiskFlagCount",
+      "suspiciousFactRatio",
       "rapidTransferBurst"
     ],
-    "featureSetVersion": "2026-09-15.rules-v2-canonical-ml-pln",
+    "featureSetVersion": "2026-09-19.rules-v2-canonical-ml-pln.suspicious-fact-ratio",
     "modelFamily": "LOGISTIC_REGRESSION",
     "modelType": "logistic",
-    "modelVersion": "2026-09-15.rules-v2-canonical-ml-pln.v1",
+    "modelVersion": "2026-09-19.rules-v2-canonical-ml-pln.suspicious-fact-ratio.v1",
     "negativeLabels": 980,
     "optimalThreshold": {
-      "alertRate": 0.013,
-      "f1": 0.787879,
+      "alertRate": 0.008,
+      "f1": 0.571429,
       "falsePositiveRate": 0.0,
-      "fraudCaptureRate": 0.65,
+      "fraudCaptureRate": 0.4,
       "precision": 1.0,
-      "recall": 0.65,
-      "threshold": 0.1
+      "recall": 0.4,
+      "threshold": 0.45
     },
     "outOfTimeEvaluation": {
-      "optimalThreshold": {
-        "alertRate": 0.0,
-        "f1": 0.0,
+      "deployedAlertThresholdMetrics": {
+        "alertRate": 0.019,
+        "f1": 0.365385,
+        "falseNegatives": 66,
         "falsePositiveRate": 0.0,
-        "fraudCaptureRate": 0.0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "threshold": 0.1
+        "falsePositives": 0,
+        "fraudCaptureRate": 0.223529,
+        "precision": 1.0,
+        "recall": 0.223529,
+        "threshold": 0.75,
+        "totalCost": 33000.0
       },
-      "prAuc": 0.678297,
-      "rocAuc": 0.788807,
+      "negativeLabels": 915,
+      "optimalThreshold": {
+        "alertRate": 0.034,
+        "f1": 0.571429,
+        "falsePositiveRate": 0.0,
+        "fraudCaptureRate": 0.4,
+        "precision": 1.0,
+        "recall": 0.4,
+        "threshold": 0.45
+      },
+      "positiveLabels": 85,
+      "prAuc": 0.683863,
+      "rocAuc": 0.788357,
+      "rows": 1000,
+      "runtimeThresholdMetrics": {
+        "critical": {
+          "alertRate": 0.017,
+          "f1": 0.333333,
+          "falseNegatives": 68,
+          "falsePositiveRate": 0.0,
+          "falsePositives": 0,
+          "fraudCaptureRate": 0.2,
+          "precision": 1.0,
+          "recall": 0.2,
+          "threshold": 0.9,
+          "totalCost": 34000.0
+        },
+        "high": {
+          "alertRate": 0.019,
+          "f1": 0.365385,
+          "falseNegatives": 66,
+          "falsePositiveRate": 0.0,
+          "falsePositives": 0,
+          "fraudCaptureRate": 0.223529,
+          "precision": 1.0,
+          "recall": 0.223529,
+          "threshold": 0.75,
+          "totalCost": 33000.0
+        },
+        "medium": {
+          "alertRate": 0.034,
+          "f1": 0.571429,
+          "falseNegatives": 51,
+          "falsePositiveRate": 0.0,
+          "falsePositives": 0,
+          "fraudCaptureRate": 0.4,
+          "precision": 1.0,
+          "recall": 0.4,
+          "threshold": 0.45,
+          "totalCost": 25500.0
+        }
+      },
+      "selectedThresholdSource": "fixed_business_risk_thresholds",
       "splitMetadata": {
         "classDistribution": {
           "test": {
@@ -71,13 +137,73 @@
         "testRows": 1000,
         "trainRows": 3000,
         "validationRows": 1000
+      },
+      "thresholdPolicy": {
+        "deployedAlertThreshold": 0.75,
+        "deployedAlertThresholdName": "high",
+        "ownership": "fixed_business_risk_thresholds",
+        "policyVersion": "fixed-business-risk-thresholds-v1",
+        "runtimeSemantics": "riskLevel bands are business-owned; alertRecommended is true for HIGH or CRITICAL",
+        "thresholds": {
+          "critical": 0.9,
+          "high": 0.75,
+          "medium": 0.45
+        }
       }
     },
     "positiveLabels": 20,
     "prAuc": 0.706117,
+    "productionReadiness": {
+      "deployedAlertThreshold": 0.75,
+      "deployedAlertThresholdName": "high",
+      "outOfTimeFraudCaptureRate": 0.223529,
+      "policyVersion": "fixed-business-risk-thresholds-v1",
+      "rankingMetricsAreNotSufficient": true,
+      "reasons": [],
+      "status": "READY",
+      "temporalFraudCaptureRate": 0.2
+    },
     "rocAuc": 0.738316,
     "rows": 1000,
-    "selectedThresholdSource": "validation",
+    "runtimeThresholdMetrics": {
+      "critical": {
+        "alertRate": 0.004,
+        "f1": 0.333333,
+        "falseNegatives": 16,
+        "falsePositiveRate": 0.0,
+        "falsePositives": 0,
+        "fraudCaptureRate": 0.2,
+        "precision": 1.0,
+        "recall": 0.2,
+        "threshold": 0.9,
+        "totalCost": 8000.0
+      },
+      "high": {
+        "alertRate": 0.004,
+        "f1": 0.333333,
+        "falseNegatives": 16,
+        "falsePositiveRate": 0.0,
+        "falsePositives": 0,
+        "fraudCaptureRate": 0.2,
+        "precision": 1.0,
+        "recall": 0.2,
+        "threshold": 0.75,
+        "totalCost": 8000.0
+      },
+      "medium": {
+        "alertRate": 0.008,
+        "f1": 0.571429,
+        "falseNegatives": 12,
+        "falsePositiveRate": 0.0,
+        "falsePositives": 0,
+        "fraudCaptureRate": 0.4,
+        "precision": 1.0,
+        "recall": 0.4,
+        "threshold": 0.45,
+        "totalCost": 6000.0
+      }
+    },
+    "selectedThresholdSource": "fixed_business_risk_thresholds",
     "splitMetadata": {
       "classDistribution": {
         "test": {
@@ -106,23 +232,35 @@
       "validationRows": 1000
     },
     "stabilityAssessment": {
-      "expectedCostDelta": 39000.0,
-      "falsePositiveRateDelta": 0.0,
-      "fraudCaptureDelta": 0.65,
-      "prAucDelta": 0.02782
+      "deployedAlertRateDelta": 0.015,
+      "deployedFalsePositiveRateDelta": 0.0,
+      "deployedFraudCaptureDelta": -0.023529,
+      "prAucDelta": 0.022254
+    },
+    "thresholdPolicy": {
+      "deployedAlertThreshold": 0.75,
+      "deployedAlertThresholdName": "high",
+      "ownership": "fixed_business_risk_thresholds",
+      "policyVersion": "fixed-business-risk-thresholds-v1",
+      "runtimeSemantics": "riskLevel bands are business-owned; alertRecommended is true for HIGH or CRITICAL",
+      "thresholds": {
+        "critical": 0.9,
+        "high": 0.75,
+        "medium": 0.45
+      }
     },
     "trainingMode": "production"
   },
-  "featureContractVersion": "2026-09-15.rules-v2-canonical-ml-pln",
+  "featureContractVersion": "2026-09-19.rules-v2-canonical-ml-pln.suspicious-fact-ratio",
   "featureImportance": {
     "countryMismatch": 1.573151,
     "deviceNovelty": 0.191654,
-    "highRiskFlagCount": 1.194273,
     "merchantFrequency7d": 0.407398,
     "proxyOrVpnDetected": 1.659997,
     "rapidTransferBurst": 1.870417,
     "recentAmountSumPln": 4.85083,
     "recentTransactionCount": 0.259332,
+    "suspiciousFactRatio": 1.194273,
     "transactionVelocityPerMinute": 0.518663
   },
   "featureSchema": [
@@ -133,10 +271,10 @@
     "deviceNovelty",
     "countryMismatch",
     "proxyOrVpnDetected",
-    "highRiskFlagCount",
+    "suspiciousFactRatio",
     "rapidTransferBurst"
   ],
-  "featureSchemaVersion": "2026-09-15.rules-v2-canonical-ml-pln",
+  "featureSchemaVersion": "2026-09-19.rules-v2-canonical-ml-pln.suspicious-fact-ratio",
   "featureSetUsed": [
     "recentTransactionCount",
     "recentAmountSumPln",
@@ -145,14 +283,36 @@
     "deviceNovelty",
     "countryMismatch",
     "proxyOrVpnDetected",
-    "highRiskFlagCount",
+    "suspiciousFactRatio",
     "rapidTransferBurst"
   ],
-  "featureSetVersion": "2026-09-15.rules-v2-canonical-ml-pln",
+  "featureSetVersion": "2026-09-19.rules-v2-canonical-ml-pln.suspicious-fact-ratio",
   "modelFamily": "LOGISTIC_REGRESSION",
   "modelName": "python-logistic-fraud-model",
   "modelType": "logistic",
-  "modelVersion": "2026-09-15.rules-v2-canonical-ml-pln.v1",
+  "modelVersion": "2026-09-19.rules-v2-canonical-ml-pln.suspicious-fact-ratio.v1",
+  "productionReadiness": {
+    "deployedAlertThreshold": 0.75,
+    "deployedAlertThresholdName": "high",
+    "outOfTimeFraudCaptureRate": 0.223529,
+    "policyVersion": "fixed-business-risk-thresholds-v1",
+    "rankingMetricsAreNotSufficient": true,
+    "reasons": [],
+    "status": "READY",
+    "temporalFraudCaptureRate": 0.2
+  },
+  "thresholdPolicy": {
+    "deployedAlertThreshold": 0.75,
+    "deployedAlertThresholdName": "high",
+    "ownership": "fixed_business_risk_thresholds",
+    "policyVersion": "fixed-business-risk-thresholds-v1",
+    "runtimeSemantics": "riskLevel bands are business-owned; alertRecommended is true for HIGH or CRITICAL",
+    "thresholds": {
+      "critical": 0.9,
+      "high": 0.75,
+      "medium": 0.45
+    }
+  },
   "thresholds": {
     "critical": 0.9,
     "high": 0.75,
@@ -161,7 +321,7 @@
   "training": {
     "algorithm": "batch-gradient-descent",
     "examples": 5000,
-    "featureContractVersion": "2026-09-15.rules-v2-canonical-ml-pln",
+    "featureContractVersion": "2026-09-19.rules-v2-canonical-ml-pln.suspicious-fact-ratio",
     "featureSetUsed": [
       "recentTransactionCount",
       "recentAmountSumPln",
@@ -170,10 +330,10 @@
       "deviceNovelty",
       "countryMismatch",
       "proxyOrVpnDetected",
-      "highRiskFlagCount",
+      "suspiciousFactRatio",
       "rapidTransferBurst"
     ],
-    "featureSetVersion": "2026-09-15.rules-v2-canonical-ml-pln",
+    "featureSetVersion": "2026-09-19.rules-v2-canonical-ml-pln.suspicious-fact-ratio",
     "source": "synthetic-fraud-scenarios",
     "trainingMode": "production"
   },
@@ -181,12 +341,12 @@
   "weights": {
     "countryMismatch": 1.573151,
     "deviceNovelty": 0.191654,
-    "highRiskFlagCount": 1.194273,
     "merchantFrequency7d": -0.407398,
     "proxyOrVpnDetected": 1.659997,
     "rapidTransferBurst": 1.870417,
     "recentAmountSumPln": 4.85083,
     "recentTransactionCount": -0.259332,
+    "suspiciousFactRatio": 1.194273,
     "transactionVelocityPerMinute": -0.518663
   }
 }

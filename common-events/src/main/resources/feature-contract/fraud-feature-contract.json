@@ -1,5 +1,5 @@
 {
-  "version": "2026-09-15.rules-v2-canonical-ml-pln",
+  "version": "2026-09-19.rules-v2-canonical-ml-pln.suspicious-fact-ratio",
   "mlFeatureNames": [
     "recentTransactionCount",
     "recentAmountSumPln",
@@ -8,13 +8,12 @@
     "deviceNovelty",
     "countryMismatch",
     "proxyOrVpnDetected",
-    "highRiskFlagCount",
+    "suspiciousFactRatio",
     "rapidTransferBurst"
   ],
   "javaEnrichedFeatureNames": [
     "recentTransactionCount",
     "recentTransactionCountWindow",
-    "recentAmountSum",
     "recentAmountSumWindow",
     "recentAmountSumPln",
     "currentTransactionAmountPln",
@@ -36,7 +35,7 @@
     "deviceNovelty",
     "countryMismatch",
     "proxyOrVpnDetected",
-    "highRiskFlagCount",
+    "suspiciousFactRatio",
     "rapidTransferBurst"
   ],
   "featureAvailability": {
@@ -58,7 +57,7 @@
     "deviceNovelty": "providedByJava",
     "countryMismatch": "providedByJava",
     "proxyOrVpnDetected": "providedByJava",
-    "highRiskFlagCount": "derivedInPython",
+    "suspiciousFactRatio": "derivedInPython",
     "rapidTransferBurst": "derivedInPython"
   },
   "supportedCurrencies": [
@@ -130,11 +129,11 @@
       "missing": "incompatible",
       "invalid": "incompatible"
     },
-    "highRiskFlagCount": {
+    "suspiciousFactRatio": {
       "type": "double",
-      "unit": "normalized_count",
+      "unit": "ratio",
       "window": "derived_from_current_production_facts",
-      "source": "Python production derivation from strict canonical inputs",
+      "source": "Python production derivation: active suspicious facts divided by total suspicious facts",
       "bounds": {"min": 0.0, "max": 1.0},
       "missing": "derived",
       "invalid": "incompatible"
@@ -182,7 +181,7 @@
     "deviceNovelty": {"source": "boolean"},
     "countryMismatch": {"source": "boolean"},
     "proxyOrVpnDetected": {"source": "boolean"},
-    "highRiskFlagCount": {"source": "canonicalFacts", "scale": 6.0, "clipMax": 1.0},
+    "suspiciousFactRatio": {"source": "canonicalFactsRatio", "scale": 1.0, "clipMax": 1.0},
     "rapidTransferBurst": {"source": "recentTransactionCount>=2 & recentAmountSumPln>=20000 & PT1M windows"}
   }
 }

@@ -14,8 +14,9 @@ public final class FraudFeatureThresholdContract {
 
     public static boolean isRapidTransferPlnBurst(int transactionCount, BigDecimal amountPln) {
         Objects.requireNonNull(amountPln, "amountPln is required");
-        if (transactionCount < 0 || amountPln.signum() < 0) {
-            throw new IllegalArgumentException("rapid transfer facts must be non-negative");
+        if (!FraudFeatureValueBoundsContract.isWithinCountBounds(transactionCount)
+                || !FraudFeatureValueBoundsContract.isWithinAmountBounds(amountPln)) {
+            throw new IllegalArgumentException("rapid transfer facts are outside canonical bounds");
         }
         return transactionCount >= RAPID_TRANSFER_MIN_COUNT
                 && amountPln.compareTo(RAPID_TRANSFER_PLN_THRESHOLD) >= 0;
@@ -28,6 +29,10 @@ public final class FraudFeatureThresholdContract {
         Integer count = integer(featureSnapshot.get(FraudFeatureContract.RECENT_TRANSACTION_COUNT));
         BigDecimal amountPln = decimal(featureSnapshot.get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN));
         if (count == null || amountPln == null) {
+            return false;
+        }
+        if (!FraudFeatureValueBoundsContract.isWithinCountBounds(count)
+                || !FraudFeatureValueBoundsContract.isWithinAmountBounds(amountPln)) {
             return false;
         }
         if (!FraudFeatureValueBoundsContract.isCanonicalRecentTransactionWindowText(
@@ -44,30 +49,23 @@ public final class FraudFeatureThresholdContract {
     }
 
     private static boolean hasRapidTransferEvidenceIds(Object value) {
-        return value instanceof List<?> ids && ids.size() >= RAPID_TRANSFER_MIN_COUNT;
+        if (!(value instanceof List<?> ids) || ids.size() < RAPID_TRANSFER_MIN_COUNT) {
+            return false;
+        }
+        for (Object id : ids) {
+            if (!(id instanceof String text) || text.isBlank()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static Integer integer(Object value) {
-        if (value instanceof Integer integer) {
-            return integer;
-        }
-        if (value instanceof Number number) {
-            long longValue = number.longValue();
-            if (longValue >= Integer.MIN_VALUE && longValue <= Integer.MAX_VALUE) {
-                return (int) longValue;
-            }
-        }
-        return null;
+        return value instanceof Integer integer ? integer : null;
     }
 
     private static BigDecimal decimal(Object value) {
-        if (value instanceof BigDecimal decimal) {
-            return decimal;
-        }
-        if (value instanceof Number number) {
-            return new BigDecimal(number.toString());
-        }
-        return null;
+        return value instanceof BigDecimal decimal ? decimal : null;
     }
 
     private static String string(Object value) {

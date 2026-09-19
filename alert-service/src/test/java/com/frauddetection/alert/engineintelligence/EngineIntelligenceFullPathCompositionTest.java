@@ -288,7 +288,6 @@ class EngineIntelligenceFullPathCompositionTest {
         return new FeatureStoreSnapshot(
                 1,
                 new BigDecimal("10000.00"),
-                new BigDecimal("10000.00"),
                 List.of(recentTransaction("rapid-full-path-seed", new BigDecimal("10000.00"))),
                 0,
                 Instant.parse("2026-06-18T09:59:30Z"),
@@ -299,7 +298,6 @@ class EngineIntelligenceFullPathCompositionTest {
     private FeatureStoreSnapshot velocityReadySnapshot() {
         return new FeatureStoreSnapshot(
                 4,
-                BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 List.of(
                         recentTransaction("hist-1"),

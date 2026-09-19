@@ -9,11 +9,15 @@ from typing import Any
 from app.features.feature_contract import FEATURE_CONTRACT
 
 
-SUPPORTED_CURRENCIES = {"PLN", "EUR", "USD", "GBP"}
-MAX_RECENT_TRANSACTION_COUNT = 1_000_000
-MAX_TRANSACTION_VELOCITY_PER_MINUTE = 1_000_000.0
-MAX_RECENT_AMOUNT_SUM_PLN = 999_999_999_999.99
-RATE_CONSISTENCY_TOLERANCE = 0.0001
+SUPPORTED_CURRENCIES = set(FEATURE_CONTRACT.supported_currencies)
+MAX_RECENT_TRANSACTION_COUNT = int(FEATURE_CONTRACT.production_feature_semantics["recentTransactionCount"]["bounds"]["max"])
+MAX_TRANSACTION_VELOCITY_PER_MINUTE = float(
+    FEATURE_CONTRACT.production_feature_semantics["transactionVelocityPerMinute"]["bounds"]["max"]
+)
+MAX_RECENT_AMOUNT_SUM_PLN = float(FEATURE_CONTRACT.production_feature_semantics["recentAmountSumPln"]["bounds"]["max"])
+RATE_CONSISTENCY_TOLERANCE = float(
+    str(FEATURE_CONTRACT.production_feature_semantics["transactionVelocityPerMinute"]["consistency"]).rsplit(" ", 1)[-1]
+)
 
 
 class FeaturePipeline:
@@ -99,7 +103,7 @@ class FeaturePipeline:
             "deviceNovelty": self._strict_boolean(event.get("deviceNovelty"), "deviceNovelty"),
             "countryMismatch": self._strict_boolean(event.get("countryMismatch"), "countryMismatch"),
             "proxyOrVpnDetected": self._strict_boolean(event.get("proxyOrVpnDetected"), "proxyOrVpnDetected"),
-            "highRiskFlagCount": self._high_risk_fact_count(event, amount_sum_pln, rapid_transfer_burst),
+            "suspiciousFactRatio": self._suspicious_fact_ratio(event, amount_sum_pln, rapid_transfer_burst),
             "rapidTransferBurst": rapid_transfer_burst,
         }
         return self._select_features(features, mode)
@@ -182,7 +186,7 @@ class FeaturePipeline:
         country_mismatch = 1.0 if known_countries and str(raw.get("country", "")) not in known_countries else 0.0
         proxy_or_vpn = self._flag(raw.get("proxyOrVpnDetected"))
         rapid_transfer_burst = 1.0 if len(recent_minute) >= 2 and recent_minute_amount >= 20_000.0 else 0.0
-        high_risk_fact_count = min(sum([
+        suspicious_fact_ratio = min(sum([
             device_novelty,
             country_mismatch,
             proxy_or_vpn,
@@ -206,7 +210,7 @@ class FeaturePipeline:
             "deviceNovelty": device_novelty,
             "countryMismatch": country_mismatch,
             "proxyOrVpnDetected": proxy_or_vpn,
-            "highRiskFlagCount": high_risk_fact_count,
+            "suspiciousFactRatio": suspicious_fact_ratio,
             "rapidTransferBurst": rapid_transfer_burst,
         }
 
@@ -245,7 +249,7 @@ class FeaturePipeline:
         total = len(values)
         return -sum((count / total) * log2(count / total) for count in counts.values())
 
-    def _high_risk_fact_count(self, event: dict[str, Any], amount_sum: float, rapid_transfer_burst: float) -> float:
+    def _suspicious_fact_ratio(self, event: dict[str, Any], amount_sum: float, rapid_transfer_burst: float) -> float:
         facts = [
             self._strict_boolean(event.get("deviceNovelty"), "deviceNovelty"),
             self._strict_boolean(event.get("countryMismatch"), "countryMismatch"),

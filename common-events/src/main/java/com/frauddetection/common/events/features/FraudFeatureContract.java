@@ -8,7 +8,6 @@ public final class FraudFeatureContract {
 
     public static final String RECENT_TRANSACTION_COUNT = "recentTransactionCount";
     public static final String RECENT_TRANSACTION_COUNT_WINDOW = "recentTransactionCountWindow";
-    public static final String RECENT_AMOUNT_SUM = "recentAmountSum";
     public static final String RECENT_AMOUNT_SUM_WINDOW = "recentAmountSumWindow";
     public static final String RECENT_AMOUNT_SUM_PLN = "recentAmountSumPln";
     public static final String CURRENT_TRANSACTION_AMOUNT_PLN = "currentTransactionAmountPln";
@@ -24,7 +23,7 @@ public final class FraudFeatureContract {
     public static final String DEVICE_NOVELTY = "deviceNovelty";
     public static final String COUNTRY_MISMATCH = "countryMismatch";
     public static final String PROXY_OR_VPN_DETECTED = "proxyOrVpnDetected";
-    public static final String HIGH_RISK_FLAG_COUNT = "highRiskFlagCount";
+    public static final String SUSPICIOUS_FACT_RATIO = "suspiciousFactRatio";
     public static final String RAPID_TRANSFER_BURST = "rapidTransferBurst";
     public static final String RAPID_TRANSFER_TRANSACTION_IDS = "rapidTransferTransactionIds";
     public static final String CUSTOMER_SEGMENT = "customerSegment";
@@ -39,14 +38,13 @@ public final class FraudFeatureContract {
             DEVICE_NOVELTY,
             COUNTRY_MISMATCH,
             PROXY_OR_VPN_DETECTED,
-            HIGH_RISK_FLAG_COUNT,
+            SUSPICIOUS_FACT_RATIO,
             RAPID_TRANSFER_BURST
     );
 
     public static final List<String> JAVA_ENRICHED_FEATURE_NAMES = List.of(
             RECENT_TRANSACTION_COUNT,
             RECENT_TRANSACTION_COUNT_WINDOW,
-            RECENT_AMOUNT_SUM,
             RECENT_AMOUNT_SUM_WINDOW,
             RECENT_AMOUNT_SUM_PLN,
             CURRENT_TRANSACTION_AMOUNT_PLN,
@@ -72,13 +70,10 @@ public final class FraudFeatureContract {
             Map.entry(DEVICE_NOVELTY, TYPE_BOOLEAN),
             Map.entry(COUNTRY_MISMATCH, TYPE_BOOLEAN),
             Map.entry(PROXY_OR_VPN_DETECTED, TYPE_BOOLEAN),
-            Map.entry(RAPID_TRANSFER_BURST, TYPE_BOOLEAN),
             Map.entry(RECENT_TRANSACTION_COUNT, TYPE_INTEGER),
             Map.entry(RECENT_TRANSACTION_COUNT_WINDOW, TYPE_STRING),
             Map.entry(RECENT_AMOUNT_SUM_WINDOW, TYPE_STRING),
             Map.entry(MERCHANT_FREQUENCY_7D, TYPE_INTEGER),
-            Map.entry(HIGH_RISK_FLAG_COUNT, TYPE_INTEGER),
-            Map.entry(RECENT_AMOUNT_SUM, TYPE_DECIMAL),
             Map.entry(TRANSACTION_VELOCITY_PER_MINUTE, TYPE_DOUBLE),
             Map.entry(TRANSACTION_VELOCITY_PER_HOUR, TYPE_DOUBLE),
             Map.entry(TRANSACTION_VELOCITY_PER_DAY, TYPE_DOUBLE),

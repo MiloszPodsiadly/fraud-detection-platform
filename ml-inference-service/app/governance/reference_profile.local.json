@@ -1,10 +1,10 @@
 {
   "data_window": "1000 deterministic local synthetic canonical fraud-behavior examples generated with seed 7307; not production traffic",
-  "feature_schema_version": "2026-09-15.rules-v2-canonical-ml-pln",
+  "feature_schema_version": "2026-09-19.rules-v2-canonical-ml-pln.suspicious-fact-ratio",
   "generated_at": "2026-09-14T00:00:00+00:00",
   "generated_by": "ml-inference-service canonical rules-v2 feature pipeline",
   "model_name": "python-logistic-fraud-model",
-  "model_version": "2026-09-15.rules-v2-canonical-ml-pln.v1",
+  "model_version": "2026-09-19.rules-v2-canonical-ml-pln.suspicious-fact-ratio.v1",
   "numeric_feature_stats": {
     "countryMismatch": {
       "count": 1000,
@@ -25,16 +25,6 @@
       "p90": 0.025,
       "p95": 0.975,
       "std": 0.281835
-    },
-    "highRiskFlagCount": {
-      "count": 1000,
-      "max": 0.5,
-      "mean": 0.029167,
-      "min": 0.0,
-      "p50": 0.025,
-      "p90": 0.175,
-      "p95": 0.175,
-      "std": 0.077168
     },
     "merchantFrequency7d": {
       "count": 1000,
@@ -85,6 +75,16 @@
       "p90": 0.125,
       "p95": 0.125,
       "std": 0.006312
+    },
+    "suspiciousFactRatio": {
+      "count": 1000,
+      "max": 0.5,
+      "mean": 0.029167,
+      "min": 0.0,
+      "p50": 0.025,
+      "p90": 0.175,
+      "p95": 0.175,
+      "std": 0.077168
     },
     "transactionVelocityPerMinute": {
       "count": 1000,

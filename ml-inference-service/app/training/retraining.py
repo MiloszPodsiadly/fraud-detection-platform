@@ -238,6 +238,9 @@ def _stability_check(evaluation: dict[str, object], thresholds: PromotionThresho
 
 
 def _optimal(evaluation: dict[str, object]) -> dict[str, object]:
+    deployed = evaluation.get("deployedAlertThresholdMetrics")
+    if isinstance(deployed, dict):
+        return deployed
     value = evaluation.get("optimalThreshold")
     return value if isinstance(value, dict) else {}
 
