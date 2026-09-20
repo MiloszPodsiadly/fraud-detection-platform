@@ -29,6 +29,7 @@ from app.models.xgboost_model import XGBoostFraudModel
 from app.training.retraining import PromotionThresholds, _promotion_decision, compare_retrained_model
 from app.training.train import (
     CANONICAL_MODEL_VERSION,
+    _require_binary_evaluation_splits,
     train,
     train_model,
     train_model_with_evaluation,
@@ -131,6 +132,30 @@ class FraudModelTest(unittest.TestCase):
             for label in labels
         ]
         return Dataset(X=rows, y=labels, metadata={"source": "ordered-production-unit"})
+
+    def _timestamped_production_dataset(
+            self,
+            labels: list[int],
+            label_dependent_features: bool = True,
+    ) -> Dataset:
+        rows = []
+        for index, label in enumerate(labels):
+            payload = self._production_payload(
+                timestamp=f"2026-01-{index + 1:02d}T00:00:00",
+            )
+            if label_dependent_features:
+                payload.update(
+                    recentTransactionCount=2 if label else 1,
+                    recentAmountSumPln=20_000.0 if label else 100.0,
+                    currentTransactionAmountPln=10_000.0 if label else 100.0,
+                    transactionVelocityPerMinute=2.0 if label else 1.0,
+                    merchantFrequency7d=6 if label else 1,
+                    deviceNovelty=bool(label),
+                    countryMismatch=bool(label),
+                    proxyOrVpnDetected=bool(label),
+                )
+            rows.append(payload)
+        return Dataset(X=rows, y=labels, metadata={"source": "timestamped-production-unit"})
 
     def _runtime_with_weights(self, weights: dict[str, float]) -> FraudModelRuntime:
         schema_weights = {name: 0.0 for name in FeaturePipeline.PRODUCTION_FEATURE_NAMES}
@@ -631,7 +656,7 @@ class FraudModelTest(unittest.TestCase):
         self.assertNotIn("recentAmountSum", normalized)
 
     def test_production_training_features_match_java_inference_schema(self):
-        dataset = generate_fraud_behavior(count=300, seed=337, user_count=8, fraud_ratio=0.03)
+        dataset = generate_fraud_behavior(count=1000, seed=301, user_count=8, fraud_ratio=0.03)
         _, weights, evaluation = train_with_evaluation(dataset, epochs=2, learning_rate=0.1)
         payload = {
             "recentTransactionCount": 5,
@@ -826,7 +851,7 @@ class FraudModelTest(unittest.TestCase):
         self.assertTrue(all("scenarioDebug" in row["metadata"] for row in dataset.X if row["metadata"]["scenario"] != "normal_behavior"))
 
     def test_training_artifact_contains_model_metadata_and_feature_schema(self):
-        dataset = generate_fraud_behavior(count=300, seed=321, user_count=8, fraud_ratio=0.03)
+        dataset = generate_fraud_behavior(count=1000, seed=301, user_count=8, fraud_ratio=0.03)
         bias, weights, evaluation = train_with_evaluation(dataset, epochs=2, learning_rate=0.1)
 
         artifact_path = Path.cwd() / "test-model-artifact.json"
@@ -865,7 +890,7 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(artifact["training"]["featureSetVersion"], FEATURE_CONTRACT.version)
 
     def test_artifact_threshold_policy_matches_evaluation_policy(self):
-        dataset = generate_fraud_behavior(count=300, seed=323, user_count=8, fraud_ratio=0.03)
+        dataset = generate_fraud_behavior(count=1000, seed=301, user_count=8, fraud_ratio=0.03)
         bias, weights, evaluation = train_with_evaluation(dataset, epochs=2, learning_rate=0.1)
         artifact_path = Path.cwd() / "threshold-policy-artifact.json"
         try:
@@ -1055,6 +1080,63 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(splits.metadata["strategy"], "out_of_time")
         self.assertLess(max(train_timestamps), min(test_timestamps))
 
+    def test_explicit_cutoff_timestamp_is_never_moved_for_class_balance(self):
+        dataset = self._timestamped_production_dataset([0, 0, 0, 0, 1, 0, 1, 0, 1, 0])
+        cutoff = "2026-01-06T00:00:00"
+
+        splits = split_dataset(dataset, mode="out_of_time", cutoff_timestamp=cutoff)
+
+        self.assertEqual(splits.metadata["requestedCutoffTimestamp"], cutoff)
+        self.assertEqual(splits.metadata["effectiveCutoffTimestamp"], cutoff)
+        self.assertEqual(splits.metadata["validationIndices"], [5])
+        self.assertEqual(splits.metadata["testIndices"], [6, 7, 8, 9])
+        with self.assertRaisesRegex(ValueError, "OUT_OF_TIME_VALIDATION_SPLIT_MUST_CONTAIN_BOTH_CLASSES"):
+            _require_binary_evaluation_splits(splits, "out_of_time")
+
+    def test_out_of_time_boundary_does_not_depend_on_labels(self):
+        labels = [0, 0, 0, 1, 0, 1, 0, 0, 1, 0]
+        changed_labels = [1, 1, 1, 0, 1, 0, 1, 1, 0, 1]
+        first = self._timestamped_production_dataset(labels, label_dependent_features=False)
+        second = self._timestamped_production_dataset(changed_labels, label_dependent_features=False)
+
+        first_splits = split_dataset(first, mode="out_of_time", cutoff_ratio=0.5)
+        second_splits = split_dataset(second, mode="out_of_time", cutoff_ratio=0.5)
+
+        for key in (
+                "trainIndices",
+                "validationIndices",
+                "testIndices",
+                "trainEndTimestamp",
+                "validationEndTimestamp",
+                "testStartTimestamp",
+                "effectiveCutoffTimestamp",
+        ):
+            self.assertEqual(first_splits.metadata[key], second_splits.metadata[key])
+
+    def test_single_class_out_of_time_partition_fails_instead_of_moving_cutoff(self):
+        dataset = self._timestamped_production_dataset([0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0])
+
+        splits = split_dataset(dataset, mode="out_of_time", cutoff_ratio=0.5)
+
+        self.assertEqual(splits.metadata["trainIndices"], [0, 1, 2, 3, 4, 5])
+        self.assertEqual(splits.metadata["validationIndices"], [6, 7])
+        self.assertEqual(splits.metadata["testIndices"], [8, 9, 10, 11])
+        with self.assertRaisesRegex(ValueError, "OUT_OF_TIME_VALIDATION_SPLIT_MUST_CONTAIN_BOTH_CLASSES"):
+            _require_binary_evaluation_splits(splits, "out_of_time")
+
+    def test_explicit_cutoff_timestamp_is_reflected_in_metadata(self):
+        dataset = self._timestamped_production_dataset([0, 1, 0, 1, 0, 1, 0, 1, 0, 1])
+        cutoff = "2026-01-06T00:00:00"
+
+        splits = split_dataset(dataset, mode="out_of_time", cutoff_timestamp=cutoff)
+
+        self.assertIsNone(splits.metadata["requestedCutoffRatio"])
+        self.assertEqual(splits.metadata["requestedCutoffTimestamp"], cutoff)
+        self.assertEqual(splits.metadata["effectiveCutoffTimestamp"], cutoff)
+        self.assertEqual(splits.metadata["trainEndTimestamp"], "2026-01-05T00:00:00")
+        self.assertEqual(splits.metadata["validationEndTimestamp"], cutoff)
+        self.assertEqual(splits.metadata["testStartTimestamp"], "2026-01-07T00:00:00")
+
     def test_training_lifecycle_rejects_single_class_train_split_before_fit(self):
         dataset = self._ordered_production_dataset([0, 0, 0, 0, 0, 0, 0, 1, 0, 1])
 
@@ -1186,7 +1268,7 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(updated[0].analyst_decision, "MARKED_LEGITIMATE")
 
     def test_retraining_comparison_reports_challenger_metrics(self):
-        dataset = generate_fraud_behavior(count=300, seed=654, user_count=8, fraud_ratio=0.03)
+        dataset = generate_fraud_behavior(count=1000, seed=301, user_count=8, fraud_ratio=0.03)
         current_evaluation = {
             "prAuc": 0.0,
             "optimalThreshold": {"falsePositiveRate": 0.0, "alertRate": 0.05},

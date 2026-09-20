@@ -57,13 +57,6 @@ def split_dataset(
             cutoff_ratio=cutoff_ratio,
             cutoff_timestamp=cutoff_timestamp if mode == "out_of_time" else None,
         )
-        if mode == "out_of_time":
-            train_rows, validation_rows, test_rows = _out_of_time_binary_boundaries(
-                indexed_rows,
-                train_rows,
-                validation_rows,
-                test_rows,
-            )
         strategy = "out_of_time" if mode == "out_of_time" else ("random" if mode == "random" else "temporal_fallback")
 
     _warn_if_imbalanced(train_rows, validation_rows, test_rows, fraud_rate_tolerance)
@@ -87,6 +80,13 @@ def split_dataset(
             "validation": _fraud_rate(validation_rows),
             "test": _fraud_rate(test_rows),
         },
+        **_boundary_metadata(
+            train_rows,
+            validation_rows,
+            test_rows,
+            cutoff_ratio if mode == "out_of_time" else None,
+            cutoff_timestamp if mode == "out_of_time" else None,
+        ),
     }
     return DatasetSplits(
         train=_subset(dataset, train_rows, "train", metadata),
@@ -150,46 +150,40 @@ def _stratified_temporal_split(
     return sorted(train, key=sorter), sorted(validation, key=sorter), sorted(test, key=sorter)
 
 
-def _out_of_time_binary_boundaries(
-        indexed_rows: list[tuple[int, tuple[dict[str, Any], int]]],
+def _boundary_metadata(
         train_rows: list[tuple[int, tuple[dict[str, Any], int]]],
         validation_rows: list[tuple[int, tuple[dict[str, Any], int]]],
         test_rows: list[tuple[int, tuple[dict[str, Any], int]]],
-) -> tuple[
-    list[tuple[int, tuple[dict[str, Any], int]]],
-    list[tuple[int, tuple[dict[str, Any], int]]],
-    list[tuple[int, tuple[dict[str, Any], int]]],
-]:
-    if _has_both_classes(train_rows) and _has_both_classes(validation_rows) and _has_both_classes(test_rows):
-        return train_rows, validation_rows, test_rows
-    original_train_end = len(train_rows)
-    original_validation_end = len(train_rows) + len(validation_rows)
-    best: tuple[int, int, int] | None = None
-    for train_end in range(1, len(indexed_rows) - 2):
-        for validation_end in range(train_end + 2, len(indexed_rows)):
-            candidate_validation = indexed_rows[train_end:validation_end]
-            candidate_test = indexed_rows[validation_end:]
-            if not candidate_test:
-                continue
-            candidate_train = indexed_rows[:train_end]
-            if (
-                    not _has_both_classes(candidate_train)
-                    or not _has_both_classes(candidate_validation)
-                    or not _has_both_classes(candidate_test)
-            ):
-                continue
-            distance = abs(train_end - original_train_end) + abs(validation_end - original_validation_end)
-            if best is None or distance < best[0]:
-                best = (distance, train_end, validation_end)
-    if best is None:
-        return train_rows, validation_rows, test_rows
-    _, train_end, validation_end = best
-    return indexed_rows[:train_end], indexed_rows[train_end:validation_end], indexed_rows[validation_end:]
+        requested_cutoff_ratio: float | None,
+        requested_cutoff_timestamp: str | None,
+) -> dict[str, Any]:
+    train_end = _max_timestamp(train_rows)
+    validation_end = _max_timestamp(validation_rows)
+    test_start = _min_timestamp(test_rows)
+    return {
+        "trainEndTimestamp": _format_timestamp(train_end),
+        "validationEndTimestamp": _format_timestamp(validation_end),
+        "testStartTimestamp": _format_timestamp(test_start),
+        "requestedCutoffRatio": requested_cutoff_ratio,
+        "requestedCutoffTimestamp": requested_cutoff_timestamp,
+        "effectiveCutoffTimestamp": requested_cutoff_timestamp or _format_timestamp(train_end),
+    }
 
 
-def _has_both_classes(rows: list[tuple[int, tuple[dict[str, Any], int]]]) -> bool:
-    distribution = _class_distribution(rows)
-    return distribution["fraud"] > 0 and distribution["legitimate"] > 0
+def _max_timestamp(rows: list[tuple[int, tuple[dict[str, Any], int]]]) -> datetime | None:
+    timestamps = [_timestamp(features) for _, (features, _) in rows]
+    present = [timestamp for timestamp in timestamps if timestamp is not None]
+    return max(present) if present else None
+
+
+def _min_timestamp(rows: list[tuple[int, tuple[dict[str, Any], int]]]) -> datetime | None:
+    timestamps = [_timestamp(features) for _, (features, _) in rows]
+    present = [timestamp for timestamp in timestamps if timestamp is not None]
+    return min(present) if present else None
+
+
+def _format_timestamp(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
 
 
 def _can_stratify(rows: list[tuple[int, tuple[dict[str, Any], int]]], min_fraud_per_split: int) -> bool:
