@@ -41,7 +41,8 @@ The adapter and production scoring both consume the canonical Rules V2 snapshot 
 `recentTransactionCount`, `recentTransactionCountWindow`, `transactionVelocityPerMinute`,
 `recentAmountSumPln`, `recentAmountSumWindow`, `currentTransactionAmountPln`,
 `merchantFrequency7d`, `deviceNovelty`, `countryMismatch`, `proxyOrVpnDetected`, and `currency`.
-Present-invalid canonical facts fail closed.
+Missing or present-invalid required canonical facts fail closed during Rules V2 input validation. They are not
+coerced to false, zero, low risk, or skipped rule semantics.
 
 Rules V2 scoring reads only current canonical feature facts. Removed feature-flag, case-candidate, and top-level
 duplicate event representations are not part of the current production scoring policy.
@@ -50,10 +51,16 @@ Production `RuleBasedFraudScoringEngine` and diagnostic `RuleBasedSignalEngine` 
 validation to `RulesV2InputValidator` before scoring. Primary scoring failure and diagnostic adapter
 degradation are intentionally different runtime boundaries.
 
-Feature status semantics:
+Required Rules V2 production input semantics:
+
+- `MISSING` required canonical fact fails closed with bounded input validation failure.
+- `INVALID_TYPE` required canonical fact fails closed with bounded input validation failure.
+- Missing or invalid required facts must not become false, zero, low risk, or a silent skipped rule.
+
+Diagnostic `FeatureSnapshotReader` status semantics after required Rules V2 validation has been separated:
 
 - `PRESENT` may produce a bounded rule signal.
-- `MISSING` skips the rule and is not false, not zero, and not low risk.
+- `MISSING` may mean no bounded diagnostic signal only for optional/diagnostic reads; it is not false, not zero, and not low risk.
 - `INVALID_TYPE` is not coerced and returns a bounded `DEGRADED` result.
 - `WRONG_ACCESSOR` is an implementation bug and must fail fast.
 - `NOT_ALLOWED` is an implementation bug and must fail fast.

@@ -72,9 +72,9 @@ class FraudModelTest(unittest.TestCase):
                 "deployedAlertThreshold": 0.75,
                 "thresholds": {"medium": 0.45, "high": 0.75, "critical": 0.9},
             },
-            "productionReadiness": self._ready_production_readiness(),
+            "modelRuntimeReadiness": self._ready_model_runtime_readiness(),
             "evaluation": {
-                "productionReadiness": self._ready_production_readiness(),
+                "modelRuntimeReadiness": self._ready_model_runtime_readiness(),
             },
             "training": {
                 "trainingMode": training_mode,
@@ -88,7 +88,7 @@ class FraudModelTest(unittest.TestCase):
             payload["weights"] = weights or {name: 0.0 for name in schema}
         return payload
 
-    def _ready_production_readiness(self) -> dict[str, object]:
+    def _ready_model_runtime_readiness(self) -> dict[str, object]:
         return {
             "status": "READY",
             "reasons": [],
@@ -872,7 +872,7 @@ class FraudModelTest(unittest.TestCase):
         self.assertIn("evaluationComparison", artifact["evaluation"])
         self.assertEqual(artifact["evaluation"]["selectedThresholdSource"], "fixed_business_risk_thresholds")
         self.assertEqual(artifact["thresholdPolicy"], artifact["evaluation"]["thresholdPolicy"])
-        self.assertEqual(artifact["productionReadiness"], artifact["evaluation"]["productionReadiness"])
+        self.assertEqual(artifact["modelRuntimeReadiness"], artifact["evaluation"]["modelRuntimeReadiness"])
         self.assertIn("deployedAlertThresholdMetrics", artifact["evaluation"])
         self.assertIn("deployedAlertThresholdMetrics", artifact["evaluation"]["outOfTimeEvaluation"])
         self.assertEqual(artifact["evaluation"]["modelVersion"], CANONICAL_MODEL_VERSION)
@@ -940,7 +940,7 @@ class FraudModelTest(unittest.TestCase):
             evaluation["validationEvaluation"]["optimalThreshold"]["threshold"],
         )
 
-    def test_production_artifact_cannot_hide_zero_capture_behind_ranking_metrics(self):
+    def test_runtime_artifact_cannot_hide_zero_capture_behind_ranking_metrics(self):
         evaluation = {
             "prAuc": 0.85,
             "rocAuc": 0.9,
@@ -969,7 +969,7 @@ class FraudModelTest(unittest.TestCase):
                     "alertRate": 0.0,
                 },
             },
-            "productionReadiness": {
+            "modelRuntimeReadiness": {
                 "status": "NOT_READY",
                 "reasons": ["OUT_OF_TIME_DEPLOYED_ALERT_THRESHOLD_ZERO_FRAUD_CAPTURE"],
                 "policyVersion": "fixed-business-risk-thresholds-v1",
@@ -992,16 +992,16 @@ class FraudModelTest(unittest.TestCase):
                 evaluation=evaluation,
             )
             artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
-            with self.assertRaisesRegex(ModelConfigurationError, "production readiness failed"):
+            with self.assertRaisesRegex(ModelConfigurationError, "model runtime readiness failed"):
                 load_model_from_artifact(artifact_path)
         finally:
             if artifact_path.exists():
                 artifact_path.unlink()
 
-        self.assertEqual(artifact["productionReadiness"]["status"], "NOT_READY")
+        self.assertEqual(artifact["modelRuntimeReadiness"]["status"], "NOT_READY")
         self.assertIn(
             "OUT_OF_TIME_DEPLOYED_ALERT_THRESHOLD_ZERO_FRAUD_CAPTURE",
-            artifact["productionReadiness"]["reasons"],
+            artifact["modelRuntimeReadiness"]["reasons"],
         )
 
     def test_model_lifecycle_report_schema_is_consistent_for_logistic(self):
@@ -1024,6 +1024,7 @@ class FraudModelTest(unittest.TestCase):
             "outOfTimeEvaluation",
             "evaluationComparison",
             "stabilityAssessment",
+            "modelRuntimeReadiness",
             "trainingMode",
             "featureSetUsed",
             "segmentEvaluation",
@@ -1495,6 +1496,14 @@ class FraudModelTest(unittest.TestCase):
 
         self.assertEqual(model.model_version, "loader-logistic-v1")
 
+    def test_committed_canonical_model_artifact_loads_successfully(self):
+        artifact_path = Path(__file__).resolve().parents[1] / "app" / "model_artifact.json"
+
+        model = load_model_from_artifact(artifact_path)
+
+        self.assertEqual(model.model_version, CANONICAL_MODEL_VERSION)
+        self.assertEqual(model.runtime_feature_names(), list(FeaturePipeline.PRODUCTION_FEATURE_NAMES))
+
     def test_model_loader_rejects_unknown_artifact_type(self):
         artifact_path = Path.cwd() / "loader-unknown-artifact.json"
         try:
@@ -1539,10 +1548,10 @@ class FraudModelTest(unittest.TestCase):
             if artifact_path.exists():
                 artifact_path.unlink()
 
-    def test_missing_production_readiness_is_rejected(self):
+    def test_missing_model_runtime_readiness_is_rejected(self):
         artifact_path = Path.cwd() / "loader-missing-readiness-artifact.json"
         artifact = self._artifact_payload("loader-missing-readiness-v1")
-        artifact.pop("productionReadiness")
+        artifact.pop("modelRuntimeReadiness")
         try:
             artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
             with self.assertRaisesRegex(ModelConfigurationError, "missing required fields"):
@@ -1551,21 +1560,39 @@ class FraudModelTest(unittest.TestCase):
             if artifact_path.exists():
                 artifact_path.unlink()
 
-    def test_malformed_production_readiness_is_rejected(self):
+    def test_old_production_readiness_field_alone_is_rejected(self):
+        artifact_path = Path.cwd() / "loader-old-readiness-artifact.json"
+        artifact = self._artifact_payload("loader-old-readiness-v1")
+        readiness = artifact.pop("modelRuntimeReadiness")
+        artifact["productionReadiness"] = readiness
+        try:
+            artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+            with self.assertRaisesRegex(ModelConfigurationError, "missing required fields"):
+                load_model_from_artifact(artifact_path)
+        finally:
+            if artifact_path.exists():
+                artifact_path.unlink()
+
+    def test_malformed_model_runtime_readiness_is_rejected(self):
         cases = {
             "null": None,
             "string": "READY",
-            "unknown_status": {**self._ready_production_readiness(), "status": "UNKNOWN"},
-            "malformed_reasons": {**self._ready_production_readiness(), "reasons": "none"},
+            "unknown_status": {**self._ready_model_runtime_readiness(), "status": "UNKNOWN"},
+            "not_ready_status": {
+                **self._ready_model_runtime_readiness(),
+                "status": "NOT_READY",
+                "reasons": ["UNIT_TEST_NOT_READY"],
+            },
+            "malformed_reasons": {**self._ready_model_runtime_readiness(), "reasons": "none"},
         }
         for case_name, readiness in cases.items():
             with self.subTest(case_name=case_name):
                 artifact_path = Path.cwd() / f"loader-{case_name}-readiness-artifact.json"
                 artifact = self._artifact_payload(f"loader-{case_name}-readiness-v1")
-                artifact["productionReadiness"] = readiness
+                artifact["modelRuntimeReadiness"] = readiness
                 try:
                     artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
-                    with self.assertRaisesRegex(ModelConfigurationError, "productionReadiness|production readiness failed"):
+                    with self.assertRaisesRegex(ModelConfigurationError, "modelRuntimeReadiness|model runtime readiness failed"):
                         load_model_from_artifact(artifact_path)
                 finally:
                     if artifact_path.exists():
@@ -1574,7 +1601,7 @@ class FraudModelTest(unittest.TestCase):
     def test_xgboost_artifact_without_readiness_is_rejected_before_model_load(self):
         artifact_path = Path.cwd() / "loader-xgboost-missing-readiness-artifact.json"
         artifact = self._artifact_payload("xgboost-missing-readiness-v1", model_type="xgboost")
-        artifact.pop("productionReadiness")
+        artifact.pop("modelRuntimeReadiness")
         try:
             artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
             with self.assertRaisesRegex(ModelConfigurationError, "missing required fields"):
@@ -1610,8 +1637,8 @@ class FraudModelTest(unittest.TestCase):
         artifact_path = Path.cwd() / "registry-not-ready-artifact.json"
         registry_path = Path.cwd() / "registry-not-ready"
         artifact = self._artifact_payload("registry-not-ready-v1")
-        artifact["productionReadiness"] = {
-            **self._ready_production_readiness(),
+        artifact["modelRuntimeReadiness"] = {
+            **self._ready_model_runtime_readiness(),
             "status": "NOT_READY",
             "reasons": ["UNIT_TEST_NOT_READY"],
         }
@@ -1620,7 +1647,7 @@ class FraudModelTest(unittest.TestCase):
             registry = ModelRegistry(registry_path)
             registry.register(artifact_path, "registry-not-ready-v1", "logistic", role="champion")
 
-            with self.assertRaisesRegex(ModelConfigurationError, "production readiness failed"):
+            with self.assertRaisesRegex(ModelConfigurationError, "model runtime readiness failed"):
                 FraudModel(artifact_path=Path.cwd() / "missing-artifact.json", registry=registry)
         finally:
             if artifact_path.exists():
@@ -1648,7 +1675,7 @@ class FraudModelTest(unittest.TestCase):
                 artifact_path,
                 metadata={
                     "examples": 100,
-                    "evaluation": {"productionReadiness": self._ready_production_readiness()},
+                    "evaluation": {"modelRuntimeReadiness": self._ready_model_runtime_readiness()},
                 },
             )
             saved = json.loads(artifact_path.read_text(encoding="utf-8"))
@@ -1658,7 +1685,7 @@ class FraudModelTest(unittest.TestCase):
                 artifact_path.unlink()
 
         self.assertEqual(saved["thresholdPolicy"]["deployedAlertThresholdName"], "high")
-        self.assertEqual(saved["productionReadiness"]["status"], "READY")
+        self.assertEqual(saved["modelRuntimeReadiness"]["status"], "READY")
         self.assertEqual(saved["training"]["examples"], 100)
         self.assertIsInstance(loaded, LogisticFraudModel)
 
@@ -1670,14 +1697,14 @@ class FraudModelTest(unittest.TestCase):
         try:
             model.save(artifact_path, metadata={"examples": 100})
             saved = json.loads(artifact_path.read_text(encoding="utf-8"))
-            with self.assertRaisesRegex(ModelConfigurationError, "production readiness failed"):
+            with self.assertRaisesRegex(ModelConfigurationError, "model runtime readiness failed"):
                 load_model_from_artifact(artifact_path)
         finally:
             if artifact_path.exists():
                 artifact_path.unlink()
 
-        self.assertEqual(saved["productionReadiness"]["status"], "UNKNOWN")
-        self.assertEqual(saved["productionReadiness"]["reasons"], ["PRODUCTION_READINESS_NOT_EVALUATED"])
+        self.assertEqual(saved["modelRuntimeReadiness"]["status"], "UNKNOWN")
+        self.assertEqual(saved["modelRuntimeReadiness"]["reasons"], ["MODEL_RUNTIME_READINESS_NOT_EVALUATED"])
 
     @unittest.skipUnless(importlib.util.find_spec("xgboost") is not None, "optional xgboost package is not installed")
     def test_xgboost_training_inference_and_artifact_loading_when_dependency_exists(self):
@@ -1691,15 +1718,17 @@ class FraudModelTest(unittest.TestCase):
                 artifact_path,
                 metadata={
                     "examples": dataset.size,
-                    "evaluation": {"productionReadiness": self._ready_production_readiness()},
+                    "evaluation": {"modelRuntimeReadiness": self._ready_model_runtime_readiness()},
                 },
             )
+            saved = json.loads(artifact_path.read_text(encoding="utf-8"))
             loaded = load_model_from_artifact(artifact_path)
             loaded_score = loaded.predict_proba(sample)
         finally:
             if artifact_path.exists():
                 artifact_path.unlink()
 
+        self.assertEqual(saved["modelRuntimeReadiness"]["status"], "READY")
         self.assertGreaterEqual(score, 0.0)
         self.assertLessEqual(score, 1.0)
         self.assertGreaterEqual(loaded_score, 0.0)

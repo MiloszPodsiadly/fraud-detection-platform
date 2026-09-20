@@ -85,7 +85,7 @@ class XGBoostFraudModel:
             "featureSetVersion": FEATURE_CONTRACT.version,
             "thresholds": self.thresholds,
             "thresholdPolicy": self._threshold_policy(),
-            "productionReadiness": self._production_readiness(evaluation),
+            "modelRuntimeReadiness": self._model_runtime_readiness(evaluation),
             "featureImportance": self.feature_importance(),
             "training": {
                 **training_metadata,
@@ -164,13 +164,13 @@ class XGBoostFraudModel:
             "thresholds": dict(self.thresholds),
         }
 
-    def _production_readiness(self, evaluation: dict[str, object]) -> dict[str, object]:
-        readiness = evaluation.get("productionReadiness")
+    def _model_runtime_readiness(self, evaluation: dict[str, object]) -> dict[str, object]:
+        readiness = evaluation.get("modelRuntimeReadiness")
         if isinstance(readiness, dict):
             return readiness
         return {
             "status": "UNKNOWN",
-            "reasons": ["PRODUCTION_READINESS_NOT_EVALUATED"],
+            "reasons": ["MODEL_RUNTIME_READINESS_NOT_EVALUATED"],
             "policyVersion": "fixed-business-risk-thresholds-v1",
             "deployedAlertThresholdName": "high",
             "deployedAlertThreshold": self.thresholds["high"],

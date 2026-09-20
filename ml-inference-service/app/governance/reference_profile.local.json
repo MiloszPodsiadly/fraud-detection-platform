@@ -101,22 +101,22 @@
   "profileVersion": "2026-09-14.rules-v2-canonical.synthetic.v1",
   "reference_quality": "SYNTHETIC",
   "risk_level_distribution": {
-    "CRITICAL": 0.004,
-    "HIGH": 0.0,
-    "LOW": 0.992,
-    "MEDIUM": 0.004
+    "CRITICAL": 0.0,
+    "HIGH": 0.004,
+    "LOW": 0.985,
+    "MEDIUM": 0.011
   },
   "sample_size": 1000,
   "score_distribution": {
     "count": 1000,
     "high_risk_rate": 0.004,
-    "max": 0.913909,
-    "mean": 0.022209,
-    "min": 0.009455,
+    "max": 0.882489,
+    "mean": 0.023612,
+    "min": 0.009116,
     "p50": 0.025,
     "p90": 0.025,
     "p95": 0.075,
-    "std": 0.073518
+    "std": 0.076813
   },
   "source": "synthetic",
   "source_metadata": {

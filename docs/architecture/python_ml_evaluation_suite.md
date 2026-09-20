@@ -89,6 +89,15 @@ raw or sensitive patterns, but they are bounded safeguards, not a full DLP contr
 Reports are diagnostic aids only. They are not promotion criteria, not threshold-change criteria, and not production
 approval criteria.
 
+## Model Runtime Readiness
+
+ML model artifacts expose `modelRuntimeReadiness` as a technical runtime contract. `READY` means the artifact is
+structurally valid, aligned with the current feature contract, evaluated through the required temporal and
+out-of-time lifecycle, and loadable by the strict ML runtime loader. It does not approve model promotion, production
+primary decisioning, threshold governance, payment authorization, or automatic fraud decision authority. Governance
+artifacts continue to represent production approval separately, including `productionApproval = NOT_APPROVED` where
+applicable.
+
 Generated reports are aggregate-first and include:
 
 - input summary,

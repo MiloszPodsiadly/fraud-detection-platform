@@ -88,7 +88,7 @@ class LogisticFraudModel:
             "weights": self.weights,
             "thresholds": self.thresholds,
             "thresholdPolicy": self._threshold_policy(),
-            "productionReadiness": self._production_readiness(evaluation),
+            "modelRuntimeReadiness": self._model_runtime_readiness(evaluation),
             "featureSchema": runtime_features,
             "featureContractVersion": FEATURE_CONTRACT.version,
             "featureSchemaVersion": FEATURE_CONTRACT.version,
@@ -184,13 +184,13 @@ class LogisticFraudModel:
             "thresholds": dict(self.thresholds),
         }
 
-    def _production_readiness(self, evaluation: dict[str, object]) -> dict[str, object]:
-        readiness = evaluation.get("productionReadiness")
+    def _model_runtime_readiness(self, evaluation: dict[str, object]) -> dict[str, object]:
+        readiness = evaluation.get("modelRuntimeReadiness")
         if isinstance(readiness, dict):
             return readiness
         return {
             "status": "UNKNOWN",
-            "reasons": ["PRODUCTION_READINESS_NOT_EVALUATED"],
+            "reasons": ["MODEL_RUNTIME_READINESS_NOT_EVALUATED"],
             "policyVersion": "fixed-business-risk-thresholds-v1",
             "deployedAlertThresholdName": "high",
             "deployedAlertThreshold": self.thresholds["high"],

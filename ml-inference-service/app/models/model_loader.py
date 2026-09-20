@@ -56,7 +56,7 @@ def validate_model_artifact(artifact: dict[str, Any], artifact_path: Path | None
             "featureSetVersion",
             "thresholds",
             "thresholdPolicy",
-            "productionReadiness",
+            "modelRuntimeReadiness",
             "evaluation",
             "training",
         ),
@@ -100,7 +100,7 @@ def validate_model_artifact(artifact: dict[str, Any], artifact_path: Path | None
             raise ModelConfigurationError(
                 f"logistic weights schema mismatch{location}: expected keys {expected_schema}, got {actual_weight_keys!r}."
             )
-    _require_ready_production_readiness(artifact.get("productionReadiness"), location)
+    _require_ready_model_runtime_readiness(artifact.get("modelRuntimeReadiness"), location)
 
 
 def _require_top_level_fields(artifact: dict[str, Any], fields: tuple[str, ...], location: str) -> None:
@@ -113,9 +113,10 @@ def _require_top_level_fields(artifact: dict[str, Any], fields: tuple[str, ...],
         raise ModelConfigurationError(f"model artifact required object fields are malformed{location}: {malformed}.")
 
 
-def _require_ready_production_readiness(readiness: Any, location: str) -> None:
+def _require_ready_model_runtime_readiness(readiness: Any, location: str) -> None:
+    """Validate technical runtime readiness; this is not model promotion approval."""
     if not isinstance(readiness, dict):
-        raise ModelConfigurationError(f"productionReadiness must be an object{location}.")
+        raise ModelConfigurationError(f"modelRuntimeReadiness must be an object{location}.")
     required_fields = (
         "status",
         "reasons",
@@ -126,12 +127,12 @@ def _require_ready_production_readiness(readiness: Any, location: str) -> None:
     )
     missing = [field for field in required_fields if field not in readiness]
     if missing:
-        raise ModelConfigurationError(f"productionReadiness missing required fields{location}: {missing}.")
+        raise ModelConfigurationError(f"modelRuntimeReadiness missing required fields{location}: {missing}.")
     if not isinstance(readiness.get("reasons"), list):
-        raise ModelConfigurationError(f"productionReadiness.reasons must be a list{location}.")
+        raise ModelConfigurationError(f"modelRuntimeReadiness.reasons must be a list{location}.")
     if readiness.get("status") != "READY":
         raise ModelConfigurationError(
-            f"production readiness failed{location}: {readiness.get('reasons', [])!r}."
+            f"model runtime readiness failed{location}: {readiness.get('reasons', [])!r}."
         )
 
 

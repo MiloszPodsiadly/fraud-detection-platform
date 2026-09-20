@@ -89,7 +89,7 @@ def train_model_with_evaluation(
         "prAucDelta": round(float(test_report["prAuc"]) - float(out_of_time_report["prAuc"]), 6),
     }
     test_report["stabilityAssessment"] = _stability_assessment(test_report, out_of_time_report)
-    test_report["productionReadiness"] = _production_readiness(test_report, out_of_time_report)
+    test_report["modelRuntimeReadiness"] = _model_runtime_readiness(test_report, out_of_time_report)
     return model, test_report
 
 
@@ -253,7 +253,7 @@ def write_artifact(
         "featureSetVersion": FEATURE_CONTRACT.version,
         "featureImportance": {name: abs(weight) for name, weight in weights.items()},
         "evaluation": _artifact_evaluation_summary(evaluation or {}),
-        "productionReadiness": _production_readiness_from_evaluation(evaluation or {}),
+        "modelRuntimeReadiness": _model_runtime_readiness_from_evaluation(evaluation or {}),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -293,7 +293,7 @@ def _artifact_evaluation_summary(evaluation: dict[str, object]) -> dict[str, obj
         "thresholdPolicy",
         "runtimeThresholdMetrics",
         "deployedAlertThresholdMetrics",
-        "productionReadiness",
+        "modelRuntimeReadiness",
         "trainingMode",
         "featureSetUsed",
         "modelType",
@@ -414,7 +414,8 @@ def _threshold_metric(report: dict[str, object], threshold: float) -> dict[str, 
     raise ValueError(f"evaluation report is missing metrics for threshold {threshold}.")
 
 
-def _production_readiness(temporal_report: dict[str, object], out_of_time_report: dict[str, object]) -> dict[str, object]:
+def _model_runtime_readiness(temporal_report: dict[str, object], out_of_time_report: dict[str, object]) -> dict[str, object]:
+    """Technical ML runtime load/execution readiness, not production-primary approval."""
     temporal = temporal_report["deployedAlertThresholdMetrics"]
     out_of_time = out_of_time_report["deployedAlertThresholdMetrics"]
     reasons = []
@@ -434,13 +435,13 @@ def _production_readiness(temporal_report: dict[str, object], out_of_time_report
     }
 
 
-def _production_readiness_from_evaluation(evaluation: dict[str, object]) -> dict[str, object]:
-    readiness = evaluation.get("productionReadiness")
+def _model_runtime_readiness_from_evaluation(evaluation: dict[str, object]) -> dict[str, object]:
+    readiness = evaluation.get("modelRuntimeReadiness")
     if isinstance(readiness, dict):
         return readiness
     return {
         "status": "UNKNOWN",
-        "reasons": ["PRODUCTION_READINESS_NOT_EVALUATED"],
+        "reasons": ["MODEL_RUNTIME_READINESS_NOT_EVALUATED"],
         "policyVersion": THRESHOLD_POLICY_VERSION,
         "deployedAlertThresholdName": DEPLOYED_ALERT_THRESHOLD_NAME,
         "deployedAlertThreshold": RUNTIME_RISK_THRESHOLDS[DEPLOYED_ALERT_THRESHOLD_NAME],
