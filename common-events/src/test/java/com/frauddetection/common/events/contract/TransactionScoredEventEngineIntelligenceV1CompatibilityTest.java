@@ -10,9 +10,9 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -28,12 +28,13 @@ class TransactionScoredEventEngineIntelligenceV1CompatibilityTest {
         TransactionScoredEvent event = read(TransactionScoredEventFixtureLoader.oldWithoutEngineIntelligenceJson());
 
         assertThat(event.engineIntelligence()).isNull();
+        assertThat(event.modelVersion()).isEqualTo("v1");
         assertThat(event.fraudScore()).isEqualTo(0.82d);
         assertThat(event.riskLevel()).isEqualTo(RiskLevel.HIGH);
     }
 
     @Test
-    void legacyV1ComparisonWithoutIdentityDeserializesAndNormalizesIdentity() throws Exception {
+    void historicalV1ComparisonWithoutIdentityIsAccepted() throws Exception {
         TransactionScoredEvent event = read(TransactionScoredEventFixtureLoader.legacyV1EngineIntelligenceJson());
 
         assertThat(event.engineIntelligence().comparison().comparisonType())
@@ -46,6 +47,7 @@ class TransactionScoredEventEngineIntelligenceV1CompatibilityTest {
                 .isEqualTo(EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL);
         assertThat(event.engineIntelligence().comparison().scoreDeltaBucket())
                 .isEqualTo(EngineIntelligenceScoreDeltaBucket.SMALL);
+        assertThat(event.modelVersion()).isEqualTo("v1");
         assertThat(event.fraudScore()).isEqualTo(0.82d);
         assertThat(event.riskLevel()).isEqualTo(RiskLevel.HIGH);
     }
@@ -62,31 +64,16 @@ class TransactionScoredEventEngineIntelligenceV1CompatibilityTest {
                 .containsExactly("rules.primary", "ml.python.primary");
         assertThat(secondReplay.engineIntelligence().comparison())
                 .isEqualTo(firstReplay.engineIntelligence().comparison());
+        assertThat(secondReplay.modelVersion()).isEqualTo("v1");
         assertThat(secondReplay.fraudScore()).isEqualTo(firstReplay.fraudScore());
         assertThat(secondReplay.riskLevel()).isEqualTo(firstReplay.riskLevel());
     }
 
     @Test
-    void legacyV1SerializesBackAsCanonicalNewV1ComparisonIdentity() throws Exception {
-        TransactionScoredEvent event = read(TransactionScoredEventFixtureLoader.legacyV1EngineIntelligenceJson());
-
-        JsonNode serialized = objectMapper.readTree(objectMapper.writeValueAsString(event));
-        JsonNode comparison = serialized.path("engineIntelligence").path("comparison");
-
-        assertThat(comparison.path("comparisonType").textValue()).isEqualTo("RULES_VS_ML");
-        assertThat(textValues(comparison.path("comparedEngineIds")))
-                .containsExactly("rules.primary", "ml.python.primary");
-        assertThat(comparison.path("agreementStatus").textValue()).isEqualTo("AGREEMENT");
-        assertThat(comparison.path("riskMismatchStatus").textValue()).isEqualTo("SAME_RISK_LEVEL");
-        assertThat(comparison.path("scoreDeltaBucket").textValue()).isEqualTo("SMALL");
-        assertThat(serialized.path("fraudScore").doubleValue()).isEqualTo(0.82d);
-        assertThat(serialized.path("riskLevel").textValue()).isEqualTo("HIGH");
-    }
-
-    @Test
-    void newV1ComparisonWithExplicitIdentityDeserializes() throws Exception {
+    void historicalV1ComparisonWithExplicitIdentityDeserializes() throws Exception {
         TransactionScoredEvent event = read(TransactionScoredEventFixtureLoader.explicitV1EngineIntelligenceJson());
 
+        assertThat(event.modelVersion()).isEqualTo("v1");
         assertThat(event.engineIntelligence().comparison().comparisonType())
                 .isEqualTo(EngineIntelligenceComparisonType.RULES_VS_ML);
         assertThat(event.engineIntelligence().comparison().comparedEngineIds())
@@ -94,13 +81,78 @@ class TransactionScoredEventEngineIntelligenceV1CompatibilityTest {
     }
 
     @Test
-    void newV1UnknownAdditiveFieldsFollowExistingIgnorePolicy() throws Exception {
+    void historicalV1ComparisonUnknownAdditiveFieldsFollowExistingIgnorePolicy() throws Exception {
         TransactionScoredEvent event = read(TransactionScoredEventFixtureLoader.unknownAdditiveV1EngineIntelligenceJson());
 
         assertThat(event.transactionId()).isEqualTo("txn-fdp129-stage2-001");
+        assertThat(event.modelVersion()).isEqualTo("v1");
         assertThat(event.engineIntelligence().engines()).hasSize(2);
         assertThat(event.engineIntelligence().comparison().comparedEngineIds())
                 .containsExactly("rules.primary", "ml.python.primary");
+    }
+
+    @Test
+    void currentComparisonWithoutIdentityIsRejected() throws Exception {
+        String currentWithoutIdentity = removeCurrentComparisonIdentity(
+                TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson(),
+                "comparisonType",
+                "comparedEngineIds"
+        );
+
+        assertThatThrownBy(() -> read(currentWithoutIdentity))
+                .isInstanceOf(Exception.class)
+                .hasRootCauseInstanceOf(NullPointerException.class)
+                .hasMessageContaining("comparisonType is required");
+    }
+
+    @Test
+    void currentComparisonWithPartialIdentityIsRejected() throws Exception {
+        String currentWithoutIds = removeCurrentComparisonIdentity(
+                TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson(),
+                "comparedEngineIds"
+        );
+        String currentWithoutType = removeCurrentComparisonIdentity(
+                TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson(),
+                "comparisonType"
+        );
+
+        assertThatThrownBy(() -> read(currentWithoutIds))
+                .isInstanceOf(Exception.class)
+                .hasRootCauseInstanceOf(NullPointerException.class)
+                .hasMessageContaining("comparedEngineIds is required");
+        assertThatThrownBy(() -> read(currentWithoutType))
+                .isInstanceOf(Exception.class)
+                .hasRootCauseInstanceOf(NullPointerException.class)
+                .hasMessageContaining("comparisonType is required");
+    }
+
+    @Test
+    void currentComparisonWithValidIdentityIsAccepted() throws Exception {
+        TransactionScoredEvent event = read(TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson());
+
+        assertThat(event.modelVersion()).isEqualTo("v2");
+        assertThat(event.engineIntelligence().comparison().comparisonType())
+                .isEqualTo(EngineIntelligenceComparisonType.RULES_VS_ML);
+        assertThat(event.engineIntelligence().comparison().comparedEngineIds())
+                .containsExactly("rules.primary", "ml.python.primary");
+    }
+
+    @Test
+    void historicalCompatibilityCannotBeInvokedByCurrentContract() throws Exception {
+        String currentWithoutIdentity = removeCurrentComparisonIdentity(
+                TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson(),
+                "comparisonType",
+                "comparedEngineIds"
+        );
+
+        assertThat(objectMapper.readTree(currentWithoutIdentity).get("modelVersion").textValue()).isEqualTo("v2");
+        assertThatThrownBy(() -> kafkaDeserializer.deserialize(
+                "transactions.scored",
+                currentWithoutIdentity.getBytes(StandardCharsets.UTF_8)
+        ))
+                .isInstanceOf(org.apache.kafka.common.errors.SerializationException.class)
+                .hasRootCauseInstanceOf(NullPointerException.class)
+                .hasRootCauseMessage("comparisonType is required");
     }
 
     @Test
@@ -135,7 +187,13 @@ class TransactionScoredEventEngineIntelligenceV1CompatibilityTest {
         return objectMapper.readValue(json, TransactionScoredEvent.class);
     }
 
-    private List<String> textValues(JsonNode node) {
-        return node.values().stream().map(JsonNode::textValue).toList();
+    private String removeCurrentComparisonIdentity(String json, String... fields) throws Exception {
+        JsonNode root = objectMapper.readTree(json);
+        ObjectNode comparison = (ObjectNode) root.path("engineIntelligence").path("comparison");
+        for (String field : fields) {
+            comparison.remove(field);
+        }
+        return root.toString();
     }
+
 }

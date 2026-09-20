@@ -7,6 +7,7 @@ dist/
 .DS_Store
 *.iml
 *.log
+documents/
 __pycache__/
 *.py[cod]
 data/generated/*
@@ -20,6 +21,7 @@ deployment/service-identity/*-key.pem
 deployment/service-identity/*private*.pem
 deployment/service-identity/**/*private*.pem
 deployment/service-identity/**/*-key.pem
+ml-inference-service/app/model_artifact.evaluation.json
 
 .env
 .env.*

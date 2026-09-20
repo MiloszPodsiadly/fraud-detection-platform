@@ -207,7 +207,7 @@ class SuspiciousTransactionLinkedAlertContextServiceTest {
         assertThat(response.alertScore()).isEqualTo(0.94);
         assertThat(response.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
         assertThat(response.alertStatus()).isEqualTo(AlertStatus.OPEN);
-        assertThat(response.reasonCodes()).containsExactly("HIGH_AMOUNT", "RAPID_TRANSFER");
+        assertThat(response.reasonCodes()).containsExactly("HIGH_TRANSACTION_AMOUNT", "RAPID_TRANSFER");
         assertThat(response.correlationId()).isEqualTo("correlation-1");
         assertThat(response.scoreDecisionId()).isEqualTo("score-decision-1");
     }
@@ -234,7 +234,7 @@ class SuspiciousTransactionLinkedAlertContextServiceTest {
         document.setRiskLevel(RiskLevel.CRITICAL);
         document.setFraudScore(0.94);
         document.setAlertStatus(AlertStatus.OPEN);
-        document.setReasonCodes(List.of("HIGH_AMOUNT", "RAPID_TRANSFER"));
+        document.setReasonCodes(List.of("HIGH_TRANSACTION_AMOUNT", "RAPID_TRANSFER"));
         document.setCustomerContext(new CustomerContext(
                 "customer-1",
                 "account-1",

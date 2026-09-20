@@ -21,22 +21,17 @@ A `ReasonCode` severity or category is not final risk level.
 `UNKNOWN` must not be treated as a supported scoring signal.
 Unsupported input must remain visible through diagnostics, metadata, and low-cardinality metrics.
 
-## RAPID_TRANSFER_FRAUD_CASE Semantics
+## Rapid Transfer Semantics
 
-`RAPID_TRANSFER_FRAUD_CASE` is a legacy-compatible wire value for a rapid-transfer case-candidate scoring signal.
-It does not mean a fraud case exists.
-It does not mean fraud is confirmed.
-It must not be displayed as a verdict.
+`RAPID_PLN_20K_BURST` is the current bounded Rules V2 rapid-transfer scoring reason.
+It does not mean a fraud case exists, fraud is confirmed, or a case was created.
+Fraud-case eligibility is derived from canonical feature facts by the alert workflow, not from a deleted
+case-candidate reason code.
 
 ## Compatibility
 
-Legacy aliases:
-
-- `HIGH_AMOUNT` -> `HIGH_TRANSACTION_AMOUNT`
-- `countryMismatch` -> `COUNTRY_MISMATCH`
-- `deviceNovelty` -> `DEVICE_NOVELTY`
-- `proxyOrVpnDetected` -> `PROXY_OR_VPN`
-- `rapidTransferFraudCaseCandidate` -> `RAPID_TRANSFER_FRAUD_CASE`
+Feature names and retired aliases are not public reason codes. Unsupported input remains diagnostic-only and is not
+projected as supported scoring evidence.
 
 ## Out Of Scope
 

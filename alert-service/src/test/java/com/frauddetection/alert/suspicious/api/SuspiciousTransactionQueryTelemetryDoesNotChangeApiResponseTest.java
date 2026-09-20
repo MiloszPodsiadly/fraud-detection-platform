@@ -26,7 +26,7 @@ class SuspiciousTransactionQueryTelemetryDoesNotChangeApiResponseTest {
     void telemetryFailureDoesNotFailSearchResponse() {
         SuspiciousTransactionReadService service = mock(SuspiciousTransactionReadService.class);
         SuspiciousTransactionSliceResponse expected = new SuspiciousTransactionSliceResponse(
-                List.of(SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))),
+                List.of(SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_TRANSACTION_AMOUNT"))),
                 20,
                 false,
                 null
@@ -47,7 +47,7 @@ class SuspiciousTransactionQueryTelemetryDoesNotChangeApiResponseTest {
     @Test
     void telemetryFailureDoesNotFailReadResponse() {
         SuspiciousTransactionReadService service = mock(SuspiciousTransactionReadService.class);
-        SuspiciousTransactionResponse expected = SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"));
+        SuspiciousTransactionResponse expected = SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_TRANSACTION_AMOUNT"));
         when(service.findById("suspicious-1")).thenReturn(Optional.of(expected));
         SuspiciousTransactionReadController controller = controller(service, snapshot -> {
             throw new IllegalStateException("raw-secret-exception-message");
@@ -62,7 +62,7 @@ class SuspiciousTransactionQueryTelemetryDoesNotChangeApiResponseTest {
     void customSinkFailureLogIsBounded(CapturedOutput output) {
         SuspiciousTransactionReadService service = mock(SuspiciousTransactionReadService.class);
         SuspiciousTransactionSliceResponse expected = new SuspiciousTransactionSliceResponse(
-                List.of(SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))),
+                List.of(SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_TRANSACTION_AMOUNT"))),
                 20,
                 false,
                 null

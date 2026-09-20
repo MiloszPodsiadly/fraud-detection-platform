@@ -80,6 +80,13 @@ def split_dataset(
             "validation": _fraud_rate(validation_rows),
             "test": _fraud_rate(test_rows),
         },
+        **_boundary_metadata(
+            train_rows,
+            validation_rows,
+            test_rows,
+            cutoff_ratio if mode == "out_of_time" else None,
+            cutoff_timestamp if mode == "out_of_time" else None,
+        ),
     }
     return DatasetSplits(
         train=_subset(dataset, train_rows, "train", metadata),
@@ -141,6 +148,42 @@ def _stratified_temporal_split(
         test.extend(bucket_test)
     sorter = lambda item: (_timestamp(item[1][0]) or datetime.min, item[0])
     return sorted(train, key=sorter), sorted(validation, key=sorter), sorted(test, key=sorter)
+
+
+def _boundary_metadata(
+        train_rows: list[tuple[int, tuple[dict[str, Any], int]]],
+        validation_rows: list[tuple[int, tuple[dict[str, Any], int]]],
+        test_rows: list[tuple[int, tuple[dict[str, Any], int]]],
+        requested_cutoff_ratio: float | None,
+        requested_cutoff_timestamp: str | None,
+) -> dict[str, Any]:
+    train_end = _max_timestamp(train_rows)
+    validation_end = _max_timestamp(validation_rows)
+    test_start = _min_timestamp(test_rows)
+    return {
+        "trainEndTimestamp": _format_timestamp(train_end),
+        "validationEndTimestamp": _format_timestamp(validation_end),
+        "testStartTimestamp": _format_timestamp(test_start),
+        "requestedCutoffRatio": requested_cutoff_ratio,
+        "requestedCutoffTimestamp": requested_cutoff_timestamp,
+        "effectiveCutoffTimestamp": requested_cutoff_timestamp or _format_timestamp(train_end),
+    }
+
+
+def _max_timestamp(rows: list[tuple[int, tuple[dict[str, Any], int]]]) -> datetime | None:
+    timestamps = [_timestamp(features) for _, (features, _) in rows]
+    present = [timestamp for timestamp in timestamps if timestamp is not None]
+    return max(present) if present else None
+
+
+def _min_timestamp(rows: list[tuple[int, tuple[dict[str, Any], int]]]) -> datetime | None:
+    timestamps = [_timestamp(features) for _, (features, _) in rows]
+    present = [timestamp for timestamp in timestamps if timestamp is not None]
+    return min(present) if present else None
+
+
+def _format_timestamp(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
 
 
 def _can_stratify(rows: list[tuple[int, tuple[dict[str, Any], int]]], min_fraud_per_split: int) -> bool:

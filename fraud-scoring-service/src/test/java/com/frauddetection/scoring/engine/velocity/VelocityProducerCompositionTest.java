@@ -66,26 +66,15 @@ class VelocityProducerCompositionTest {
                 raw.deviceInfo(),
                 raw.locationInfo(),
                 raw.customerContext(),
-                features.recentTransactionCount(),
-                features.recentTransactionCountWindow(),
-                features.recentAmountSum(),
-                features.recentAmountSumWindow(),
-                features.transactionVelocityPerMinute(),
-                features.merchantFrequency7d(),
-                features.deviceNovelty(),
-                features.countryMismatch(),
-                features.proxyOrVpnDetected(),
-                features.featureFlags(),
                 features.featureSnapshot()
         );
-        assertThat(enriched.featureFlags()).doesNotContain(FraudFeatureContract.FLAG_HIGH_VELOCITY);
+        assertThat(enriched.featureSnapshot()).containsKey(FraudFeatureContract.RECENT_TRANSACTION_COUNT);
         return new ScoringContext(enriched, enriched.featureSnapshot(), ScoringMode.ML, enriched.correlationId(), RECEIVED_AT);
     }
 
     private FeatureStoreSnapshot velocitySnapshot() {
         return new FeatureStoreSnapshot(
                 4,
-                BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 List.of(
                         recentTransaction("hist-1"),

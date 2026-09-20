@@ -4,7 +4,6 @@ import com.frauddetection.common.events.features.FraudFeatureContract;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
-import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -14,10 +13,7 @@ class FeatureSnapshotKeyPolicyTest {
 
     @Test
     void acceptsRegisteredCanonicalCamelCaseFeatureKeys() {
-        Stream.concat(
-                FraudFeatureContract.JAVA_ENRICHED_FEATURE_NAMES.stream(),
-                FraudFeatureContract.ML_FEATURE_NAMES.stream()
-        ).forEach(key -> assertThat(FeatureSnapshotKeyPolicy.isAllowedFeatureKey(key))
+        FraudFeatureContract.JAVA_ENRICHED_FEATURE_NAMES.forEach(key -> assertThat(FeatureSnapshotKeyPolicy.isAllowedFeatureKey(key))
                 .as("registered feature key %s", key)
                 .isTrue());
 
@@ -83,7 +79,7 @@ class FeatureSnapshotKeyPolicyTest {
                 .contains(FeatureSnapshotScalarType.BOOLEAN);
         assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.RECENT_TRANSACTION_COUNT))
                 .contains(FeatureSnapshotScalarType.INTEGER);
-        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.RECENT_AMOUNT_SUM))
+        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN))
                 .contains(FeatureSnapshotScalarType.DECIMAL);
         assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW))
                 .contains(FeatureSnapshotScalarType.STRING);
@@ -93,15 +89,11 @@ class FeatureSnapshotKeyPolicyTest {
                 .contains(FeatureSnapshotScalarType.DOUBLE);
         assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.CURRENCY))
                 .contains(FeatureSnapshotScalarType.STRING);
-        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN))
-                .contains(FeatureSnapshotScalarType.DECIMAL);
     }
 
     @Test
     void excludesNonScalarOrIdentifierBearingKeysFromAdapterConsumption() {
         assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS))
-                .isEqualTo(Optional.empty());
-        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.FEATURE_FLAGS))
                 .isEqualTo(Optional.empty());
     }
 
@@ -111,9 +103,26 @@ class FeatureSnapshotKeyPolicyTest {
                 .isTrue();
         assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS))
                 .isEmpty();
-        assertThat(FeatureSnapshotKeyPolicy.isAllowedFeatureKey(FraudFeatureContract.FEATURE_FLAGS))
-                .isTrue();
-        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.FEATURE_FLAGS))
+    }
+
+    @Test
+    void oldOrUnsupportedPolicyFieldsAreNotCurrentAdapterKeys() {
+        assertThat(FeatureSnapshotKeyPolicy.isAllowedFeatureKey("unsupportedPolicyMarker"))
+                .isFalse();
+    }
+
+    @Test
+    void pythonDerivedModelFeaturesAreNotJavaSnapshotAdapterKeys() {
+        assertThat(FraudFeatureContract.ML_FEATURE_NAMES)
+                .contains(FraudFeatureContract.SUSPICIOUS_FACT_RATIO, FraudFeatureContract.RAPID_TRANSFER_BURST);
+
+        assertThat(FeatureSnapshotKeyPolicy.isAllowedFeatureKey(FraudFeatureContract.SUSPICIOUS_FACT_RATIO))
+                .isFalse();
+        assertThat(FeatureSnapshotKeyPolicy.isAllowedFeatureKey(FraudFeatureContract.RAPID_TRANSFER_BURST))
+                .isFalse();
+        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.SUSPICIOUS_FACT_RATIO))
+                .isEmpty();
+        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.RAPID_TRANSFER_BURST))
                 .isEmpty();
     }
 
@@ -121,7 +130,7 @@ class FeatureSnapshotKeyPolicyTest {
     void scalarConsumptionMustUseExpectedTypePolicy() {
         assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.CURRENCY))
                 .contains(FeatureSnapshotScalarType.STRING);
-        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor(FraudFeatureContract.FEATURE_FLAGS))
+        assertThat(FeatureSnapshotKeyPolicy.expectedTypeFor("unsupportedPolicyMarker"))
                 .isEmpty();
     }
 }

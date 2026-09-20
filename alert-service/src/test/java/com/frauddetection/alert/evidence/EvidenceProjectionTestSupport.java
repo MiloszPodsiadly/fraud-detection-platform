@@ -43,7 +43,7 @@ final class EvidenceProjectionTestSupport {
                 riskLevel,
                 "RULE_BASED",
                 "rule-based-engine",
-                "v1",
+                "v2",
                 INFERENCE_AT,
                 reasonCodes,
                 Map.of("reasonCodeCount", reasonCodes == null ? 0 : reasonCodes.size()),

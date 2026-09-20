@@ -4,6 +4,7 @@ import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.evidence.ScoringEvidenceSource;
 import com.frauddetection.common.events.evidence.ScoringEvidenceStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.model.Money;
 import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
@@ -120,17 +121,19 @@ class MlFallbackScoringEvidenceTest {
                 base.deviceInfo(),
                 base.locationInfo(),
                 base.customerContext(),
-                1,
-                "PT1M",
-                new Money(new BigDecimal("1500.00"), "PLN"),
-                "PT1M",
-                1.0d,
-                base.merchantFrequency7d(),
-                false,
-                false,
-                false,
-                List.of(),
-                Map.of()
+                Map.ofEntries(
+                        Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 1),
+                        Map.entry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M"),
+                        Map.entry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 1.0d),
+                        Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("1500.00")),
+                        Map.entry(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M"),
+                        Map.entry(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("1500.00")),
+                        Map.entry(FraudFeatureContract.MERCHANT_FREQUENCY_7D, 1),
+                        Map.entry(FraudFeatureContract.DEVICE_NOVELTY, false),
+                        Map.entry(FraudFeatureContract.COUNTRY_MISMATCH, false),
+                        Map.entry(FraudFeatureContract.PROXY_OR_VPN_DETECTED, false),
+                        Map.entry(FraudFeatureContract.CURRENCY, "PLN")
+                )
         ));
     }
 }

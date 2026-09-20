@@ -2,10 +2,22 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
+from math import isfinite
 from math import log2, sqrt
 from typing import Any
 
 from app.features.feature_contract import FEATURE_CONTRACT
+
+
+SUPPORTED_CURRENCIES = set(FEATURE_CONTRACT.supported_currencies)
+MAX_RECENT_TRANSACTION_COUNT = int(FEATURE_CONTRACT.production_feature_semantics["recentTransactionCount"]["bounds"]["max"])
+MAX_TRANSACTION_VELOCITY_PER_MINUTE = float(
+    FEATURE_CONTRACT.production_feature_semantics["transactionVelocityPerMinute"]["bounds"]["max"]
+)
+MAX_RECENT_AMOUNT_SUM_PLN = float(FEATURE_CONTRACT.production_feature_semantics["recentAmountSumPln"]["bounds"]["max"])
+RATE_CONSISTENCY_TOLERANCE = float(
+    str(FEATURE_CONTRACT.production_feature_semantics["transactionVelocityPerMinute"]["consistency"]).rsplit(" ", 1)[-1]
+)
 
 
 class FeaturePipeline:
@@ -74,12 +86,12 @@ class FeaturePipeline:
         if self._is_raw_event(event):
             return self._select_features(self._raw_features(event, history=[]), mode)
 
-        feature_flags = event.get("featureFlags") or []
-        amount_sum = self._money_amount(event.get("recentAmountSum"))
+        amount_sum_pln = self._strict_amount(event.get("recentAmountSumPln"), "recentAmountSumPln")
+        rapid_transfer_burst = self._rapid_transfer_burst(event)
         features = {
-            "recentTransactionCount": min(self._number(event.get("recentTransactionCount")) / 10.0, 1.0),
-            "recentAmountSum": min(amount_sum / 10000.0, 1.0),
-            "transactionVelocityPerMinute": min(self._number(event.get("transactionVelocityPerMinute")) / 5.0, 1.0),
+            "recentTransactionCount": min(self._strict_integer(event.get("recentTransactionCount"), "recentTransactionCount") / 10.0, 1.0),
+            "recentAmountSumPln": min(amount_sum_pln / 10000.0, 1.0),
+            "transactionVelocityPerMinute": min(self._strict_float(event.get("transactionVelocityPerMinute"), "transactionVelocityPerMinute") / 5.0, 1.0),
             "transactionVelocityPerHour": min(self._number(event.get("transactionVelocityPerHour")) / 20.0, 1.0),
             "transactionVelocityPerDay": min(self._number(event.get("transactionVelocityPerDay")) / 80.0, 1.0),
             "recentAmountAverage": min(self._money_amount(event.get("recentAmountAverage")) / 5000.0, 1.0),
@@ -87,12 +99,12 @@ class FeaturePipeline:
             "amountDeviationFromUserMean": min(self._number(event.get("amountDeviationFromUserMean")) / 5.0, 1.0),
             "merchantEntropy": min(self._number(event.get("merchantEntropy")) / 4.0, 1.0),
             "countryEntropy": min(self._number(event.get("countryEntropy")) / 3.0, 1.0),
-            "merchantFrequency7d": min(self._number(event.get("merchantFrequency7d")) / 12.0, 1.0),
-            "deviceNovelty": self._flag(event.get("deviceNovelty")),
-            "countryMismatch": self._flag(event.get("countryMismatch")),
-            "proxyOrVpnDetected": self._flag(event.get("proxyOrVpnDetected")),
-            "highRiskFlagCount": min(len(feature_flags) / 6.0, 1.0) if isinstance(feature_flags, list) else 0.0,
-            "rapidTransferBurst": self._rapid_transfer_burst(event, feature_flags),
+            "merchantFrequency7d": min(self._strict_integer(event.get("merchantFrequency7d"), "merchantFrequency7d") / 12.0, 1.0),
+            "deviceNovelty": self._strict_boolean(event.get("deviceNovelty"), "deviceNovelty"),
+            "countryMismatch": self._strict_boolean(event.get("countryMismatch"), "countryMismatch"),
+            "proxyOrVpnDetected": self._strict_boolean(event.get("proxyOrVpnDetected"), "proxyOrVpnDetected"),
+            "suspiciousFactRatio": self._suspicious_fact_ratio(event, amount_sum_pln, rapid_transfer_burst),
+            "rapidTransferBurst": rapid_transfer_burst,
         }
         return self._select_features(features, mode)
 
@@ -100,20 +112,27 @@ class FeaturePipeline:
         """Report production feature compatibility for a Java-enriched snapshot."""
         if self._is_raw_event(event):
             return {
-                "compatible": True,
+                "compatible": False,
                 "source": "raw_sequence",
                 "missingRequiredFeatures": [],
+                "invalidFeatures": {
+                    "raw_transaction": "raw_sequence_not_allowed_for_production_inference",
+                },
+                "providedByJava": self._features_by_availability("providedByJava"),
+                "derivedInPython": self._features_by_availability("derivedInPython"),
                 "trainingOnlyFeatures": self._features_by_availability("trainingOnly"),
             }
         required = [
-            name for name in self.PRODUCTION_FEATURE_NAMES
+            name for name in FEATURE_CONTRACT.java_enriched_feature_names
             if FEATURE_CONTRACT.feature_availability.get(name) == "providedByJava"
         ]
         missing = [name for name in required if name not in event]
+        invalid = self._invalid_production_features(event, missing)
         return {
-            "compatible": not missing,
+            "compatible": not missing and not invalid,
             "source": "java_enriched_snapshot",
             "missingRequiredFeatures": missing,
+            "invalidFeatures": invalid,
             "providedByJava": self._features_by_availability("providedByJava"),
             "derivedInPython": self._features_by_availability("derivedInPython"),
             "trainingOnlyFeatures": self._features_by_availability("trainingOnly"),
@@ -149,11 +168,12 @@ class FeaturePipeline:
         raw = event["raw_transaction"]
         occurred_at = self._timestamp(event)
         amount = self._number(raw.get("amount"))
-        recent_minute = self._recent(history, occurred_at, seconds=60)
-        recent_hour = self._recent(history, occurred_at, seconds=3600)
-        recent_day = self._recent(history, occurred_at, seconds=86400)
-        recent_week = self._recent(history, occurred_at, seconds=604800)
-        recent_amounts = [self._number(row["raw_transaction"].get("amount")) for row in recent_day]
+        recent_minute = [*self._recent(history, occurred_at, seconds=60), event]
+        recent_hour = [*self._recent(history, occurred_at, seconds=3600), event]
+        recent_day = [*self._recent(history, occurred_at, seconds=86400), event]
+        recent_week = [*self._recent(history, occurred_at, seconds=604800), event]
+        recent_day_amounts = [self._number(row["raw_transaction"].get("amount")) for row in recent_day]
+        recent_minute_amount = sum(self._number(row["raw_transaction"].get("amount")) for row in recent_minute)
         user_id = str(event.get("user_id", "unknown"))
         historical_amounts = [self._number(row["raw_transaction"].get("amount")) for row in history]
         user_mean = self._user_mean_amounts.get(user_id) or self._mean(historical_amounts) or amount
@@ -161,25 +181,37 @@ class FeaturePipeline:
         countries = [str(row["raw_transaction"].get("country", "")) for row in recent_week]
         known_devices = {str(row["raw_transaction"].get("deviceId", "")) for row in history} or self._known_devices.get(user_id, set())
         known_countries = {str(row["raw_transaction"].get("country", "")) for row in history} or self._known_countries.get(user_id, set())
-        scenario = str(event.get("metadata", {}).get("scenario", ""))
+        merchant_frequency = self._merchant_frequency(raw, recent_week)
+        device_novelty = 1.0 if known_devices and str(raw.get("deviceId", "")) not in known_devices else 0.0
+        country_mismatch = 1.0 if known_countries and str(raw.get("country", "")) not in known_countries else 0.0
+        proxy_or_vpn = self._flag(raw.get("proxyOrVpnDetected"))
+        rapid_transfer_burst = 1.0 if len(recent_minute) >= 2 and recent_minute_amount >= 20_000.0 else 0.0
+        suspicious_fact_ratio = min(sum([
+            device_novelty,
+            country_mismatch,
+            proxy_or_vpn,
+            1.0 if merchant_frequency >= 5.0 else 0.0,
+            1.0 if len(recent_minute) >= 2 and recent_minute_amount >= 5_000.0 else 0.0,
+            rapid_transfer_burst,
+        ]) / 6.0, 1.0)
 
         return {
-            "recentTransactionCount": min(len(recent_day) / 10.0, 1.0),
-            "recentAmountSum": min(sum(recent_amounts) / 10000.0, 1.0),
+            "recentTransactionCount": min(len(recent_minute) / 10.0, 1.0),
+            "recentAmountSumPln": min(recent_minute_amount / 10000.0, 1.0),
             "transactionVelocityPerMinute": min(len(recent_minute) / 5.0, 1.0),
             "transactionVelocityPerHour": min(len(recent_hour) / 20.0, 1.0),
             "transactionVelocityPerDay": min(len(recent_day) / 80.0, 1.0),
-            "recentAmountAverage": min(self._mean(recent_amounts) / 5000.0, 1.0),
-            "recentAmountStdDev": min(self._stddev(recent_amounts) / 5000.0, 1.0),
+            "recentAmountAverage": min(self._mean(recent_day_amounts) / 5000.0, 1.0),
+            "recentAmountStdDev": min(self._stddev(recent_day_amounts) / 5000.0, 1.0),
             "amountDeviationFromUserMean": min(abs(amount - user_mean) / max(user_mean, 1.0) / 5.0, 1.0),
             "merchantEntropy": min(self._entropy(merchants) / 4.0, 1.0),
             "countryEntropy": min(self._entropy(countries) / 3.0, 1.0),
-            "merchantFrequency7d": min(self._merchant_frequency(raw, recent_week) / 12.0, 1.0),
-            "deviceNovelty": 1.0 if known_devices and str(raw.get("deviceId", "")) not in known_devices else 0.0,
-            "countryMismatch": 1.0 if known_countries and str(raw.get("country", "")) not in known_countries else 0.0,
-            "proxyOrVpnDetected": self._flag(raw.get("proxyOrVpnDetected")),
-            "highRiskFlagCount": self._raw_high_risk_flags(event, amount, user_mean),
-            "rapidTransferBurst": 1.0 if scenario == "rapid_transfer_burst" else 0.0,
+            "merchantFrequency7d": min(merchant_frequency / 12.0, 1.0),
+            "deviceNovelty": device_novelty,
+            "countryMismatch": country_mismatch,
+            "proxyOrVpnDetected": proxy_or_vpn,
+            "suspiciousFactRatio": suspicious_fact_ratio,
+            "rapidTransferBurst": rapid_transfer_burst,
         }
 
     def _recent(self, history: list[dict[str, Any]], occurred_at: datetime, seconds: int) -> list[dict[str, Any]]:
@@ -195,15 +227,6 @@ class FeaturePipeline:
     def _merchant_frequency(self, raw: dict[str, Any], recent_week: list[dict[str, Any]]) -> float:
         merchant_id = raw.get("merchantId")
         return sum(1 for row in recent_week if row["raw_transaction"].get("merchantId") == merchant_id)
-
-    def _raw_high_risk_flags(self, event: dict[str, Any], amount: float, user_mean: float) -> float:
-        raw = event["raw_transaction"]
-        flags = [
-            self._flag(raw.get("proxyOrVpnDetected")),
-            1.0 if amount > user_mean * 3.0 else 0.0,
-            1.0 if str(event.get("metadata", {}).get("scenario", "")) in {"account_takeover", "card_testing"} else 0.0,
-        ]
-        return min(sum(flags) / 6.0, 1.0)
 
     def _is_raw_event(self, event: dict[str, Any]) -> bool:
         return isinstance(event.get("raw_transaction"), dict)
@@ -226,17 +249,100 @@ class FeaturePipeline:
         total = len(values)
         return -sum((count / total) * log2(count / total) for count in counts.values())
 
-    def _rapid_transfer_burst(self, event: dict[str, Any], feature_flags: Any) -> float:
-        if isinstance(feature_flags, list) and "RAPID_PLN_20K_BURST" in feature_flags:
-            return 1.0
-        if event.get("rapidTransferFraudCaseCandidate") is True:
-            return 1.0
-        return 1.0 if self._number(event.get("rapidTransferTotalPln")) >= 20_000.0 else 0.0
+    def _suspicious_fact_ratio(self, event: dict[str, Any], amount_sum: float, rapid_transfer_burst: float) -> float:
+        facts = [
+            self._strict_boolean(event.get("deviceNovelty"), "deviceNovelty"),
+            self._strict_boolean(event.get("countryMismatch"), "countryMismatch"),
+            self._strict_boolean(event.get("proxyOrVpnDetected"), "proxyOrVpnDetected"),
+            1.0 if self._strict_integer(event.get("merchantFrequency7d"), "merchantFrequency7d") >= 5 else 0.0,
+            1.0 if self._strict_integer(event.get("recentTransactionCount"), "recentTransactionCount") >= 2 and amount_sum >= 5_000.0 else 0.0,
+            rapid_transfer_burst,
+        ]
+        return min(sum(facts) / 6.0, 1.0)
+
+    def _rapid_transfer_burst(self, event: dict[str, Any]) -> float:
+        if self._strict_integer(event.get("recentTransactionCount"), "recentTransactionCount") < 2:
+            return 0.0
+        if not self._canonical_one_minute_window(event.get("recentTransactionCountWindow")):
+            return 0.0
+        if not self._canonical_one_minute_window(event.get("recentAmountSumWindow")):
+            return 0.0
+        return 1.0 if self._strict_amount(event.get("recentAmountSumPln"), "recentAmountSumPln") >= 20_000.0 else 0.0
+
+    def _canonical_one_minute_window(self, value: Any) -> bool:
+        return str(value) == "PT1M"
 
     def _money_amount(self, value: Any) -> float:
         if isinstance(value, dict):
             return self._number(value.get("amount"))
         return self._number(value)
+
+    def _invalid_production_features(self, event: dict[str, Any], missing: list[str]) -> dict[str, str]:
+        if missing:
+            return {}
+        checks = [
+            ("recentTransactionCount", lambda: self._strict_integer(event.get("recentTransactionCount"), "recentTransactionCount")),
+            ("merchantFrequency7d", lambda: self._strict_integer(event.get("merchantFrequency7d"), "merchantFrequency7d")),
+            ("transactionVelocityPerMinute", lambda: self._strict_float(event.get("transactionVelocityPerMinute"), "transactionVelocityPerMinute")),
+            ("recentAmountSumPln", lambda: self._strict_amount(event.get("recentAmountSumPln"), "recentAmountSumPln")),
+            ("currentTransactionAmountPln", lambda: self._strict_amount(event.get("currentTransactionAmountPln"), "currentTransactionAmountPln")),
+            ("deviceNovelty", lambda: self._strict_boolean(event.get("deviceNovelty"), "deviceNovelty")),
+            ("countryMismatch", lambda: self._strict_boolean(event.get("countryMismatch"), "countryMismatch")),
+            ("proxyOrVpnDetected", lambda: self._strict_boolean(event.get("proxyOrVpnDetected"), "proxyOrVpnDetected")),
+            ("recentTransactionCountWindow", lambda: self._strict_window(event.get("recentTransactionCountWindow"), "recentTransactionCountWindow")),
+            ("recentAmountSumWindow", lambda: self._strict_window(event.get("recentAmountSumWindow"), "recentAmountSumWindow")),
+            ("currency", lambda: self._strict_currency(event.get("currency"))),
+        ]
+        invalid: dict[str, str] = {}
+        for name, check in checks:
+            try:
+                check()
+            except ValueError as exc:
+                invalid[name] = str(exc)
+        if not invalid:
+            count = self._strict_integer(event.get("recentTransactionCount"), "recentTransactionCount")
+            rate = self._strict_float(event.get("transactionVelocityPerMinute"), "transactionVelocityPerMinute")
+            if abs(rate - float(count)) > RATE_CONSISTENCY_TOLERANCE:
+                invalid["transactionVelocityPerMinute"] = "inconsistent_with_recentTransactionCount"
+        return invalid
+
+    def _strict_integer(self, value: Any, name: str) -> int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{name}_must_be_integer")
+        if value < 0 or value > MAX_RECENT_TRANSACTION_COUNT:
+            raise ValueError(f"{name}_out_of_bounds")
+        return value
+
+    def _strict_float(self, value: Any, name: str) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{name}_must_be_number")
+        number = float(value)
+        if not isfinite(number) or number < 0.0 or number > MAX_TRANSACTION_VELOCITY_PER_MINUTE:
+            raise ValueError(f"{name}_out_of_bounds")
+        return number
+
+    def _strict_amount(self, value: Any, name: str) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{name}_must_be_number")
+        number = float(value)
+        if not isfinite(number) or number < 0.0 or number > MAX_RECENT_AMOUNT_SUM_PLN:
+            raise ValueError(f"{name}_out_of_bounds")
+        return number
+
+    def _strict_boolean(self, value: Any, name: str) -> float:
+        if not isinstance(value, bool):
+            raise ValueError(f"{name}_must_be_boolean")
+        return 1.0 if value else 0.0
+
+    def _strict_window(self, value: Any, name: str) -> str:
+        if value != "PT1M":
+            raise ValueError(f"{name}_must_be_PT1M")
+        return value
+
+    def _strict_currency(self, value: Any) -> str:
+        if not isinstance(value, str) or value.upper() not in SUPPORTED_CURRENCIES:
+            raise ValueError("currency_unsupported")
+        return value.upper()
 
     def _number(self, value: Any, default: float = 0.0) -> float:
         if isinstance(value, bool) or value is None:

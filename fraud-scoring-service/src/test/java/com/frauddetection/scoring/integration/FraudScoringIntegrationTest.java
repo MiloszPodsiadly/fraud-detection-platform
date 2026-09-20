@@ -2,6 +2,7 @@ package com.frauddetection.scoring.integration;
 
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
+import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
 import com.frauddetection.common.testsupport.base.AbstractIntegrationTest;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
@@ -54,7 +55,15 @@ class FraudScoringIntegrationTest extends AbstractIntegrationTest {
         assertThat(record.value().correlationId()).isEqualTo(enrichedEvent.correlationId());
         assertThat(record.value().fraudScore()).isGreaterThan(0.0d);
         assertThat(record.value().riskLevel()).isNotNull();
-        assertThat(record.value().featureSnapshot()).isEqualTo(enrichedEvent.featureSnapshot());
+        assertThat(record.value().featureSnapshot())
+                .containsEntry(
+                        FraudFeatureContract.RECENT_TRANSACTION_COUNT,
+                        enrichedEvent.featureSnapshot().get(FraudFeatureContract.RECENT_TRANSACTION_COUNT)
+                )
+                .containsEntry(
+                        FraudFeatureContract.RECENT_AMOUNT_SUM_PLN,
+                        enrichedEvent.featureSnapshot().get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN)
+                );
     }
 
     private ConsumerRecord<String, TransactionScoredEvent> pollSingleScoredRecord() {

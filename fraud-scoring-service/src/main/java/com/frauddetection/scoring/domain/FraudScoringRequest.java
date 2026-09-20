@@ -8,7 +8,6 @@ public record FraudScoringRequest(
         TransactionEnrichedEvent event,
         Map<String, Object> featureSnapshot
 ) {
-
     public static FraudScoringRequest from(TransactionEnrichedEvent event) {
         Map<String, Object> snapshot = event.featureSnapshot() == null ? Map.of() : event.featureSnapshot();
         return new FraudScoringRequest(event, snapshot);

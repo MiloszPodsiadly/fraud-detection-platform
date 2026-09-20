@@ -40,8 +40,8 @@ class ScoringEvidenceReasonCodeCompatibilityTest {
     }
 
     @Test
-    void rapidTransferFraudCaseRemainsVelocitySignalCandidateOnly() {
-        assertThat(mapper.map(ReasonCode.RAPID_TRANSFER_FRAUD_CASE))
+    void rapidPln20kBurstMapsToVelocitySignalEvidenceType() {
+        assertThat(mapper.map(ReasonCode.RAPID_PLN_20K_BURST))
                 .contains(ScoringEvidenceType.VELOCITY_SIGNAL);
     }
 }

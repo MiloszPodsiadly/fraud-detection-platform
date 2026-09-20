@@ -199,16 +199,6 @@ class FraudScoringInvalidRulesInputKafkaIntegrationTest extends AbstractIntegrat
                 base.deviceInfo(),
                 base.locationInfo(),
                 base.customerContext(),
-                null,
-                null,
-                null,
-                null,
-                null,
-                base.merchantFrequency7d(),
-                false,
-                false,
-                false,
-                List.of(),
                 Map.of(
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5,
                         FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "P1D"

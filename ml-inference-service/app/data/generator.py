@@ -84,12 +84,22 @@ class NormalBehaviorSimulator:
             "rapid_transfer_burst",
             "low_and_slow",
         ]
-        for index in range(fraud_count):
-            scenario = fraud_scenarios[index % len(fraud_scenarios)]
+        fraud_index = 0
+        scenario_index = 0
+        while fraud_index < fraud_count:
+            scenario = fraud_scenarios[scenario_index % len(fraud_scenarios)]
             profile = self.rng.choice(profiles)
-            transaction = self._fraud_transaction(profile, scenario, index)
-            transactions.append(transaction)
-            scenario_counts[scenario] = scenario_counts.get(scenario, 0) + 1
+            if scenario == "rapid_transfer_burst" and fraud_index + 1 < fraud_count:
+                burst = self._rapid_transfer_burst_transactions(profile, fraud_index)
+                transactions.extend(burst)
+                scenario_counts[scenario] = scenario_counts.get(scenario, 0) + len(burst)
+                fraud_index += len(burst)
+            else:
+                transaction = self._fraud_transaction(profile, scenario, fraud_index)
+                transactions.append(transaction)
+                scenario_counts[scenario] = scenario_counts.get(scenario, 0) + 1
+                fraud_index += 1
+            scenario_index += 1
 
         for index in range(legitimate_anomaly_count):
             profile = self.rng.choice(profiles)
@@ -244,6 +254,43 @@ class NormalBehaviorSimulator:
             burst_key=burst_key,
         )
 
+    def _rapid_transfer_burst_transactions(self, profile: UserProfile, index: int) -> list[dict[str, Any]]:
+        occurred_at = self.start_time + timedelta(days=self.rng.uniform(2, 30), minutes=index)
+        burst_key = f"transfer-burst-{profile.user_id}-{index // 2}"
+        country = self.rng.choice(profile.preferred_countries)
+        device_id = f"device-{profile.user_id}-primary"
+        total_amount = self.rng.uniform(20_000.0, 36_000.0)
+        first_amount = round(total_amount * self.rng.uniform(0.46, 0.54), 2)
+        second_amount = round(total_amount - first_amount, 2)
+        return [
+            self._scenario_transaction(
+                profile=profile,
+                index=index,
+                occurred_at=occurred_at,
+                amount=first_amount,
+                category="TRANSFER",
+                country=country,
+                device_id=device_id,
+                scenario="rapid_transfer_burst",
+                label=True,
+                proxy=False,
+                burst_key=burst_key,
+            ),
+            self._scenario_transaction(
+                profile=profile,
+                index=index + 1,
+                occurred_at=occurred_at + timedelta(seconds=20),
+                amount=second_amount,
+                category="TRANSFER",
+                country=country,
+                device_id=device_id,
+                scenario="rapid_transfer_burst",
+                label=True,
+                proxy=False,
+                burst_key=burst_key,
+            ),
+        ]
+
     def _legitimate_anomaly(self, profile: UserProfile, index: int) -> dict[str, Any]:
         occurred_at = self.start_time + timedelta(days=self.rng.uniform(1, 30), hours=self.rng.uniform(0, 24))
         amount = profile.avg_transaction_amount * self.rng.uniform(3.0, 7.5)
@@ -336,13 +383,13 @@ def generate_fraud_behavior(
 def generate_examples(count: int, seed: int) -> Dataset:
     """Generate labelled user behavior sequences.
 
-    The normalized training generator is kept separately as
-    generate_legacy_training_examples until Prompt 4 introduces raw-event feature engineering.
+    The normalized training generator is kept behind this stable entrypoint while
+    raw-event feature engineering evolves independently.
     """
     return generate_fraud_behavior(count, seed)
 
 
-def generate_legacy_training_examples(count: int, seed: int) -> Dataset:
+def generate_training_examples(count: int, seed: int) -> Dataset:
     """Generate the existing synthetic model-training examples."""
     rng = random.Random(seed)
     features: list[dict[str, float]] = []
@@ -382,13 +429,13 @@ def example_for(scenario: str, rng: random.Random) -> tuple[dict[str, float], in
         return (
             {
                 "recentTransactionCount": rng.uniform(0.0, 0.25),
-                "recentAmountSum": rng.uniform(0.0, 0.18),
+                "recentAmountSumPln": rng.uniform(0.0, 0.18),
                 "transactionVelocityPerMinute": rng.uniform(0.0, 0.12),
                 "merchantFrequency7d": rng.uniform(0.0, 0.35),
                 "deviceNovelty": 0.0,
                 "countryMismatch": 0.0,
                 "proxyOrVpnDetected": 0.0,
-                "highRiskFlagCount": 0.0,
+                "suspiciousFactRatio": 0.0,
                 "rapidTransferBurst": 0.0,
             },
             0,
@@ -397,13 +444,13 @@ def example_for(scenario: str, rng: random.Random) -> tuple[dict[str, float], in
         return (
             {
                 "recentTransactionCount": rng.uniform(0.05, 0.35),
-                "recentAmountSum": rng.uniform(0.03, 0.25),
+                "recentAmountSumPln": rng.uniform(0.03, 0.25),
                 "transactionVelocityPerMinute": rng.uniform(0.04, 0.20),
                 "merchantFrequency7d": rng.uniform(0.0, 0.45),
                 "deviceNovelty": 1.0,
                 "countryMismatch": 0.0,
                 "proxyOrVpnDetected": rng.choice([0.0, 1.0]),
-                "highRiskFlagCount": rng.uniform(0.15, 0.35),
+                "suspiciousFactRatio": rng.uniform(0.15, 0.35),
                 "rapidTransferBurst": 0.0,
             },
             0,
@@ -412,13 +459,13 @@ def example_for(scenario: str, rng: random.Random) -> tuple[dict[str, float], in
         return (
             {
                 "recentTransactionCount": rng.uniform(0.10, 0.20),
-                "recentAmountSum": rng.uniform(0.45, 0.55),
+                "recentAmountSumPln": rng.uniform(0.45, 0.55),
                 "transactionVelocityPerMinute": rng.uniform(0.20, 0.40),
                 "merchantFrequency7d": rng.uniform(0.0, 0.20),
                 "deviceNovelty": 0.0,
                 "countryMismatch": 0.0,
                 "proxyOrVpnDetected": 0.0,
-                "highRiskFlagCount": 0.0,
+                "suspiciousFactRatio": 0.0,
                 "rapidTransferBurst": 0.0,
             },
             0,
@@ -427,13 +474,13 @@ def example_for(scenario: str, rng: random.Random) -> tuple[dict[str, float], in
         return (
             {
                 "recentTransactionCount": rng.uniform(0.05, 0.45),
-                "recentAmountSum": rng.uniform(0.05, 0.35),
+                "recentAmountSumPln": rng.uniform(0.05, 0.35),
                 "transactionVelocityPerMinute": rng.uniform(0.05, 0.35),
                 "merchantFrequency7d": rng.uniform(0.0, 0.50),
                 "deviceNovelty": 1.0,
                 "countryMismatch": 1.0,
                 "proxyOrVpnDetected": 0.0,
-                "highRiskFlagCount": rng.uniform(0.30, 0.55),
+                "suspiciousFactRatio": rng.uniform(0.30, 0.55),
                 "rapidTransferBurst": 0.0,
             },
             0,
@@ -442,13 +489,13 @@ def example_for(scenario: str, rng: random.Random) -> tuple[dict[str, float], in
         return (
             {
                 "recentTransactionCount": rng.uniform(0.35, 0.80),
-                "recentAmountSum": rng.uniform(0.35, 0.95),
+                "recentAmountSumPln": rng.uniform(0.35, 0.95),
                 "transactionVelocityPerMinute": rng.uniform(0.30, 0.80),
                 "merchantFrequency7d": rng.uniform(0.25, 0.85),
                 "deviceNovelty": 1.0,
                 "countryMismatch": 0.0,
                 "proxyOrVpnDetected": 1.0,
-                "highRiskFlagCount": rng.uniform(0.50, 0.85),
+                "suspiciousFactRatio": rng.uniform(0.50, 0.85),
                 "rapidTransferBurst": rng.choice([0.0, 1.0]),
             },
             1,
@@ -457,13 +504,13 @@ def example_for(scenario: str, rng: random.Random) -> tuple[dict[str, float], in
         return (
             {
                 "recentTransactionCount": rng.uniform(0.20, 0.35),
-                "recentAmountSum": rng.uniform(0.95, 1.0),
+                "recentAmountSumPln": rng.uniform(0.95, 1.0),
                 "transactionVelocityPerMinute": rng.uniform(0.40, 0.65),
                 "merchantFrequency7d": rng.uniform(0.0, 0.20),
                 "deviceNovelty": rng.choice([0.0, 0.0, 1.0]),
                 "countryMismatch": 0.0,
                 "proxyOrVpnDetected": 0.0,
-                "highRiskFlagCount": rng.uniform(0.10, 0.35),
+                "suspiciousFactRatio": rng.uniform(0.10, 0.35),
                 "rapidTransferBurst": 1.0,
             },
             1,
@@ -471,13 +518,13 @@ def example_for(scenario: str, rng: random.Random) -> tuple[dict[str, float], in
     return (
         {
             "recentTransactionCount": rng.uniform(0.55, 1.0),
-            "recentAmountSum": rng.uniform(0.45, 1.0),
+            "recentAmountSumPln": rng.uniform(0.45, 1.0),
             "transactionVelocityPerMinute": rng.uniform(0.45, 1.0),
             "merchantFrequency7d": rng.uniform(0.20, 1.0),
             "deviceNovelty": 1.0,
             "countryMismatch": 1.0,
             "proxyOrVpnDetected": 1.0,
-            "highRiskFlagCount": rng.uniform(0.70, 1.0),
+            "suspiciousFactRatio": rng.uniform(0.70, 1.0),
             "rapidTransferBurst": rng.choice([0.0, 1.0]),
         },
         1,

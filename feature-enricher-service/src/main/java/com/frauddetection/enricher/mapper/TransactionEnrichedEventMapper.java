@@ -25,16 +25,6 @@ public class TransactionEnrichedEventMapper {
                 event.deviceInfo(),
                 event.locationInfo(),
                 event.customerContext(),
-                features.recentTransactionCount(),
-                features.recentTransactionCountWindow(),
-                features.recentAmountSum(),
-                features.recentAmountSumWindow(),
-                features.transactionVelocityPerMinute(),
-                features.merchantFrequency7d(),
-                features.deviceNovelty(),
-                features.countryMismatch(),
-                features.proxyOrVpnDetected(),
-                features.featureFlags(),
                 features.featureSnapshot()
         );
     }

@@ -18,7 +18,7 @@ Status: current product documentation index.
 | [Fraud Case Investigation Read Surface Contract](fraud_case_investigation_read_surface_contract.md) | Current FDP-78 frontend hardening contract for shared read-only FraudCase investigation section guardrails. |
 | [Fraud Case Evidence Timeline UI](fraud_case_evidence_timeline_ui.md) | Current FDP-77 UI behavior contract for the frontend read-only fraud-case evidence timeline view and non-claims. |
 | [Evidence Model](evidence_model.md) | Current product-domain semantics for typed evidence signals, status meanings, non-claims, and relationship to reason codes. |
-| [Reason Codes](reason_codes.md) | Current product-domain semantics for scoring reason codes, legacy compatibility, UNKNOWN handling, and non-claims. |
+| [Reason Codes](reason_codes.md) | Current product-domain semantics for scoring reason codes, UNKNOWN handling, and non-claims. |
 | [Scoring Evidence Contract](scoring_evidence_contract.md) | Current product-domain semantics for typed scoring evidence, diagnostic evidence, compatibility, and attributes safety. |
 | [Alert Evidence Snapshot](alert_evidence_snapshot.md) | Current product-domain semantics for point-in-time alert evidence snapshot projection, boundedness, lineage, and non-claims. |
 | [Suspicious Transactions](suspicious_transactions.md) | Current product-domain semantics for the FDP-60 backend suspicious scoring signal read model and non-claims. |

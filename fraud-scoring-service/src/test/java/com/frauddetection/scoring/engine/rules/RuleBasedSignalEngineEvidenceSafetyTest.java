@@ -36,9 +36,8 @@ class RuleBasedSignalEngineEvidenceSafetyTest {
                 FraudFeatureContract.MERCHANT_CATEGORY, "crypto",
                 FraudFeatureContract.CURRENCY, "EUR",
                 FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("50000"),
-                FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("99999"),
                 FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("tx-secret-1"),
-                FraudFeatureContract.FEATURE_FLAGS, List.of("SENSITIVE_FLAG")
+                "unsupportedPolicyMarker", List.of("SENSITIVE_FLAG")
         ))));
 
         String flattened = flatten(result);
@@ -47,7 +46,6 @@ class RuleBasedSignalEngineEvidenceSafetyTest {
                 .doesNotContain("crypto")
                 .doesNotContain("EUR")
                 .doesNotContain("50000")
-                .doesNotContain("99999")
                 .doesNotContain("tx-secret")
                 .doesNotContain("SENSITIVE_FLAG")
                 .doesNotContain("customerSegment=VIP")
@@ -113,16 +111,6 @@ class RuleBasedSignalEngineEvidenceSafetyTest {
                 base.deviceInfo(),
                 base.locationInfo(),
                 base.customerContext(),
-                1,
-                "PT1M",
-                new Money(new BigDecimal("50000.00"), "PLN"),
-                "PT1M",
-                0.1d,
-                base.merchantFrequency7d(),
-                true,
-                false,
-                false,
-                List.of(),
                 featureSnapshot
         );
     }

@@ -18,7 +18,6 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,31 +31,25 @@ class RuleBasedSignalEngineBehaviorParityTest {
 
     @Test
     void baselineScenarioMapsProductionScoreRiskAndReasonsExactly() {
-        TransactionEnrichedEvent event = event(false, false, false, 1, 0.1d, BigDecimal.TEN, List.of(), Map.of());
+        TransactionEnrichedEvent event = event(false, false, false, 1, 0.1d, BigDecimal.TEN, Map.of());
 
         assertProductionMappingParity(event);
     }
 
     @Test
-    void featureFlagAndEventBooleanDedupeReasonButPreserveProductionScore() {
+    void canonicalBooleanReasonPreservesProductionScore() {
         TransactionEnrichedEvent event = event(true, false, false, 1, 0.1d, BigDecimal.TEN,
-                List.of(ReasonCode.DEVICE_NOVELTY.wireValue()),
                 Map.of(FraudFeatureContract.DEVICE_NOVELTY, true));
 
         FraudScoreResult production = assertProductionMappingParity(event);
 
         assertThat(production.reasonCodes()).containsExactly(ReasonCode.DEVICE_NOVELTY.wireValue());
-        assertThat(production.fraudScore()).isGreaterThan(0.32d).isLessThan(0.34d);
+        assertThat(production.fraudScore()).isEqualTo(0.23d);
     }
 
     @Test
-    void consolidatedRulesV1ThresholdRiskAndAlertRecommendationMirrorProduction() {
+    void consolidatedRulesV2ThresholdRiskAndAlertRecommendationMirrorProduction() {
         TransactionEnrichedEvent event = event(true, true, false, 5, 5.0d, BigDecimal.TEN,
-                List.of(
-                        ReasonCode.DEVICE_NOVELTY.wireValue(),
-                        ReasonCode.COUNTRY_MISMATCH.wireValue(),
-                        ReasonCode.HIGH_VELOCITY.wireValue()
-                ),
                 Map.of(
                         FraudFeatureContract.DEVICE_NOVELTY, true,
                         FraudFeatureContract.COUNTRY_MISMATCH, true,
@@ -69,14 +62,13 @@ class RuleBasedSignalEngineBehaviorParityTest {
         FraudScoreResult production = assertProductionMappingParity(event);
         var adapterResult = adapter.evaluate(context(event));
 
-        assertThat(production.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
+        assertThat(production.riskLevel()).isEqualTo(RiskLevel.HIGH);
         assertThat(production.alertRecommended()).isEqualTo(alertRecommended(adapterResult.riskLevel()));
     }
 
     @Test
     void highAmountDiagnosticReasonIsMappedWithoutAdapterLocalZeroWeightSignal() {
         TransactionEnrichedEvent event = event(false, false, false, 1, 0.1d, new BigDecimal("1500.00"),
-                List.of(),
                 Map.of(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("1500.00")));
 
         FraudScoreResult production = assertProductionMappingParity(event);
@@ -90,31 +82,18 @@ class RuleBasedSignalEngineBehaviorParityTest {
     }
 
     @Test
-    void rapidTransferFraudCaseCandidateMirrorsProductionSnapshotSignal() {
-        TransactionEnrichedEvent event = withoutFactualInputs(event(false, false, false, 1, 0.1d, BigDecimal.TEN,
-                List.of(),
-                Map.of(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true)));
-
-        FraudScoreResult production = assertProductionMappingParity(event);
-
-        assertThat(production.reasonCodes()).containsExactly(ReasonCode.RAPID_PLN_20K_BURST.wireValue());
-    }
-
-    @Test
     void rapidTransferSignalsKeepSingleMappedEvidenceAndContributionForOneFact() {
-        TransactionEnrichedEvent event = event(false, false, false, 1, 0.1d, BigDecimal.TEN,
-                List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue()),
-                Map.of(
-                        FraudFeatureContract.RAPID_TRANSFER_COUNT, 2,
-                        FraudFeatureContract.RAPID_TRANSFER_TOTAL_PLN, new BigDecimal("20000.00"),
-                        FraudFeatureContract.RAPID_TRANSFER_WINDOW, "PT1M",
-                        FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true
-                ));
+        TransactionEnrichedEvent event = event(false, false, false, 2, 2.0d, new BigDecimal("20000.00"),
+                Map.of(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, java.util.List.of("txn-1", "txn-2")));
 
         FraudScoreResult production = assertProductionMappingParity(event);
         var adapterResult = adapter.evaluate(context(event));
 
-        assertThat(production.reasonCodes()).containsExactly(ReasonCode.RAPID_PLN_20K_BURST.wireValue());
+        assertThat(production.reasonCodes()).containsExactly(
+                ReasonCode.HIGH_AMOUNT_ACTIVITY.wireValue(),
+                ReasonCode.RAPID_PLN_20K_BURST.wireValue(),
+                ReasonCode.HIGH_TRANSACTION_AMOUNT.wireValue()
+        );
         assertThat(adapterResult.contributions()).extracting(contribution -> contribution.feature())
                 .containsExactlyElementsOf(production.reasonCodes());
         assertThat(adapterResult.evidence()).extracting(evidence -> evidence.reasonCode())
@@ -157,7 +136,6 @@ class RuleBasedSignalEngineBehaviorParityTest {
             int recentTransactionCount,
             double velocityPerMinute,
             BigDecimal amount,
-            List<String> featureFlags,
             Map<String, Object> featureSnapshot
     ) {
         TransactionEnrichedEvent base = TransactionFixtures.enrichedTransaction().build();
@@ -174,45 +152,38 @@ class RuleBasedSignalEngineBehaviorParityTest {
                 base.deviceInfo(),
                 base.locationInfo(),
                 base.customerContext(),
-                recentTransactionCount,
-                "PT1M",
-                new Money(amount, "PLN"),
-                "PT1M",
-                velocityPerMinute,
-                base.merchantFrequency7d(),
-                deviceNovelty,
-                countryMismatch,
-                proxyOrVpn,
-                featureFlags,
-                featureSnapshot
+                canonicalSnapshot(
+                        deviceNovelty,
+                        countryMismatch,
+                        proxyOrVpn,
+                        recentTransactionCount,
+                        amount,
+                        featureSnapshot
+                )
         );
     }
 
-    private TransactionEnrichedEvent withoutFactualInputs(TransactionEnrichedEvent source) {
-        return new TransactionEnrichedEvent(
-                source.eventId(),
-                source.transactionId(),
-                source.correlationId(),
-                source.customerId(),
-                source.accountId(),
-                source.createdAt(),
-                source.transactionTimestamp(),
-                source.transactionAmount(),
-                source.merchantInfo(),
-                source.deviceInfo(),
-                source.locationInfo(),
-                source.customerContext(),
-                null,
-                null,
-                null,
-                null,
-                source.transactionVelocityPerMinute(),
-                source.merchantFrequency7d(),
-                source.deviceNovelty(),
-                source.countryMismatch(),
-                source.proxyOrVpnDetected(),
-                source.featureFlags(),
-                source.featureSnapshot()
-        );
+    private Map<String, Object> canonicalSnapshot(
+            boolean deviceNovelty,
+            boolean countryMismatch,
+            boolean proxyOrVpn,
+            int recentTransactionCount,
+            BigDecimal amount,
+            Map<String, Object> overrides
+    ) {
+        Map<String, Object> snapshot = new java.util.LinkedHashMap<>();
+        snapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT, recentTransactionCount);
+        snapshot.put(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M");
+        snapshot.put(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, (double) recentTransactionCount);
+        snapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, amount);
+        snapshot.put(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M");
+        snapshot.put(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, amount);
+        snapshot.put(FraudFeatureContract.MERCHANT_FREQUENCY_7D, 1);
+        snapshot.put(FraudFeatureContract.DEVICE_NOVELTY, deviceNovelty);
+        snapshot.put(FraudFeatureContract.COUNTRY_MISMATCH, countryMismatch);
+        snapshot.put(FraudFeatureContract.PROXY_OR_VPN_DETECTED, proxyOrVpn);
+        snapshot.put(FraudFeatureContract.CURRENCY, "PLN");
+        snapshot.putAll(overrides);
+        return Map.copyOf(snapshot);
     }
 }

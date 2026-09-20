@@ -6,9 +6,19 @@ from pathlib import Path
 from app.data.dataset import Dataset
 from app.data.splitting import split_dataset
 from app.evaluation.evaluate import evaluate_scores
+from app.features.feature_contract import FEATURE_CONTRACT
 from app.features.feature_pipeline import FeaturePipeline
 from app.models.logistic_model import LogisticFraudModel
 from app.models.xgboost_model import XGBoostFraudModel
+
+CANONICAL_MODEL_VERSION = "2026-09-19.rules-v2-canonical-ml-pln.suspicious-fact-ratio.v1"
+RUNTIME_RISK_THRESHOLDS = {
+    "medium": 0.45,
+    "high": 0.75,
+    "critical": 0.90,
+}
+THRESHOLD_POLICY_VERSION = "fixed-business-risk-thresholds-v1"
+DEPLOYED_ALERT_THRESHOLD_NAME = "high"
 
 
 def train(
@@ -21,6 +31,7 @@ def train(
     pipeline = FeaturePipeline().fit(dataset)
     feature_rows = pipeline.transform(dataset, mode=training_mode)
     _validate_feature_set(feature_rows, pipeline.get_training_features(training_mode), training_mode)
+    _require_binary_labels(dataset.y, "TRAIN_DATASET_MUST_CONTAIN_BOTH_CLASSES")
     model = LogisticFraudModel()
     model.fit(feature_rows, dataset.y, epochs=epochs, learning_rate=learning_rate)
     return model.bias, model.weights
@@ -50,13 +61,23 @@ def train_model_with_evaluation(
 ) -> tuple[LogisticFraudModel | XGBoostFraudModel, dict[str, object]]:
     """Train and evaluate any supported model through the same lifecycle."""
     splits = split_dataset(dataset, mode="temporal")
+    _require_binary_evaluation_splits(splits, "temporal")
     model, test_report = _train_on_splits(splits, model_type, epochs, learning_rate, training_mode)
     out_of_time_splits = split_dataset(dataset, mode="out_of_time", cutoff_ratio=0.6)
-    _, out_of_time_report = _train_on_splits(out_of_time_splits, model_type, epochs, learning_rate, training_mode)
+    _require_binary_evaluation_splits(out_of_time_splits, "out_of_time")
+    out_of_time_report = _evaluate_model_on_splits(model, out_of_time_splits, training_mode)
     test_report["outOfTimeEvaluation"] = {
+        "rows": out_of_time_report["rows"],
+        "positiveLabels": out_of_time_report["positiveLabels"],
+        "negativeLabels": out_of_time_report["negativeLabels"],
         "prAuc": out_of_time_report["prAuc"],
         "rocAuc": out_of_time_report["rocAuc"],
         "optimalThreshold": out_of_time_report["optimalThreshold"],
+        "selectedThresholdSource": out_of_time_report["selectedThresholdSource"],
+        "thresholdPolicy": out_of_time_report["thresholdPolicy"],
+        "thresholds": out_of_time_report["thresholds"],
+        "runtimeThresholdMetrics": out_of_time_report["runtimeThresholdMetrics"],
+        "deployedAlertThresholdMetrics": out_of_time_report["deployedAlertThresholdMetrics"],
         "costEvaluation": out_of_time_report["costEvaluation"],
         "budgetEvaluation": out_of_time_report["budgetEvaluation"],
         "segmentEvaluation": out_of_time_report.get("segmentEvaluation", {}),
@@ -68,6 +89,7 @@ def train_model_with_evaluation(
         "prAucDelta": round(float(test_report["prAuc"]) - float(out_of_time_report["prAuc"]), 6),
     }
     test_report["stabilityAssessment"] = _stability_assessment(test_report, out_of_time_report)
+    test_report["modelRuntimeReadiness"] = _model_runtime_readiness(test_report, out_of_time_report)
     return model, test_report
 
 
@@ -93,19 +115,76 @@ def _train_on_splits(
     else:
         model.fit(train_rows, splits.train.y)
         model.weights = model.feature_importance()
+    thresholds = _runtime_threshold_values()
     validation_scores = [model.predict_proba(features) for features in validation_rows]
-    validation_report = evaluate_scores(splits.validation.y, validation_scores, segment_rows=splits.validation.X)
-    selected_threshold = float(validation_report["optimalThreshold"]["threshold"])
+    validation_report = evaluate_scores(
+        splits.validation.y,
+        validation_scores,
+        thresholds=thresholds,
+        segment_rows=splits.validation.X,
+    )
+    _attach_threshold_policy(validation_report)
     test_scores = [model.predict_proba(features) for features in test_rows]
-    test_report = evaluate_scores(splits.test.y, test_scores, thresholds=[selected_threshold], segment_rows=splits.test.X)
+    test_report = evaluate_scores(splits.test.y, test_scores, thresholds=thresholds, segment_rows=splits.test.X)
+    _attach_threshold_policy(test_report)
     test_report["validationEvaluation"] = validation_report
     test_report["splitMetadata"] = splits.metadata
-    test_report["selectedThresholdSource"] = "validation"
     test_report["trainingMode"] = training_mode
     test_report["featureSetUsed"] = feature_set
     test_report["modelType"] = model_type
     test_report["modelFamily"] = model.model_family
+    test_report["modelVersion"] = model.model_version
+    test_report["featureContractVersion"] = FEATURE_CONTRACT.version
+    test_report["featureSchemaVersion"] = FEATURE_CONTRACT.version
+    test_report["featureSetVersion"] = FEATURE_CONTRACT.version
     return model, test_report
+
+
+def _evaluate_model_on_splits(
+        model: LogisticFraudModel | XGBoostFraudModel,
+        splits,
+        training_mode: str,
+) -> dict[str, object]:
+    feature_pipeline = FeaturePipeline().fit(splits.train)
+    feature_set = feature_pipeline.get_training_features(training_mode)
+    test_rows = feature_pipeline.transform(splits.test, mode=training_mode)
+    _validate_feature_set(test_rows, feature_set, training_mode)
+    scores = [model.predict_proba(features) for features in test_rows]
+    report = evaluate_scores(
+        splits.test.y,
+        scores,
+        thresholds=_runtime_threshold_values(),
+        segment_rows=splits.test.X,
+    )
+    _attach_threshold_policy(report)
+    report["splitMetadata"] = splits.metadata
+    return report
+
+
+def _require_binary_evaluation_splits(splits, split_name: str) -> None:
+    distribution = splits.metadata["classDistribution"]
+    reason_codes = {
+        "train": f"{split_name.upper()}_TRAIN_SPLIT_MUST_CONTAIN_BOTH_CLASSES",
+        "validation": f"{split_name.upper()}_VALIDATION_SPLIT_MUST_CONTAIN_BOTH_CLASSES",
+        "test": f"{split_name.upper()}_TEST_SPLIT_MUST_CONTAIN_BOTH_CLASSES",
+    }
+    for partition in ("train", "validation", "test"):
+        counts = distribution[partition]
+        if counts["fraud"] <= 0 or counts["legitimate"] <= 0:
+            raise ValueError(
+                f"{reason_codes[partition]}: {split_name} {partition} split must contain fraud and legitimate examples; "
+                f"distribution={counts}"
+            )
+
+
+def _require_binary_labels(labels: list[int], reason_code: str) -> None:
+    fraud = sum(1 for label in labels if label == 1)
+    legitimate = sum(1 for label in labels if label == 0)
+    if fraud <= 0 or legitimate <= 0:
+        raise ValueError(
+            f"{reason_code}: training data must contain fraud and legitimate examples; "
+            f"distribution={{'fraud': {fraud}, 'legitimate': {legitimate}}}"
+        )
 
 
 def train_model(
@@ -119,6 +198,7 @@ def train_model(
     pipeline = FeaturePipeline().fit(dataset)
     feature_rows = pipeline.transform(dataset, mode=training_mode)
     _validate_feature_set(feature_rows, pipeline.get_training_features(training_mode), training_mode)
+    _require_binary_labels(dataset.y, "TRAIN_DATASET_MUST_CONTAIN_BOTH_CLASSES")
     if model_type == "logistic":
         model = _new_model(model_type, training_mode, list(feature_rows[0]) if feature_rows else [])
         assert isinstance(model, LogisticFraudModel)
@@ -149,28 +229,31 @@ def write_artifact(
     """Persist a trained model artifact compatible with the inference service."""
     artifact = {
         "modelName": "python-logistic-fraud-model",
-        "modelVersion": "2026-04-21.trained.v1",
+        "modelVersion": CANONICAL_MODEL_VERSION,
         "modelType": model_type,
         "modelFamily": "LOGISTIC_REGRESSION",
         "bias": bias,
         "weights": weights,
-        "thresholds": {
-            "medium": 0.45,
-            "high": 0.75,
-            "critical": 0.90,
-        },
+        "thresholds": dict(RUNTIME_RISK_THRESHOLDS),
+        "thresholdPolicy": _threshold_policy(),
         "training": {
             "source": "synthetic-fraud-scenarios",
             "algorithm": "batch-gradient-descent",
             "examples": examples,
             "trainingMode": training_mode,
             "featureSetUsed": list(weights),
+            "featureContractVersion": FEATURE_CONTRACT.version,
+            "featureSetVersion": FEATURE_CONTRACT.version,
         },
         "trainingMode": training_mode,
         "featureSetUsed": list(weights),
         "featureSchema": list(weights),
+        "featureContractVersion": FEATURE_CONTRACT.version,
+        "featureSchemaVersion": FEATURE_CONTRACT.version,
+        "featureSetVersion": FEATURE_CONTRACT.version,
         "featureImportance": {name: abs(weight) for name, weight in weights.items()},
-        "evaluation": evaluation or {},
+        "evaluation": _artifact_evaluation_summary(evaluation or {}),
+        "modelRuntimeReadiness": _model_runtime_readiness_from_evaluation(evaluation or {}),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -183,6 +266,7 @@ def write_model_artifact(
         evaluation: dict[str, object],
 ) -> None:
     """Persist any supported model with aligned artifact metadata."""
+    model.model_version = CANONICAL_MODEL_VERSION
     if isinstance(model, LogisticFraudModel):
         write_artifact(
             path,
@@ -197,6 +281,70 @@ def write_model_artifact(
     model.save(path, metadata={"examples": examples, "evaluation": evaluation})
 
 
+def _artifact_evaluation_summary(evaluation: dict[str, object]) -> dict[str, object]:
+    summary_keys = [
+        "rows",
+        "positiveLabels",
+        "negativeLabels",
+        "prAuc",
+        "rocAuc",
+        "optimalThreshold",
+        "selectedThresholdSource",
+        "thresholdPolicy",
+        "runtimeThresholdMetrics",
+        "deployedAlertThresholdMetrics",
+        "modelRuntimeReadiness",
+        "trainingMode",
+        "featureSetUsed",
+        "modelType",
+        "modelFamily",
+        "modelVersion",
+        "featureContractVersion",
+        "featureSchemaVersion",
+        "featureSetVersion",
+        "evaluationComparison",
+        "stabilityAssessment",
+    ]
+    summary = {
+        key: evaluation[key]
+        for key in summary_keys
+        if key in evaluation
+    }
+    split_metadata = evaluation.get("splitMetadata")
+    if isinstance(split_metadata, dict):
+        summary["splitMetadata"] = _compact_split_metadata(split_metadata)
+    out_of_time = evaluation.get("outOfTimeEvaluation")
+    if isinstance(out_of_time, dict):
+        summary["outOfTimeEvaluation"] = {
+            key: out_of_time[key]
+            for key in [
+                "rows",
+                "positiveLabels",
+                "negativeLabels",
+                "prAuc",
+                "rocAuc",
+                "optimalThreshold",
+                "selectedThresholdSource",
+                "thresholdPolicy",
+                "runtimeThresholdMetrics",
+                "deployedAlertThresholdMetrics",
+            ]
+            if key in out_of_time
+        }
+        out_of_time_split = out_of_time.get("splitMetadata")
+        if isinstance(out_of_time_split, dict):
+            summary["outOfTimeEvaluation"]["splitMetadata"] = _compact_split_metadata(out_of_time_split)
+    return summary
+
+
+def _compact_split_metadata(split_metadata: dict[str, object]) -> dict[str, object]:
+    return {
+        key: value
+        for key, value in split_metadata.items()
+        if key not in {"trainIndices", "validationIndices", "testIndices"}
+    }
+
+
 def _new_model(
         model_type: str,
         training_mode: str,
@@ -208,6 +356,7 @@ def _new_model(
         model = XGBoostFraudModel()
     else:
         raise ValueError("model_type must be 'logistic' or 'xgboost'.")
+    model.model_version = CANONICAL_MODEL_VERSION
     model.training_mode = training_mode
     model.feature_schema = list(feature_schema)
     if hasattr(model, "weights") and not getattr(model, "weights"):
@@ -216,15 +365,87 @@ def _new_model(
 
 
 def _stability_assessment(temporal_report: dict[str, object], out_of_time_report: dict[str, object]) -> dict[str, object]:
-    temporal_optimal = temporal_report["optimalThreshold"]
-    out_of_time_optimal = out_of_time_report["optimalThreshold"]
-    temporal_cost = temporal_report["costEvaluation"]["optimalCostThreshold"]
-    out_of_time_cost = out_of_time_report["costEvaluation"]["optimalCostThreshold"]
+    temporal_deployed = temporal_report["deployedAlertThresholdMetrics"]
+    out_of_time_deployed = out_of_time_report["deployedAlertThresholdMetrics"]
     return {
         "prAucDelta": round(float(temporal_report["prAuc"]) - float(out_of_time_report["prAuc"]), 6),
-        "fraudCaptureDelta": round(float(temporal_optimal["fraudCaptureRate"]) - float(out_of_time_optimal["fraudCaptureRate"]), 6),
-        "falsePositiveRateDelta": round(float(out_of_time_optimal["falsePositiveRate"]) - float(temporal_optimal["falsePositiveRate"]), 6),
-        "expectedCostDelta": round(float(out_of_time_cost["totalCost"]) - float(temporal_cost["totalCost"]), 6),
+        "deployedFraudCaptureDelta": round(float(temporal_deployed["fraudCaptureRate"]) - float(out_of_time_deployed["fraudCaptureRate"]), 6),
+        "deployedFalsePositiveRateDelta": round(
+            float(out_of_time_deployed["falsePositiveRate"]) - float(temporal_deployed["falsePositiveRate"]),
+            6,
+        ),
+        "deployedAlertRateDelta": round(float(out_of_time_deployed["alertRate"]) - float(temporal_deployed["alertRate"]), 6),
+    }
+
+
+def _threshold_policy() -> dict[str, object]:
+    deployed_threshold = RUNTIME_RISK_THRESHOLDS[DEPLOYED_ALERT_THRESHOLD_NAME]
+    return {
+        "policyVersion": THRESHOLD_POLICY_VERSION,
+        "ownership": "fixed_business_risk_thresholds",
+        "runtimeSemantics": "riskLevel bands are business-owned; alertRecommended is true for HIGH or CRITICAL",
+        "deployedAlertThresholdName": DEPLOYED_ALERT_THRESHOLD_NAME,
+        "deployedAlertThreshold": deployed_threshold,
+        "thresholds": dict(RUNTIME_RISK_THRESHOLDS),
+    }
+
+
+def _runtime_threshold_values() -> list[float]:
+    return list(dict.fromkeys(RUNTIME_RISK_THRESHOLDS.values()))
+
+
+def _attach_threshold_policy(report: dict[str, object]) -> None:
+    report["selectedThresholdSource"] = "fixed_business_risk_thresholds"
+    report["thresholdPolicy"] = _threshold_policy()
+    report["runtimeThresholdMetrics"] = {
+        name: _threshold_metric(report, threshold)
+        for name, threshold in RUNTIME_RISK_THRESHOLDS.items()
+    }
+    report["deployedAlertThresholdMetrics"] = report["runtimeThresholdMetrics"][DEPLOYED_ALERT_THRESHOLD_NAME]
+
+
+def _threshold_metric(report: dict[str, object], threshold: float) -> dict[str, object]:
+    thresholds = report.get("thresholds")
+    if not isinstance(thresholds, list):
+        raise ValueError("evaluation report is missing threshold metrics.")
+    for entry in thresholds:
+        if isinstance(entry, dict) and abs(float(entry.get("threshold", -1.0)) - threshold) < 0.000001:
+            return dict(entry)
+    raise ValueError(f"evaluation report is missing metrics for threshold {threshold}.")
+
+
+def _model_runtime_readiness(temporal_report: dict[str, object], out_of_time_report: dict[str, object]) -> dict[str, object]:
+    """Technical ML runtime load/execution readiness, not production-primary approval."""
+    temporal = temporal_report["deployedAlertThresholdMetrics"]
+    out_of_time = out_of_time_report["deployedAlertThresholdMetrics"]
+    reasons = []
+    if float(temporal.get("fraudCaptureRate", 0.0)) <= 0.0:
+        reasons.append("TEMPORAL_DEPLOYED_ALERT_THRESHOLD_ZERO_FRAUD_CAPTURE")
+    if float(out_of_time.get("fraudCaptureRate", 0.0)) <= 0.0:
+        reasons.append("OUT_OF_TIME_DEPLOYED_ALERT_THRESHOLD_ZERO_FRAUD_CAPTURE")
+    return {
+        "status": "READY" if not reasons else "NOT_READY",
+        "reasons": reasons,
+        "policyVersion": THRESHOLD_POLICY_VERSION,
+        "deployedAlertThresholdName": DEPLOYED_ALERT_THRESHOLD_NAME,
+        "deployedAlertThreshold": RUNTIME_RISK_THRESHOLDS[DEPLOYED_ALERT_THRESHOLD_NAME],
+        "temporalFraudCaptureRate": temporal.get("fraudCaptureRate"),
+        "outOfTimeFraudCaptureRate": out_of_time.get("fraudCaptureRate"),
+        "rankingMetricsAreNotSufficient": True,
+    }
+
+
+def _model_runtime_readiness_from_evaluation(evaluation: dict[str, object]) -> dict[str, object]:
+    readiness = evaluation.get("modelRuntimeReadiness")
+    if isinstance(readiness, dict):
+        return readiness
+    return {
+        "status": "UNKNOWN",
+        "reasons": ["MODEL_RUNTIME_READINESS_NOT_EVALUATED"],
+        "policyVersion": THRESHOLD_POLICY_VERSION,
+        "deployedAlertThresholdName": DEPLOYED_ALERT_THRESHOLD_NAME,
+        "deployedAlertThreshold": RUNTIME_RISK_THRESHOLDS[DEPLOYED_ALERT_THRESHOLD_NAME],
+        "rankingMetricsAreNotSufficient": True,
     }
 
 

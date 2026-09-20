@@ -14,7 +14,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RulesModelVersionConsistencyTest {
 
     @Test
-    void preservedRulesV1BehaviorKeepsModelAndDescriptorVersionsStable() {
+    void rulesV2CutoverKeepsStableEngineIdentityWithV2ModelAndDescriptorVersions() {
         var productionEngine = new RuleBasedFraudScoringEngine(
                 new ScoringProperties(0.75d, 0.90d, ScoringMode.RULE_BASED)
         );
@@ -24,8 +24,8 @@ class RulesModelVersionConsistencyTest {
         var descriptor = adapter.descriptor();
 
         assertThat(productionResult.modelName()).isEqualTo("rule-based-engine");
-        assertThat(productionResult.modelVersion()).isEqualTo("v1");
+        assertThat(productionResult.modelVersion()).isEqualTo("v2");
         assertThat(descriptor.engineType()).isEqualTo(FraudEngineType.RULES);
-        assertThat(descriptor.version()).isEqualTo("1.0.0");
+        assertThat(descriptor.version()).isEqualTo("2.0.0");
     }
 }

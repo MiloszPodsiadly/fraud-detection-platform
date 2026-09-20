@@ -1,6 +1,6 @@
 # Rule-Based Signal Engine Adapter
 
-Status: historical FDP-87 adapter foundation, superseded for FDP-129 runtime semantics.
+Status: current Rules V2 diagnostic adapter contract, with historical FDP-87 notes retained only as background.
 
 ## Purpose
 
@@ -8,7 +8,7 @@ Status: historical FDP-87 adapter foundation, superseded for FDP-129 runtime sem
 `FraudSignalEngine` using `ScoringContext`, `FeatureSnapshotReader`, and internal
 `FraudSignalEvaluation`.
 
-FDP-87 statements below are historical foundation notes. FDP-129 wires this adapter into the
+FDP-87 statements below are historical foundation notes. The current runtime wires this adapter into the
 diagnostic Engine Intelligence runtime through `FraudScoringOrchestrator`; current runtime source
 of truth is:
 
@@ -26,10 +26,10 @@ scoring to the production rule engine and maps the production score, risk level,
 and supported production reason codes into `FraudSignalEvaluation`. It must not keep independent
 weights, high thresholds, critical thresholds, or local score calculations.
 
-FDP-87 introduced no runtime scoring behavior changes. FDP-129 supersedes that historical non-goal:
+FDP-87 introduced no runtime scoring behavior changes. The current runtime supersedes that historical non-goal:
 diagnostic runtime wiring, public bounded event summaries, alert-service projection/API, and Analyst
 Console rendering now exist elsewhere in the current architecture. This document must not be used to
-claim that those FDP-129 runtime components are absent.
+claim that those runtime components are absent.
 
 ## Feature Consumption
 
@@ -37,31 +37,30 @@ claim that those FDP-129 runtime components are absent.
 It must not call `context.featureSnapshot().get(...)`, must not cast raw `Map<String, Object>`,
 and must not use `FeatureSnapshotKeyPolicy.isAllowedFeatureKey` as permission to consume features.
 
-FDP-129 preflight covers the canonical Rules V1 snapshot facts consumed by production Rules:
-`recentTransactionCount`, `recentTransactionCountWindow`, `recentAmountSumPln`,
-`recentAmountSumWindow`, `rapidTransferCount`, `rapidTransferTotalPln`, `rapidTransferWindow`, and
-`rapidTransferFraudCaseCandidate`. Present-invalid canonical facts fail closed. Missing legacy data
-may use only the narrow compatibility paths documented in
-`feature_snapshot_consumption_policy.md`.
+The adapter and production scoring both consume the canonical Rules V2 snapshot facts:
+`recentTransactionCount`, `recentTransactionCountWindow`, `transactionVelocityPerMinute`,
+`recentAmountSumPln`, `recentAmountSumWindow`, `currentTransactionAmountPln`,
+`merchantFrequency7d`, `deviceNovelty`, `countryMismatch`, `proxyOrVpnDetected`, and `currency`.
+Missing or present-invalid required canonical facts fail closed during Rules V2 input validation. They are not
+coerced to false, zero, low risk, or skipped rule semantics.
 
-Rules V1 compatibility is explicit and component-based. Current canonical producer payloads retain
-the approved V1 semantic totals, while historical partial inputs keep only their historical
-component contribution. A legacy flag alone, a top-level count alone, a top-level rate alone, a
-top-level amount alone, or a rapid candidate alone is not upgraded to a full canonical contribution.
-Canonical false is authoritative, and present-invalid canonical or top-level temporal data prevents
-legacy fallback. Top-level count and amount compatibility inputs require `PT1M` windows.
+Rules V2 scoring reads only current canonical feature facts. Removed feature-flag, case-candidate, and top-level
+duplicate event representations are not part of the current production scoring policy.
 
-The adapter exposes no compatibility provenance in public Engine Intelligence. Provenance remains
-bounded internal score detail and fixture evidence only.
+Production `RuleBasedFraudScoringEngine` and diagnostic `RuleBasedSignalEngine` both delegate input
+validation to `RulesV2InputValidator` before scoring. Primary scoring failure and diagnostic adapter
+degradation are intentionally different runtime boundaries.
 
-Production `RuleBasedFraudScoringEngine` still delegates validation to `RulesFeatureInputValidator`
-before scoring. Primary scoring failure and diagnostic adapter degradation are intentionally
-different runtime boundaries.
+Required Rules V2 production input semantics:
 
-Feature status semantics:
+- `MISSING` required canonical fact fails closed with bounded input validation failure.
+- `INVALID_TYPE` required canonical fact fails closed with bounded input validation failure.
+- Missing or invalid required facts must not become false, zero, low risk, or a silent skipped rule.
+
+Diagnostic `FeatureSnapshotReader` status semantics after required Rules V2 validation has been separated:
 
 - `PRESENT` may produce a bounded rule signal.
-- `MISSING` skips the rule and is not false, not zero, and not low risk.
+- `MISSING` may mean no bounded diagnostic signal only for optional/diagnostic reads; it is not false, not zero, and not low risk.
 - `INVALID_TYPE` is not coerced and returns a bounded `DEGRADED` result.
 - `WRONG_ACCESSOR` is an implementation bug and must fail fast.
 - `NOT_ALLOWED` is an implementation bug and must fail fast.
@@ -92,9 +91,7 @@ Diagnostic Engine Intelligence:
 - eligible ML diagnostics can still execute;
 - public Engine Intelligence does not expose raw exception text or raw feature values.
 
-Future removal of legacy flags, `rapidTransferFraudCaseCandidate`, and retired top-level
-compatibility paths belongs to a separate versioned Rules migration branch. FDP-129 keeps
-`rule-based-engine` / `v1` and adapter version `1.0.0`.
+Current Rules scoring uses `rule-based-engine` / `v2` and adapter version `2.0.0`.
 
 ## Historical FDP-87 Out Of Scope
 

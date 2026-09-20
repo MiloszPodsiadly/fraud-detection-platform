@@ -18,7 +18,7 @@ class MissingReasonCodesCreatesPartialScoringEvidenceDiagnosticTest {
         ScoringEvidenceFactory factory = new ScoringEvidenceFactory();
 
         var evidence = factory.modelEvidence(
-                ReasonCode.parseLegacyList(List.of()),
+                ReasonCode.parseInputList(List.of()),
                 true,
                 RiskLevel.CRITICAL,
                 Instant.now(),
@@ -37,7 +37,7 @@ class MissingReasonCodesCreatesPartialScoringEvidenceDiagnosticTest {
     void lowRiskWithoutReasonCodesDoesNotCreateFakeAvailableEvidence() {
         ScoringEvidenceFactory factory = new ScoringEvidenceFactory();
 
-        assertThat(factory.modelEvidence(ReasonCode.parseLegacyList(List.of()), true, RiskLevel.LOW, Instant.now(), null))
+        assertThat(factory.modelEvidence(ReasonCode.parseInputList(List.of()), true, RiskLevel.LOW, Instant.now(), null))
                 .isEmpty();
     }
 }

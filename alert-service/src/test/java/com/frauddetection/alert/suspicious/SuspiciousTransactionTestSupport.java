@@ -184,7 +184,7 @@ final class SuspiciousTransactionTestSupport {
     private static ScoringEvidenceItem evidence(ScoringEvidenceStatus status, ScoringEvidenceSource source) {
         return new ScoringEvidenceItem(
                 "evidence-1",
-                status == ScoringEvidenceStatus.AVAILABLE ? "HIGH_AMOUNT" : null,
+                status == ScoringEvidenceStatus.AVAILABLE ? "HIGH_TRANSACTION_AMOUNT" : null,
                 status == ScoringEvidenceStatus.AVAILABLE ? ScoringEvidenceType.RULE_MATCH : ScoringEvidenceType.DIAGNOSTIC,
                 source,
                 status,

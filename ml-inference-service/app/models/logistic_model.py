@@ -5,6 +5,7 @@ from math import exp
 from pathlib import Path
 from typing import Any
 
+from app.features.feature_contract import FEATURE_CONTRACT
 from app.features.feature_pipeline import FeaturePipeline
 
 
@@ -13,20 +14,13 @@ class LogisticFraudModel:
 
     DEFAULT_WEIGHTS = {
         "recentTransactionCount": 0.35,
-        "recentAmountSum": 0.45,
+        "recentAmountSumPln": 0.45,
         "transactionVelocityPerMinute": 0.80,
-        "transactionVelocityPerHour": 0.0,
-        "transactionVelocityPerDay": 0.0,
-        "recentAmountAverage": 0.0,
-        "recentAmountStdDev": 0.0,
-        "amountDeviationFromUserMean": 0.0,
-        "merchantEntropy": 0.0,
-        "countryEntropy": 0.0,
         "merchantFrequency7d": 0.16,
         "deviceNovelty": 1.10,
         "countryMismatch": 1.30,
         "proxyOrVpnDetected": 0.95,
-        "highRiskFlagCount": 0.42,
+        "suspiciousFactRatio": 0.42,
         "rapidTransferBurst": 5.25,
     }
     DEFAULT_THRESHOLDS = {
@@ -79,21 +73,35 @@ class LogisticFraudModel:
 
     def save(self, path: Path, metadata: dict[str, object] | None = None) -> None:
         """Persist a logistic model artifact."""
+        metadata = metadata or {}
+        evaluation = metadata.get("evaluation") if isinstance(metadata.get("evaluation"), dict) else {}
+        training_metadata = {key: value for key, value in metadata.items() if key != "evaluation"}
+        runtime_features = self.runtime_feature_names()
         artifact = {
             "modelName": self.model_name,
             "modelVersion": self.model_version,
             "modelType": "logistic",
             "modelFamily": self.model_family,
+            "trainingMode": self.training_mode,
+            "featureSetUsed": runtime_features,
             "bias": self.bias,
             "weights": self.weights,
             "thresholds": self.thresholds,
-            "featureSchema": self.runtime_feature_names(),
+            "thresholdPolicy": self._threshold_policy(),
+            "modelRuntimeReadiness": self._model_runtime_readiness(evaluation),
+            "featureSchema": runtime_features,
+            "featureContractVersion": FEATURE_CONTRACT.version,
+            "featureSchemaVersion": FEATURE_CONTRACT.version,
+            "featureSetVersion": FEATURE_CONTRACT.version,
             "featureImportance": self.feature_importance(),
             "training": {
-                **(metadata or {}),
+                **training_metadata,
                 "trainingMode": self.training_mode,
-                "featureSetUsed": self.runtime_feature_names(),
+                "featureSetUsed": runtime_features,
+                "featureContractVersion": FEATURE_CONTRACT.version,
+                "featureSetVersion": FEATURE_CONTRACT.version,
             },
+            "evaluation": evaluation,
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -165,6 +173,29 @@ class LogisticFraudModel:
         if not thresholds["medium"] <= thresholds["high"] <= thresholds["critical"]:
             return dict(self.DEFAULT_THRESHOLDS)
         return thresholds
+
+    def _threshold_policy(self) -> dict[str, object]:
+        return {
+            "policyVersion": "fixed-business-risk-thresholds-v1",
+            "ownership": "fixed_business_risk_thresholds",
+            "runtimeSemantics": "riskLevel bands are business-owned; alertRecommended is true for HIGH or CRITICAL",
+            "deployedAlertThresholdName": "high",
+            "deployedAlertThreshold": self.thresholds["high"],
+            "thresholds": dict(self.thresholds),
+        }
+
+    def _model_runtime_readiness(self, evaluation: dict[str, object]) -> dict[str, object]:
+        readiness = evaluation.get("modelRuntimeReadiness")
+        if isinstance(readiness, dict):
+            return readiness
+        return {
+            "status": "UNKNOWN",
+            "reasons": ["MODEL_RUNTIME_READINESS_NOT_EVALUATED"],
+            "policyVersion": "fixed-business-risk-thresholds-v1",
+            "deployedAlertThresholdName": "high",
+            "deployedAlertThreshold": self.thresholds["high"],
+            "rankingMetricsAreNotSufficient": True,
+        }
 
     def _number(self, value: Any, default: float = 0.0) -> float:
         if isinstance(value, bool) or value is None:

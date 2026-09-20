@@ -18,7 +18,7 @@ class SuspiciousTransactionResponseContractTest {
 
     @Test
     void mapsAllowedReadModelFieldsAndDefensivelyCopiesReasonCodes() {
-        ArrayList<String> reasons = new ArrayList<>(List.of("HIGH_AMOUNT"));
+        ArrayList<String> reasons = new ArrayList<>(List.of("HIGH_TRANSACTION_AMOUNT"));
         SuspiciousTransactionResponse response = new SuspiciousTransactionResponse(
                 "suspicious-1",
                 "txn-1",
@@ -49,7 +49,7 @@ class SuspiciousTransactionResponseContractTest {
         assertThat(response.transactionId()).isEqualTo("txn-1");
         assertThat(response.sourceEventId()).isEqualTo("event-1");
         assertThat(response.evidenceStatus()).isEqualTo(EvidenceStatus.PARTIAL);
-        assertThat(response.reasonCodes()).containsExactly("HIGH_AMOUNT");
+        assertThat(response.reasonCodes()).containsExactly("HIGH_TRANSACTION_AMOUNT");
     }
 
     @Test

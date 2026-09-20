@@ -35,9 +35,11 @@ producer emits `engineIntelligence`, because historical consumers may reject an 
 field.
 
 Compatibility is intentionally narrow. Old events without `engineIntelligence` are accepted as absent. Legacy v1
-comparison objects without both identity fields are normalized only when the three legacy semantic fields are present.
-Partial comparison identity, current summaries missing Rules or ML, and malformed current canonical feature values are
-rejected or fail closed; compatibility adapters must not repair current corruption.
+comparison objects without both identity fields are normalized only at the historical `TransactionScoredEvent` read
+boundary when the outer event proves `modelVersion=v1` and the three legacy semantic fields are present. Partial
+comparison identity, current summaries missing Rules or ML, current summaries missing comparison identity, and
+malformed current canonical feature values are rejected or fail closed; compatibility adapters must not repair current
+corruption.
 
 ## Payload Limits
 

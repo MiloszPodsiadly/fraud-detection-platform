@@ -69,7 +69,8 @@ class HttpMlModelScoringClientTest {
         var result = client.score(input());
 
         assertThat(result.available()).isFalse();
-        assertThat(result.riskLevel()).isEqualTo(RiskLevel.LOW);
+        assertThat(result.fraudScore()).isNull();
+        assertThat(result.riskLevel()).isNull();
         assertThat(result.reasonCodes()).containsExactly(ReasonCode.ML_MODEL_UNAVAILABLE.wireValue());
         assertThat(result.explanationMetadata()).containsEntry("modelAvailable", false);
         assertThat(meterRegistry.get("fraud.scoring.ml.client.requests")

@@ -5,8 +5,11 @@ import com.frauddetection.alert.config.AssistantProperties;
 import com.frauddetection.alert.domain.AlertCase;
 import com.frauddetection.alert.service.AlertManagementUseCase;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.features.FraudFeatureContract;
+import com.frauddetection.common.events.model.Money;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -22,7 +25,6 @@ public class DeterministicAnalystCaseSummaryService implements AnalystCaseSummar
     private static final String HIGH_VELOCITY_REASON = "HIGH_VELOCITY";
     private static final String TRANSACTION_VELOCITY_REASON = "TRANSACTION_VELOCITY";
     private static final String HIGH_TRANSACTION_AMOUNT_REASON = "HIGH_TRANSACTION_AMOUNT";
-    private static final String RECENT_AMOUNT_SUM = "recentAmountSum";
     private static final String TRANSACTION_VELOCITY_PER_MINUTE = "transactionVelocityPerMinute";
     private static final String DEVICE_NOVELTY = "deviceNovelty";
     private static final String COUNTRY_MISMATCH = "countryMismatch";
@@ -118,14 +120,13 @@ public class DeterministicAnalystCaseSummaryService implements AnalystCaseSummar
                 alert.customerContext() == null ? null : alert.customerContext().segment(),
                 alert.customerContext() == null ? null : alert.customerContext().accountAgeDays(),
                 integerValue(snapshot.get("recentTransactionCount")),
-                alert.transactionAmount() == null ? null : moneyValue(snapshot.get(RECENT_AMOUNT_SUM), alert.transactionAmount().currency()),
+                moneyPlnValue(snapshot.get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN)),
                 numberValue(snapshot.get(TRANSACTION_VELOCITY_PER_MINUTE)),
                 integerValue(snapshot.get("merchantFrequency7d")),
                 booleanValue(snapshot.get(DEVICE_NOVELTY)),
                 booleanValue(snapshot.get(COUNTRY_MISMATCH)),
                 booleanValue(snapshot.get(PROXY_OR_VPN_DETECTED)),
-                null,
-                snapshot
+                null
         );
     }
 
@@ -156,11 +157,18 @@ public class DeterministicAnalystCaseSummaryService implements AnalystCaseSummar
 
     private Map<String, Object> supportingEvidence(AlertCase alert) {
         Map<String, Object> evidence = new LinkedHashMap<>();
+        Map<String, Object> snapshot = alert.featureSnapshot() == null ? Map.of() : alert.featureSnapshot();
         evidence.put("alertStatus", alert.alertStatus());
-        evidence.put("scoreDetails", alert.scoreDetails() == null ? Map.of() : alert.scoreDetails());
-        evidence.put("featureSnapshot", alert.featureSnapshot() == null ? Map.of() : alert.featureSnapshot());
         evidence.put("modelName", value(alert.scoreDetails(), "modelName"));
         evidence.put("modelVersion", value(alert.scoreDetails(), "modelVersion"));
+        evidence.put("riskLevel", alert.riskLevel() == null ? null : alert.riskLevel().name());
+        evidence.put("reasonCodes", alert.reasonCodes() == null ? List.of() : alert.reasonCodes());
+        evidence.put("recentTransactionCount", integerValue(snapshot.get(FraudFeatureContract.RECENT_TRANSACTION_COUNT)));
+        evidence.put("recentAmountSumPln", moneyPlnValue(snapshot.get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN)));
+        evidence.put("transactionVelocityPerMinute", numberValue(snapshot.get(TRANSACTION_VELOCITY_PER_MINUTE)));
+        evidence.put("deviceNovelty", booleanValue(snapshot.get(DEVICE_NOVELTY)));
+        evidence.put("countryMismatch", booleanValue(snapshot.get(COUNTRY_MISMATCH)));
+        evidence.put("proxyOrVpnDetected", booleanValue(snapshot.get(PROXY_OR_VPN_DETECTED)));
         return evidence;
     }
 
@@ -213,7 +221,12 @@ public class DeterministicAnalystCaseSummaryService implements AnalystCaseSummar
             case PROXY_OR_VPN_REASON, PROXY_OR_VPN_DETECTED -> evidence.put(PROXY_OR_VPN_DETECTED, snapshot.get(PROXY_OR_VPN_DETECTED));
             case HIGH_VELOCITY_REASON, TRANSACTION_VELOCITY_REASON, TRANSACTION_VELOCITY_PER_MINUTE ->
                     evidence.put(TRANSACTION_VELOCITY_PER_MINUTE, snapshot.get(TRANSACTION_VELOCITY_PER_MINUTE));
-            default -> evidence.put("featureSnapshot", snapshot);
+            case HIGH_TRANSACTION_AMOUNT_REASON ->
+                    evidence.put("recentAmountSumPln", moneyPlnValue(snapshot.get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN)));
+            default -> {
+                evidence.put("riskLevel", alert.riskLevel() == null ? "UNKNOWN" : alert.riskLevel().name());
+                evidence.put("reasonCode", reasonCode);
+            }
         }
         return evidence;
     }
@@ -224,7 +237,7 @@ public class DeterministicAnalystCaseSummaryService implements AnalystCaseSummar
             case COUNTRY_MISMATCH_REASON, COUNTRY_MISMATCH -> "Country mismatch";
             case PROXY_OR_VPN_REASON, PROXY_OR_VPN_DETECTED -> "Proxy or VPN detected";
             case HIGH_VELOCITY_REASON, TRANSACTION_VELOCITY_REASON, TRANSACTION_VELOCITY_PER_MINUTE -> "Transaction velocity";
-            case HIGH_TRANSACTION_AMOUNT_REASON, RECENT_AMOUNT_SUM -> "High amount activity";
+            case HIGH_TRANSACTION_AMOUNT_REASON -> "High amount activity";
             default -> reasonCode.replace('_', ' ');
         };
     }
@@ -235,7 +248,7 @@ public class DeterministicAnalystCaseSummaryService implements AnalystCaseSummar
             case COUNTRY_MISMATCH_REASON, COUNTRY_MISMATCH -> "The transaction location differs from the customer's expected country context.";
             case PROXY_OR_VPN_REASON, PROXY_OR_VPN_DETECTED -> "Network indicators suggest anonymized or proxied access.";
             case HIGH_VELOCITY_REASON, TRANSACTION_VELOCITY_REASON, TRANSACTION_VELOCITY_PER_MINUTE -> "Recent transaction frequency is elevated for this customer.";
-            case HIGH_TRANSACTION_AMOUNT_REASON, RECENT_AMOUNT_SUM -> "The transaction or recent amount accumulation is materially higher than baseline traffic.";
+            case HIGH_TRANSACTION_AMOUNT_REASON -> "The transaction or recent amount accumulation is materially higher than baseline traffic.";
             default -> "This signal contributed to the alert score and should be reviewed with the supporting evidence.";
         };
     }
@@ -266,24 +279,25 @@ public class DeterministicAnalystCaseSummaryService implements AnalystCaseSummar
         return value instanceof Boolean bool ? bool : null;
     }
 
-    private com.frauddetection.common.events.model.Money moneyValue(Object value, String fallbackCurrency) {
-        if (value instanceof com.frauddetection.common.events.model.Money money) {
-            return money;
+    private Money moneyPlnValue(Object value) {
+        BigDecimal amount = decimalValue(value);
+        return amount == null ? null : new Money(amount, "PLN");
+    }
+
+    private BigDecimal decimalValue(Object value) {
+        if (value instanceof BigDecimal decimal) {
+            return decimal;
         }
-        if (value instanceof Map<?, ?> map) {
-            Object amount = map.get("amount");
-            Object currency = map.get("currency");
-            Double numericAmount = numberValue(amount);
-            if (numericAmount != null) {
-                return new com.frauddetection.common.events.model.Money(
-                        java.math.BigDecimal.valueOf(numericAmount),
-                        currency == null ? fallbackCurrency : currency.toString()
-                );
-            }
+        if (value instanceof Integer integer) {
+            return BigDecimal.valueOf(integer.longValue());
         }
-        if (value instanceof Number number) {
-            return new com.frauddetection.common.events.model.Money(java.math.BigDecimal.valueOf(number.doubleValue()), fallbackCurrency);
+        if (value instanceof Long longValue) {
+            return BigDecimal.valueOf(longValue);
+        }
+        if (value instanceof Double doubleValue && Double.isFinite(doubleValue)) {
+            return BigDecimal.valueOf(doubleValue);
         }
         return null;
     }
+
 }

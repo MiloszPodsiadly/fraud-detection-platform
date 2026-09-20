@@ -158,9 +158,10 @@ class MlMetricsEndpointTest(unittest.TestCase):
     def test_scoring_request_increments_request_counter_and_latency(self):
         before = self.metrics_text()
         payload = (
-            b'{"features":{"recentTransactionCount":1,"recentAmountSum":{"amount":45.0,"currency":"USD"},'
+            b'{"features":{"recentTransactionCount":1,'
             b'"transactionVelocityPerMinute":0.05,"merchantFrequency7d":1,"deviceNovelty":false,'
-            b'"countryMismatch":false,"proxyOrVpnDetected":false,"featureFlags":[]}}'
+            b'"countryMismatch":false,"proxyOrVpnDetected":false,'
+            b'"recentTransactionCountWindow":"PT1M","recentAmountSumWindow":"PT1M","recentAmountSumPln":45.0}}'
         )
         status, _, _ = self.request("POST", "/v1/fraud/score", body=payload, headers={"Content-Type": "application/json"})
         self.assertEqual(status, 200)

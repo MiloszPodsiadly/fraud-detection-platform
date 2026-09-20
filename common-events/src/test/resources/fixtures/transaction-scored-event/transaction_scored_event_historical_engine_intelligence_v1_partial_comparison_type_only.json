@@ -9,7 +9,7 @@
   "fraudScore": 0.82,
   "riskLevel": "HIGH",
   "scoringStrategy": "RULE_BASED",
-  "modelName": "rule-engine",
+  "modelName": "rule-based-engine",
   "modelVersion": "v1",
   "inferenceTimestamp": "2026-06-01T06:00:01Z",
   "reasonCodes": ["HIGH_VELOCITY"],
@@ -22,12 +22,10 @@
     "generatedAt": "2026-06-01T06:00:01Z",
     "engines": [
       {"engineId": "rules.primary", "engineType": "RULES", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["HIGH_VELOCITY"]},
-      {"engineId": "ml.python.primary", "engineType": "ML_MODEL", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["ML_MODEL_SIGNAL"]},
-      {"engineId": "velocity.primary", "engineType": "VELOCITY", "status": "AVAILABLE", "riskLevel": "LOW", "scoreBucket": "LOW", "reasonCodes": []}
+      {"engineId": "ml.python.primary", "engineType": "ML_MODEL", "status": "AVAILABLE", "riskLevel": "HIGH", "scoreBucket": "HIGH", "reasonCodes": ["ML_MODEL_SIGNAL"]}
     ],
     "comparison": {
       "comparisonType": "RULES_VS_ML",
-      "comparedEngineIds": ["rules.primary", "velocity.primary"],
       "agreementStatus": "AGREEMENT",
       "riskMismatchStatus": "SAME_RISK_LEVEL",
       "scoreDeltaBucket": "SMALL"

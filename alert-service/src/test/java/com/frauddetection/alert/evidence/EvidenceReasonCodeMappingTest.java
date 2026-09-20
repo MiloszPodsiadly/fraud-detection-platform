@@ -47,7 +47,7 @@ class EvidenceReasonCodeMappingTest {
         mappings.put(ReasonCode.TRANSACTION_VELOCITY, EvidenceType.VELOCITY_SIGNAL);
         mappings.put(ReasonCode.RECENT_TRANSACTION_SPIKE, EvidenceType.VELOCITY_SIGNAL);
         mappings.put(ReasonCode.RAPID_PLN_20K_BURST, EvidenceType.VELOCITY_SIGNAL);
-        mappings.put(ReasonCode.RAPID_TRANSFER_FRAUD_CASE, EvidenceType.VELOCITY_SIGNAL);
+        mappings.put(ReasonCode.RAPID_PLN_20K_BURST, EvidenceType.VELOCITY_SIGNAL);
         mappings.put(ReasonCode.HIGH_TRANSACTION_AMOUNT, EvidenceType.TRANSACTION_FEATURE);
         mappings.put(ReasonCode.RECENT_AMOUNT_ACCUMULATION, EvidenceType.TRANSACTION_FEATURE);
         mappings.put(ReasonCode.HIGH_AMOUNT_ACTIVITY, EvidenceType.TRANSACTION_FEATURE);

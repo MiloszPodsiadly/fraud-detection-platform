@@ -13,6 +13,7 @@ class AlertServiceTransactionScoredEventDeserializationCompatibilityTest {
         TransactionScoredEvent event = AlertServiceTransactionScoredEventFixtureLoader.oldWithoutEngineIntelligence();
 
         assertExistingFields(event);
+        assertThat(event.modelVersion()).isEqualTo("v1");
         assertThat(event.engineIntelligence()).isNull();
     }
 
@@ -21,6 +22,7 @@ class AlertServiceTransactionScoredEventDeserializationCompatibilityTest {
         TransactionScoredEvent event = AlertServiceTransactionScoredEventFixtureLoader.minimalEngineIntelligence();
 
         assertExistingFields(event);
+        assertThat(event.modelVersion()).isEqualTo("v2");
         assertThat(event.engineIntelligence()).isNotNull();
     }
 
@@ -29,6 +31,7 @@ class AlertServiceTransactionScoredEventDeserializationCompatibilityTest {
         TransactionScoredEvent event = AlertServiceTransactionScoredEventFixtureLoader.legacyV1EngineIntelligence();
 
         assertThat(event.transactionId()).isEqualTo("txn-fdp129-stage2-001");
+        assertThat(event.modelVersion()).isEqualTo("v1");
         assertThat(event.engineIntelligence().comparison().comparisonType().name()).isEqualTo("RULES_VS_ML");
         assertThat(event.engineIntelligence().comparison().comparedEngineIds())
                 .containsExactly("rules.primary", "ml.python.primary");
@@ -39,6 +42,7 @@ class AlertServiceTransactionScoredEventDeserializationCompatibilityTest {
         TransactionScoredEvent event = AlertServiceTransactionScoredEventFixtureLoader.fullBoundedEngineIntelligence();
 
         assertExistingFields(event);
+        assertThat(event.modelVersion()).isEqualTo("v2");
         assertThat(event.engineIntelligence().engines()).hasSize(2);
     }
 

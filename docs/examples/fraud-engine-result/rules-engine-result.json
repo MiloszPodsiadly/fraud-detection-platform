@@ -1,5 +1,5 @@
 {
-  "engineId": "rules-v1",
+  "engineId": "rules.primary",
   "engineType": "RULES",
   "engineLanguage": "java",
   "status": "AVAILABLE",
@@ -29,8 +29,8 @@
     }
   ],
   "latencyMs": 4,
-  "modelName": null,
-  "modelVersion": null,
+  "modelName": "rule-based-engine",
+  "modelVersion": "v2",
   "statusReason": null,
   "generatedAt": "2026-05-25T09:00:00Z"
 }

@@ -18,10 +18,11 @@ it must not participate in Rules-vs-ML score delta semantics. New v1 producers m
 
 Legacy v1 comparison objects produced before FDP-129 that contain exactly the three semantic fields
 `agreementStatus`, `riskMismatchStatus`, and `scoreDeltaBucket` without `comparisonType` and without
-`comparedEngineIds` are normalized at the common-events comparison deserialization boundary to
-`RULES_VS_ML` and `["rules.primary","ml.python.primary"]`, then validated by the same strict constructor rules as new
-payloads. Partial identity, reversed IDs, Velocity-containing comparison IDs, or otherwise incorrect identity is
-rejected rather than completed.
+`comparedEngineIds` are normalized only at the historical `TransactionScoredEvent` read boundary when the outer event
+proves `modelVersion=v1`. They are normalized to `RULES_VS_ML` and
+`["rules.primary","ml.python.primary"]`, then validated by the same strict constructor rules as new payloads. Partial
+identity, reversed IDs, Velocity-containing comparison IDs, otherwise incorrect identity, and current events missing
+identity are rejected rather than completed.
 
 This is not compatibility-by-dropping. Consumers must not hide Velocity, map it to Rules or ML, or fabricate a v1 shape
 from a richer future payload. The repository controls in-repository consumers, but this does not prove the absence of

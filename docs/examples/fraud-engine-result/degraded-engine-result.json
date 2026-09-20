@@ -1,5 +1,5 @@
 {
-  "engineId": "velocity-v1",
+  "engineId": "velocity.primary",
   "engineType": "VELOCITY",
   "engineLanguage": "java",
   "status": "DEGRADED",

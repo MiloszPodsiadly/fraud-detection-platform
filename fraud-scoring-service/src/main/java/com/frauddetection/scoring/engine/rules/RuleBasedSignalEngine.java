@@ -12,7 +12,6 @@ import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.scoring.context.ScoringContext;
 import com.frauddetection.scoring.domain.FraudScoreResult;
-import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.engine.FraudEngineDescriptor;
 import com.frauddetection.scoring.engine.FraudSignalEngine;
 import com.frauddetection.scoring.engine.FraudSignalEvaluation;
@@ -20,9 +19,10 @@ import com.frauddetection.scoring.features.FeatureSnapshotReader;
 import com.frauddetection.scoring.features.FeatureSnapshotReaderFactory;
 import com.frauddetection.scoring.features.FeatureSnapshotValueStatus;
 import com.frauddetection.scoring.service.RuleBasedFraudScoringEngine;
-import com.frauddetection.scoring.service.RulesFeatureInputValidator;
 import com.frauddetection.scoring.service.RulesInputValidationResult;
 import com.frauddetection.scoring.service.RulesInputValidationStatus;
+import com.frauddetection.scoring.service.RulesV2InputValidator;
+import com.frauddetection.scoring.service.RulesV2ValidatedInput;
 
 import java.util.List;
 import java.util.Objects;
@@ -31,7 +31,7 @@ public final class RuleBasedSignalEngine implements FraudSignalEngine {
 
     private static final String ENGINE_ID = FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID;
     private static final String ENGINE_LANGUAGE = "java";
-    private static final String ENGINE_VERSION = "1.0.0";
+    private static final String ENGINE_VERSION = "2.0.0";
     private static final String EVIDENCE_SOURCE = "RULES";
 
     private final FeatureSnapshotReaderFactory readerFactory;
@@ -49,15 +49,13 @@ public final class RuleBasedSignalEngine implements FraudSignalEngine {
     public FraudSignalEvaluation evaluate(ScoringContext context) {
         Objects.requireNonNull(context, "context is required");
         FeatureSnapshotReader reader = readerFactory.from(context);
-        RulesInputValidationResult validation = RulesFeatureInputValidator.validate(context.transaction(), reader);
+        RulesInputValidationResult validation = RulesV2InputValidator.validate(reader);
         validation.requireNoAdapterDefect();
         if (!validation.valid()) {
             return degradedResultFor(validation.status());
         }
-        FraudScoreResult productionResult = productionRuleEngine.scoreValidated(
-                FraudScoringRequest.from(context.transaction()),
-                validation
-        );
+        RulesV2ValidatedInput input = RulesV2InputValidator.requireValidInput(reader);
+        FraudScoreResult productionResult = productionRuleEngine.scoreValidated(input);
         return availableResult(productionResult);
     }
 
@@ -111,7 +109,7 @@ public final class RuleBasedSignalEngine implements FraudSignalEngine {
 
     private FraudSignalEvaluation availableResult(FraudScoreResult productionResult) {
         List<String> reasonCodes = ReasonCode.supportedWireValues(
-                ReasonCode.parseLegacyList(productionResult.reasonCodes())
+                ReasonCode.parseInputList(productionResult.reasonCodes())
         );
         return new FraudSignalEvaluation(
                 FraudEngineStatus.AVAILABLE,

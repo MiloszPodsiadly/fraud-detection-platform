@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from app.features.feature_contract import FEATURE_CONTRACT
 from app.features.feature_pipeline import FeaturePipeline
 
 
@@ -79,12 +80,19 @@ class XGBoostFraudModel:
             "trainingMode": self.training_mode,
             "featureSetUsed": self.feature_schema,
             "featureSchema": self.feature_schema,
+            "featureContractVersion": FEATURE_CONTRACT.version,
+            "featureSchemaVersion": FEATURE_CONTRACT.version,
+            "featureSetVersion": FEATURE_CONTRACT.version,
             "thresholds": self.thresholds,
+            "thresholdPolicy": self._threshold_policy(),
+            "modelRuntimeReadiness": self._model_runtime_readiness(evaluation),
             "featureImportance": self.feature_importance(),
             "training": {
                 **training_metadata,
                 "trainingMode": self.training_mode,
                 "featureSetUsed": self.feature_schema,
+                "featureContractVersion": FEATURE_CONTRACT.version,
+                "featureSetVersion": FEATURE_CONTRACT.version,
             },
             "evaluation": evaluation,
             "modelDataBase64": base64.b64encode(self._booster_bytes()).decode("ascii"),
@@ -145,3 +153,26 @@ class XGBoostFraudModel:
         if value is None and isinstance(training, dict):
             value = training.get("trainingMode")
         return str(value or "production")
+
+    def _threshold_policy(self) -> dict[str, object]:
+        return {
+            "policyVersion": "fixed-business-risk-thresholds-v1",
+            "ownership": "fixed_business_risk_thresholds",
+            "runtimeSemantics": "riskLevel bands are business-owned; alertRecommended is true for HIGH or CRITICAL",
+            "deployedAlertThresholdName": "high",
+            "deployedAlertThreshold": self.thresholds["high"],
+            "thresholds": dict(self.thresholds),
+        }
+
+    def _model_runtime_readiness(self, evaluation: dict[str, object]) -> dict[str, object]:
+        readiness = evaluation.get("modelRuntimeReadiness")
+        if isinstance(readiness, dict):
+            return readiness
+        return {
+            "status": "UNKNOWN",
+            "reasons": ["MODEL_RUNTIME_READINESS_NOT_EVALUATED"],
+            "policyVersion": "fixed-business-risk-thresholds-v1",
+            "deployedAlertThresholdName": "high",
+            "deployedAlertThreshold": self.thresholds["high"],
+            "rankingMetricsAreNotSufficient": True,
+        }

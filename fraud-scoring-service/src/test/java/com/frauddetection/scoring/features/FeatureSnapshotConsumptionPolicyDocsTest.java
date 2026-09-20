@@ -19,7 +19,7 @@ class FeatureSnapshotConsumptionPolicyDocsTest {
                 .contains("feature snapshot consumption policy")
                 .contains("current feature-snapshot consumption policy")
                 .contains("historical fdp-85 scope")
-                .contains("current fdp-129 runtime architecture")
+                .contains("current runtime architecture")
                 .contains("scoringcontext.featuresnapshot")
                 .contains("fraudsignalengine")
                 .contains("diagnostic multi-engine runtime")
@@ -56,14 +56,13 @@ class FeatureSnapshotConsumptionPolicyDocsTest {
                 .contains("adapter consumption is not key-only")
                 .contains("key and expected scalar type")
                 .contains("a registered key is not automatically adapter-consumable")
-                .contains("not consumable by the v1 scalar reader")
+                .contains("not consumable by current rules scoring")
                 .contains("devicenovelty` is boolean")
                 .contains("recenttransactioncount` is integer")
                 .contains("transactionvelocityperminute` is double")
                 .contains("currency` is string")
-                .contains("rapidtransfertotalpln` is decimal")
-                .contains("rapidtransfertransactionids` is not consumable by the v1 scalar reader")
-                .contains("featureflags` is not consumable by the v1 scalar reader")
+                .contains("rapidtransfertransactionids` is not consumable by current rules scoring")
+                .contains("unsupported policy marker fields are not consumable by current rules scoring")
                 .contains("wrong accessor use is not valid consumption")
                 .contains("wrong_accessor` means")
                 .contains("invalid_type` means")
@@ -83,15 +82,16 @@ class FeatureSnapshotConsumptionPolicyDocsTest {
                 .contains("velocity pt1m policy")
                 .contains("velocity remains optional, diagnostic-only")
                 .contains("rules canonical input policy")
+                .contains("rules v2 uses canonical feature-snapshot facts only")
                 .contains("present-invalid canonical rules inputs fail closed")
                 .contains("must not become `available low`")
-                .contains("must not fall back to legacy flags")
+                .contains("must not fall back to removed feature-flag or case-candidate")
                 .contains("retained compatibility")
                 .contains("engineintelligencecomparisonv1compatibility")
                 .contains("old-event `engineintelligence == null` handling")
                 .contains("kafka and mongo replay support")
-                .contains("legacy retirement preconditions")
-                .contains("removal only after zero-use evidence")
+                .contains("retired rules inputs")
+                .contains("consumes current canonical feature facts only")
                 .contains("casting raw `map<string, object>` values")
                 .contains("context.featuresnapshot().get(...)");
 
@@ -111,7 +111,10 @@ class FeatureSnapshotConsumptionPolicyDocsTest {
                 .doesNotContain("no `engineresults[]`, and no event/api/ui integration")
                 .doesNotContain("featuresnapshot` remains internal to `fraud-scoring-service`. it is not a kafka event")
                 .doesNotContain("this branch introduces no runtime scoring behavior change, no event/api/ui change")
-                .doesNotContain("compatibility code is a solid violation");
+                .doesNotContain("compatibility code is a solid violation")
+                .doesNotContain("rules v1 time-dependent canonical facts")
+                .doesNotContain("rules v1 compatibility preserves")
+                .doesNotContain("rules_v1_compatibility_matrix");
     }
 
     private Path docsRoot() {

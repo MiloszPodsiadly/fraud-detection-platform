@@ -90,17 +90,6 @@ class VelocitySignalEngineTest {
     }
 
     @Test
-    void upstreamRapidTransferCandidateIsIgnoredAsDecisionInput() {
-        Map<String, Object> forgedFalse = producerSnapshot(2, "20000.00");
-        forgedFalse.put(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, false);
-        Map<String, Object> forgedTrue = producerSnapshot(1, "100.00");
-        forgedTrue.put(FraudFeatureContract.RAPID_TRANSFER_FRAUD_CASE_CANDIDATE, true);
-
-        assertThat(engine.evaluate(context(forgedFalse)).reasonCodes()).contains("RAPID_PLN_20K_BURST");
-        assertThat(engine.evaluate(context(forgedTrue)).reasonCodes()).doesNotContain("RAPID_PLN_20K_BURST");
-    }
-
-    @Test
     void missingOnlyVelocityFeatureIsUnavailable() {
         Map<String, Object> featureSnapshot = producerSnapshot(5, "25000.00");
         featureSnapshot.remove(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE);

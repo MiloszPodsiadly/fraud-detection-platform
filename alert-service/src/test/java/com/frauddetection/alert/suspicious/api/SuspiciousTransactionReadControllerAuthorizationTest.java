@@ -119,7 +119,7 @@ class SuspiciousTransactionReadControllerAuthorizationTest {
                 java.time.Instant.parse("2026-05-19T10:00:30Z")
         ));
         when(service.findById("suspicious-1")).thenReturn(Optional.of(
-                SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))
+                SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_TRANSACTION_AMOUNT"))
         ));
 
         mockMvc.perform(get("/internal/suspicious-transactions")
@@ -168,7 +168,7 @@ class SuspiciousTransactionReadControllerAuthorizationTest {
     @Test
     void responseMayContainCustomerAndAccountIdentifiersOnlyBehindAuthority() throws Exception {
         when(service.findById("suspicious-1")).thenReturn(Optional.of(
-                SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_AMOUNT"))
+                SuspiciousTransactionResponseContractTest.minimalResponse(List.of("HIGH_TRANSACTION_AMOUNT"))
         ));
 
         mockMvc.perform(get("/internal/suspicious-transactions/suspicious-1")

@@ -48,7 +48,7 @@ class FraudCaseEvidenceSummaryServiceTest {
         when(fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(caseWithAlerts("case-1", "alert-1", "alert-2")));
         when(alertRepository.findAllById(List.of("alert-1", "alert-2"))).thenReturn(List.of(
                 alert("alert-1", evidence("HIGH_AMOUNT_ACTIVITY", EvidenceStatus.AVAILABLE, EvidenceSeverity.CRITICAL)),
-                alert("alert-2", evidence("RAPID_TRANSFER_FRAUD_CASE", EvidenceStatus.AVAILABLE, EvidenceSeverity.HIGH))
+                alert("alert-2", evidence("RAPID_PLN_20K_BURST", EvidenceStatus.AVAILABLE, EvidenceSeverity.HIGH))
         ));
 
         var response = service.summary("case-1");
@@ -57,7 +57,7 @@ class FraudCaseEvidenceSummaryServiceTest {
         assertThat(response.aggregateEvidenceStatus()).isEqualTo(EvidenceStatus.AVAILABLE);
         assertThat(response.linkedAlertCount()).isEqualTo(2);
         assertThat(response.evidenceItemCount()).isEqualTo(2);
-        assertThat(response.topReasonCodes()).containsExactly("HIGH_AMOUNT_ACTIVITY", "RAPID_TRANSFER_FRAUD_CASE");
+        assertThat(response.topReasonCodes()).containsExactly("HIGH_AMOUNT_ACTIVITY", "RAPID_PLN_20K_BURST");
         assertThat(response.highestSeverityEvidence()).hasSize(2);
         assertThat(response.evidenceBySource()).hasSize(1);
         assertThat(response.evidenceByStatus()).hasSize(1);
@@ -97,7 +97,7 @@ class FraudCaseEvidenceSummaryServiceTest {
         when(alertRepository.findAllById(List.of("alert-1"))).thenReturn(List.of(alert(
                 "alert-1",
                 evidence("HIGH_AMOUNT_ACTIVITY", EvidenceStatus.AVAILABLE, EvidenceSeverity.LOW),
-                evidence("RAPID_TRANSFER_FRAUD_CASE", EvidenceStatus.PARTIAL, EvidenceSeverity.HIGH)
+                evidence("RAPID_PLN_20K_BURST", EvidenceStatus.PARTIAL, EvidenceSeverity.HIGH)
         )));
 
         var response = service.summary("case-1");
@@ -134,7 +134,7 @@ class FraudCaseEvidenceSummaryServiceTest {
         when(alertRepository.findAllById(List.of("alert-1"))).thenReturn(List.of(alert(
                 "alert-1",
                 evidence("HIGH_AMOUNT_ACTIVITY", EvidenceStatus.AVAILABLE, EvidenceSeverity.LOW),
-                evidence("RAPID_TRANSFER_FRAUD_CASE", EvidenceStatus.NOT_APPLICABLE, EvidenceSeverity.HIGH)
+                evidence("RAPID_PLN_20K_BURST", EvidenceStatus.NOT_APPLICABLE, EvidenceSeverity.HIGH)
         )));
 
         var response = service.summary("case-1");
@@ -150,7 +150,7 @@ class FraudCaseEvidenceSummaryServiceTest {
         when(alertRepository.findAllById(List.of("alert-1"))).thenReturn(List.of(alert(
                 "alert-1",
                 evidence("HIGH_AMOUNT_ACTIVITY", EvidenceStatus.PARTIAL, EvidenceSeverity.LOW),
-                evidence("RAPID_TRANSFER_FRAUD_CASE", EvidenceStatus.ERROR, EvidenceSeverity.MEDIUM)
+                evidence("RAPID_PLN_20K_BURST", EvidenceStatus.ERROR, EvidenceSeverity.MEDIUM)
         )));
 
         assertThat(service.summary("case-1").aggregateEvidenceStatus()).isEqualTo(EvidenceStatus.ERROR);
@@ -446,7 +446,7 @@ class FraudCaseEvidenceSummaryServiceTest {
         when(alertRepository.findAllById(List.of("alert-1"))).thenReturn(List.of(alert(
                 "alert-1",
                 evidence("HIGH_AMOUNT_ACTIVITY", EvidenceStatus.AVAILABLE, EvidenceSeverity.LOW),
-                evidence("RAPID_TRANSFER_FRAUD_CASE", inputStatus, EvidenceSeverity.HIGH)
+                evidence("RAPID_PLN_20K_BURST", inputStatus, EvidenceSeverity.HIGH)
         )));
 
         assertThat(service.summary("case-1").aggregateEvidenceStatus()).isEqualTo(expectedStatus);

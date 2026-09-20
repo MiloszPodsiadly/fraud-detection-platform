@@ -1,6 +1,6 @@
 # Engine Intelligence Semantic Ownership ADR
 
-Status: accepted for FDP-129.
+Status: current semantic ownership decision. FDP-129 statements are historical where explicitly named.
 
 ## Context
 
@@ -16,29 +16,22 @@ Feature Enricher owns factual observations only. It provides bounded facts such 
 semantics, Velocity severity, Rules/ML comparison, analyst recommendations, or final actions.
 
 Rules owns baseline business-rule interpretation and the single Rules contribution for current canonical
-representations of a given underlying fact. Rules also owns Rules V1 compatibility interpretation for historical
-partial representations. Rules may use the same official rapid-transfer threshold facts as other components, but it
-must not double-count redundant current and legacy representations of the same semantic signal.
+representations of a given underlying fact. Current Rules scoring is `rule-based-engine` / `v2`, and the diagnostic
+adapter descriptor is `rules.primary` / `2.0.0`. Rules may use the same official rapid-transfer threshold facts as
+other components, but it must not double-count redundant representations of the same semantic signal.
 
-FDP-129 keeps the production Rules model at `rule-based-engine` / `v1` and the adapter descriptor at
-`rules.primary` / `1.0.0`. The frozen Rules V1 compatibility matrix is captured in
-`fraud-scoring-service/src/test/resources/fixtures/rules/rules_v1_compatibility_matrix.json`. Current canonical
-producer payloads preserve the approved V1 total for each semantic fact. Historical partial representations preserve
-only the historical contribution components that were actually present: flag-only, count-only, rate-only,
-amount-only, and candidate-only payloads are not promoted to full canonical totals.
-
-Canonical Rules facts are authoritative. Canonical true contributes through the canonical policy. Canonical false
-prevents contradictory legacy true from contributing. Present-invalid canonical facts and present-invalid top-level
-temporal facts fail closed and do not activate legacy fallback. Top-level compatibility facts remain valid only when
-their time-dependent meaning is explicitly `PT1M`. Unsupported currencies are rejected instead of being converted
-with a default rate.
+Canonical Rules facts are authoritative. Canonical true contributes through the canonical policy. Canonical false is
+not missing and cannot be overridden by removed feature-flag, case-candidate, or top-level duplicate representations.
+Present-invalid canonical facts fail closed and do not activate a scoring fallback. Unsupported currencies are
+rejected instead of being converted with a default rate.
 
 Python ML owns bounded ML score context only. The current public comparison identity is explicitly `RULES_VS_ML` with
 `comparedEngineIds=["rules.primary","ml.python.primary"]`; it is not generic all-engine agreement.
 
-VelocitySignalPolicy owns Velocity V1 semantics. Velocity requires `recentTransactionCountWindow=PT1M`; count, window,
-and per-minute rate must be mutually consistent when all are present. Inconsistent present values degrade Velocity
-with `VELOCITY_FEATURES_INCONSISTENT`. Velocity score is deterministic normalized risk severity, not calibrated fraud
+VelocitySignalPolicy owns current Velocity v1 semantics. `velocity-v1` is Velocity lineage only, independent from
+Rules V1/V2 naming. Velocity requires `recentTransactionCountWindow=PT1M`; count, window, and per-minute rate must be
+mutually consistent when all are present. Inconsistent present values degrade Velocity with
+`VELOCITY_FEATURES_INCONSISTENT`. Velocity score is deterministic normalized risk severity, not calibrated fraud
 probability and not model confidence.
 
 The orchestrator owns optional-engine failure isolation and execution metadata. Optional Velocity failures must not
@@ -66,6 +59,5 @@ This ADR does not change authentication, authorization, tenant isolation, paymen
 approve/decline/block behavior, fraud-case workflow, model retraining, rule update workflow, external attestation, or
 compatibility guarantees for unknown external consumers.
 
-Rules V1 legacy compatibility remains isolated and temporary in FDP-129. A later branch may remove legacy flags,
-remove `rapidTransferFraudCaseCandidate`, remove retired top-level compatibility paths, introduce a clean canonical
-Rules V2 through explicit version migration, and compare V1 versus the new policy in shadow mode before rollout.
+Historical event compatibility remains an event/read compatibility concern only. It is not part of current Rules V2
+production scoring and must not be reintroduced as a scoring fallback.
