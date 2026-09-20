@@ -71,6 +71,43 @@ class PublicEngineIntelligenceMapperTest {
     }
 
     @Test
+    void mapsAvailableMlModelIdentityOnlyForMlEngine() {
+        var summary = mapper.map(service.aggregate(AggregationTestSupport.orchestration(
+                AggregationTestSupport.available("rules.primary", 0.8d, RiskLevel.HIGH, "HIGH_VELOCITY"),
+                AggregationTestSupport.available("ml.python.primary", 0.7d, RiskLevel.HIGH, "MODEL_HIGH_RISK"),
+                AggregationTestSupport.available(
+                        "velocity.primary",
+                        0.95d,
+                        RiskLevel.CRITICAL,
+                        "RAPID_PLN_20K_BURST"
+                )
+        )));
+
+        assertThat(summary.engines().get(0).modelIdentity()).isNull();
+        assertThat(summary.engines().get(1).modelIdentity().modelName())
+                .isEqualTo("python-logistic-fraud-model");
+        assertThat(summary.engines().get(1).modelIdentity().modelVersion())
+                .isEqualTo("2026-05-30.v1");
+        assertThat(summary.engines().get(1).modelIdentity().featureContractVersion())
+                .isEqualTo("2026-05-30.feature-contract.v1");
+        assertThat(summary.engines().get(2).modelIdentity()).isNull();
+    }
+
+    @Test
+    void operationalMlResultDoesNotInventModelIdentity() {
+        var summary = mapper.map(service.aggregate(AggregationTestSupport.orchestration(
+                AggregationTestSupport.available("rules.primary", 0.8d, RiskLevel.HIGH, "HIGH_VELOCITY"),
+                AggregationTestSupport.unavailable(
+                        "ml.python.primary",
+                        FraudEngineStatus.TIMEOUT,
+                        "ML_MODEL_TIMEOUT"
+                )
+        )));
+
+        assertThat(summary.engines().get(1).modelIdentity()).isNull();
+    }
+
+    @Test
     void mapsAggregationCompatibleWithSharedThreeEngineGoldenFixture() throws Exception {
         EngineIntelligenceSummary expected = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build()
                 .readValue(Files.readString(goldenFixturePath()), EngineIntelligenceSummary.class);

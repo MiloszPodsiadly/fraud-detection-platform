@@ -13,6 +13,7 @@ public record FraudScoreResult(
         String scoringStrategy,
         String modelName,
         String modelVersion,
+        String featureContractVersion,
         Instant inferenceTimestamp,
         List<String> reasonCodes,
         Map<String, Object> scoreDetails,
@@ -23,6 +24,68 @@ public record FraudScoreResult(
 ) {
     public FraudScoreResult {
         scoringEvidence = scoringEvidence == null ? List.of() : List.copyOf(scoringEvidence);
+    }
+
+    public FraudScoreResult(
+            Double fraudScore,
+            RiskLevel riskLevel,
+            String scoringStrategy,
+            String modelName,
+            String modelVersion,
+            String featureContractVersion,
+            Instant inferenceTimestamp,
+            List<String> reasonCodes,
+            Map<String, Object> scoreDetails,
+            Map<String, Object> featureSnapshot,
+            Map<String, Object> explanationMetadata,
+            Boolean alertRecommended
+    ) {
+        this(
+                fraudScore,
+                riskLevel,
+                scoringStrategy,
+                modelName,
+                modelVersion,
+                featureContractVersion,
+                inferenceTimestamp,
+                reasonCodes,
+                scoreDetails,
+                featureSnapshot,
+                explanationMetadata,
+                alertRecommended,
+                List.of()
+        );
+    }
+
+    public FraudScoreResult(
+            Double fraudScore,
+            RiskLevel riskLevel,
+            String scoringStrategy,
+            String modelName,
+            String modelVersion,
+            Instant inferenceTimestamp,
+            List<String> reasonCodes,
+            Map<String, Object> scoreDetails,
+            Map<String, Object> featureSnapshot,
+            Map<String, Object> explanationMetadata,
+            Boolean alertRecommended,
+            List<ScoringEvidenceItem> scoringEvidence
+    ) {
+        this(
+                fraudScore,
+                riskLevel,
+                scoringStrategy,
+                modelName,
+                modelVersion,
+                null,
+                inferenceTimestamp,
+                reasonCodes,
+                scoreDetails,
+                featureSnapshot,
+                explanationMetadata,
+                alertRecommended,
+                scoringEvidence
+        );
     }
 
     public FraudScoreResult(
@@ -44,6 +107,7 @@ public record FraudScoreResult(
                 scoringStrategy,
                 modelName,
                 modelVersion,
+                null,
                 inferenceTimestamp,
                 reasonCodes,
                 scoreDetails,

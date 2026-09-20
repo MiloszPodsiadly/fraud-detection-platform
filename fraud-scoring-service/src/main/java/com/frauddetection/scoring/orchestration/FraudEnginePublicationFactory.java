@@ -71,11 +71,12 @@ final class FraudEnginePublicationFactory {
                         EVIDENCE_SOURCE,
                         FraudEngineEvidenceStatus.PARTIAL
                 )),
-                latency.toMillis(),
-                null,
-                null,
-                reasonCode.wireValue(),
-                generatedAt
+                    latency.toMillis(),
+                    null,
+                    null,
+                    null,
+                    reasonCode.wireValue(),
+                    generatedAt
         );
     }
 
@@ -100,6 +101,7 @@ final class FraudEnginePublicationFactory {
                     latency.toMillis(),
                     source.modelName(),
                     source.modelVersion(),
+                    source.featureContractVersion(),
                     source.statusReason(),
                     generatedAt
             );
@@ -138,6 +140,7 @@ final class FraudEnginePublicationFactory {
                         FraudEngineEvidenceStatus.UNAVAILABLE
                 )),
                 latency.toMillis(),
+                null,
                 null,
                 null,
                 reasonCode.wireValue(),

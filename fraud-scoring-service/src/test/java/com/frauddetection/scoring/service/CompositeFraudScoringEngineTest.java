@@ -22,6 +22,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class CompositeFraudScoringEngineTest {
+    private static final String FEATURE_CONTRACT_VERSION = "2026-05-30.feature-contract.v1";
 
     @Test
     void shouldUseRuleBasedScoringByDefault() {
@@ -94,6 +95,7 @@ class CompositeFraudScoringEngineTest {
                 RiskLevel.LOW,
                 "python-logistic-fraud-model",
                 "test-version",
+                FEATURE_CONTRACT_VERSION,
                 Instant.now(),
                 List.of("LOW_MODEL_RISK"),
                 Map.of("modelAvailable", true),
@@ -150,6 +152,7 @@ class CompositeFraudScoringEngineTest {
                 RiskLevel.CRITICAL,
                 "python-logistic-fraud-model",
                 "test-version",
+                FEATURE_CONTRACT_VERSION,
                 Instant.now(),
                 List.of("MODEL_HIGH_RISK"),
                 Map.of("modelAvailable", true),
@@ -185,6 +188,7 @@ class CompositeFraudScoringEngineTest {
                 RiskLevel.HIGH,
                 "python-logistic-fraud-model",
                 "test-version",
+                FEATURE_CONTRACT_VERSION,
                 Instant.now(),
                 List.of("MODEL_HIGH_RISK"),
                 Map.of("modelAvailable", true),

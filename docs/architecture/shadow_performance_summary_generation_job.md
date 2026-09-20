@@ -39,7 +39,7 @@ and not exported from real transactions. FDP-109 does not connect to Mongo/Kafka
 
 The job reuses the existing governed chain without rebuilding legacy model-card flow:
 
-- FDP-123 bounded feedback dataset.
+- bounded feedback dataset.
 - FDP-124 evaluation artifact set.
 - Platform Recommendation Evaluation Card v1 artifact set as the only executable source for summary generation.
 - Shadow Performance Summary v2 builder and writer for validated current summary output.

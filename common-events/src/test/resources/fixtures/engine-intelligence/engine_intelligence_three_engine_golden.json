@@ -16,7 +16,12 @@
       "status": "AVAILABLE",
       "riskLevel": "LOW",
       "scoreBucket": "LOW",
-      "reasonCodes": ["LOW_MODEL_RISK"]
+      "reasonCodes": ["LOW_MODEL_RISK"],
+      "modelIdentity": {
+        "modelName": "python-logistic-fraud-model",
+        "modelVersion": "2026-05-30.v1",
+        "featureContractVersion": "2026-05-30.feature-contract.v1"
+      }
     },
     {
       "engineId": "velocity.primary",

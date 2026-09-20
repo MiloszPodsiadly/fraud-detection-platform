@@ -187,6 +187,8 @@ class FraudModelTest(unittest.TestCase):
         self.assertIn(result["riskLevel"], {"HIGH", "CRITICAL"})
         self.assertGreaterEqual(result["fraudScore"], 0.75)
         self.assertIn("PROXY_OR_VPN", result["reasonCodes"])
+        self.assertEqual(result["featureContractVersion"], FEATURE_CONTRACT.version)
+        self.assertEqual(result["explanationMetadata"]["featureContractVersion"], FEATURE_CONTRACT.version)
 
     def test_scores_baseline_signal_as_low(self):
         result = FraudModel().score(

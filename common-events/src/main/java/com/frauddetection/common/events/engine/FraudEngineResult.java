@@ -3,6 +3,7 @@ package com.frauddetection.common.events.engine;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.frauddetection.common.events.enums.RiskLevel;
 
 import java.math.BigDecimal;
@@ -26,6 +27,8 @@ public record FraudEngineResult(
         Long latencyMs,
         String modelName,
         String modelVersion,
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        String featureContractVersion,
         @JsonAlias("fallbackReason") String statusReason,
         Instant generatedAt
 ) {
@@ -89,12 +92,64 @@ public record FraudEngineResult(
                 "modelVersion",
                 FraudEngineValuePolicy.MODEL_VERSION_MAX_LENGTH
         );
+        featureContractVersion = FraudEngineValuePolicy.optionalBoundedIdentifier(
+                featureContractVersion,
+                "featureContractVersion",
+                FraudEngineValuePolicy.FEATURE_CONTRACT_VERSION_MAX_LENGTH
+        );
         statusReason = FraudEngineValuePolicy.optionalMachineCode(
                 statusReason,
                 "statusReason",
                 FraudEngineValuePolicy.FALLBACK_REASON_MAX_LENGTH
         );
-        validateStatusSemantics(engineType, status, score, riskLevel, confidence, statusReason);
+        validateStatusSemantics(
+                engineType,
+                status,
+                score,
+                riskLevel,
+                confidence,
+                modelName,
+                modelVersion,
+                featureContractVersion,
+                statusReason
+        );
+    }
+
+    public FraudEngineResult(
+            String engineId,
+            FraudEngineType engineType,
+            String engineLanguage,
+            FraudEngineStatus status,
+            Double score,
+            RiskLevel riskLevel,
+            FraudEngineConfidence confidence,
+            List<String> reasonCodes,
+            List<FraudEngineContribution> contributions,
+            List<FraudEngineEvidence> evidence,
+            Long latencyMs,
+            String modelName,
+            String modelVersion,
+            String statusReason,
+            Instant generatedAt
+    ) {
+        this(
+                engineId,
+                engineType,
+                engineLanguage,
+                status,
+                score,
+                riskLevel,
+                confidence,
+                reasonCodes,
+                contributions,
+                evidence,
+                latencyMs,
+                modelName,
+                modelVersion,
+                null,
+                statusReason,
+                generatedAt
+        );
     }
 
     @JsonIgnore
@@ -198,12 +253,16 @@ public record FraudEngineResult(
             Double score,
             RiskLevel riskLevel,
             FraudEngineConfidence confidence,
+            String modelName,
+            String modelVersion,
+            String featureContractVersion,
             String statusReason
     ) {
         switch (status) {
             case AVAILABLE -> {
                 requireScoreAndRiskLevel(score, riskLevel, status);
                 requireConfidence(confidence, status);
+                requireAvailableMlIdentity(engineType, modelName, modelVersion, featureContractVersion);
                 if (statusReason != null) {
                     throw new IllegalArgumentException("AVAILABLE status must not declare statusReason");
                 }
@@ -229,6 +288,22 @@ public record FraudEngineResult(
                 }
                 requireStatusReason(statusReason, status);
             }
+        }
+    }
+
+    private static void requireAvailableMlIdentity(
+            FraudEngineType engineType,
+            String modelName,
+            String modelVersion,
+            String featureContractVersion
+    ) {
+        if (engineType != FraudEngineType.ML_MODEL) {
+            return;
+        }
+        if (modelName == null || modelVersion == null || featureContractVersion == null) {
+            throw new IllegalArgumentException(
+                    "AVAILABLE ML_MODEL status requires modelName, modelVersion, and featureContractVersion"
+            );
         }
     }
 

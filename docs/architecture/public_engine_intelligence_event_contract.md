@@ -61,6 +61,12 @@ The public shape contains only contract version, timestamp, bounded engine summa
 metadata, diagnostic signals, and warning code counts. Engine identities and reason codes use
 allowlists.
 
+`ml.python.primary` may include a bounded `modelIdentity` object with `modelName`, `modelVersion`, and
+`featureContractVersion`. This identity belongs to the ML engine-intelligence result, not to the top-level final
+scoring fields on `TransactionScoredEvent`. Rules and Velocity engine results must omit it. The field is additive and
+optional so historical events without ML lineage remain readable; new producer publication must use the validated ML
+engine result as its source.
+
 ## Field Omission Rules
 
 The public DTOs omit raw payloads, identifiers, endpoints, tokens, secrets, stack traces, exception

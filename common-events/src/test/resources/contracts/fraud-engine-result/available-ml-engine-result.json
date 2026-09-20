@@ -28,5 +28,6 @@
   "latencyMs": 28,
   "modelName": "python-fraud-model",
   "modelVersion": "v1",
+  "featureContractVersion": "2026-05-30.feature-contract.v1",
   "generatedAt": "2026-06-01T10:15:30Z"
 }

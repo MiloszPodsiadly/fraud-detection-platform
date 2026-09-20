@@ -83,6 +83,7 @@ class PythonMlSignalEngineSourceOfTruthMappingTest {
 
         assertThat(result.modelName()).isEqualTo("python-logistic-fraud-model");
         assertThat(result.modelVersion()).isEqualTo("2026-05-30.v1");
+        assertThat(result.featureContractVersion()).isEqualTo(PythonMlSignalEngineTestSupport.FEATURE_CONTRACT_VERSION);
     }
 
     @Test
@@ -103,6 +104,7 @@ class PythonMlSignalEngineSourceOfTruthMappingTest {
         assertThat(result.riskLevel()).isEqualTo(RiskLevel.HIGH);
         assertThat(result.modelName()).isEqualTo("python-logistic-fraud-model");
         assertThat(result.modelVersion()).isEqualTo("2026-05-30.v1");
+        assertThat(result.featureContractVersion()).isEqualTo(PythonMlSignalEngineTestSupport.FEATURE_CONTRACT_VERSION);
         assertThat(result.reasonCodes()).containsExactly(ReasonCode.MODEL_HIGH_RISK.wireValue());
     }
 

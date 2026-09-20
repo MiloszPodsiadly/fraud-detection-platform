@@ -14,6 +14,7 @@ final class FraudEngineValuePolicy {
     static final int ENGINE_LANGUAGE_MAX_LENGTH = 16;
     static final int MODEL_NAME_MAX_LENGTH = 64;
     static final int MODEL_VERSION_MAX_LENGTH = 64;
+    static final int FEATURE_CONTRACT_VERSION_MAX_LENGTH = 96;
     static final int FALLBACK_REASON_MAX_LENGTH = 128;
 
     private static final Pattern MACHINE_CODE_PATTERN = Pattern.compile("[A-Z0-9_]+");

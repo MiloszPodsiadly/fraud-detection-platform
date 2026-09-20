@@ -11,11 +11,13 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class MlFraudScoringEngineTest {
+    private static final String FEATURE_CONTRACT_VERSION = "2026-05-30.feature-contract.v1";
 
     @Test
     void unsupportedModelReasonCodesAreNotReturnedAsScoringSignals() {
@@ -26,6 +28,7 @@ class MlFraudScoringEngineTest {
                 RiskLevel.HIGH,
                 "python-logistic-fraud-model",
                 "test-version",
+                FEATURE_CONTRACT_VERSION,
                 Instant.now(),
                 Arrays.asList(
                         ReasonCode.COUNTRY_MISMATCH.wireValue(),
@@ -68,6 +71,7 @@ class MlFraudScoringEngineTest {
                 RiskLevel.LOW,
                 "python-logistic-fraud-model",
                 "test-version",
+                FEATURE_CONTRACT_VERSION,
                 Instant.now(),
                 null,
                 Map.of("modelAvailable", true),
@@ -79,5 +83,33 @@ class MlFraudScoringEngineTest {
 
         assertThat(result.reasonCodes()).isEmpty();
         assertThat(result.scoreDetails()).doesNotContainKey("unsupportedReasonCodeCount");
+    }
+
+    @Test
+    void availableMlOutputWithoutCompleteModelIdentityFailsClosed() {
+        MlFraudScoringEngine engine = new MlFraudScoringEngine(input -> new MlModelOutput(
+                true,
+                0.91d,
+                RiskLevel.CRITICAL,
+                "python-logistic-fraud-model",
+                "test-version",
+                null,
+                Instant.now(),
+                List.of(ReasonCode.MODEL_HIGH_RISK.wireValue()),
+                Map.of("modelAvailable", true),
+                Map.of("modelAvailable", true),
+                null
+        ), new ScoringMetrics(new SimpleMeterRegistry()));
+
+        var result = engine.score(FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build()));
+
+        assertThat(result.fraudScore()).isNull();
+        assertThat(result.riskLevel()).isNull();
+        assertThat(result.featureContractVersion()).isNull();
+        assertThat(result.reasonCodes()).containsExactly(ReasonCode.ML_MODEL_UNAVAILABLE.wireValue());
+        assertThat(result.explanationMetadata())
+                .containsEntry("modelAvailable", false)
+                .containsEntry("fallbackReason", "ML_MODEL_IDENTITY_MISSING");
+        assertThat(result.alertRecommended()).isFalse();
     }
 }

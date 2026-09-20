@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://frauddetection.local/schemas/feedback_dataset_record.schema.json",
-  "title": "FDP-123 feedback dataset JSONL envelope line",
-  "description": "Schema for one line of the internal FDP-123 feedback dataset JSONL envelope. Line 1 is DATASET_METADATA; following evaluation rows are DATASET_RECORD lines.",
+  "title": "feedback dataset JSONL envelope line",
+  "description": "Schema for one line of the internal feedback dataset JSONL envelope. Line 1 is DATASET_METADATA; following evaluation rows are DATASET_RECORD lines.",
   "oneOf": [
     {
       "type": "object",
@@ -229,6 +229,27 @@
                 "string",
                 "null"
               ]
+            },
+            "mlModelName": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 128
+            },
+            "mlModelVersion": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 128
+            },
+            "mlFeatureContractVersion": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 128
             },
             "analystRecommendationStatus": {
               "type": [

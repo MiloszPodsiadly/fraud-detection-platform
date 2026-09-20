@@ -185,6 +185,7 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
                 result.scoringStrategy(),
                 result.modelName(),
                 result.modelVersion(),
+                result.featureContractVersion(),
                 result.inferenceTimestamp(),
                 result.reasonCodes(),
                 scoreDetails,

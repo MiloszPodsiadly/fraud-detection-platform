@@ -12,10 +12,37 @@ public record MlModelOutput(
         RiskLevel riskLevel,
         String modelName,
         String modelVersion,
+        String featureContractVersion,
         Instant inferenceTimestamp,
         List<String> reasonCodes,
         Map<String, Object> scoreDetails,
         Map<String, Object> explanationMetadata,
         String fallbackReason
 ) {
+    public MlModelOutput(
+            boolean available,
+            Double fraudScore,
+            RiskLevel riskLevel,
+            String modelName,
+            String modelVersion,
+            Instant inferenceTimestamp,
+            List<String> reasonCodes,
+            Map<String, Object> scoreDetails,
+            Map<String, Object> explanationMetadata,
+            String fallbackReason
+    ) {
+        this(
+                available,
+                fraudScore,
+                riskLevel,
+                modelName,
+                modelVersion,
+                null,
+                inferenceTimestamp,
+                reasonCodes,
+                scoreDetails,
+                explanationMetadata,
+                fallbackReason
+        );
+    }
 }

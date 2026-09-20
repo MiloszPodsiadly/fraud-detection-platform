@@ -16,7 +16,8 @@ public record EngineIntelligenceEngineResult(
         FraudEngineStatus status,
         @JsonInclude(JsonInclude.Include.NON_NULL) RiskLevel riskLevel,
         EngineIntelligenceScoreBucket scoreBucket,
-        List<String> reasonCodes
+        List<String> reasonCodes,
+        @JsonInclude(JsonInclude.Include.NON_NULL) MlModelIdentity modelIdentity
 ) {
     public EngineIntelligenceEngineResult {
         Objects.requireNonNull(engineType, "engineType is required");
@@ -41,5 +42,33 @@ public record EngineIntelligenceEngineResult(
                 "reasonCodes"
         );
         reasonCodes.forEach(EngineIntelligenceValuePolicy::requireReasonCode);
+        validateModelIdentity(engineType, status, modelIdentity);
+    }
+
+    public EngineIntelligenceEngineResult(
+            String engineId,
+            FraudEngineType engineType,
+            FraudEngineStatus status,
+            RiskLevel riskLevel,
+            EngineIntelligenceScoreBucket scoreBucket,
+            List<String> reasonCodes
+    ) {
+        this(engineId, engineType, status, riskLevel, scoreBucket, reasonCodes, null);
+    }
+
+    private static void validateModelIdentity(
+            FraudEngineType engineType,
+            FraudEngineStatus status,
+            MlModelIdentity modelIdentity
+    ) {
+        if (modelIdentity == null) {
+            return;
+        }
+        if (engineType != FraudEngineType.ML_MODEL) {
+            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_NON_ML_MODEL_IDENTITY_INVALID");
+        }
+        if (status != FraudEngineStatus.AVAILABLE) {
+            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_OPERATIONAL_ML_MODEL_IDENTITY_INVALID");
+        }
     }
 }

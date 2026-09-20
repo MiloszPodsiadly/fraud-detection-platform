@@ -30,6 +30,9 @@ public class MlFraudScoringEngine implements FraudScoringEngine {
     @Override
     public FraudScoreResult score(FraudScoringRequest request) {
         MlModelOutput output = mlModelScoringClient.score(MlModelInput.from(request));
+        if (output.available() && missingModelIdentity(output)) {
+            return unavailableIdentityResult(request, output);
+        }
         List<ReasonCodeParseResult> parsedReasonCodes = ReasonCode.parseInputList(output.reasonCodes());
         int unsupportedReasonCodeCount = unsupportedReasonCodeCount(parsedReasonCodes);
         Map<String, Object> scoreDetails = copyOf(output.scoreDetails());
@@ -54,6 +57,7 @@ public class MlFraudScoringEngine implements FraudScoringEngine {
                 "ML",
                 output.modelName(),
                 output.modelVersion(),
+                output.featureContractVersion(),
                 output.inferenceTimestamp(),
                 ReasonCode.supportedWireValues(parsedReasonCodes),
                 scoreDetails,
@@ -63,6 +67,51 @@ public class MlFraudScoringEngine implements FraudScoringEngine {
                         || output.riskLevel() == com.frauddetection.common.events.enums.RiskLevel.CRITICAL),
                 scoringEvidence
         );
+    }
+
+    private boolean missingModelIdentity(MlModelOutput output) {
+        return isBlank(output.modelName())
+                || isBlank(output.modelVersion())
+                || isBlank(output.featureContractVersion());
+    }
+
+    private FraudScoreResult unavailableIdentityResult(FraudScoringRequest request, MlModelOutput output) {
+        String fallbackReason = "ML_MODEL_IDENTITY_MISSING";
+        Map<String, Object> scoreDetails = copyOf(output.scoreDetails());
+        scoreDetails.put("modelAvailable", false);
+        scoreDetails.put("fallbackReason", fallbackReason);
+        Map<String, Object> explanationMetadata = copyOf(output.explanationMetadata());
+        explanationMetadata.put("modelAvailable", false);
+        explanationMetadata.put("fallbackReason", fallbackReason);
+        List<ReasonCodeParseResult> parsedReasonCodes = ReasonCode.parseInputList(
+                List.of(ReasonCode.ML_MODEL_UNAVAILABLE.wireValue())
+        );
+
+        return new FraudScoreResult(
+                null,
+                null,
+                "ML",
+                output.modelName(),
+                output.modelVersion(),
+                output.featureContractVersion(),
+                output.inferenceTimestamp(),
+                ReasonCode.supportedWireValues(parsedReasonCodes),
+                scoreDetails,
+                request.featureSnapshot(),
+                explanationMetadata,
+                false,
+                scoringEvidenceFactory.modelEvidence(
+                        parsedReasonCodes,
+                        false,
+                        null,
+                        output.inferenceTimestamp(),
+                        fallbackReason
+                )
+        );
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     private int unsupportedReasonCodeCount(List<ReasonCodeParseResult> parsedReasonCodes) {

@@ -196,6 +196,22 @@ class FraudEngineResultValidationTest {
     }
 
     @Test
+    void availableMlModelRequiresCompleteRuntimeIdentity() {
+        assertThat(availableMlResult(
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                "2026-05-30.feature-contract.v1"
+        ).featureContractVersion()).isEqualTo("2026-05-30.feature-contract.v1");
+
+        assertThatThrownBy(() -> availableMlResult(null, "2026-05-30.v1", "2026-05-30.feature-contract.v1"))
+                .hasMessageContaining("AVAILABLE ML_MODEL status requires");
+        assertThatThrownBy(() -> availableMlResult("python-logistic-fraud-model", null, "2026-05-30.feature-contract.v1"))
+                .hasMessageContaining("AVAILABLE ML_MODEL status requires");
+        assertThatThrownBy(() -> availableMlResult("python-logistic-fraud-model", "2026-05-30.v1", null))
+                .hasMessageContaining("AVAILABLE ML_MODEL status requires");
+    }
+
+    @Test
     void contributionValidationIsBoundedStrictAndCompatible() {
         FraudEngineContribution contribution = contribution();
 
@@ -566,6 +582,31 @@ class FraudEngineResultValidationTest {
                 modelName,
                 modelVersion,
                 statusReason,
+                now()
+        );
+    }
+
+    private FraudEngineResult availableMlResult(
+            String modelName,
+            String modelVersion,
+            String featureContractVersion
+    ) {
+        return new FraudEngineResult(
+                "ml.python.primary",
+                FraudEngineType.ML_MODEL,
+                "python",
+                FraudEngineStatus.AVAILABLE,
+                0.4000d,
+                RiskLevel.MEDIUM,
+                FraudEngineConfidence.MEDIUM,
+                List.of("MODEL_SIGNAL"),
+                List.of(),
+                List.of(),
+                3L,
+                modelName,
+                modelVersion,
+                featureContractVersion,
+                null,
                 now()
         );
     }

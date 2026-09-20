@@ -197,6 +197,28 @@ class PythonMlSignalEngineAvailabilityStatusTest {
         assertFailure(result, FraudEngineStatus.DEGRADED, PythonMlSignalReasonCode.ML_MODEL_METADATA_MISSING);
     }
 
+    @Test
+    void modelAvailableTrueWithMissingFeatureContractVersionReturnsDegraded() {
+        FraudScoreResult source = new FraudScoreResult(
+                0.82d,
+                RiskLevel.HIGH,
+                "ML",
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                null,
+                Instant.parse("2026-05-30T09:59:59Z"),
+                List.of(),
+                Map.of(),
+                Map.of(),
+                Map.of("modelAvailable", true),
+                true
+        );
+
+        FraudSignalEvaluation result = new PythonMlSignalEngine(sourceReturning(source)).evaluate(context());
+
+        assertFailure(result, FraudEngineStatus.DEGRADED, PythonMlSignalReasonCode.ML_MODEL_METADATA_MISSING);
+    }
+
     private void assertFailure(
             FraudSignalEvaluation result,
             FraudEngineStatus expectedStatus,
