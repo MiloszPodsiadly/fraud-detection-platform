@@ -73,26 +73,35 @@ class LogisticFraudModel:
 
     def save(self, path: Path, metadata: dict[str, object] | None = None) -> None:
         """Persist a logistic model artifact."""
+        metadata = metadata or {}
+        evaluation = metadata.get("evaluation") if isinstance(metadata.get("evaluation"), dict) else {}
+        training_metadata = {key: value for key, value in metadata.items() if key != "evaluation"}
+        runtime_features = self.runtime_feature_names()
         artifact = {
             "modelName": self.model_name,
             "modelVersion": self.model_version,
             "modelType": "logistic",
             "modelFamily": self.model_family,
+            "trainingMode": self.training_mode,
+            "featureSetUsed": runtime_features,
             "bias": self.bias,
             "weights": self.weights,
             "thresholds": self.thresholds,
-            "featureSchema": self.runtime_feature_names(),
+            "thresholdPolicy": self._threshold_policy(),
+            "productionReadiness": self._production_readiness(evaluation),
+            "featureSchema": runtime_features,
             "featureContractVersion": FEATURE_CONTRACT.version,
             "featureSchemaVersion": FEATURE_CONTRACT.version,
             "featureSetVersion": FEATURE_CONTRACT.version,
             "featureImportance": self.feature_importance(),
             "training": {
-                **(metadata or {}),
+                **training_metadata,
                 "trainingMode": self.training_mode,
-                "featureSetUsed": self.runtime_feature_names(),
+                "featureSetUsed": runtime_features,
                 "featureContractVersion": FEATURE_CONTRACT.version,
                 "featureSetVersion": FEATURE_CONTRACT.version,
             },
+            "evaluation": evaluation,
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -164,6 +173,29 @@ class LogisticFraudModel:
         if not thresholds["medium"] <= thresholds["high"] <= thresholds["critical"]:
             return dict(self.DEFAULT_THRESHOLDS)
         return thresholds
+
+    def _threshold_policy(self) -> dict[str, object]:
+        return {
+            "policyVersion": "fixed-business-risk-thresholds-v1",
+            "ownership": "fixed_business_risk_thresholds",
+            "runtimeSemantics": "riskLevel bands are business-owned; alertRecommended is true for HIGH or CRITICAL",
+            "deployedAlertThresholdName": "high",
+            "deployedAlertThreshold": self.thresholds["high"],
+            "thresholds": dict(self.thresholds),
+        }
+
+    def _production_readiness(self, evaluation: dict[str, object]) -> dict[str, object]:
+        readiness = evaluation.get("productionReadiness")
+        if isinstance(readiness, dict):
+            return readiness
+        return {
+            "status": "UNKNOWN",
+            "reasons": ["PRODUCTION_READINESS_NOT_EVALUATED"],
+            "policyVersion": "fixed-business-risk-thresholds-v1",
+            "deployedAlertThresholdName": "high",
+            "deployedAlertThreshold": self.thresholds["high"],
+            "rankingMetricsAreNotSufficient": True,
+        }
 
     def _number(self, value: Any, default: float = 0.0) -> float:
         if isinstance(value, bool) or value is None:

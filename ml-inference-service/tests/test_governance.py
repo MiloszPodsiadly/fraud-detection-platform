@@ -376,7 +376,7 @@ class MlGovernancePersistenceTest(unittest.TestCase):
                 "POST",
                 "/v1/fraud/score",
                 body=(
-                    b'{"features":{"recentTransactionCount":1,"recentAmountSum":{"amount":45.0,"currency":"USD"},'
+                    b'{"features":{"recentTransactionCount":1,'
                     b'"currentTransactionAmountPln":180.0,"currency":"USD",'
                     b'"transactionVelocityPerMinute":1.0,"merchantFrequency7d":1,"deviceNovelty":false,'
                     b'"countryMismatch":false,"proxyOrVpnDetected":false,'
@@ -520,7 +520,7 @@ class MlModelLifecycleUnitTest(unittest.TestCase):
                 "POST",
                 "/v1/fraud/score",
                 body=(
-                    b'{"features":{"recentTransactionCount":1,"recentAmountSum":{"amount":45.0,"currency":"USD"},'
+                    b'{"features":{"recentTransactionCount":1,'
                     b'"currentTransactionAmountPln":180.0,"currency":"USD",'
                     b'"transactionVelocityPerMinute":1.0,"merchantFrequency7d":1,"deviceNovelty":false,'
                     b'"countryMismatch":false,"proxyOrVpnDetected":false,'
@@ -1080,7 +1080,7 @@ class MlGovernanceEndpointTest(unittest.TestCase):
     def test_inference_profile_updates_after_successful_scoring(self):
         before = self.get_json("/governance/profile/inference")["inference_profile"]["observation_count"]
         self.score(
-            b'{"features":{"recentTransactionCount":1,"recentAmountSum":{"amount":45.0,"currency":"USD"},'
+            b'{"features":{"recentTransactionCount":1,'
             b'"currentTransactionAmountPln":180.0,"currency":"USD",'
             b'"transactionVelocityPerMinute":1.0,"merchantFrequency7d":1,"deviceNovelty":false,'
             b'"countryMismatch":false,"proxyOrVpnDetected":false,'
@@ -1339,7 +1339,7 @@ class MlGovernanceEndpointTest(unittest.TestCase):
 
     def test_existing_scoring_response_contract_remains_compatible(self):
         response = self.score(
-            b'{"features":{"recentTransactionCount":8,"recentAmountSum":{"amount":7200.0,"currency":"USD"},'
+            b'{"features":{"recentTransactionCount":8,'
             b'"currentTransactionAmountPln":28800.0,"currency":"USD",'
             b'"transactionVelocityPerMinute":8.0,"merchantFrequency7d":9,"deviceNovelty":true,'
             b'"countryMismatch":true,"proxyOrVpnDetected":true,'

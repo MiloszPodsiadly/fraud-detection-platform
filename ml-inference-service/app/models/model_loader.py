@@ -42,6 +42,26 @@ def validate_model_artifact(artifact: dict[str, Any], artifact_path: Path | None
         raise ModelConfigurationError(
             f"Unsupported modelType '{model_type}'{location}. Supported values: logistic, xgboost."
         )
+    _require_top_level_fields(
+        artifact,
+        (
+            "modelName",
+            "modelVersion",
+            "modelType",
+            "modelFamily",
+            "trainingMode",
+            "featureSchema",
+            "featureContractVersion",
+            "featureSchemaVersion",
+            "featureSetVersion",
+            "thresholds",
+            "thresholdPolicy",
+            "productionReadiness",
+            "evaluation",
+            "training",
+        ),
+        location,
+    )
     training_mode = _training_mode(artifact)
     expected_schema = _expected_schema(training_mode)
     for field in ("featureContractVersion", "featureSchemaVersion", "featureSetVersion"):
@@ -80,8 +100,36 @@ def validate_model_artifact(artifact: dict[str, Any], artifact_path: Path | None
             raise ModelConfigurationError(
                 f"logistic weights schema mismatch{location}: expected keys {expected_schema}, got {actual_weight_keys!r}."
             )
-    readiness = artifact.get("productionReadiness")
-    if isinstance(readiness, dict) and readiness.get("status") == "NOT_READY":
+    _require_ready_production_readiness(artifact.get("productionReadiness"), location)
+
+
+def _require_top_level_fields(artifact: dict[str, Any], fields: tuple[str, ...], location: str) -> None:
+    missing = [field for field in fields if field not in artifact]
+    if missing:
+        raise ModelConfigurationError(f"model artifact missing required fields{location}: {missing}.")
+    object_fields = ("thresholds", "thresholdPolicy", "evaluation", "training")
+    malformed = [field for field in object_fields if not isinstance(artifact.get(field), dict)]
+    if malformed:
+        raise ModelConfigurationError(f"model artifact required object fields are malformed{location}: {malformed}.")
+
+
+def _require_ready_production_readiness(readiness: Any, location: str) -> None:
+    if not isinstance(readiness, dict):
+        raise ModelConfigurationError(f"productionReadiness must be an object{location}.")
+    required_fields = (
+        "status",
+        "reasons",
+        "policyVersion",
+        "deployedAlertThresholdName",
+        "deployedAlertThreshold",
+        "rankingMetricsAreNotSufficient",
+    )
+    missing = [field for field in required_fields if field not in readiness]
+    if missing:
+        raise ModelConfigurationError(f"productionReadiness missing required fields{location}: {missing}.")
+    if not isinstance(readiness.get("reasons"), list):
+        raise ModelConfigurationError(f"productionReadiness.reasons must be a list{location}.")
+    if readiness.get("status") != "READY":
         raise ModelConfigurationError(
             f"production readiness failed{location}: {readiness.get('reasons', [])!r}."
         )

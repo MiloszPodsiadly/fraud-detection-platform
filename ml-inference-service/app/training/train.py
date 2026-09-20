@@ -31,6 +31,7 @@ def train(
     pipeline = FeaturePipeline().fit(dataset)
     feature_rows = pipeline.transform(dataset, mode=training_mode)
     _validate_feature_set(feature_rows, pipeline.get_training_features(training_mode), training_mode)
+    _require_binary_labels(dataset.y, "TRAIN_DATASET_MUST_CONTAIN_BOTH_CLASSES")
     model = LogisticFraudModel()
     model.fit(feature_rows, dataset.y, epochs=epochs, learning_rate=learning_rate)
     return model.bias, model.weights
@@ -162,13 +163,28 @@ def _evaluate_model_on_splits(
 
 def _require_binary_evaluation_splits(splits, split_name: str) -> None:
     distribution = splits.metadata["classDistribution"]
-    for partition in ("validation", "test"):
+    reason_codes = {
+        "train": f"{split_name.upper()}_TRAIN_SPLIT_MUST_CONTAIN_BOTH_CLASSES",
+        "validation": f"{split_name.upper()}_VALIDATION_SPLIT_MUST_CONTAIN_BOTH_CLASSES",
+        "test": f"{split_name.upper()}_TEST_SPLIT_MUST_CONTAIN_BOTH_CLASSES",
+    }
+    for partition in ("train", "validation", "test"):
         counts = distribution[partition]
         if counts["fraud"] <= 0 or counts["legitimate"] <= 0:
             raise ValueError(
-                f"{split_name} {partition} split must contain fraud and legitimate examples; "
+                f"{reason_codes[partition]}: {split_name} {partition} split must contain fraud and legitimate examples; "
                 f"distribution={counts}"
             )
+
+
+def _require_binary_labels(labels: list[int], reason_code: str) -> None:
+    fraud = sum(1 for label in labels if label == 1)
+    legitimate = sum(1 for label in labels if label == 0)
+    if fraud <= 0 or legitimate <= 0:
+        raise ValueError(
+            f"{reason_code}: training data must contain fraud and legitimate examples; "
+            f"distribution={{'fraud': {fraud}, 'legitimate': {legitimate}}}"
+        )
 
 
 def train_model(
@@ -182,6 +198,7 @@ def train_model(
     pipeline = FeaturePipeline().fit(dataset)
     feature_rows = pipeline.transform(dataset, mode=training_mode)
     _validate_feature_set(feature_rows, pipeline.get_training_features(training_mode), training_mode)
+    _require_binary_labels(dataset.y, "TRAIN_DATASET_MUST_CONTAIN_BOTH_CLASSES")
     if model_type == "logistic":
         model = _new_model(model_type, training_mode, list(feature_rows[0]) if feature_rows else [])
         assert isinstance(model, LogisticFraudModel)

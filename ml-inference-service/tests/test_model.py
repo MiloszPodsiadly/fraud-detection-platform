@@ -63,6 +63,18 @@ class FraudModelTest(unittest.TestCase):
             "featureSchemaVersion": FEATURE_CONTRACT.version,
             "featureSetVersion": FEATURE_CONTRACT.version,
             "thresholds": {"medium": 0.45, "high": 0.75, "critical": 0.9},
+            "thresholdPolicy": {
+                "policyVersion": "fixed-business-risk-thresholds-v1",
+                "ownership": "fixed_business_risk_thresholds",
+                "runtimeSemantics": "riskLevel bands are business-owned; alertRecommended is true for HIGH or CRITICAL",
+                "deployedAlertThresholdName": "high",
+                "deployedAlertThreshold": 0.75,
+                "thresholds": {"medium": 0.45, "high": 0.75, "critical": 0.9},
+            },
+            "productionReadiness": self._ready_production_readiness(),
+            "evaluation": {
+                "productionReadiness": self._ready_production_readiness(),
+            },
             "training": {
                 "trainingMode": training_mode,
                 "featureSetUsed": schema,
@@ -75,10 +87,21 @@ class FraudModelTest(unittest.TestCase):
             payload["weights"] = weights or {name: 0.0 for name in schema}
         return payload
 
+    def _ready_production_readiness(self) -> dict[str, object]:
+        return {
+            "status": "READY",
+            "reasons": [],
+            "policyVersion": "fixed-business-risk-thresholds-v1",
+            "deployedAlertThresholdName": "high",
+            "deployedAlertThreshold": 0.75,
+            "temporalFraudCaptureRate": 0.5,
+            "outOfTimeFraudCaptureRate": 0.5,
+            "rankingMetricsAreNotSufficient": True,
+        }
+
     def _production_payload(self, **overrides: object) -> dict[str, object]:
         payload: dict[str, object] = {
             "recentTransactionCount": 1,
-            "recentAmountSum": {"amount": 100.0, "currency": "PLN"},
             "recentAmountSumPln": 100.0,
             "currentTransactionAmountPln": 100.0,
             "currency": "PLN",
@@ -93,6 +116,22 @@ class FraudModelTest(unittest.TestCase):
         payload.update(overrides)
         return payload
 
+    def _ordered_production_dataset(self, labels: list[int]) -> Dataset:
+        rows = [
+            self._production_payload(
+                recentTransactionCount=2 if label else 1,
+                recentAmountSumPln=20_000.0 if label else 100.0,
+                currentTransactionAmountPln=10_000.0 if label else 100.0,
+                transactionVelocityPerMinute=2.0 if label else 1.0,
+                merchantFrequency7d=6 if label else 1,
+                deviceNovelty=bool(label),
+                countryMismatch=bool(label),
+                proxyOrVpnDetected=bool(label),
+            )
+            for label in labels
+        ]
+        return Dataset(X=rows, y=labels, metadata={"source": "ordered-production-unit"})
+
     def _runtime_with_weights(self, weights: dict[str, float]) -> FraudModelRuntime:
         schema_weights = {name: 0.0 for name in FeaturePipeline.PRODUCTION_FEATURE_NAMES}
         schema_weights.update(weights)
@@ -106,7 +145,6 @@ class FraudModelTest(unittest.TestCase):
         result = FraudModel().score(
             {
                 "recentTransactionCount": 8,
-                "recentAmountSum": {"amount": 7200.0, "currency": "USD"},
                 "currentTransactionAmountPln": 28_800.0,
                 "currency": "USD",
                 "transactionVelocityPerMinute": 8.0,
@@ -129,7 +167,6 @@ class FraudModelTest(unittest.TestCase):
         result = FraudModel().score(
             {
                 "recentTransactionCount": 1,
-                "recentAmountSum": {"amount": 45.0, "currency": "USD"},
                 "currentTransactionAmountPln": 180.0,
                 "currency": "USD",
                 "transactionVelocityPerMinute": 1.0,
@@ -150,7 +187,6 @@ class FraudModelTest(unittest.TestCase):
         result = FraudModel().score(
             {
                 "recentTransactionCount": 2,
-                "recentAmountSum": {"amount": 20000.0, "currency": "PLN"},
                 "recentAmountSumPln": 20000.0,
                 "currentTransactionAmountPln": 10000.0,
                 "currency": "PLN",
@@ -171,7 +207,6 @@ class FraudModelTest(unittest.TestCase):
         result = FraudModel().score(
             {
                 "recentTransactionCount": 1,
-                "recentAmountSum": {"amount": 1000.0, "currency": "PLN"},
                 "recentAmountSumPln": 1000.0,
                 "currentTransactionAmountPln": 500.0,
                 "currency": "PLN",
@@ -287,7 +322,6 @@ class FraudModelTest(unittest.TestCase):
         normalized = FeaturePipeline().transform_single(
             {
                 "recentTransactionCount": 20,
-                "recentAmountSum": {"amount": 15000.0, "currency": "PLN"},
                 "transactionVelocityPerMinute": 20,
                 "merchantFrequency7d": 24,
                 "deviceNovelty": True,
@@ -365,6 +399,59 @@ class FraudModelTest(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "Canonical fraud feature contract is required"):
                     FeatureContract.load()
 
+    def test_production_cannot_use_fallback_contract(self):
+        with self.assertRaisesRegex(RuntimeError, "must not be fallback"):
+            FeatureContract(feature_contract_module._fallback_contract())
+
+    def test_feature_contract_required_lists_fail_closed(self):
+        cases = {
+            "missing_ml": ("mlFeatureNames", None, "mlFeatureNames must be a list"),
+            "wrong_type_ml": ("mlFeatureNames", "recentTransactionCount", "mlFeatureNames must be a list"),
+            "duplicate_ml": (
+                "mlFeatureNames",
+                [*FEATURE_CONTRACT.ml_feature_names, FEATURE_CONTRACT.ml_feature_names[0]],
+                "mlFeatureNames contains duplicates",
+            ),
+            "missing_production": ("productionInferenceFeatures", None, "productionInferenceFeatures must be a list"),
+            "wrong_type_production": (
+                "productionInferenceFeatures",
+                "recentTransactionCount",
+                "productionInferenceFeatures must be a list",
+            ),
+            "duplicate_production": (
+                "productionInferenceFeatures",
+                [*FEATURE_CONTRACT.production_inference_features, FEATURE_CONTRACT.production_inference_features[0]],
+                "productionInferenceFeatures contains duplicates",
+            ),
+        }
+        for case_name, (field, value, message) in cases.items():
+            with self.subTest(case_name=case_name):
+                payload = self._canonical_feature_contract_payload()
+                if value is None:
+                    payload.pop(field)
+                else:
+                    payload[field] = value
+
+                with self.assertRaisesRegex(RuntimeError, message):
+                    FeatureContract(payload)
+
+    def test_feature_contract_rejects_unknown_reference_keys(self):
+        cases = {
+            "unknown_availability": ("featureAvailability", "ghostFeature", "providedByJava", "featureAvailability contains unknown"),
+            "unknown_normalization": ("normalization", "ghostFeature", {"source": "ghost"}, "normalization contains unknown"),
+        }
+        for case_name, (field, key, value, message) in cases.items():
+            with self.subTest(case_name=case_name):
+                payload = self._canonical_feature_contract_payload()
+                payload[field] = {**payload[field], key: value}
+
+                with self.assertRaisesRegex(RuntimeError, message):
+                    FeatureContract(payload)
+
+    def _canonical_feature_contract_payload(self) -> dict[str, object]:
+        path = Path(__file__).resolve().parents[2] / "common-events" / "src" / "main" / "resources" / "feature-contract" / "fraud-feature-contract.json"
+        return json.loads(path.read_text(encoding="utf-8"))
+
     def test_ml_production_image_packages_canonical_feature_contract(self):
         dockerfile = (Path(__file__).resolve().parents[2] / "deployment" / "Dockerfile.ml-inference").read_text(
             encoding="utf-8"
@@ -435,7 +522,6 @@ class FraudModelTest(unittest.TestCase):
     def test_java_enriched_snapshot_normalizes_to_contract_features(self):
         payload = {
             "recentTransactionCount": 5,
-            "recentAmountSum": {"amount": 5000.0, "currency": "PLN"},
             "currentTransactionAmountPln": 5000.0,
             "currency": "PLN",
             "transactionVelocityPerMinute": 5.0,
@@ -468,7 +554,6 @@ class FraudModelTest(unittest.TestCase):
     def test_production_feature_vector_is_derived_from_current_canonical_fields(self):
         canonical = {
             "recentTransactionCount": 2,
-            "recentAmountSum": {"amount": 20000.0, "currency": "PLN"},
             "currentTransactionAmountPln": 10000.0,
             "currency": "PLN",
             "transactionVelocityPerMinute": 2.0,
@@ -492,10 +577,39 @@ class FraudModelTest(unittest.TestCase):
             pipeline.transform_single(additive_transport_overlay, mode="production"),
         )
 
+    def test_legacy_recent_amount_sum_additive_field_is_ignored(self):
+        canonical = {
+            "recentTransactionCount": 2,
+            "recentAmountSumPln": 1000.0,
+            "currentTransactionAmountPln": 500.0,
+            "currency": "GBP",
+            "transactionVelocityPerMinute": 2.0,
+            "merchantFrequency7d": 1,
+            "deviceNovelty": False,
+            "countryMismatch": False,
+            "proxyOrVpnDetected": False,
+            "recentTransactionCountWindow": "PT1M",
+            "recentAmountSumWindow": "PT1M",
+        }
+        legacy_overlay = {
+            **canonical,
+            "recentAmountSum": {"amount": 200.0, "currency": "GBP"},
+        }
+
+        pipeline = FeaturePipeline()
+
+        self.assertEqual(
+            pipeline.transform_single(canonical, mode="production"),
+            pipeline.transform_single(legacy_overlay, mode="production"),
+        )
+        self.assertEqual(
+            pipeline.validate_production_snapshot(canonical),
+            pipeline.validate_production_snapshot(legacy_overlay),
+        )
+
     def test_production_monetary_feature_uses_normalized_pln_basis_for_supported_currencies(self):
         payload = {
             "recentTransactionCount": 2,
-            "recentAmountSum": {"amount": 200.0, "currency": "GBP"},
             "recentAmountSumPln": 1000.0,
             "currentTransactionAmountPln": 500.0,
             "currency": "GBP",
@@ -521,7 +635,6 @@ class FraudModelTest(unittest.TestCase):
         _, weights, evaluation = train_with_evaluation(dataset, epochs=2, learning_rate=0.1)
         payload = {
             "recentTransactionCount": 5,
-            "recentAmountSum": {"amount": 5000.0, "currency": "PLN"},
             "currentTransactionAmountPln": 5000.0,
             "currency": "PLN",
             "transactionVelocityPerMinute": 5.0,
@@ -548,7 +661,6 @@ class FraudModelTest(unittest.TestCase):
         compatibility = FeaturePipeline().validate_production_snapshot(
             {
                 "recentTransactionCount": 5,
-                "recentAmountSum": {"amount": 5000.0},
             }
         )
 
@@ -563,7 +675,6 @@ class FraudModelTest(unittest.TestCase):
         result = FraudModel().score(
             {
                 "recentTransactionCount": 2,
-                "recentAmountSum": {"amount": 20000.0, "currency": "PLN"},
                 "recentAmountSumPln": 20000.0,
                 "currentTransactionAmountPln": 10000.0,
                 "currency": "PLN",
@@ -613,7 +724,6 @@ class FraudModelTest(unittest.TestCase):
     def test_runtime_fails_closed_for_present_invalid_canonical_features(self):
         valid = {
             "recentTransactionCount": 2,
-            "recentAmountSum": {"amount": 20000.0, "currency": "PLN"},
             "recentAmountSumPln": 20000.0,
             "currentTransactionAmountPln": 10000.0,
             "currency": "PLN",
@@ -837,6 +947,11 @@ class FraudModelTest(unittest.TestCase):
             "productionReadiness": {
                 "status": "NOT_READY",
                 "reasons": ["OUT_OF_TIME_DEPLOYED_ALERT_THRESHOLD_ZERO_FRAUD_CAPTURE"],
+                "policyVersion": "fixed-business-risk-thresholds-v1",
+                "deployedAlertThresholdName": "high",
+                "deployedAlertThreshold": 0.75,
+                "temporalFraudCaptureRate": 0.5,
+                "outOfTimeFraudCaptureRate": 0.0,
                 "rankingMetricsAreNotSufficient": True,
             },
         }
@@ -940,6 +1055,37 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(splits.metadata["strategy"], "out_of_time")
         self.assertLess(max(train_timestamps), min(test_timestamps))
 
+    def test_training_lifecycle_rejects_single_class_train_split_before_fit(self):
+        dataset = self._ordered_production_dataset([0, 0, 0, 0, 0, 0, 0, 1, 0, 1])
+
+        with patch.object(LogisticFraudModel, "fit", side_effect=AssertionError("fit must not run")):
+            with self.assertRaisesRegex(ValueError, "TEMPORAL_TRAIN_SPLIT_MUST_CONTAIN_BOTH_CLASSES"):
+                train_model_with_evaluation(dataset, "logistic", epochs=2, learning_rate=0.1)
+
+    def test_training_lifecycle_rejects_single_class_validation_split_before_fit(self):
+        dataset = self._ordered_production_dataset([0, 0, 0, 0, 0, 1, 0, 0, 0, 1])
+
+        with patch.object(LogisticFraudModel, "fit", side_effect=AssertionError("fit must not run")):
+            with self.assertRaisesRegex(ValueError, "TEMPORAL_VALIDATION_SPLIT_MUST_CONTAIN_BOTH_CLASSES"):
+                train_model_with_evaluation(dataset, "logistic", epochs=2, learning_rate=0.1)
+
+    def test_training_lifecycle_rejects_single_class_test_split_before_fit(self):
+        dataset = self._ordered_production_dataset([0, 0, 0, 0, 0, 1, 0, 1, 0, 0])
+
+        with patch.object(LogisticFraudModel, "fit", side_effect=AssertionError("fit must not run")):
+            with self.assertRaisesRegex(ValueError, "TEMPORAL_TEST_SPLIT_MUST_CONTAIN_BOTH_CLASSES"):
+                train_model_with_evaluation(dataset, "logistic", epochs=2, learning_rate=0.1)
+
+    def test_training_lifecycle_accepts_binary_train_validation_and_test_splits(self):
+        dataset = self._ordered_production_dataset([0, 0, 0, 0, 0, 1, 0, 1, 0, 1])
+
+        _, evaluation = train_model_with_evaluation(dataset, "logistic", epochs=2, learning_rate=0.1)
+
+        distribution = evaluation["splitMetadata"]["classDistribution"]
+        self.assertGreater(distribution["train"]["fraud"], 0)
+        self.assertGreater(distribution["validation"]["fraud"], 0)
+        self.assertGreater(distribution["test"]["fraud"], 0)
+
     def test_evaluation_metrics_include_ranking_business_and_thresholds(self):
         report = evaluate_scores(
             y_true=[0, 1, 0, 1, 0],
@@ -976,7 +1122,7 @@ class FraudModelTest(unittest.TestCase):
                 "modelScore": 0.87,
                 "featureSnapshot": {
                     "recentTransactionCount": 5,
-                    "recentAmountSum": {"amount": 7000.0},
+                    "recentAmountSumPln": 7000.0,
                     "transactionVelocityPerMinute": 5.0,
                     "merchantFrequency7d": 2,
                     "deviceNovelty": True,
@@ -1192,7 +1338,6 @@ class FraudModelTest(unittest.TestCase):
             comparison = model.compare_with(
                 {
                     "recentTransactionCount": 5,
-                    "recentAmountSum": {"amount": 5000.0, "currency": "PLN"},
                     "recentAmountSumPln": 5000.0,
                     "currentTransactionAmountPln": 5000.0,
                     "currency": "PLN",
@@ -1210,7 +1355,6 @@ class FraudModelTest(unittest.TestCase):
             invalid_comparison = model.compare_with(
                 {
                     "recentTransactionCount": "5",
-                    "recentAmountSum": {"amount": 5000.0, "currency": "PLN"},
                     "recentAmountSumPln": 5000.0,
                     "currentTransactionAmountPln": 5000.0,
                     "currency": "PLN",
@@ -1313,6 +1457,50 @@ class FraudModelTest(unittest.TestCase):
             if artifact_path.exists():
                 artifact_path.unlink()
 
+    def test_missing_production_readiness_is_rejected(self):
+        artifact_path = Path.cwd() / "loader-missing-readiness-artifact.json"
+        artifact = self._artifact_payload("loader-missing-readiness-v1")
+        artifact.pop("productionReadiness")
+        try:
+            artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+            with self.assertRaisesRegex(ModelConfigurationError, "missing required fields"):
+                load_model_from_artifact(artifact_path)
+        finally:
+            if artifact_path.exists():
+                artifact_path.unlink()
+
+    def test_malformed_production_readiness_is_rejected(self):
+        cases = {
+            "null": None,
+            "string": "READY",
+            "unknown_status": {**self._ready_production_readiness(), "status": "UNKNOWN"},
+            "malformed_reasons": {**self._ready_production_readiness(), "reasons": "none"},
+        }
+        for case_name, readiness in cases.items():
+            with self.subTest(case_name=case_name):
+                artifact_path = Path.cwd() / f"loader-{case_name}-readiness-artifact.json"
+                artifact = self._artifact_payload(f"loader-{case_name}-readiness-v1")
+                artifact["productionReadiness"] = readiness
+                try:
+                    artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+                    with self.assertRaisesRegex(ModelConfigurationError, "productionReadiness|production readiness failed"):
+                        load_model_from_artifact(artifact_path)
+                finally:
+                    if artifact_path.exists():
+                        artifact_path.unlink()
+
+    def test_xgboost_artifact_without_readiness_is_rejected_before_model_load(self):
+        artifact_path = Path.cwd() / "loader-xgboost-missing-readiness-artifact.json"
+        artifact = self._artifact_payload("xgboost-missing-readiness-v1", model_type="xgboost")
+        artifact.pop("productionReadiness")
+        try:
+            artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+            with self.assertRaisesRegex(ModelConfigurationError, "missing required fields"):
+                load_model_from_artifact(artifact_path)
+        finally:
+            if artifact_path.exists():
+                artifact_path.unlink()
+
     def test_registry_artifact_cannot_bypass_contract_validation(self):
         artifact_path = Path.cwd() / "registry-invalid-artifact.json"
         registry_path = Path.cwd() / "registry-invalid"
@@ -1336,10 +1524,78 @@ class FraudModelTest(unittest.TestCase):
                         child.rmdir()
                 registry_path.rmdir()
 
+    def test_registry_selected_not_ready_artifact_is_rejected(self):
+        artifact_path = Path.cwd() / "registry-not-ready-artifact.json"
+        registry_path = Path.cwd() / "registry-not-ready"
+        artifact = self._artifact_payload("registry-not-ready-v1")
+        artifact["productionReadiness"] = {
+            **self._ready_production_readiness(),
+            "status": "NOT_READY",
+            "reasons": ["UNIT_TEST_NOT_READY"],
+        }
+        try:
+            artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+            registry = ModelRegistry(registry_path)
+            registry.register(artifact_path, "registry-not-ready-v1", "logistic", role="champion")
+
+            with self.assertRaisesRegex(ModelConfigurationError, "production readiness failed"):
+                FraudModel(artifact_path=Path.cwd() / "missing-artifact.json", registry=registry)
+        finally:
+            if artifact_path.exists():
+                artifact_path.unlink()
+            if registry_path.exists():
+                for child in sorted(registry_path.rglob("*"), reverse=True):
+                    if child.is_file():
+                        child.unlink()
+                    elif child.is_dir():
+                        child.rmdir()
+                registry_path.rmdir()
+
     def test_optional_xgboost_model_fails_clearly_when_dependency_is_missing(self):
         if importlib.util.find_spec("xgboost") is None:
             with self.assertRaisesRegex(RuntimeError, "xgboost"):
                 XGBoostFraudModel()
+
+    def test_logistic_save_writes_strict_readiness_envelope(self):
+        schema = list(FeaturePipeline.PRODUCTION_FEATURE_NAMES)
+        artifact = self._artifact_payload(feature_schema=schema, weights={name: 0.01 for name in schema})
+        model = LogisticFraudModel(artifact)
+        artifact_path = Path.cwd() / "logistic-save-artifact.json"
+        try:
+            model.save(
+                artifact_path,
+                metadata={
+                    "examples": 100,
+                    "evaluation": {"productionReadiness": self._ready_production_readiness()},
+                },
+            )
+            saved = json.loads(artifact_path.read_text(encoding="utf-8"))
+            loaded = load_model_from_artifact(artifact_path)
+        finally:
+            if artifact_path.exists():
+                artifact_path.unlink()
+
+        self.assertEqual(saved["thresholdPolicy"]["deployedAlertThresholdName"], "high")
+        self.assertEqual(saved["productionReadiness"]["status"], "READY")
+        self.assertEqual(saved["training"]["examples"], 100)
+        self.assertIsInstance(loaded, LogisticFraudModel)
+
+    def test_logistic_save_without_readiness_is_not_loadable(self):
+        schema = list(FeaturePipeline.PRODUCTION_FEATURE_NAMES)
+        artifact = self._artifact_payload(feature_schema=schema, weights={name: 0.01 for name in schema})
+        model = LogisticFraudModel(artifact)
+        artifact_path = Path.cwd() / "logistic-save-not-ready-artifact.json"
+        try:
+            model.save(artifact_path, metadata={"examples": 100})
+            saved = json.loads(artifact_path.read_text(encoding="utf-8"))
+            with self.assertRaisesRegex(ModelConfigurationError, "production readiness failed"):
+                load_model_from_artifact(artifact_path)
+        finally:
+            if artifact_path.exists():
+                artifact_path.unlink()
+
+        self.assertEqual(saved["productionReadiness"]["status"], "UNKNOWN")
+        self.assertEqual(saved["productionReadiness"]["reasons"], ["PRODUCTION_READINESS_NOT_EVALUATED"])
 
     @unittest.skipUnless(importlib.util.find_spec("xgboost") is not None, "optional xgboost package is not installed")
     def test_xgboost_training_inference_and_artifact_loading_when_dependency_exists(self):
@@ -1349,7 +1605,13 @@ class FraudModelTest(unittest.TestCase):
         score = model.predict_proba(sample)
         artifact_path = Path.cwd() / "xgboost-artifact.json"
         try:
-            model.save(artifact_path, metadata={"examples": dataset.size})
+            model.save(
+                artifact_path,
+                metadata={
+                    "examples": dataset.size,
+                    "evaluation": {"productionReadiness": self._ready_production_readiness()},
+                },
+            )
             loaded = load_model_from_artifact(artifact_path)
             loaded_score = loaded.predict_proba(sample)
         finally:

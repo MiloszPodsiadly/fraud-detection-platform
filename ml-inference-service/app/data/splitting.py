@@ -160,7 +160,7 @@ def _out_of_time_binary_boundaries(
     list[tuple[int, tuple[dict[str, Any], int]]],
     list[tuple[int, tuple[dict[str, Any], int]]],
 ]:
-    if _has_both_classes(validation_rows) and _has_both_classes(test_rows):
+    if _has_both_classes(train_rows) and _has_both_classes(validation_rows) and _has_both_classes(test_rows):
         return train_rows, validation_rows, test_rows
     original_train_end = len(train_rows)
     original_validation_end = len(train_rows) + len(validation_rows)
@@ -171,7 +171,12 @@ def _out_of_time_binary_boundaries(
             candidate_test = indexed_rows[validation_end:]
             if not candidate_test:
                 continue
-            if not _has_both_classes(candidate_validation) or not _has_both_classes(candidate_test):
+            candidate_train = indexed_rows[:train_end]
+            if (
+                    not _has_both_classes(candidate_train)
+                    or not _has_both_classes(candidate_validation)
+                    or not _has_both_classes(candidate_test)
+            ):
                 continue
             distance = abs(train_end - original_train_end) + abs(validation_end - original_validation_end)
             if best is None or distance < best[0]:

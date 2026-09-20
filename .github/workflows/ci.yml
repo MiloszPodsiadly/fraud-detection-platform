@@ -31,18 +31,8 @@ jobs:
           java-version: "21"
           cache: maven
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-
-      - name: Install ML dependencies for artifact generation
-        run: pip install -r ml-inference-service/requirements.txt
-
-      - name: Generate shadow model artifact for backend tests
-        run: python -m app.train_model --examples 1000 --epochs 20 --output /tmp/model_artifact.json
-        env:
-          PYTHONPATH: ml-inference-service
+      - name: Use canonical ready shadow model artifact for backend tests
+        run: cp ml-inference-service/app/model_artifact.json /tmp/model_artifact.json
 
       - name: Generate local identity fixtures and manifests for backend tests
         run: bash scripts/bootstrap-local-fixtures.sh
@@ -254,7 +244,7 @@ jobs:
           PYTHONPATH: ml-inference-service
 
       - name: Validate trained model artifact loads
-        run: python -m app.train_model --examples 1000 --epochs 20 --output /tmp/model_artifact.json
+        run: python -m app.train_model --examples 5000 --epochs 1100 --output /tmp/model_artifact.json
         env:
           PYTHONPATH: ml-inference-service
 

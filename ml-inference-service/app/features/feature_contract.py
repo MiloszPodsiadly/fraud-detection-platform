@@ -20,6 +20,17 @@ _FALLBACK_ML_FEATURE_NAMES = [
     "suspiciousFactRatio",
     "rapidTransferBurst",
 ]
+_REQUIRED_CONTRACT_FIELDS = (
+    "version",
+    "mlFeatureNames",
+    "javaEnrichedFeatureNames",
+    "productionInferenceFeatures",
+    "normalization",
+    "featureAvailability",
+    "supportedCurrencies",
+    "productionFeatureSemantics",
+    "strictTypingExpectations",
+)
 
 
 class FeatureContract:
@@ -39,11 +50,7 @@ class FeatureContract:
             return FeatureContract(payload)
         if _fallback_allowed():
             return FeatureContract(
-                {
-                    "version": "fallback",
-                    "mlFeatureNames": _FALLBACK_ML_FEATURE_NAMES,
-                    "productionInferenceFeatures": _FALLBACK_ML_FEATURE_NAMES,
-                },
+                _fallback_contract(),
                 allow_fallback=True,
             )
         raise RuntimeError(
@@ -53,45 +60,59 @@ class FeatureContract:
         )
 
     def __init__(self, contract: dict[str, Any], allow_fallback: bool = False) -> None:
-        self.version = str(contract.get("version", "fallback"))
-        self.ml_feature_names = self._list(contract.get("mlFeatureNames"), _FALLBACK_ML_FEATURE_NAMES)
-        self.java_enriched_feature_names = self._list(contract.get("javaEnrichedFeatureNames"), [])
-        self.production_inference_features = self._list(
-            contract.get("productionInferenceFeatures"),
-            self.ml_feature_names,
-        )
-        self.normalization = contract.get("normalization") if isinstance(contract.get("normalization"), dict) else {}
-        self.feature_availability = contract.get("featureAvailability") if isinstance(contract.get("featureAvailability"), dict) else {}
-        self.supported_currencies = self._list(contract.get("supportedCurrencies"), [])
-        self.production_feature_semantics = (
-            contract.get("productionFeatureSemantics")
-            if isinstance(contract.get("productionFeatureSemantics"), dict)
-            else {}
-        )
-        self.strict_typing_expectations = (
-            contract.get("strictTypingExpectations")
-            if isinstance(contract.get("strictTypingExpectations"), dict)
-            else {}
-        )
+        self._field_names = set(contract)
+        self.version = _required_string(contract, "version")
+        self.ml_feature_names = _required_string_list(contract, "mlFeatureNames")
+        self.java_enriched_feature_names = _required_string_list(contract, "javaEnrichedFeatureNames")
+        self.production_inference_features = _required_string_list(contract, "productionInferenceFeatures")
+        self.normalization = _required_dict(contract, "normalization")
+        self.feature_availability = _required_dict(contract, "featureAvailability")
+        self.supported_currencies = _required_string_list(contract, "supportedCurrencies")
+        self.production_feature_semantics = _required_dict(contract, "productionFeatureSemantics")
+        self.strict_typing_expectations = _required_dict(contract, "strictTypingExpectations")
         self._validate(allow_fallback=allow_fallback)
 
-    def _list(self, value: Any, fallback: list[str]) -> list[str]:
-        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-            return list(fallback)
-        return list(value)
-
     def _validate(self, allow_fallback: bool = False) -> None:
-        if not self.version or self.version == "fallback":
-            if allow_fallback:
-                return
+        if not self.version or (self.version == "fallback" and not allow_fallback):
             raise RuntimeError("Feature contract version must be present and must not be fallback.")
+        for field in _REQUIRED_CONTRACT_FIELDS:
+            if field not in self._raw_contract_fields:
+                raise RuntimeError(f"Feature contract {field} must be present.")
         _require_unique_strings("mlFeatureNames", self.ml_feature_names)
+        _require_unique_strings("javaEnrichedFeatureNames", self.java_enriched_feature_names)
         _require_unique_strings("productionInferenceFeatures", self.production_inference_features)
+        _require_unique_strings("supportedCurrencies", self.supported_currencies)
         if not self.production_inference_features:
             raise RuntimeError("Feature contract productionInferenceFeatures must not be empty.")
         missing = [name for name in self.production_inference_features if name not in self.ml_feature_names]
         if missing:
             raise RuntimeError(f"Production inference features missing from mlFeatureNames: {missing}")
+        semantic_keys = set(self.production_feature_semantics)
+        if semantic_keys != set(self.production_inference_features):
+            raise RuntimeError(
+                "Feature contract productionFeatureSemantics must exactly match productionInferenceFeatures: "
+                f"missing={sorted(set(self.production_inference_features) - semantic_keys)}; "
+                f"unexpected={sorted(semantic_keys - set(self.production_inference_features))}"
+            )
+        known_features = (
+            set(self.ml_feature_names)
+            | set(self.java_enriched_feature_names)
+            | set(self.production_inference_features)
+            | set(self.feature_availability)
+        )
+        unknown_normalization = sorted(set(self.normalization) - known_features)
+        if unknown_normalization:
+            raise RuntimeError(f"Feature contract normalization contains unknown features: {unknown_normalization}")
+        declared_features = (
+            set(self.ml_feature_names)
+            | set(self.java_enriched_feature_names)
+            | set(self.production_inference_features)
+            | set(self.normalization)
+            | set(self.production_feature_semantics)
+        )
+        unknown_availability = sorted(set(self.feature_availability) - declared_features)
+        if unknown_availability:
+            raise RuntimeError(f"Feature contract featureAvailability contains unknown features: {unknown_availability}")
         for name in self.production_inference_features:
             if name not in self.production_feature_semantics:
                 raise RuntimeError(f"Missing production feature semantics for {name}.")
@@ -99,6 +120,10 @@ class FeatureContract:
             raise RuntimeError("Feature contract supportedCurrencies must not be empty.")
         if not isinstance(self.strict_typing_expectations.get("windows"), dict):
             raise RuntimeError("Feature contract strictTypingExpectations.windows must be present.")
+
+    @property
+    def _raw_contract_fields(self) -> set[str]:
+        return set(self._field_names)
 
 
 def _contract_path() -> Path | None:
@@ -120,6 +145,78 @@ def _contract_path() -> Path | None:
 
 def _fallback_allowed() -> bool:
     return os.getenv(ALLOW_FALLBACK_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _fallback_contract() -> dict[str, Any]:
+    return {
+        "version": "fallback",
+        "mlFeatureNames": _FALLBACK_ML_FEATURE_NAMES,
+        "javaEnrichedFeatureNames": [
+            "recentTransactionCount",
+            "recentTransactionCountWindow",
+            "recentAmountSumWindow",
+            "recentAmountSumPln",
+            "currentTransactionAmountPln",
+            "transactionVelocityPerMinute",
+            "merchantFrequency7d",
+            "deviceNovelty",
+            "countryMismatch",
+            "proxyOrVpnDetected",
+            "currency",
+        ],
+        "productionInferenceFeatures": _FALLBACK_ML_FEATURE_NAMES,
+        "normalization": {name: {"source": "fallback"} for name in _FALLBACK_ML_FEATURE_NAMES},
+        "featureAvailability": {
+            "recentTransactionCount": "providedByJava",
+            "recentTransactionCountWindow": "providedByJava",
+            "recentAmountSumWindow": "providedByJava",
+            "recentAmountSumPln": "providedByJava",
+            "currentTransactionAmountPln": "providedByJava",
+            "currency": "providedByJava",
+            "transactionVelocityPerMinute": "providedByJava",
+            "merchantFrequency7d": "providedByJava",
+            "deviceNovelty": "providedByJava",
+            "countryMismatch": "providedByJava",
+            "proxyOrVpnDetected": "providedByJava",
+            "suspiciousFactRatio": "derivedInPython",
+            "rapidTransferBurst": "derivedInPython",
+        },
+        "supportedCurrencies": ["PLN", "EUR", "USD", "GBP"],
+        "productionFeatureSemantics": {
+            name: {"type": "fallback", "unit": "fallback", "window": "fallback", "source": "test fallback"}
+            for name in _FALLBACK_ML_FEATURE_NAMES
+        },
+        "strictTypingExpectations": {
+            "windows": {
+                "recentTransactionCountWindow": "PT1M",
+                "recentAmountSumWindow": "PT1M",
+            }
+        },
+    }
+
+
+def _required_string(contract: dict[str, Any], name: str) -> str:
+    value = contract.get(name)
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeError(f"Feature contract {name} must be a non-blank string.")
+    return value
+
+
+def _required_string_list(contract: dict[str, Any], name: str) -> list[str]:
+    value = contract.get(name)
+    if not isinstance(value, list):
+        raise RuntimeError(f"Feature contract {name} must be a list.")
+    invalid = [item for item in value if not isinstance(item, str) or not item.strip()]
+    if invalid:
+        raise RuntimeError(f"Feature contract {name} must contain only non-blank strings.")
+    return list(value)
+
+
+def _required_dict(contract: dict[str, Any], name: str) -> dict[str, Any]:
+    value = contract.get(name)
+    if not isinstance(value, dict):
+        raise RuntimeError(f"Feature contract {name} must be an object.")
+    return dict(value)
 
 
 def _require_unique_strings(name: str, values: list[str]) -> None:
