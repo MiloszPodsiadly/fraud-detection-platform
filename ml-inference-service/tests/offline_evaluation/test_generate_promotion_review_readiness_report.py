@@ -32,14 +32,14 @@ from offline_evaluation.promotion_review_readiness_schema import (
     promotion_review_readiness_report_json,
     validate_promotion_review_readiness_report,
 )
-from offline_evaluation.fdp123.timestamp_contract import timestamp_instant
+from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import timestamp_instant
 from offline_evaluation.shadow_performance_artifact_set import (
     ShadowPerformanceArtifactSetError,
     build_shadow_performance_manifest,
     read_validated_shadow_performance_artifact_set,
 )
 from offline_evaluation.shadow_performance_summary import build_shadow_performance_summary
-from fdp123.evaluation_card.test_schema import (
+from feedback_dataset_evaluation.evaluation_card.test_schema import (
     INVALID_CANONICAL_TIMESTAMPS,
     VALID_CANONICAL_TIMESTAMPS,
     valid_evaluation_card,
@@ -608,7 +608,7 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
         with self.assertRaises(PromotionReviewReadinessValidationError):
             validate_promotion_review_readiness_report(report)
 
-    def test_rejectsCountsAboveFdp123Limit(self):
+    def test_rejectsCountsAboveFeedbackDatasetLimit(self):
         for field in ("recordsEvaluated", "minimumDiagnosticEvidenceRecords"):
             report = build_report()
             report["inputs"][field] = 1001

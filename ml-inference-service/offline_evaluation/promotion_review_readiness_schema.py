@@ -4,11 +4,11 @@ import re
 from typing import Any
 
 from offline_evaluation.json_contract import JsonContractError, dumps_strict_json, require_finite_number
-from offline_evaluation.fdp123.evaluation_card.schema import (
+from offline_evaluation.feedback_dataset_evaluation.evaluation_card.schema import (
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION,
 )
-from offline_evaluation.fdp123.timestamp_contract import (
+from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import (
     TimestampContractError,
     normalize_rfc3339_timestamp,
     timestamp_instant,
