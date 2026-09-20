@@ -12,7 +12,9 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 
+import java.io.File;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.net.ServerSocket;
 import java.net.URI;
@@ -24,9 +26,14 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.jar.Attributes;
+import java.util.jar.JarOutputStream;
+import java.util.jar.Manifest;
+import java.util.regex.Pattern;
 
 public final class RegulatedMutationAlertServiceProcessChaosHarness implements AutoCloseable {
 
@@ -167,7 +174,7 @@ public final class RegulatedMutationAlertServiceProcessChaosHarness implements A
         servicePort = freePort();
         try {
             Files.createDirectories(logDirectory);
-            serviceProcess = new ProcessBuilder(alertServiceCommand(additionalArgs))
+            serviceProcess = new ProcessBuilder(alertServiceCommand(logName, additionalArgs))
                     .directory(Path.of("").toAbsolutePath().toFile())
                     .redirectOutput(logDirectory.resolve(logName + "-stdout.log").toFile())
                     .redirectError(logDirectory.resolve(logName + "-stderr.log").toFile())
@@ -253,11 +260,11 @@ public final class RegulatedMutationAlertServiceProcessChaosHarness implements A
         }
     }
 
-    private List<String> alertServiceCommand(List<String> additionalArgs) {
+    private List<String> alertServiceCommand(String logName, List<String> additionalArgs) {
         List<String> command = new ArrayList<>();
         command.add(javaExecutable());
         command.add("-cp");
-        command.add(testClasspath());
+        command.add(classpathManifestJar(logName).toString());
         command.add(ALERT_SERVICE_MAIN_CLASS);
         command.add("--server.port=" + servicePort);
         command.add("--spring.profiles.active=test");
@@ -277,6 +284,39 @@ public final class RegulatedMutationAlertServiceProcessChaosHarness implements A
         command.add("--logging.level.root=WARN");
         command.addAll(additionalArgs);
         return command;
+    }
+
+    private Path classpathManifestJar(String logName) {
+        try {
+            Files.createDirectories(logDirectory);
+            Path jarPath = logDirectory.resolve(safeFileName(logName) + "-classpath.jar");
+            Manifest manifest = new Manifest();
+            Attributes attributes = manifest.getMainAttributes();
+            attributes.put(Attributes.Name.MANIFEST_VERSION, "1.0");
+            attributes.put(Attributes.Name.CLASS_PATH, manifestClasspath());
+            try (OutputStream output = Files.newOutputStream(jarPath);
+                    JarOutputStream ignored = new JarOutputStream(output, manifest)) {
+                // The manifest carries the classpath; no entries are required in this helper jar.
+            }
+            return jarPath;
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Unable to write FDP-36 alert-service classpath manifest", exception);
+        }
+    }
+
+    private String manifestClasspath() {
+        List<String> entries = Arrays.stream(testClasspath().split(Pattern.quote(File.pathSeparator)))
+                .filter(entry -> !entry.isBlank())
+                .map(entry -> Path.of(entry).toUri().toASCIIString())
+                .toList();
+        if (entries.isEmpty()) {
+            throw new IllegalStateException("FDP-36 alert-service test classpath is empty");
+        }
+        return String.join(" ", entries);
+    }
+
+    private String safeFileName(String value) {
+        return value.replaceAll("[^A-Za-z0-9._-]", "_");
     }
 
     private JsonNode requestJson(HttpRequest request) {
