@@ -344,7 +344,7 @@ function promotionReadinessCheckInputs() {
     evaluation: {
       evaluationCardType: "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
       evaluationCardVersion: "platform-recommendation-evaluation-card-v1",
-      evaluationReportType: "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"
+      evaluationReportType: "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"
     },
     metricBasis: "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK",
     minimumDiagnosticEvidenceRecords: 1,

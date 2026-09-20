@@ -25,6 +25,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceCompariso
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
+import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationConfidence;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationNonDecisioning;
@@ -139,6 +140,34 @@ class FraudFeedbackServiceTest {
                         "token",
                         "secret"
                 );
+    }
+
+    @Test
+    void snapshotsMlIdentityFromPersistedEngineIntelligenceProjection() {
+        when(engineIntelligenceReadService.read("txn-1")).thenReturn(projectedEngineIntelligenceWithAvailableMl(
+                "python-logistic-fraud-model",
+                "2026-06-25.v1",
+                "feature-contract-v2"
+        ));
+
+        service.create("txn-1", request());
+
+        assertThat(savedRecords).singleElement().satisfies(record -> {
+            assertThat(record.getMlModelName()).isEqualTo("python-logistic-fraud-model");
+            assertThat(record.getMlModelVersion()).isEqualTo("2026-06-25.v1");
+            assertThat(record.getMlFeatureContractVersion()).isEqualTo("feature-contract-v2");
+        });
+    }
+
+    @Test
+    void doesNotBackfillMlIdentityWhenProjectionHasNoAvailableMlIdentity() {
+        service.create("txn-1", request());
+
+        assertThat(savedRecords).singleElement().satisfies(record -> {
+            assertThat(record.getMlModelName()).isNull();
+            assertThat(record.getMlModelVersion()).isNull();
+            assertThat(record.getMlFeatureContractVersion()).isNull();
+        });
     }
 
     @Test
@@ -650,6 +679,44 @@ class FraudFeedbackServiceTest {
                                 null,
                                 EngineIntelligenceScoreBucket.UNAVAILABLE,
                                 List.of("ML_MODEL_TIMEOUT")
+                        )
+                ),
+                List.of(),
+                List.of()
+        );
+    }
+
+    private EngineIntelligenceReadModel projectedEngineIntelligenceWithAvailableMl(
+            String modelName,
+            String modelVersion,
+            String featureContractVersion
+    ) {
+        return EngineIntelligenceReadModel.projected(
+                "txn-1",
+                1,
+                Instant.parse("2026-06-25T09:00:03Z"),
+                new EngineIntelligenceComparisonReadModel(
+                        EngineIntelligenceAgreementStatus.AGREEMENT,
+                        EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                        EngineIntelligenceScoreDeltaBucket.SMALL
+                ),
+                List.of(
+                        new EngineIntelligenceEngineReadModel(
+                                "rules.primary",
+                                FraudEngineType.RULES,
+                                FraudEngineStatus.AVAILABLE,
+                                RiskLevel.CRITICAL,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("HIGH_TRANSACTION_AMOUNT")
+                        ),
+                        new EngineIntelligenceEngineReadModel(
+                                "ml.python.primary",
+                                FraudEngineType.ML_MODEL,
+                                FraudEngineStatus.AVAILABLE,
+                                RiskLevel.CRITICAL,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("MODEL_HIGH_RISK"),
+                                new MlModelIdentity(modelName, modelVersion, featureContractVersion)
                         )
                 ),
                 List.of(),

@@ -11,7 +11,7 @@ const REQUIRED_EVALUATION_SUBJECT = {
   featureContractVersion: "NOT_APPLICABLE",
   modelIdentity: "NOT_AVAILABLE",
   modelArtifactSha256: "NOT_AVAILABLE",
-  identityCompleteness: "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
+  identityCompleteness: "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
 };
 const REQUIRED_GOVERNANCE = {
   governanceStatus: "DIAGNOSTIC_ONLY",
@@ -26,9 +26,9 @@ const REQUIRED_EVALUATION = {
   evaluationCardType: "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
   evaluationCardVersion: "platform-recommendation-evaluation-card-v1",
   evaluationPurpose: "OFFLINE_DIAGNOSTIC",
-  evaluationReportType: "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+  evaluationReportType: "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
   evaluationReportVersion: "FDP-124",
-  evaluationArtifactSetVersion: "fdp123-report-artifact-set-v1",
+  evaluationArtifactSetVersion: "feedback-dataset-evaluation-report-artifact-set-v1",
   datasetVersion: "feedback-dataset-v1",
   datasetTimeBasis: "FEEDBACK_CREATED_AT"
 };
@@ -325,7 +325,7 @@ function ShadowPerformanceNoCurrentSummary({ onRetry }) {
           To display metrics, the backend environment must provide a current validated Shadow Performance Summary produced from the governed artifact chain:
         </p>
         <ol className="shadowPerformanceChain">
-          <li>FDP-123 bounded feedback dataset</li>
+          <li>bounded feedback dataset</li>
           <li>FDP-124 evaluation artifact set</li>
           <li>Platform Recommendation Evaluation Card v1 artifact set</li>
           <li>Shadow Performance Summary v2</li>

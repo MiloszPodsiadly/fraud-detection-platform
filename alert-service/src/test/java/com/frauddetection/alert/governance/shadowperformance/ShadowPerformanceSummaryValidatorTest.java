@@ -119,8 +119,8 @@ class ShadowPerformanceSummaryValidatorTest {
         ShadowPerformanceSummary base = validSummary();
         for (ShadowPerformanceSummary.ShadowPerformanceEvaluation evaluation : List.of(
                 replaceEvaluationLineage(base.evaluation(), "other-artifact-format-v99", "feedback-dataset-v1", "FEEDBACK_CREATED_AT"),
-                replaceEvaluationLineage(base.evaluation(), "fdp123-report-artifact-set-v1", "unknown-dataset-v77", "FEEDBACK_CREATED_AT"),
-                replaceEvaluationLineage(base.evaluation(), "fdp123-report-artifact-set-v1", "feedback-dataset-v1", "TRANSACTION_CREATED_AT")
+                replaceEvaluationLineage(base.evaluation(), "feedback-dataset-evaluation-report-artifact-set-v1", "unknown-dataset-v77", "FEEDBACK_CREATED_AT"),
+                replaceEvaluationLineage(base.evaluation(), "feedback-dataset-evaluation-report-artifact-set-v1", "feedback-dataset-v1", "TRANSACTION_CREATED_AT")
         )) {
             ShadowPerformanceSummary summary = new ShadowPerformanceSummary(
                     base.reportType(),

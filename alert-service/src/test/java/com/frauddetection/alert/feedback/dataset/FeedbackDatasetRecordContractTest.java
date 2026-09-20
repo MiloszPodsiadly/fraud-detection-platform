@@ -32,6 +32,9 @@ class FeedbackDatasetRecordContractTest {
                         "agreementStatus",
                         "riskMismatchStatus",
                         "scoreDeltaBucket",
+                        "mlModelName",
+                        "mlModelVersion",
+                        "mlFeatureContractVersion",
                         "analystRecommendationStatus",
                         "analystRecommendation",
                         "analystRecommendationVersion",
@@ -186,6 +189,33 @@ class FeedbackDatasetRecordContractTest {
         )).isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void acceptsBoundedMlModelIdentitySnapshotFields() {
+        FeedbackDatasetRecord record = recordWithMlIdentity(
+                "python-logistic-fraud-model",
+                "2026-06-25.v1",
+                "feature-contract-v2"
+        );
+
+        assertThat(record.mlModelName()).isEqualTo("python-logistic-fraud-model");
+        assertThat(record.mlModelVersion()).isEqualTo("2026-06-25.v1");
+        assertThat(record.mlFeatureContractVersion()).isEqualTo("feature-contract-v2");
+    }
+
+    @Test
+    void rejectsUnsafeMlModelIdentitySnapshotValues() {
+        assertThatThrownBy(() -> recordWithMlIdentity(
+                "s3://bucket/model",
+                "2026-06-25.v1",
+                "feature-contract-v2"
+        )).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> recordWithMlIdentity(
+                "python-logistic-fraud-model",
+                "v1/token-secret",
+                "feature-contract-v2"
+        )).isInstanceOf(IllegalArgumentException.class);
+    }
+
     private FeedbackDatasetRecord record(FraudFeedbackLabel feedbackLabel, FeedbackEvaluationLabel evaluationLabel) {
         return record(feedbackLabel, evaluationLabel, List.of(reasonCode(feedbackLabel)));
     }
@@ -210,6 +240,39 @@ class FeedbackDatasetRecordContractTest {
                 null,
                 null,
                 null,
+                null,
+                null,
+                null,
+                null,
+                List.of(),
+                null,
+                null
+        );
+    }
+
+    private FeedbackDatasetRecord recordWithMlIdentity(
+            String mlModelName,
+            String mlModelVersion,
+            String mlFeatureContractVersion
+    ) {
+        return new FeedbackDatasetRecord(
+                FeedbackDatasetBuilder.DATASET_VERSION,
+                FeedbackDatasetIdentifierHasher.evaluationRecordId("feedback-1"),
+                FeedbackDatasetIdentifierHasher.transactionReference("txn-1"),
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                FeedbackEvaluationLabel.POSITIVE_FRAUD,
+                List.of("ANALYST_CONFIRMED_FRAUD"),
+                Instant.parse("2026-06-01T00:00:00Z"),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                mlModelName,
+                mlModelVersion,
+                mlFeatureContractVersion,
                 null,
                 null,
                 null,

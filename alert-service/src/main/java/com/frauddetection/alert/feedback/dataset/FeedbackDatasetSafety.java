@@ -73,6 +73,20 @@ final class FeedbackDatasetSafety {
         return value;
     }
 
+    static String optionalModelIdentityPart(String value, String fieldName) {
+        if (value == null) {
+            return null;
+        }
+        if (value.isBlank() || value.length() > 128 || value.chars().anyMatch(Character::isISOControl)) {
+            throw new IllegalArgumentException(fieldName + " must be bounded");
+        }
+        rejectUnsafeValue(value, fieldName);
+        if (value.contains("/") || value.contains("\\") || value.contains("://")) {
+            throw new IllegalArgumentException(fieldName + " must not contain paths or endpoints");
+        }
+        return value;
+    }
+
     private static String requireMachineCode(String value, String fieldName) {
         if (value == null || !MACHINE_CODE.matcher(value).matches()) {
             throw new IllegalArgumentException(fieldName + " must use bounded UPPER_SNAKE_CASE");

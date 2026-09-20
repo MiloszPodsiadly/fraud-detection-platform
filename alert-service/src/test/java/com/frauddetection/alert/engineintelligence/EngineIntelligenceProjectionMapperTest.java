@@ -71,6 +71,21 @@ class EngineIntelligenceProjectionMapperTest {
     }
 
     @Test
+    void availableMlModelIdentityMapsToProjection() {
+        EngineIntelligenceProjection projection = mapped(EngineIntelligenceProjectionTestFixtures.disagreementSummary());
+
+        assertThat(projection.getEngines())
+                .filteredOn(engine -> engine.engineId().equals("ml.python.primary"))
+                .singleElement()
+                .satisfies(engine -> assertThat(engine.modelIdentity().modelVersion())
+                        .isEqualTo("2026-05-30.v1"));
+        assertThat(projection.getEngines())
+                .filteredOn(engine -> engine.engineId().equals("rules.primary"))
+                .singleElement()
+                .satisfies(engine -> assertThat(engine.modelIdentity()).isNull());
+    }
+
+    @Test
     void unsupportedContractVersionUsesTypedOmissionReason() {
         EngineIntelligenceSummary summary = summaryMock();
         when(summary.contractVersion()).thenReturn(2);

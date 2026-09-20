@@ -48,7 +48,10 @@ class FeedbackDatasetSchemaContractTest {
                         "\"feedbackLabel\"",
                         "\"evaluationLabel\"",
                         "\"decisionReasonCodes\"",
-                        "\"feedbackCreatedAt\""
+                        "\"feedbackCreatedAt\"",
+                        "\"mlModelName\"",
+                        "\"mlModelVersion\"",
+                        "\"mlFeatureContractVersion\""
                 );
     }
 
@@ -129,6 +132,9 @@ class FeedbackDatasetSchemaContractTest {
         assertThat(record.get("evaluationLabel").asString()).isEqualTo("POSITIVE_FRAUD");
         assertThat(record.get("decisionReasonCodes").get(0).asString()).isEqualTo("ANALYST_CONFIRMED_FRAUD");
         assertThat(record.get("feedbackCreatedAt").asString()).isEqualTo("2026-06-01T00:00:00Z");
+        assertThat(record.has("mlModelName")).isTrue();
+        assertThat(record.has("mlModelVersion")).isTrue();
+        assertThat(record.has("mlFeatureContractVersion")).isTrue();
     }
 
     @Test
