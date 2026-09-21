@@ -92,7 +92,7 @@ public record FraudEngineResult(
                 "modelVersion",
                 FraudEngineValuePolicy.MODEL_VERSION_MAX_LENGTH
         );
-        featureContractVersion = FraudEngineValuePolicy.optionalBoundedIdentifier(
+        featureContractVersion = FraudEngineValuePolicy.optionalSafeIdentifier(
                 featureContractVersion,
                 "featureContractVersion",
                 FraudEngineValuePolicy.FEATURE_CONTRACT_VERSION_MAX_LENGTH

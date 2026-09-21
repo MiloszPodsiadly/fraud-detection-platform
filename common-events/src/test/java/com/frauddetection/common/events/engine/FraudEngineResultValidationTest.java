@@ -212,6 +212,20 @@ class FraudEngineResultValidationTest {
     }
 
     @Test
+    void availableMlModelRejectsUnsafeFeatureContractVersion() {
+        assertThatThrownBy(() -> availableMlResult(
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                "token-contract-v1"
+        )).hasMessageContaining("featureContractVersion contains forbidden contract text");
+        assertThatThrownBy(() -> availableMlResult(
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                "secret-contract-v1"
+        )).hasMessageContaining("featureContractVersion contains forbidden contract text");
+    }
+
+    @Test
     void contributionValidationIsBoundedStrictAndCompatible() {
         FraudEngineContribution contribution = contribution();
 
