@@ -313,6 +313,20 @@ class FeedbackDatasetBuilderTest {
     }
 
     @Test
+    void partialMlModelIdentitySnapshotIsSkippedAsInvalidSource() {
+        FraudFeedbackRecord source = feedback("feedback-1", "txn-1", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        source.setMlModelName("python-logistic-fraud-model");
+        source.setMlFeatureContractVersion("feature-contract-v2");
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.records()).isEmpty();
+        assertThat(result.skippedInvalidSourceRecordCount()).isEqualTo(1);
+        assertThat(result.skippedMissingRequiredFieldCount()).isZero();
+    }
+
+    @Test
     void mixedTransactionsRetainDifferentMlModelVersions() {
         FraudFeedbackRecord first = feedback("feedback-1", "txn-1", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
         first.setMlModelName("python-logistic-fraud-model");

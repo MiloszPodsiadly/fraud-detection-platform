@@ -140,6 +140,41 @@
                   }
                 }
               }
+            },
+            {
+              "oneOf": [
+                {
+                  "properties": {
+                    "mlModelName": {
+                      "type": "null"
+                    },
+                    "mlModelVersion": {
+                      "type": "null"
+                    },
+                    "mlFeatureContractVersion": {
+                      "type": "null"
+                    }
+                  }
+                },
+                {
+                  "required": [
+                    "mlModelName",
+                    "mlModelVersion",
+                    "mlFeatureContractVersion"
+                  ],
+                  "properties": {
+                    "mlModelName": {
+                      "type": "string"
+                    },
+                    "mlModelVersion": {
+                      "type": "string"
+                    },
+                    "mlFeatureContractVersion": {
+                      "type": "string"
+                    }
+                  }
+                }
+              ]
             }
           ],
           "required": [
@@ -235,21 +270,27 @@
                 "string",
                 "null"
               ],
-              "maxLength": 128
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9._-]+$"
             },
             "mlModelVersion": {
               "type": [
                 "string",
                 "null"
               ],
-              "maxLength": 128
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9._-]+$"
             },
             "mlFeatureContractVersion": {
               "type": [
                 "string",
                 "null"
               ],
-              "maxLength": 128
+              "minLength": 1,
+              "maxLength": 96,
+              "pattern": "^[A-Za-z0-9._-]+$"
             },
             "analystRecommendationStatus": {
               "type": [

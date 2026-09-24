@@ -72,6 +72,20 @@ class FeedbackDatasetSchemaContractTest {
     }
 
     @Test
+    void schemaDocumentsAtomicMlModelIdentityConstraint() throws Exception {
+        String schema = Files.readString(SCHEMA);
+
+        assertThat(schema)
+                .contains("\"oneOf\"")
+                .contains("\"mlModelName\"")
+                .contains("\"mlModelVersion\"")
+                .contains("\"mlFeatureContractVersion\"")
+                .contains("\"maxLength\": 64")
+                .contains("\"maxLength\": 96")
+                .contains("\"pattern\": \"^[A-Za-z0-9._-]+$\"");
+    }
+
+    @Test
     void schemaKeepsDecisionReasonCodeLimitAtTen() throws Exception {
         String schema = Files.readString(SCHEMA);
 

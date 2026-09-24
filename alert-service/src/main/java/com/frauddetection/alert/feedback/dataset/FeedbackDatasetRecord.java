@@ -67,6 +67,11 @@ public record FeedbackDatasetRecord(
                 mlFeatureContractVersion,
                 "mlFeatureContractVersion"
         );
+        FeedbackDatasetSafety.validateMlModelIdentity(
+                mlModelName,
+                mlModelVersion,
+                mlFeatureContractVersion
+        );
     }
 
     public FeedbackDatasetRecord(
