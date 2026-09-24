@@ -42,6 +42,11 @@ class FraudModel:
         """Family of the loaded model."""
         return self._runtime.model_family
 
+    @property
+    def feature_contract_version(self) -> str:
+        """Feature contract version declared by the loaded model artifact."""
+        return self._runtime.feature_contract_version
+
     def score(self, features: dict[str, Any]) -> dict[str, Any]:
         """Score feature payloads using the production runtime."""
         return self._runtime.score(features)

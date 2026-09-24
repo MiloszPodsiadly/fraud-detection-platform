@@ -187,6 +187,8 @@ class FraudModelTest(unittest.TestCase):
         self.assertIn(result["riskLevel"], {"HIGH", "CRITICAL"})
         self.assertGreaterEqual(result["fraudScore"], 0.75)
         self.assertIn("PROXY_OR_VPN", result["reasonCodes"])
+        self.assertEqual(result["featureContractVersion"], FEATURE_CONTRACT.version)
+        self.assertEqual(result["explanationMetadata"]["featureContractVersion"], FEATURE_CONTRACT.version)
 
     def test_scores_baseline_signal_as_low(self):
         result = FraudModel().score(
@@ -1503,6 +1505,26 @@ class FraudModelTest(unittest.TestCase):
 
         self.assertEqual(model.model_version, CANONICAL_MODEL_VERSION)
         self.assertEqual(model.runtime_feature_names(), list(FeaturePipeline.PRODUCTION_FEATURE_NAMES))
+
+    def test_model_loader_rejects_noncanonical_model_identity(self):
+        invalid_cases = (
+            {"modelName": "models/python-logistic-fraud-model"},
+            {"modelVersion": "loader:model-v1"},
+            {"modelVersion": "v" * 65},
+            {"featureContractVersion": "feature contract v2"},
+            {"featureContractVersion": "f" * 97},
+        )
+        for index, overrides in enumerate(invalid_cases):
+            artifact_path = Path.cwd() / f"loader-invalid-identity-{index}.json"
+            artifact = self._artifact_payload(f"loader-invalid-identity-v{index}")
+            artifact.update(overrides)
+            try:
+                artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+                with self.assertRaisesRegex(ModelConfigurationError, "model artifact identity invalid"):
+                    load_model_from_artifact(artifact_path)
+            finally:
+                if artifact_path.exists():
+                    artifact_path.unlink()
 
     def test_model_loader_rejects_unknown_artifact_type(self):
         artifact_path = Path.cwd() / "loader-unknown-artifact.json"

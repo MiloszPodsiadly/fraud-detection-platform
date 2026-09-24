@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from offline_evaluation.json_contract import JsonContractError, loads_strict_json
-from offline_evaluation.fdp123.evaluation_card.artifact_reader import read_validated_evaluation_card_artifact_set
-from offline_evaluation.fdp123.evaluation_card.schema import Fdp123EvaluationCardValidationError
+from offline_evaluation.feedback_dataset_evaluation.evaluation_card.artifact_reader import read_validated_evaluation_card_artifact_set
+from offline_evaluation.feedback_dataset_evaluation.evaluation_card.schema import FeedbackDatasetEvaluationCardValidationError
 from offline_evaluation.shadow_performance_summary import build_shadow_performance_summary
 from offline_evaluation.shadow_performance_artifact_set import publish_shadow_performance_artifact_set
 from offline_evaluation.shadow_performance_writer import write_shadow_performance_summary
@@ -47,7 +47,7 @@ def generate_current_shadow_summary(
             evaluation_card_path,
             evaluation_card_manifest_path,
         )
-    except Fdp123EvaluationCardValidationError as exc:
+    except FeedbackDatasetEvaluationCardValidationError as exc:
         raise CurrentSummaryGenerationError(str(exc)) from exc
     timestamp = generated_at or _utc_now()
     summary = build_shadow_performance_summary(

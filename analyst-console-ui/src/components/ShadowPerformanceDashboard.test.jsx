@@ -30,7 +30,7 @@ describe("ShadowPerformanceDashboard", () => {
     expect(screen.getByText("PLATFORM_RECOMMENDATION")).toBeInTheDocument();
     expect(screen.getByText("ENGINE_INTELLIGENCE_PROJECTION")).toBeInTheDocument();
     expect(screen.getByText("ENGINE_INTELLIGENCE_PROJECTION_V1")).toBeInTheDocument();
-    expect(screen.getByText("NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE")).toBeInTheDocument();
+    expect(screen.getByText("NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE")).toBeInTheDocument();
   });
 
   it("rendersGovernanceStatus", () => {
@@ -51,7 +51,7 @@ describe("ShadowPerformanceDashboard", () => {
     renderDashboard();
 
     expect(screen.getByText("PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1")).toBeInTheDocument();
-    expect(screen.getByText("FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1")).toBeInTheDocument();
+    expect(screen.getByText("FEEDBACK_DATASET_OFFLINE_EVALUATION_V1")).toBeInTheDocument();
     expect(screen.getByText("FDP-124")).toBeInTheDocument();
   });
 
@@ -726,7 +726,7 @@ function shadowSummary(overrides = {}) {
       featureContractVersion: "NOT_APPLICABLE",
       modelIdentity: "NOT_AVAILABLE",
       modelArtifactSha256: "NOT_AVAILABLE",
-      identityCompleteness: "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
+      identityCompleteness: "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
     },
     metricBasis: "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK",
     governance: {
@@ -742,11 +742,11 @@ function shadowSummary(overrides = {}) {
       evaluationCardType: "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
       evaluationCardVersion: "platform-recommendation-evaluation-card-v1",
       evaluationPurpose: "OFFLINE_DIAGNOSTIC",
-      evaluationReportType: "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+      evaluationReportType: "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
       evaluationReportVersion: "FDP-124",
       evaluationReportGeneratedAt: "2026-06-10T00:00:00Z",
       evaluationCardGeneratedAt: "2026-06-12T00:00:00Z",
-      evaluationArtifactSetVersion: "fdp123-report-artifact-set-v1",
+      evaluationArtifactSetVersion: "feedback-dataset-evaluation-report-artifact-set-v1",
       datasetVersion: "feedback-dataset-v1",
       datasetTimeBasis: "FEEDBACK_CREATED_AT",
       sourceManifestSha256: "a".repeat(64),

@@ -18,6 +18,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class MlScoringEvidenceProjectionTest {
+    private static final String FEATURE_CONTRACT_VERSION = "2026-05-30.feature-contract.v1";
 
     @Test
     void supportedMlReasonCodesCreateAvailableEvidenceAndUnsupportedCodesCreateDiagnostic() {
@@ -27,6 +28,7 @@ class MlScoringEvidenceProjectionTest {
                 RiskLevel.CRITICAL,
                 "python-logistic-fraud-model",
                 "test-version",
+                FEATURE_CONTRACT_VERSION,
                 Instant.now(),
                 Arrays.asList(
                         "MODEL_HIGH_RISK",

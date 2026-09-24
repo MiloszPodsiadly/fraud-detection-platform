@@ -4,27 +4,27 @@ import re
 from typing import Any
 
 from offline_evaluation.json_contract import JsonContractError, require_finite_number
-from offline_evaluation.fdp123.evaluation_card.schema import (
+from offline_evaluation.feedback_dataset_evaluation.evaluation_card.schema import (
     EVALUATION_PURPOSE,
-    MAX_FDP123_DATASET_RECORDS,
+    MAX_FEEDBACK_DATASET_RECORDS,
     METRIC_BASIS as EXPECTED_METRIC_BASIS,
     METRICS_SUBJECT,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION,
-    Fdp123EvaluationCardValidationError,
+    FeedbackDatasetEvaluationCardValidationError,
     REQUIRED_LIMITATIONS as REQUIRED_SHADOW_LIMITATIONS,
     validate_evaluation_card,
 )
-from offline_evaluation.fdp123.dataset_schema import (
+from offline_evaluation.feedback_dataset_evaluation.dataset_schema import (
     DATASET_TIME_BASIS as EXPECTED_DATASET_TIME_BASIS,
     DATASET_VERSION as EXPECTED_DATASET_VERSION,
 )
-from offline_evaluation.fdp123.evaluation_contract import EVALUATION_SUBJECT
-from offline_evaluation.fdp123.report_contract import (
+from offline_evaluation.feedback_dataset_evaluation.evaluation_contract import EVALUATION_SUBJECT
+from offline_evaluation.feedback_dataset_evaluation.report_contract import (
     ARTIFACT_SET_VERSION as EXPECTED_EVALUATION_ARTIFACT_SET_VERSION,
     REPORT_TYPE as EXPECTED_EVALUATION_REPORT_TYPE,
 )
-from offline_evaluation.fdp123.timestamp_contract import (
+from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import (
     TimestampContractError,
     normalize_rfc3339_timestamp,
     timestamp_instant,
@@ -42,7 +42,7 @@ EXPECTED_EVALUATION_REPORT_VERSION = "FDP-124"
 EXPECTED_GOVERNANCE_STATUS = "DIAGNOSTIC_ONLY"
 MAX_WARNINGS = 20
 MAX_LIMITATIONS = 20
-MAX_COUNT_VALUE = MAX_FDP123_DATASET_RECORDS
+MAX_COUNT_VALUE = MAX_FEEDBACK_DATASET_RECORDS
 MAX_MACHINE_CODE_LENGTH = 128
 BANNER = (
     "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, "
@@ -120,7 +120,7 @@ SAFE_CONTRACT_VALUES = {
     "OFFLINE_DIAGNOSTIC",
     "NOT_AVAILABLE",
     "NOT_APPLICABLE",
-    "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
+    "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
     "PLATFORM_RECOMMENDATION",
     "ENGINE_INTELLIGENCE_PROJECTION",
     "ENGINE_INTELLIGENCE_PROJECTION_V1",
@@ -208,7 +208,7 @@ FORBIDDEN_VALUE_TERMS = FORBIDDEN_FIELD_NAMES | {
 def validate_evaluation_card_for_shadow_summary(evaluation_card: dict[str, Any]) -> dict[str, Any]:
     try:
         safe_evaluation_card = validate_evaluation_card(evaluation_card)
-    except Fdp123EvaluationCardValidationError as exc:
+    except FeedbackDatasetEvaluationCardValidationError as exc:
         raise ShadowPerformanceValidationError(str(exc)) from exc
     if safe_evaluation_card["cardType"] != PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE:
         raise ShadowPerformanceValidationError("evaluation card type is unsupported")

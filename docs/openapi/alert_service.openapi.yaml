@@ -5101,6 +5101,29 @@ components:
             minLength: 1
             maxLength: 128
             pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
+        modelIdentity:
+          $ref: "#/components/schemas/EngineIntelligenceMlModelIdentity"
+          description: Optional bounded ML runtime identity. Present only for ml.python.primary ML_MODEL results when the producer emitted validated ML model lineage; Rules and Velocity engines must omit it. The top-level scored transaction modelName/modelVersion fields are not the source for this nested identity.
+    EngineIntelligenceMlModelIdentity:
+      type: object
+      additionalProperties: false
+      required: [modelName, modelVersion, featureContractVersion]
+      properties:
+        modelName:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
+        modelVersion:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
+        featureContractVersion:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
     EngineIntelligenceDiagnosticSignalResponse:
       type: object
       additionalProperties: false
@@ -5671,7 +5694,7 @@ components:
           maxLength: 128
         identityCompleteness:
           type: string
-          enum: [NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE]
+          enum: [NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE]
     ShadowPerformanceGovernanceResponse:
       type: object
       additionalProperties: false
@@ -5708,7 +5731,7 @@ components:
           enum: [OFFLINE_DIAGNOSTIC]
         evaluationReportType:
           type: string
-          enum: [FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1]
+          enum: [FEEDBACK_DATASET_OFFLINE_EVALUATION_V1]
         evaluationReportVersion:
           type: string
           enum: [FDP-124]
@@ -5716,7 +5739,7 @@ components:
           type: string
           format: date-time
           pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,9})?Z$'
-          description: UTC-normalized timestamp from the source FDP-123/FDP-124 evaluation report. Must be less than or equal to evaluationCardGeneratedAt.
+          description: UTC-normalized timestamp from the source feedback dataset/FDP-124 evaluation report. Must be less than or equal to evaluationCardGeneratedAt.
         evaluationCardGeneratedAt:
           type: string
           format: date-time
@@ -5724,7 +5747,7 @@ components:
           description: UTC-normalized timestamp from the Platform Recommendation Evaluation Card. Must be greater than or equal to evaluationReportGeneratedAt and less than or equal to the summary generatedAt.
         evaluationArtifactSetVersion:
           type: string
-          enum: [fdp123-report-artifact-set-v1]
+          enum: [feedback-dataset-evaluation-report-artifact-set-v1]
         datasetVersion:
           type: string
           enum: [feedback-dataset-v1]

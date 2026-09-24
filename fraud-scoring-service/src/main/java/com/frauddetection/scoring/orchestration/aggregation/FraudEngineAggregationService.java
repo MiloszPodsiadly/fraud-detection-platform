@@ -2,6 +2,9 @@ package com.frauddetection.scoring.orchestration.aggregation;
 
 import com.frauddetection.common.events.engine.FraudEngineResult;
 import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
+import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.common.events.engine.FraudEngineType;
+import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrationResult;
 
 import java.util.ArrayList;
@@ -85,7 +88,15 @@ public final class FraudEngineAggregationService {
                 reasonCodeNormalizer.normalize(result.engineId(), result.reasonCodes(), policy, warnings),
                 evidenceSanitizer.sanitize(result.engineId(), result.evidence(), policy, warnings),
                 contributionSanitizer.sanitize(result.engineId(), result.contributions(), policy, warnings),
-                result.latencyMs()
+                result.latencyMs(),
+                modelIdentity(result)
         );
+    }
+
+    private MlModelIdentity modelIdentity(FraudEngineResult result) {
+        if (result.engineType() != FraudEngineType.ML_MODEL || result.status() != FraudEngineStatus.AVAILABLE) {
+            return null;
+        }
+        return new MlModelIdentity(result.modelName(), result.modelVersion(), result.featureContractVersion());
     }
 }

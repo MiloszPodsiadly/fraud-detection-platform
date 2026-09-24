@@ -39,6 +39,56 @@ class EngineIntelligenceEngineResultTest {
     }
 
     @Test
+    void acceptsAvailableMlEngineResultWithModelIdentity() {
+        EngineIntelligenceEngineResult engine = new EngineIntelligenceEngineResult(
+                "ml.python.primary",
+                FraudEngineType.ML_MODEL,
+                FraudEngineStatus.AVAILABLE,
+                RiskLevel.HIGH,
+                EngineIntelligenceScoreBucket.HIGH,
+                List.of("MODEL_HIGH_RISK"),
+                EngineIntelligenceTestSupport.mlIdentity()
+        );
+
+        assertThat(engine.modelIdentity()).isEqualTo(EngineIntelligenceTestSupport.mlIdentity());
+    }
+
+    @Test
+    void rejectsModelIdentityForRulesAndVelocityEngines() {
+        assertThatThrownBy(() -> new EngineIntelligenceEngineResult(
+                "rules.primary",
+                FraudEngineType.RULES,
+                FraudEngineStatus.AVAILABLE,
+                RiskLevel.HIGH,
+                EngineIntelligenceScoreBucket.HIGH,
+                List.of("HIGH_VELOCITY"),
+                EngineIntelligenceTestSupport.mlIdentity()
+        )).hasMessage("ENGINE_INTELLIGENCE_NON_ML_MODEL_IDENTITY_INVALID");
+        assertThatThrownBy(() -> new EngineIntelligenceEngineResult(
+                "velocity.primary",
+                FraudEngineType.VELOCITY,
+                FraudEngineStatus.AVAILABLE,
+                RiskLevel.HIGH,
+                EngineIntelligenceScoreBucket.HIGH,
+                List.of("RAPID_TRANSFER_BURST_SIGNAL"),
+                EngineIntelligenceTestSupport.mlIdentity()
+        )).hasMessage("ENGINE_INTELLIGENCE_NON_ML_MODEL_IDENTITY_INVALID");
+    }
+
+    @Test
+    void rejectsModelIdentityForOperationalMlEngineResult() {
+        assertThatThrownBy(() -> new EngineIntelligenceEngineResult(
+                "ml.python.primary",
+                FraudEngineType.ML_MODEL,
+                FraudEngineStatus.TIMEOUT,
+                null,
+                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                List.of("ML_MODEL_TIMEOUT"),
+                EngineIntelligenceTestSupport.mlIdentity()
+        )).hasMessage("ENGINE_INTELLIGENCE_OPERATIONAL_ML_MODEL_IDENTITY_INVALID");
+    }
+
+    @Test
     void rejectsAvailableEngineResultWithoutRiskLevel() {
         assertThatThrownBy(() -> engine(FraudEngineStatus.AVAILABLE, null, EngineIntelligenceScoreBucket.HIGH))
                 .hasMessage("ENGINE_INTELLIGENCE_AVAILABLE_STATUS_RISK_LEVEL_REQUIRED");

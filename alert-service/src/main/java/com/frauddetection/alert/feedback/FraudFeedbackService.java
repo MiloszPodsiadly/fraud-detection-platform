@@ -9,6 +9,7 @@ import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceEngineReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
 import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
@@ -16,6 +17,10 @@ import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
+import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
+import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.common.events.engine.FraudEngineType;
+import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -177,12 +182,35 @@ public class FraudFeedbackService {
                 record.setRiskMismatchStatus(response.comparison().riskMismatchStatus());
                 record.setScoreDeltaBucket(response.comparison().scoreDeltaBucket());
             }
+            snapshotMlModelIdentity(record, readModel);
         } catch (EngineIntelligenceProjectionReadUnavailableException exception) {
             record.setEngineIntelligenceStatus(EngineIntelligenceResponseStatus.UNAVAILABLE);
         } catch (RuntimeException exception) {
             log.warn("Fraud feedback engine intelligence snapshot unavailable.");
             record.setEngineIntelligenceStatus(EngineIntelligenceResponseStatus.UNAVAILABLE);
         }
+    }
+
+    private void snapshotMlModelIdentity(FraudFeedbackRecord record, EngineIntelligenceReadModel readModel) {
+        if (readModel == null || !readModel.available() || readModel.engines() == null) {
+            return;
+        }
+        readModel.engines().stream()
+                .filter(engine -> FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID.equals(engine.engineId()))
+                .filter(engine -> engine.engineType() == FraudEngineType.ML_MODEL)
+                .filter(engine -> engine.status() == FraudEngineStatus.AVAILABLE)
+                .map(EngineIntelligenceEngineReadModel::modelIdentity)
+                .findFirst()
+                .ifPresent(identity -> applyMlModelIdentity(record, identity));
+    }
+
+    private void applyMlModelIdentity(FraudFeedbackRecord record, MlModelIdentity identity) {
+        if (identity == null) {
+            return;
+        }
+        record.setMlModelName(identity.modelName());
+        record.setMlModelVersion(identity.modelVersion());
+        record.setMlFeatureContractVersion(identity.featureContractVersion());
     }
 
     private void snapshotAnalystRecommendation(FraudFeedbackRecord record, AnalystRecommendationResult recommendation) {

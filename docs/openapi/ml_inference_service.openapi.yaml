@@ -361,6 +361,7 @@ components:
         - available
         - explanationMetadata
         - fallbackReason
+        - featureContractVersion
         - fraudScore
         - inferenceTimestamp
         - modelName
@@ -380,6 +381,8 @@ components:
           type: string
         modelVersion:
           type: string
+        featureContractVersion:
+          type: string
         inferenceTimestamp:
           type: string
           format: date-time
@@ -394,7 +397,7 @@ components:
         explanationMetadata:
           type: object
           additionalProperties: true
-          required: [engineType, explanationType, modelAvailable, modelName, modelVersion]
+          required: [engineType, explanationType, featureContractVersion, modelAvailable, modelName, modelVersion]
         fallbackReason:
           nullable: true
           type: string

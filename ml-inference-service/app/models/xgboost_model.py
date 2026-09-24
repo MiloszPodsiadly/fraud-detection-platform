@@ -17,6 +17,7 @@ class XGBoostFraudModel:
     model_name = "python-xgboost-fraud-model"
     model_version = "untrained"
     model_family = "XGBOOST"
+    feature_contract_version = FEATURE_CONTRACT.version
     training_mode = "production"
     weights: dict[str, float] = {}
     thresholds = {"medium": 0.45, "high": 0.75, "critical": 0.90}
@@ -32,6 +33,7 @@ class XGBoostFraudModel:
         self.model_name = str(artifact.get("modelName", self.model_name))
         self.model_version = str(artifact.get("modelVersion", self.model_version))
         self.model_family = str(artifact.get("modelFamily", self.model_family))
+        self.feature_contract_version = str(artifact.get("featureContractVersion", self.feature_contract_version))
         self.training_mode = self._training_mode(artifact)
         self.feature_schema = self._feature_schema(artifact.get("featureSchema"))
         self.thresholds = artifact.get("thresholds") if isinstance(artifact.get("thresholds"), dict) else dict(self.thresholds)

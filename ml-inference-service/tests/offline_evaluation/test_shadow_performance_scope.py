@@ -55,7 +55,7 @@ class ShadowPerformanceScopeGuardTest(unittest.TestCase):
 
         self.assertIn("Shadow Performance Summary v2 is an offline diagnostic artifact", doc)
         self.assertIn("accepts only validated", doc)
-        self.assertIn("FDP-123/FDP-124/FDP-126 Platform Recommendation Evaluation Card v1", doc)
+        self.assertIn("feedback dataset/FDP-124/FDP-126 Platform Recommendation Evaluation Card v1", doc)
         self.assertIn("does not recreate the removed FDP-102/FDP-103 Platform Recommendation Evaluation Card path", " ".join(doc.split()))
         self.assertIn("evaluation population and sample-size context", doc)
 

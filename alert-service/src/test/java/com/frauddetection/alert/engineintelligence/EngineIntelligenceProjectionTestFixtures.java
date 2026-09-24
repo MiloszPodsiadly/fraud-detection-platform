@@ -89,7 +89,12 @@ final class EngineIntelligenceProjectionTestFixtures {
                                 FraudEngineStatus.AVAILABLE,
                                 RiskLevel.HIGH,
                                 EngineIntelligenceScoreBucket.VERY_HIGH,
-                                List.of("ML_MODEL_SIGNAL")
+                                List.of("ML_MODEL_SIGNAL"),
+                                new com.frauddetection.common.events.intelligence.MlModelIdentity(
+                                        "python-logistic-fraud-model",
+                                        "2026-05-30.v1",
+                                        "2026-05-30.feature-contract.v1"
+                                )
                         )
                 ),
                 comparison(

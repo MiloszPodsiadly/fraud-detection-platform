@@ -154,7 +154,7 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
     }
 
     @Test
-    void configuredCountsAboveFdp123LimitMapToUnavailable() throws Exception {
+    void configuredCountsAboveFeedbackDatasetLimitMapToUnavailable() throws Exception {
         JsonNode records = objectMapper.readTree(validReportJson());
         ((ObjectNode) records.get("inputs")).put("recordsEvaluated", 1001);
         assertUnavailable(provider(writeJson(objectMapper.writeValueAsString(records))));

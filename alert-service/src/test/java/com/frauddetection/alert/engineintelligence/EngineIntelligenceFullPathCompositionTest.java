@@ -354,6 +354,7 @@ class EngineIntelligenceFullPathCompositionTest {
                         RiskLevel.MEDIUM,
                         "python-logistic-fraud-model",
                         "2026-06-18.v1",
+                        "feature-contract-v2",
                         Instant.parse("2026-06-18T09:59:59Z"),
                         List.of("MODEL_MEDIUM_RISK"),
                         Map.of("modelScoreBucket", "MEDIUM"),

@@ -297,6 +297,53 @@ class FeedbackDatasetBuilderTest {
         assertThat(record.transactionReference()).doesNotContain("txn-secret-1");
     }
 
+    @Test
+    void preservesExactMlModelIdentitySnapshotFromFeedbackRecord() {
+        FraudFeedbackRecord source = feedback("feedback-1", "txn-1", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        source.setMlModelName("python-logistic-fraud-model");
+        source.setMlModelVersion("2026-06-25.v1");
+        source.setMlFeatureContractVersion("feature-contract-v2");
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+
+        FeedbackDatasetRecord record = builder.build(request(10)).records().getFirst();
+
+        assertThat(record.mlModelName()).isEqualTo("python-logistic-fraud-model");
+        assertThat(record.mlModelVersion()).isEqualTo("2026-06-25.v1");
+        assertThat(record.mlFeatureContractVersion()).isEqualTo("feature-contract-v2");
+    }
+
+    @Test
+    void partialMlModelIdentitySnapshotIsSkippedAsInvalidSource() {
+        FraudFeedbackRecord source = feedback("feedback-1", "txn-1", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        source.setMlModelName("python-logistic-fraud-model");
+        source.setMlFeatureContractVersion("feature-contract-v2");
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.records()).isEmpty();
+        assertThat(result.skippedInvalidSourceRecordCount()).isEqualTo(1);
+        assertThat(result.skippedMissingRequiredFieldCount()).isZero();
+    }
+
+    @Test
+    void mixedTransactionsRetainDifferentMlModelVersions() {
+        FraudFeedbackRecord first = feedback("feedback-1", "txn-1", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        first.setMlModelName("python-logistic-fraud-model");
+        first.setMlModelVersion("2026-06-25.v1");
+        first.setMlFeatureContractVersion("feature-contract-v2");
+        FraudFeedbackRecord second = feedback("feedback-2", "txn-2", FraudFeedbackLabel.CONFIRMED_LEGITIMATE, FROM.plusSeconds(1));
+        second.setMlModelName("python-logistic-fraud-model");
+        second.setMlModelVersion("2026-06-26.v1");
+        second.setMlFeatureContractVersion("feature-contract-v2");
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(first, second));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.records()).extracting(FeedbackDatasetRecord::mlModelVersion)
+                .containsExactly("2026-06-25.v1", "2026-06-26.v1");
+    }
+
     private FeedbackDatasetBuildRequest request(int maxRecords) {
         return new FeedbackDatasetBuildRequest(FROM, TO, maxRecords);
     }

@@ -560,14 +560,18 @@ function normalizeEngineResults(values) {
     if (!reasonCodes || !safeRenderableString(value.engineId)) {
       return null;
     }
-    normalized.push(Object.freeze({
+    const normalizedEngine = {
       engineId: value.engineId,
       engineType: value.engineType,
       status: value.status,
       scoreBucket: value.scoreBucket,
       riskLevel: value.riskLevel ?? "",
       reasonCodes: Object.freeze(reasonCodes)
-    }));
+    };
+    if (value.modelIdentity) {
+      normalizedEngine.modelIdentity = Object.freeze({ ...value.modelIdentity });
+    }
+    normalized.push(Object.freeze(normalizedEngine));
   }
   return normalized;
 }

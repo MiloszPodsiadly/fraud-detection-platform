@@ -174,8 +174,9 @@ final class FraudScoringOrchestratorTestSupport {
                 List.of(),
                 List.of(),
                 0L,
-                null,
-                null,
+                modelName(descriptor, status),
+                modelVersion(descriptor, status),
+                featureContractVersion(descriptor, status),
                 statusReason,
                 RECEIVED_AT
         );
@@ -192,6 +193,7 @@ final class FraudScoringOrchestratorTestSupport {
                 result.evidence(),
                 result.modelName(),
                 result.modelVersion(),
+                result.featureContractVersion(),
                 result.statusReason()
         );
     }
@@ -205,6 +207,22 @@ final class FraudScoringOrchestratorTestSupport {
             return FraudEngineConfidence.UNKNOWN;
         }
         return FraudEngineConfidence.MEDIUM;
+    }
+
+    private static String modelName(FraudEngineDescriptor descriptor, FraudEngineStatus status) {
+        return isAvailableMl(descriptor, status) ? "python-logistic-fraud-model" : null;
+    }
+
+    private static String modelVersion(FraudEngineDescriptor descriptor, FraudEngineStatus status) {
+        return isAvailableMl(descriptor, status) ? "2026-05-30.v1" : null;
+    }
+
+    private static String featureContractVersion(FraudEngineDescriptor descriptor, FraudEngineStatus status) {
+        return isAvailableMl(descriptor, status) ? "2026-05-30.feature-contract.v1" : null;
+    }
+
+    private static boolean isAvailableMl(FraudEngineDescriptor descriptor, FraudEngineStatus status) {
+        return descriptor.engineType() == FraudEngineType.ML_MODEL && status == FraudEngineStatus.AVAILABLE;
     }
 
     static final class FakeFraudSignalEngine implements FraudSignalEngine {

@@ -6,6 +6,7 @@ import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceEngineResult;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
+import com.frauddetection.common.events.intelligence.MlModelIdentity;
 
 import java.util.List;
 
@@ -16,7 +17,8 @@ public record EngineIntelligenceEngineReadModel(
         FraudEngineStatus status,
         RiskLevel riskLevel,
         EngineIntelligenceScoreBucket scoreBucket,
-    List<String> reasonCodes
+        List<String> reasonCodes,
+        MlModelIdentity modelIdentity
 ) {
     public EngineIntelligenceEngineReadModel {
         EngineIntelligenceEngineResult result = new EngineIntelligenceEngineResult(
@@ -25,7 +27,8 @@ public record EngineIntelligenceEngineReadModel(
                 status,
                 riskLevel,
                 scoreBucket,
-                reasonCodes == null ? List.of() : reasonCodes
+                reasonCodes == null ? List.of() : reasonCodes,
+                modelIdentity
         );
         engineId = result.engineId();
         engineType = result.engineType();
@@ -33,5 +36,17 @@ public record EngineIntelligenceEngineReadModel(
         riskLevel = result.riskLevel();
         scoreBucket = result.scoreBucket();
         reasonCodes = result.reasonCodes();
+        modelIdentity = result.modelIdentity();
+    }
+
+    public EngineIntelligenceEngineReadModel(
+            String engineId,
+            FraudEngineType engineType,
+            FraudEngineStatus status,
+            RiskLevel riskLevel,
+            EngineIntelligenceScoreBucket scoreBucket,
+            List<String> reasonCodes
+    ) {
+        this(engineId, engineType, status, riskLevel, scoreBucket, reasonCodes, null);
     }
 }

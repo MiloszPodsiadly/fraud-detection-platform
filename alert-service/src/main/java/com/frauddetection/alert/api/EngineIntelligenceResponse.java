@@ -111,7 +111,8 @@ public record EngineIntelligenceResponse(
                 engine.status().toFraudEngineStatus(),
                 engine.riskLevel(),
                 engine.scoreBucket(),
-                engine.reasonCodes()
+                engine.reasonCodes(),
+                engine.modelIdentity()
         );
     }
 

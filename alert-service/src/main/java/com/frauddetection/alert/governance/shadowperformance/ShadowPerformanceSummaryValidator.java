@@ -96,7 +96,7 @@ class ShadowPerformanceSummaryValidator {
         require("NOT_AVAILABLE".equals(subject.modelIdentity()), "modelIdentity is unsupported");
         require("NOT_AVAILABLE".equals(subject.modelArtifactSha256()), "modelArtifactSha256 is unsupported");
         require(
-                "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE".equals(subject.identityCompleteness()),
+                "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE".equals(subject.identityCompleteness()),
                 "identityCompleteness is unsupported"
         );
     }
@@ -124,7 +124,7 @@ class ShadowPerformanceSummaryValidator {
         );
         require("OFFLINE_DIAGNOSTIC".equals(evaluation.evaluationPurpose()), "evaluationPurpose is unsupported");
         require(
-                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1".equals(evaluation.evaluationReportType()),
+                "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1".equals(evaluation.evaluationReportType()),
                 "evaluationReportType is unsupported"
         );
         require("FDP-124".equals(evaluation.evaluationReportVersion()), "evaluationReportVersion is unsupported");
@@ -133,7 +133,7 @@ class ShadowPerformanceSummaryValidator {
         require(!cardGeneratedAt.isBefore(reportGeneratedAt), "evaluationCardGeneratedAt must be >= evaluationReportGeneratedAt");
         require(!summaryGeneratedAt.isBefore(cardGeneratedAt), "generatedAt must be >= evaluationCardGeneratedAt");
         require(
-                "fdp123-report-artifact-set-v1".equals(evaluation.evaluationArtifactSetVersion()),
+                "feedback-dataset-evaluation-report-artifact-set-v1".equals(evaluation.evaluationArtifactSetVersion()),
                 "evaluationArtifactSetVersion is unsupported"
         );
         require("feedback-dataset-v1".equals(evaluation.datasetVersion()), "datasetVersion is unsupported");

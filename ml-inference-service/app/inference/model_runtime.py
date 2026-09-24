@@ -92,6 +92,11 @@ class FraudModelRuntime:
         """Family of the loaded model."""
         return self.model.model_family
 
+    @property
+    def feature_contract_version(self) -> str:
+        """Feature contract version declared by the loaded model artifact."""
+        return self.model.feature_contract_version
+
     def score(self, features: dict[str, Any]) -> dict[str, Any]:
         """Score a fraud feature payload without changing the public response contract."""
         compatibility = self.feature_pipeline.validate_production_snapshot(features)
@@ -115,6 +120,7 @@ class FraudModelRuntime:
             "riskLevel": risk_level,
             "modelName": self.model_name,
             "modelVersion": self.model_version,
+            "featureContractVersion": self.feature_contract_version,
             "inferenceTimestamp": datetime.now(timezone.utc).isoformat(),
             "reasonCodes": self._reason_codes(contributions),
             "scoreDetails": {
@@ -134,6 +140,7 @@ class FraudModelRuntime:
                 "modelAvailable": True,
                 "modelName": self.model_name,
                 "modelVersion": self.model_version,
+                "featureContractVersion": self.feature_contract_version,
             },
             "fallbackReason": None,
         }
@@ -145,6 +152,7 @@ class FraudModelRuntime:
             "riskLevel": None,
             "modelName": self.model_name,
             "modelVersion": self.model_version,
+            "featureContractVersion": self.feature_contract_version,
             "inferenceTimestamp": datetime.now(timezone.utc).isoformat(),
             "reasonCodes": [],
             "scoreDetails": {
@@ -159,6 +167,7 @@ class FraudModelRuntime:
                 "modelAvailable": False,
                 "modelName": self.model_name,
                 "modelVersion": self.model_version,
+                "featureContractVersion": self.feature_contract_version,
             },
             "fallbackReason": "INCOMPATIBLE_FEATURE_SNAPSHOT",
         }
@@ -223,6 +232,7 @@ def _model_summary(result: dict[str, Any]) -> dict[str, Any]:
         "available": result["available"],
         "modelName": result["modelName"],
         "modelVersion": result["modelVersion"],
+        "featureContractVersion": result.get("featureContractVersion"),
         "fraudScore": result["fraudScore"],
         "riskLevel": result["riskLevel"],
         "fallbackReason": result["fallbackReason"],

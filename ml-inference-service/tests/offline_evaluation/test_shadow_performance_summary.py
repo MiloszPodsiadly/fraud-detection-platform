@@ -12,7 +12,7 @@ from offline_evaluation.shadow_performance_schema import (
 )
 from offline_evaluation.shadow_performance_summary import build_shadow_performance_summary
 from offline_evaluation.shadow_performance_writer import write_shadow_performance_summary
-from fdp123.evaluation_card.test_schema import (
+from feedback_dataset_evaluation.evaluation_card.test_schema import (
     INVALID_CANONICAL_TIMESTAMPS,
     VALID_CANONICAL_TIMESTAMPS,
     valid_evaluation_card,

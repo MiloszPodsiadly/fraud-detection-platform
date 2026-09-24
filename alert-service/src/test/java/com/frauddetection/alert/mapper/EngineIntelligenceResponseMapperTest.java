@@ -74,6 +74,20 @@ class EngineIntelligenceResponseMapperTest {
     }
 
     @Test
+    void mapsMlModelIdentityFromReadModelToPublicResponse() {
+        EngineIntelligenceResponse response = mapper.toResponse(readModel(
+                FraudEngineStatus.AVAILABLE,
+                FraudEngineStatus.AVAILABLE,
+                EngineIntelligenceAgreementStatus.AGREEMENT,
+                List.of()
+        ));
+
+        assertThat(response.engines().get(0).modelIdentity()).isNull();
+        assertThat(response.engines().get(1).modelIdentity().modelVersion())
+                .isEqualTo("2026-05-30.v1");
+    }
+
+    @Test
     void preservesProjectedComparisonValuesExactlyWithoutCalculatingThem() {
         EngineIntelligenceResponse response = mapper.toResponse(readModel(
                 FraudEngineStatus.AVAILABLE,
@@ -564,7 +578,8 @@ class EngineIntelligenceResponseMapperTest {
                                 engine.status(),
                                 engine.riskLevel(),
                                 engine.scoreBucket(),
-                                engine.reasonCodes()
+                                engine.reasonCodes(),
+                                engine.modelIdentity()
                         ))
                         .toList(),
                 summary.diagnosticSignals().stream()
@@ -617,7 +632,14 @@ class EngineIntelligenceResponseMapperTest {
                 status,
                 status == FraudEngineStatus.AVAILABLE ? RiskLevel.HIGH : null,
                 status == FraudEngineStatus.AVAILABLE ? EngineIntelligenceScoreBucket.HIGH : EngineIntelligenceScoreBucket.UNAVAILABLE,
-                reasonCodes
+                reasonCodes,
+                engineType == FraudEngineType.ML_MODEL && status == FraudEngineStatus.AVAILABLE
+                        ? new com.frauddetection.common.events.intelligence.MlModelIdentity(
+                                "python-logistic-fraud-model",
+                                "2026-05-30.v1",
+                                "2026-05-30.feature-contract.v1"
+                        )
+                        : null
         );
     }
 

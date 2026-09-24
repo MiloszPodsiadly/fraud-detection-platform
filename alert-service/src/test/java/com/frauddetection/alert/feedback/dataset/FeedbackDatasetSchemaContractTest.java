@@ -48,7 +48,10 @@ class FeedbackDatasetSchemaContractTest {
                         "\"feedbackLabel\"",
                         "\"evaluationLabel\"",
                         "\"decisionReasonCodes\"",
-                        "\"feedbackCreatedAt\""
+                        "\"feedbackCreatedAt\"",
+                        "\"mlModelName\"",
+                        "\"mlModelVersion\"",
+                        "\"mlFeatureContractVersion\""
                 );
     }
 
@@ -66,6 +69,20 @@ class FeedbackDatasetSchemaContractTest {
                 .contains("\"const\": \"POSITIVE_FRAUD\"")
                 .contains("\"const\": \"CONFIRMED_LEGITIMATE\"")
                 .contains("\"const\": \"NEGATIVE_LEGITIMATE\"");
+    }
+
+    @Test
+    void schemaDocumentsAtomicMlModelIdentityConstraint() throws Exception {
+        String schema = Files.readString(SCHEMA);
+
+        assertThat(schema)
+                .contains("\"oneOf\"")
+                .contains("\"mlModelName\"")
+                .contains("\"mlModelVersion\"")
+                .contains("\"mlFeatureContractVersion\"")
+                .contains("\"maxLength\": 64")
+                .contains("\"maxLength\": 96")
+                .contains("\"pattern\": \"^[A-Za-z0-9._-]+$\"");
     }
 
     @Test
@@ -129,6 +146,9 @@ class FeedbackDatasetSchemaContractTest {
         assertThat(record.get("evaluationLabel").asString()).isEqualTo("POSITIVE_FRAUD");
         assertThat(record.get("decisionReasonCodes").get(0).asString()).isEqualTo("ANALYST_CONFIRMED_FRAUD");
         assertThat(record.get("feedbackCreatedAt").asString()).isEqualTo("2026-06-01T00:00:00Z");
+        assertThat(record.has("mlModelName")).isTrue();
+        assertThat(record.has("mlModelVersion")).isTrue();
+        assertThat(record.has("mlFeatureContractVersion")).isTrue();
     }
 
     @Test

@@ -26,7 +26,7 @@ The endpoint does not recompute metrics. The endpoint does not read raw dataset 
 The source chain remains:
 
 ```text
-FDP-123 bounded feedback dataset
+bounded feedback dataset
 -> FDP-124 evaluation artifact set
 -> Platform Recommendation Evaluation Card v1 artifact set
 -> Shadow Performance Summary v2

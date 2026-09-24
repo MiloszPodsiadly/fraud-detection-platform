@@ -7,6 +7,7 @@ import com.frauddetection.common.events.engine.FraudEngineResult;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrationResult;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrationStatus;
 
@@ -36,7 +37,8 @@ final class AggregationTestSupport {
                 List.of(reasonCodes),
                 List.of(),
                 List.of(),
-                0L
+                0L,
+                modelIdentity(engineType(engineId), status)
         );
     }
 
@@ -74,8 +76,9 @@ final class AggregationTestSupport {
                 contributions,
                 evidence,
                 0L,
-                null,
-                null,
+                modelName(engineType, status),
+                modelVersion(engineType, status),
+                featureContractVersion(engineType, status),
                 status == FraudEngineStatus.AVAILABLE ? null : reasonCodes.getFirst(),
                 GENERATED_AT
         );
@@ -112,5 +115,31 @@ final class AggregationTestSupport {
             return FraudEngineConfidence.UNKNOWN;
         }
         return FraudEngineConfidence.MEDIUM;
+    }
+
+    private static String modelName(FraudEngineType engineType, FraudEngineStatus status) {
+        return isAvailableMl(engineType, status) ? "python-logistic-fraud-model" : null;
+    }
+
+    private static String modelVersion(FraudEngineType engineType, FraudEngineStatus status) {
+        return isAvailableMl(engineType, status) ? "2026-05-30.v1" : null;
+    }
+
+    private static String featureContractVersion(FraudEngineType engineType, FraudEngineStatus status) {
+        return isAvailableMl(engineType, status) ? "2026-05-30.feature-contract.v1" : null;
+    }
+
+    private static boolean isAvailableMl(FraudEngineType engineType, FraudEngineStatus status) {
+        return engineType == FraudEngineType.ML_MODEL && status == FraudEngineStatus.AVAILABLE;
+    }
+
+    private static MlModelIdentity modelIdentity(FraudEngineType engineType, FraudEngineStatus status) {
+        return isAvailableMl(engineType, status)
+                ? new MlModelIdentity(
+                        modelName(engineType, status),
+                        modelVersion(engineType, status),
+                        featureContractVersion(engineType, status)
+                )
+                : null;
     }
 }

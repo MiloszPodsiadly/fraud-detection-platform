@@ -86,13 +86,13 @@ class FeedbackDatasetArchitectureGuardTest {
     }
 
     @Test
-    void documentationMentionsFdp123Boundary() throws IOException {
+    void documentationMentionsFeedbackDatasetBoundary() throws IOException {
         String docs = Files.readString(ROOT.resolve("docs/architecture/feedback_dataset_governance.md"))
                 + "\n"
                 + Files.readString(ROOT.resolve("docs/architecture/feedback_dataset_builder.md"));
 
         assertThat(docs)
-                .contains("FDP-123")
+                .contains("feedback dataset")
                 .contains("FeedbackDatasetEligibilityPolicy")
                 .contains("not training")
                 .contains("separate bounded context")

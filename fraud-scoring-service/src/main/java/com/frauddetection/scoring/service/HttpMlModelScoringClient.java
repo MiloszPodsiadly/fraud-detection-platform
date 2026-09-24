@@ -65,8 +65,9 @@ public class HttpMlModelScoringClient implements MlModelScoringClient {
                 false,
                 null,
                 null,
-                "python-fraud-model",
-                "unavailable",
+                null,
+                null,
+                null,
                 Instant.now(),
                 List.of(ReasonCode.ML_MODEL_UNAVAILABLE.wireValue()),
                 Map.of(

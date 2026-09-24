@@ -50,7 +50,8 @@ public final class PublicEngineIntelligenceMapper {
                 status,
                 publicRiskLevel(status, result.riskLevel()),
                 EngineIntelligenceScoreBucket.from(status, result.score()),
-                result.reasonCodes()
+                result.reasonCodes(),
+                status == FraudEngineStatus.AVAILABLE ? result.modelIdentity() : null
         );
     }
 

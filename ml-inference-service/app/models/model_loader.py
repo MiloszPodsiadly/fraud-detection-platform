@@ -8,6 +8,11 @@ from app.features.feature_contract import FEATURE_CONTRACT
 from app.features.feature_pipeline import FeaturePipeline
 from app.models.logistic_model import LogisticFraudModel
 from app.models.xgboost_model import XGBoostFraudModel
+from model_identity_policy import (
+    validate_feature_contract_version,
+    validate_model_name,
+    validate_model_version,
+)
 
 
 class ModelConfigurationError(RuntimeError):
@@ -62,6 +67,7 @@ def validate_model_artifact(artifact: dict[str, Any], artifact_path: Path | None
         ),
         location,
     )
+    _require_canonical_model_identity(artifact, location)
     training_mode = _training_mode(artifact)
     expected_schema = _expected_schema(training_mode)
     for field in ("featureContractVersion", "featureSchemaVersion", "featureSetVersion"):
@@ -101,6 +107,15 @@ def validate_model_artifact(artifact: dict[str, Any], artifact_path: Path | None
                 f"logistic weights schema mismatch{location}: expected keys {expected_schema}, got {actual_weight_keys!r}."
             )
     _require_ready_model_runtime_readiness(artifact.get("modelRuntimeReadiness"), location)
+
+
+def _require_canonical_model_identity(artifact: dict[str, Any], location: str) -> None:
+    try:
+        validate_model_name(artifact.get("modelName"), "modelName")
+        validate_model_version(artifact.get("modelVersion"), "modelVersion")
+        validate_feature_contract_version(artifact.get("featureContractVersion"), "featureContractVersion")
+    except ValueError as exception:
+        raise ModelConfigurationError(f"model artifact identity invalid{location}: {exception}") from exception
 
 
 def _require_top_level_fields(artifact: dict[str, Any], fields: tuple[str, ...], location: str) -> None:

@@ -312,7 +312,7 @@ function checksFromInputs(inputs) {
     check("NOT_THRESHOLD_RECOMMENDATION_TRUE", passFail(inputs.governance.notThresholdRecommendation === true)),
     check("NOT_PAYMENT_AUTHORIZATION_TRUE", passFail(inputs.governance.notPaymentAuthorization === true)),
     check("NOT_AUTOMATIC_DECISIONING_TRUE", passFail(inputs.governance.notAutomaticDecisioning === true)),
-    check("EVALUATION_REPORT_TYPE_SUPPORTED", passFail(inputs.evaluation.evaluationReportType === "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1")),
+    check("EVALUATION_REPORT_TYPE_SUPPORTED", passFail(inputs.evaluation.evaluationReportType === "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1")),
     check("METRIC_BASIS_SUPPORTED", passFail(inputs.metricBasis === "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK")),
     check("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", passFail(inputs.recordsEvaluated >= inputs.minimumDiagnosticEvidenceRecords), "HIGH"),
     metricCheck("ALERT_RECOMMENDED_PRECISION_AVAILABLE", inputs.metrics.alertRecommendedPrecision),
