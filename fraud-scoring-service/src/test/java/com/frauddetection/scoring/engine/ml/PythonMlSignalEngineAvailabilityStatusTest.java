@@ -59,6 +59,7 @@ class PythonMlSignalEngineAvailabilityStatusTest {
                 "ML",
                 "python-logistic-fraud-model",
                 "2026-05-30.v1",
+                PythonMlSignalEngineTestSupport.FEATURE_CONTRACT_VERSION,
                 Instant.parse("2026-05-30T09:59:59Z"),
                 List.of(),
                 Map.of(),
@@ -189,17 +190,14 @@ class PythonMlSignalEngineAvailabilityStatusTest {
     }
 
     @Test
-    void modelAvailableTrueWithMissingModelMetadataReturnsDegraded() {
-        FraudSignalEvaluation result = new PythonMlSignalEngine(
-                sourceReturning(result(0.82d, RiskLevel.HIGH, null, "2026-05-30.v1", true, List.of()))
-        ).evaluate(context());
-
-        assertFailure(result, FraudEngineStatus.DEGRADED, PythonMlSignalReasonCode.ML_MODEL_METADATA_MISSING);
+    void modelAvailableTrueWithMissingModelMetadataIsRejectedAtResultBoundary() {
+        assertThatThrownBy(() -> result(0.82d, RiskLevel.HIGH, null, "2026-05-30.v1", true, List.of()))
+                .hasMessageContaining("ML model identity must be entirely absent or complete");
     }
 
     @Test
-    void modelAvailableTrueWithMissingFeatureContractVersionReturnsDegraded() {
-        FraudScoreResult source = new FraudScoreResult(
+    void modelAvailableTrueWithMissingFeatureContractVersionIsRejectedAtResultBoundary() {
+        assertThatThrownBy(() -> new FraudScoreResult(
                 0.82d,
                 RiskLevel.HIGH,
                 "ML",
@@ -212,11 +210,7 @@ class PythonMlSignalEngineAvailabilityStatusTest {
                 Map.of(),
                 Map.of("modelAvailable", true),
                 true
-        );
-
-        FraudSignalEvaluation result = new PythonMlSignalEngine(sourceReturning(source)).evaluate(context());
-
-        assertFailure(result, FraudEngineStatus.DEGRADED, PythonMlSignalReasonCode.ML_MODEL_METADATA_MISSING);
+        )).hasMessageContaining("ML model identity must be entirely absent or complete");
     }
 
     private void assertFailure(

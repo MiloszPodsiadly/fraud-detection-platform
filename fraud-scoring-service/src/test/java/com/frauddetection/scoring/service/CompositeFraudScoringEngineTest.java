@@ -50,7 +50,8 @@ class CompositeFraudScoringEngineTest {
         assertThat(mlDiagnostics(result))
                 .containsEntry("fallbackUsed", true)
                 .containsEntry("fallbackReasonCode", "ml_runtime_unavailable")
-                .containsEntry("mlModelName", "ml-placeholder");
+                .containsEntry("mlModelName", null)
+                .containsEntry("mlModelVersion", null);
         assertThat(meterRegistry.get("fraud.scoring.fallbacks")
                 .tags("mode", "ml", "reason", "no_ml_model_runtime_is_configured_yet")
                 .counter()
@@ -69,11 +70,13 @@ class CompositeFraudScoringEngineTest {
         assertThat(mlDiagnostics(result))
                 .containsEntry("mode", "SHADOW")
                 .containsEntry("finalDecisionSource", "RULE_BASED")
-                .containsEntry("shadowModelName", "ml-placeholder")
+                .containsEntry("shadowModelName", null)
+                .containsEntry("shadowModelVersion", null)
                 .containsKey("modelMonitoring");
         assertThat(modelMonitoring(result))
                 .containsEntry("mode", "SHADOW")
-                .containsEntry("modelVersion", "unavailable")
+                .containsEntry("modelName", null)
+                .containsEntry("modelVersion", null)
                 .containsEntry("finalDecisionSource", "RULE_BASED")
                 .containsEntry("modelAvailable", false)
                 .containsEntry("mlScore", null)

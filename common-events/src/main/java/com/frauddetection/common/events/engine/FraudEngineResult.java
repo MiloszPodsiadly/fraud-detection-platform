@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.ml.MlModelIdentityPolicy;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -82,21 +83,19 @@ public record FraudEngineResult(
         reasonCodes = copyBoundedReasonCodes(reasonCodes);
         contributions = copyBoundedContributions(contributions);
         evidence = copyBoundedEvidence(evidence);
-        modelName = FraudEngineValuePolicy.optionalSafeIdentifier(
+        modelName = MlModelIdentityPolicy.optionalModelName(
                 modelName,
-                "modelName",
-                FraudEngineValuePolicy.MODEL_NAME_MAX_LENGTH
+                "modelName"
         );
-        modelVersion = FraudEngineValuePolicy.optionalSafeIdentifier(
+        modelVersion = MlModelIdentityPolicy.optionalModelVersion(
                 modelVersion,
-                "modelVersion",
-                FraudEngineValuePolicy.MODEL_VERSION_MAX_LENGTH
+                "modelVersion"
         );
-        featureContractVersion = FraudEngineValuePolicy.optionalSafeIdentifier(
+        featureContractVersion = MlModelIdentityPolicy.optionalFeatureContractVersion(
                 featureContractVersion,
-                "featureContractVersion",
-                FraudEngineValuePolicy.FEATURE_CONTRACT_VERSION_MAX_LENGTH
+                "featureContractVersion"
         );
+        validateAtomicMlModelIdentity(engineType, modelName, modelVersion, featureContractVersion);
         statusReason = FraudEngineValuePolicy.optionalMachineCode(
                 statusReason,
                 "statusReason",
@@ -304,6 +303,24 @@ public record FraudEngineResult(
             throw new IllegalArgumentException(
                     "AVAILABLE ML_MODEL status requires modelName, modelVersion, and featureContractVersion"
             );
+        }
+    }
+
+    private static void validateAtomicMlModelIdentity(
+            FraudEngineType engineType,
+            String modelName,
+            String modelVersion,
+            String featureContractVersion
+    ) {
+        if (engineType != FraudEngineType.ML_MODEL) {
+            return;
+        }
+        int present = 0;
+        present += modelName == null ? 0 : 1;
+        present += modelVersion == null ? 0 : 1;
+        present += featureContractVersion == null ? 0 : 1;
+        if (present != 0 && present != 3) {
+            throw new IllegalArgumentException("ML model identity must be entirely absent or complete");
         }
     }
 

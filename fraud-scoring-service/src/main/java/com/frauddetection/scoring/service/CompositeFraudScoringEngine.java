@@ -61,15 +61,16 @@ public class CompositeFraudScoringEngine implements FraudScoringEngine {
         }
         scoringMetrics.recordFallback(ScoringMode.ML, fallbackReason(mlResult));
 
-        return withDiagnostics(ruleBasedFraudScoringEngine.score(request), Map.of(
-                "mode", ScoringMode.ML.name(),
-                "fallbackUsed", true,
-                "fallbackReasonCode", FallbackReasonCodes.from(fallbackReason(mlResult)),
-                "fallbackReasonLength", fallbackReason(mlResult).length(),
-                "fallbackReasonProvided", !fallbackReason(mlResult).isBlank(),
-                "mlModelName", mlResult.modelName(),
-                "mlModelVersion", mlResult.modelVersion()
-        ), mlResult.scoringEvidence());
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        diagnostics.put("mode", ScoringMode.ML.name());
+        diagnostics.put("fallbackUsed", true);
+        diagnostics.put("fallbackReasonCode", FallbackReasonCodes.from(fallbackReason(mlResult)));
+        diagnostics.put("fallbackReasonLength", fallbackReason(mlResult).length());
+        diagnostics.put("fallbackReasonProvided", !fallbackReason(mlResult).isBlank());
+        diagnostics.put("mlModelName", mlResult.modelName());
+        diagnostics.put("mlModelVersion", mlResult.modelVersion());
+
+        return withDiagnostics(ruleBasedFraudScoringEngine.score(request), diagnostics, mlResult.scoringEvidence());
     }
 
     private FraudScoreResult scoreWithShadow(FraudScoringRequest request) {

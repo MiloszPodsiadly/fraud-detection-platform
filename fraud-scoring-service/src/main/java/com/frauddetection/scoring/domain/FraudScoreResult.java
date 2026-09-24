@@ -2,6 +2,7 @@ package com.frauddetection.scoring.domain;
 
 import com.frauddetection.common.events.evidence.ScoringEvidenceItem;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.ml.MlModelIdentityPolicy;
 
 import java.time.Instant;
 import java.util.List;
@@ -23,6 +24,15 @@ public record FraudScoreResult(
         List<ScoringEvidenceItem> scoringEvidence
 ) {
     public FraudScoreResult {
+        if ("ML".equals(scoringStrategy)) {
+            modelName = MlModelIdentityPolicy.optionalModelName(modelName, "modelName");
+            modelVersion = MlModelIdentityPolicy.optionalModelVersion(modelVersion, "modelVersion");
+            featureContractVersion = MlModelIdentityPolicy.optionalFeatureContractVersion(
+                    featureContractVersion,
+                    "featureContractVersion"
+            );
+            validateAtomicMlModelIdentity(modelName, modelVersion, featureContractVersion);
+        }
         scoringEvidence = scoringEvidence == null ? List.of() : List.copyOf(scoringEvidence);
     }
 
@@ -116,5 +126,19 @@ public record FraudScoreResult(
                 alertRecommended,
                 List.of()
         );
+    }
+
+    private static void validateAtomicMlModelIdentity(
+            String modelName,
+            String modelVersion,
+            String featureContractVersion
+    ) {
+        int present = 0;
+        present += modelName == null ? 0 : 1;
+        present += modelVersion == null ? 0 : 1;
+        present += featureContractVersion == null ? 0 : 1;
+        if (present != 0 && present != 3) {
+            throw new IllegalArgumentException("ML model identity must be entirely absent or complete");
+        }
     }
 }

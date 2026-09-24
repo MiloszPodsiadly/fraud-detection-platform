@@ -189,10 +189,34 @@ class FraudEngineResultValidationTest {
                 .hasMessageContaining("modelName");
         assertThatThrownBy(() -> resultWithModel(null, "v".repeat(65), null))
                 .hasMessageContaining("modelVersion");
+        assertThatThrownBy(() -> availableMlResult(
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                "f".repeat(97)
+        )).hasMessageContaining("featureContractVersion");
         assertThatThrownBy(() -> resultWithModel(null, null, "A".repeat(129)))
                 .hasMessageContaining("statusReason");
         assertThatThrownBy(() -> result("rules\nprimary", FraudEngineStatus.AVAILABLE, 0.4000d,
                 RiskLevel.MEDIUM)).hasMessageContaining("control characters");
+    }
+
+    @Test
+    void mlModelIdentityFieldsRejectPathEndpointAndWhitespaceSyntax() {
+        assertThatThrownBy(() -> availableMlResult(
+                "models/python-logistic-fraud-model",
+                "2026-05-30.v1",
+                "2026-05-30.feature-contract.v1"
+        )).hasMessageContaining("modelName");
+        assertThatThrownBy(() -> availableMlResult(
+                "python-logistic-fraud-model",
+                "2026-05-30:v1",
+                "2026-05-30.feature-contract.v1"
+        )).hasMessageContaining("modelVersion");
+        assertThatThrownBy(() -> availableMlResult(
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                "2026-05-30 feature-contract.v1"
+        )).hasMessageContaining("featureContractVersion");
     }
 
     @Test
@@ -204,11 +228,33 @@ class FraudEngineResultValidationTest {
         ).featureContractVersion()).isEqualTo("2026-05-30.feature-contract.v1");
 
         assertThatThrownBy(() -> availableMlResult(null, "2026-05-30.v1", "2026-05-30.feature-contract.v1"))
-                .hasMessageContaining("AVAILABLE ML_MODEL status requires");
+                .hasMessageContaining("ML model identity must be entirely absent or complete");
         assertThatThrownBy(() -> availableMlResult("python-logistic-fraud-model", null, "2026-05-30.feature-contract.v1"))
-                .hasMessageContaining("AVAILABLE ML_MODEL status requires");
+                .hasMessageContaining("ML model identity must be entirely absent or complete");
         assertThatThrownBy(() -> availableMlResult("python-logistic-fraud-model", "2026-05-30.v1", null))
-                .hasMessageContaining("AVAILABLE ML_MODEL status requires");
+                .hasMessageContaining("ML model identity must be entirely absent or complete");
+    }
+
+    @Test
+    void mlModelResultRejectsPartialRuntimeIdentityForEveryStatus() {
+        assertThatThrownBy(() -> new FraudEngineResult(
+                "ml.python.primary",
+                FraudEngineType.ML_MODEL,
+                "python",
+                FraudEngineStatus.DEGRADED,
+                null,
+                null,
+                FraudEngineConfidence.UNKNOWN,
+                List.of("ENGINE_STATUS"),
+                List.of(),
+                List.of(),
+                3L,
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                null,
+                "ENGINE_STATUS",
+                now()
+        )).hasMessageContaining("ML model identity must be entirely absent or complete");
     }
 
     @Test

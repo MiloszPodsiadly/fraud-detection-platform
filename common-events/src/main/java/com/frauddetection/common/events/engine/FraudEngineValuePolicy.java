@@ -1,5 +1,7 @@
 package com.frauddetection.common.events.engine;
 
+import com.frauddetection.common.events.ml.MlModelIdentityPolicy;
+
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -12,13 +14,13 @@ final class FraudEngineValuePolicy {
     static final int EVIDENCE_CODE_MAX_LENGTH = 64;
     static final int DESCRIPTION_CODE_MAX_LENGTH = 128;
     static final int ENGINE_LANGUAGE_MAX_LENGTH = 16;
-    static final int MODEL_NAME_MAX_LENGTH = 64;
-    static final int MODEL_VERSION_MAX_LENGTH = 64;
-    static final int FEATURE_CONTRACT_VERSION_MAX_LENGTH = 96;
+    static final int MODEL_NAME_MAX_LENGTH = MlModelIdentityPolicy.MODEL_NAME_MAX_LENGTH;
+    static final int MODEL_VERSION_MAX_LENGTH = MlModelIdentityPolicy.MODEL_VERSION_MAX_LENGTH;
+    static final int FEATURE_CONTRACT_VERSION_MAX_LENGTH = MlModelIdentityPolicy.FEATURE_CONTRACT_VERSION_MAX_LENGTH;
     static final int FALLBACK_REASON_MAX_LENGTH = 128;
 
     private static final Pattern MACHINE_CODE_PATTERN = Pattern.compile("[A-Z0-9_]+");
-    private static final Pattern SAFE_IDENTIFIER_PATTERN = Pattern.compile("[A-Za-z0-9._:-]+");
+    private static final Pattern SAFE_IDENTIFIER_PATTERN = Pattern.compile("[A-Za-z0-9._-]+");
     private static final Set<String> FORBIDDEN_COMPACT_TERMS = Set.of(
             "rawpayload",
             "rawrequest",

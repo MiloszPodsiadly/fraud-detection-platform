@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class MlFraudScoringEngineTest {
     private static final String FEATURE_CONTRACT_VERSION = "2026-05-30.feature-contract.v1";
@@ -86,8 +87,8 @@ class MlFraudScoringEngineTest {
     }
 
     @Test
-    void availableMlOutputWithoutCompleteModelIdentityFailsClosed() {
-        MlFraudScoringEngine engine = new MlFraudScoringEngine(input -> new MlModelOutput(
+    void partialMlOutputModelIdentityIsRejectedAtBoundary() {
+        assertThatThrownBy(() -> new MlModelOutput(
                 true,
                 0.91d,
                 RiskLevel.CRITICAL,
@@ -99,17 +100,6 @@ class MlFraudScoringEngineTest {
                 Map.of("modelAvailable", true),
                 Map.of("modelAvailable", true),
                 null
-        ), new ScoringMetrics(new SimpleMeterRegistry()));
-
-        var result = engine.score(FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build()));
-
-        assertThat(result.fraudScore()).isNull();
-        assertThat(result.riskLevel()).isNull();
-        assertThat(result.featureContractVersion()).isNull();
-        assertThat(result.reasonCodes()).containsExactly(ReasonCode.ML_MODEL_UNAVAILABLE.wireValue());
-        assertThat(result.explanationMetadata())
-                .containsEntry("modelAvailable", false)
-                .containsEntry("fallbackReason", "ML_MODEL_IDENTITY_MISSING");
-        assertThat(result.alertRecommended()).isFalse();
+        )).hasMessageContaining("ML model identity must be entirely absent or complete");
     }
 }

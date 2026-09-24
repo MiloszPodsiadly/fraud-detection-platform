@@ -1,6 +1,7 @@
 package com.frauddetection.common.events.intelligence;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.frauddetection.common.events.ml.MlModelIdentityPolicy;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record MlModelIdentity(
@@ -9,17 +10,17 @@ public record MlModelIdentity(
         String featureContractVersion
 ) {
     public MlModelIdentity {
-        modelName = EngineIntelligenceValuePolicy.requireBoundedSafeText(
+        modelName = MlModelIdentityPolicy.requireModelName(
                 modelName,
-                "ENGINE_INTELLIGENCE_MODEL_NAME_INVALID"
+                "modelName"
         );
-        modelVersion = EngineIntelligenceValuePolicy.requireBoundedSafeText(
+        modelVersion = MlModelIdentityPolicy.requireModelVersion(
                 modelVersion,
-                "ENGINE_INTELLIGENCE_MODEL_VERSION_INVALID"
+                "modelVersion"
         );
-        featureContractVersion = EngineIntelligenceValuePolicy.requireBoundedSafeText(
+        featureContractVersion = MlModelIdentityPolicy.requireFeatureContractVersion(
                 featureContractVersion,
-                "ENGINE_INTELLIGENCE_FEATURE_CONTRACT_VERSION_INVALID"
+                "featureContractVersion"
         );
     }
 }
