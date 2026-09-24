@@ -2,10 +2,12 @@ import json
 import unittest
 
 from offline_evaluation.feedback_dataset_evaluation.dataset_reader import read_feedback_dataset_jsonl
+from offline_evaluation.feedback_dataset_evaluation.dataset_schema import FeedbackDatasetValidationError
 from offline_evaluation.feedback_dataset_evaluation.evaluation_runner import build_feedback_dataset_evaluation_reports
 from offline_evaluation.feedback_dataset_evaluation.model_evaluation import (
     MODEL_EVALUATION_REPORT_TYPE,
     ModelEvaluationIdentity,
+    validate_model_evaluation_summary,
 )
 from offline_evaluation.feedback_dataset_evaluation.report_writer import report_json
 
@@ -23,6 +25,11 @@ MODEL_X = ModelEvaluationIdentity(
 MODEL_Y = ModelEvaluationIdentity(
     "python-logistic-fraud-model",
     "2026-07-01.v1",
+    "feature-contract-v2",
+)
+SHADOW_MODEL = ModelEvaluationIdentity(
+    "python-logistic-fraud-model",
+    "ml-shadow-2026-06-01",
     "feature-contract-v2",
 )
 
@@ -64,6 +71,14 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
         self.assertEqual(1, summary["population"]["recordsExcludedMissingLineage"])
         self.assertEqual("MODEL_LINEAGE_UNAVAILABLE", summary["lineagePolicy"]["missingLineageReason"])
 
+    def test_partialLineageFailsInsteadOfBecomingUnavailableLineage(self):
+        with jsonl_file(jsonl(record(
+            mlModelName="python-logistic-fraud-model",
+            mlFeatureContractVersion="feature-contract-v2",
+        ))) as path:
+            with self.assertRaises(FeedbackDatasetValidationError):
+                read_feedback_dataset_jsonl(path)
+
     def test_legacyDatasetRemainsValidForPlatformEvaluation(self):
         reports = self._reports(record())
 
@@ -78,6 +93,15 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
         with_model = build_feedback_dataset_evaluation_reports(dataset, generated_at=GENERATED_AT, model_identity=MODEL_X)
 
         self.assertEqual(platform_only["evaluationSummary"], with_model["evaluationSummary"])
+
+    def test_shadowMlIdentityVersionRemainsTheModelSpecificEvaluationSubject(self):
+        summary = self._model_summary(
+            self._model_record("eval_11111111111111111111111111111111", SHADOW_MODEL),
+            requested=SHADOW_MODEL,
+        )
+
+        self.assertEqual("ml-shadow-2026-06-01", summary["evaluationSubject"]["modelVersion"])
+        self.assertEqual(1, summary["population"]["recordsEvaluated"])
 
     def test_modelNameMismatchIsDetected(self):
         requested = ModelEvaluationIdentity("python-xgboost-fraud-model", MODEL_X.model_version, MODEL_X.feature_contract_version)
@@ -154,11 +178,45 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
             summary["supportedMetrics"]["mlPredictionMetrics"]["reason"],
         )
 
+    def test_modelEvaluationSummaryValidatorRejectsRootContractDrift(self):
+        summary = self._model_summary(self._model_record("eval_11111111111111111111111111111111", MODEL_X))
+        summary["unexpected"] = "field"
+
+        with self.assertRaisesRegex(ValueError, "unsupported fields"):
+            validate_model_evaluation_summary(summary)
+
+    def test_modelEvaluationSummaryValidatorRejectsBrokenPopulationAccounting(self):
+        summary = self._model_summary(
+            self._model_record("eval_11111111111111111111111111111111", MODEL_X),
+            record(),
+        )
+        summary["population"]["recordsConsidered"] = 999
+
+        with self.assertRaisesRegex(ValueError, "population counts"):
+            validate_model_evaluation_summary(summary)
+
+    def test_modelEvaluationSummaryValidatorRejectsBrokenClassBalanceAccounting(self):
+        summary = self._model_summary(self._model_record("eval_11111111111111111111111111111111", MODEL_X))
+        summary["classBalance"]["positiveClassCount"] = 0
+
+        with self.assertRaisesRegex(ValueError, "class balance"):
+            validate_model_evaluation_summary(summary)
+
     def test_requestedModelIdentityRejectsSecretLikeValues(self):
         with self.assertRaises(ValueError):
             ModelEvaluationIdentity("python-logistic-fraud-model", "tokenized-model-version", "feature-contract-v2")
         with self.assertRaises(ValueError):
             ModelEvaluationIdentity("python-logistic-fraud-model", "2026-06-25.v1", "secret-feature-contract")
+
+    def test_requestedModelIdentityRejectsUnsafeSyntaxAndBounds(self):
+        with self.assertRaises(ValueError):
+            ModelEvaluationIdentity("python/logistic-fraud-model", "2026-06-25.v1", "feature-contract-v2")
+        with self.assertRaises(ValueError):
+            ModelEvaluationIdentity("python-logistic-fraud-model", "2026-06-25:v1", "feature-contract-v2")
+        with self.assertRaises(ValueError):
+            ModelEvaluationIdentity("python-logistic-fraud-model", "2026-06-25.v1", "feature contract v2")
+        with self.assertRaises(ValueError):
+            ModelEvaluationIdentity("python-logistic-fraud-model", "2026-06-25.v1", "f" * 97)
 
     def _model_summary(self, *records, requested=MODEL_X):
         return self._reports(*records, model_identity=requested)["modelEvaluationSummary"]

@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from offline_evaluation.json_contract import dumps_strict_json
+from offline_evaluation.feedback_dataset_evaluation.model_evaluation import validate_model_evaluation_summary
 from offline_evaluation.feedback_dataset_evaluation.report_contract import (
     ARTIFACT_SET_VERSION,
+    MODEL_EVALUATION_ARTIFACT_SET_VERSION,
     MODEL_EVALUATION_REPORT_TYPE,
     REPORT_TYPE,
 )
@@ -100,33 +102,63 @@ def write_feedback_dataset_evaluation_reports(
         allow_output_root: Path | None = None,
 ) -> dict[str, Path]:
     output_dir = Path(output_dir)
+    platform_dir = output_dir / "platform-evaluation"
+    model_dir = output_dir / "model-evaluation"
     paths = {
-        "evaluationSummary": output_dir / "evaluation_summary.json",
-        "scoreBucketReport": output_dir / "score_bucket_report.json",
-        "riskLevelReport": output_dir / "risk_level_report.json",
-        "disagreementReport": output_dir / "disagreement_report.jsonl",
-        "evaluationRunMarkdown": output_dir / "evaluation_run.md",
+        "platformEvaluationDir": platform_dir,
+        "evaluationSummary": platform_dir / "evaluation_summary.json",
+        "scoreBucketReport": platform_dir / "score_bucket_report.json",
+        "riskLevelReport": platform_dir / "risk_level_report.json",
+        "disagreementReport": platform_dir / "disagreement_report.jsonl",
+        "evaluationRunMarkdown": platform_dir / "evaluation_run.md",
     }
-    if "modelEvaluationSummary" in reports:
-        paths["modelEvaluationSummary"] = output_dir / "model_evaluation_summary.json"
-    payloads = {
+    platform_payloads = {
         paths["evaluationSummary"]: report_json(reports["evaluationSummary"]),
         paths["scoreBucketReport"]: report_json(reports["scoreBucketReport"]),
         paths["riskLevelReport"]: report_json(reports["riskLevelReport"]),
         paths["disagreementReport"]: disagreement_jsonl(reports["disagreementReport"]),
         paths["evaluationRunMarkdown"]: evaluation_run_markdown(reports["evaluationSummary"]),
     }
+    platform_manifest_path = platform_dir / "manifest.json"
+    platform_manifest_payload = build_artifact_manifest(
+        platform_payloads,
+        reports["evaluationSummary"].get("generatedAt"),
+        artifact_set_version=ARTIFACT_SET_VERSION,
+        report_type=REPORT_TYPE,
+    )
+    model_payloads: dict[Path, str] = {}
+    model_manifest_path: Path | None = None
+    model_manifest_payload: str | None = None
     if "modelEvaluationSummary" in reports:
-        payloads[paths["modelEvaluationSummary"]] = report_json(reports["modelEvaluationSummary"])
-    manifest_path = output_dir / "manifest.json"
-    manifest_payload = build_artifact_manifest(payloads, reports["evaluationSummary"].get("generatedAt"))
+        model_summary = validate_model_evaluation_summary(reports["modelEvaluationSummary"])
+        paths["modelEvaluationDir"] = model_dir
+        paths["modelEvaluationSummary"] = model_dir / "model_evaluation_summary.json"
+        model_payloads[paths["modelEvaluationSummary"]] = report_json(model_summary)
+        model_manifest_path = model_dir / "manifest.json"
+        model_manifest_payload = build_artifact_manifest(
+            model_payloads,
+            model_summary.get("generatedAt"),
+            artifact_set_version=MODEL_EVALUATION_ARTIFACT_SET_VERSION,
+            report_type=MODEL_EVALUATION_REPORT_TYPE,
+        )
     _prepare_output_dir(output_dir, allow_output_root)
-    _write_artifacts_atomically(payloads, manifest_path, manifest_payload)
-    paths["manifest"] = manifest_path
+    _prepare_output_dir(platform_dir, allow_output_root)
+    _write_artifacts_atomically(platform_payloads, platform_manifest_path, platform_manifest_payload)
+    paths["platformManifest"] = platform_manifest_path
+    paths["manifest"] = platform_manifest_path
+    if model_manifest_path is not None and model_manifest_payload is not None:
+        _prepare_output_dir(model_dir, allow_output_root)
+        _write_artifacts_atomically(model_payloads, model_manifest_path, model_manifest_payload)
+        paths["modelEvaluationManifest"] = model_manifest_path
     return paths
 
 
-def build_artifact_manifest(payloads: dict[Path, str], generated_at: str | None) -> str:
+def build_artifact_manifest(
+        payloads: dict[Path, str],
+        generated_at: str | None,
+        artifact_set_version: str = ARTIFACT_SET_VERSION,
+        report_type: str = REPORT_TYPE,
+) -> str:
     generated_at = normalize_rfc3339_timestamp(generated_at, "generatedAt")
     files = []
     for path, payload in sorted(payloads.items(), key=lambda item: item[0].name):
@@ -137,10 +169,10 @@ def build_artifact_manifest(payloads: dict[Path, str], generated_at: str | None)
             "sizeBytes": len(encoded),
         })
     manifest = {
-        "artifactSetVersion": ARTIFACT_SET_VERSION,
+        "artifactSetVersion": artifact_set_version,
         "files": files,
         "generatedAt": generated_at,
-        "reportType": REPORT_TYPE,
+        "reportType": report_type,
     }
     _reject_forbidden_report_fields(manifest)
     payload = dumps_strict_json(manifest, sort_keys=True, separators=(",", ":"))

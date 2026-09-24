@@ -6,6 +6,11 @@ from datetime import datetime
 from typing import Any
 
 from offline_evaluation.feedback_dataset_evaluation.models import FeedbackDatasetMetadata, FeedbackDatasetRecord
+from model_identity_policy import (
+    validate_feature_contract_version,
+    validate_model_name,
+    validate_model_version,
+)
 
 
 class FeedbackDatasetFormatError(ValueError):
@@ -29,6 +34,7 @@ MAX_JSONL_NON_EMPTY_LINES = MAX_DATASET_RECORDS + 1
 EVALUATION_RECORD_ID_PATTERN = re.compile(r"^eval_[a-f0-9]{32}$")
 TRANSACTION_REFERENCE_PATTERN = re.compile(r"^txnref_[a-f0-9]{32}$")
 MACHINE_CODE_PATTERN = re.compile(r"^[A-Z0-9_]{1,64}$")
+ML_MODEL_IDENTITY_FIELDS = ("mlModelName", "mlModelVersion", "mlFeatureContractVersion")
 
 ALLOWED_METADATA_FIELDS = {
     "type",
@@ -219,6 +225,10 @@ def validate_record(raw: dict[str, Any]) -> FeedbackDatasetRecord:
         raise FeedbackDatasetValidationError("CONFIRMED_FRAUD requires POSITIVE_FRAUD")
     if feedback_label == "CONFIRMED_LEGITIMATE" and evaluation_label != "NEGATIVE_LEGITIMATE":
         raise FeedbackDatasetValidationError("CONFIRMED_LEGITIMATE requires NEGATIVE_LEGITIMATE")
+    ml_model_name = _optional_model_identity_part(raw, "mlModelName")
+    ml_model_version = _optional_model_identity_part(raw, "mlModelVersion")
+    ml_feature_contract_version = _optional_model_identity_part(raw, "mlFeatureContractVersion")
+    _validate_ml_model_identity(ml_model_name, ml_model_version, ml_feature_contract_version)
     return FeedbackDatasetRecord(
         dataset_version=DATASET_VERSION,
         evaluation_record_id=_required_pattern(raw, "evaluationRecordId", EVALUATION_RECORD_ID_PATTERN),
@@ -234,9 +244,9 @@ def validate_record(raw: dict[str, Any]) -> FeedbackDatasetRecord:
         agreement_status=_optional_string(raw, "agreementStatus"),
         risk_mismatch_status=_optional_string(raw, "riskMismatchStatus"),
         score_delta_bucket=_optional_string(raw, "scoreDeltaBucket"),
-        ml_model_name=_optional_model_identity_part(raw, "mlModelName"),
-        ml_model_version=_optional_model_identity_part(raw, "mlModelVersion"),
-        ml_feature_contract_version=_optional_model_identity_part(raw, "mlFeatureContractVersion"),
+        ml_model_name=ml_model_name,
+        ml_model_version=ml_model_version,
+        ml_feature_contract_version=ml_feature_contract_version,
         analyst_recommendation_status=_optional_string(raw, "analystRecommendationStatus"),
         analyst_recommendation=_optional_string(raw, "analystRecommendation"),
         analyst_recommendation_version=_optional_string(raw, "analystRecommendationVersion"),
@@ -314,14 +324,29 @@ def _optional_model_identity_part(raw: dict[str, Any], field: str) -> str | None
     value = raw.get(field)
     if value is None:
         return None
-    if not isinstance(value, str) or not value or len(value) > 128:
-        raise FeedbackDatasetValidationError(f"{field} must be a bounded non-empty string when present")
-    if any(ord(character) < 32 for character in value):
-        raise FeedbackDatasetValidationError(f"{field} contains control characters")
-    if "/" in value or "\\" in value or "://" in value or "@" in value or ":" in value:
-        raise FeedbackDatasetValidationError(f"{field} contains unsafe value")
-    _validate_safe_string_value(value, field)
-    return value
+    try:
+        if field == "mlModelName":
+            return validate_model_name(value, field)
+        if field == "mlModelVersion":
+            return validate_model_version(value, field)
+        if field == "mlFeatureContractVersion":
+            return validate_feature_contract_version(value, field)
+    except ValueError as exception:
+        raise FeedbackDatasetValidationError(str(exception)) from exception
+    raise FeedbackDatasetValidationError(f"{field} is not a supported ML model identity field")
+
+
+def _validate_ml_model_identity(
+        ml_model_name: str | None,
+        ml_model_version: str | None,
+        ml_feature_contract_version: str | None,
+) -> None:
+    present = sum(value is not None for value in (ml_model_name, ml_model_version, ml_feature_contract_version))
+    if present not in (0, len(ML_MODEL_IDENTITY_FIELDS)):
+        raise FeedbackDatasetValidationError(
+            "ML model identity must be entirely absent or complete: "
+            + ", ".join(ML_MODEL_IDENTITY_FIELDS)
+        )
 
 
 def _required_enum(raw: dict[str, Any], field: str, allowed: set[str]) -> str:

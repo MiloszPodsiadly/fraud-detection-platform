@@ -4,3 +4,4 @@ from __future__ import annotations
 REPORT_TYPE = "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"
 MODEL_EVALUATION_REPORT_TYPE = "ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1"
 ARTIFACT_SET_VERSION = "feedback-dataset-evaluation-report-artifact-set-v1"
+MODEL_EVALUATION_ARTIFACT_SET_VERSION = "ml-model-feedback-dataset-evaluation-artifact-set-v1"

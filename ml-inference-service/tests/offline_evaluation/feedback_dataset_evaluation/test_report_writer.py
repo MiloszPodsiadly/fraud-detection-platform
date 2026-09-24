@@ -107,10 +107,11 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
     def test_writeReportsRejectsSymlinkFinalArtifactPath(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output"
-            output.mkdir()
+            platform = output / "platform-evaluation"
+            platform.mkdir(parents=True)
             target = Path(directory) / "target.json"
             target.write_text("{}", encoding="utf-8")
-            link = output / "evaluation_summary.json"
+            link = platform / "evaluation_summary.json"
             try:
                 link.symlink_to(target)
             except OSError as exception:
@@ -122,10 +123,11 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
     def test_writeReportsRejectsSymlinkManifestPath(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output"
-            output.mkdir()
+            platform = output / "platform-evaluation"
+            platform.mkdir(parents=True)
             target = Path(directory) / "target.json"
             target.write_text("{}", encoding="utf-8")
-            link = output / "manifest.json"
+            link = platform / "manifest.json"
             try:
                 link.symlink_to(target)
             except OSError as exception:
@@ -158,7 +160,7 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
             output = Path(directory)
             write_feedback_dataset_evaluation_reports(reports, output)
 
-            manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+            manifest = json.loads((output / "platform-evaluation" / "manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(REPORT_TYPE, manifest["reportType"])
             self.assertEqual("feedback-dataset-evaluation-report-artifact-set-v1", manifest["artifactSetVersion"])
             self.assertEqual(GENERATED_AT, manifest["generatedAt"])
@@ -173,7 +175,7 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
                 [item["name"] for item in manifest["files"]],
             )
 
-    def test_manifestListsModelEvaluationSummaryWhenExactModelRequested(self):
+    def test_modelEvaluationSummaryUsesIndependentArtifactSetWhenExactModelRequested(self):
         reports = self._reports(
             record(
                 fraudScore=0.1,
@@ -188,18 +190,45 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
             output = Path(directory)
             write_feedback_dataset_evaluation_reports(reports, output)
 
-            manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
-            self.assertTrue((output / "model_evaluation_summary.json").exists())
-            self.assertIn("model_evaluation_summary.json", [item["name"] for item in manifest["files"]])
+            platform_manifest = json.loads((output / "platform-evaluation" / "manifest.json").read_text(encoding="utf-8"))
+            model_manifest = json.loads((output / "model-evaluation" / "manifest.json").read_text(encoding="utf-8"))
+            self.assertTrue((output / "model-evaluation" / "model_evaluation_summary.json").exists())
+            self.assertNotIn("model_evaluation_summary.json", [item["name"] for item in platform_manifest["files"]])
+            self.assertEqual("ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1", model_manifest["reportType"])
+            self.assertEqual(
+                "ml-model-feedback-dataset-evaluation-artifact-set-v1",
+                model_manifest["artifactSetVersion"],
+            )
+            self.assertEqual(["model_evaluation_summary.json"], [item["name"] for item in model_manifest["files"]])
+
+    def test_writerRejectsInvalidModelEvaluationSummaryBeforeCreatingArtifacts(self):
+        reports = self._reports(
+            record(
+                fraudScore=0.1,
+                mlModelName="python-logistic-fraud-model",
+                mlModelVersion="2026-06-25.v1",
+                mlFeatureContractVersion="feature-contract-v2",
+            ),
+            model_identity=self._model_identity(),
+        )
+        reports["modelEvaluationSummary"]["unexpected"] = "field"
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            with self.assertRaisesRegex(ValueError, "unsupported fields"):
+                write_feedback_dataset_evaluation_reports(reports, output)
+
+            self.assertEqual([], list(output.iterdir()))
 
     def test_manifestHashesMatchWrittenFiles(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
             write_feedback_dataset_evaluation_reports(self._reports(record(fraudScore=0.1)), output)
 
-            manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+            manifest_path = output / "platform-evaluation" / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             for item in manifest["files"]:
-                payload = (output / item["name"]).read_bytes()
+                payload = (manifest_path.parent / item["name"]).read_bytes()
                 self.assertEqual(len(payload), item["sizeBytes"])
                 self.assertEqual(hashlib.sha256(payload).hexdigest(), item["sha256"])
 
@@ -239,9 +268,10 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
                 with self.assertRaises(OSError):
                     write_feedback_dataset_evaluation_reports(self._reports(record(fraudScore=0.1)), output)
 
-            self.assertFalse((output / "manifest.json").exists())
-            self.assertFalse((output / "manifest.json.tmp").exists())
-            self.assertEqual([], list(output.glob("*.tmp")))
+            platform = output / "platform-evaluation"
+            self.assertFalse((platform / "manifest.json").exists())
+            self.assertFalse((platform / "manifest.json.tmp").exists())
+            self.assertEqual([], list(output.rglob("*.tmp")))
 
     def test_replaceFailureAfterArtifactReplaceDoesNotLeaveValidManifest(self):
         original_replace = os.replace
@@ -259,10 +289,11 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
                 with self.assertRaises(OSError):
                     write_feedback_dataset_evaluation_reports(self._reports(record(fraudScore=0.1)), output)
 
-            self.assertTrue((output / replace_calls[0]).exists())
-            self.assertFalse((output / "manifest.json").exists())
-            self.assertFalse((output / "manifest.json.tmp").exists())
-            self.assertEqual([], list(output.glob("*.tmp")))
+            platform = output / "platform-evaluation"
+            self.assertTrue((platform / replace_calls[0]).exists())
+            self.assertFalse((platform / "manifest.json").exists())
+            self.assertFalse((platform / "manifest.json.tmp").exists())
+            self.assertEqual([], list(output.rglob("*.tmp")))
 
     def test_runRejectsOutputOutsideAllowedRoot(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -280,7 +311,7 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
                 paths = run_feedback_dataset_evaluation(input_path, output, allow_output_root=root)
 
             self.assertTrue(paths["manifest"].exists())
-            self.assertTrue((output / "evaluation_summary.json").exists())
+            self.assertTrue((output / "platform-evaluation" / "evaluation_summary.json").exists())
 
     def test_cliAcceptsAllowOutputRootWhenInsideRoot(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -294,7 +325,7 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
                 ])
 
             self.assertEqual(0, result)
-            self.assertTrue((output / "manifest.json").exists())
+            self.assertTrue((output / "platform-evaluation" / "manifest.json").exists())
 
     def test_cliWritesModelEvaluationSummaryWhenExactIdentityIsProvided(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -315,7 +346,8 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
                 ])
 
             self.assertEqual(0, result)
-            self.assertTrue((output / "model_evaluation_summary.json").exists())
+            self.assertTrue((output / "model-evaluation" / "model_evaluation_summary.json").exists())
+            self.assertTrue((output / "model-evaluation" / "manifest.json").exists())
 
     def test_cliRejectsPartialModelIdentity(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -348,7 +380,7 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
             with jsonl_file(jsonl(record())) as input_path:
                 result = main(["--input", str(input_path), "--output-dir", str(output), "--generated-at", generated_at])
 
-            summary = json.loads((output / "evaluation_summary.json").read_text(encoding="utf-8"))
+            summary = json.loads((output / "platform-evaluation" / "evaluation_summary.json").read_text(encoding="utf-8"))
             self.assertEqual(0, result)
             self.assertEqual(generated_at, summary["generatedAt"])
 
@@ -374,9 +406,9 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
                         with self.assertRaises(ValueError):
                             run_feedback_dataset_evaluation(input_path, output, generated_at=generated_at)
 
-                    self.assertFalse((output / "evaluation_summary.json").exists())
-                    self.assertFalse((output / "manifest.json").exists())
-                    self.assertEqual([], list(output.glob("*.tmp")) if output.exists() else [])
+                    self.assertFalse((output / "platform-evaluation" / "evaluation_summary.json").exists())
+                    self.assertFalse((output / "platform-evaluation" / "manifest.json").exists())
+                    self.assertEqual([], list(output.rglob("*.tmp")) if output.exists() else [])
 
     def _reports(self, *records, model_identity=None):
         records = records or (record(),)

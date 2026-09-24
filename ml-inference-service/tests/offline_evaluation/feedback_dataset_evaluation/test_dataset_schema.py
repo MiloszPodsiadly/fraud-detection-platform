@@ -96,9 +96,37 @@ class FeedbackDatasetSchemaTest(unittest.TestCase):
         self.assertIsNone(parsed.records[0].ml_model_version)
         self.assertIsNone(parsed.records[0].ml_feature_contract_version)
 
+    def test_explicitNullMlModelIdentityRemainsValid(self):
+        parsed = self._parse(record(
+            mlModelName=None,
+            mlModelVersion=None,
+            mlFeatureContractVersion=None,
+        ))
+
+        self.assertIsNone(parsed.records[0].ml_model_name)
+        self.assertIsNone(parsed.records[0].ml_model_version)
+        self.assertIsNone(parsed.records[0].ml_feature_contract_version)
+
+    def test_rejectsPartialMlModelIdentityMatrix(self):
+        partial_identities = (
+            {"mlModelName": "python-logistic-fraud-model"},
+            {"mlModelVersion": "2026-06-25.v1"},
+            {"mlFeatureContractVersion": "feature-contract-v2"},
+            {"mlModelName": "python-logistic-fraud-model", "mlModelVersion": "2026-06-25.v1"},
+            {"mlModelName": "python-logistic-fraud-model", "mlFeatureContractVersion": "feature-contract-v2"},
+            {"mlModelVersion": "2026-06-25.v1", "mlFeatureContractVersion": "feature-contract-v2"},
+        )
+
+        for identity in partial_identities:
+            with self.subTest(identity=identity):
+                self._assert_rejected(record(**identity))
+
     def test_rejectsUnsafeMlModelIdentity(self):
         self._assert_rejected(record(mlModelName="s3://bucket/model"))
         self._assert_rejected(record(mlModelVersion="v1/token-secret"))
+        self._assert_rejected(record(mlModelVersion="2026-06-25:v1"))
+        self._assert_rejected(record(mlFeatureContractVersion="feature contract v2"))
+        self._assert_rejected(record(mlFeatureContractVersion="f" * 97))
 
     def _parse(self, payload):
         with jsonl_file(jsonl(payload)) as path:

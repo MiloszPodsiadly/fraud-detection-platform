@@ -135,8 +135,11 @@ single-class datasets, missing scores, missing alert recommendations, missing ri
 sizes are surfaced as warnings. Only feedback dataset `DATASET_RECORD` lines are metric rows. Low sample size warnings are not model-quality conclusions.
 
 FDP-124 report sets use a manifest-last local artifact pattern. The writer prepares report payloads in memory, writes
-temporary artifact files, writes `manifest.json.tmp`, replaces report artifacts, and replaces `manifest.json` last. A report set is considered complete only when `manifest.json` exists, has report type
-`FEEDBACK_DATASET_OFFLINE_EVALUATION_V1`, lists the expected artifact files, and each listed artifact matches
+temporary artifact files, writes `manifest.json.tmp`, replaces report artifacts, and replaces `manifest.json` last. Platform recommendation evaluation artifacts are written under `platform-evaluation/` with report type
+`FEEDBACK_DATASET_OFFLINE_EVALUATION_V1` and artifact-set version
+`feedback-dataset-evaluation-report-artifact-set-v1`. Optional model-specific evaluation artifacts are written as a separate `model-evaluation/` artifact set with report type
+`ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1` and artifact-set version
+`ml-model-feedback-dataset-evaluation-artifact-set-v1`; `model_evaluation_summary.json` is not part of the platform manifest. A report set is considered complete only when its own `manifest.json` exists, lists the expected artifact files, and each listed artifact matches
 the manifest `sha256` and `sizeBytes`. The manifest is not external publishing, and scheduled generation or external
 publication requires a separate security, governance, and observability review.
 
