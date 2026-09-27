@@ -143,6 +143,51 @@ class ShadowPerformanceSummaryValidatorTest {
     }
 
     @Test
+    void acceptsExactCurrentAndLegacyReadOnlyPlatformEvaluationIdentityPairs() {
+        ShadowPerformanceSummary base = validSummary();
+        assertThatCode(() -> validator.validate(withEvaluationIdentity(
+                base.evaluation(),
+                "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "feedback-dataset-evaluation-report-artifact-set-v1"
+        ))).doesNotThrowAnyException();
+        assertThatCode(() -> validator.validate(withEvaluationIdentity(
+                base.evaluation(),
+                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "fdp123-report-artifact-set-v1"
+        ))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectsMixedOrUnknownPlatformEvaluationIdentityPairs() {
+        ShadowPerformanceSummary base = validSummary();
+        for (ShadowPerformanceSummary summary : List.of(
+                withEvaluationIdentity(
+                        base.evaluation(),
+                        "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                        "fdp123-report-artifact-set-v1"
+                ),
+                withEvaluationIdentity(
+                        base.evaluation(),
+                        "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                        "feedback-dataset-evaluation-report-artifact-set-v1"
+                ),
+                withEvaluationIdentity(
+                        base.evaluation(),
+                        "UNKNOWN_PLATFORM_EVALUATION",
+                        "feedback-dataset-evaluation-report-artifact-set-v1"
+                ),
+                withEvaluationIdentity(
+                        base.evaluation(),
+                        "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                        "unknown-artifact-set-v1"
+                )
+        )) {
+            assertThatThrownBy(() -> validator.validate(summary))
+                    .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
+        }
+    }
+
+    @Test
     void rejectsTwentyOneLimitations() {
         ShadowPerformanceSummary base = validSummary();
         ShadowPerformanceSummary summary = new ShadowPerformanceSummary(
@@ -343,6 +388,41 @@ class ShadowPerformanceSummaryValidatorTest {
                 datasetTimeBasis,
                 base.sourceManifestSha256(),
                 base.sourceEvaluationCardManifestSha256()
+        );
+    }
+
+    private ShadowPerformanceSummary withEvaluationIdentity(
+            ShadowPerformanceSummary.ShadowPerformanceEvaluation evaluation,
+            String evaluationReportType,
+            String evaluationArtifactSetVersion
+    ) {
+        ShadowPerformanceSummary base = validSummary();
+        return new ShadowPerformanceSummary(
+                base.reportType(),
+                base.summaryVersion(),
+                base.generatedAt(),
+                base.evaluationSubject(),
+                base.metricBasis(),
+                base.governance(),
+                new ShadowPerformanceSummary.ShadowPerformanceEvaluation(
+                        evaluation.evaluationCardType(),
+                        evaluation.evaluationCardVersion(),
+                        evaluation.evaluationPurpose(),
+                        evaluationReportType,
+                        evaluation.evaluationReportVersion(),
+                        evaluation.evaluationReportGeneratedAt(),
+                        evaluation.evaluationCardGeneratedAt(),
+                        evaluationArtifactSetVersion,
+                        evaluation.datasetVersion(),
+                        evaluation.datasetTimeBasis(),
+                        evaluation.sourceManifestSha256(),
+                        evaluation.sourceEvaluationCardManifestSha256()
+                ),
+                base.evaluationPopulation(),
+                base.metrics(),
+                base.warnings(),
+                base.limitations(),
+                base.banner()
         );
     }
 }

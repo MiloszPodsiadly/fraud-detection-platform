@@ -3,6 +3,10 @@ import { isCanonicalUtcTimestamp, isOrderedCanonicalUtcTimestamp } from "./canon
 const PROMOTION_REVIEW_READINESS_REPORT_TYPE = "PROMOTION_REVIEW_READINESS_REPORT_V1";
 const PROMOTION_REVIEW_READINESS_REPORT_VERSION = "1.0";
 const PROMOTION_REVIEW_READINESS_GOVERNANCE_STATUS = "DIAGNOSTIC_ONLY";
+const SUPPORTED_PLATFORM_EVALUATION_REPORT_TYPES = new Set([
+  "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+  "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"
+]);
 export const REQUIRED_PROMOTION_REVIEW_READINESS_BANNER =
   "Promotion review readiness is an offline diagnostic aid only. It is not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic.";
 const PROMOTION_REVIEW_READINESS_STATUSES = new Set([
@@ -312,7 +316,9 @@ function checksFromInputs(inputs) {
     check("NOT_THRESHOLD_RECOMMENDATION_TRUE", passFail(inputs.governance.notThresholdRecommendation === true)),
     check("NOT_PAYMENT_AUTHORIZATION_TRUE", passFail(inputs.governance.notPaymentAuthorization === true)),
     check("NOT_AUTOMATIC_DECISIONING_TRUE", passFail(inputs.governance.notAutomaticDecisioning === true)),
-    check("EVALUATION_REPORT_TYPE_SUPPORTED", passFail(inputs.evaluation.evaluationReportType === "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1")),
+    check("EVALUATION_REPORT_TYPE_SUPPORTED", passFail(
+      SUPPORTED_PLATFORM_EVALUATION_REPORT_TYPES.has(inputs.evaluation.evaluationReportType)
+    )),
     check("METRIC_BASIS_SUPPORTED", passFail(inputs.metricBasis === "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK")),
     check("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", passFail(inputs.recordsEvaluated >= inputs.minimumDiagnosticEvidenceRecords), "HIGH"),
     metricCheck("ALERT_RECOMMENDED_PRECISION_AVAILABLE", inputs.metrics.alertRecommendedPrecision),

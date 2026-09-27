@@ -41,6 +41,10 @@ from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import (
     TimestampContractError,
     normalize_rfc3339_timestamp,
 )
+from offline_evaluation.feedback_dataset_evaluation.report_contract import (
+    LEGACY_READ_ONLY_REPORT_TYPE,
+    validate_platform_evaluation_artifact_identity,
+)
 
 
 REQUIRED_GOVERNANCE_METADATA_FIELDS = {
@@ -217,10 +221,24 @@ def _validate_manifest(manifest: dict[str, Any], summary: dict[str, Any], artifa
     missing = sorted(MANIFEST_FIELDS - set(manifest))
     if missing:
         raise FeedbackDatasetEvaluationCardValidationError(f"manifest missing required fields: {', '.join(missing)}")
-    if manifest.get("reportType") != EXPECTED_EVALUATION_REPORT_TYPE:
-        raise FeedbackDatasetEvaluationCardValidationError("manifest reportType unsupported")
-    if manifest.get("artifactSetVersion") != EXPECTED_SOURCE_ARTIFACT_SET_VERSION:
-        raise FeedbackDatasetEvaluationCardValidationError("manifest artifactSetVersion unsupported")
+    try:
+        validate_platform_evaluation_artifact_identity(
+            manifest.get("reportType"),
+            manifest.get("artifactSetVersion"),
+            "manifest",
+        )
+    except ValueError as exc:
+        raise FeedbackDatasetEvaluationCardValidationError(str(exc)) from exc
+    if manifest.get("reportType") != summary.get("reportType"):
+        raise FeedbackDatasetEvaluationCardValidationError("manifest reportType must match evaluation summary reportType")
+    try:
+        validate_platform_evaluation_artifact_identity(
+            summary.get("reportType"),
+            manifest.get("artifactSetVersion"),
+            "evaluation summary and manifest",
+        )
+    except ValueError as exc:
+        raise FeedbackDatasetEvaluationCardValidationError(str(exc)) from exc
     _normalize_timestamp(manifest.get("generatedAt"), "manifest generatedAt")
     _normalize_timestamp(summary.get("generatedAt"), "evaluation summary generatedAt")
     if manifest.get("generatedAt") != summary.get("generatedAt"):
@@ -264,7 +282,7 @@ def _validate_summary(summary: dict[str, Any]) -> None:
     extra_missing = sorted(REQUIRED_SUMMARY_FIELDS - set(summary))
     if extra_missing:
         raise FeedbackDatasetEvaluationCardValidationError(f"evaluation summary missing required fields: {', '.join(extra_missing)}")
-    if summary.get("reportType") != EXPECTED_EVALUATION_REPORT_TYPE:
+    if summary.get("reportType") not in {EXPECTED_EVALUATION_REPORT_TYPE, LEGACY_READ_ONLY_REPORT_TYPE}:
         raise FeedbackDatasetEvaluationCardValidationError("evaluation summary reportType unsupported")
     _validate_evaluation_subject(summary.get("evaluationSubject"))
     if summary.get("metricsSubject") != METRICS_SUBJECT:

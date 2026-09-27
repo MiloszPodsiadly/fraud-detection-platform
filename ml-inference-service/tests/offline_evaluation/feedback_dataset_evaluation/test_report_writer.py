@@ -12,6 +12,8 @@ from offline_evaluation.feedback_dataset_evaluation.evaluation_runner import bui
 from offline_evaluation.feedback_dataset_evaluation.model_evaluation import ModelEvaluationIdentity
 from offline_evaluation.feedback_dataset_evaluation.run_feedback_dataset_evaluation import main
 from offline_evaluation.feedback_dataset_evaluation.report_writer import (
+    LEGACY_READ_ONLY_ARTIFACT_SET_VERSION,
+    LEGACY_READ_ONLY_REPORT_TYPE,
     REPORT_TYPE,
     build_artifact_manifest,
     disagreement_jsonl,
@@ -90,6 +92,75 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
             self.assertTrue(paths["disagreementReport"].exists())
             self.assertTrue(paths["evaluationRunMarkdown"].exists())
             self.assertTrue(paths["manifest"].exists())
+
+    def test_writeReportsAcceptsExistingEmptyOutputDirectory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+            output.mkdir()
+
+            paths = write_feedback_dataset_evaluation_reports(self._reports(), output)
+
+            self.assertTrue(paths["platformManifest"].exists())
+
+    def test_writeReportsRejectsReuseAfterModelSpecificRunWithoutMutatingArtifacts(self):
+        model_reports = self._reports(
+            record(
+                fraudScore=0.1,
+                mlModelName="python-logistic-fraud-model",
+                mlModelVersion="2026-06-25.v1",
+                mlFeatureContractVersion="feature-contract-v2",
+            ),
+            model_identity=self._model_identity(),
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+            write_feedback_dataset_evaluation_reports(model_reports, output)
+            original_artifacts = {
+                path.relative_to(output): path.read_bytes()
+                for path in output.rglob("*")
+                if path.is_file()
+            }
+
+            with self.assertRaisesRegex(ValueError, "must be empty"):
+                write_feedback_dataset_evaluation_reports(self._reports(), output)
+
+            self.assertEqual(
+                original_artifacts,
+                {
+                    path.relative_to(output): path.read_bytes()
+                    for path in output.rglob("*")
+                    if path.is_file()
+                },
+            )
+
+    def test_writeReportsRejectsReuseAfterPlatformOnlyRun(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+            write_feedback_dataset_evaluation_reports(self._reports(), output)
+            original_manifest = (output / "platform-evaluation" / "manifest.json").read_bytes()
+
+            with self.assertRaisesRegex(ValueError, "must be empty"):
+                write_feedback_dataset_evaluation_reports(self._reports(record(fraudScore=0.1)), output)
+
+            self.assertEqual(
+                original_manifest,
+                (output / "platform-evaluation" / "manifest.json").read_bytes(),
+            )
+            self.assertFalse((output / "model-evaluation").exists())
+
+    def test_writeReportsRejectsOutputDirectoryContainingUnrelatedFile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+            output.mkdir()
+            unrelated = output / "readme.txt"
+            unrelated.write_text("keep me", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "must be empty"):
+                write_feedback_dataset_evaluation_reports(self._reports(), output)
+
+            self.assertEqual("keep me", unrelated.read_text(encoding="utf-8"))
+            self.assertEqual([unrelated], list(output.iterdir()))
 
     def test_writeReportsRejectsSymlinkOutputDirectory(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -173,6 +244,21 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
                     "score_bucket_report.json",
                 ],
                 [item["name"] for item in manifest["files"]],
+            )
+
+    def test_writerRejectsLegacyReadOnlyPlatformEvaluationIdentity(self):
+        report = self._reports()["evaluationSummary"]
+        report["reportType"] = LEGACY_READ_ONLY_REPORT_TYPE
+
+        with self.assertRaisesRegex(ValueError, "reportType must be a supported"):
+            report_json(report)
+
+        with self.assertRaisesRegex(ValueError, "read-only"):
+            build_artifact_manifest(
+                {Path("evaluation_summary.json"): "{}\n"},
+                GENERATED_AT,
+                artifact_set_version=LEGACY_READ_ONLY_ARTIFACT_SET_VERSION,
+                report_type=LEGACY_READ_ONLY_REPORT_TYPE,
             )
 
     def test_modelEvaluationSummaryUsesIndependentArtifactSetWhenExactModelRequested(self):

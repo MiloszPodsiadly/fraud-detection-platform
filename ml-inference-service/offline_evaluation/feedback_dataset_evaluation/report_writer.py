@@ -9,6 +9,8 @@ from offline_evaluation.json_contract import dumps_strict_json
 from offline_evaluation.feedback_dataset_evaluation.model_evaluation import validate_model_evaluation_summary
 from offline_evaluation.feedback_dataset_evaluation.report_contract import (
     ARTIFACT_SET_VERSION,
+    LEGACY_READ_ONLY_ARTIFACT_SET_VERSION,
+    LEGACY_READ_ONLY_REPORT_TYPE,
     MODEL_EVALUATION_ARTIFACT_SET_VERSION,
     MODEL_EVALUATION_REPORT_TYPE,
     REPORT_TYPE,
@@ -141,7 +143,7 @@ def write_feedback_dataset_evaluation_reports(
             artifact_set_version=MODEL_EVALUATION_ARTIFACT_SET_VERSION,
             report_type=MODEL_EVALUATION_REPORT_TYPE,
         )
-    _prepare_output_dir(output_dir, allow_output_root)
+    _prepare_fresh_evaluation_output_dir(output_dir, allow_output_root)
     _prepare_output_dir(platform_dir, allow_output_root)
     _write_artifacts_atomically(platform_payloads, platform_manifest_path, platform_manifest_payload)
     paths["platformManifest"] = platform_manifest_path
@@ -159,6 +161,8 @@ def build_artifact_manifest(
         artifact_set_version: str = ARTIFACT_SET_VERSION,
         report_type: str = REPORT_TYPE,
 ) -> str:
+    if report_type == LEGACY_READ_ONLY_REPORT_TYPE or artifact_set_version == LEGACY_READ_ONLY_ARTIFACT_SET_VERSION:
+        raise ValueError("legacy platform evaluation artifact identity is read-only")
     generated_at = normalize_rfc3339_timestamp(generated_at, "generatedAt")
     files = []
     for path, payload in sorted(payloads.items(), key=lambda item: item[0].name):
@@ -252,6 +256,12 @@ def _prepare_output_dir(output_dir: Path, allow_output_root: Path | None) -> Non
     output_dir.mkdir(parents=True, exist_ok=True)
     if output_dir.is_symlink():
         raise ValueError("output directory must not be a symlink")
+
+
+def _prepare_fresh_evaluation_output_dir(output_dir: Path, allow_output_root: Path | None) -> None:
+    _prepare_output_dir(output_dir, allow_output_root)
+    if any(output_dir.iterdir()):
+        raise ValueError("output directory must be empty for a new evaluation run")
 
 
 def _write_artifacts_atomically(payloads: dict[Path, str], manifest_path: Path, manifest_payload: str) -> None:

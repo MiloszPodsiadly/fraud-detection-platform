@@ -325,6 +325,37 @@ describe("ShadowPerformanceDashboard", () => {
     });
   });
 
+  it("acceptsLegacyReadOnlyPlatformEvaluationIdentityPair", () => {
+    renderDashboard({ summary: shadowSummary({
+      evaluation: {
+        ...shadowSummary().evaluation,
+        evaluationReportType: "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+        evaluationArtifactSetVersion: "fdp123-report-artifact-set-v1"
+      }
+    }) });
+
+    expect(screen.queryByText(MALFORMED_MESSAGE)).not.toBeInTheDocument();
+    expect(screen.getByText("FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1")).toBeInTheDocument();
+  });
+
+  it.each([
+    [
+      "currentReportLegacyArtifact",
+      "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+      "fdp123-report-artifact-set-v1"
+    ],
+    [
+      "legacyReportCurrentArtifact",
+      "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+      "feedback-dataset-evaluation-report-artifact-set-v1"
+    ]
+  ])("rejectsMixedPlatformEvaluationIdentityPair: %s", (_name, evaluationReportType, evaluationArtifactSetVersion) => {
+    expectMalformedSummary((summary) => {
+      summary.evaluation.evaluationReportType = evaluationReportType;
+      summary.evaluation.evaluationArtifactSetVersion = evaluationArtifactSetVersion;
+    });
+  });
+
   it("rejectsWrongMetricBasis", () => {
     expectMalformedSummary((summary) => {
       summary.metricBasis = "production_threshold";

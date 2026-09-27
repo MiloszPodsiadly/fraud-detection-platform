@@ -26,11 +26,17 @@ const REQUIRED_EVALUATION = {
   evaluationCardType: "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
   evaluationCardVersion: "platform-recommendation-evaluation-card-v1",
   evaluationPurpose: "OFFLINE_DIAGNOSTIC",
-  evaluationReportType: "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
   evaluationReportVersion: "FDP-124",
-  evaluationArtifactSetVersion: "feedback-dataset-evaluation-report-artifact-set-v1",
   datasetVersion: "feedback-dataset-v1",
   datasetTimeBasis: "FEEDBACK_CREATED_AT"
+};
+const CURRENT_PLATFORM_EVALUATION_IDENTITY = {
+  evaluationReportType: "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+  evaluationArtifactSetVersion: "feedback-dataset-evaluation-report-artifact-set-v1"
+};
+const LEGACY_READ_ONLY_PLATFORM_EVALUATION_IDENTITY = {
+  evaluationReportType: "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+  evaluationArtifactSetVersion: "fdp123-report-artifact-set-v1"
 };
 const REQUIRED_LIMITATIONS = new Set([
   "ANALYST_FEEDBACK_LABELS_ARE_NOT_LEGAL_GROUND_TRUTH",
@@ -457,11 +463,22 @@ function isValidEvaluation(evaluation) {
       "sourceEvaluationCardManifestSha256"
     ])
     && Object.entries(REQUIRED_EVALUATION).every(([field, value]) => evaluation[field] === value)
+    && isSupportedPlatformEvaluationIdentity(evaluation)
     && isCanonicalUtcTimestamp(evaluation.evaluationReportGeneratedAt)
     && isCanonicalUtcTimestamp(evaluation.evaluationCardGeneratedAt)
     && isOrderedTimestamp(evaluation.evaluationReportGeneratedAt, evaluation.evaluationCardGeneratedAt)
     && /^[a-f0-9]{64}$/.test(evaluation.sourceManifestSha256)
     && /^[a-f0-9]{64}$/.test(evaluation.sourceEvaluationCardManifestSha256);
+}
+
+function isSupportedPlatformEvaluationIdentity(evaluation) {
+  return matchesIdentity(evaluation, CURRENT_PLATFORM_EVALUATION_IDENTITY)
+    || matchesIdentity(evaluation, LEGACY_READ_ONLY_PLATFORM_EVALUATION_IDENTITY);
+}
+
+function matchesIdentity(evaluation, identity) {
+  return evaluation.evaluationReportType === identity.evaluationReportType
+    && evaluation.evaluationArtifactSetVersion === identity.evaluationArtifactSetVersion;
 }
 
 function isMetricValue(metric) {

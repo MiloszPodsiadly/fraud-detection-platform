@@ -177,6 +177,54 @@ class FeedbackDatasetEvaluationCardGeneratorTest(unittest.TestCase):
             with self.assertRaises(FeedbackDatasetEvaluationCardValidationError):
                 self.generate(paths)
 
+    def test_acceptsLegacyReadOnlyPlatformEvaluationIdentityPair(self):
+        with self.artifacts() as paths:
+            self._mutate_summary(paths, reportType="FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1")
+            self._mutate_manifest(
+                paths,
+                reportType="FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                artifactSetVersion="fdp123-report-artifact-set-v1",
+            )
+
+            card = self.generate(paths)
+
+        self.assertEqual("FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1", card["evaluationEvidence"]["evaluationReportType"])
+        self.assertEqual("fdp123-report-artifact-set-v1", card["evaluationEvidence"]["evaluationArtifactSetVersion"])
+
+    def test_rejectsMixedPlatformEvaluationIdentityPairs(self):
+        cases = (
+            (
+                "current_legacy",
+                "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "fdp123-report-artifact-set-v1",
+            ),
+            (
+                "legacy_current",
+                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "feedback-dataset-evaluation-report-artifact-set-v1",
+            ),
+            (
+                "manifest_summary_mismatch",
+                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "feedback-dataset-evaluation-report-artifact-set-v1",
+            ),
+        )
+        for name, summary_report_type, manifest_report_type, artifact_set_version in cases:
+            with self.subTest(name=name):
+                with self.artifacts() as paths:
+                    self._mutate_summary(paths, reportType=summary_report_type)
+                    self._mutate_manifest(
+                        paths,
+                        reportType=manifest_report_type,
+                        artifactSetVersion=artifact_set_version,
+                    )
+
+                    with self.assertRaises(FeedbackDatasetEvaluationCardValidationError):
+                        self.generate(paths)
+
     def test_failsIfSummaryMissingGeneratedAt(self):
         self._assert_summary_missing("generatedAt")
 

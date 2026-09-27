@@ -27,6 +27,18 @@ The model-specific report is aggregate-only. It contains counts, class balance, 
 explicit unavailable metric reasons. It does not emit `evaluationRecordId`, `transactionReference`, raw identifiers,
 raw feature vectors, raw ML requests or responses, or per-record examples.
 
+The trusted model-evaluation artifact reader accepts only a `model-evaluation/` directory containing exactly
+`model_evaluation_summary.json` and `manifest.json`. Before returning read-only evidence it bounds both files, rejects
+symlinks and noncanonical manifest paths, verifies the canonical report and artifact-set identity, checks `sizeBytes`
+and SHA-256 against the actual summary bytes, validates the summary contract, and requires matching `generatedAt`
+values. Unknown files, malformed manifests, and tampered summaries fail closed.
+
+Public JSON Schema, OpenAPI, and frontend model-identity contracts enforce the canonical structural syntax:
+`modelName` and `modelVersion` are bounded to 64 characters, `featureContractVersion` is bounded to 96 characters,
+and each uses `^[A-Za-z0-9._-]+$`. The Java and Python runtime identity policies deliberately add sensitive and
+forbidden semantic-term rejection. A value may therefore be structurally valid for transport while still being
+rejected at the runtime trust boundary; public schemas do not claim to implement that additional security policy.
+
 The current feedback dataset does not carry direct ML prediction outputs with enough fidelity to claim ML model
 precision, recall, threshold, or score-ranking metrics. Those metrics remain unavailable with
 `MODEL_PREDICTION_SIGNAL_UNAVAILABLE` until a future contract deliberately adds direct ML output evidence.

@@ -203,6 +203,59 @@ class FeedbackDatasetEvaluationCardSchemaTest(unittest.TestCase):
 
         self.assertEqual(2, validate_evaluation_card(card)["evaluationEvidence"]["recordsEvaluated"])
 
+    def test_platformEvaluationArtifactIdentityMatrix(self):
+        cases = (
+            (
+                "current_current",
+                "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "feedback-dataset-evaluation-report-artifact-set-v1",
+                True,
+            ),
+            (
+                "legacy_legacy",
+                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "fdp123-report-artifact-set-v1",
+                True,
+            ),
+            (
+                "current_legacy",
+                "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "fdp123-report-artifact-set-v1",
+                False,
+            ),
+            (
+                "legacy_current",
+                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "feedback-dataset-evaluation-report-artifact-set-v1",
+                False,
+            ),
+            (
+                "unknown_current",
+                "UNKNOWN_PLATFORM_EVALUATION",
+                "feedback-dataset-evaluation-report-artifact-set-v1",
+                False,
+            ),
+            (
+                "current_unknown",
+                "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "unknown-artifact-set-v1",
+                False,
+            ),
+        )
+        for name, report_type, artifact_set_version, accepted in cases:
+            with self.subTest(name=name):
+                card = valid_evaluation_card(evaluationEvidence=valid_evaluation_evidence(
+                    evaluationReportType=report_type,
+                    evaluationArtifactSetVersion=artifact_set_version,
+                ))
+                if accepted:
+                    evidence = validate_evaluation_card(card)["evaluationEvidence"]
+                    self.assertEqual(report_type, evidence["evaluationReportType"])
+                    self.assertEqual(artifact_set_version, evidence["evaluationArtifactSetVersion"])
+                else:
+                    with self.assertRaises(FeedbackDatasetEvaluationCardValidationError):
+                        validate_evaluation_card(card)
+
     def test_classCountSumBelowRecordsEvaluatedRejected(self):
         self._assert_rejected(evaluationEvidence=valid_evaluation_evidence(
             recordsEvaluated=100,

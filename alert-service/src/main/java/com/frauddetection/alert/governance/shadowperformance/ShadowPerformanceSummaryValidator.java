@@ -1,6 +1,7 @@
 package com.frauddetection.alert.governance.shadowperformance;
 
 import com.frauddetection.alert.governance.GovernanceTimestampContract;
+import com.frauddetection.alert.governance.PlatformEvaluationArtifactIdentityPolicy;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -123,18 +124,17 @@ class ShadowPerformanceSummaryValidator {
                 "evaluationCardVersion is unsupported"
         );
         require("OFFLINE_DIAGNOSTIC".equals(evaluation.evaluationPurpose()), "evaluationPurpose is unsupported");
-        require(
-                "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1".equals(evaluation.evaluationReportType()),
-                "evaluationReportType is unsupported"
-        );
         require("FDP-124".equals(evaluation.evaluationReportVersion()), "evaluationReportVersion is unsupported");
         Instant reportGeneratedAt = instant(evaluation.evaluationReportGeneratedAt(), "evaluationReportGeneratedAt");
         Instant cardGeneratedAt = instant(evaluation.evaluationCardGeneratedAt(), "evaluationCardGeneratedAt");
         require(!cardGeneratedAt.isBefore(reportGeneratedAt), "evaluationCardGeneratedAt must be >= evaluationReportGeneratedAt");
         require(!summaryGeneratedAt.isBefore(cardGeneratedAt), "generatedAt must be >= evaluationCardGeneratedAt");
         require(
-                "feedback-dataset-evaluation-report-artifact-set-v1".equals(evaluation.evaluationArtifactSetVersion()),
-                "evaluationArtifactSetVersion is unsupported"
+                PlatformEvaluationArtifactIdentityPolicy.isSupportedReadIdentity(
+                        evaluation.evaluationReportType(),
+                        evaluation.evaluationArtifactSetVersion()
+                ),
+                "evaluation artifact identity is unsupported"
         );
         require("feedback-dataset-v1".equals(evaluation.datasetVersion()), "datasetVersion is unsupported");
         require("FEEDBACK_CREATED_AT".equals(evaluation.datasetTimeBasis()), "datasetTimeBasis is unsupported");

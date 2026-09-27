@@ -22,7 +22,10 @@ from offline_evaluation.feedback_dataset_evaluation.dataset_schema import (
 from offline_evaluation.feedback_dataset_evaluation.evaluation_contract import EVALUATION_SUBJECT
 from offline_evaluation.feedback_dataset_evaluation.report_contract import (
     ARTIFACT_SET_VERSION as EXPECTED_EVALUATION_ARTIFACT_SET_VERSION,
+    LEGACY_READ_ONLY_ARTIFACT_SET_VERSION,
+    LEGACY_READ_ONLY_REPORT_TYPE,
     REPORT_TYPE as EXPECTED_EVALUATION_REPORT_TYPE,
+    validate_platform_evaluation_artifact_identity,
 )
 from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import (
     TimestampContractError,
@@ -108,6 +111,8 @@ SAFE_CONTRACT_VALUES = {
     EXPECTED_EVALUATION_REPORT_TYPE,
     EXPECTED_EVALUATION_REPORT_VERSION,
     EXPECTED_EVALUATION_ARTIFACT_SET_VERSION,
+    LEGACY_READ_ONLY_REPORT_TYPE,
+    LEGACY_READ_ONLY_ARTIFACT_SET_VERSION,
     EXPECTED_DATASET_VERSION,
     EXPECTED_DATASET_TIME_BASIS,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
@@ -280,6 +285,16 @@ def _evaluation(raw: Any) -> dict[str, str]:
     if not isinstance(raw, dict):
         raise ShadowPerformanceValidationError("evaluation must be an object")
     _reject_unknown_or_missing(raw, EVALUATION_FIELDS, "evaluation")
+    evaluation_report_type = _bounded_string(raw, "evaluationReportType", 128)
+    evaluation_artifact_set_version = _bounded_string(raw, "evaluationArtifactSetVersion", 128)
+    try:
+        validate_platform_evaluation_artifact_identity(
+            evaluation_report_type,
+            evaluation_artifact_set_version,
+            "evaluation",
+        )
+    except ValueError as exc:
+        raise ShadowPerformanceValidationError(str(exc)) from exc
     return {
         "evaluationCardType": _required_constant(
             raw, "evaluationCardType", PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE
@@ -288,7 +303,7 @@ def _evaluation(raw: Any) -> dict[str, str]:
             raw, "evaluationCardVersion", PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION
         ),
         "evaluationPurpose": _required_constant(raw, "evaluationPurpose", EVALUATION_PURPOSE),
-        "evaluationReportType": _required_constant(raw, "evaluationReportType", EXPECTED_EVALUATION_REPORT_TYPE),
+        "evaluationReportType": evaluation_report_type,
         "evaluationReportVersion": _required_constant(raw, "evaluationReportVersion", EXPECTED_EVALUATION_REPORT_VERSION),
         "evaluationReportGeneratedAt": normalize_shadow_timestamp(
             raw.get("evaluationReportGeneratedAt"), "evaluationReportGeneratedAt"
@@ -296,9 +311,7 @@ def _evaluation(raw: Any) -> dict[str, str]:
         "evaluationCardGeneratedAt": normalize_shadow_timestamp(
             raw.get("evaluationCardGeneratedAt"), "evaluationCardGeneratedAt"
         ),
-        "evaluationArtifactSetVersion": _required_constant(
-            raw, "evaluationArtifactSetVersion", EXPECTED_EVALUATION_ARTIFACT_SET_VERSION
-        ),
+        "evaluationArtifactSetVersion": evaluation_artifact_set_version,
         "datasetVersion": _required_constant(raw, "datasetVersion", EXPECTED_DATASET_VERSION),
         "datasetTimeBasis": _required_constant(raw, "datasetTimeBasis", EXPECTED_DATASET_TIME_BASIS),
         "sourceManifestSha256": _sha256(raw, "sourceManifestSha256"),

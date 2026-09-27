@@ -139,9 +139,19 @@ temporary artifact files, writes `manifest.json.tmp`, replaces report artifacts,
 `FEEDBACK_DATASET_OFFLINE_EVALUATION_V1` and artifact-set version
 `feedback-dataset-evaluation-report-artifact-set-v1`. Optional model-specific evaluation artifacts are written as a separate `model-evaluation/` artifact set with report type
 `ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1` and artifact-set version
-`ml-model-feedback-dataset-evaluation-artifact-set-v1`; `model_evaluation_summary.json` is not part of the platform manifest. A report set is considered complete only when its own `manifest.json` exists, lists the expected artifact files, and each listed artifact matches
+`ml-model-feedback-dataset-evaluation-artifact-set-v1`; `model_evaluation_summary.json` is not part of the platform manifest. A report set is considered complete only when `manifest.json` exists in that report set, lists the expected artifact files, and each listed artifact matches
 the manifest `sha256` and `sizeBytes`. The manifest is not external publishing, and scheduled generation or external
 publication requires a separate security, governance, and observability review.
+
+An evaluation output directory represents exactly one evaluation run. A run may use a new directory or an existing
+empty directory only. Any non-empty output directory is rejected before `platform-evaluation/` or `model-evaluation/`
+is created; the runner does not merge runs, delete prior evidence, or infer ownership of existing artifacts. Downstream
+FDP-140 work may rely on this one-directory, one-run invariant.
+
+Historical Platform Evaluation artifact sets with `reportType = FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1`
+and `artifactSetVersion = fdp123-report-artifact-set-v1` are accepted only as an exact read-only legacy pair for
+persisted artifact reads. Current writers continue to emit only `FEEDBACK_DATASET_OFFLINE_EVALUATION_V1` with
+`feedback-dataset-evaluation-report-artifact-set-v1`; mixed current/legacy pairs are invalid.
 
 FDP-124 report artifacts are not external exports and do not expose raw source identifiers, raw notes, raw payloads,
 raw evidence, feature vectors, ground-truth fields, training labels, final decisions, payment authorization, model

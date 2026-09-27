@@ -238,6 +238,30 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
         with self.assertRaises(ShadowPerformanceValidationError):
             write_shadow_performance_summary(summary)
 
+    def test_acceptsExactLegacyReadOnlyPlatformEvaluationIdentityPair(self):
+        summary = self.summary()
+        summary["evaluation"]["evaluationReportType"] = "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"
+        summary["evaluation"]["evaluationArtifactSetVersion"] = "fdp123-report-artifact-set-v1"
+
+        payload = write_shadow_performance_summary(summary)
+
+        evaluation = json.loads(payload)["evaluation"]
+        self.assertEqual("FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1", evaluation["evaluationReportType"])
+        self.assertEqual("fdp123-report-artifact-set-v1", evaluation["evaluationArtifactSetVersion"])
+
+    def test_rejectsMixedPlatformEvaluationIdentityPairs(self):
+        for report_type, artifact_set_version in (
+                ("FEEDBACK_DATASET_OFFLINE_EVALUATION_V1", "fdp123-report-artifact-set-v1"),
+                ("FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1", "feedback-dataset-evaluation-report-artifact-set-v1"),
+        ):
+            with self.subTest(report_type=report_type, artifact_set_version=artifact_set_version):
+                summary = self.summary()
+                summary["evaluation"]["evaluationReportType"] = report_type
+                summary["evaluation"]["evaluationArtifactSetVersion"] = artifact_set_version
+
+                with self.assertRaises(ShadowPerformanceValidationError):
+                    write_shadow_performance_summary(summary)
+
     def test_rejectsUnsupportedLineageVersions(self):
         for field, value in (
                 ("evaluationArtifactSetVersion", "other-artifact-format-v99"),

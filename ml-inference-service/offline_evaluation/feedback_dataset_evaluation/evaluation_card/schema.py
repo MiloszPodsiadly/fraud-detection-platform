@@ -23,7 +23,10 @@ from offline_evaluation.feedback_dataset_evaluation.evaluation_contract import (
 )
 from offline_evaluation.feedback_dataset_evaluation.report_contract import (
     ARTIFACT_SET_VERSION as EXPECTED_SOURCE_ARTIFACT_SET_VERSION,
+    LEGACY_READ_ONLY_ARTIFACT_SET_VERSION,
+    LEGACY_READ_ONLY_REPORT_TYPE,
     REPORT_TYPE as EXPECTED_EVALUATION_REPORT_TYPE,
+    validate_platform_evaluation_artifact_identity,
 )
 from offline_evaluation.feedback_dataset_evaluation.evaluation_card.safety_policy import (
     EvaluationCardSafetyPolicyError,
@@ -157,6 +160,8 @@ SAFE_CONTRACT_VALUES = {
     ARTIFACT_SET_VERSION,
     EXPECTED_EVALUATION_REPORT_TYPE,
     EXPECTED_SOURCE_ARTIFACT_SET_VERSION,
+    LEGACY_READ_ONLY_REPORT_TYPE,
+    LEGACY_READ_ONLY_ARTIFACT_SET_VERSION,
     EXPECTED_DATASET_VERSION,
     EXPECTED_DATASET_TIME_BASIS,
     EVALUATION_SUBJECT_TYPE,
@@ -242,14 +247,20 @@ def _evaluation_evidence(raw: dict[str, Any]) -> dict[str, Any]:
     if missing:
         raise FeedbackDatasetEvaluationCardValidationError(f"evaluationEvidence missing required fields: {', '.join(missing)}")
     warnings = _optional_machine_code_list(value, "warnings", MAX_WARNINGS)
+    evaluation_report_type = _bounded_string(value, "evaluationReportType", 128)
+    evaluation_artifact_set_version = _bounded_string(value, "evaluationArtifactSetVersion", 128)
+    try:
+        validate_platform_evaluation_artifact_identity(
+            evaluation_report_type,
+            evaluation_artifact_set_version,
+            "evaluationEvidence",
+        )
+    except ValueError as exc:
+        raise FeedbackDatasetEvaluationCardValidationError(str(exc)) from exc
     evidence = {
-        "evaluationReportType": _required_constant(value, "evaluationReportType", EXPECTED_EVALUATION_REPORT_TYPE),
+        "evaluationReportType": evaluation_report_type,
         "evaluationGeneratedAt": _required_timestamp(value.get("evaluationGeneratedAt"), "evaluationGeneratedAt"),
-        "evaluationArtifactSetVersion": _required_constant(
-            value,
-            "evaluationArtifactSetVersion",
-            EXPECTED_SOURCE_ARTIFACT_SET_VERSION,
-        ),
+        "evaluationArtifactSetVersion": evaluation_artifact_set_version,
         "datasetVersion": _required_constant(value, "datasetVersion", EXPECTED_DATASET_VERSION),
         "datasetTimeBasis": _required_constant(value, "datasetTimeBasis", EXPECTED_DATASET_TIME_BASIS),
         "recordsEvaluated": _required_count(value, "recordsEvaluated"),
