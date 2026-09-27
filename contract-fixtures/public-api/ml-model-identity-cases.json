@@ -1,0 +1,100 @@
+{
+  "canonicalIdentity": {
+    "modelName": "python-logistic-fraud-model",
+    "modelVersion": "2026-05-30.v1",
+    "featureContractVersion": "2026-05-30.feature-contract.v1"
+  },
+  "cases": [
+    {
+      "caseId": "canonical-model-name",
+      "field": "modelName",
+      "value": "python-logistic-fraud-model",
+      "validSyntax": true,
+      "validRuntime": true
+    },
+    {
+      "caseId": "canonical-model-version",
+      "field": "modelVersion",
+      "value": "2026-05-30.v1",
+      "validSyntax": true,
+      "validRuntime": true
+    },
+    {
+      "caseId": "canonical-feature-contract-version",
+      "field": "featureContractVersion",
+      "value": "2026-05-30.feature-contract.v1",
+      "validSyntax": true,
+      "validRuntime": true
+    },
+    {
+      "caseId": "model-name-at-max-length",
+      "field": "modelName",
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "validSyntax": true,
+      "validRuntime": true
+    },
+    {
+      "caseId": "model-name-above-max-length",
+      "field": "modelName",
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "validSyntax": false,
+      "validRuntime": false
+    },
+    {
+      "caseId": "model-version-at-max-length",
+      "field": "modelVersion",
+      "value": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+      "validSyntax": true,
+      "validRuntime": true
+    },
+    {
+      "caseId": "model-version-above-max-length",
+      "field": "modelVersion",
+      "value": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+      "validSyntax": false,
+      "validRuntime": false
+    },
+    {
+      "caseId": "feature-contract-version-at-max-length",
+      "field": "featureContractVersion",
+      "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "validSyntax": true,
+      "validRuntime": true
+    },
+    {
+      "caseId": "feature-contract-version-above-max-length",
+      "field": "featureContractVersion",
+      "value": "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "validSyntax": false,
+      "validRuntime": false
+    },
+    {
+      "caseId": "model-name-with-slash",
+      "field": "modelName",
+      "value": "models/fraud-model",
+      "validSyntax": false,
+      "validRuntime": false
+    },
+    {
+      "caseId": "model-version-with-colon",
+      "field": "modelVersion",
+      "value": "model:v1",
+      "validSyntax": false,
+      "validRuntime": false
+    },
+    {
+      "caseId": "feature-contract-version-with-space",
+      "field": "featureContractVersion",
+      "value": "feature contract v2",
+      "validSyntax": false,
+      "validRuntime": false
+    },
+    {
+      "caseId": "syntax-valid-runtime-forbidden-term",
+      "field": "featureContractVersion",
+      "value": "token-contract-v1",
+      "validSyntax": true,
+      "validRuntime": false
+    }
+  ]
+}

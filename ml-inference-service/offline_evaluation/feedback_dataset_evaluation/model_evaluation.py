@@ -5,7 +5,7 @@ from typing import Any
 
 from offline_evaluation.feedback_dataset_evaluation.models import FeedbackDataset, FeedbackDatasetRecord
 from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import normalize_rfc3339_timestamp
-from model_identity_policy import (
+from app.model_identity_policy import (
     validate_feature_contract_version,
     validate_model_name,
     validate_model_version,

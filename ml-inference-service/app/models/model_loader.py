@@ -8,7 +8,7 @@ from app.features.feature_contract import FEATURE_CONTRACT
 from app.features.feature_pipeline import FeaturePipeline
 from app.models.logistic_model import LogisticFraudModel
 from app.models.xgboost_model import XGBoostFraudModel
-from model_identity_policy import (
+from app.model_identity_policy import (
     validate_feature_contract_version,
     validate_model_name,
     validate_model_version,
