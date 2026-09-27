@@ -5101,7 +5101,7 @@ components:
             pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
         modelIdentity:
           $ref: "#/components/schemas/EngineIntelligenceMlModelIdentity"
-          description: Optional bounded ML runtime identity. Present only for ml.python.primary ML_MODEL results when the producer emitted validated ML model lineage; Rules and Velocity engines must omit it. The top-level scored transaction modelName/modelVersion fields are not the source for this nested identity.
+          description: Optional bounded ML runtime identity. Present only for AVAILABLE ml.python.primary ML_MODEL results when the producer emitted validated ML model lineage; Rules, Velocity, and non-AVAILABLE ML engines must omit it. The top-level scored transaction modelName/modelVersion fields are not the source for this nested identity.
     CanonicalMlModelName:
       type: string
       minLength: 1
@@ -5701,7 +5701,7 @@ components:
           maxLength: 128
         identityCompleteness:
           type: string
-          enum: [NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE]
+          enum: [NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE, NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE]
     ShadowPerformanceGovernanceResponse:
       type: object
       additionalProperties: false

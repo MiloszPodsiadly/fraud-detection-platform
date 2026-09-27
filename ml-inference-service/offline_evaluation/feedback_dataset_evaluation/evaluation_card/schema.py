@@ -23,10 +23,12 @@ from offline_evaluation.feedback_dataset_evaluation.evaluation_contract import (
 )
 from offline_evaluation.feedback_dataset_evaluation.report_contract import (
     ARTIFACT_SET_VERSION as EXPECTED_SOURCE_ARTIFACT_SET_VERSION,
+    LEGACY_READ_ONLY_IDENTITY_COMPLETENESS,
     LEGACY_READ_ONLY_ARTIFACT_SET_VERSION,
     LEGACY_READ_ONLY_REPORT_TYPE,
     REPORT_TYPE as EXPECTED_EVALUATION_REPORT_TYPE,
     validate_platform_evaluation_artifact_identity,
+    validate_platform_evaluation_artifact_provenance,
 )
 from offline_evaluation.feedback_dataset_evaluation.evaluation_card.safety_policy import (
     EvaluationCardSafetyPolicyError,
@@ -171,6 +173,7 @@ SAFE_CONTRACT_VALUES = {
     EVALUATION_MODEL_IDENTITY,
     EVALUATION_MODEL_ARTIFACT_SHA256,
     EVALUATION_IDENTITY_COMPLETENESS,
+    LEGACY_READ_ONLY_IDENTITY_COMPLETENESS,
     METRICS_SUBJECT,
     METRIC_BASIS,
     EVALUATION_PURPOSE,
@@ -212,6 +215,15 @@ def validate_evaluation_card(raw: dict[str, Any]) -> dict[str, Any]:
         "limitations": _required_machine_code_superset(raw, "limitations", REQUIRED_LIMITATIONS),
         "governanceBoundary": _required_machine_code_superset(raw, "governanceBoundary", REQUIRED_GOVERNANCE_BOUNDARY),
     }
+    try:
+        validate_platform_evaluation_artifact_provenance(
+            normalized["evaluationEvidence"]["evaluationReportType"],
+            normalized["evaluationEvidence"]["evaluationArtifactSetVersion"],
+            normalized["evaluationSubject"]["identityCompleteness"],
+            "evaluation card",
+        )
+    except ValueError as exc:
+        raise FeedbackDatasetEvaluationCardValidationError(str(exc)) from exc
     if _timestamp_instant(normalized["generatedAt"]) < _timestamp_instant(
             normalized["evaluationEvidence"]["evaluationGeneratedAt"]
     ):
@@ -230,10 +242,13 @@ def _evaluation_subject(raw: dict[str, Any]) -> dict[str, str]:
     missing = sorted(REQUIRED_EVALUATION_SUBJECT_FIELDS - set(value))
     if missing:
         raise FeedbackDatasetEvaluationCardValidationError(f"evaluationSubject missing required fields: {', '.join(missing)}")
-    return {
+    subject = {
         field: _required_constant(value, field, expected)
         for field, expected in EVALUATION_SUBJECT.items()
+        if field != "identityCompleteness"
     }
+    subject["identityCompleteness"] = _bounded_string(value, "identityCompleteness", 128)
+    return subject
 
 
 def _evaluation_evidence(raw: dict[str, Any]) -> dict[str, Any]:

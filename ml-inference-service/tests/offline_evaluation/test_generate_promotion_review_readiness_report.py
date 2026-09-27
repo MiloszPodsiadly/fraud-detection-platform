@@ -56,6 +56,8 @@ OPENAPI_ROOT = ROOT / "docs" / "openapi"
 UI_ROOT = ROOT / "analyst-console-ui"
 CANONICAL_SHADOW_FIXTURE = ROOT / "deployment" / "local-fixtures" / "shadow-performance" / "current-summary.json"
 CANONICAL_SHADOW_FIXTURE_MANIFEST = CANONICAL_SHADOW_FIXTURE.with_name("manifest.json")
+HISTORICAL_SHADOW_FIXTURE = ROOT / "contract-fixtures" / "governance" / "shadow-performance-fdp123" / "current-summary.json"
+HISTORICAL_SHADOW_FIXTURE_MANIFEST = HISTORICAL_SHADOW_FIXTURE.with_name("manifest.json")
 
 
 class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
@@ -155,6 +157,33 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
 
         self.assertEqual(summary_before, CANONICAL_SHADOW_FIXTURE.read_bytes())
         self.assertEqual(manifest_before, CANONICAL_SHADOW_FIXTURE_MANIFEST.read_bytes())
+
+    def test_historicalShadowFixtureGeneratesReadinessWithoutRewritingSource(self):
+        summary_before = HISTORICAL_SHADOW_FIXTURE.read_bytes()
+        manifest_before = HISTORICAL_SHADOW_FIXTURE_MANIFEST.read_bytes()
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "promotion-readiness" / "promotion-review-readiness-report.json"
+
+            generate_promotion_review_readiness_report(
+                HISTORICAL_SHADOW_FIXTURE,
+                HISTORICAL_SHADOW_FIXTURE_MANIFEST,
+                output,
+                generated_at="2026-06-14T00:00:00Z",
+                allowed_output_root=output.parent,
+            )
+
+            report = validate_promotion_review_readiness_artifact_set(output, output.with_name("manifest.json"))
+            self.assertEqual(
+                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                report["checkInputs"]["evaluation"]["evaluationReportType"],
+            )
+            self.assertEqual(
+                hashlib.sha256(manifest_before).hexdigest(),
+                report["checkInputs"]["sourceShadowSummaryManifestSha256"],
+            )
+
+        self.assertEqual(summary_before, HISTORICAL_SHADOW_FIXTURE.read_bytes())
+        self.assertEqual(manifest_before, HISTORICAL_SHADOW_FIXTURE_MANIFEST.read_bytes())
 
     def test_tamperedCanonicalShadowFixtureCopyDoesNotPublishPromotionReadinessArtifactSet(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -124,6 +124,20 @@ class OpenApiContractTest(unittest.TestCase):
             [fixture["banner"]],
         )
 
+    def test_shadowIdentityCompletenessDocumentsCurrentAndLegacyReadOnlyMarkers(self):
+        document = yaml.safe_load(OPENAPI.read_text(encoding="utf-8"))
+        marker_schema = document["components"]["schemas"]["ShadowPerformanceEvaluationSubjectResponse"][
+            "properties"
+        ]["identityCompleteness"]
+
+        self.assertEqual(
+            [
+                "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
+                "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
+            ],
+            marker_schema["enum"],
+        )
+
     def test_mlInferencePublicIdentityFieldsUseCanonicalFieldSpecificContracts(self):
         document = yaml.safe_load(ML_OPENAPI.read_text(encoding="utf-8"))
         schemas = document["components"]["schemas"]

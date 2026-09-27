@@ -22,10 +22,13 @@ from offline_evaluation.feedback_dataset_evaluation.dataset_schema import (
 from offline_evaluation.feedback_dataset_evaluation.evaluation_contract import EVALUATION_SUBJECT
 from offline_evaluation.feedback_dataset_evaluation.report_contract import (
     ARTIFACT_SET_VERSION as EXPECTED_EVALUATION_ARTIFACT_SET_VERSION,
+    CURRENT_IDENTITY_COMPLETENESS,
+    LEGACY_READ_ONLY_IDENTITY_COMPLETENESS,
     LEGACY_READ_ONLY_ARTIFACT_SET_VERSION,
     LEGACY_READ_ONLY_REPORT_TYPE,
     REPORT_TYPE as EXPECTED_EVALUATION_REPORT_TYPE,
     validate_platform_evaluation_artifact_identity,
+    validate_platform_evaluation_artifact_provenance,
 )
 from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import (
     TimestampContractError,
@@ -125,7 +128,8 @@ SAFE_CONTRACT_VALUES = {
     "OFFLINE_DIAGNOSTIC",
     "NOT_AVAILABLE",
     "NOT_APPLICABLE",
-    "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
+    CURRENT_IDENTITY_COMPLETENESS,
+    LEGACY_READ_ONLY_IDENTITY_COMPLETENESS,
     "PLATFORM_RECOMMENDATION",
     "ENGINE_INTELLIGENCE_PROJECTION",
     "ENGINE_INTELLIGENCE_PROJECTION_V1",
@@ -249,15 +253,28 @@ def validate_shadow_performance_summary(raw: dict[str, Any]) -> dict[str, Any]:
         "limitations": _required_machine_code_superset(raw, "limitations", MAX_LIMITATIONS, REQUIRED_SHADOW_LIMITATIONS),
         "banner": _required_constant(raw, "banner", BANNER),
     }
+    try:
+        validate_platform_evaluation_artifact_provenance(
+            normalized["evaluation"]["evaluationReportType"],
+            normalized["evaluation"]["evaluationArtifactSetVersion"],
+            normalized["evaluationSubject"]["identityCompleteness"],
+            "shadow performance summary",
+        )
+    except ValueError as exc:
+        raise ShadowPerformanceValidationError(str(exc)) from exc
     _validate_summary_consistency(normalized)
     _reject_unsafe(normalized)
     return normalized
 
 
 def _evaluation_subject(raw: Any) -> dict[str, str]:
-    if raw != EVALUATION_SUBJECT:
+    if not isinstance(raw, dict):
         raise ShadowPerformanceValidationError("evaluationSubject is unsupported")
-    return dict(EVALUATION_SUBJECT)
+    expected = dict(EVALUATION_SUBJECT)
+    expected["identityCompleteness"] = raw.get("identityCompleteness")
+    if raw != expected:
+        raise ShadowPerformanceValidationError("evaluationSubject is unsupported")
+    return dict(raw)
 
 
 def _governance(raw: Any) -> dict[str, Any]:

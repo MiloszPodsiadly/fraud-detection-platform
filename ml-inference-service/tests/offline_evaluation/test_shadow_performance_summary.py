@@ -24,6 +24,8 @@ from feedback_dataset_evaluation.evaluation_card.test_schema import (
 GENERATED_AT = "2026-06-13T02:00:00Z"
 CARD_MANIFEST_SHA256 = "b" * 64
 ROOT = Path(__file__).resolve().parents[3]
+HISTORICAL_FIXTURE = ROOT / "contract-fixtures" / "governance" / "shadow-performance-fdp123" / "current-summary.json"
+HISTORICAL_FIXTURE_MANIFEST = HISTORICAL_FIXTURE.with_name("manifest.json")
 
 
 class ShadowPerformanceSummaryTest(unittest.TestCase):
@@ -33,6 +35,10 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
         self.assertEqual(REPORT_TYPE, summary["reportType"])
         self.assertEqual(SUMMARY_VERSION, summary["summaryVersion"])
         self.assertEqual("PLATFORM_RECOMMENDATION", summary["evaluationSubject"]["subjectType"])
+        self.assertEqual(
+            "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
+            summary["evaluationSubject"]["identityCompleteness"],
+        )
         self.assertEqual("2026-06-10T00:00:00Z", summary["evaluation"]["evaluationReportGeneratedAt"])
         self.assertEqual("2026-06-12T00:00:00Z", summary["evaluation"]["evaluationCardGeneratedAt"])
         self.assertEqual(CARD_MANIFEST_SHA256, summary["evaluation"]["sourceEvaluationCardManifestSha256"])
@@ -51,6 +57,28 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
         self.assertEqual("2026-06-13T02:00:00Z", summary["generatedAt"])
         self.assertEqual("shadow-performance-artifact-set-v1", json.loads(manifest_path.read_text())["artifactSetVersion"])
         self.assertEqual(64, len(manifest_sha256))
+
+    def test_historicalMasterFixturePassesWithoutRewrite(self):
+        summary_before = HISTORICAL_FIXTURE.read_bytes()
+        manifest_before = HISTORICAL_FIXTURE_MANIFEST.read_bytes()
+
+        summary, manifest_sha256 = read_validated_shadow_performance_artifact_set(
+            HISTORICAL_FIXTURE,
+            HISTORICAL_FIXTURE_MANIFEST,
+        )
+
+        self.assertEqual(
+            "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
+            summary["evaluationSubject"]["identityCompleteness"],
+        )
+        self.assertEqual(
+            "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+            summary["evaluation"]["evaluationReportType"],
+        )
+        self.assertEqual("fdp123-report-artifact-set-v1", summary["evaluation"]["evaluationArtifactSetVersion"])
+        self.assertEqual(64, len(manifest_sha256))
+        self.assertEqual(summary_before, HISTORICAL_FIXTURE.read_bytes())
+        self.assertEqual(manifest_before, HISTORICAL_FIXTURE_MANIFEST.read_bytes())
 
     def test_canonicalTimestampMatrixAccepted(self):
         for value in VALID_CANONICAL_TIMESTAMPS:
@@ -240,6 +268,7 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
 
     def test_acceptsExactLegacyReadOnlyPlatformEvaluationIdentityPair(self):
         summary = self.summary()
+        summary["evaluationSubject"]["identityCompleteness"] = "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
         summary["evaluation"]["evaluationReportType"] = "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"
         summary["evaluation"]["evaluationArtifactSetVersion"] = "fdp123-report-artifact-set-v1"
 
@@ -249,13 +278,36 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
         self.assertEqual("FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1", evaluation["evaluationReportType"])
         self.assertEqual("fdp123-report-artifact-set-v1", evaluation["evaluationArtifactSetVersion"])
 
-    def test_rejectsMixedPlatformEvaluationIdentityPairs(self):
-        for report_type, artifact_set_version in (
-                ("FEEDBACK_DATASET_OFFLINE_EVALUATION_V1", "fdp123-report-artifact-set-v1"),
-                ("FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1", "feedback-dataset-evaluation-report-artifact-set-v1"),
+    def test_rejectsMixedPlatformEvaluationProvenance(self):
+        for report_type, artifact_set_version, identity_completeness in (
+                (
+                    "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                    "fdp123-report-artifact-set-v1",
+                    "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
+                ),
+                (
+                    "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                    "feedback-dataset-evaluation-report-artifact-set-v1",
+                    "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
+                ),
+                (
+                    "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                    "feedback-dataset-evaluation-report-artifact-set-v1",
+                    "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
+                ),
+                (
+                    "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                    "fdp123-report-artifact-set-v1",
+                    "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
+                ),
         ):
-            with self.subTest(report_type=report_type, artifact_set_version=artifact_set_version):
+            with self.subTest(
+                    report_type=report_type,
+                    artifact_set_version=artifact_set_version,
+                    identity_completeness=identity_completeness,
+            ):
                 summary = self.summary()
+                summary["evaluationSubject"]["identityCompleteness"] = identity_completeness
                 summary["evaluation"]["evaluationReportType"] = report_type
                 summary["evaluation"]["evaluationArtifactSetVersion"] = artifact_set_version
 

@@ -44,6 +44,7 @@ from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import (
 from offline_evaluation.feedback_dataset_evaluation.report_contract import (
     LEGACY_READ_ONLY_REPORT_TYPE,
     validate_platform_evaluation_artifact_identity,
+    validate_platform_evaluation_artifact_provenance,
 )
 
 
@@ -229,6 +230,15 @@ def _validate_manifest(manifest: dict[str, Any], summary: dict[str, Any], artifa
         )
     except ValueError as exc:
         raise FeedbackDatasetEvaluationCardValidationError(str(exc)) from exc
+    try:
+        validate_platform_evaluation_artifact_provenance(
+            summary.get("reportType"),
+            manifest.get("artifactSetVersion"),
+            summary.get("evaluationSubject", {}).get("identityCompleteness"),
+            "evaluation summary and manifest",
+        )
+    except ValueError as exc:
+        raise FeedbackDatasetEvaluationCardValidationError(str(exc)) from exc
     if manifest.get("reportType") != summary.get("reportType"):
         raise FeedbackDatasetEvaluationCardValidationError("manifest reportType must match evaluation summary reportType")
     try:
@@ -346,7 +356,11 @@ def _validate_summary(summary: dict[str, Any]) -> None:
 
 
 def _validate_evaluation_subject(raw: Any) -> None:
-    if raw != EVALUATION_SUBJECT:
+    if not isinstance(raw, dict):
+        raise FeedbackDatasetEvaluationCardValidationError("evaluation summary evaluationSubject unsupported")
+    expected = dict(EVALUATION_SUBJECT)
+    expected["identityCompleteness"] = raw.get("identityCompleteness")
+    if raw != expected:
         raise FeedbackDatasetEvaluationCardValidationError("evaluation summary evaluationSubject unsupported")
 
 

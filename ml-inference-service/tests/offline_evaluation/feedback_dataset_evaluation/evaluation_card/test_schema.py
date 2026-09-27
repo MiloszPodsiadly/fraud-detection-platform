@@ -209,45 +209,70 @@ class FeedbackDatasetEvaluationCardSchemaTest(unittest.TestCase):
                 "current_current",
                 "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
                 "feedback-dataset-evaluation-report-artifact-set-v1",
+                "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
                 True,
             ),
             (
                 "legacy_legacy",
                 "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
                 "fdp123-report-artifact-set-v1",
+                "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
                 True,
             ),
             (
                 "current_legacy",
                 "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
                 "fdp123-report-artifact-set-v1",
+                "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
                 False,
             ),
             (
                 "legacy_current",
                 "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
                 "feedback-dataset-evaluation-report-artifact-set-v1",
+                "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
+                False,
+            ),
+            (
+                "current_with_legacy_marker",
+                "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "feedback-dataset-evaluation-report-artifact-set-v1",
+                "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
+                False,
+            ),
+            (
+                "legacy_with_current_marker",
+                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "fdp123-report-artifact-set-v1",
+                "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
                 False,
             ),
             (
                 "unknown_current",
                 "UNKNOWN_PLATFORM_EVALUATION",
                 "feedback-dataset-evaluation-report-artifact-set-v1",
+                "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
                 False,
             ),
             (
                 "current_unknown",
                 "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
                 "unknown-artifact-set-v1",
+                "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
                 False,
             ),
         )
-        for name, report_type, artifact_set_version, accepted in cases:
+        for name, report_type, artifact_set_version, identity_completeness, accepted in cases:
             with self.subTest(name=name):
-                card = valid_evaluation_card(evaluationEvidence=valid_evaluation_evidence(
-                    evaluationReportType=report_type,
-                    evaluationArtifactSetVersion=artifact_set_version,
-                ))
+                subject = dict(EVALUATION_SUBJECT)
+                subject["identityCompleteness"] = identity_completeness
+                card = valid_evaluation_card(
+                    evaluationSubject=subject,
+                    evaluationEvidence=valid_evaluation_evidence(
+                        evaluationReportType=report_type,
+                        evaluationArtifactSetVersion=artifact_set_version,
+                    ),
+                )
                 if accepted:
                     evidence = validate_evaluation_card(card)["evaluationEvidence"]
                     self.assertEqual(report_type, evidence["evaluationReportType"])

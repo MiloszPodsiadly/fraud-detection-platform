@@ -10,8 +10,7 @@ const REQUIRED_EVALUATION_SUBJECT = {
   sourceVersion: "ENGINE_INTELLIGENCE_PROJECTION_V1",
   featureContractVersion: "NOT_APPLICABLE",
   modelIdentity: "NOT_AVAILABLE",
-  modelArtifactSha256: "NOT_AVAILABLE",
-  identityCompleteness: "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
+  modelArtifactSha256: "NOT_AVAILABLE"
 };
 const REQUIRED_GOVERNANCE = {
   governanceStatus: "DIAGNOSTIC_ONLY",
@@ -32,11 +31,13 @@ const REQUIRED_EVALUATION = {
 };
 const CURRENT_PLATFORM_EVALUATION_IDENTITY = {
   evaluationReportType: "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-  evaluationArtifactSetVersion: "feedback-dataset-evaluation-report-artifact-set-v1"
+  evaluationArtifactSetVersion: "feedback-dataset-evaluation-report-artifact-set-v1",
+  identityCompleteness: "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
 };
 const LEGACY_READ_ONLY_PLATFORM_EVALUATION_IDENTITY = {
   evaluationReportType: "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-  evaluationArtifactSetVersion: "fdp123-report-artifact-set-v1"
+  evaluationArtifactSetVersion: "fdp123-report-artifact-set-v1",
+  identityCompleteness: "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
 };
 const REQUIRED_LIMITATIONS = new Set([
   "ANALYST_FEEDBACK_LABELS_ARE_NOT_LEGAL_GROUND_TRUTH",
@@ -399,6 +400,7 @@ function isValidSummary(summary) {
       || !isValidEvaluationSubject(summary.evaluationSubject)
       || !isValidGovernance(summary.governance)
       || !isValidEvaluation(summary.evaluation)
+      || !isSupportedPlatformEvaluationProvenance(summary.evaluationSubject, summary.evaluation)
       || !isObject(summary.evaluationPopulation)
       || !hasExactKeys(summary.evaluationPopulation, ["recordsEvaluated", "positiveClassCount", "negativeClassCount"])
       || !isObject(summary.metrics)
@@ -436,7 +438,7 @@ function isString(value) {
 
 function isValidEvaluationSubject(subject) {
   return isObject(subject)
-    && hasExactKeys(subject, Object.keys(REQUIRED_EVALUATION_SUBJECT))
+    && hasExactKeys(subject, [...Object.keys(REQUIRED_EVALUATION_SUBJECT), "identityCompleteness"])
     && Object.entries(REQUIRED_EVALUATION_SUBJECT).every(([field, value]) => subject[field] === value);
 }
 
@@ -463,7 +465,6 @@ function isValidEvaluation(evaluation) {
       "sourceEvaluationCardManifestSha256"
     ])
     && Object.entries(REQUIRED_EVALUATION).every(([field, value]) => evaluation[field] === value)
-    && isSupportedPlatformEvaluationIdentity(evaluation)
     && isCanonicalUtcTimestamp(evaluation.evaluationReportGeneratedAt)
     && isCanonicalUtcTimestamp(evaluation.evaluationCardGeneratedAt)
     && isOrderedTimestamp(evaluation.evaluationReportGeneratedAt, evaluation.evaluationCardGeneratedAt)
@@ -471,14 +472,15 @@ function isValidEvaluation(evaluation) {
     && /^[a-f0-9]{64}$/.test(evaluation.sourceEvaluationCardManifestSha256);
 }
 
-function isSupportedPlatformEvaluationIdentity(evaluation) {
-  return matchesIdentity(evaluation, CURRENT_PLATFORM_EVALUATION_IDENTITY)
-    || matchesIdentity(evaluation, LEGACY_READ_ONLY_PLATFORM_EVALUATION_IDENTITY);
+function isSupportedPlatformEvaluationProvenance(subject, evaluation) {
+  return matchesProvenance(subject, evaluation, CURRENT_PLATFORM_EVALUATION_IDENTITY)
+    || matchesProvenance(subject, evaluation, LEGACY_READ_ONLY_PLATFORM_EVALUATION_IDENTITY);
 }
 
-function matchesIdentity(evaluation, identity) {
+function matchesProvenance(subject, evaluation, identity) {
   return evaluation.evaluationReportType === identity.evaluationReportType
-    && evaluation.evaluationArtifactSetVersion === identity.evaluationArtifactSetVersion;
+    && evaluation.evaluationArtifactSetVersion === identity.evaluationArtifactSetVersion
+    && subject.identityCompleteness === identity.identityCompleteness;
 }
 
 function isMetricValue(metric) {

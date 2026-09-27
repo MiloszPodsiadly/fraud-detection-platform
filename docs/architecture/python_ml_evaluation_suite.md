@@ -152,6 +152,9 @@ Historical Platform Evaluation artifact sets with `reportType = FDP123_FEEDBACK_
 and `artifactSetVersion = fdp123-report-artifact-set-v1` are accepted only as an exact read-only legacy pair for
 persisted artifact reads. Current writers continue to emit only `FEEDBACK_DATASET_OFFLINE_EVALUATION_V1` with
 `feedback-dataset-evaluation-report-artifact-set-v1`; mixed current/legacy pairs are invalid.
+Shadow Performance and Evaluation Card readers additionally couple that legacy pair to
+`identityCompleteness = NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE`. The current pair requires
+`NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE`; mixed markers and identities fail closed.
 
 FDP-124 report artifacts are not external exports and do not expose raw source identifiers, raw notes, raw payloads,
 raw evidence, feature vectors, ground-truth fields, training labels, final decisions, payment authorization, model

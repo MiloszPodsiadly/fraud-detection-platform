@@ -58,17 +58,23 @@ class TransactionScoredEventMapperEngineIntelligenceTest {
     }
 
     @Test
-    void shadowModeMlIdentityStaysInsideEngineIntelligenceNotTopLevelFinalScoreIdentity() {
+    void shadowModeMlIdentityStaysInsideEngineIntelligenceNotTopLevelFinalScoreIdentity() throws Exception {
         var event = mapper.toEvent(
                 request(),
                 ruleBasedScoreResult("rules-v2-final"),
-                Optional.of(availableMlSummary("ml-shadow-2026-06-01"))
+                Optional.of(availableMlSummary("model-X"))
         );
 
         assertThat(event.scoringStrategy()).isEqualTo("RULE_BASED");
         assertThat(event.modelVersion()).isEqualTo("rules-v2-final");
         assertThat(event.engineIntelligence().engines().get(1).modelIdentity().modelVersion())
-                .isEqualTo("ml-shadow-2026-06-01");
+                .isEqualTo("model-X");
+
+        var serialized = objectMapper.readTree(objectMapper.writeValueAsString(event));
+        assertThat(serialized.get("scoringStrategy").asText()).isEqualTo("RULE_BASED");
+        assertThat(serialized.get("modelVersion").asText()).isEqualTo("rules-v2-final");
+        assertThat(serialized.get("engineIntelligence").get("engines").get(1)
+                .get("modelIdentity").get("modelVersion").asText()).isEqualTo("model-X");
     }
 
     private FraudScoringRequest request() {

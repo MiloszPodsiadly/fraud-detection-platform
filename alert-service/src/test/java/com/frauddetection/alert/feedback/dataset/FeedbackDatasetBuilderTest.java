@@ -1,9 +1,13 @@
 package com.frauddetection.alert.feedback.dataset;
 
+import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
 import com.frauddetection.alert.feedback.FraudFeedbackLabel;
 import com.frauddetection.alert.feedback.FraudFeedbackRecord;
 import com.frauddetection.alert.feedback.governance.FeedbackDatasetEligibilityPolicy;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -310,6 +314,40 @@ class FeedbackDatasetBuilderTest {
         assertThat(record.mlModelName()).isEqualTo("python-logistic-fraud-model");
         assertThat(record.mlModelVersion()).isEqualTo("2026-06-25.v1");
         assertThat(record.mlFeatureContractVersion()).isEqualTo("feature-contract-v2");
+    }
+
+    @Test
+    void exportsHistoricalAvailableMlSnapshotWithoutLineageAsValidJsonl() {
+        FraudFeedbackRecord source = feedback(
+                "feedback-historical",
+                "txn-historical",
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                FROM
+        );
+        source.setEngineIntelligenceStatus(EngineIntelligenceResponseStatus.AVAILABLE);
+        source.setAgreementStatus(EngineIntelligenceAgreementStatus.DISAGREEMENT);
+        source.setRiskMismatchStatus(EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH);
+        source.setScoreDeltaBucket(EngineIntelligenceScoreDeltaBucket.LARGE);
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.failed()).isFalse();
+        assertThat(result.records()).singleElement().satisfies(record -> {
+            assertThat(record.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
+            assertThat(record.agreementStatus()).isEqualTo(EngineIntelligenceAgreementStatus.DISAGREEMENT);
+            assertThat(record.riskMismatchStatus()).isEqualTo(EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH);
+            assertThat(record.scoreDeltaBucket()).isEqualTo(EngineIntelligenceScoreDeltaBucket.LARGE);
+            assertThat(record.mlModelName()).isNull();
+            assertThat(record.mlModelVersion()).isNull();
+            assertThat(record.mlFeatureContractVersion()).isNull();
+        });
+        assertThat(new FeedbackDatasetJsonlWriter().writeJsonl(result))
+                .contains("\"type\":\"DATASET_RECORD\"")
+                .contains("\"engineIntelligenceStatus\":\"AVAILABLE\"")
+                .contains("\"mlModelName\":null")
+                .contains("\"mlModelVersion\":null")
+                .contains("\"mlFeatureContractVersion\":null");
     }
 
     @Test

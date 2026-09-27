@@ -78,7 +78,7 @@ class ShadowPerformanceSummaryValidator {
         validateSubject(summary.evaluationSubject());
         require("ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK".equals(summary.metricBasis()), "metricBasis is unsupported");
         validateGovernance(summary.governance());
-        validateEvaluation(summary.evaluation(), summaryGeneratedAt);
+        validateEvaluation(summary.evaluation(), summary.evaluationSubject().identityCompleteness(), summaryGeneratedAt);
         validatePopulation(summary.evaluationPopulation());
         validateMetrics(summary.metrics());
         validateMachineCodes(summary.warnings(), 20, "warnings");
@@ -97,7 +97,10 @@ class ShadowPerformanceSummaryValidator {
         require("NOT_AVAILABLE".equals(subject.modelIdentity()), "modelIdentity is unsupported");
         require("NOT_AVAILABLE".equals(subject.modelArtifactSha256()), "modelArtifactSha256 is unsupported");
         require(
-                "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE".equals(subject.identityCompleteness()),
+                PlatformEvaluationArtifactIdentityPolicy.CURRENT_IDENTITY_COMPLETENESS.equals(subject.identityCompleteness())
+                        || PlatformEvaluationArtifactIdentityPolicy.LEGACY_READ_ONLY_IDENTITY_COMPLETENESS.equals(
+                        subject.identityCompleteness()
+                ),
                 "identityCompleteness is unsupported"
         );
     }
@@ -113,7 +116,11 @@ class ShadowPerformanceSummaryValidator {
         require(governance.notAutomaticDecisioning(), "notAutomaticDecisioning must be true");
     }
 
-    private void validateEvaluation(ShadowPerformanceSummary.ShadowPerformanceEvaluation evaluation, Instant summaryGeneratedAt) {
+    private void validateEvaluation(
+            ShadowPerformanceSummary.ShadowPerformanceEvaluation evaluation,
+            String identityCompleteness,
+            Instant summaryGeneratedAt
+    ) {
         require(evaluation != null, "evaluation is missing");
         require(
                 "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1".equals(evaluation.evaluationCardType()),
@@ -130,11 +137,12 @@ class ShadowPerformanceSummaryValidator {
         require(!cardGeneratedAt.isBefore(reportGeneratedAt), "evaluationCardGeneratedAt must be >= evaluationReportGeneratedAt");
         require(!summaryGeneratedAt.isBefore(cardGeneratedAt), "generatedAt must be >= evaluationCardGeneratedAt");
         require(
-                PlatformEvaluationArtifactIdentityPolicy.isSupportedReadIdentity(
+                PlatformEvaluationArtifactIdentityPolicy.isSupportedReadProvenance(
                         evaluation.evaluationReportType(),
-                        evaluation.evaluationArtifactSetVersion()
+                        evaluation.evaluationArtifactSetVersion(),
+                        identityCompleteness
                 ),
-                "evaluation artifact identity is unsupported"
+                "evaluation artifact provenance is unsupported"
         );
         require("feedback-dataset-v1".equals(evaluation.datasetVersion()), "datasetVersion is unsupported");
         require("FEEDBACK_CREATED_AT".equals(evaluation.datasetTimeBasis()), "datasetTimeBasis is unsupported");

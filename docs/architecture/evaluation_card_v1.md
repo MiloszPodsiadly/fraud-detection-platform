@@ -52,6 +52,11 @@ FDP-124 `evaluation_summary.json` is the only source of evaluation identity. It 
 - `modelArtifactSha256 = NOT_AVAILABLE`
 - `identityCompleteness = NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE`
 
+Historical read-only evidence is accepted only when the exact legacy evaluation identity pair
+`FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1` / `fdp123-report-artifact-set-v1` is coupled to
+`NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE`. Current/legacy mixtures are invalid, and current writers retain the
+canonical marker above.
+
 The Platform Recommendation Evaluation Card generator copies that subject from FDP-124 and rejects unsupported subject, `metricsSubject`, or
 `metricBasis` values. CLI callers cannot set model name, model version, model family, training mode, feature contract,
 reference quality, or artifact identity.

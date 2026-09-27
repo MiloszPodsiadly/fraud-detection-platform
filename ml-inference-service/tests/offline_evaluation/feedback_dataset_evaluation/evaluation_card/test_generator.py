@@ -30,6 +30,12 @@ except ModuleNotFoundError:
 
 
 PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT = "2026-06-12T00:00:00Z"
+HISTORICAL_PLATFORM_EVALUATION_FIXTURE = (
+    Path(__file__).resolve().parents[5]
+    / "contract-fixtures"
+    / "governance"
+    / "platform-evaluation-fdp123"
+)
 
 
 class FeedbackDatasetEvaluationCardGeneratorTest(unittest.TestCase):
@@ -180,6 +186,10 @@ class FeedbackDatasetEvaluationCardGeneratorTest(unittest.TestCase):
     def test_acceptsLegacyReadOnlyPlatformEvaluationIdentityPair(self):
         with self.artifacts() as paths:
             self._mutate_summary(paths, reportType="FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1")
+            self._mutate_summary_identity_completeness(
+                paths,
+                "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
+            )
             self._mutate_manifest(
                 paths,
                 reportType="FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
@@ -190,6 +200,41 @@ class FeedbackDatasetEvaluationCardGeneratorTest(unittest.TestCase):
 
         self.assertEqual("FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1", card["evaluationEvidence"]["evaluationReportType"])
         self.assertEqual("fdp123-report-artifact-set-v1", card["evaluationEvidence"]["evaluationArtifactSetVersion"])
+        self.assertEqual(
+            "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
+            card["evaluationSubject"]["identityCompleteness"],
+        )
+
+    def test_readsHistoricalPlatformEvaluationArtifactSetWithoutRewritingIt(self):
+        fixture_bytes = {
+            path.name: path.read_bytes()
+            for path in HISTORICAL_PLATFORM_EVALUATION_FIXTURE.iterdir()
+            if path.is_file()
+        }
+
+        card = generate_evaluation_card_from_fdp124_artifacts(
+            HISTORICAL_PLATFORM_EVALUATION_FIXTURE / "evaluation_summary.json",
+            HISTORICAL_PLATFORM_EVALUATION_FIXTURE / "manifest.json",
+            model_metadata(),
+            PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT,
+        )
+
+        self.assertEqual(
+            "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+            card["evaluationEvidence"]["evaluationReportType"],
+        )
+        self.assertEqual(
+            "fdp123-report-artifact-set-v1",
+            card["evaluationEvidence"]["evaluationArtifactSetVersion"],
+        )
+        self.assertEqual(
+            fixture_bytes,
+            {
+                path.name: path.read_bytes()
+                for path in HISTORICAL_PLATFORM_EVALUATION_FIXTURE.iterdir()
+                if path.is_file()
+            },
+        )
 
     def test_rejectsMixedPlatformEvaluationIdentityPairs(self):
         cases = (
@@ -219,6 +264,35 @@ class FeedbackDatasetEvaluationCardGeneratorTest(unittest.TestCase):
                     self._mutate_manifest(
                         paths,
                         reportType=manifest_report_type,
+                        artifactSetVersion=artifact_set_version,
+                    )
+
+                    with self.assertRaises(FeedbackDatasetEvaluationCardValidationError):
+                        self.generate(paths)
+
+    def test_rejectsMixedPlatformEvaluationIdentityMarkers(self):
+        cases = (
+            (
+                "current_with_legacy_marker",
+                "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "feedback-dataset-evaluation-report-artifact-set-v1",
+                "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
+            ),
+            (
+                "legacy_with_current_marker",
+                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "fdp123-report-artifact-set-v1",
+                "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
+            ),
+        )
+        for name, report_type, artifact_set_version, identity_completeness in cases:
+            with self.subTest(name=name):
+                with self.artifacts() as paths:
+                    self._mutate_summary(paths, reportType=report_type)
+                    self._mutate_summary_identity_completeness(paths, identity_completeness)
+                    self._mutate_manifest(
+                        paths,
+                        reportType=report_type,
                         artifactSetVersion=artifact_set_version,
                     )
 
@@ -530,6 +604,11 @@ class FeedbackDatasetEvaluationCardGeneratorTest(unittest.TestCase):
     def _mutate_summary(self, paths, **overrides):
         summary = self._summary(paths)
         summary.update(overrides)
+        self._write_summary(paths, summary)
+
+    def _mutate_summary_identity_completeness(self, paths, identity_completeness):
+        summary = self._summary(paths)
+        summary["evaluationSubject"]["identityCompleteness"] = identity_completeness
         self._write_summary(paths, summary)
 
     def artifacts(self, *records):

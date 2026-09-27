@@ -23,6 +23,8 @@ import static org.mockito.Mockito.verify;
 class ArtifactBackedShadowPerformanceSummaryProviderTest {
 
     private static final Path ROOT = resolveProjectRoot();
+    private static final Path HISTORICAL_FIXTURE_DIR =
+            ROOT.resolve("contract-fixtures/governance/shadow-performance-fdp123");
 
     private static Path resolveProjectRoot() {
         String projectRootProperty = System.getProperty("project.root");
@@ -77,6 +79,26 @@ class ArtifactBackedShadowPerformanceSummaryProviderTest {
         assertThat(fixtureDir.resolve("manifest.json")).isRegularFile();
         assertThat(result).isPresent();
         assertThat(result.orElseThrow().reportType()).isEqualTo("SHADOW_PERFORMANCE_SUMMARY_V2");
+    }
+
+    @Test
+    void historicalMasterArtifactSetIsReadableAndNotRewritten() throws Exception {
+        Path artifact = HISTORICAL_FIXTURE_DIR.resolve("current-summary.json");
+        Path manifest = HISTORICAL_FIXTURE_DIR.resolve("manifest.json");
+        byte[] summaryBefore = Files.readAllBytes(artifact);
+        byte[] manifestBefore = Files.readAllBytes(manifest);
+
+        ShadowPerformanceSummary result = provider(true, HISTORICAL_FIXTURE_DIR, artifact)
+                .currentSummary()
+                .orElseThrow();
+
+        assertThat(result.evaluationSubject().identityCompleteness())
+                .isEqualTo("NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE");
+        assertThat(result.evaluation().evaluationReportType())
+                .isEqualTo("FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1");
+        assertThat(result.evaluation().evaluationArtifactSetVersion()).isEqualTo("fdp123-report-artifact-set-v1");
+        assertThat(Files.readAllBytes(artifact)).isEqualTo(summaryBefore);
+        assertThat(Files.readAllBytes(manifest)).isEqualTo(manifestBefore);
     }
 
     @Test
