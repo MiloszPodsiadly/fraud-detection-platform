@@ -21,8 +21,8 @@ from offline_evaluation.shadow_performance_artifact_set import read_validated_sh
 from offline_evaluation.shadow_performance_artifact_set import build_shadow_performance_manifest
 from offline_evaluation.shadow_performance_schema import REPORT_TYPE, SUMMARY_VERSION
 from offline_evaluation.shadow_performance_writer import write_shadow_performance_summary
-from offline_evaluation.fdp123.evaluation_card.writer import write_evaluation_card_artifacts
-from fdp123.evaluation_card.test_schema import INVALID_CANONICAL_TIMESTAMPS, valid_evaluation_card
+from offline_evaluation.feedback_dataset_evaluation.evaluation_card.writer import write_evaluation_card_artifacts
+from feedback_dataset_evaluation.evaluation_card.test_schema import INVALID_CANONICAL_TIMESTAMPS, valid_evaluation_card
 
 
 GENERATED_AT = "2026-06-13T02:00:00Z"

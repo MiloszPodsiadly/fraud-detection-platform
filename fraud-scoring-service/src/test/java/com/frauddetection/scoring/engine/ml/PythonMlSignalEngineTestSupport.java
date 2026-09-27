@@ -27,6 +27,7 @@ import java.util.function.Function;
 final class PythonMlSignalEngineTestSupport {
 
     static final Instant RECEIVED_AT = Instant.parse("2026-05-30T10:00:00Z");
+    static final String FEATURE_CONTRACT_VERSION = "2026-05-30.feature-contract.v1";
 
     private PythonMlSignalEngineTestSupport() {
     }
@@ -72,6 +73,7 @@ final class PythonMlSignalEngineTestSupport {
                 "ML",
                 modelName,
                 modelVersion,
+                modelName == null && modelVersion == null ? null : FEATURE_CONTRACT_VERSION,
                 Instant.parse("2026-05-30T09:59:59Z"),
                 reasonCodes,
                 new LinkedHashMap<>(),
@@ -94,6 +96,7 @@ final class PythonMlSignalEngineTestSupport {
                 "ML",
                 "python-logistic-fraud-model",
                 "2026-05-30.v1",
+                FEATURE_CONTRACT_VERSION,
                 Instant.parse("2026-05-30T09:59:59Z"),
                 List.of("VIP", "rawResponseJson"),
                 scoreDetails,
@@ -126,6 +129,7 @@ final class PythonMlSignalEngineTestSupport {
                 "ML",
                 "python-logistic-fraud-model",
                 "2026-05-30.v1",
+                FEATURE_CONTRACT_VERSION,
                 Instant.parse("2026-05-30T09:59:59Z"),
                 List.of("MODEL_HIGH_RISK"),
                 Map.of(),
@@ -153,7 +157,8 @@ final class PythonMlSignalEngineTestSupport {
                 + result.evidence() + " "
                 + result.statusReason() + " "
                 + result.modelName() + " "
-                + result.modelVersion();
+                + result.modelVersion() + " "
+                + result.featureContractVersion();
     }
 
     static final class RecordingMlSource extends MlFraudScoringEngine {
@@ -196,6 +201,7 @@ final class PythonMlSignalEngineTestSupport {
                 riskLevel,
                 modelName,
                 modelVersion,
+                modelName == null && modelVersion == null ? null : FEATURE_CONTRACT_VERSION,
                 Instant.parse("2026-05-30T09:59:59Z"),
                 reasonCodes,
                 Map.of(),
@@ -209,8 +215,9 @@ final class PythonMlSignalEngineTestSupport {
                 false,
                 0.0d,
                 RiskLevel.LOW,
-                "test",
-                "unavailable",
+                null,
+                null,
+                null,
                 RECEIVED_AT,
                 List.of(PythonMlSignalReasonCode.ML_MODEL_UNAVAILABLE.wireValue()),
                 Map.of(),

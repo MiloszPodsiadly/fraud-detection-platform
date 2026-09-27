@@ -54,7 +54,8 @@ public class EngineIntelligenceProjectionMapper {
                                     engine.status(),
                                     engine.riskLevel(),
                                     engine.scoreBucket(),
-                                    engine.reasonCodes()
+                                    engine.reasonCodes(),
+                                    engine.modelIdentity()
                             ))
                             .toList(),
                     safe.diagnosticSignals().stream()

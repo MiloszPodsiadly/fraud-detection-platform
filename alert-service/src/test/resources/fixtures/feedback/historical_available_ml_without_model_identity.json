@@ -1,0 +1,36 @@
+{
+  "transactionId": "txn-1",
+  "available": true,
+  "contractVersion": 1,
+  "generatedAt": "2026-06-25T09:00:03Z",
+  "comparison": {
+    "comparisonType": "RULES_VS_ML",
+    "comparedEngineIds": ["rules.primary", "ml.python.primary"],
+    "agreementStatus": "DISAGREEMENT",
+    "riskMismatchStatus": "MATERIAL_RISK_MISMATCH",
+    "scoreDeltaBucket": "LARGE"
+  },
+  "engineCount": 2,
+  "diagnosticSignalCount": 0,
+  "warningCount": 0,
+  "engines": [
+    {
+      "engineId": "rules.primary",
+      "engineType": "RULES",
+      "status": "AVAILABLE",
+      "riskLevel": "HIGH",
+      "scoreBucket": "HIGH",
+      "reasonCodes": ["HIGH_TRANSACTION_AMOUNT"]
+    },
+    {
+      "engineId": "ml.python.primary",
+      "engineType": "ML_MODEL",
+      "status": "AVAILABLE",
+      "riskLevel": "LOW",
+      "scoreBucket": "LOW",
+      "reasonCodes": ["LOW_MODEL_RISK"]
+    }
+  ],
+  "diagnosticSignals": [],
+  "warnings": []
+}

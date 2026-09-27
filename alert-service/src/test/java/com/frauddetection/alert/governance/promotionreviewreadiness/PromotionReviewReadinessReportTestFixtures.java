@@ -57,7 +57,7 @@ final class PromotionReviewReadinessReportTestFixtures {
                         new PromotionReviewReadinessReport.PromotionReadinessEvaluationCheckInput(
                                 "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
                                 "platform-recommendation-evaluation-card-v1",
-                                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"
+                                "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"
                         ),
                         "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK",
                         1,

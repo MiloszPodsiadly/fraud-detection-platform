@@ -110,7 +110,9 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
         return sourceResult.modelName() == null
                 || sourceResult.modelName().isBlank()
                 || sourceResult.modelVersion() == null
-                || sourceResult.modelVersion().isBlank();
+                || sourceResult.modelVersion().isBlank()
+                || sourceResult.featureContractVersion() == null
+                || sourceResult.featureContractVersion().isBlank();
     }
 
     private FraudSignalEvaluation availableResult(FraudScoreResult sourceResult) {
@@ -125,6 +127,7 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
                 evidence(reasonCodes, FraudEngineEvidenceStatus.AVAILABLE),
                 sourceResult.modelName(),
                 sourceResult.modelVersion(),
+                sourceResult.featureContractVersion(),
                 null
         );
     }
@@ -152,6 +155,7 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
                 evidence(reasonCode, FraudEngineEvidenceStatus.UNAVAILABLE),
                 null,
                 null,
+                null,
                 reasonCode.wireValue()
         );
     }
@@ -165,6 +169,7 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
                 List.of(reasonCode.wireValue()),
                 List.of(),
                 evidence(reasonCode, FraudEngineEvidenceStatus.PARTIAL),
+                null,
                 null,
                 null,
                 reasonCode.wireValue()

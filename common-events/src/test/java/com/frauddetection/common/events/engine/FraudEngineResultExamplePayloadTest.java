@@ -50,6 +50,8 @@ class FraudEngineResultExamplePayloadTest {
         assertThat(read("available-rules-engine-result.json").engineType()).isEqualTo(FraudEngineType.RULES);
         assertThat(read("available-ml-engine-result.json").engineType()).isEqualTo(FraudEngineType.ML_MODEL);
         assertThat(read("available-ml-engine-result.json").modelName()).isEqualTo("python-fraud-model");
+        assertThat(read("available-ml-engine-result.json").featureContractVersion())
+                .isEqualTo("2026-05-30.feature-contract.v1");
 
         FraudEngineResult timeout = read("timeout-ml-engine-result.json");
         assertThat(timeout.status()).isEqualTo(FraudEngineStatus.TIMEOUT);

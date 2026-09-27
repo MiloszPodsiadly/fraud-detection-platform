@@ -80,7 +80,8 @@ public class EngineIntelligenceReadModelMapper {
                         engine.reasonCodes(),
                         EngineIntelligenceProjectionPolicy.MAX_REASON_CODES_PER_ENGINE,
                         "engine reason codes"
-                )
+                ),
+                engine.modelIdentity()
         );
     }
 

@@ -10,6 +10,7 @@ from offline_evaluation.shadow_performance_schema import BANNER as SHADOW_PERFOR
 
 ROOT = Path(__file__).resolve().parents[3]
 OPENAPI = ROOT / "docs" / "openapi" / "alert_service.openapi.yaml"
+ML_OPENAPI = ROOT / "docs" / "openapi" / "ml_inference_service.openapi.yaml"
 TIMESTAMP_FIXTURE = ROOT / "contract-fixtures" / "governance" / "canonical-utc-timestamp-cases.json"
 PROMOTION_READINESS_UI_VALIDATOR = (
     ROOT / "analyst-console-ui" / "src" / "governance" / "promotionReviewReadinessReportValidation.js"
@@ -122,6 +123,68 @@ class OpenApiContractTest(unittest.TestCase):
             schemas["ShadowPerformanceSummaryResponse"]["properties"]["banner"]["enum"],
             [fixture["banner"]],
         )
+
+    def test_shadowIdentityCompletenessDocumentsCurrentAndLegacyReadOnlyMarkers(self):
+        document = yaml.safe_load(OPENAPI.read_text(encoding="utf-8"))
+        marker_schema = document["components"]["schemas"]["ShadowPerformanceEvaluationSubjectResponse"][
+            "properties"
+        ]["identityCompleteness"]
+
+        self.assertEqual(
+            [
+                "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
+                "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
+            ],
+            marker_schema["enum"],
+        )
+
+    def test_mlInferencePublicIdentityFieldsUseCanonicalFieldSpecificContracts(self):
+        document = yaml.safe_load(ML_OPENAPI.read_text(encoding="utf-8"))
+        schemas = document["components"]["schemas"]
+        expected_refs = {
+            "modelName": "#/components/schemas/CanonicalMlModelName",
+            "modelVersion": "#/components/schemas/CanonicalMlModelVersion",
+            "featureContractVersion": "#/components/schemas/CanonicalMlFeatureContractVersion",
+        }
+        expected_parts = {
+            "CanonicalMlModelName": 64,
+            "CanonicalMlModelVersion": 64,
+            "CanonicalMlFeatureContractVersion": 96,
+        }
+
+        for schema_name, max_length in expected_parts.items():
+            with self.subTest(schema=schema_name):
+                self.assertEqual(
+                    {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": max_length,
+                        "pattern": "^[A-Za-z0-9._-]+$",
+                    },
+                    {key: schemas[schema_name][key] for key in ("type", "minLength", "maxLength", "pattern")},
+                )
+
+        self.assertEqual(expected_refs["modelName"], schemas["HealthResponse"]["properties"]["modelName"]["$ref"])
+        self.assertEqual(expected_refs["modelVersion"], schemas["HealthResponse"]["properties"]["modelVersion"]["$ref"])
+        score_properties = schemas["FraudScoreResponse"]["properties"]
+        for field, expected_ref in expected_refs.items():
+            self.assertEqual(expected_ref, score_properties[field]["$ref"])
+            self.assertEqual(expected_ref, score_properties["explanationMetadata"]["properties"][field]["$ref"])
+        lifecycle_properties = schemas["ModelLifecycleMetadata"]["properties"]
+        self.assertEqual(expected_refs["modelName"], lifecycle_properties["model_name"]["$ref"])
+        self.assertEqual(expected_refs["modelVersion"], lifecycle_properties["model_version"]["$ref"])
+        advisory_properties = schemas["AdvisoryEvent"]["properties"]
+        self.assertEqual(expected_refs["modelName"], advisory_properties["model_name"]["$ref"])
+        self.assertEqual(expected_refs["modelVersion"], advisory_properties["model_version"]["$ref"])
+        self.assertEqual(
+            expected_refs["modelVersion"],
+            advisory_properties["lifecycle_context"]["properties"]["current_model_version"]["$ref"],
+        )
+        advisory_parameters = document["paths"]["/governance/advisories"]["get"]["parameters"]
+        model_version_parameter = next(
+            parameter for parameter in advisory_parameters if parameter["name"] == "model_version"
+        )
+        self.assertEqual(expected_refs["modelVersion"], model_version_parameter["schema"]["$ref"])
 
 
 if __name__ == "__main__":

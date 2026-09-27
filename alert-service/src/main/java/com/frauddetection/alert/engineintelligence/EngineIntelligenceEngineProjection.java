@@ -4,6 +4,7 @@ import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
+import com.frauddetection.common.events.intelligence.MlModelIdentity;
 
 import java.util.List;
 import java.util.Objects;
@@ -14,7 +15,8 @@ public record EngineIntelligenceEngineProjection(
         FraudEngineStatus status,
         RiskLevel riskLevel,
         EngineIntelligenceScoreBucket scoreBucket,
-        List<String> reasonCodes
+        List<String> reasonCodes,
+        MlModelIdentity modelIdentity
 ) {
     public EngineIntelligenceEngineProjection {
         Objects.requireNonNull(engineId, "engineId is required");
@@ -22,5 +24,16 @@ public record EngineIntelligenceEngineProjection(
         Objects.requireNonNull(status, "status is required");
         Objects.requireNonNull(scoreBucket, "scoreBucket is required");
         reasonCodes = reasonCodes == null ? List.of() : List.copyOf(reasonCodes);
+    }
+
+    public EngineIntelligenceEngineProjection(
+            String engineId,
+            FraudEngineType engineType,
+            FraudEngineStatus status,
+            RiskLevel riskLevel,
+            EngineIntelligenceScoreBucket scoreBucket,
+            List<String> reasonCodes
+    ) {
+        this(engineId, engineType, status, riskLevel, scoreBucket, reasonCodes, null);
     }
 }

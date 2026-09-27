@@ -75,7 +75,8 @@ public class EngineIntelligenceResponseMapper {
                         engine.scoreBucket(),
                         list(engine.reasonCodes()).stream()
                                 .limit(MAX_PUBLIC_REASON_CODES)
-                                .toList()
+                                .toList(),
+                        engine.modelIdentity()
                 ))
                 .toList();
     }

@@ -22,6 +22,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class CompositeFraudScoringEngineTest {
+    private static final String FEATURE_CONTRACT_VERSION = "2026-05-30.feature-contract.v1";
 
     @Test
     void shouldUseRuleBasedScoringByDefault() {
@@ -49,7 +50,8 @@ class CompositeFraudScoringEngineTest {
         assertThat(mlDiagnostics(result))
                 .containsEntry("fallbackUsed", true)
                 .containsEntry("fallbackReasonCode", "ml_runtime_unavailable")
-                .containsEntry("mlModelName", "ml-placeholder");
+                .containsEntry("mlModelName", null)
+                .containsEntry("mlModelVersion", null);
         assertThat(meterRegistry.get("fraud.scoring.fallbacks")
                 .tags("mode", "ml", "reason", "no_ml_model_runtime_is_configured_yet")
                 .counter()
@@ -68,11 +70,13 @@ class CompositeFraudScoringEngineTest {
         assertThat(mlDiagnostics(result))
                 .containsEntry("mode", "SHADOW")
                 .containsEntry("finalDecisionSource", "RULE_BASED")
-                .containsEntry("shadowModelName", "ml-placeholder")
+                .containsEntry("shadowModelName", null)
+                .containsEntry("shadowModelVersion", null)
                 .containsKey("modelMonitoring");
         assertThat(modelMonitoring(result))
                 .containsEntry("mode", "SHADOW")
-                .containsEntry("modelVersion", "unavailable")
+                .containsEntry("modelName", null)
+                .containsEntry("modelVersion", null)
                 .containsEntry("finalDecisionSource", "RULE_BASED")
                 .containsEntry("modelAvailable", false)
                 .containsEntry("mlScore", null)
@@ -94,6 +98,7 @@ class CompositeFraudScoringEngineTest {
                 RiskLevel.LOW,
                 "python-logistic-fraud-model",
                 "test-version",
+                FEATURE_CONTRACT_VERSION,
                 Instant.now(),
                 List.of("LOW_MODEL_RISK"),
                 Map.of("modelAvailable", true),
@@ -150,6 +155,7 @@ class CompositeFraudScoringEngineTest {
                 RiskLevel.CRITICAL,
                 "python-logistic-fraud-model",
                 "test-version",
+                FEATURE_CONTRACT_VERSION,
                 Instant.now(),
                 List.of("MODEL_HIGH_RISK"),
                 Map.of("modelAvailable", true),
@@ -185,6 +191,7 @@ class CompositeFraudScoringEngineTest {
                 RiskLevel.HIGH,
                 "python-logistic-fraud-model",
                 "test-version",
+                FEATURE_CONTRACT_VERSION,
                 Instant.now(),
                 List.of("MODEL_HIGH_RISK"),
                 Map.of("modelAvailable", true),

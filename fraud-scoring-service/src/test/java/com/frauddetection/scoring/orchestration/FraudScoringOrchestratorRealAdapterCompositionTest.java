@@ -55,6 +55,7 @@ class FraudScoringOrchestratorRealAdapterCompositionTest {
         assertThat(result.engineResults()).extracting(FraudEngineResult::status)
                 .containsExactly(FraudEngineStatus.AVAILABLE, FraudEngineStatus.AVAILABLE);
         assertThat(result.status()).isEqualTo(FraudScoringOrchestrationStatus.COMPLETE);
+        assertThat(result.engineResults().get(1).featureContractVersion()).isEqualTo("2026-05-30.feature-contract.v1");
         assertThat(result.generatedAt()).isNotEqualTo(context().receivedAt());
         assertThat(result.generatedAt()).isEqualTo(result.engineResults().getLast().generatedAt());
         assertThat(mlClient.calls()).isEqualTo(1);
@@ -238,6 +239,7 @@ class FraudScoringOrchestratorRealAdapterCompositionTest {
                 RiskLevel.MEDIUM,
                 "python-logistic-fraud-model",
                 "2026-05-30.v1",
+                "2026-05-30.feature-contract.v1",
                 Instant.parse("2026-05-30T09:59:59Z"),
                 List.of(),
                 Map.of(),
@@ -251,8 +253,9 @@ class FraudScoringOrchestratorRealAdapterCompositionTest {
                 false,
                 0.0d,
                 RiskLevel.LOW,
-                "python-logistic-fraud-model",
-                "unavailable",
+                null,
+                null,
+                null,
                 Instant.parse("2026-05-30T09:59:59Z"),
                 List.of(),
                 Map.of(),

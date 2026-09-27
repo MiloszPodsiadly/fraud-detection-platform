@@ -76,10 +76,11 @@ final class EngineIntelligenceValuePolicy {
         return List.copyOf(source);
     }
 
-    private static void requireBoundedSafeText(String value, String errorCode) {
+    static String requireBoundedSafeText(String value, String errorCode) {
         if (value == null || value.isBlank() || value.length() > MAX_STRING_LENGTH || containsForbiddenText(value)) {
             throw new IllegalArgumentException(errorCode);
         }
+        return value;
     }
 
     private static boolean containsForbiddenText(String value) {

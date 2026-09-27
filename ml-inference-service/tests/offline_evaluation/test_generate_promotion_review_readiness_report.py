@@ -32,14 +32,14 @@ from offline_evaluation.promotion_review_readiness_schema import (
     promotion_review_readiness_report_json,
     validate_promotion_review_readiness_report,
 )
-from offline_evaluation.fdp123.timestamp_contract import timestamp_instant
+from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import compare_rfc3339_timestamps
 from offline_evaluation.shadow_performance_artifact_set import (
     ShadowPerformanceArtifactSetError,
     build_shadow_performance_manifest,
     read_validated_shadow_performance_artifact_set,
 )
 from offline_evaluation.shadow_performance_summary import build_shadow_performance_summary
-from fdp123.evaluation_card.test_schema import (
+from feedback_dataset_evaluation.evaluation_card.test_schema import (
     INVALID_CANONICAL_TIMESTAMPS,
     VALID_CANONICAL_TIMESTAMPS,
     valid_evaluation_card,
@@ -56,6 +56,8 @@ OPENAPI_ROOT = ROOT / "docs" / "openapi"
 UI_ROOT = ROOT / "analyst-console-ui"
 CANONICAL_SHADOW_FIXTURE = ROOT / "deployment" / "local-fixtures" / "shadow-performance" / "current-summary.json"
 CANONICAL_SHADOW_FIXTURE_MANIFEST = CANONICAL_SHADOW_FIXTURE.with_name("manifest.json")
+HISTORICAL_SHADOW_FIXTURE = ROOT / "contract-fixtures" / "governance" / "shadow-performance-fdp123" / "current-summary.json"
+HISTORICAL_SHADOW_FIXTURE_MANIFEST = HISTORICAL_SHADOW_FIXTURE.with_name("manifest.json")
 
 
 class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
@@ -149,12 +151,42 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
                 report["inputs"]["shadowPerformanceSummary"]["generatedAt"],
             )
             self.assertGreaterEqual(
-                timestamp_instant(report["generatedAt"]),
-                timestamp_instant(source_summary["generatedAt"]),
+                compare_rfc3339_timestamps(
+                    report["generatedAt"],
+                    source_summary["generatedAt"],
+                ),
+                0,
             )
 
         self.assertEqual(summary_before, CANONICAL_SHADOW_FIXTURE.read_bytes())
         self.assertEqual(manifest_before, CANONICAL_SHADOW_FIXTURE_MANIFEST.read_bytes())
+
+    def test_historicalShadowFixtureGeneratesReadinessWithoutRewritingSource(self):
+        summary_before = HISTORICAL_SHADOW_FIXTURE.read_bytes()
+        manifest_before = HISTORICAL_SHADOW_FIXTURE_MANIFEST.read_bytes()
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "promotion-readiness" / "promotion-review-readiness-report.json"
+
+            generate_promotion_review_readiness_report(
+                HISTORICAL_SHADOW_FIXTURE,
+                HISTORICAL_SHADOW_FIXTURE_MANIFEST,
+                output,
+                generated_at="2026-06-14T00:00:00Z",
+                allowed_output_root=output.parent,
+            )
+
+            report = validate_promotion_review_readiness_artifact_set(output, output.with_name("manifest.json"))
+            self.assertEqual(
+                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                report["checkInputs"]["evaluation"]["evaluationReportType"],
+            )
+            self.assertEqual(
+                hashlib.sha256(manifest_before).hexdigest(),
+                report["checkInputs"]["sourceShadowSummaryManifestSha256"],
+            )
+
+        self.assertEqual(summary_before, HISTORICAL_SHADOW_FIXTURE.read_bytes())
+        self.assertEqual(manifest_before, HISTORICAL_SHADOW_FIXTURE_MANIFEST.read_bytes())
 
     def test_tamperedCanonicalShadowFixtureCopyDoesNotPublishPromotionReadinessArtifactSet(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -608,7 +640,7 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
         with self.assertRaises(PromotionReviewReadinessValidationError):
             validate_promotion_review_readiness_report(report)
 
-    def test_rejectsCountsAboveFdp123Limit(self):
+    def test_rejectsCountsAboveFeedbackDatasetLimit(self):
         for field in ("recordsEvaluated", "minimumDiagnosticEvidenceRecords"):
             report = build_report()
             report["inputs"][field] = 1001

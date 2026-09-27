@@ -10,8 +10,7 @@ const REQUIRED_EVALUATION_SUBJECT = {
   sourceVersion: "ENGINE_INTELLIGENCE_PROJECTION_V1",
   featureContractVersion: "NOT_APPLICABLE",
   modelIdentity: "NOT_AVAILABLE",
-  modelArtifactSha256: "NOT_AVAILABLE",
-  identityCompleteness: "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
+  modelArtifactSha256: "NOT_AVAILABLE"
 };
 const REQUIRED_GOVERNANCE = {
   governanceStatus: "DIAGNOSTIC_ONLY",
@@ -26,11 +25,19 @@ const REQUIRED_EVALUATION = {
   evaluationCardType: "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
   evaluationCardVersion: "platform-recommendation-evaluation-card-v1",
   evaluationPurpose: "OFFLINE_DIAGNOSTIC",
-  evaluationReportType: "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
   evaluationReportVersion: "FDP-124",
-  evaluationArtifactSetVersion: "fdp123-report-artifact-set-v1",
   datasetVersion: "feedback-dataset-v1",
   datasetTimeBasis: "FEEDBACK_CREATED_AT"
+};
+const CURRENT_PLATFORM_EVALUATION_IDENTITY = {
+  evaluationReportType: "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+  evaluationArtifactSetVersion: "feedback-dataset-evaluation-report-artifact-set-v1",
+  identityCompleteness: "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
+};
+const LEGACY_READ_ONLY_PLATFORM_EVALUATION_IDENTITY = {
+  evaluationReportType: "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+  evaluationArtifactSetVersion: "fdp123-report-artifact-set-v1",
+  identityCompleteness: "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
 };
 const REQUIRED_LIMITATIONS = new Set([
   "ANALYST_FEEDBACK_LABELS_ARE_NOT_LEGAL_GROUND_TRUTH",
@@ -325,7 +332,7 @@ function ShadowPerformanceNoCurrentSummary({ onRetry }) {
           To display metrics, the backend environment must provide a current validated Shadow Performance Summary produced from the governed artifact chain:
         </p>
         <ol className="shadowPerformanceChain">
-          <li>FDP-123 bounded feedback dataset</li>
+          <li>bounded feedback dataset</li>
           <li>FDP-124 evaluation artifact set</li>
           <li>Platform Recommendation Evaluation Card v1 artifact set</li>
           <li>Shadow Performance Summary v2</li>
@@ -393,6 +400,7 @@ function isValidSummary(summary) {
       || !isValidEvaluationSubject(summary.evaluationSubject)
       || !isValidGovernance(summary.governance)
       || !isValidEvaluation(summary.evaluation)
+      || !isSupportedPlatformEvaluationProvenance(summary.evaluationSubject, summary.evaluation)
       || !isObject(summary.evaluationPopulation)
       || !hasExactKeys(summary.evaluationPopulation, ["recordsEvaluated", "positiveClassCount", "negativeClassCount"])
       || !isObject(summary.metrics)
@@ -430,7 +438,7 @@ function isString(value) {
 
 function isValidEvaluationSubject(subject) {
   return isObject(subject)
-    && hasExactKeys(subject, Object.keys(REQUIRED_EVALUATION_SUBJECT))
+    && hasExactKeys(subject, [...Object.keys(REQUIRED_EVALUATION_SUBJECT), "identityCompleteness"])
     && Object.entries(REQUIRED_EVALUATION_SUBJECT).every(([field, value]) => subject[field] === value);
 }
 
@@ -462,6 +470,17 @@ function isValidEvaluation(evaluation) {
     && isOrderedTimestamp(evaluation.evaluationReportGeneratedAt, evaluation.evaluationCardGeneratedAt)
     && /^[a-f0-9]{64}$/.test(evaluation.sourceManifestSha256)
     && /^[a-f0-9]{64}$/.test(evaluation.sourceEvaluationCardManifestSha256);
+}
+
+function isSupportedPlatformEvaluationProvenance(subject, evaluation) {
+  return matchesProvenance(subject, evaluation, CURRENT_PLATFORM_EVALUATION_IDENTITY)
+    || matchesProvenance(subject, evaluation, LEGACY_READ_ONLY_PLATFORM_EVALUATION_IDENTITY);
+}
+
+function matchesProvenance(subject, evaluation, identity) {
+  return evaluation.evaluationReportType === identity.evaluationReportType
+    && evaluation.evaluationArtifactSetVersion === identity.evaluationArtifactSetVersion
+    && subject.identityCompleteness === identity.identityCompleteness;
 }
 
 function isMetricValue(metric) {

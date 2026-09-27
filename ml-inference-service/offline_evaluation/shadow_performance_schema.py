@@ -4,30 +4,36 @@ import re
 from typing import Any
 
 from offline_evaluation.json_contract import JsonContractError, require_finite_number
-from offline_evaluation.fdp123.evaluation_card.schema import (
+from offline_evaluation.feedback_dataset_evaluation.evaluation_card.schema import (
     EVALUATION_PURPOSE,
-    MAX_FDP123_DATASET_RECORDS,
+    MAX_FEEDBACK_DATASET_RECORDS,
     METRIC_BASIS as EXPECTED_METRIC_BASIS,
     METRICS_SUBJECT,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION,
-    Fdp123EvaluationCardValidationError,
+    FeedbackDatasetEvaluationCardValidationError,
     REQUIRED_LIMITATIONS as REQUIRED_SHADOW_LIMITATIONS,
     validate_evaluation_card,
 )
-from offline_evaluation.fdp123.dataset_schema import (
+from offline_evaluation.feedback_dataset_evaluation.dataset_schema import (
     DATASET_TIME_BASIS as EXPECTED_DATASET_TIME_BASIS,
     DATASET_VERSION as EXPECTED_DATASET_VERSION,
 )
-from offline_evaluation.fdp123.evaluation_contract import EVALUATION_SUBJECT
-from offline_evaluation.fdp123.report_contract import (
+from offline_evaluation.feedback_dataset_evaluation.evaluation_contract import EVALUATION_SUBJECT
+from offline_evaluation.feedback_dataset_evaluation.report_contract import (
     ARTIFACT_SET_VERSION as EXPECTED_EVALUATION_ARTIFACT_SET_VERSION,
+    CURRENT_IDENTITY_COMPLETENESS,
+    LEGACY_READ_ONLY_IDENTITY_COMPLETENESS,
+    LEGACY_READ_ONLY_ARTIFACT_SET_VERSION,
+    LEGACY_READ_ONLY_REPORT_TYPE,
     REPORT_TYPE as EXPECTED_EVALUATION_REPORT_TYPE,
+    validate_platform_evaluation_artifact_identity,
+    validate_platform_evaluation_artifact_provenance,
 )
-from offline_evaluation.fdp123.timestamp_contract import (
+from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import (
     TimestampContractError,
+    compare_rfc3339_timestamps,
     normalize_rfc3339_timestamp,
-    timestamp_instant,
 )
 
 
@@ -42,7 +48,7 @@ EXPECTED_EVALUATION_REPORT_VERSION = "FDP-124"
 EXPECTED_GOVERNANCE_STATUS = "DIAGNOSTIC_ONLY"
 MAX_WARNINGS = 20
 MAX_LIMITATIONS = 20
-MAX_COUNT_VALUE = MAX_FDP123_DATASET_RECORDS
+MAX_COUNT_VALUE = MAX_FEEDBACK_DATASET_RECORDS
 MAX_MACHINE_CODE_LENGTH = 128
 BANNER = (
     "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, "
@@ -108,6 +114,8 @@ SAFE_CONTRACT_VALUES = {
     EXPECTED_EVALUATION_REPORT_TYPE,
     EXPECTED_EVALUATION_REPORT_VERSION,
     EXPECTED_EVALUATION_ARTIFACT_SET_VERSION,
+    LEGACY_READ_ONLY_REPORT_TYPE,
+    LEGACY_READ_ONLY_ARTIFACT_SET_VERSION,
     EXPECTED_DATASET_VERSION,
     EXPECTED_DATASET_TIME_BASIS,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
@@ -120,7 +128,8 @@ SAFE_CONTRACT_VALUES = {
     "OFFLINE_DIAGNOSTIC",
     "NOT_AVAILABLE",
     "NOT_APPLICABLE",
-    "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
+    CURRENT_IDENTITY_COMPLETENESS,
+    LEGACY_READ_ONLY_IDENTITY_COMPLETENESS,
     "PLATFORM_RECOMMENDATION",
     "ENGINE_INTELLIGENCE_PROJECTION",
     "ENGINE_INTELLIGENCE_PROJECTION_V1",
@@ -208,7 +217,7 @@ FORBIDDEN_VALUE_TERMS = FORBIDDEN_FIELD_NAMES | {
 def validate_evaluation_card_for_shadow_summary(evaluation_card: dict[str, Any]) -> dict[str, Any]:
     try:
         safe_evaluation_card = validate_evaluation_card(evaluation_card)
-    except Fdp123EvaluationCardValidationError as exc:
+    except FeedbackDatasetEvaluationCardValidationError as exc:
         raise ShadowPerformanceValidationError(str(exc)) from exc
     if safe_evaluation_card["cardType"] != PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE:
         raise ShadowPerformanceValidationError("evaluation card type is unsupported")
@@ -244,15 +253,28 @@ def validate_shadow_performance_summary(raw: dict[str, Any]) -> dict[str, Any]:
         "limitations": _required_machine_code_superset(raw, "limitations", MAX_LIMITATIONS, REQUIRED_SHADOW_LIMITATIONS),
         "banner": _required_constant(raw, "banner", BANNER),
     }
+    try:
+        validate_platform_evaluation_artifact_provenance(
+            normalized["evaluation"]["evaluationReportType"],
+            normalized["evaluation"]["evaluationArtifactSetVersion"],
+            normalized["evaluationSubject"]["identityCompleteness"],
+            "shadow performance summary",
+        )
+    except ValueError as exc:
+        raise ShadowPerformanceValidationError(str(exc)) from exc
     _validate_summary_consistency(normalized)
     _reject_unsafe(normalized)
     return normalized
 
 
 def _evaluation_subject(raw: Any) -> dict[str, str]:
-    if raw != EVALUATION_SUBJECT:
+    if not isinstance(raw, dict):
         raise ShadowPerformanceValidationError("evaluationSubject is unsupported")
-    return dict(EVALUATION_SUBJECT)
+    expected = dict(EVALUATION_SUBJECT)
+    expected["identityCompleteness"] = raw.get("identityCompleteness")
+    if raw != expected:
+        raise ShadowPerformanceValidationError("evaluationSubject is unsupported")
+    return dict(raw)
 
 
 def _governance(raw: Any) -> dict[str, Any]:
@@ -280,6 +302,16 @@ def _evaluation(raw: Any) -> dict[str, str]:
     if not isinstance(raw, dict):
         raise ShadowPerformanceValidationError("evaluation must be an object")
     _reject_unknown_or_missing(raw, EVALUATION_FIELDS, "evaluation")
+    evaluation_report_type = _bounded_string(raw, "evaluationReportType", 128)
+    evaluation_artifact_set_version = _bounded_string(raw, "evaluationArtifactSetVersion", 128)
+    try:
+        validate_platform_evaluation_artifact_identity(
+            evaluation_report_type,
+            evaluation_artifact_set_version,
+            "evaluation",
+        )
+    except ValueError as exc:
+        raise ShadowPerformanceValidationError(str(exc)) from exc
     return {
         "evaluationCardType": _required_constant(
             raw, "evaluationCardType", PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE
@@ -288,7 +320,7 @@ def _evaluation(raw: Any) -> dict[str, str]:
             raw, "evaluationCardVersion", PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION
         ),
         "evaluationPurpose": _required_constant(raw, "evaluationPurpose", EVALUATION_PURPOSE),
-        "evaluationReportType": _required_constant(raw, "evaluationReportType", EXPECTED_EVALUATION_REPORT_TYPE),
+        "evaluationReportType": evaluation_report_type,
         "evaluationReportVersion": _required_constant(raw, "evaluationReportVersion", EXPECTED_EVALUATION_REPORT_VERSION),
         "evaluationReportGeneratedAt": normalize_shadow_timestamp(
             raw.get("evaluationReportGeneratedAt"), "evaluationReportGeneratedAt"
@@ -296,9 +328,7 @@ def _evaluation(raw: Any) -> dict[str, str]:
         "evaluationCardGeneratedAt": normalize_shadow_timestamp(
             raw.get("evaluationCardGeneratedAt"), "evaluationCardGeneratedAt"
         ),
-        "evaluationArtifactSetVersion": _required_constant(
-            raw, "evaluationArtifactSetVersion", EXPECTED_EVALUATION_ARTIFACT_SET_VERSION
-        ),
+        "evaluationArtifactSetVersion": evaluation_artifact_set_version,
         "datasetVersion": _required_constant(raw, "datasetVersion", EXPECTED_DATASET_VERSION),
         "datasetTimeBasis": _required_constant(raw, "datasetTimeBasis", EXPECTED_DATASET_TIME_BASIS),
         "sourceManifestSha256": _sha256(raw, "sourceManifestSha256"),
@@ -369,12 +399,15 @@ def _validate_summary_consistency(summary: dict[str, Any]) -> None:
     if evaluation_population["positiveClassCount"] + evaluation_population["negativeClassCount"] != evaluation_population["recordsEvaluated"]:
         raise ShadowPerformanceValidationError("positiveClassCount + negativeClassCount must equal recordsEvaluated")
     evaluation = summary["evaluation"]
-    report_generated_at = timestamp_instant(evaluation["evaluationReportGeneratedAt"])
-    card_generated_at = timestamp_instant(evaluation["evaluationCardGeneratedAt"])
-    summary_generated_at = timestamp_instant(summary["generatedAt"])
-    if card_generated_at < report_generated_at:
+    if compare_rfc3339_timestamps(
+            evaluation["evaluationCardGeneratedAt"],
+            evaluation["evaluationReportGeneratedAt"],
+    ) < 0:
         raise ShadowPerformanceValidationError("evaluationCardGeneratedAt must be greater than or equal to evaluationReportGeneratedAt")
-    if summary_generated_at < card_generated_at:
+    if compare_rfc3339_timestamps(
+            summary["generatedAt"],
+            evaluation["evaluationCardGeneratedAt"],
+    ) < 0:
         raise ShadowPerformanceValidationError("generatedAt must be greater than or equal to evaluationCardGeneratedAt")
 
 

@@ -88,7 +88,8 @@ public class EngineIntelligenceProjectionPolicy {
                 boundedEnum(source.status(), FraudEngineStatus.class),
                 boundedOptionalEnum(source.riskLevel(), RiskLevel.class),
                 boundedEnum(source.scoreBucket(), EngineIntelligenceScoreBucket.class),
-                copyBounded(source.reasonCodes(), MAX_REASON_CODES_PER_ENGINE, this::boundedPublicReasonCode)
+                copyBounded(source.reasonCodes(), MAX_REASON_CODES_PER_ENGINE, this::boundedPublicReasonCode),
+                source.modelIdentity()
         ));
     }
 

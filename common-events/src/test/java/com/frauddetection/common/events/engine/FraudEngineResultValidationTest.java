@@ -189,10 +189,86 @@ class FraudEngineResultValidationTest {
                 .hasMessageContaining("modelName");
         assertThatThrownBy(() -> resultWithModel(null, "v".repeat(65), null))
                 .hasMessageContaining("modelVersion");
+        assertThatThrownBy(() -> availableMlResult(
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                "f".repeat(97)
+        )).hasMessageContaining("featureContractVersion");
         assertThatThrownBy(() -> resultWithModel(null, null, "A".repeat(129)))
                 .hasMessageContaining("statusReason");
         assertThatThrownBy(() -> result("rules\nprimary", FraudEngineStatus.AVAILABLE, 0.4000d,
                 RiskLevel.MEDIUM)).hasMessageContaining("control characters");
+    }
+
+    @Test
+    void mlModelIdentityFieldsRejectPathEndpointAndWhitespaceSyntax() {
+        assertThatThrownBy(() -> availableMlResult(
+                "models/python-logistic-fraud-model",
+                "2026-05-30.v1",
+                "2026-05-30.feature-contract.v1"
+        )).hasMessageContaining("modelName");
+        assertThatThrownBy(() -> availableMlResult(
+                "python-logistic-fraud-model",
+                "2026-05-30:v1",
+                "2026-05-30.feature-contract.v1"
+        )).hasMessageContaining("modelVersion");
+        assertThatThrownBy(() -> availableMlResult(
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                "2026-05-30 feature-contract.v1"
+        )).hasMessageContaining("featureContractVersion");
+    }
+
+    @Test
+    void availableMlModelRequiresCompleteRuntimeIdentity() {
+        assertThat(availableMlResult(
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                "2026-05-30.feature-contract.v1"
+        ).featureContractVersion()).isEqualTo("2026-05-30.feature-contract.v1");
+
+        assertThatThrownBy(() -> availableMlResult(null, "2026-05-30.v1", "2026-05-30.feature-contract.v1"))
+                .hasMessageContaining("ML model identity must be entirely absent or complete");
+        assertThatThrownBy(() -> availableMlResult("python-logistic-fraud-model", null, "2026-05-30.feature-contract.v1"))
+                .hasMessageContaining("ML model identity must be entirely absent or complete");
+        assertThatThrownBy(() -> availableMlResult("python-logistic-fraud-model", "2026-05-30.v1", null))
+                .hasMessageContaining("ML model identity must be entirely absent or complete");
+    }
+
+    @Test
+    void mlModelResultRejectsPartialRuntimeIdentityForEveryStatus() {
+        assertThatThrownBy(() -> new FraudEngineResult(
+                "ml.python.primary",
+                FraudEngineType.ML_MODEL,
+                "python",
+                FraudEngineStatus.DEGRADED,
+                null,
+                null,
+                FraudEngineConfidence.UNKNOWN,
+                List.of("ENGINE_STATUS"),
+                List.of(),
+                List.of(),
+                3L,
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                null,
+                "ENGINE_STATUS",
+                now()
+        )).hasMessageContaining("ML model identity must be entirely absent or complete");
+    }
+
+    @Test
+    void availableMlModelRejectsUnsafeFeatureContractVersion() {
+        assertThatThrownBy(() -> availableMlResult(
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                "token-contract-v1"
+        )).hasMessageContaining("featureContractVersion contains forbidden contract text");
+        assertThatThrownBy(() -> availableMlResult(
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                "secret-contract-v1"
+        )).hasMessageContaining("featureContractVersion contains forbidden contract text");
     }
 
     @Test
@@ -566,6 +642,31 @@ class FraudEngineResultValidationTest {
                 modelName,
                 modelVersion,
                 statusReason,
+                now()
+        );
+    }
+
+    private FraudEngineResult availableMlResult(
+            String modelName,
+            String modelVersion,
+            String featureContractVersion
+    ) {
+        return new FraudEngineResult(
+                "ml.python.primary",
+                FraudEngineType.ML_MODEL,
+                "python",
+                FraudEngineStatus.AVAILABLE,
+                0.4000d,
+                RiskLevel.MEDIUM,
+                FraudEngineConfidence.MEDIUM,
+                List.of("MODEL_SIGNAL"),
+                List.of(),
+                List.of(),
+                3L,
+                modelName,
+                modelVersion,
+                featureContractVersion,
+                null,
                 now()
         );
     }

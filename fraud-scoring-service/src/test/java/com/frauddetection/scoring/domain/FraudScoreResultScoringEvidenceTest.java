@@ -54,6 +54,7 @@ class FraudScoreResultScoringEvidenceTest {
                 "ML",
                 "python-logistic-fraud-model",
                 "test-version",
+                "2026-05-30.feature-contract.v1",
                 Instant.now(),
                 List.of(ReasonCode.MODEL_HIGH_RISK.wireValue()),
                 Map.of("modelAvailable", true),

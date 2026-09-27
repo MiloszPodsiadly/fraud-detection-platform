@@ -1,13 +1,13 @@
 # Feedback Dataset Builder
 
-Status: FDP-123 internal bounded builder.
+Status: feedback dataset internal bounded builder.
 
 ## Scope
 
-FDP-123 adds an internal bounded builder for `fraud_feedback_records`. It creates envelope JSONL for future ML/rules
+feedback dataset adds an internal bounded builder for `fraud_feedback_records`. It creates envelope JSONL for future ML/rules
 evaluation work. The builder is an internal service and writer only.
 
-FDP-123 does not add a public dataset API, controller, OpenAPI path, UI, scheduler, CLI export, automatic runtime file
+feedback dataset does not add a public dataset API, controller, OpenAPI path, UI, scheduler, CLI export, automatic runtime file
 export, Kafka publication, ML evaluation, model training, model promotion, threshold recommendation, payment
 authorization, approve/decline/block behavior, workflow automation, or case creation.
 
@@ -23,7 +23,7 @@ The source of truth is:
 
 The builder reads `fraud_feedback_records` only. It does not read `engine_intelligence_feedback`.
 
-This is separate from the Engine Intelligence Feedback Dataset Export bounded context. FDP-123 does not replace FDP-102,
+This is separate from the Engine Intelligence Feedback Dataset Export bounded context. feedback dataset does not replace FDP-102,
 does not use `alert-service/src/main/java/com/frauddetection/alert/engineintelligence/dataset` as source of truth, and
 does not use `ml-inference-service/app/feedback/feedback_dataset.py` as source of truth.
 
@@ -86,6 +86,12 @@ Optional nullable fields are limited to bounded feedback diagnostics already pre
 agreement/mismatch/score-delta buckets, Analyst Recommendation status/value/version/generated-at/reason codes,
 `scoredAt`, and `transactionTimestamp`.
 
+FDP-139 adds optional ML diagnostic lineage snapshot fields to the same `feedback-dataset-v1` record shape:
+`mlModelName`, `mlModelVersion`, and `mlFeatureContractVersion`. They are copied from `FraudFeedbackRecord`, which
+captures them at feedback creation from the persisted Engine Intelligence projection for the reviewed transaction. Old
+feedback rows and old JSONL records can omit these fields or carry nulls; consumers must not backfill missing lineage
+from the current runtime, registry, or latest artifact.
+
 The builder never serializes `FraudFeedbackRecord` directly.
 
 ## Identifier Safety
@@ -136,4 +142,4 @@ Failed builds emit metadata with a bounded `failureReason` and no fake successfu
 
 `docs/schemas/feedback_dataset_record.schema.json` is the machine-readable JSONL envelope contract for FDP-124
 consumers. It covers both `DATASET_METADATA` and `DATASET_RECORD` line shapes. It does not add a public API or runtime
-export path in FDP-123.
+export path in feedback dataset.

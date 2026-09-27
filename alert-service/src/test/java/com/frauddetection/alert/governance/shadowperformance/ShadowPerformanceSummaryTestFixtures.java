@@ -19,7 +19,7 @@ final class ShadowPerformanceSummaryTestFixtures {
                         "NOT_APPLICABLE",
                         "NOT_AVAILABLE",
                         "NOT_AVAILABLE",
-                        "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
+                        "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
                 ),
                 "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK",
                 new ShadowPerformanceSummary.ShadowPerformanceGovernance(
@@ -35,11 +35,11 @@ final class ShadowPerformanceSummaryTestFixtures {
                         "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
                         "platform-recommendation-evaluation-card-v1",
                         "OFFLINE_DIAGNOSTIC",
-                        "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                        "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
                         "FDP-124",
                         "2026-06-10T00:00:00Z",
                         "2026-06-12T00:00:00Z",
-                        "fdp123-report-artifact-set-v1",
+                        "feedback-dataset-evaluation-report-artifact-set-v1",
                         "feedback-dataset-v1",
                         "FEEDBACK_CREATED_AT",
                         "a".repeat(64),

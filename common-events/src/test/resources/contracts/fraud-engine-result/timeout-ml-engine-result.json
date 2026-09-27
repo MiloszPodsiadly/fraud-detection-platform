@@ -16,8 +16,6 @@
     }
   ],
   "latencyMs": 300000,
-  "modelName": "python-fraud-model",
-  "modelVersion": "v1",
   "statusReason": "ML_MODEL_TIMEOUT",
   "generatedAt": "2026-06-01T10:15:30Z"
 }

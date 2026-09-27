@@ -53,6 +53,9 @@ public class FraudFeedbackRecord {
     private EngineIntelligenceAgreementStatus agreementStatus;
     private EngineIntelligenceRiskMismatchStatus riskMismatchStatus;
     private EngineIntelligenceScoreDeltaBucket scoreDeltaBucket;
+    private String mlModelName;
+    private String mlModelVersion;
+    private String mlFeatureContractVersion;
     private AnalystRecommendationStatus analystRecommendationStatus;
     private AnalystRecommendation analystRecommendation;
     private String analystRecommendationVersion;
@@ -109,6 +112,12 @@ public class FraudFeedbackRecord {
     public void setRiskMismatchStatus(EngineIntelligenceRiskMismatchStatus riskMismatchStatus) { this.riskMismatchStatus = riskMismatchStatus; }
     public EngineIntelligenceScoreDeltaBucket getScoreDeltaBucket() { return scoreDeltaBucket; }
     public void setScoreDeltaBucket(EngineIntelligenceScoreDeltaBucket scoreDeltaBucket) { this.scoreDeltaBucket = scoreDeltaBucket; }
+    public String getMlModelName() { return mlModelName; }
+    public void setMlModelName(String mlModelName) { this.mlModelName = mlModelName; }
+    public String getMlModelVersion() { return mlModelVersion; }
+    public void setMlModelVersion(String mlModelVersion) { this.mlModelVersion = mlModelVersion; }
+    public String getMlFeatureContractVersion() { return mlFeatureContractVersion; }
+    public void setMlFeatureContractVersion(String mlFeatureContractVersion) { this.mlFeatureContractVersion = mlFeatureContractVersion; }
     public AnalystRecommendationStatus getAnalystRecommendationStatus() { return analystRecommendationStatus; }
     public void setAnalystRecommendationStatus(AnalystRecommendationStatus analystRecommendationStatus) { this.analystRecommendationStatus = analystRecommendationStatus; }
     public AnalystRecommendation getAnalystRecommendation() { return analystRecommendation; }

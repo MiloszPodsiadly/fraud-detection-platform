@@ -57,17 +57,41 @@ class TransactionScoredEventMapperEngineIntelligenceTest {
                 .isEqualTo(withoutSummary);
     }
 
+    @Test
+    void shadowModeMlIdentityStaysInsideEngineIntelligenceNotTopLevelFinalScoreIdentity() throws Exception {
+        var event = mapper.toEvent(
+                request(),
+                ruleBasedScoreResult("rules-v2-final"),
+                Optional.of(availableMlSummary("model-X"))
+        );
+
+        assertThat(event.scoringStrategy()).isEqualTo("RULE_BASED");
+        assertThat(event.modelVersion()).isEqualTo("rules-v2-final");
+        assertThat(event.engineIntelligence().engines().get(1).modelIdentity().modelVersion())
+                .isEqualTo("model-X");
+
+        var serialized = objectMapper.readTree(objectMapper.writeValueAsString(event));
+        assertThat(serialized.get("scoringStrategy").asText()).isEqualTo("RULE_BASED");
+        assertThat(serialized.get("modelVersion").asText()).isEqualTo("rules-v2-final");
+        assertThat(serialized.get("engineIntelligence").get("engines").get(1)
+                .get("modelIdentity").get("modelVersion").asText()).isEqualTo("model-X");
+    }
+
     private FraudScoringRequest request() {
         return FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build());
     }
 
     private FraudScoreResult scoreResult() {
+        return ruleBasedScoreResult("v1");
+    }
+
+    private FraudScoreResult ruleBasedScoreResult(String modelVersion) {
         return new FraudScoreResult(
                 0.91d,
                 RiskLevel.CRITICAL,
                 "RULE_BASED",
                 "rule-based-engine",
-                "v1",
+                modelVersion,
                 GENERATED_AT,
                 List.of("HIGH_VELOCITY"),
                 Map.of("finalScore", 0.91d),
@@ -103,6 +127,43 @@ class TransactionScoredEventMapperEngineIntelligenceTest {
                         EngineIntelligenceAgreementStatus.PARTIAL,
                         EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                         EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
+                ),
+                List.of(),
+                List.of()
+        );
+    }
+
+    private EngineIntelligenceSummary availableMlSummary(String mlModelVersion) {
+        return new EngineIntelligenceSummary(
+                EngineIntelligenceSummary.CONTRACT_VERSION,
+                GENERATED_AT,
+                List.of(
+                        new EngineIntelligenceEngineResult(
+                                "rules.primary",
+                                FraudEngineType.RULES,
+                                FraudEngineStatus.AVAILABLE,
+                                RiskLevel.HIGH,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("HIGH_VELOCITY")
+                        ),
+                        new EngineIntelligenceEngineResult(
+                                "ml.python.primary",
+                                FraudEngineType.ML_MODEL,
+                                FraudEngineStatus.AVAILABLE,
+                                RiskLevel.HIGH,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("MODEL_HIGH_RISK"),
+                                new com.frauddetection.common.events.intelligence.MlModelIdentity(
+                                        "python-logistic-fraud-model",
+                                        mlModelVersion,
+                                        "2026-05-30.feature-contract.v1"
+                                )
+                        )
+                ),
+                new EngineIntelligenceComparison(
+                        EngineIntelligenceAgreementStatus.AGREEMENT,
+                        EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                        EngineIntelligenceScoreDeltaBucket.NONE
                 ),
                 List.of(),
                 List.of()

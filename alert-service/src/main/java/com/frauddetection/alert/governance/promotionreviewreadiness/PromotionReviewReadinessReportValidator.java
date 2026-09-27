@@ -1,6 +1,7 @@
 package com.frauddetection.alert.governance.promotionreviewreadiness;
 
 import com.frauddetection.alert.governance.GovernanceTimestampContract;
+import com.frauddetection.alert.governance.PlatformEvaluationArtifactIdentityPolicy;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -239,7 +240,9 @@ class PromotionReviewReadinessReportValidator {
                 check("NOT_THRESHOLD_RECOMMENDATION_TRUE", passFail(governance.notThresholdRecommendation())),
                 check("NOT_PAYMENT_AUTHORIZATION_TRUE", passFail(governance.notPaymentAuthorization())),
                 check("NOT_AUTOMATIC_DECISIONING_TRUE", passFail(governance.notAutomaticDecisioning())),
-                check("EVALUATION_REPORT_TYPE_SUPPORTED", passFail("FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1".equals(evaluation.evaluationReportType()))),
+                check("EVALUATION_REPORT_TYPE_SUPPORTED", passFail(
+                        PlatformEvaluationArtifactIdentityPolicy.isSupportedReadReportType(evaluation.evaluationReportType())
+                )),
                 check("METRIC_BASIS_SUPPORTED", passFail("ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK".equals(inputs.metricBasis()))),
                 check("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", passFail(inputs.recordsEvaluated() >= inputs.minimumDiagnosticEvidenceRecords()), "HIGH"),
                 metricCheck("ALERT_RECOMMENDED_PRECISION_AVAILABLE", metrics.alertRecommendedPrecision()),

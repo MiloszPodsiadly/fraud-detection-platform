@@ -119,8 +119,8 @@ class ShadowPerformanceSummaryValidatorTest {
         ShadowPerformanceSummary base = validSummary();
         for (ShadowPerformanceSummary.ShadowPerformanceEvaluation evaluation : List.of(
                 replaceEvaluationLineage(base.evaluation(), "other-artifact-format-v99", "feedback-dataset-v1", "FEEDBACK_CREATED_AT"),
-                replaceEvaluationLineage(base.evaluation(), "fdp123-report-artifact-set-v1", "unknown-dataset-v77", "FEEDBACK_CREATED_AT"),
-                replaceEvaluationLineage(base.evaluation(), "fdp123-report-artifact-set-v1", "feedback-dataset-v1", "TRANSACTION_CREATED_AT")
+                replaceEvaluationLineage(base.evaluation(), "feedback-dataset-evaluation-report-artifact-set-v1", "unknown-dataset-v77", "FEEDBACK_CREATED_AT"),
+                replaceEvaluationLineage(base.evaluation(), "feedback-dataset-evaluation-report-artifact-set-v1", "feedback-dataset-v1", "TRANSACTION_CREATED_AT")
         )) {
             ShadowPerformanceSummary summary = new ShadowPerformanceSummary(
                     base.reportType(),
@@ -137,6 +137,69 @@ class ShadowPerformanceSummaryValidatorTest {
                     base.banner()
             );
 
+            assertThatThrownBy(() -> validator.validate(summary))
+                    .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
+        }
+    }
+
+    @Test
+    void acceptsExactCurrentAndLegacyReadOnlyPlatformEvaluationProvenance() {
+        ShadowPerformanceSummary base = validSummary();
+        assertThatCode(() -> validator.validate(withEvaluationProvenance(
+                base.evaluation(),
+                "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "feedback-dataset-evaluation-report-artifact-set-v1",
+                "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
+        ))).doesNotThrowAnyException();
+        assertThatCode(() -> validator.validate(withEvaluationProvenance(
+                base.evaluation(),
+                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "fdp123-report-artifact-set-v1",
+                "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
+        ))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectsMixedOrUnknownPlatformEvaluationProvenance() {
+        ShadowPerformanceSummary base = validSummary();
+        for (ShadowPerformanceSummary summary : List.of(
+                withEvaluationProvenance(
+                        base.evaluation(),
+                        "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                        "fdp123-report-artifact-set-v1",
+                        "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
+                ),
+                withEvaluationProvenance(
+                        base.evaluation(),
+                        "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                        "feedback-dataset-evaluation-report-artifact-set-v1",
+                        "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
+                ),
+                withEvaluationProvenance(
+                        base.evaluation(),
+                        "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                        "feedback-dataset-evaluation-report-artifact-set-v1",
+                        "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
+                ),
+                withEvaluationProvenance(
+                        base.evaluation(),
+                        "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                        "fdp123-report-artifact-set-v1",
+                        "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
+                ),
+                withEvaluationProvenance(
+                        base.evaluation(),
+                        "UNKNOWN_PLATFORM_EVALUATION",
+                        "feedback-dataset-evaluation-report-artifact-set-v1",
+                        "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
+                ),
+                withEvaluationProvenance(
+                        base.evaluation(),
+                        "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                        "unknown-artifact-set-v1",
+                        "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
+                )
+        )) {
             assertThatThrownBy(() -> validator.validate(summary))
                     .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
         }
@@ -343,6 +406,51 @@ class ShadowPerformanceSummaryValidatorTest {
                 datasetTimeBasis,
                 base.sourceManifestSha256(),
                 base.sourceEvaluationCardManifestSha256()
+        );
+    }
+
+    private ShadowPerformanceSummary withEvaluationProvenance(
+            ShadowPerformanceSummary.ShadowPerformanceEvaluation evaluation,
+            String evaluationReportType,
+            String evaluationArtifactSetVersion,
+            String identityCompleteness
+    ) {
+        ShadowPerformanceSummary base = validSummary();
+        ShadowPerformanceSummary.EvaluationSubject baseSubject = base.evaluationSubject();
+        return new ShadowPerformanceSummary(
+                base.reportType(),
+                base.summaryVersion(),
+                base.generatedAt(),
+                new ShadowPerformanceSummary.EvaluationSubject(
+                        baseSubject.subjectType(),
+                        baseSubject.sourceComponent(),
+                        baseSubject.sourceVersion(),
+                        baseSubject.featureContractVersion(),
+                        baseSubject.modelIdentity(),
+                        baseSubject.modelArtifactSha256(),
+                        identityCompleteness
+                ),
+                base.metricBasis(),
+                base.governance(),
+                new ShadowPerformanceSummary.ShadowPerformanceEvaluation(
+                        evaluation.evaluationCardType(),
+                        evaluation.evaluationCardVersion(),
+                        evaluation.evaluationPurpose(),
+                        evaluationReportType,
+                        evaluation.evaluationReportVersion(),
+                        evaluation.evaluationReportGeneratedAt(),
+                        evaluation.evaluationCardGeneratedAt(),
+                        evaluationArtifactSetVersion,
+                        evaluation.datasetVersion(),
+                        evaluation.datasetTimeBasis(),
+                        evaluation.sourceManifestSha256(),
+                        evaluation.sourceEvaluationCardManifestSha256()
+                ),
+                base.evaluationPopulation(),
+                base.metrics(),
+                base.warnings(),
+                base.limitations(),
+                base.banner()
         );
     }
 }

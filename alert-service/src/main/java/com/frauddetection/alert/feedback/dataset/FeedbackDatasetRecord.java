@@ -28,6 +28,9 @@ public record FeedbackDatasetRecord(
         EngineIntelligenceAgreementStatus agreementStatus,
         EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
         EngineIntelligenceScoreDeltaBucket scoreDeltaBucket,
+        String mlModelName,
+        String mlModelVersion,
+        String mlFeatureContractVersion,
         AnalystRecommendationStatus analystRecommendationStatus,
         AnalystRecommendation analystRecommendation,
         String analystRecommendationVersion,
@@ -57,6 +60,68 @@ public record FeedbackDatasetRecord(
         analystRecommendationVersion = FeedbackDatasetSafety.optionalSafeIdentifier(
                 analystRecommendationVersion,
                 "analystRecommendationVersion"
+        );
+        mlModelName = FeedbackDatasetSafety.optionalModelIdentityPart(mlModelName, "mlModelName");
+        mlModelVersion = FeedbackDatasetSafety.optionalModelIdentityPart(mlModelVersion, "mlModelVersion");
+        mlFeatureContractVersion = FeedbackDatasetSafety.optionalModelIdentityPart(
+                mlFeatureContractVersion,
+                "mlFeatureContractVersion"
+        );
+        FeedbackDatasetSafety.validateMlModelIdentity(
+                mlModelName,
+                mlModelVersion,
+                mlFeatureContractVersion
+        );
+    }
+
+    public FeedbackDatasetRecord(
+            String datasetVersion,
+            String evaluationRecordId,
+            String transactionReference,
+            FraudFeedbackLabel feedbackLabel,
+            FeedbackEvaluationLabel evaluationLabel,
+            List<String> decisionReasonCodes,
+            Instant feedbackCreatedAt,
+            Double fraudScore,
+            RiskLevel riskLevel,
+            Boolean alertRecommended,
+            EngineIntelligenceResponseStatus engineIntelligenceStatus,
+            EngineIntelligenceAgreementStatus agreementStatus,
+            EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
+            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket,
+            AnalystRecommendationStatus analystRecommendationStatus,
+            AnalystRecommendation analystRecommendation,
+            String analystRecommendationVersion,
+            Instant analystRecommendationGeneratedAt,
+            List<String> analystRecommendationReasonCodes,
+            Instant scoredAt,
+            Instant transactionTimestamp
+    ) {
+        this(
+                datasetVersion,
+                evaluationRecordId,
+                transactionReference,
+                feedbackLabel,
+                evaluationLabel,
+                decisionReasonCodes,
+                feedbackCreatedAt,
+                fraudScore,
+                riskLevel,
+                alertRecommended,
+                engineIntelligenceStatus,
+                agreementStatus,
+                riskMismatchStatus,
+                scoreDeltaBucket,
+                null,
+                null,
+                null,
+                analystRecommendationStatus,
+                analystRecommendation,
+                analystRecommendationVersion,
+                analystRecommendationGeneratedAt,
+                analystRecommendationReasonCodes,
+                scoredAt,
+                transactionTimestamp
         );
     }
 

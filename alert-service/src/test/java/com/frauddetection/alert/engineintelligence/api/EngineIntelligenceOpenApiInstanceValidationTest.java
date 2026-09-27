@@ -195,6 +195,24 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
         }
     }
 
+    @Test
+    void instanceValidationUsesSharedMlModelIdentitySyntaxMatrix() throws Exception {
+        Map<String, Object> fixture = publicApiFixtureMap("ml-model-identity-cases.json");
+        Map<String, Object> canonicalIdentity = map(fixture.get("canonicalIdentity"));
+        List<Map<String, Object>> identityCases = list(fixture.get("cases"));
+        for (Map<String, Object> identityCase : identityCases) {
+            Map<String, Object> identity = new LinkedHashMap<>(canonicalIdentity);
+            identity.put(identityCase.get("field").toString(), identityCase.get("value"));
+            List<String> errors = validate("EngineIntelligenceResponse", mutate(canonicalResponse(), instance ->
+                    engine(instance, 1).put("modelIdentity", identity)
+            ));
+
+            assertThat(errors.isEmpty())
+                    .as(identityCase.get("caseId").toString())
+                    .isEqualTo(Boolean.TRUE.equals(identityCase.get("validSyntax")));
+        }
+    }
+
     private void assertValid(String schemaName, Object instance) {
         assertThat(validate(schemaName, instance)).isEmpty();
     }

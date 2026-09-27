@@ -19,8 +19,9 @@ public class PlaceholderMlModelScoringClient implements MlModelScoringClient {
                 false,
                 0.0d,
                 RiskLevel.LOW,
-                "ml-placeholder",
-                "unavailable",
+                null,
+                null,
+                null,
                 Instant.now(),
                 List.of(ReasonCode.ML_MODEL_UNAVAILABLE.wireValue()),
                 Map.of(

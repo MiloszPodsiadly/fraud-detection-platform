@@ -4,14 +4,14 @@ import re
 from typing import Any
 
 from offline_evaluation.json_contract import JsonContractError, dumps_strict_json, require_finite_number
-from offline_evaluation.fdp123.evaluation_card.schema import (
+from offline_evaluation.feedback_dataset_evaluation.evaluation_card.schema import (
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION,
 )
-from offline_evaluation.fdp123.timestamp_contract import (
+from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import (
     TimestampContractError,
+    compare_rfc3339_timestamps,
     normalize_rfc3339_timestamp,
-    timestamp_instant,
 )
 from offline_evaluation.shadow_performance_schema import (
     BANNER as SHADOW_PERFORMANCE_BANNER,
@@ -21,6 +21,9 @@ from offline_evaluation.shadow_performance_schema import (
     REPORT_TYPE as SHADOW_REPORT_TYPE,
     SUMMARY_VERSION as SHADOW_SUMMARY_VERSION,
     validate_shadow_performance_summary,
+)
+from offline_evaluation.feedback_dataset_evaluation.report_contract import (
+    is_supported_platform_evaluation_report_type,
 )
 
 
@@ -288,7 +291,9 @@ def _checks_from_inputs(check_inputs: dict[str, Any]) -> list[dict[str, str]]:
         _check("NOT_THRESHOLD_RECOMMENDATION_TRUE", _pass_fail(governance["notThresholdRecommendation"] is True)),
         _check("NOT_PAYMENT_AUTHORIZATION_TRUE", _pass_fail(governance["notPaymentAuthorization"] is True)),
         _check("NOT_AUTOMATIC_DECISIONING_TRUE", _pass_fail(governance["notAutomaticDecisioning"] is True)),
-        _check("EVALUATION_REPORT_TYPE_SUPPORTED", _pass_fail(evaluation["evaluationReportType"] == EXPECTED_EVALUATION_REPORT_TYPE)),
+        _check("EVALUATION_REPORT_TYPE_SUPPORTED", _pass_fail(
+            is_supported_platform_evaluation_report_type(evaluation["evaluationReportType"])
+        )),
         _check("METRIC_BASIS_SUPPORTED", _pass_fail(check_inputs["metricBasis"] == EXPECTED_METRIC_BASIS)),
         _check("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", _pass_fail(records_evaluated >= check_inputs["minimumDiagnosticEvidenceRecords"]), "HIGH"),
         _metric_availability_check("ALERT_RECOMMENDED_PRECISION_AVAILABLE", metrics["alertRecommendedPrecision"]),
@@ -336,9 +341,10 @@ def _validate_status_consistency(report: dict[str, Any]) -> None:
         raise PromotionReviewReadinessValidationError("reasonCodes must match required checks")
     if not REQUIRED_LIMITATIONS.issubset(set(report["limitations"])):
         raise PromotionReviewReadinessValidationError("limitations missing diagnostic non-goals")
-    if timestamp_instant(report["generatedAt"]) < timestamp_instant(
-            report["inputs"]["shadowPerformanceSummary"]["generatedAt"]
-    ):
+    if compare_rfc3339_timestamps(
+            report["generatedAt"],
+            report["inputs"]["shadowPerformanceSummary"]["generatedAt"],
+    ) < 0:
         raise PromotionReviewReadinessValidationError(
             "generatedAt must be greater than or equal to inputs.shadowPerformanceSummary.generatedAt"
         )

@@ -1,5 +1,7 @@
 package com.frauddetection.alert.feedback.dataset;
 
+import com.frauddetection.common.events.ml.MlModelIdentityPolicy;
+
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -71,6 +73,29 @@ final class FeedbackDatasetSafety {
             throw new IllegalArgumentException(fieldName + " must not contain paths or endpoints");
         }
         return value;
+    }
+
+    static String optionalModelIdentityPart(String value, String fieldName) {
+        return switch (fieldName) {
+            case "mlModelName" -> MlModelIdentityPolicy.optionalModelName(value, fieldName);
+            case "mlModelVersion" -> MlModelIdentityPolicy.optionalModelVersion(value, fieldName);
+            case "mlFeatureContractVersion" -> MlModelIdentityPolicy.optionalFeatureContractVersion(value, fieldName);
+            default -> throw new IllegalArgumentException("unknown ML model identity field");
+        };
+    }
+
+    static void validateMlModelIdentity(
+            String mlModelName,
+            String mlModelVersion,
+            String mlFeatureContractVersion
+    ) {
+        int present = 0;
+        present += mlModelName == null ? 0 : 1;
+        present += mlModelVersion == null ? 0 : 1;
+        present += mlFeatureContractVersion == null ? 0 : 1;
+        if (present != 0 && present != 3) {
+            throw new IllegalArgumentException("ML model identity must be entirely absent or complete");
+        }
     }
 
     private static String requireMachineCode(String value, String fieldName) {

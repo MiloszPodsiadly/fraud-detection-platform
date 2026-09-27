@@ -30,7 +30,8 @@ logic. Projection failure must not break base alert projection.
 
 The `engine_intelligence_projections` Mongo collection stores one replacement document per transaction ID. The
 document contains the contract version, generated timestamp, explicit Rules-vs-ML comparison identity and summary, bounded engine results, bounded
-diagnostic signals, bounded warnings, counts, and projection timestamps.
+diagnostic signals, bounded warnings, counts, projection timestamps, and the bounded ML model identity when it is
+present on the `ml.python.primary` engine result.
 
 ## Projection Policy and Limits
 
@@ -52,6 +53,8 @@ Old events without engineIntelligence remain compatible. They create no engine-i
 
 Valid events with the optional public field create an internal read model. Operational engine results and signals
 remain nullable for risk level; projection does not invent a fake risk level.
+The projection stores ML model identity only from the nested Engine Intelligence ML engine result and never
+reconstructs it from top-level final-scoring `modelName` or `modelVersion`.
 
 ## Invalid/Oversized Safe Omission
 

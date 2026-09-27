@@ -116,8 +116,8 @@ class OfflineEvaluationDocumentationTest(unittest.TestCase):
     def test_docsMentionOfflineOnly(self):
         self.assertDocContains("The current evaluation suite is offline-only")
 
-    def test_docsMentionConsumesOnlyFdp123Jsonl(self):
-        self.assertDocContains("consumes FDP-123 bounded feedback dataset JSONL")
+    def test_docsMentionConsumesOnlyFeedbackDatasetJsonl(self):
+        self.assertDocContains("consumes bounded feedback dataset JSONL")
 
     def test_docsMentionNoProductionDbReads(self):
         self.assertDocContains("does not read production DBs")
@@ -142,7 +142,7 @@ class OfflineEvaluationDocumentationTest(unittest.TestCase):
         self.assertDocContains("FDP-124 fails fast on malformed or invalid schema input")
 
     def test_docsMentionPseudonymousInputReferencesStayInternal(self):
-        self.assertDocContains("accepts FDP-123 pseudonymous input references only for parsing and deterministic ordering")
+        self.assertDocContains("accepts feedback dataset pseudonymous input references only for parsing and deterministic ordering")
         self.assertDocContains("must not emit `evaluationRecordId`, `transactionReference`, `eval-`, or `txnref-`")
 
     def test_docsMentionStrictEngineStatusPolicy(self):

@@ -70,7 +70,8 @@ final class EngineIntelligenceReadModelPolicy {
                 source.status(),
                 source.riskLevel(),
                 source.scoreBucket(),
-                bounded(source.reasonCodes(), EngineIntelligenceProjectionPolicy.MAX_REASON_CODES_PER_ENGINE)
+                bounded(source.reasonCodes(), EngineIntelligenceProjectionPolicy.MAX_REASON_CODES_PER_ENGINE),
+                source.modelIdentity()
         );
     }
 

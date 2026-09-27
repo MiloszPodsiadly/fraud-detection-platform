@@ -132,7 +132,7 @@ in FDP-122. Any future notes export requires a separate governance and sanitizat
 Feedback reason codes are bounded signals, not raw evidence. Feedback does not trigger training, retraining, model
 promotion, threshold change, or dataset export.
 
-FDP-122 includes a conservative internal dataset-field allowlist for governance checks. FDP-123 adds an internal bounded
+FDP-122 includes a conservative internal dataset-field allowlist for governance checks. feedback dataset adds an internal bounded
 fraud feedback dataset builder for `fraud_feedback_records` only. The builder is separate from Engine Intelligence
 Feedback Dataset Export, does not read `engine_intelligence_feedback`, does not use Python `feedback_dataset.py` as
 source of truth, and does not expose a public dataset API, UI, scheduler, CLI, Kafka publication, or automatic runtime

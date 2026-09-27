@@ -5,7 +5,7 @@ Status: FDP-105 offline diagnostic summary foundation.
 ## Scope
 
 Shadow Performance Summary v2 is an offline diagnostic artifact. Its Platform Recommendation Evaluation Card consumer path accepts only validated
-FDP-123/FDP-124/FDP-126 Platform Recommendation Evaluation Card v1 objects and caller-provided generation timestamps. The local FDP-109 generator
+feedback dataset/FDP-124/FDP-126 Platform Recommendation Evaluation Card v1 objects and caller-provided generation timestamps. The local FDP-109 generator
 builds a summary directly from the current Platform Recommendation Evaluation Card artifact and does not recreate the removed FDP-102/FDP-103
 Platform Recommendation Evaluation Card path or map an FDP-103/FDP-124 report directly into the current summary.
 

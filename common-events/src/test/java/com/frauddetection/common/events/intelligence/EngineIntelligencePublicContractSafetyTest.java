@@ -12,6 +12,7 @@ class EngineIntelligencePublicContractSafetyTest {
     private static final List<Class<?>> PUBLIC_DTOS = List.of(
             EngineIntelligenceSummary.class,
             EngineIntelligenceEngineResult.class,
+            MlModelIdentity.class,
             EngineIntelligenceComparison.class,
             EngineIntelligenceDiagnosticSignal.class,
             EngineIntelligenceWarningSummary.class
@@ -30,7 +31,9 @@ class EngineIntelligencePublicContractSafetyTest {
         assertFields(EngineIntelligenceSummary.class,
                 "contractVersion", "generatedAt", "engines", "comparison", "diagnosticSignals", "warnings");
         assertFields(EngineIntelligenceEngineResult.class,
-                "engineId", "engineType", "status", "riskLevel", "scoreBucket", "reasonCodes");
+                "engineId", "engineType", "status", "riskLevel", "scoreBucket", "reasonCodes", "modelIdentity");
+        assertFields(MlModelIdentity.class,
+                "modelName", "modelVersion", "featureContractVersion");
         assertFields(EngineIntelligenceComparison.class,
                 "comparisonType", "comparedEngineIds", "agreementStatus", "riskMismatchStatus", "scoreDeltaBucket");
         assertFields(EngineIntelligenceDiagnosticSignal.class,

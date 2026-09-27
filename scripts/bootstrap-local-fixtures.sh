@@ -172,7 +172,7 @@ cat > "$generated_eval_dir/platform_recommendation_evaluation_card.json" <<'EOF'
     "featureContractVersion": "NOT_APPLICABLE",
     "modelIdentity": "NOT_AVAILABLE",
     "modelArtifactSha256": "NOT_AVAILABLE",
-    "identityCompleteness": "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
+    "identityCompleteness": "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
   },
   "metricsSubject": "PLATFORM_RECOMMENDATION",
   "metricBasis": "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK",
@@ -202,9 +202,9 @@ cat > "$generated_eval_dir/platform_recommendation_evaluation_card.json" <<'EOF'
     "NO_REGULATORY_CERTIFICATION_CLAIM"
   ],
   "evaluationEvidence": {
-    "evaluationReportType": "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+    "evaluationReportType": "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
     "evaluationGeneratedAt": "2026-06-10T00:00:00Z",
-    "evaluationArtifactSetVersion": "fdp123-report-artifact-set-v1",
+    "evaluationArtifactSetVersion": "feedback-dataset-evaluation-report-artifact-set-v1",
     "datasetVersion": "feedback-dataset-v1",
     "datasetTimeBasis": "FEEDBACK_CREATED_AT",
     "recordsEvaluated": 2,

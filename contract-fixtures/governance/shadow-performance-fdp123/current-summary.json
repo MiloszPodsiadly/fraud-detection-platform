@@ -1,0 +1,79 @@
+{
+  "reportType": "SHADOW_PERFORMANCE_SUMMARY_V2",
+  "summaryVersion": "shadow-performance-summary-v2",
+  "generatedAt": "2026-06-13T02:00:00Z",
+  "evaluationSubject": {
+    "subjectType": "PLATFORM_RECOMMENDATION",
+    "sourceComponent": "ENGINE_INTELLIGENCE_PROJECTION",
+    "sourceVersion": "ENGINE_INTELLIGENCE_PROJECTION_V1",
+    "featureContractVersion": "NOT_APPLICABLE",
+    "modelIdentity": "NOT_AVAILABLE",
+    "modelArtifactSha256": "NOT_AVAILABLE",
+    "identityCompleteness": "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
+  },
+  "metricBasis": "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK",
+  "governance": {
+    "governanceStatus": "DIAGNOSTIC_ONLY",
+    "diagnosticOnly": true,
+    "notProductionApproval": true,
+    "notPromotionApproval": true,
+    "notThresholdRecommendation": true,
+    "notPaymentAuthorization": true,
+    "notAutomaticDecisioning": true
+  },
+  "evaluation": {
+    "evaluationCardType": "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
+    "evaluationCardVersion": "platform-recommendation-evaluation-card-v1",
+    "evaluationPurpose": "OFFLINE_DIAGNOSTIC",
+    "evaluationReportType": "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+    "evaluationReportVersion": "FDP-124",
+    "evaluationReportGeneratedAt": "2026-06-10T00:00:00Z",
+    "evaluationCardGeneratedAt": "2026-06-12T00:00:00Z",
+    "evaluationArtifactSetVersion": "fdp123-report-artifact-set-v1",
+    "datasetVersion": "feedback-dataset-v1",
+    "datasetTimeBasis": "FEEDBACK_CREATED_AT",
+    "sourceManifestSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "sourceEvaluationCardManifestSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "evaluationPopulation": {
+    "recordsEvaluated": 5,
+    "positiveClassCount": 3,
+    "negativeClassCount": 2
+  },
+  "metrics": {
+    "alertRecommendedPrecision": {
+      "available": true,
+      "value": 0.666667,
+      "reason": null
+    },
+    "alertRecommendedRecall": {
+      "available": true,
+      "value": 0.5,
+      "reason": null
+    },
+    "falsePositiveRate": {
+      "available": true,
+      "value": 0.25,
+      "reason": null
+    },
+    "falseNegativeRate": {
+      "available": true,
+      "value": 0.2,
+      "reason": null
+    }
+  },
+  "warnings": [
+    "LOW_SAMPLE_SIZE"
+  ],
+  "limitations": [
+    "ANALYST_FEEDBACK_LABELS_ARE_NOT_LEGAL_GROUND_TRUTH",
+    "OFFLINE_DIAGNOSTIC_METRICS_ARE_NOT_PRODUCTION_APPROVAL",
+    "METRICS_ARE_PLATFORM_RECOMMENDATION_DIAGNOSTICS",
+    "SMALL_SAMPLE_SIZE_MAY_BE_INCONCLUSIVE",
+    "PSEUDONYMOUS_REFERENCES_ARE_NOT_ANONYMIZATION",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_APPROVE_PROMOTION",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_AUTHORIZE_AUTOMATIC_DECLINE",
+    "PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOES_NOT_CHANGE_SCORING_THRESHOLDS"
+  ],
+  "banner": "Shadow performance metrics are offline diagnostics only. They are not model promotion approval, threshold recommendation, production decisioning approval, payment authorization, automatic approve / decline / block logic, or analyst recommendation logic."
+}

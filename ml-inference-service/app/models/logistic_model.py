@@ -35,6 +35,7 @@ class LogisticFraudModel:
         self.model_name = str(artifact.get("modelName", "python-logistic-fraud-model"))
         self.model_version = str(artifact.get("modelVersion", "unversioned"))
         self.model_family = str(artifact.get("modelFamily", "LOGISTIC_REGRESSION"))
+        self.feature_contract_version = str(artifact.get("featureContractVersion", FEATURE_CONTRACT.version))
         self.weights = self._weights(artifact.get("weights"))
         self.feature_schema = self._feature_schema(artifact.get("featureSchema"), self.weights)
         self.training_mode = self._training_mode(artifact, self.feature_schema)

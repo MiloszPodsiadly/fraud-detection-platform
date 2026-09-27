@@ -3,7 +3,9 @@ package com.frauddetection.common.events.engine;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.ml.MlModelIdentityPolicy;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -26,6 +28,8 @@ public record FraudEngineResult(
         Long latencyMs,
         String modelName,
         String modelVersion,
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        String featureContractVersion,
         @JsonAlias("fallbackReason") String statusReason,
         Instant generatedAt
 ) {
@@ -79,22 +83,72 @@ public record FraudEngineResult(
         reasonCodes = copyBoundedReasonCodes(reasonCodes);
         contributions = copyBoundedContributions(contributions);
         evidence = copyBoundedEvidence(evidence);
-        modelName = FraudEngineValuePolicy.optionalSafeIdentifier(
+        modelName = MlModelIdentityPolicy.optionalModelName(
                 modelName,
-                "modelName",
-                FraudEngineValuePolicy.MODEL_NAME_MAX_LENGTH
+                "modelName"
         );
-        modelVersion = FraudEngineValuePolicy.optionalSafeIdentifier(
+        modelVersion = MlModelIdentityPolicy.optionalModelVersion(
                 modelVersion,
-                "modelVersion",
-                FraudEngineValuePolicy.MODEL_VERSION_MAX_LENGTH
+                "modelVersion"
         );
+        featureContractVersion = MlModelIdentityPolicy.optionalFeatureContractVersion(
+                featureContractVersion,
+                "featureContractVersion"
+        );
+        validateAtomicMlModelIdentity(engineType, modelName, modelVersion, featureContractVersion);
         statusReason = FraudEngineValuePolicy.optionalMachineCode(
                 statusReason,
                 "statusReason",
                 FraudEngineValuePolicy.FALLBACK_REASON_MAX_LENGTH
         );
-        validateStatusSemantics(engineType, status, score, riskLevel, confidence, statusReason);
+        validateStatusSemantics(
+                engineType,
+                status,
+                score,
+                riskLevel,
+                confidence,
+                modelName,
+                modelVersion,
+                featureContractVersion,
+                statusReason
+        );
+    }
+
+    public FraudEngineResult(
+            String engineId,
+            FraudEngineType engineType,
+            String engineLanguage,
+            FraudEngineStatus status,
+            Double score,
+            RiskLevel riskLevel,
+            FraudEngineConfidence confidence,
+            List<String> reasonCodes,
+            List<FraudEngineContribution> contributions,
+            List<FraudEngineEvidence> evidence,
+            Long latencyMs,
+            String modelName,
+            String modelVersion,
+            String statusReason,
+            Instant generatedAt
+    ) {
+        this(
+                engineId,
+                engineType,
+                engineLanguage,
+                status,
+                score,
+                riskLevel,
+                confidence,
+                reasonCodes,
+                contributions,
+                evidence,
+                latencyMs,
+                modelName,
+                modelVersion,
+                null,
+                statusReason,
+                generatedAt
+        );
     }
 
     @JsonIgnore
@@ -198,12 +252,16 @@ public record FraudEngineResult(
             Double score,
             RiskLevel riskLevel,
             FraudEngineConfidence confidence,
+            String modelName,
+            String modelVersion,
+            String featureContractVersion,
             String statusReason
     ) {
         switch (status) {
             case AVAILABLE -> {
                 requireScoreAndRiskLevel(score, riskLevel, status);
                 requireConfidence(confidence, status);
+                requireAvailableMlIdentity(engineType, modelName, modelVersion, featureContractVersion);
                 if (statusReason != null) {
                     throw new IllegalArgumentException("AVAILABLE status must not declare statusReason");
                 }
@@ -229,6 +287,40 @@ public record FraudEngineResult(
                 }
                 requireStatusReason(statusReason, status);
             }
+        }
+    }
+
+    private static void requireAvailableMlIdentity(
+            FraudEngineType engineType,
+            String modelName,
+            String modelVersion,
+            String featureContractVersion
+    ) {
+        if (engineType != FraudEngineType.ML_MODEL) {
+            return;
+        }
+        if (modelName == null || modelVersion == null || featureContractVersion == null) {
+            throw new IllegalArgumentException(
+                    "AVAILABLE ML_MODEL status requires modelName, modelVersion, and featureContractVersion"
+            );
+        }
+    }
+
+    private static void validateAtomicMlModelIdentity(
+            FraudEngineType engineType,
+            String modelName,
+            String modelVersion,
+            String featureContractVersion
+    ) {
+        if (engineType != FraudEngineType.ML_MODEL) {
+            return;
+        }
+        int present = 0;
+        present += modelName == null ? 0 : 1;
+        present += modelVersion == null ? 0 : 1;
+        present += featureContractVersion == null ? 0 : 1;
+        if (present != 0 && present != 3) {
+            throw new IllegalArgumentException("ML model identity must be entirely absent or complete");
         }
     }
 

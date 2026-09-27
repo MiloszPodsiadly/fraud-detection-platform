@@ -116,6 +116,16 @@ class FeedbackDatasetJsonlWriterTest {
                 );
     }
 
+    @Test
+    void jsonlWritesMlModelIdentitySnapshotFields() {
+        String jsonl = new FeedbackDatasetJsonlWriter().writeJsonl(result(List.of(recordWithMlIdentity())));
+
+        assertThat(jsonl)
+                .contains("\"mlModelName\":\"python-logistic-fraud-model\"")
+                .contains("\"mlModelVersion\":\"2026-06-25.v1\"")
+                .contains("\"mlFeatureContractVersion\":\"feature-contract-v2\"");
+    }
+
     private FeedbackDatasetBuildResult result(List<FeedbackDatasetRecord> records) {
         return new FeedbackDatasetBuildResult(
                 FeedbackDatasetBuilder.DATASET_VERSION,
@@ -170,6 +180,35 @@ class FeedbackDatasetJsonlWriterTest {
                 null,
                 null,
                 null,
+                null,
+                null,
+                null,
+                null,
+                List.of(),
+                null,
+                null
+        );
+    }
+
+    private FeedbackDatasetRecord recordWithMlIdentity() {
+        return new FeedbackDatasetRecord(
+                FeedbackDatasetBuilder.DATASET_VERSION,
+                FeedbackDatasetIdentifierHasher.evaluationRecordId("feedback-raw-1"),
+                FeedbackDatasetIdentifierHasher.transactionReference("txn-raw-1"),
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                FeedbackEvaluationLabel.POSITIVE_FRAUD,
+                List.of("ANALYST_CONFIRMED_FRAUD"),
+                FROM,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "python-logistic-fraud-model",
+                "2026-06-25.v1",
+                "feature-contract-v2",
                 null,
                 null,
                 null,

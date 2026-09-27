@@ -127,6 +127,7 @@ final class RuntimeOrchestratorTestSupport {
                 result.evidence(),
                 result.modelName(),
                 result.modelVersion(),
+                result.featureContractVersion(),
                 result.statusReason()
         );
     }
@@ -161,8 +162,9 @@ final class RuntimeOrchestratorTestSupport {
                 List.of(),
                 List.of(),
                 latencyMs,
-                null,
-                null,
+                descriptor.engineType() == FraudEngineType.ML_MODEL ? "python-logistic-fraud-model" : null,
+                descriptor.engineType() == FraudEngineType.ML_MODEL ? "2026-05-30.v1" : null,
+                descriptor.engineType() == FraudEngineType.ML_MODEL ? "2026-05-30.feature-contract.v1" : null,
                 null,
                 RECEIVED_AT
         );

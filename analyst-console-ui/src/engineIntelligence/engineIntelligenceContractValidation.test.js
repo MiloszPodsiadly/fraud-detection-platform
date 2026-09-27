@@ -12,6 +12,7 @@ import {
   isDiagnosticSignalShape,
   isEngineIntelligenceResponseShape,
   isEngineShape,
+  isModelIdentityShape,
   isWarningShape,
   safeString
 } from "./engineIntelligenceContractValidation.js";
@@ -54,6 +55,58 @@ describe("engineIntelligenceContractValidation", () => {
     expect(safeString(value, maxLength)).toBe(valid);
   });
 
+  it.each(modelIdentityCases())("applies shared ML model identity syntax matrix $caseId", ({ field, value, validSyntax }) => {
+    const fixture = publicApiFixture("ml-model-identity-cases.json");
+    const identity = { ...fixture.canonicalIdentity, [field]: value };
+
+    expect(isModelIdentityShape(identity)).toBe(validSyntax);
+  });
+
+  it("accepts an available ML engine with complete canonical model identity", () => {
+    expect(isEngineShape({
+      ...availableEngine("ml.python.primary", "ML_MODEL"),
+      modelIdentity: canonicalModelIdentity()
+    })).toBe(true);
+  });
+
+  it("preserves historical available ML engines without model identity", () => {
+    expect(isEngineShape(availableEngine("ml.python.primary", "ML_MODEL"))).toBe(true);
+  });
+
+  it("accepts a timeout ML engine when model identity is absent", () => {
+    expect(isEngineShape(operationalMlEngine("TIMEOUT"))).toBe(true);
+  });
+
+  it.each(["UNAVAILABLE", "DEGRADED", "TIMEOUT"])(
+    "rejects model identity on a %s ML engine",
+    (status) => {
+      expect(isEngineShape({
+        ...operationalMlEngine(status),
+        modelIdentity: canonicalModelIdentity()
+      })).toBe(false);
+    }
+  );
+
+  it.each([
+    ["rules.primary", "RULES"],
+    ["velocity.primary", "VELOCITY"]
+  ])("rejects model identity on the %s engine", (engineId, engineType) => {
+    expect(isEngineShape({
+      ...availableEngine(engineId, engineType),
+      modelIdentity: canonicalModelIdentity()
+    })).toBe(false);
+  });
+
+  it.each(modelIdentityCases().filter(({ validSyntax }) => !validSyntax))(
+    "rejects noncanonical model identity in an engine for $caseId",
+    ({ field, value }) => {
+      expect(isEngineShape({
+        ...availableEngine("ml.python.primary", "ML_MODEL"),
+        modelIdentity: { ...canonicalModelIdentity(), [field]: value }
+      })).toBe(false);
+    }
+  );
+
   it("rejects extra field at every nested public DTO", () => {
     const fixture = sharedFixture("engine_intelligence_three_engine_golden.json");
 
@@ -95,6 +148,36 @@ function timestampCases() {
 
 function stringBoundaryCases() {
   return publicApiFixture("public-string-boundary-cases.json").cases;
+}
+
+function modelIdentityCases() {
+  return publicApiFixture("ml-model-identity-cases.json").cases;
+}
+
+function canonicalModelIdentity() {
+  return publicApiFixture("ml-model-identity-cases.json").canonicalIdentity;
+}
+
+function availableEngine(engineId, engineType) {
+  return {
+    engineId,
+    engineType,
+    status: "AVAILABLE",
+    riskLevel: "HIGH",
+    scoreBucket: "HIGH",
+    reasonCodes: ["MODEL_HIGH_RISK"]
+  };
+}
+
+function operationalMlEngine(status) {
+  return {
+    engineId: "ml.python.primary",
+    engineType: "ML_MODEL",
+    status,
+    riskLevel: null,
+    scoreBucket: "UNAVAILABLE",
+    reasonCodes: ["ML_MODEL_UNAVAILABLE"]
+  };
 }
 
 function publicApiFixture(name) {

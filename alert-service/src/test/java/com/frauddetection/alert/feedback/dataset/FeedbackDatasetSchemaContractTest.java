@@ -1,6 +1,11 @@
 package com.frauddetection.alert.feedback.dataset;
 
 import com.frauddetection.alert.feedback.FraudFeedbackLabel;
+import com.networknt.schema.Error;
+import com.networknt.schema.InputFormat;
+import com.networknt.schema.Schema;
+import com.networknt.schema.SchemaRegistry;
+import com.networknt.schema.SpecificationVersion;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -8,7 +13,9 @@ import tools.jackson.databind.ObjectMapper;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -16,6 +23,9 @@ class FeedbackDatasetSchemaContractTest {
 
     private static final Path ROOT = repositoryRoot();
     private static final Path SCHEMA = ROOT.resolve("docs/schemas/feedback_dataset_record.schema.json");
+    private static final Path MODEL_IDENTITY_CASES = ROOT.resolve(
+            "contract-fixtures/public-api/ml-model-identity-cases.json"
+    );
     private static final Instant FROM = Instant.parse("2026-06-01T00:00:00Z");
     private static final Instant TO = Instant.parse("2026-06-02T00:00:00Z");
     private static final Instant BUILT_AT = Instant.parse("2026-06-02T12:00:00Z");
@@ -48,7 +58,10 @@ class FeedbackDatasetSchemaContractTest {
                         "\"feedbackLabel\"",
                         "\"evaluationLabel\"",
                         "\"decisionReasonCodes\"",
-                        "\"feedbackCreatedAt\""
+                        "\"feedbackCreatedAt\"",
+                        "\"mlModelName\"",
+                        "\"mlModelVersion\"",
+                        "\"mlFeatureContractVersion\""
                 );
     }
 
@@ -66,6 +79,69 @@ class FeedbackDatasetSchemaContractTest {
                 .contains("\"const\": \"POSITIVE_FRAUD\"")
                 .contains("\"const\": \"CONFIRMED_LEGITIMATE\"")
                 .contains("\"const\": \"NEGATIVE_LEGITIMATE\"");
+    }
+
+    @Test
+    void schemaDocumentsAtomicMlModelIdentityConstraint() throws Exception {
+        String schema = Files.readString(SCHEMA);
+
+        assertThat(schema)
+                .contains("\"oneOf\"")
+                .contains("\"mlModelName\"")
+                .contains("\"mlModelVersion\"")
+                .contains("\"mlFeatureContractVersion\"")
+                .contains("\"maxLength\": 64")
+                .contains("\"maxLength\": 96")
+                .contains("\"pattern\": \"^[A-Za-z0-9._-]+$\"");
+    }
+
+    @Test
+    void jsonSchemaAcceptsZeroOrCompleteMlIdentityAndRejectsEveryPartialState() throws Exception {
+        assertSchemaValid(datasetRecordLine(null, null, null, false));
+        assertSchemaValid(datasetRecordLine(null, null, null, true));
+        assertSchemaValid(datasetRecordLine("model", "v1", "feature-contract-v1", true));
+
+        String[][] partialStates = {
+                {"model", null, null},
+                {null, "v1", null},
+                {null, null, "feature-contract-v1"},
+                {"model", "v1", null},
+                {"model", null, "feature-contract-v1"},
+                {null, "v1", "feature-contract-v1"}
+        };
+        for (String[] state : partialStates) {
+            assertSchemaInvalid(datasetRecordLine(state[0], state[1], state[2], true));
+        }
+    }
+
+    @Test
+    void jsonSchemaUsesSharedCanonicalMlIdentitySyntaxCases() throws Exception {
+        JsonNode fixture = objectMapper.readTree(MODEL_IDENTITY_CASES.toFile());
+        JsonNode canonical = fixture.get("canonicalIdentity");
+
+        for (JsonNode identityCase : fixture.get("cases")) {
+            String field = identityCase.get("field").asString();
+            String modelName = canonical.get("modelName").asString();
+            String modelVersion = canonical.get("modelVersion").asString();
+            String featureContractVersion = canonical.get("featureContractVersion").asString();
+            if ("modelName".equals(field)) {
+                modelName = identityCase.get("value").asString();
+            } else if ("modelVersion".equals(field)) {
+                modelVersion = identityCase.get("value").asString();
+            } else if ("featureContractVersion".equals(field)) {
+                featureContractVersion = identityCase.get("value").asString();
+            }
+
+            boolean accepted = validateSchema(datasetRecordLine(
+                    modelName,
+                    modelVersion,
+                    featureContractVersion,
+                    true
+            )).isEmpty();
+            assertThat(accepted)
+                    .as(identityCase.get("caseId").asString())
+                    .isEqualTo(identityCase.get("validSyntax").booleanValue());
+        }
     }
 
     @Test
@@ -129,6 +205,9 @@ class FeedbackDatasetSchemaContractTest {
         assertThat(record.get("evaluationLabel").asString()).isEqualTo("POSITIVE_FRAUD");
         assertThat(record.get("decisionReasonCodes").get(0).asString()).isEqualTo("ANALYST_CONFIRMED_FRAUD");
         assertThat(record.get("feedbackCreatedAt").asString()).isEqualTo("2026-06-01T00:00:00Z");
+        assertThat(record.has("mlModelName")).isTrue();
+        assertThat(record.has("mlModelVersion")).isTrue();
+        assertThat(record.has("mlFeatureContractVersion")).isTrue();
     }
 
     @Test
@@ -318,6 +397,45 @@ class FeedbackDatasetSchemaContractTest {
             return;
         }
         throw new AssertionError("schema-equivalent record contract accepted invalid dataset record");
+    }
+
+    private void assertSchemaValid(Map<String, Object> payload) throws Exception {
+        assertThat(validateSchema(payload)).isEmpty();
+    }
+
+    private void assertSchemaInvalid(Map<String, Object> payload) throws Exception {
+        assertThat(validateSchema(payload)).isNotEmpty();
+    }
+
+    private List<Error> validateSchema(Map<String, Object> payload) throws Exception {
+        Schema schema = SchemaRegistry.withDefaultDialect(SpecificationVersion.DRAFT_2020_12)
+                .getSchema(Files.readString(SCHEMA));
+        return schema.validate(objectMapper.writeValueAsString(payload), InputFormat.JSON);
+    }
+
+    private Map<String, Object> datasetRecordLine(
+            String modelName,
+            String modelVersion,
+            String featureContractVersion,
+            boolean includeIdentityFields
+    ) {
+        Map<String, Object> record = new LinkedHashMap<>();
+        record.put("datasetVersion", FeedbackDatasetBuilder.DATASET_VERSION);
+        record.put("evaluationRecordId", "eval_11111111111111111111111111111111");
+        record.put("transactionReference", "txnref_22222222222222222222222222222222");
+        record.put("feedbackLabel", "CONFIRMED_FRAUD");
+        record.put("evaluationLabel", "POSITIVE_FRAUD");
+        record.put("decisionReasonCodes", List.of("ANALYST_CONFIRMED_FRAUD"));
+        record.put("feedbackCreatedAt", "2026-06-01T00:00:00Z");
+        if (includeIdentityFields) {
+            record.put("mlModelName", modelName);
+            record.put("mlModelVersion", modelVersion);
+            record.put("mlFeatureContractVersion", featureContractVersion);
+        }
+        Map<String, Object> envelope = new LinkedHashMap<>();
+        envelope.put("type", "DATASET_RECORD");
+        envelope.put("record", record);
+        return envelope;
     }
 
     private static Path repositoryRoot() {

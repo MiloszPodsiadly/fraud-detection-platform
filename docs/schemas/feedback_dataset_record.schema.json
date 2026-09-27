@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://frauddetection.local/schemas/feedback_dataset_record.schema.json",
-  "title": "FDP-123 feedback dataset JSONL envelope line",
-  "description": "Schema for one line of the internal FDP-123 feedback dataset JSONL envelope. Line 1 is DATASET_METADATA; following evaluation rows are DATASET_RECORD lines.",
+  "title": "feedback dataset JSONL envelope line",
+  "description": "Schema for one line of the internal feedback dataset JSONL envelope. Line 1 is DATASET_METADATA; following evaluation rows are DATASET_RECORD lines.",
   "oneOf": [
     {
       "type": "object",
@@ -140,6 +140,41 @@
                   }
                 }
               }
+            },
+            {
+              "oneOf": [
+                {
+                  "properties": {
+                    "mlModelName": {
+                      "type": "null"
+                    },
+                    "mlModelVersion": {
+                      "type": "null"
+                    },
+                    "mlFeatureContractVersion": {
+                      "type": "null"
+                    }
+                  }
+                },
+                {
+                  "required": [
+                    "mlModelName",
+                    "mlModelVersion",
+                    "mlFeatureContractVersion"
+                  ],
+                  "properties": {
+                    "mlModelName": {
+                      "type": "string"
+                    },
+                    "mlModelVersion": {
+                      "type": "string"
+                    },
+                    "mlFeatureContractVersion": {
+                      "type": "string"
+                    }
+                  }
+                }
+              ]
             }
           ],
           "required": [
@@ -229,6 +264,33 @@
                 "string",
                 "null"
               ]
+            },
+            "mlModelName": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9._-]+$"
+            },
+            "mlModelVersion": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9._-]+$"
+            },
+            "mlFeatureContractVersion": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1,
+              "maxLength": 96,
+              "pattern": "^[A-Za-z0-9._-]+$"
             },
             "analystRecommendationStatus": {
               "type": [

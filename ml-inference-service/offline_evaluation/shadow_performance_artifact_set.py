@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from offline_evaluation.json_contract import JsonContractError, dumps_strict_json, loads_strict_json
-from offline_evaluation.fdp123.timestamp_contract import (
+from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import (
     TimestampContractError,
     normalize_rfc3339_timestamp,
 )

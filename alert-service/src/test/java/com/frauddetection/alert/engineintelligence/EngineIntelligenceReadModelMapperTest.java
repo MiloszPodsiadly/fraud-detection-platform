@@ -85,6 +85,25 @@ class EngineIntelligenceReadModelMapperTest {
     }
 
     @Test
+    void readModelExposesProjectedMlModelIdentityWithoutRecomputation() {
+        EngineIntelligenceProjection projection = new EngineIntelligenceProjectionMapper(
+                new EngineIntelligenceProjectionPolicy()
+        ).map(
+                "txn-ml-identity",
+                EngineIntelligenceProjectionTestFixtures.disagreementSummary(),
+                null
+        ).projection().orElseThrow();
+
+        var readModel = mapper.map(projection);
+
+        assertThat(readModel.engines())
+                .filteredOn(engine -> engine.engineId().equals("ml.python.primary"))
+                .singleElement()
+                .satisfies(engine -> assertThat(engine.modelIdentity().featureContractVersion())
+                        .isEqualTo("2026-05-30.feature-contract.v1"));
+    }
+
+    @Test
     void unavailableEngineHasRiskLevelNull() {
         var unavailableEngine = mapper.map(projectionWithStatus(FraudEngineStatus.UNAVAILABLE)).engines().get(1);
 

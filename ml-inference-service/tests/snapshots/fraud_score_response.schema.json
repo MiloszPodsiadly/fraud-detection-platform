@@ -3,6 +3,7 @@
     "available",
     "explanationMetadata",
     "fallbackReason",
+    "featureContractVersion",
     "fraudScore",
     "inferenceTimestamp",
     "modelName",
@@ -15,6 +16,7 @@
     "available": "boolean",
     "explanationMetadata": "object",
     "fallbackReason": ["string", "null"],
+    "featureContractVersion": "string",
     "fraudScore": "number",
     "inferenceTimestamp": "string",
     "modelName": "string",
@@ -30,6 +32,7 @@
     "explanationMetadata": [
       "engineType",
       "explanationType",
+      "featureContractVersion",
       "modelAvailable",
       "modelName",
       "modelVersion"

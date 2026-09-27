@@ -68,7 +68,8 @@ final class EngineIntelligenceTestSupport {
                 FraudEngineStatus.AVAILABLE,
                 riskLevel,
                 scoreBucket,
-                List.of("MODEL_HIGH_RISK")
+                List.of("MODEL_HIGH_RISK"),
+                mlIdentity()
         );
     }
 
@@ -109,5 +110,13 @@ final class EngineIntelligenceTestSupport {
 
     static ObjectMapper objectMapper() {
         return tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
+    }
+
+    static MlModelIdentity mlIdentity() {
+        return new MlModelIdentity(
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                "2026-05-30.feature-contract.v1"
+        );
     }
 }

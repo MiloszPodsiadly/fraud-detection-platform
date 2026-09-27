@@ -22,6 +22,11 @@ from app.features.feature_pipeline import (
 )
 from app.inference.model_runtime import FraudModelRuntime
 from app.model import FraudModel
+from app.model_identity_policy import (
+    validate_feature_contract_version,
+    validate_model_name,
+    validate_model_version,
+)
 from app.models.model_loader import ModelConfigurationError, load_model_from_artifact
 from app.models.logistic_model import LogisticFraudModel
 from app.registry.model_registry import ModelRegistry
@@ -187,6 +192,8 @@ class FraudModelTest(unittest.TestCase):
         self.assertIn(result["riskLevel"], {"HIGH", "CRITICAL"})
         self.assertGreaterEqual(result["fraudScore"], 0.75)
         self.assertIn("PROXY_OR_VPN", result["reasonCodes"])
+        self.assertEqual(result["featureContractVersion"], FEATURE_CONTRACT.version)
+        self.assertEqual(result["explanationMetadata"]["featureContractVersion"], FEATURE_CONTRACT.version)
 
     def test_scores_baseline_signal_as_low(self):
         result = FraudModel().score(
@@ -488,6 +495,20 @@ class FraudModelTest(unittest.TestCase):
             "/app/contracts/fraud-feature-contract.json",
             dockerfile,
         )
+
+    def test_ml_runtime_package_owns_model_identity_policy(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        dockerfile = (repo_root / "deployment" / "Dockerfile.ml-inference").read_text(encoding="utf-8")
+
+        self.assertIn("COPY --chown=10001:10001 ml-inference-service/app /app/app", dockerfile)
+        self.assertTrue((repo_root / "ml-inference-service" / "app" / "model_identity_policy.py").is_file())
+        self.assertFalse((repo_root / "ml-inference-service" / "model_identity_policy.py").exists())
+
+        from app.model_identity_policy import validate_model_name
+        from app.models.model_loader import validate_model_artifact
+
+        self.assertEqual("python-logistic-fraud-model", validate_model_name("python-logistic-fraud-model"))
+        validate_model_artifact(self._artifact_payload())
 
     def test_shared_contract_defines_java_python_semantics_not_just_names(self):
         semantics = FEATURE_CONTRACT.production_feature_semantics
@@ -1503,6 +1524,48 @@ class FraudModelTest(unittest.TestCase):
 
         self.assertEqual(model.model_version, CANONICAL_MODEL_VERSION)
         self.assertEqual(model.runtime_feature_names(), list(FeaturePipeline.PRODUCTION_FEATURE_NAMES))
+
+    def test_model_loader_rejects_noncanonical_model_identity(self):
+        invalid_cases = (
+            {"modelName": "models/python-logistic-fraud-model"},
+            {"modelVersion": "loader:model-v1"},
+            {"modelVersion": "v" * 65},
+            {"featureContractVersion": "feature contract v2"},
+            {"featureContractVersion": "f" * 97},
+        )
+        for index, overrides in enumerate(invalid_cases):
+            artifact_path = Path.cwd() / f"loader-invalid-identity-{index}.json"
+            artifact = self._artifact_payload(f"loader-invalid-identity-v{index}")
+            artifact.update(overrides)
+            try:
+                artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+                with self.assertRaisesRegex(ModelConfigurationError, "model artifact identity invalid"):
+                    load_model_from_artifact(artifact_path)
+            finally:
+                if artifact_path.exists():
+                    artifact_path.unlink()
+
+    def test_shared_model_identity_cases_match_python_runtime_policy(self):
+        fixture_path = Path(__file__).resolve().parents[2] / "contract-fixtures" / "public-api" / "ml-model-identity-cases.json"
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        validators = {
+            "modelName": validate_model_name,
+            "modelVersion": validate_model_version,
+            "featureContractVersion": validate_feature_contract_version,
+        }
+        syntax_runtime_difference_covered = False
+
+        for identity_case in fixture["cases"]:
+            validator = validators[identity_case["field"]]
+            try:
+                validator(identity_case["value"])
+                accepted = True
+            except ValueError:
+                accepted = False
+            self.assertEqual(identity_case["validRuntime"], accepted, identity_case["caseId"])
+            syntax_runtime_difference_covered |= identity_case["validSyntax"] and not identity_case["validRuntime"]
+
+        self.assertTrue(syntax_runtime_difference_covered)
 
     def test_model_loader_rejects_unknown_artifact_type(self):
         artifact_path = Path.cwd() / "loader-unknown-artifact.json"

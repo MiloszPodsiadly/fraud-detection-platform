@@ -5,6 +5,9 @@ export const MAX_ENGINE_INTELLIGENCE_WARNINGS = 10;
 export const MAX_ENGINE_INTELLIGENCE_REASON_CODES = 5;
 export const MAX_PUBLIC_STRING_LENGTH = 128;
 export const MAX_RECOMMENDATION_VERSION_LENGTH = 64;
+export const MAX_ML_MODEL_NAME_LENGTH = 64;
+export const MAX_ML_MODEL_VERSION_LENGTH = 64;
+export const MAX_ML_FEATURE_CONTRACT_VERSION_LENGTH = 96;
 
 export const COMPARISON_TYPE = "RULES_VS_ML";
 export const COMPARED_ENGINE_IDS = Object.freeze(["rules.primary", "ml.python.primary"]);
@@ -30,6 +33,10 @@ export const RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
 export const SCORE_BUCKETS = new Set(["NONE", "LOW", "MEDIUM", "HIGH", "VERY_HIGH", "UNAVAILABLE"]);
 export const SIGNAL_CATEGORIES = new Set(["FRAUD_SIGNAL", "OPERATIONAL_SIGNAL"]);
 export const RESPONSE_STATUSES = new Set(["AVAILABLE", "ABSENT", "UNAVAILABLE", "DEGRADED"]);
+const ENGINE_RESULT_REQUIRED_KEYS = Object.freeze(["engineId", "engineType", "status", "riskLevel", "scoreBucket", "reasonCodes"]);
+const ENGINE_RESULT_ALLOWED_KEYS = Object.freeze([...ENGINE_RESULT_REQUIRED_KEYS, "modelIdentity"]);
+const MODEL_IDENTITY_KEYS = Object.freeze(["modelName", "modelVersion", "featureContractVersion"]);
+const ML_MODEL_IDENTITY_PART_PATTERN = /^[A-Za-z0-9._-]+$/;
 
 export const ENGINE_TYPE_BY_ID = Object.freeze({
   "rules.primary": "RULES",
@@ -133,7 +140,8 @@ export function isEngineIntelligenceResponseShape(value) {
 
 export function isEngineShape(engine) {
   return isPlainObject(engine)
-    && hasOnlyKeys(engine, ["engineId", "engineType", "status", "riskLevel", "scoreBucket", "reasonCodes"])
+    && hasRequiredKeys(engine, ENGINE_RESULT_REQUIRED_KEYS)
+    && hasOnlyKnownKeys(engine, ENGINE_RESULT_ALLOWED_KEYS)
     && safeString(engine.engineId, MAX_PUBLIC_STRING_LENGTH)
     && oneOf(engine.engineType, ENGINE_TYPES)
     && isExpectedEngineType(engine.engineId, engine.engineType)
@@ -141,7 +149,23 @@ export function isEngineShape(engine) {
     && optionalOneOf(engine.riskLevel, RISK_LEVELS)
     && oneOf(engine.scoreBucket, SCORE_BUCKETS)
     && safeStringArray(engine.reasonCodes, MAX_ENGINE_INTELLIGENCE_REASON_CODES, MAX_PUBLIC_STRING_LENGTH)
+    && isEngineModelIdentityConsistent(engine)
     && isEngineResultOperationallyConsistent(engine.status, engine.scoreBucket, engine.riskLevel);
+}
+
+export function isModelIdentityShape(identity) {
+  return isPlainObject(identity)
+    && hasOnlyKeys(identity, MODEL_IDENTITY_KEYS)
+    && validateMlModelIdentityPart(identity.modelName, MAX_ML_MODEL_NAME_LENGTH)
+    && validateMlModelIdentityPart(identity.modelVersion, MAX_ML_MODEL_VERSION_LENGTH)
+    && validateMlModelIdentityPart(identity.featureContractVersion, MAX_ML_FEATURE_CONTRACT_VERSION_LENGTH);
+}
+
+export function validateMlModelIdentityPart(value, maxLength) {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= maxLength
+    && ML_MODEL_IDENTITY_PART_PATTERN.test(value);
 }
 
 export function isDiagnosticSignalShape(signal) {
@@ -289,6 +313,11 @@ export function hasOnlyKnownKeys(value, allowedKeys) {
     && Object.keys(value).every((key) => allowedKeys.includes(key));
 }
 
+export function hasRequiredKeys(value, requiredKeys) {
+  return isPlainObject(value)
+    && requiredKeys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+}
+
 export function isPlainObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -308,6 +337,16 @@ function isEngineResultOperationallyConsistent(status, scoreBucket, riskLevel) {
     return riskLevel !== null && riskLevel !== undefined && isUsableAvailableScoreBucket(scoreBucket);
   }
   return scoreBucket === "UNAVAILABLE" && (riskLevel === null || riskLevel === undefined);
+}
+
+function isEngineModelIdentityConsistent(engine) {
+  if (!Object.prototype.hasOwnProperty.call(engine, "modelIdentity")) {
+    return true;
+  }
+  return engine.engineId === "ml.python.primary"
+    && engine.engineType === "ML_MODEL"
+    && engine.status === "AVAILABLE"
+    && isModelIdentityShape(engine.modelIdentity);
 }
 
 function isDiagnosticSignalOperationallyConsistent(signalCategory, engineStatus, scoreBucket, riskLevel) {

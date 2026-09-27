@@ -1,1 +1,3 @@
 *.sh text eol=lf
+contract-fixtures/governance/shadow-performance-fdp123/*.json -text whitespace=cr-at-eol
+contract-fixtures/governance/platform-evaluation-fdp123/* -text

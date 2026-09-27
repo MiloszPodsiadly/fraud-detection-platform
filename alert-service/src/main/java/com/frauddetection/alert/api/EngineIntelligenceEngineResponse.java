@@ -1,10 +1,12 @@
 package com.frauddetection.alert.api;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceEngineResult;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
+import com.frauddetection.common.events.intelligence.MlModelIdentity;
 
 import java.util.List;
 import java.util.Objects;
@@ -15,7 +17,9 @@ public record EngineIntelligenceEngineResponse(
         EngineIntelligenceEngineStatusResponse status,
         RiskLevel riskLevel,
         EngineIntelligenceScoreBucket scoreBucket,
-        List<String> reasonCodes
+        List<String> reasonCodes,
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        MlModelIdentity modelIdentity
 ) {
 
     public EngineIntelligenceEngineResponse {
@@ -26,13 +30,26 @@ public record EngineIntelligenceEngineResponse(
                 contractStatus(status),
                 riskLevel,
                 scoreBucket,
-                reasonCodes == null ? List.of() : reasonCodes
+                reasonCodes == null ? List.of() : reasonCodes,
+                modelIdentity
         );
         engineId = result.engineId();
         engineType = result.engineType();
         riskLevel = result.riskLevel();
         scoreBucket = result.scoreBucket();
         reasonCodes = result.reasonCodes();
+        modelIdentity = result.modelIdentity();
+    }
+
+    public EngineIntelligenceEngineResponse(
+            String engineId,
+            FraudEngineType engineType,
+            EngineIntelligenceEngineStatusResponse status,
+            RiskLevel riskLevel,
+            EngineIntelligenceScoreBucket scoreBucket,
+            List<String> reasonCodes
+    ) {
+        this(engineId, engineType, status, riskLevel, scoreBucket, reasonCodes, null);
     }
 
     private static FraudEngineStatus contractStatus(EngineIntelligenceEngineStatusResponse status) {

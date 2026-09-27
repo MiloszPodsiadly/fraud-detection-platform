@@ -3,6 +3,7 @@ package com.frauddetection.scoring.orchestration.aggregation;
 import com.frauddetection.common.events.engine.FraudEngineConfidence;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
+import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -46,6 +47,43 @@ class NormalizedFraudEngineResultTest {
     void acceptsMlPythonPrimaryWithMlModelType() {
         assertThat(result("ml.python.primary", FraudEngineType.ML_MODEL, FraudEngineStatus.TIMEOUT, null, List.of()).engineType())
                 .isEqualTo(FraudEngineType.ML_MODEL);
+    }
+
+    @Test
+    void rejectsAvailableMlWithoutModelIdentityBeforePublication() {
+        assertThatThrownBy(() -> result(
+                "ml.python.primary",
+                FraudEngineType.ML_MODEL,
+                FraudEngineStatus.AVAILABLE,
+                0.8d,
+                List.of("MODEL_HIGH_RISK")
+        )).hasMessage("AGGREGATION_AVAILABLE_ML_MODEL_IDENTITY_REQUIRED");
+    }
+
+    @Test
+    void acceptsAvailableMlWithModelIdentity() {
+        NormalizedFraudEngineResult result = result(
+                "ml.python.primary",
+                FraudEngineType.ML_MODEL,
+                FraudEngineStatus.AVAILABLE,
+                0.8d,
+                List.of("MODEL_HIGH_RISK"),
+                mlIdentity()
+        );
+
+        assertThat(result.modelIdentity()).isEqualTo(mlIdentity());
+    }
+
+    @Test
+    void rejectsModelIdentityForRulesEngine() {
+        assertThatThrownBy(() -> result(
+                "rules.primary",
+                FraudEngineType.RULES,
+                FraudEngineStatus.AVAILABLE,
+                0.8d,
+                List.of("HIGH_VELOCITY"),
+                mlIdentity()
+        )).hasMessage("AGGREGATION_NON_ML_MODEL_IDENTITY_INVALID");
     }
 
     @Test
@@ -108,6 +146,17 @@ class NormalizedFraudEngineResultTest {
             Double score,
             List<String> reasons
     ) {
+        return result(engineId, engineType, status, score, reasons, null);
+    }
+
+    private NormalizedFraudEngineResult result(
+            String engineId,
+            FraudEngineType engineType,
+            FraudEngineStatus status,
+            Double score,
+            List<String> reasons,
+            MlModelIdentity modelIdentity
+    ) {
         return new NormalizedFraudEngineResult(
                 engineId,
                 engineType,
@@ -118,11 +167,20 @@ class NormalizedFraudEngineResultTest {
                 reasons,
                 List.of(),
                 List.of(),
-                0L
+                0L,
+                modelIdentity
         );
     }
 
     private FraudEngineType engineType(String engineId) {
         return "ml.python.primary".equals(engineId) ? FraudEngineType.ML_MODEL : FraudEngineType.RULES;
+    }
+
+    private MlModelIdentity mlIdentity() {
+        return new MlModelIdentity(
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                "2026-05-30.feature-contract.v1"
+        );
     }
 }

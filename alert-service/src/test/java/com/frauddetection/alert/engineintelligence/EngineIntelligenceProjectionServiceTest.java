@@ -136,6 +136,22 @@ class EngineIntelligenceProjectionServiceTest {
     }
 
     @Test
+    void projectionUsesEngineIntelligenceMlIdentityNotTopLevelFinalScoreModelVersion() {
+        when(repository.findById("txn-fdp95-001")).thenReturn(Optional.empty());
+
+        EngineIntelligenceProjection projection = service.project(EngineIntelligenceProjectionTestFixtures.event(
+                EngineIntelligenceProjectionTestFixtures.disagreementSummary()
+        )).projection().orElseThrow();
+
+        assertThat(projection.getEngines())
+                .filteredOn(engine -> engine.engineId().equals("ml.python.primary"))
+                .singleElement()
+                .satisfies(engine -> assertThat(engine.modelIdentity().modelVersion())
+                        .isEqualTo("2026-05-30.v1")
+                        .isNotEqualTo("v2"));
+    }
+
+    @Test
     void sameEventProjectedTwiceDoesNotDuplicateEngineIntelligence() {
         AtomicReference<EngineIntelligenceProjection> state = new AtomicReference<>();
         when(repository.findById("txn-fdp95-001")).thenAnswer(invocation -> Optional.ofNullable(state.get()));
@@ -151,6 +167,11 @@ class EngineIntelligenceProjectionServiceTest {
 
         assertThat(state.get()).isNotNull();
         assertThat(state.get().getEngines()).hasSize(2);
+        assertThat(state.get().getEngines().stream()
+                .filter(engine -> engine.engineId().equals("ml.python.primary"))
+                .findFirst()
+                .orElseThrow()
+                .modelIdentity()).isNull();
         assertThat(state.get().getDiagnosticSignals()).hasSize(2);
         assertThat(state.get().getWarnings()).hasSize(2);
         assertThat(state.get().getCreatedAt()).isEqualTo(NOW);
