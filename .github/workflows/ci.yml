@@ -38,7 +38,7 @@ jobs:
         run: bash scripts/bootstrap-local-fixtures.sh
 
       - name: Build and test backend modules
-        run: mvn -B verify -Dproject.root=${{ github.workspace }} -Dtest=!ArtifactBackedShadowPerformanceSummaryProviderTest#deploymentDemoArtifactSetIsReadableByRealProvider -Dsurefire.failIfNoSpecifiedTests=false
+        run: mvn -B -U verify -Dproject.root=${{ github.workspace }} -Dtest=!ArtifactBackedShadowPerformanceSummaryProviderTest#deploymentDemoArtifactSetIsReadableByRealProvider -Dsurefire.failIfNoSpecifiedTests=false
 
   fdp42-fraud-case-management:
     name: FDP-42 Fraud Case Management
