@@ -1483,9 +1483,7 @@ paths:
           in: query
           required: false
           schema:
-            type: string
-            maxLength: 80
-            pattern: "^[A-Za-z0-9._-]+$"
+            $ref: "#/components/schemas/CanonicalMlModelVersion"
         - name: lifecycle_status
           in: query
           required: false
@@ -4600,9 +4598,9 @@ components:
         advisory_confidence_context:
           type: string
         model_name:
-          type: string
+          $ref: "#/components/schemas/CanonicalMlModelName"
         model_version:
-          type: string
+          $ref: "#/components/schemas/CanonicalMlModelVersion"
         lifecycle_context:
           type: object
           additionalProperties: true
@@ -4694,9 +4692,9 @@ components:
           type: string
           format: date-time
         model_name:
-          type: string
+          $ref: "#/components/schemas/CanonicalMlModelName"
         model_version:
-          type: string
+          $ref: "#/components/schemas/CanonicalMlModelVersion"
         advisory_severity:
           type: string
         advisory_confidence:
@@ -5104,26 +5102,35 @@ components:
         modelIdentity:
           $ref: "#/components/schemas/EngineIntelligenceMlModelIdentity"
           description: Optional bounded ML runtime identity. Present only for ml.python.primary ML_MODEL results when the producer emitted validated ML model lineage; Rules and Velocity engines must omit it. The top-level scored transaction modelName/modelVersion fields are not the source for this nested identity.
+    CanonicalMlModelName:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: '^[A-Za-z0-9._-]+$'
+      description: Canonical ML model-name syntax only. Runtime identity validation additionally rejects sensitive or forbidden semantic terms.
+    CanonicalMlModelVersion:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: '^[A-Za-z0-9._-]+$'
+      description: Canonical ML model-version syntax only. Runtime identity validation additionally rejects sensitive or forbidden semantic terms.
+    CanonicalMlFeatureContractVersion:
+      type: string
+      minLength: 1
+      maxLength: 96
+      pattern: '^[A-Za-z0-9._-]+$'
+      description: Canonical ML feature-contract-version syntax only. Runtime identity validation additionally rejects sensitive or forbidden semantic terms.
     EngineIntelligenceMlModelIdentity:
       type: object
       additionalProperties: false
       required: [modelName, modelVersion, featureContractVersion]
       properties:
         modelName:
-          type: string
-          minLength: 1
-          maxLength: 128
-          pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
+          $ref: "#/components/schemas/CanonicalMlModelName"
         modelVersion:
-          type: string
-          minLength: 1
-          maxLength: 128
-          pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
+          $ref: "#/components/schemas/CanonicalMlModelVersion"
         featureContractVersion:
-          type: string
-          minLength: 1
-          maxLength: 128
-          pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
+          $ref: "#/components/schemas/CanonicalMlFeatureContractVersion"
     EngineIntelligenceDiagnosticSignalResponse:
       type: object
       additionalProperties: false
@@ -5731,7 +5738,8 @@ components:
           enum: [OFFLINE_DIAGNOSTIC]
         evaluationReportType:
           type: string
-          enum: [FEEDBACK_DATASET_OFFLINE_EVALUATION_V1]
+          enum: [FEEDBACK_DATASET_OFFLINE_EVALUATION_V1, FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1]
+          description: Current Platform Evaluation report type, or the exact legacy read-only report type when reading historical persisted artifacts. Legacy values are not emitted by current writers.
         evaluationReportVersion:
           type: string
           enum: [FDP-124]
@@ -5747,7 +5755,8 @@ components:
           description: UTC-normalized timestamp from the Platform Recommendation Evaluation Card. Must be greater than or equal to evaluationReportGeneratedAt and less than or equal to the summary generatedAt.
         evaluationArtifactSetVersion:
           type: string
-          enum: [feedback-dataset-evaluation-report-artifact-set-v1]
+          enum: [feedback-dataset-evaluation-report-artifact-set-v1, fdp123-report-artifact-set-v1]
+          description: Must match evaluationReportType as an exact current/current or legacy/legacy pair; mixed pairs are invalid.
         datasetVersion:
           type: string
           enum: [feedback-dataset-v1]

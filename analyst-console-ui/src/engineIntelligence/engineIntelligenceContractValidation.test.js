@@ -12,6 +12,7 @@ import {
   isDiagnosticSignalShape,
   isEngineIntelligenceResponseShape,
   isEngineShape,
+  isModelIdentityShape,
   isWarningShape,
   safeString
 } from "./engineIntelligenceContractValidation.js";
@@ -52,6 +53,13 @@ describe("engineIntelligenceContractValidation", () => {
 
   it.each(stringBoundaryCases())("applies shared bounded-string matrix $caseId", ({ value, maxLength, valid }) => {
     expect(safeString(value, maxLength)).toBe(valid);
+  });
+
+  it.each(modelIdentityCases())("applies shared ML model identity syntax matrix $caseId", ({ field, value, validSyntax }) => {
+    const fixture = publicApiFixture("ml-model-identity-cases.json");
+    const identity = { ...fixture.canonicalIdentity, [field]: value };
+
+    expect(isModelIdentityShape(identity)).toBe(validSyntax);
   });
 
   it("rejects extra field at every nested public DTO", () => {
@@ -95,6 +103,10 @@ function timestampCases() {
 
 function stringBoundaryCases() {
   return publicApiFixture("public-string-boundary-cases.json").cases;
+}
+
+function modelIdentityCases() {
+  return publicApiFixture("ml-model-identity-cases.json").cases;
 }
 
 function publicApiFixture(name) {

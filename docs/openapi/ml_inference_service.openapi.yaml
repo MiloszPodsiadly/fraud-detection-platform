@@ -231,7 +231,7 @@ paths:
           in: query
           required: false
           schema:
-            type: string
+            $ref: "#/components/schemas/CanonicalMlModelVersion"
       responses:
         "200":
           description: Bounded advisory event history.
@@ -313,6 +313,24 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
   schemas:
+    CanonicalMlModelName:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: '^[A-Za-z0-9._-]+$'
+      description: Canonical ML model-name syntax only. Runtime identity validation additionally rejects sensitive or forbidden semantic terms.
+    CanonicalMlModelVersion:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: '^[A-Za-z0-9._-]+$'
+      description: Canonical ML model-version syntax only. Runtime identity validation additionally rejects sensitive or forbidden semantic terms.
+    CanonicalMlFeatureContractVersion:
+      type: string
+      minLength: 1
+      maxLength: 96
+      pattern: '^[A-Za-z0-9._-]+$'
+      description: Canonical ML feature-contract-version syntax only. Runtime identity validation additionally rejects sensitive or forbidden semantic terms.
     HealthResponse:
       type: object
       required: [modelName, modelVersion, status, mtlsCert]
@@ -321,9 +339,9 @@ components:
           type: string
           enum: [UP]
         modelName:
-          type: string
+          $ref: "#/components/schemas/CanonicalMlModelName"
         modelVersion:
-          type: string
+          $ref: "#/components/schemas/CanonicalMlModelVersion"
         mtlsCert:
           $ref: "#/components/schemas/MtlsCertHealth"
     MtlsCertHealth:
@@ -378,11 +396,11 @@ components:
           type: string
           enum: [LOW, MEDIUM, HIGH, CRITICAL]
         modelName:
-          type: string
+          $ref: "#/components/schemas/CanonicalMlModelName"
         modelVersion:
-          type: string
+          $ref: "#/components/schemas/CanonicalMlModelVersion"
         featureContractVersion:
-          type: string
+          $ref: "#/components/schemas/CanonicalMlFeatureContractVersion"
         inferenceTimestamp:
           type: string
           format: date-time
@@ -398,6 +416,13 @@ components:
           type: object
           additionalProperties: true
           required: [engineType, explanationType, featureContractVersion, modelAvailable, modelName, modelVersion]
+          properties:
+            modelName:
+              $ref: "#/components/schemas/CanonicalMlModelName"
+            modelVersion:
+              $ref: "#/components/schemas/CanonicalMlModelVersion"
+            featureContractVersion:
+              $ref: "#/components/schemas/CanonicalMlFeatureContractVersion"
         fallbackReason:
           nullable: true
           type: string
@@ -453,9 +478,9 @@ components:
         model_family:
           type: string
         model_name:
-          type: string
+          $ref: "#/components/schemas/CanonicalMlModelName"
         model_version:
-          type: string
+          $ref: "#/components/schemas/CanonicalMlModelVersion"
         reference_profile_id:
           type: string
           nullable: true
@@ -550,16 +575,16 @@ components:
           type: string
           enum: [LOW_SAMPLE, PARTIAL_DATA, STABLE_BASELINE, SUFFICIENT_DATA]
         model_name:
-          type: string
+          $ref: "#/components/schemas/CanonicalMlModelName"
         model_version:
-          type: string
+          $ref: "#/components/schemas/CanonicalMlModelVersion"
         lifecycle_context:
           type: object
           required: [current_model_version, model_changed_recently, model_loaded_at, recent_lifecycle_event_count]
           additionalProperties: false
           properties:
             current_model_version:
-              type: string
+              $ref: "#/components/schemas/CanonicalMlModelVersion"
             model_loaded_at:
               type: string
               nullable: true

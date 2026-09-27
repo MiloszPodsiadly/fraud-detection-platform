@@ -363,6 +363,35 @@ class EngineIntelligenceOpenApiContractTest {
     }
 
     @Test
+    void openApiMlModelIdentityUsesCanonicalFieldSpecificSyntaxSchemas() throws Exception {
+        Map<String, Object> document = map(new Yaml().load(openApi()));
+        Map<String, Object> schemas = schemas();
+        Map<String, Object> identity = schema(schemas, "EngineIntelligenceMlModelIdentity");
+
+        assertThat(property(identity, "modelName"))
+                .containsEntry("$ref", "#/components/schemas/CanonicalMlModelName");
+        assertThat(property(identity, "modelVersion"))
+                .containsEntry("$ref", "#/components/schemas/CanonicalMlModelVersion");
+        assertThat(property(identity, "featureContractVersion"))
+                .containsEntry("$ref", "#/components/schemas/CanonicalMlFeatureContractVersion");
+        assertCanonicalIdentityPart(schema(schemas, "CanonicalMlModelName"), 64);
+        assertCanonicalIdentityPart(schema(schemas, "CanonicalMlModelVersion"), 64);
+        assertCanonicalIdentityPart(schema(schemas, "CanonicalMlFeatureContractVersion"), 96);
+
+        Map<String, Object> advisoryGet = map(
+                map(map(document, "paths"), "/governance/advisories"),
+                "get"
+        );
+        Map<String, Object> modelVersionParameter = list(advisoryGet, "parameters").stream()
+                .map(this::map)
+                .filter(parameter -> "model_version".equals(parameter.get("name")))
+                .findFirst()
+                .orElseThrow();
+        assertThat(map(modelVersionParameter, "schema"))
+                .containsEntry("$ref", "#/components/schemas/CanonicalMlModelVersion");
+    }
+
+    @Test
     void serializedRuntimeComparisonInstanceMatchesParsedOpenApiSchema() throws Exception {
         EngineIntelligenceComparisonResponse response = new EngineIntelligenceComparisonResponse(
                 EngineIntelligenceComparisonType.RULES_VS_ML,
@@ -423,6 +452,14 @@ class EngineIntelligenceOpenApiContractTest {
                 schemaStart,
                 schemaEnd
         );
+    }
+
+    private void assertCanonicalIdentityPart(Map<String, Object> schema, int maxLength) {
+        assertThat(schema)
+                .containsEntry("type", "string")
+                .containsEntry("minLength", 1)
+                .containsEntry("maxLength", maxLength)
+                .containsEntry("pattern", "^[A-Za-z0-9._-]+$");
     }
 
     private String engineIntelligencePath() throws Exception {
