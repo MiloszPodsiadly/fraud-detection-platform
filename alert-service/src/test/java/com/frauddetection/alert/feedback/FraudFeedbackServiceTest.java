@@ -37,7 +37,11 @@ import org.springframework.dao.DuplicateKeyException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -54,6 +58,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 class FraudFeedbackServiceTest {
@@ -65,6 +70,7 @@ class FraudFeedbackServiceTest {
     private final WriteActionAuditOutboxService auditOutboxService = mock(WriteActionAuditOutboxService.class);
     private final RegulatedMutationTransactionRunner transactionRunner = mock(RegulatedMutationTransactionRunner.class);
     private final List<FraudFeedbackRecord> savedRecords = new ArrayList<>();
+    private final ObjectMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
 
     private FraudFeedbackService service;
 
@@ -146,23 +152,65 @@ class FraudFeedbackServiceTest {
     void snapshotsMlIdentityFromPersistedEngineIntelligenceProjection() {
         when(engineIntelligenceReadService.read("txn-1")).thenReturn(projectedEngineIntelligenceWithAvailableMl(
                 "python-logistic-fraud-model",
-                "2026-06-25.v1",
+                "model-X",
                 "feature-contract-v2"
         ));
 
-        service.create("txn-1", request());
+        FraudFeedbackResponse response = service.create("txn-1", request());
 
+        assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
         assertThat(savedRecords).singleElement().satisfies(record -> {
             assertThat(record.getMlModelName()).isEqualTo("python-logistic-fraud-model");
-            assertThat(record.getMlModelVersion()).isEqualTo("2026-06-25.v1");
+            assertThat(record.getMlModelVersion()).isEqualTo("model-X");
             assertThat(record.getMlFeatureContractVersion()).isEqualTo("feature-contract-v2");
         });
     }
 
     @Test
-    void doesNotBackfillMlIdentityWhenProjectionHasNoAvailableMlIdentity() {
-        service.create("txn-1", request());
+    void historicalAvailableMlWithoutIdentityPreservesAvailableComparisonAndPersists() throws Exception {
+        when(engineIntelligenceReadService.read("txn-1"))
+                .thenReturn(historicalAvailableMlWithoutIdentityFixture());
 
+        FraudFeedbackResponse response = service.create("txn-1", request());
+
+        assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
+        assertThat(response.comparisonType()).isEqualTo(EngineIntelligenceComparisonType.RULES_VS_ML);
+        assertThat(response.comparedEngineIds()).containsExactly("rules.primary", "ml.python.primary");
+        assertThat(response.agreementStatus()).isEqualTo(EngineIntelligenceAgreementStatus.DISAGREEMENT);
+        assertThat(response.riskMismatchStatus()).isEqualTo(EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH);
+        assertThat(response.scoreDeltaBucket()).isEqualTo(EngineIntelligenceScoreDeltaBucket.LARGE);
+        assertThat(savedRecords).singleElement().satisfies(record -> {
+            assertThat(record.getMlModelName()).isNull();
+            assertThat(record.getMlModelVersion()).isNull();
+            assertThat(record.getMlFeatureContractVersion()).isNull();
+        });
+
+        verify(repository).save(savedRecords.getFirst());
+        verify(auditOutboxService).createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(engineIntelligenceReadService).read("txn-1");
+        verifyNoMoreInteractions(engineIntelligenceReadService);
+    }
+
+    @Test
+    void timeoutMlWithoutIdentityDoesNotBackfillLineage() {
+        FraudFeedbackResponse response = service.create("txn-1", request());
+
+        assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
+        assertThat(response.comparisonType()).isEqualTo(EngineIntelligenceComparisonType.RULES_VS_ML);
+        assertThat(savedRecords).singleElement().satisfies(record -> {
+            assertThat(record.getMlModelName()).isNull();
+            assertThat(record.getMlModelVersion()).isNull();
+            assertThat(record.getMlFeatureContractVersion()).isNull();
+        });
+    }
+
+    @Test
+    void missingHistoricalMlEngineDoesNotBackfillLineage() {
+        when(engineIntelligenceReadService.read("txn-1")).thenReturn(projectedEngineIntelligenceWithoutMl());
+
+        FraudFeedbackResponse response = service.create("txn-1", request());
+
+        assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.UNAVAILABLE);
         assertThat(savedRecords).singleElement().satisfies(record -> {
             assertThat(record.getMlModelName()).isNull();
             assertThat(record.getMlModelVersion()).isNull();
@@ -722,6 +770,36 @@ class FraudFeedbackServiceTest {
                 List.of(),
                 List.of()
         );
+    }
+
+    private EngineIntelligenceReadModel projectedEngineIntelligenceWithoutMl() {
+        return EngineIntelligenceReadModel.projected(
+                "txn-1",
+                1,
+                Instant.parse("2026-06-25T09:00:03Z"),
+                null,
+                List.of(new EngineIntelligenceEngineReadModel(
+                        "rules.primary",
+                        FraudEngineType.RULES,
+                        FraudEngineStatus.AVAILABLE,
+                        RiskLevel.CRITICAL,
+                        EngineIntelligenceScoreBucket.HIGH,
+                        List.of("HIGH_TRANSACTION_AMOUNT")
+                )),
+                List.of(),
+                List.of()
+        );
+    }
+
+    private EngineIntelligenceReadModel historicalAvailableMlWithoutIdentityFixture() throws Exception {
+        Path fromRepositoryRoot = Path.of(
+                "alert-service",
+                "src/test/resources/fixtures/feedback/historical_available_ml_without_model_identity.json"
+        );
+        Path fixture = Files.isRegularFile(fromRepositoryRoot)
+                ? fromRepositoryRoot
+                : Path.of("src/test/resources/fixtures/feedback/historical_available_ml_without_model_identity.json");
+        return objectMapper.readValue(Files.readString(fixture), EngineIntelligenceReadModel.class);
     }
 
     private FraudFeedbackRecord record() {

@@ -199,8 +199,8 @@ public class FraudFeedbackService {
                 .filter(engine -> FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID.equals(engine.engineId()))
                 .filter(engine -> engine.engineType() == FraudEngineType.ML_MODEL)
                 .filter(engine -> engine.status() == FraudEngineStatus.AVAILABLE)
-                .map(EngineIntelligenceEngineReadModel::modelIdentity)
                 .findFirst()
+                .map(EngineIntelligenceEngineReadModel::modelIdentity)
                 .ifPresent(identity -> applyMlModelIdentity(record, identity));
     }
 
