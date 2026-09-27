@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from offline_evaluation.feedback_dataset_evaluation.dataset_reader import read_feedback_dataset_jsonl
+from offline_evaluation.feedback_dataset_evaluation.dataset_schema import MAX_DATASET_RECORDS
 from offline_evaluation.feedback_dataset_evaluation.evaluation_runner import build_feedback_dataset_evaluation_reports
 from offline_evaluation.feedback_dataset_evaluation.model_evaluation import ModelEvaluationIdentity
 from offline_evaluation.feedback_dataset_evaluation.model_evaluation_artifact_set import (
@@ -164,6 +165,49 @@ class ModelEvaluationArtifactSetReaderTest(unittest.TestCase):
             self._write_summary_and_reseal(artifact_dir, summary)
 
             with self.assertRaisesRegex(ModelEvaluationArtifactSetError, "class balance must sum"):
+                read_validated_model_evaluation_artifact_set(artifact_dir)
+
+    def test_resealedSummaryWithContradictoryWarningsRejected(self):
+        with model_evaluation_artifacts() as artifact_dir:
+            summary = self._summary(artifact_dir)
+            summary["warnings"] = [
+                "MODEL_PREDICTION_SIGNAL_UNAVAILABLE",
+                "SINGLE_CLASS_MODEL_LINEAGE_RECORDS",
+            ]
+            self._write_summary_and_reseal(artifact_dir, summary)
+
+            with self.assertRaisesRegex(ModelEvaluationArtifactSetError, "warnings must match evaluated population"):
+                read_validated_model_evaluation_artifact_set(artifact_dir)
+
+    def test_resealedSummaryWithReversedEvaluationWindowRejected(self):
+        with model_evaluation_artifacts() as artifact_dir:
+            summary = self._summary(artifact_dir)
+            summary["evaluationWindow"]["fromInclusive"] = "2026-06-10T00:00:00Z"
+            summary["evaluationWindow"]["toInclusive"] = "2026-06-01T00:00:00Z"
+            self._write_summary_and_reseal(artifact_dir, summary)
+
+            with self.assertRaisesRegex(ModelEvaluationArtifactSetError, "must not be later"):
+                read_validated_model_evaluation_artifact_set(artifact_dir)
+
+    def test_resealedSummaryWithReconciledOversizedPopulationRejected(self):
+        with model_evaluation_artifacts() as artifact_dir:
+            summary = self._summary(artifact_dir)
+            summary["population"] = {
+                "recordsConsidered": MAX_DATASET_RECORDS + 1,
+                "recordsEvaluated": MAX_DATASET_RECORDS + 1,
+                "recordsExcludedMissingLineage": 0,
+                "recordsExcludedIdentityMismatch": 0,
+            }
+            summary["classBalance"] = {
+                "positiveClassCount": MAX_DATASET_RECORDS,
+                "negativeClassCount": 1,
+            }
+            self._write_summary_and_reseal(artifact_dir, summary)
+
+            with self.assertRaisesRegex(
+                    ModelEvaluationArtifactSetError,
+                    f"must be an integer between 0 and {MAX_DATASET_RECORDS}",
+            ):
                 read_validated_model_evaluation_artifact_set(artifact_dir)
 
     def test_symlinkSummaryRejected(self):

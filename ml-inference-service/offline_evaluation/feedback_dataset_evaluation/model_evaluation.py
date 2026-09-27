@@ -3,8 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from offline_evaluation.feedback_dataset_evaluation.dataset_schema import MAX_DATASET_RECORDS
 from offline_evaluation.feedback_dataset_evaluation.models import FeedbackDataset, FeedbackDatasetRecord
-from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import normalize_rfc3339_timestamp
+from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import (
+    normalize_rfc3339_timestamp,
+    validate_optional_timestamp_range,
+)
 from app.model_identity_policy import (
     validate_feature_contract_version,
     validate_model_name,
@@ -113,7 +117,7 @@ def build_model_specific_evaluation_summary(
     ]
     positives = [record for record in matching if record.is_positive_class]
     negatives = [record for record in matching if record.is_negative_class]
-    warnings = _warnings(matching, positives, negatives)
+    warnings = _expected_warnings(len(matching), len(positives), len(negatives))
     summary = {
         "reportType": MODEL_EVALUATION_REPORT_TYPE,
         "generatedAt": generated_at,
@@ -187,6 +191,13 @@ def validate_model_evaluation_summary(summary: dict[str, Any]) -> dict[str, Any]
     _validate_supported_metrics(summary.get("supportedMetrics"), population["recordsEvaluated"])
     _validate_machine_code_set(summary.get("limitations"), REQUIRED_LIMITATIONS, "limitations", exact=True)
     _validate_machine_code_set(summary.get("warnings"), ALLOWED_WARNINGS, "warnings", exact=False)
+    expected_warnings = _expected_warnings(
+        population["recordsEvaluated"],
+        class_balance["positiveClassCount"],
+        class_balance["negativeClassCount"],
+    )
+    if summary["warnings"] != expected_warnings:
+        raise ValueError("warnings must match evaluated population and class balance")
     return summary
 
 
@@ -206,27 +217,33 @@ def _validate_subject(value: Any) -> None:
 def _validate_window(value: Any) -> None:
     if not isinstance(value, dict):
         raise ValueError("evaluationWindow must be an object")
-    _reject_unknown_or_missing(value, EVALUATION_WINDOW_FIELDS, "evaluationWindow")
+    extra = sorted(set(value) - EVALUATION_WINDOW_FIELDS)
+    if extra:
+        raise ValueError(f"evaluationWindow contains unsupported fields: {', '.join(extra)}")
+    if "timeBasis" not in value:
+        raise ValueError("evaluationWindow missing required fields: timeBasis")
     if value.get("timeBasis") != EVALUATION_TIME_BASIS:
         raise ValueError("evaluationWindow timeBasis unsupported")
-    for field in ("fromInclusive", "toInclusive"):
-        timestamp = value.get(field)
-        if timestamp is not None and normalize_rfc3339_timestamp(timestamp, field) != timestamp:
-            raise ValueError(f"evaluationWindow {field} must be canonical")
+    validate_optional_timestamp_range(
+        value.get("fromInclusive"),
+        value.get("toInclusive"),
+        "evaluationWindow.fromInclusive",
+        "evaluationWindow.toInclusive",
+    )
 
 
 def _validate_population(value: Any) -> dict[str, int]:
     if not isinstance(value, dict):
         raise ValueError("population must be an object")
     _reject_unknown_or_missing(value, POPULATION_FIELDS, "population")
-    return {field: _non_negative_int(value.get(field), f"population.{field}") for field in POPULATION_FIELDS}
+    return {field: _bounded_count(value.get(field), f"population.{field}") for field in POPULATION_FIELDS}
 
 
 def _validate_class_balance(value: Any) -> dict[str, int]:
     if not isinstance(value, dict):
         raise ValueError("classBalance must be an object")
     _reject_unknown_or_missing(value, CLASS_BALANCE_FIELDS, "classBalance")
-    return {field: _non_negative_int(value.get(field), f"classBalance.{field}") for field in CLASS_BALANCE_FIELDS}
+    return {field: _bounded_count(value.get(field), f"classBalance.{field}") for field in CLASS_BALANCE_FIELDS}
 
 
 def _validate_lineage_policy(value: Any) -> None:
@@ -295,23 +312,27 @@ def _reject_unknown_or_missing(value: dict[str, Any], allowed: set[str], locatio
         raise ValueError(f"{location} missing required fields: {', '.join(missing)}")
 
 
-def _non_negative_int(value: Any, location: str) -> int:
-    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-        raise ValueError(f"{location} must be a non-negative integer")
+def _bounded_count(value: Any, location: str) -> int:
+    if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or value < 0
+            or value > MAX_DATASET_RECORDS
+    ):
+        raise ValueError(f"{location} must be an integer between 0 and {MAX_DATASET_RECORDS}")
     return value
 
 
-def _warnings(
-        matching: list[FeedbackDatasetRecord],
-        positives: list[FeedbackDatasetRecord],
-        negatives: list[FeedbackDatasetRecord],
+def _expected_warnings(
+        records_evaluated: int,
+        positive_class_count: int,
+        negative_class_count: int,
 ) -> list[str]:
-    warnings = []
-    if not matching:
+    warnings = [MODEL_PREDICTION_SIGNAL_UNAVAILABLE]
+    if records_evaluated == 0:
         warnings.append(INSUFFICIENT_MODEL_LINEAGE_RECORDS)
-    if matching and (not positives or not negatives):
+    elif positive_class_count == 0 or negative_class_count == 0:
         warnings.append(SINGLE_CLASS_MODEL_LINEAGE_RECORDS)
-    warnings.append(MODEL_PREDICTION_SIGNAL_UNAVAILABLE)
     return sorted(warnings)
 
 

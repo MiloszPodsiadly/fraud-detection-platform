@@ -51,3 +51,28 @@ def normalize_rfc3339_timestamp(value: Any, field: str) -> str:
 def timestamp_instant(value: str) -> datetime:
     normalized = normalize_rfc3339_timestamp(value, "timestamp")
     return datetime.fromisoformat(normalized.replace("Z", "+00:00")).astimezone(UTC)
+
+
+def validate_optional_timestamp_range(
+        from_inclusive: Any,
+        to_inclusive: Any,
+        from_field: str = "fromInclusive",
+        to_field: str = "toInclusive",
+) -> tuple[str | None, str | None]:
+    normalized_from = (
+        None
+        if from_inclusive is None
+        else normalize_rfc3339_timestamp(from_inclusive, from_field)
+    )
+    normalized_to = (
+        None
+        if to_inclusive is None
+        else normalize_rfc3339_timestamp(to_inclusive, to_field)
+    )
+    if (
+            normalized_from is not None
+            and normalized_to is not None
+            and timestamp_instant(normalized_from) > timestamp_instant(normalized_to)
+    ):
+        raise TimestampContractError(f"{from_field} must not be later than {to_field}")
+    return normalized_from, normalized_to

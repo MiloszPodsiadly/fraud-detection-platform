@@ -345,6 +345,7 @@ function isEngineModelIdentityConsistent(engine) {
   }
   return engine.engineId === "ml.python.primary"
     && engine.engineType === "ML_MODEL"
+    && engine.status === "AVAILABLE"
     && isModelIdentityShape(engine.modelIdentity);
 }
 

@@ -1,11 +1,12 @@
+import json
 import unittest
 
 from offline_evaluation.feedback_dataset_evaluation.dataset_reader import read_feedback_dataset_jsonl
 from offline_evaluation.feedback_dataset_evaluation.dataset_schema import FeedbackDatasetValidationError, evaluation_label_value
 try:
-    from feedback_dataset_evaluation.feedback_dataset_fixtures import jsonl, jsonl_file, record
+    from feedback_dataset_evaluation.feedback_dataset_fixtures import jsonl, jsonl_file, metadata, record
 except ModuleNotFoundError:
-    from feedback_dataset_fixtures import jsonl, jsonl_file, record
+    from feedback_dataset_fixtures import jsonl, jsonl_file, metadata, record
 
 
 class FeedbackDatasetSchemaTest(unittest.TestCase):
@@ -128,6 +129,42 @@ class FeedbackDatasetSchemaTest(unittest.TestCase):
         self._assert_rejected(record(mlFeatureContractVersion="feature contract v2"))
         self._assert_rejected(record(mlFeatureContractVersion="f" * 97))
 
+    def test_metadataAcceptsOptionalAndChronologicalEvaluationWindows(self):
+        valid_windows = (
+            ({}, (None, None)),
+            ({"fromInclusive": None, "toInclusive": None}, (None, None)),
+            ({"fromInclusive": "2026-06-01T00:00:00Z"}, ("2026-06-01T00:00:00Z", None)),
+            ({"toInclusive": "2026-06-09T23:59:59Z"}, (None, "2026-06-09T23:59:59Z")),
+            (
+                {"fromInclusive": "2026-06-01T00:00:00Z", "toInclusive": "2026-06-09T23:59:59Z"},
+                ("2026-06-01T00:00:00Z", "2026-06-09T23:59:59Z"),
+            ),
+            (
+                {"fromInclusive": "2026-06-01T00:00:00Z", "toInclusive": "2026-06-01T00:00:00Z"},
+                ("2026-06-01T00:00:00Z", "2026-06-01T00:00:00Z"),
+            ),
+            (
+                {"fromInclusive": "2026-06-01T00:00:00Z", "toInclusive": "2026-06-01T00:00:00.1Z"},
+                ("2026-06-01T00:00:00Z", "2026-06-01T00:00:00.1Z"),
+            ),
+        )
+        for window, expected in valid_windows:
+            with self.subTest(window=window):
+                parsed = self._parse_with_metadata_window(window)
+                self.assertEqual(expected, (parsed.metadata.from_inclusive, parsed.metadata.to_inclusive))
+
+    def test_metadataRejectsInvalidEvaluationWindows(self):
+        invalid_windows = (
+            {"fromInclusive": "2026-06-10T00:00:00Z", "toInclusive": "2026-06-01T00:00:00Z"},
+            {"fromInclusive": "not-a-timestamp", "toInclusive": None},
+            {"fromInclusive": "2026-06-01T00:00:00", "toInclusive": None},
+            {"fromInclusive": "2026-06-01T01:00:00+01:00", "toInclusive": None},
+        )
+        for window in invalid_windows:
+            with self.subTest(window=window):
+                with self.assertRaises(FeedbackDatasetValidationError):
+                    self._parse_with_metadata_window(window)
+
     def _parse(self, payload):
         with jsonl_file(jsonl(payload)) as path:
             return read_feedback_dataset_jsonl(path)
@@ -136,6 +173,19 @@ class FeedbackDatasetSchemaTest(unittest.TestCase):
         with jsonl_file(jsonl(payload)) as path:
             with self.assertRaises(FeedbackDatasetValidationError):
                 read_feedback_dataset_jsonl(path)
+
+    def _parse_with_metadata_window(self, window):
+        metadata_payload = metadata()
+        metadata_payload.pop("fromInclusive")
+        metadata_payload.pop("toInclusive")
+        metadata_payload.update(window)
+        payload = "\n".join((
+            json.dumps(metadata_payload, separators=(",", ":")),
+            json.dumps({"type": "DATASET_RECORD", "record": record()}, separators=(",", ":")),
+            "",
+        ))
+        with jsonl_file(payload) as path:
+            return read_feedback_dataset_jsonl(path)
 
 
 if __name__ == "__main__":

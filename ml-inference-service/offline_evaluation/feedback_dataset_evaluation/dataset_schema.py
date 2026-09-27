@@ -6,6 +6,10 @@ from datetime import datetime
 from typing import Any
 
 from offline_evaluation.feedback_dataset_evaluation.models import FeedbackDatasetMetadata, FeedbackDatasetRecord
+from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import (
+    TimestampContractError,
+    validate_optional_timestamp_range,
+)
 from app.model_identity_policy import (
     validate_feature_contract_version,
     validate_model_name,
@@ -52,7 +56,7 @@ ALLOWED_METADATA_FIELDS = {
     "truncated",
     "failureReason",
 }
-REQUIRED_METADATA_FIELDS = set(ALLOWED_METADATA_FIELDS)
+REQUIRED_METADATA_FIELDS = set(ALLOWED_METADATA_FIELDS) - {"fromInclusive", "toInclusive"}
 ALLOWED_FAILURE_REASONS = {
     "NONE",
     "INVALID_REQUEST",
@@ -183,12 +187,19 @@ def validate_metadata(raw: dict[str, Any]) -> FeedbackDatasetMetadata:
     truncated = raw.get("truncated")
     if not isinstance(truncated, bool):
         raise FeedbackDatasetValidationError("truncated must be boolean")
+    try:
+        from_inclusive, to_inclusive = validate_optional_timestamp_range(
+            raw.get("fromInclusive"),
+            raw.get("toInclusive"),
+        )
+    except TimestampContractError as exception:
+        raise FeedbackDatasetValidationError(str(exception)) from exception
     return FeedbackDatasetMetadata(
         dataset_version=DATASET_VERSION,
         built_at=_required_datetime_string(raw, "builtAt"),
         time_basis=DATASET_TIME_BASIS,
-        from_inclusive=_optional_datetime_string(raw, "fromInclusive"),
-        to_inclusive=_optional_datetime_string(raw, "toInclusive"),
+        from_inclusive=from_inclusive,
+        to_inclusive=to_inclusive,
         raw_rows_read=raw_rows_read,
         records_returned=records_returned,
         excluded_unresolved_count=_required_int(raw, "excludedUnresolvedCount", minimum=0),
