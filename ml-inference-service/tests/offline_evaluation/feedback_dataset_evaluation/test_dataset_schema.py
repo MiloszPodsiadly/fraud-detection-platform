@@ -147,6 +147,10 @@ class FeedbackDatasetSchemaTest(unittest.TestCase):
                 {"fromInclusive": "2026-06-01T00:00:00Z", "toInclusive": "2026-06-01T00:00:00.1Z"},
                 ("2026-06-01T00:00:00Z", "2026-06-01T00:00:00.1Z"),
             ),
+            (
+                {"fromInclusive": "2026-09-27T00:00:00.123456788Z", "toInclusive": "2026-09-27T00:00:00.123456789Z"},
+                ("2026-09-27T00:00:00.123456788Z", "2026-09-27T00:00:00.123456789Z"),
+            ),
         )
         for window, expected in valid_windows:
             with self.subTest(window=window):
@@ -159,6 +163,7 @@ class FeedbackDatasetSchemaTest(unittest.TestCase):
             {"fromInclusive": "not-a-timestamp", "toInclusive": None},
             {"fromInclusive": "2026-06-01T00:00:00", "toInclusive": None},
             {"fromInclusive": "2026-06-01T01:00:00+01:00", "toInclusive": None},
+            {"fromInclusive": "2026-09-27T00:00:00.123456789Z", "toInclusive": "2026-09-27T00:00:00.123456788Z"},
         )
         for window in invalid_windows:
             with self.subTest(window=window):

@@ -32,7 +32,7 @@ from offline_evaluation.promotion_review_readiness_schema import (
     promotion_review_readiness_report_json,
     validate_promotion_review_readiness_report,
 )
-from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import timestamp_instant
+from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import compare_rfc3339_timestamps
 from offline_evaluation.shadow_performance_artifact_set import (
     ShadowPerformanceArtifactSetError,
     build_shadow_performance_manifest,
@@ -151,8 +151,11 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
                 report["inputs"]["shadowPerformanceSummary"]["generatedAt"],
             )
             self.assertGreaterEqual(
-                timestamp_instant(report["generatedAt"]),
-                timestamp_instant(source_summary["generatedAt"]),
+                compare_rfc3339_timestamps(
+                    report["generatedAt"],
+                    source_summary["generatedAt"],
+                ),
+                0,
             )
 
         self.assertEqual(summary_before, CANONICAL_SHADOW_FIXTURE.read_bytes())

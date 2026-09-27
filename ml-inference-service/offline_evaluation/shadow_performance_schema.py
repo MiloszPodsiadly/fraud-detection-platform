@@ -32,8 +32,8 @@ from offline_evaluation.feedback_dataset_evaluation.report_contract import (
 )
 from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import (
     TimestampContractError,
+    compare_rfc3339_timestamps,
     normalize_rfc3339_timestamp,
-    timestamp_instant,
 )
 
 
@@ -399,12 +399,15 @@ def _validate_summary_consistency(summary: dict[str, Any]) -> None:
     if evaluation_population["positiveClassCount"] + evaluation_population["negativeClassCount"] != evaluation_population["recordsEvaluated"]:
         raise ShadowPerformanceValidationError("positiveClassCount + negativeClassCount must equal recordsEvaluated")
     evaluation = summary["evaluation"]
-    report_generated_at = timestamp_instant(evaluation["evaluationReportGeneratedAt"])
-    card_generated_at = timestamp_instant(evaluation["evaluationCardGeneratedAt"])
-    summary_generated_at = timestamp_instant(summary["generatedAt"])
-    if card_generated_at < report_generated_at:
+    if compare_rfc3339_timestamps(
+            evaluation["evaluationCardGeneratedAt"],
+            evaluation["evaluationReportGeneratedAt"],
+    ) < 0:
         raise ShadowPerformanceValidationError("evaluationCardGeneratedAt must be greater than or equal to evaluationReportGeneratedAt")
-    if summary_generated_at < card_generated_at:
+    if compare_rfc3339_timestamps(
+            summary["generatedAt"],
+            evaluation["evaluationCardGeneratedAt"],
+    ) < 0:
         raise ShadowPerformanceValidationError("generatedAt must be greater than or equal to evaluationCardGeneratedAt")
 
 

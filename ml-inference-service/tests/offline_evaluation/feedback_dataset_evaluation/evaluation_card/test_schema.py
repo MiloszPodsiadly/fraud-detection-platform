@@ -23,8 +23,9 @@ from offline_evaluation.feedback_dataset_evaluation.evaluation_card.safety_polic
 )
 from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import (
     TimestampContractError,
+    compare_rfc3339_timestamps,
     normalize_rfc3339_timestamp,
-    timestamp_instant,
+    validate_optional_timestamp_range,
 )
 
 
@@ -41,7 +42,7 @@ class SharedTimestampContractTest(unittest.TestCase):
         for value in VALID_CANONICAL_TIMESTAMPS:
             with self.subTest(value=value):
                 self.assertEqual(value, normalize_rfc3339_timestamp(value, "generatedAt"))
-                self.assertIsNotNone(timestamp_instant(value).tzinfo)
+                self.assertEqual(0, compare_rfc3339_timestamps(value, value))
 
     def test_canonicalTimestampMatrixRejected(self):
         for value in INVALID_CANONICAL_TIMESTAMPS:
@@ -49,7 +50,40 @@ class SharedTimestampContractTest(unittest.TestCase):
                 with self.assertRaises(TimestampContractError):
                     normalize_rfc3339_timestamp(value, "generatedAt")
                 with self.assertRaises(TimestampContractError):
-                    timestamp_instant(value)
+                    compare_rfc3339_timestamps(value, value)
+
+    def test_timestampRangePreservesFullNanosecondOrdering(self):
+        valid_ranges = (
+            (None, None),
+            ("2026-09-27T00:00:00.123456788Z", None),
+            (None, "2026-09-27T00:00:00.123456789Z"),
+            ("2026-09-27T00:00:00.123456788Z", "2026-09-27T00:00:00.123456789Z"),
+            ("2026-09-27T00:00:00.123Z", "2026-09-27T00:00:00.123000000Z"),
+            ("2026-09-27T00:00:00.999999999Z", "2026-09-27T00:00:01Z"),
+            ("2026-09-27T00:00:00Z", "2026-09-27T00:00:00.000000000Z"),
+            ("2026-09-27T00:00:00.123456789Z", "2026-09-27T00:00:00.123456789Z"),
+            ("2026-09-26T23:59:59.999999999Z", "2026-09-27T00:00:00Z"),
+            ("2024-02-29T00:00:00Z", "2024-02-29T23:59:59.999999999Z"),
+        )
+        for from_inclusive, to_inclusive in valid_ranges:
+            with self.subTest(from_inclusive=from_inclusive, to_inclusive=to_inclusive):
+                self.assertEqual(
+                    (from_inclusive, to_inclusive),
+                    validate_optional_timestamp_range(from_inclusive, to_inclusive),
+                )
+
+    def test_timestampRangeRejectsNanosecondInversionAndInvalidBoundaries(self):
+        invalid_ranges = (
+            ("2026-09-27T00:00:00.123456789Z", "2026-09-27T00:00:00.123456788Z"),
+            ("2026-09-27T00:00:00.123000001Z", "2026-09-27T00:00:00.123Z"),
+            ("2026-09-27T00:00:00.1234567890Z", None),
+            ("2026-02-29T00:00:00Z", None),
+            ("2026-04-31T00:00:00Z", None),
+        )
+        for from_inclusive, to_inclusive in invalid_ranges:
+            with self.subTest(from_inclusive=from_inclusive, to_inclusive=to_inclusive):
+                with self.assertRaises(TimestampContractError):
+                    validate_optional_timestamp_range(from_inclusive, to_inclusive)
 
 
 class FeedbackDatasetEvaluationCardSchemaTest(unittest.TestCase):

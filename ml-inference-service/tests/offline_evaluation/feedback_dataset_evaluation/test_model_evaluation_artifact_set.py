@@ -182,8 +182,8 @@ class ModelEvaluationArtifactSetReaderTest(unittest.TestCase):
     def test_resealedSummaryWithReversedEvaluationWindowRejected(self):
         with model_evaluation_artifacts() as artifact_dir:
             summary = self._summary(artifact_dir)
-            summary["evaluationWindow"]["fromInclusive"] = "2026-06-10T00:00:00Z"
-            summary["evaluationWindow"]["toInclusive"] = "2026-06-01T00:00:00Z"
+            summary["evaluationWindow"]["fromInclusive"] = "2026-09-27T00:00:00.123456789Z"
+            summary["evaluationWindow"]["toInclusive"] = "2026-09-27T00:00:00.123456788Z"
             self._write_summary_and_reseal(artifact_dir, summary)
 
             with self.assertRaisesRegex(ModelEvaluationArtifactSetError, "must not be later"):

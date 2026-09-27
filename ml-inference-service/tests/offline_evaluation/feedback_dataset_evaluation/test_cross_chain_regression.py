@@ -5,7 +5,6 @@ import json
 import tempfile
 import unittest
 from contextlib import contextmanager
-from datetime import datetime
 from pathlib import Path
 
 from offline_evaluation.feedback_dataset_evaluation.dataset_schema import MAX_DATASET_RECORDS
@@ -27,6 +26,7 @@ from offline_evaluation.feedback_dataset_evaluation.model_evaluation_artifact_se
     ModelEvaluationArtifactSetError,
     read_validated_model_evaluation_artifact_set,
 )
+from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import compare_rfc3339_timestamps
 
 try:
     from feedback_dataset_evaluation.feedback_dataset_fixtures import GENERATED_AT, jsonl, record
@@ -94,8 +94,11 @@ class FeedbackEvaluationCrossChainRegressionTest(unittest.TestCase):
             self.assertLessEqual(model_summary["population"]["recordsConsidered"], MAX_DATASET_RECORDS)
             window = model_summary["evaluationWindow"]
             self.assertLessEqual(
-                datetime.fromisoformat(window["fromInclusive"].replace("Z", "+00:00")),
-                datetime.fromisoformat(window["toInclusive"].replace("Z", "+00:00")),
+                compare_rfc3339_timestamps(
+                    window["fromInclusive"],
+                    window["toInclusive"],
+                ),
+                0,
             )
             self.assertEqual(4, card["evaluationEvidence"]["recordsEvaluated"])
 

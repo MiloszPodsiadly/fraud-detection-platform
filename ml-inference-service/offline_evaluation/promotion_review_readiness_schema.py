@@ -10,8 +10,8 @@ from offline_evaluation.feedback_dataset_evaluation.evaluation_card.schema impor
 )
 from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import (
     TimestampContractError,
+    compare_rfc3339_timestamps,
     normalize_rfc3339_timestamp,
-    timestamp_instant,
 )
 from offline_evaluation.shadow_performance_schema import (
     BANNER as SHADOW_PERFORMANCE_BANNER,
@@ -341,9 +341,10 @@ def _validate_status_consistency(report: dict[str, Any]) -> None:
         raise PromotionReviewReadinessValidationError("reasonCodes must match required checks")
     if not REQUIRED_LIMITATIONS.issubset(set(report["limitations"])):
         raise PromotionReviewReadinessValidationError("limitations missing diagnostic non-goals")
-    if timestamp_instant(report["generatedAt"]) < timestamp_instant(
-            report["inputs"]["shadowPerformanceSummary"]["generatedAt"]
-    ):
+    if compare_rfc3339_timestamps(
+            report["generatedAt"],
+            report["inputs"]["shadowPerformanceSummary"]["generatedAt"],
+    ) < 0:
         raise PromotionReviewReadinessValidationError(
             "generatedAt must be greater than or equal to inputs.shadowPerformanceSummary.generatedAt"
         )

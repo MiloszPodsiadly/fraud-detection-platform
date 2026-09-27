@@ -236,6 +236,11 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
                 "fromInclusive": "2026-06-01T00:00:00Z",
                 "toInclusive": "2026-06-01T00:00:00.1Z",
             },
+            {
+                "timeBasis": "FEEDBACK_CREATED_AT",
+                "fromInclusive": "2026-09-27T00:00:00.123456788Z",
+                "toInclusive": "2026-09-27T00:00:00.123456789Z",
+            },
         )
         for window in valid_windows:
             with self.subTest(window=window):
@@ -253,6 +258,11 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
             {"timeBasis": "FEEDBACK_CREATED_AT", "fromInclusive": "not-a-timestamp"},
             {"timeBasis": "FEEDBACK_CREATED_AT", "fromInclusive": "2026-06-01T00:00:00"},
             {"timeBasis": "FEEDBACK_CREATED_AT", "fromInclusive": "2026-06-01T01:00:00+01:00"},
+            {
+                "timeBasis": "FEEDBACK_CREATED_AT",
+                "fromInclusive": "2026-09-27T00:00:00.123456789Z",
+                "toInclusive": "2026-09-27T00:00:00.123456788Z",
+            },
         )
         for window in invalid_windows:
             with self.subTest(window=window):

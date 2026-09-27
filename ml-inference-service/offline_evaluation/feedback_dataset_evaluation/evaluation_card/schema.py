@@ -37,8 +37,8 @@ from offline_evaluation.feedback_dataset_evaluation.evaluation_card.safety_polic
 )
 from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import (
     TimestampContractError,
+    compare_rfc3339_timestamps as _compare_rfc3339_timestamps,
     normalize_rfc3339_timestamp as _normalize_rfc3339_timestamp,
-    timestamp_instant as _timestamp_instant,
 )
 
 
@@ -224,9 +224,10 @@ def validate_evaluation_card(raw: dict[str, Any]) -> dict[str, Any]:
         )
     except ValueError as exc:
         raise FeedbackDatasetEvaluationCardValidationError(str(exc)) from exc
-    if _timestamp_instant(normalized["generatedAt"]) < _timestamp_instant(
-            normalized["evaluationEvidence"]["evaluationGeneratedAt"]
-    ):
+    if _compare_rfc3339_timestamps(
+            normalized["generatedAt"],
+            normalized["evaluationEvidence"]["evaluationGeneratedAt"],
+    ) < 0:
         raise FeedbackDatasetEvaluationCardValidationError("generatedAt must be greater than or equal to evaluationGeneratedAt")
     _reject_unsafe(normalized)
     return normalized
