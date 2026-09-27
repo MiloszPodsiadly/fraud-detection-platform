@@ -3,13 +3,15 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from offline_evaluation.feedback_dataset_evaluation.evaluation_card.generator import generate_evaluation_card_from_fdp124_artifacts
+from offline_evaluation.feedback_dataset_evaluation.evaluation_card.generator import (
+    generate_platform_evaluation_card_from_artifacts,
+)
 from offline_evaluation.feedback_dataset_evaluation.evaluation_card.writer import write_evaluation_card_artifacts
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Generate a local feedback dataset/FDP-124 Platform Recommendation Evaluation Card v1 artifact set."
+        description="Generate a local Platform Evaluation Card artifact set from Feedback Dataset Evaluation artifacts."
     )
     parser.add_argument("--evaluation-summary", required=True)
     parser.add_argument("--evaluation-manifest", required=True)
@@ -30,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
         "limitations": _list_arg(args.limitation),
         "governanceBoundary": _list_arg(args.governance_boundary),
     }
-    evaluation_card = generate_evaluation_card_from_fdp124_artifacts(
+    evaluation_card = generate_platform_evaluation_card_from_artifacts(
         Path(args.evaluation_summary),
         Path(args.evaluation_manifest),
         metadata,

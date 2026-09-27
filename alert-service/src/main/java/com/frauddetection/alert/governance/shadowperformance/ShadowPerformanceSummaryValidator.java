@@ -97,10 +97,7 @@ class ShadowPerformanceSummaryValidator {
         require("NOT_AVAILABLE".equals(subject.modelIdentity()), "modelIdentity is unsupported");
         require("NOT_AVAILABLE".equals(subject.modelArtifactSha256()), "modelArtifactSha256 is unsupported");
         require(
-                PlatformEvaluationArtifactIdentityPolicy.CURRENT_IDENTITY_COMPLETENESS.equals(subject.identityCompleteness())
-                        || PlatformEvaluationArtifactIdentityPolicy.LEGACY_READ_ONLY_IDENTITY_COMPLETENESS.equals(
-                        subject.identityCompleteness()
-                ),
+                PlatformEvaluationArtifactIdentityPolicy.CURRENT_IDENTITY_COMPLETENESS.equals(subject.identityCompleteness()),
                 "identityCompleteness is unsupported"
         );
     }
@@ -131,13 +128,16 @@ class ShadowPerformanceSummaryValidator {
                 "evaluationCardVersion is unsupported"
         );
         require("OFFLINE_DIAGNOSTIC".equals(evaluation.evaluationPurpose()), "evaluationPurpose is unsupported");
-        require("FDP-124".equals(evaluation.evaluationReportVersion()), "evaluationReportVersion is unsupported");
+        require(
+                ShadowPerformanceSummaryContract.EVALUATION_REPORT_VERSION.equals(evaluation.evaluationReportVersion()),
+                "evaluationReportVersion is unsupported"
+        );
         Instant reportGeneratedAt = instant(evaluation.evaluationReportGeneratedAt(), "evaluationReportGeneratedAt");
         Instant cardGeneratedAt = instant(evaluation.evaluationCardGeneratedAt(), "evaluationCardGeneratedAt");
         require(!cardGeneratedAt.isBefore(reportGeneratedAt), "evaluationCardGeneratedAt must be >= evaluationReportGeneratedAt");
         require(!summaryGeneratedAt.isBefore(cardGeneratedAt), "generatedAt must be >= evaluationCardGeneratedAt");
         require(
-                PlatformEvaluationArtifactIdentityPolicy.isSupportedReadProvenance(
+                PlatformEvaluationArtifactIdentityPolicy.isCanonicalProvenance(
                         evaluation.evaluationReportType(),
                         evaluation.evaluationArtifactSetVersion(),
                         identityCompleteness

@@ -1,2 +1,2 @@
-"""feedback dataset/FDP-124 scoped evaluation card generation."""
+"""Platform Evaluation Card generation from Feedback Dataset Evaluation artifacts."""
 

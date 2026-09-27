@@ -23,9 +23,6 @@ from offline_evaluation.feedback_dataset_evaluation.evaluation_contract import E
 from offline_evaluation.feedback_dataset_evaluation.report_contract import (
     ARTIFACT_SET_VERSION as EXPECTED_EVALUATION_ARTIFACT_SET_VERSION,
     CURRENT_IDENTITY_COMPLETENESS,
-    LEGACY_READ_ONLY_IDENTITY_COMPLETENESS,
-    LEGACY_READ_ONLY_ARTIFACT_SET_VERSION,
-    LEGACY_READ_ONLY_REPORT_TYPE,
     REPORT_TYPE as EXPECTED_EVALUATION_REPORT_TYPE,
     validate_platform_evaluation_artifact_identity,
     validate_platform_evaluation_artifact_provenance,
@@ -38,13 +35,13 @@ from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import (
 
 
 class ShadowPerformanceValidationError(ValueError):
-    """Raised when Shadow Performance Summary v2 is unsafe or outside FDP-126 bounds."""
+    """Raised when Shadow Performance Summary v2 is unsafe or outside current contract bounds."""
 
 
 REPORT_TYPE = "SHADOW_PERFORMANCE_SUMMARY_V2"
 SUMMARY_TYPE = REPORT_TYPE
 SUMMARY_VERSION = "shadow-performance-summary-v2"
-EXPECTED_EVALUATION_REPORT_VERSION = "FDP-124"
+EXPECTED_EVALUATION_REPORT_VERSION = "feedback-dataset-evaluation-v1"
 EXPECTED_GOVERNANCE_STATUS = "DIAGNOSTIC_ONLY"
 MAX_WARNINGS = 20
 MAX_LIMITATIONS = 20
@@ -114,8 +111,6 @@ SAFE_CONTRACT_VALUES = {
     EXPECTED_EVALUATION_REPORT_TYPE,
     EXPECTED_EVALUATION_REPORT_VERSION,
     EXPECTED_EVALUATION_ARTIFACT_SET_VERSION,
-    LEGACY_READ_ONLY_REPORT_TYPE,
-    LEGACY_READ_ONLY_ARTIFACT_SET_VERSION,
     EXPECTED_DATASET_VERSION,
     EXPECTED_DATASET_TIME_BASIS,
     PLATFORM_RECOMMENDATION_EVALUATION_CARD_REPORT_TYPE,
@@ -124,12 +119,10 @@ SAFE_CONTRACT_VALUES = {
     METRICS_SUBJECT,
     BANNER,
     "DIAGNOSTIC_ONLY",
-    "FDP-124",
     "OFFLINE_DIAGNOSTIC",
     "NOT_AVAILABLE",
     "NOT_APPLICABLE",
     CURRENT_IDENTITY_COMPLETENESS,
-    LEGACY_READ_ONLY_IDENTITY_COMPLETENESS,
     "PLATFORM_RECOMMENDATION",
     "ENGINE_INTELLIGENCE_PROJECTION",
     "ENGINE_INTELLIGENCE_PROJECTION_V1",

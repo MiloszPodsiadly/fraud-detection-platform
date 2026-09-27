@@ -23,12 +23,12 @@ from offline_evaluation.shadow_performance_schema import (
     validate_shadow_performance_summary,
 )
 from offline_evaluation.feedback_dataset_evaluation.report_contract import (
-    is_supported_platform_evaluation_report_type,
+    is_canonical_platform_evaluation_report_type,
 )
 
 
 class PromotionReviewReadinessValidationError(ValueError):
-    """Raised when PromotionReviewReadinessReport v1 is unsafe or outside FDP-126 bounds."""
+    """Raised when PromotionReviewReadinessReport v1 is unsafe or outside current contract bounds."""
 
 
 REPORT_TYPE = "PROMOTION_REVIEW_READINESS_REPORT_V1"
@@ -292,7 +292,7 @@ def _checks_from_inputs(check_inputs: dict[str, Any]) -> list[dict[str, str]]:
         _check("NOT_PAYMENT_AUTHORIZATION_TRUE", _pass_fail(governance["notPaymentAuthorization"] is True)),
         _check("NOT_AUTOMATIC_DECISIONING_TRUE", _pass_fail(governance["notAutomaticDecisioning"] is True)),
         _check("EVALUATION_REPORT_TYPE_SUPPORTED", _pass_fail(
-            is_supported_platform_evaluation_report_type(evaluation["evaluationReportType"])
+            is_canonical_platform_evaluation_report_type(evaluation["evaluationReportType"])
         )),
         _check("METRIC_BASIS_SUPPORTED", _pass_fail(check_inputs["metricBasis"] == EXPECTED_METRIC_BASIS)),
         _check("MINIMUM_DIAGNOSTIC_EVIDENCE_RECORDS", _pass_fail(records_evaluated >= check_inputs["minimumDiagnosticEvidenceRecords"]), "HIGH"),

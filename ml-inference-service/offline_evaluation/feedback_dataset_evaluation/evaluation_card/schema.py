@@ -23,9 +23,6 @@ from offline_evaluation.feedback_dataset_evaluation.evaluation_contract import (
 )
 from offline_evaluation.feedback_dataset_evaluation.report_contract import (
     ARTIFACT_SET_VERSION as EXPECTED_SOURCE_ARTIFACT_SET_VERSION,
-    LEGACY_READ_ONLY_IDENTITY_COMPLETENESS,
-    LEGACY_READ_ONLY_ARTIFACT_SET_VERSION,
-    LEGACY_READ_ONLY_REPORT_TYPE,
     REPORT_TYPE as EXPECTED_EVALUATION_REPORT_TYPE,
     validate_platform_evaluation_artifact_identity,
     validate_platform_evaluation_artifact_provenance,
@@ -43,7 +40,7 @@ from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import (
 
 
 class FeedbackDatasetEvaluationCardValidationError(ValueError):
-    """Raised when feedback dataset/FDP-124 Platform Recommendation Evaluation Card v1 content is invalid or unsafe."""
+    """Raised when Platform Evaluation Card content is invalid or unsafe."""
 
 
 PLATFORM_RECOMMENDATION_EVALUATION_CARD_VERSION = "platform-recommendation-evaluation-card-v1"
@@ -162,8 +159,6 @@ SAFE_CONTRACT_VALUES = {
     ARTIFACT_SET_VERSION,
     EXPECTED_EVALUATION_REPORT_TYPE,
     EXPECTED_SOURCE_ARTIFACT_SET_VERSION,
-    LEGACY_READ_ONLY_REPORT_TYPE,
-    LEGACY_READ_ONLY_ARTIFACT_SET_VERSION,
     EXPECTED_DATASET_VERSION,
     EXPECTED_DATASET_TIME_BASIS,
     EVALUATION_SUBJECT_TYPE,
@@ -173,7 +168,6 @@ SAFE_CONTRACT_VALUES = {
     EVALUATION_MODEL_IDENTITY,
     EVALUATION_MODEL_ARTIFACT_SHA256,
     EVALUATION_IDENTITY_COMPLETENESS,
-    LEGACY_READ_ONLY_IDENTITY_COMPLETENESS,
     METRICS_SUBJECT,
     METRIC_BASIS,
     EVALUATION_PURPOSE,
