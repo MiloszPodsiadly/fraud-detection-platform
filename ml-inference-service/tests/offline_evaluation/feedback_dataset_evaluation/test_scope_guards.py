@@ -52,10 +52,10 @@ class FeedbackDatasetEvaluationScopeGuardTest(unittest.TestCase):
         ui_root = ROOT / "analyst-console-ui"
         self.assertFalse(any("feedback_dataset_evaluation" in path.as_posix().lower() for path in ui_root.rglob("*") if path.is_file()))
 
-    def test_docsDescribeFdp124Boundary(self):
+    def test_docsDescribeFeedbackDatasetEvaluationBoundary(self):
         doc = DOC.read_text(encoding="utf-8")
 
-        self.assertIn("FDP-124 consumes feedback dataset `DATASET_RECORD` rows", doc)
+        self.assertIn("Feedback Dataset Evaluation consumes feedback dataset `DATASET_RECORD` rows", doc)
         self.assertIn("`DATASET_METADATA` is not an evaluation row", doc)
         self.assertIn("Only feedback dataset `DATASET_RECORD` lines are metric rows", doc)
         self.assertIn("Feedback dataset evaluation is not a permissive dual-format parser", doc)

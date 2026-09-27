@@ -47,62 +47,62 @@ class OfflineEvaluationScopeGuardTest(unittest.TestCase):
     def test_noRecommendationModule(self):
         self.assertNotInAnyOfflineFile("recommendation_module", "AnalystRecommendation", "recommend_analyst_action")
 
-    def test_fdp104DoesNotAddApiEndpoint(self):
+    def test_evaluationCardDoesNotAddApiEndpoint(self):
         self.assertNotInAnyOfflineFile("FastAPI", "Flask", "@app.route", "uvicorn", "@RestController", "@RequestMapping")
 
-    def test_fdp104DoesNotModifyOpenApi(self):
+    def test_evaluationCardDoesNotModifyOpenApi(self):
         openapi_root = ROOT / "docs" / "openapi"
         haystack = "\n".join(path.read_text(encoding="utf-8") for path in openapi_root.rglob("*.yaml"))
         self.assertNotIn("modelCard", haystack)
 
-    def test_fdp104DoesNotAddUi(self):
+    def test_evaluationCardDoesNotAddUi(self):
         ui_root = ROOT / "analyst-console-ui"
         self.assertFalse(any("evaluation_card" in path.as_posix() or "EvaluationCard" in path.as_posix() for path in ui_root.rglob("*") if path.is_file()))
 
-    def test_fdp104DoesNotAddDashboard(self):
+    def test_evaluationCardDoesNotAddDashboard(self):
         self.assertNotInAnyOfflineFile("dashboard", "Dashboard")
 
-    def test_fdp104DoesNotAddScheduledJob(self):
+    def test_evaluationCardDoesNotAddScheduledJob(self):
         self.assertNotInAnyOfflineFile("schedule", "cron", "APScheduler", "celery")
 
-    def test_fdp104DoesNotReadProductionDb(self):
+    def test_evaluationCardDoesNotReadProductionDb(self):
         self.assertNotInAnyOfflineFile("pymongo", "MongoClient", "mongodb", "model_registry")
 
-    def test_fdp104DoesNotImportPymongoOrKafka(self):
+    def test_evaluationCardDoesNotImportPymongoOrKafka(self):
         self.assertNotInAnyOfflineFile("pymongo", "MongoClient", "kafka", "KafkaProducer")
 
-    def test_fdp104DoesNotCallNetwork(self):
+    def test_evaluationCardDoesNotCallNetwork(self):
         self.assertNotInAnyOfflineFile("requests", "httpx", "urllib", "socket")
 
-    def test_fdp104DoesNotAddRetrainingCode(self):
+    def test_evaluationCardDoesNotAddRetrainingCode(self):
         self.assertNotInAnyOfflineFile("retrain", "train_model")
 
-    def test_fdp104DoesNotAddPromotionWorkflow(self):
+    def test_evaluationCardDoesNotAddPromotionWorkflow(self):
         self.assertNotInAnyOfflineFile("promote_model", "promotion_workflow")
 
-    def test_fdp104DoesNotMutateThresholdConfig(self):
+    def test_evaluationCardDoesNotMutateThresholdConfig(self):
         self.assertNotInAnyOfflineFile("threshold_config", "threshold_mutation")
 
-    def test_fdp104DoesNotModifyModelArtifacts(self):
+    def test_evaluationCardDoesNotModifyModelArtifacts(self):
         self.assertNotInAnyOfflineFile("model_artifact.json", "write_model_artifact", "model_registry_write")
 
-    def test_fdp104DoesNotModifyProductionScoring(self):
+    def test_evaluationCardDoesNotModifyProductionScoring(self):
         self.assertNotInAnyOfflineFile("FraudInferenceHandler", "model_runtime", "score_completed")
 
-    def test_fdp104DoesNotModifyKafkaEvents(self):
+    def test_evaluationCardDoesNotModifyKafkaEvents(self):
         common_events = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "common-events" / "src").rglob("*.java"))
         self.assertNotIn("EvaluationCard", common_events)
 
-    def test_fdp104DoesNotModifyAlertServiceProjection(self):
+    def test_evaluationCardDoesNotModifyAlertServiceProjection(self):
         alert_service = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "alert-service" / "src" / "main").rglob("*.java"))
         self.assertNotIn("EvaluationCardGenerator", alert_service)
         self.assertNotIn("buildEvaluationCard", alert_service)
         self.assertNotIn("EvaluationCardRepository", alert_service)
 
-    def test_fdp104DoesNotAddRecommendationService(self):
+    def test_evaluationCardDoesNotAddRecommendationService(self):
         self.assertNotInAnyOfflineFile("recommendation_module", "AnalystRecommendation", "recommend_analyst_action")
 
-    def test_fdp104DoesNotCallPaymentAuthorization(self):
+    def test_evaluationCardDoesNotCallPaymentAuthorization(self):
         self.assertNotInAnyOfflineFile("payment_authorization", "approve_transaction", "decline_transaction", "block_transaction")
 
     def assertNotInAnyOfflineFile(self, *terms: str):
@@ -139,14 +139,14 @@ class OfflineEvaluationDocumentationTest(unittest.TestCase):
         self.assertDocContains("They are not ground truth")
 
     def test_docsMentionFailFastMalformedInputPolicy(self):
-        self.assertDocContains("FDP-124 fails fast on malformed or invalid schema input")
+        self.assertDocContains("Feedback Dataset Evaluation fails fast on malformed or invalid schema input")
 
     def test_docsMentionPseudonymousInputReferencesStayInternal(self):
         self.assertDocContains("accepts feedback dataset pseudonymous input references only for parsing and deterministic ordering")
         self.assertDocContains("must not emit `evaluationRecordId`, `transactionReference`, `eval-`, or `txnref-`")
 
     def test_docsMentionStrictEngineStatusPolicy(self):
-        self.assertDocContains("engineStatus as the source of truth for operational availability")
+        self.assertDocContains("`engineStatus` as the source of truth for operational availability")
         self.assertDocContains("risk and score bucket fields must be absent")
         self.assertDocContains("are not ranked and are not high/low signals")
 
@@ -173,7 +173,7 @@ class OfflineEvaluationDocumentationTest(unittest.TestCase):
 
     def test_docsMentionEvaluationCardStrictValidation(self):
         doc = PLATFORM_RECOMMENDATION_EVALUATION_CARD_DOC.read_text(encoding="utf-8")
-        self.assertIn("FDP-124 `evaluation_summary.json` is the only source of evaluation identity", doc)
+        self.assertIn("Platform Evaluation `evaluation_summary.json` is the only source of evaluation identity", doc)
         self.assertIn("metricsSubject = PLATFORM_RECOMMENDATION", doc)
         self.assertIn("metricBasis = ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK", doc)
         self.assertIn("positiveClassCount + negativeClassCount == recordsEvaluated", doc)

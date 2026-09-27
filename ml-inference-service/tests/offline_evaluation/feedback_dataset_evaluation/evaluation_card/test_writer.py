@@ -18,14 +18,14 @@ from offline_evaluation.feedback_dataset_evaluation.evaluation_card.writer impor
     write_evaluation_card_artifacts,
 )
 try:
-    from feedback_dataset_evaluation.evaluation_card.test_generator import PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT, fdp124_artifacts, model_metadata
+    from feedback_dataset_evaluation.evaluation_card.test_generator import PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT, model_metadata, platform_evaluation_artifacts
     from feedback_dataset_evaluation.evaluation_card.test_schema import INVALID_CANONICAL_TIMESTAMPS, valid_evaluation_card
 except ModuleNotFoundError:
     try:
-        from .test_generator import PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT, fdp124_artifacts, model_metadata
+        from .test_generator import PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT, model_metadata, platform_evaluation_artifacts
         from .test_schema import INVALID_CANONICAL_TIMESTAMPS, valid_evaluation_card
     except ImportError:
-        from test_generator import PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT, fdp124_artifacts, model_metadata
+        from test_generator import PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT, model_metadata, platform_evaluation_artifacts
         from test_schema import INVALID_CANONICAL_TIMESTAMPS, valid_evaluation_card
 
 
@@ -226,7 +226,7 @@ class FeedbackDatasetEvaluationCardCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             output = root / "platform-recommendation-evaluation-card"
-            with fdp124_artifacts() as paths:
+            with platform_evaluation_artifacts() as paths:
                 result = main(cli_args(paths, output, root))
 
             self.assertEqual(0, result)
@@ -238,7 +238,7 @@ class FeedbackDatasetEvaluationCardCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "allowed"
             output = Path(directory) / "outside"
-            with fdp124_artifacts() as paths:
+            with platform_evaluation_artifacts() as paths:
                 with self.assertRaises(FeedbackDatasetEvaluationCardValidationError):
                     main(cli_args(paths, output, root))
 
@@ -246,14 +246,14 @@ class FeedbackDatasetEvaluationCardCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             output = root / "platform-recommendation-evaluation-card"
-            with fdp124_artifacts() as paths:
+            with platform_evaluation_artifacts() as paths:
                 main(cli_args(paths, output, root))
 
             card = json.loads((output / "platform_recommendation_evaluation_card.json").read_text(encoding="utf-8"))
             self.assertEqual(PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT, card["generatedAt"])
 
     def test_cliRequiresAllowOutputRoot(self):
-        with fdp124_artifacts() as paths:
+        with platform_evaluation_artifacts() as paths:
             args = cli_args(paths, Path("out"), Path("."))
             root_index = args.index("--allow-output-root")
             del args[root_index:root_index + 2]
@@ -265,7 +265,7 @@ class FeedbackDatasetEvaluationCardCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             output = root / "platform-recommendation-evaluation-card"
-            with fdp124_artifacts() as paths:
+            with platform_evaluation_artifacts() as paths:
                 args = cli_args(paths, output, root)
                 args.extend(["--model-version", "2026.06.12-offline"])
                 with self.assertRaises(SystemExit):
@@ -276,7 +276,7 @@ class FeedbackDatasetEvaluationCardCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             output = root / "platform-recommendation-evaluation-card"
-            with fdp124_artifacts() as paths:
+            with platform_evaluation_artifacts() as paths:
                 args = cli_args(paths, output, root)
                 args.extend(["--limitation", "modelName"])
                 with self.assertRaises(FeedbackDatasetEvaluationCardValidationError):

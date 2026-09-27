@@ -1,1 +1,0 @@
-{"generatedAt":"2026-06-10T00:00:00Z","reportType":"FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1","riskLevels":{"HIGH":{"negativeClassCount":0,"positiveClassCount":1,"totalCount":1}},"warnings":["LOW_SAMPLE_SIZE","SINGLE_CLASS_DATASET"]}

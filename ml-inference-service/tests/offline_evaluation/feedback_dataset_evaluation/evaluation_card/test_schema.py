@@ -128,13 +128,13 @@ class FeedbackDatasetEvaluationCardSchemaTest(unittest.TestCase):
             with self.subTest(field=field):
                 self._assert_rejected(**{field: "caller-controlled"})
 
-    def test_evaluationSubjectMustMatchFdp124Contract(self):
+    def test_evaluationSubjectMustMatchPlatformEvaluationContract(self):
         subject = dict(EVALUATION_SUBJECT)
         subject["sourceVersion"] = "OTHER"
 
         self._assert_rejected(evaluationSubject=subject)
 
-    def test_metricsSubjectAndBasisMustMatchFdp124Contract(self):
+    def test_metricsSubjectAndBasisMustMatchPlatformEvaluationContract(self):
         self._assert_rejected(metricsSubject="MODEL")
         self._assert_rejected(metricBasis="MODEL_PERFORMANCE")
 
@@ -247,38 +247,24 @@ class FeedbackDatasetEvaluationCardSchemaTest(unittest.TestCase):
                 True,
             ),
             (
-                "legacy_legacy",
-                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-                "fdp123-report-artifact-set-v1",
-                "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
-                True,
-            ),
-            (
-                "current_legacy",
+                "unsupported_artifact_set",
                 "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-                "fdp123-report-artifact-set-v1",
+                "unsupported-artifact-set-v1",
                 "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
                 False,
             ),
             (
-                "legacy_current",
-                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "unsupported_report_type",
+                "UNSUPPORTED_PLATFORM_EVALUATION",
                 "feedback-dataset-evaluation-report-artifact-set-v1",
-                "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
+                "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
                 False,
             ),
             (
-                "current_with_legacy_marker",
+                "unsupported_identity_marker",
                 "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
                 "feedback-dataset-evaluation-report-artifact-set-v1",
-                "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
-                False,
-            ),
-            (
-                "legacy_with_current_marker",
-                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-                "fdp123-report-artifact-set-v1",
-                "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
+                "UNSUPPORTED_IDENTITY_COMPLETENESS",
                 False,
             ),
             (
@@ -345,7 +331,7 @@ class FeedbackDatasetEvaluationCardSchemaTest(unittest.TestCase):
             negativeClassCount=0,
         ))
 
-    def test_disagreementSummaryRejectedFromFdp126EvaluationCardV1(self):
+    def test_disagreementSummaryRejectedFromEvaluationCardV1(self):
         metrics = valid_metrics(disagreementSummary={"totalDisagreementRows": 1})
 
         self._assert_rejected(metricsSummary=metrics)

@@ -11,12 +11,16 @@ from offline_evaluation.feedback_dataset_evaluation.evaluation_contract import E
 from offline_evaluation.feedback_dataset_evaluation.evaluation_runner import build_feedback_dataset_evaluation_reports, run_feedback_dataset_evaluation
 from offline_evaluation.feedback_dataset_evaluation.model_evaluation import ModelEvaluationIdentity
 from offline_evaluation.feedback_dataset_evaluation.run_feedback_dataset_evaluation import main
+from offline_evaluation.feedback_dataset_evaluation.report_contract import (
+    ARTIFACT_SET_VERSION,
+    MODEL_EVALUATION_ARTIFACT_SET_VERSION,
+    MODEL_EVALUATION_REPORT_TYPE,
+)
 from offline_evaluation.feedback_dataset_evaluation.report_writer import (
-    LEGACY_READ_ONLY_ARTIFACT_SET_VERSION,
-    LEGACY_READ_ONLY_REPORT_TYPE,
     REPORT_TYPE,
     build_artifact_manifest,
     disagreement_jsonl,
+    evaluation_run_markdown,
     report_json,
     write_feedback_dataset_evaluation_reports,
 )
@@ -246,20 +250,90 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
                 [item["name"] for item in manifest["files"]],
             )
 
-    def test_writerRejectsLegacyReadOnlyPlatformEvaluationIdentity(self):
+    def test_writerRejectsUnsupportedPlatformEvaluationIdentity(self):
         report = self._reports()["evaluationSummary"]
-        report["reportType"] = LEGACY_READ_ONLY_REPORT_TYPE
+        report["reportType"] = "UNSUPPORTED_PLATFORM_EVALUATION"
 
         with self.assertRaisesRegex(ValueError, "reportType must be a supported"):
             report_json(report)
 
-        with self.assertRaisesRegex(ValueError, "read-only"):
+        with self.assertRaisesRegex(ValueError, "identity is unsupported"):
             build_artifact_manifest(
                 {Path("evaluation_summary.json"): "{}\n"},
                 GENERATED_AT,
-                artifact_set_version=LEGACY_READ_ONLY_ARTIFACT_SET_VERSION,
-                report_type=LEGACY_READ_ONLY_REPORT_TYPE,
+                artifact_set_version="unsupported-artifact-set-v1",
+                report_type="UNSUPPORTED_PLATFORM_EVALUATION",
             )
+
+    def test_manifestBuilderAcceptsExactCanonicalArtifactIdentities(self):
+        platform_manifest = json.loads(build_artifact_manifest(
+            self._platform_artifact_payloads(),
+            GENERATED_AT,
+        ))
+        model_manifest = json.loads(build_artifact_manifest(
+            self._model_artifact_payloads(),
+            GENERATED_AT,
+            artifact_set_version=MODEL_EVALUATION_ARTIFACT_SET_VERSION,
+            report_type=MODEL_EVALUATION_REPORT_TYPE,
+        ))
+
+        self.assertEqual(REPORT_TYPE, platform_manifest["reportType"])
+        self.assertEqual(ARTIFACT_SET_VERSION, platform_manifest["artifactSetVersion"])
+        self.assertEqual(MODEL_EVALUATION_REPORT_TYPE, model_manifest["reportType"])
+        self.assertEqual(MODEL_EVALUATION_ARTIFACT_SET_VERSION, model_manifest["artifactSetVersion"])
+
+    def test_manifestBuilderRejectsUnsupportedAndRetiredIdentityPairs(self):
+        for report_type, artifact_set_version in (
+                (REPORT_TYPE, MODEL_EVALUATION_ARTIFACT_SET_VERSION),
+                (MODEL_EVALUATION_REPORT_TYPE, ARTIFACT_SET_VERSION),
+                ("UNKNOWN_EVALUATION_REPORT", ARTIFACT_SET_VERSION),
+                (REPORT_TYPE, "unknown-artifact-set-v1"),
+                ("FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1", "fdp123-report-artifact-set-v1"),
+        ):
+            with self.subTest(report_type=report_type, artifact_set_version=artifact_set_version):
+                with self.assertRaisesRegex(ValueError, "identity is unsupported"):
+                    build_artifact_manifest(
+                        self._platform_artifact_payloads(),
+                        GENERATED_AT,
+                        artifact_set_version=artifact_set_version,
+                        report_type=report_type,
+                    )
+
+    def test_manifestBuilderRejectsValidIdentityFromWrongArtifactFamily(self):
+        for payloads, report_type, artifact_set_version in (
+                (
+                    self._platform_artifact_payloads(),
+                    MODEL_EVALUATION_REPORT_TYPE,
+                    MODEL_EVALUATION_ARTIFACT_SET_VERSION,
+                ),
+                (
+                    self._model_artifact_payloads(),
+                    REPORT_TYPE,
+                    ARTIFACT_SET_VERSION,
+                ),
+        ):
+            with self.subTest(report_type=report_type):
+                with self.assertRaisesRegex(ValueError, "does not match artifact family"):
+                    build_artifact_manifest(
+                        payloads,
+                        GENERATED_AT,
+                        artifact_set_version=artifact_set_version,
+                        report_type=report_type,
+                    )
+
+    def test_rejectedWrongFamilyIdentityPublishesNoManifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+            with patch(
+                    "offline_evaluation.feedback_dataset_evaluation.report_writer.PLATFORM_ARTIFACT_IDENTITY",
+                    (MODEL_EVALUATION_REPORT_TYPE, MODEL_EVALUATION_ARTIFACT_SET_VERSION),
+            ):
+                with self.assertRaisesRegex(ValueError, "does not match artifact family"):
+                    write_feedback_dataset_evaluation_reports(self._reports(), output)
+
+            self.assertFalse((output / "platform-evaluation" / "manifest.json").exists())
+            self.assertFalse((output / "model-evaluation" / "manifest.json").exists())
+            self.assertEqual([], list(output.rglob("*.tmp")) if output.exists() else [])
 
     def test_modelEvaluationSummaryUsesIndependentArtifactSetWhenExactModelRequested(self):
         reports = self._reports(
@@ -318,7 +392,7 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
                 self.assertEqual(len(payload), item["sizeBytes"])
                 self.assertEqual(hashlib.sha256(payload).hexdigest(), item["sha256"])
 
-    def test_manifestPayloadRejectsForbiddenTerms(self):
+    def test_manifestRejectsUnsupportedArtifactFilename(self):
         with self.assertRaises(ValueError):
             build_artifact_manifest({Path("rawNotes.json"): "{}\n"}, GENERATED_AT)
 
@@ -470,18 +544,19 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
             self.assertEqual(0, result)
             self.assertEqual(generated_at, summary["generatedAt"])
 
-    def test_fdp124WriterConsumesCanonicalTimestampFixture(self):
+    def test_platformEvaluationWriterConsumesCanonicalTimestampFixture(self):
         for generated_at in VALID_CANONICAL_TIMESTAMPS:
             with self.subTest(generated_at=generated_at):
                 reports = self._reports()
                 for key in ("evaluationSummary", "scoreBucketReport", "riskLevelReport"):
                     reports[key]["generatedAt"] = generated_at
 
-                self.assertIn(generated_at, build_artifact_manifest({
-                    Path("evaluation_summary.json"): report_json(reports["evaluationSummary"]),
-                }, generated_at))
+                self.assertIn(
+                    generated_at,
+                    build_artifact_manifest(self._platform_artifact_payloads(reports), generated_at),
+                )
 
-    def test_invalidGeneratedAtCreatesNoFdp124ArtifactsOrTemps(self):
+    def test_invalidGeneratedAtCreatesNoPlatformEvaluationArtifactsOrTemps(self):
         for generated_at in INVALID_CANONICAL_TIMESTAMPS:
             if generated_at is None:
                 continue
@@ -505,6 +580,28 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
             generated_at=GENERATED_AT,
             model_identity=model_identity,
         )
+
+    def _platform_artifact_payloads(self, reports=None):
+        reports = reports or self._reports()
+        return {
+            Path("evaluation_summary.json"): report_json(reports["evaluationSummary"]),
+            Path("score_bucket_report.json"): report_json(reports["scoreBucketReport"]),
+            Path("risk_level_report.json"): report_json(reports["riskLevelReport"]),
+            Path("disagreement_report.jsonl"): disagreement_jsonl(reports["disagreementReport"]),
+            Path("evaluation_run.md"): evaluation_run_markdown(reports["evaluationSummary"]),
+        }
+
+    def _model_artifact_payloads(self):
+        reports = self._reports(
+            record(
+                fraudScore=0.1,
+                mlModelName="python-logistic-fraud-model",
+                mlModelVersion="2026-06-25.v1",
+                mlFeatureContractVersion="feature-contract-v2",
+            ),
+            model_identity=self._model_identity(),
+        )
+        return {Path("model_evaluation_summary.json"): report_json(reports["modelEvaluationSummary"])}
 
     def _model_identity(self):
         return ModelEvaluationIdentity(

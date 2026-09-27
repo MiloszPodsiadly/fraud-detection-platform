@@ -9,18 +9,18 @@ GLOSSARY_DOC = ROOT / "docs" / "product" / "fraud_intelligence_glossary.md"
 
 
 class ShadowPerformanceScopeGuardTest(unittest.TestCase):
-    def test_fdp105DoesNotAddApiOrOpenApiSurface(self):
+    def test_shadowSummaryDoesNotAddApiOrOpenApiSurface(self):
         self.assertNotInAnyOfflineFile("FastAPI", "Flask", "@app.route", "uvicorn", "@RestController", "@RequestMapping", "openapi")
 
-    def test_fdp105DoesNotAddDashboardOrUiSurface(self):
+    def test_shadowSummaryDoesNotAddDashboardOrUiSurface(self):
         ui_root = ROOT / "analyst-console-ui"
         self.assertFalse(any("shadow_performance" in path.as_posix() for path in ui_root.rglob("*") if path.is_file()))
         self.assertNotInAnyOfflineFile("dashboard", "Dashboard")
 
-    def test_fdp105DoesNotAddSchedulersDbKafkaOrNetwork(self):
+    def test_shadowSummaryDoesNotAddSchedulersDbKafkaOrNetwork(self):
         self.assertNotInAnyOfflineFile("APScheduler", "celery", "pymongo", "MongoClient", "KafkaProducer", "requests", "httpx")
 
-    def test_fdp105DoesNotMutateScoringRegistryArtifactsOrThresholds(self):
+    def test_shadowSummaryDoesNotMutateScoringRegistryArtifactsOrThresholds(self):
         self.assertNotInAnyOfflineFile(
             "FraudInferenceHandler",
             "model_registry_write",
@@ -30,7 +30,7 @@ class ShadowPerformanceScopeGuardTest(unittest.TestCase):
             "write_threshold",
         )
 
-    def test_fdp105DoesNotAddTrainingPromotionOrRecommendationFlow(self):
+    def test_shadowSummaryDoesNotAddTrainingPromotionOrRecommendationFlow(self):
         self.assertNotInAnyOfflineFile(
             "train_model",
             "retraining",
@@ -40,7 +40,7 @@ class ShadowPerformanceScopeGuardTest(unittest.TestCase):
             "recommend_analyst_action",
         )
 
-    def test_fdp105DoesNotCallPaymentOrStateMutationFlows(self):
+    def test_shadowSummaryDoesNotCallPaymentOrStateMutationFlows(self):
         self.assertNotInAnyOfflineFile(
             "payment_authorization",
             "approve_transaction",
@@ -52,11 +52,12 @@ class ShadowPerformanceScopeGuardTest(unittest.TestCase):
 
     def test_docsDescribeOfflineDiagnosticOnlyBoundary(self):
         doc = SUMMARY_DOC.read_text(encoding="utf-8")
+        compact_doc = " ".join(doc.split())
 
         self.assertIn("Shadow Performance Summary v2 is an offline diagnostic artifact", doc)
         self.assertIn("accepts only validated", doc)
-        self.assertIn("feedback dataset/FDP-124/FDP-126 Platform Recommendation Evaluation Card v1", doc)
-        self.assertIn("does not recreate the removed FDP-102/FDP-103 Platform Recommendation Evaluation Card path", " ".join(doc.split()))
+        self.assertIn("validated Platform Recommendation Evaluation Card v1 objects", compact_doc)
+        self.assertIn("raw Platform Evaluation reports cannot be mapped directly into the summary", compact_doc)
         self.assertIn("evaluation population and sample-size context", doc)
 
     def test_docsDescribeNonGoalsAndNoRuntimeSurface(self):
@@ -86,7 +87,7 @@ class ShadowPerformanceScopeGuardTest(unittest.TestCase):
 
         self.assertIn("Shadow Performance Summary v2", glossary)
         self.assertIn("includes population context and metric availability objects", glossary)
-        self.assertIn("derived only from validated FDP-126 Platform Recommendation Evaluation Card fields", glossary)
+        self.assertIn("derived only from validated Platform Recommendation Evaluation Card fields", glossary)
 
     def assertNotInAnyOfflineFile(self, *terms: str):
         haystack = "\n".join(path.read_text(encoding="utf-8") for path in OFFLINE_ROOT.rglob("*.py"))
