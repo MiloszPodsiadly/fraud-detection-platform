@@ -5701,7 +5701,7 @@ components:
           maxLength: 128
         identityCompleteness:
           type: string
-          enum: [NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE, NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE]
+          enum: [NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE]
     ShadowPerformanceGovernanceResponse:
       type: object
       additionalProperties: false
@@ -5738,16 +5738,16 @@ components:
           enum: [OFFLINE_DIAGNOSTIC]
         evaluationReportType:
           type: string
-          enum: [FEEDBACK_DATASET_OFFLINE_EVALUATION_V1, FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1]
-          description: Current Platform Evaluation report type, or the exact legacy read-only report type when reading historical persisted artifacts. Legacy values are not emitted by current writers.
+          enum: [FEEDBACK_DATASET_OFFLINE_EVALUATION_V1]
+          description: Canonical Platform Evaluation report type.
         evaluationReportVersion:
           type: string
-          enum: [FDP-124]
+          enum: [feedback-dataset-evaluation-v1]
         evaluationReportGeneratedAt:
           type: string
           format: date-time
           pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,9})?Z$'
-          description: UTC-normalized timestamp from the source feedback dataset/FDP-124 evaluation report. Must be less than or equal to evaluationCardGeneratedAt.
+          description: UTC-normalized timestamp from the source feedback dataset evaluation report. Must be less than or equal to evaluationCardGeneratedAt.
         evaluationCardGeneratedAt:
           type: string
           format: date-time
@@ -5755,8 +5755,8 @@ components:
           description: UTC-normalized timestamp from the Platform Recommendation Evaluation Card. Must be greater than or equal to evaluationReportGeneratedAt and less than or equal to the summary generatedAt.
         evaluationArtifactSetVersion:
           type: string
-          enum: [feedback-dataset-evaluation-report-artifact-set-v1, fdp123-report-artifact-set-v1]
-          description: Must match evaluationReportType as an exact current/current or legacy/legacy pair; mixed pairs are invalid.
+          enum: [feedback-dataset-evaluation-report-artifact-set-v1]
+          description: Canonical Platform Evaluation artifact-set version.
         datasetVersion:
           type: string
           enum: [feedback-dataset-v1]

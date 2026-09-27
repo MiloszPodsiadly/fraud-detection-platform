@@ -1,6 +1,6 @@
 # ML Model Specific Evaluation
 
-Status: FDP-139 offline lineage evidence foundation.
+Status: offline exact-model-lineage evidence foundation.
 
 The feedback dataset evaluation package now supports two separate offline diagnostic subjects.
 
@@ -45,5 +45,5 @@ precision, recall, threshold, or score-ranking metrics. Those metrics remain una
 
 ML Model Evaluation is not a model evaluation card, not model promotion approval, not threshold recommendation, not
 production-primary approval, not payment authorization, not workflow automation, and not a runtime model switch.
-FDP-140 can consume this as trustworthy model-specific lineage evidence, but approval and lifecycle decisions remain
+Downstream governance checks can consume this as trustworthy model-specific lineage evidence, but approval and lifecycle decisions remain
 out of scope.

@@ -8,8 +8,8 @@ Platform Recommendation Evaluation Card v1 has one executable implementation in 
 
 - `ml-inference-service/offline_evaluation/feedback_dataset_evaluation/evaluation_card/`
 
-The previous FDP-102/FDP-103 Platform Recommendation Evaluation Card modules were removed. Platform Recommendation Evaluation Card v1 now consumes only FDP-124 aggregate
-artifacts generated from the feedback dataset path. It validates the canonical FDP-124 `manifest.json` before
+Platform Recommendation Evaluation Card v1 consumes only Platform Evaluation aggregate artifacts generated from the
+Feedback Dataset Evaluation path. It validates the canonical Platform Evaluation `manifest.json` before
 trusting the canonical `evaluation_summary.json`. It does not read `disagreement_report.jsonl` in v1 and does not
 read the raw feedback dataset.
 
@@ -23,8 +23,8 @@ Dashboards and promotion workflows are future scopes.
 
 The generator accepts only:
 
-- FDP-124 `manifest.json`
-- FDP-124 `evaluation_summary.json`
+- Platform Evaluation `manifest.json`
+- Platform Evaluation `evaluation_summary.json`
 - local governance metadata for non-identity usage/boundary lists
 
 The accepted source artifact identity is:
@@ -41,7 +41,7 @@ Input JSON artifacts are bounded before full read:
 - `manifest.json` maximum size: 65,536 bytes.
 - `evaluation_summary.json` maximum size: 262,144 bytes.
 
-FDP-124 `evaluation_summary.json` is the only source of evaluation identity. It carries a closed
+Platform Evaluation `evaluation_summary.json` is the only source of evaluation identity. It carries a closed
 `evaluationSubject`:
 
 - `subjectType = PLATFORM_RECOMMENDATION`
@@ -52,12 +52,10 @@ FDP-124 `evaluation_summary.json` is the only source of evaluation identity. It 
 - `modelArtifactSha256 = NOT_AVAILABLE`
 - `identityCompleteness = NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE`
 
-Historical read-only evidence is accepted only when the exact legacy evaluation identity pair
-`FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1` / `fdp123-report-artifact-set-v1` is coupled to
-`NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE`. Current/legacy mixtures are invalid, and current writers retain the
-canonical marker above.
+Evaluation evidence must use the canonical report type, artifact-set version, and identity-completeness marker.
+Unsupported or mixed identities fail closed.
 
-The Platform Recommendation Evaluation Card generator copies that subject from FDP-124 and rejects unsupported subject, `metricsSubject`, or
+The Platform Recommendation Evaluation Card generator copies that subject from Platform Evaluation and rejects unsupported subject, `metricsSubject`, or
 `metricBasis` values. CLI callers cannot set model name, model version, model family, training mode, feature contract,
 reference quality, or artifact identity.
 
@@ -69,13 +67,13 @@ The metric owner and basis are explicit:
 `alertRecommendedConfusionMatrix` is therefore a platform recommendation diagnostic against bounded analyst feedback
 signals. It is not represented as direct model performance or model promotion evidence.
 
-For the binary feedback dataset/FDP-124 evaluation contract, class-count integrity is strict:
+For the binary Feedback Dataset Evaluation contract, class-count integrity is strict:
 
 ```text
 positiveClassCount + negativeClassCount == recordsEvaluated
 ```
 
-The invariant is enforced at the FDP-124 source boundary and again when validating final Platform Recommendation Evaluation Card
+The invariant is enforced at the Platform Evaluation source boundary and again when validating the final Platform Recommendation Evaluation Card
 `evaluationEvidence`. Evidence counts use the single feedback dataset hard limit, `MAX_DATASET_RECORDS = 1000`.
 
 Published governance timestamps must be real RFC3339 UTC date-times ending in `Z`, with optional 1-9 digit fractional
@@ -106,7 +104,7 @@ feedback signals, not legal ground truth, certified labels, model-training label
 decisions, or automatic decisioning signals.
 `intendedUse` is allowlisted, and required `notIntendedUse` non-goals cannot be omitted.
 
-FDP-124 `disagreementSummary` is not part of the Platform Recommendation Evaluation Card v1 contract. The v1 generator does not copy it into
+Platform Evaluation `disagreementSummary` is not part of the Platform Recommendation Evaluation Card v1 contract. The v1 generator does not copy it into
 `metricsSummary`, does not silently filter malformed members, and does not transform it into a valid-looking Model
 Card field.
 
@@ -137,7 +135,7 @@ responses, raw feature vectors, raw evidence, per-record disagreement rows, toke
 the generator. It is not a signature, notarization, external attestation, immutability guarantee, independent trust
 anchor, or proof that the source artifact was produced by a trusted party.
 
-Unavailable metric objects preserve the FDP-124 shape:
+Unavailable metric objects preserve the Platform Evaluation shape:
 
 ```json
 {"available":false,"reason":"NO_POSITIVE_RECORDS","value":null}

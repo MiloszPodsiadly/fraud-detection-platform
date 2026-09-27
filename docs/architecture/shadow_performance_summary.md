@@ -1,13 +1,13 @@
 # Shadow Performance Summary v2
 
-Status: FDP-105 offline diagnostic summary foundation.
+Status: offline diagnostic summary foundation.
 
 ## Scope
 
-Shadow Performance Summary v2 is an offline diagnostic artifact. Its Platform Recommendation Evaluation Card consumer path accepts only validated
-feedback dataset/FDP-124/FDP-126 Platform Recommendation Evaluation Card v1 objects and caller-provided generation timestamps. The local FDP-109 generator
-builds a summary directly from the current Platform Recommendation Evaluation Card artifact and does not recreate the removed FDP-102/FDP-103
-Platform Recommendation Evaluation Card path or map an FDP-103/FDP-124 report directly into the current summary.
+Shadow Performance Summary v2 is an offline diagnostic artifact. Its consumer path accepts only validated Platform
+Recommendation Evaluation Card v1 objects and caller-provided generation timestamps. The local generator builds a
+summary directly from the current Platform Recommendation Evaluation Card artifact; raw Platform Evaluation reports
+cannot be mapped directly into the summary.
 
 Shadow Performance Summary v2 carries evaluation population and sample-size context with its diagnostic metrics. This
 context is required so precision, recall, and false-positive-rate values cannot be interpreted without knowing the
@@ -20,7 +20,7 @@ scheduled jobs, DB writes, Kafka messages, scoring changes, registry writes, or 
 
 ## Input
 
-For Platform Recommendation Evaluation Card input, the only supported source of truth is a validated FDP-126 Platform Recommendation Evaluation Card v1:
+For Platform Recommendation Evaluation Card input, the only supported source of truth is a validated Platform Recommendation Evaluation Card v1:
 
 - `cardType = PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1`
 - `cardVersion = platform-recommendation-evaluation-card-v1`
@@ -28,7 +28,7 @@ For Platform Recommendation Evaluation Card input, the only supported source of 
 - runtime, promotion, threshold, payment, and workflow authority fields are `NONE`
 - `metricsSubject = PLATFORM_RECOMMENDATION`
 - `metricBasis = ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK`
-- FDP-124 report identity and dataset time basis already validated by Platform Recommendation Evaluation Card v1
+- Platform Evaluation report identity and dataset time basis already validated by Platform Recommendation Evaluation Card v1
 
 The summary builder copies only allowlisted aggregate and governance fields from the validated evaluation card. It does not accept raw evaluation cards as output fields and does not pass through raw reports,
 raw dataset rows, pseudonymous

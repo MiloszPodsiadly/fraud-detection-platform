@@ -6,7 +6,7 @@ The local generator produces the current summary. The artifact-backed provider r
 
 ## Scope
 
-FDP-109 is manual/local/offline only. It adds an explicitly invoked local generation command:
+The generation job is manual/local/offline only. It is invoked explicitly with:
 
 ```bash
 make shadow-performance-summary
@@ -35,12 +35,12 @@ The job consumes the current Platform Recommendation Evaluation Card artifact se
 - `deployment/local-generated/platform-recommendation-evaluation-card/manifest.json`
 
 The local input file is a generated/local governance artifact only. It is not production data, not current runtime data,
-and not exported from real transactions. FDP-109 does not connect to Mongo/Kafka directly. The generated summary must not contain raw transaction references or evaluation record IDs.
+and not exported from real transactions. The job does not connect to Mongo/Kafka directly. The generated summary must not contain raw transaction references or evaluation record IDs.
 
 The job reuses the existing governed chain without rebuilding legacy model-card flow:
 
 - bounded feedback dataset.
-- FDP-124 evaluation artifact set.
+- Platform Evaluation artifact set.
 - Platform Recommendation Evaluation Card v1 artifact set as the only executable source for summary generation.
 - Shadow Performance Summary v2 builder and writer for validated current summary output.
 
@@ -65,12 +65,14 @@ If any step fails, the command exits non-zero, does not leave a final manifest a
 
 ## Boundary
 
-FDP-109 is not production scheduler. FDP-109 is not promotion readiness. FDP-109 is not threshold recommendation. FDP-109 is not production decisioning. FDP-109 is not payment authorization. FDP-109 is not analyst recommendation logic.
+The generation job is not a production scheduler, promotion readiness, threshold recommendation, production decisioning, payment authorization, or analyst recommendation logic.
 
-FDP-109 does not mutate model registry state, model artifacts, threshold configuration, online scoring, alert state, fraud-case state, or payment authorization state. It does not emit Kafka events, add a cron job, add a scheduler, expose an API, expose OpenAPI, or add dashboard filters, search, history, charts, model comparison, or UI behavior.
+It does not mutate model registry state, model artifacts, threshold configuration, online scoring, alert state, fraud-case state, or payment authorization state. It does not emit Kafka events, add a cron job, add a scheduler, expose an API, expose OpenAPI, or add dashboard filters, search, history, charts, model comparison, or UI behavior.
 
 The final generated summary must not contain raw dataset exports, raw evaluation reports, raw Platform Recommendation Evaluation Card payloads, per-record examples, raw transaction references or evaluation record IDs, transaction references, evaluation record identifiers, customer/account/card/device/merchant identifiers, analyst identifiers, raw payloads, raw feature vectors, raw ML requests or responses, tokens, secrets, stack traces, endpoints, ground truth, training labels, or final decisions.
 
 The final summary must not contain promotion readiness score, promotion approval, promotion workflow, threshold recommendation, threshold switching, recommended threshold, champion/challenger status, champion candidate, deploy recommendation, production approval, payment authorization, automatic approve/decline/block, or analyst recommendation logic.
 
-Demo fixture metrics remain only for the explicit FDP-108 local demo compose override. FDP-109 does not use `deployment/local-fixtures/shadow-performance/current-summary.json` or its sibling manifest as generation input or fallback. FDP-110 provides the generated-summary compose override; FDP-109 only generates the artifact.
+Demo fixture metrics remain only for the explicit local demo compose override. The generation job does not use
+`deployment/local-fixtures/shadow-performance/current-summary.json` or its sibling manifest as generation input or
+fallback. The generated-summary compose override mounts generated artifacts; this job only generates the artifact.
