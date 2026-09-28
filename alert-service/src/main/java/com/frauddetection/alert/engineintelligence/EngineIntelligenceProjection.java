@@ -1,7 +1,6 @@
 package com.frauddetection.alert.engineintelligence;
 
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
-import com.frauddetection.common.events.intelligence.EngineIntelligenceComparison;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
@@ -52,17 +51,8 @@ public class EngineIntelligenceProjection {
         this.transactionId = transactionId;
         this.contractVersion = contractVersion;
         this.generatedAt = generatedAt;
-        EngineIntelligenceComparison legacyComparison = legacyComparisonIfIdentityAbsent(
-                comparisonType,
-                comparedEngineIds,
-                comparisonStatus,
-                riskMismatchStatus,
-                scoreDeltaBucket
-        );
-        this.comparisonType = legacyComparison == null ? comparisonType : legacyComparison.comparisonType();
-        this.comparedEngineIds = legacyComparison == null
-                ? comparedEngineIds == null ? null : List.copyOf(comparedEngineIds)
-                : legacyComparison.comparedEngineIds();
+        this.comparisonType = comparisonType;
+        this.comparedEngineIds = comparedEngineIds == null ? null : List.copyOf(comparedEngineIds);
         this.comparisonStatus = comparisonStatus;
         this.riskMismatchStatus = riskMismatchStatus;
         this.scoreDeltaBucket = scoreDeltaBucket;
@@ -74,36 +64,6 @@ public class EngineIntelligenceProjection {
         this.warningCount = this.warnings.size();
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
-    }
-
-    public EngineIntelligenceProjection(
-            String transactionId,
-            int contractVersion,
-            Instant generatedAt,
-            EngineIntelligenceAgreementStatus comparisonStatus,
-            EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
-            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket,
-            List<EngineIntelligenceEngineProjection> engines,
-            List<EngineIntelligenceDiagnosticSignalProjection> diagnosticSignals,
-            List<EngineIntelligenceWarningProjection> warnings,
-            Instant createdAt,
-            Instant updatedAt
-    ) {
-        this(
-                transactionId,
-                contractVersion,
-                generatedAt,
-                null,
-                null,
-                comparisonStatus,
-                riskMismatchStatus,
-                scoreDeltaBucket,
-                engines,
-                diagnosticSignals,
-                warnings,
-                createdAt,
-                updatedAt
-        );
     }
 
     public String getTransactionId() { return transactionId; }
@@ -123,19 +83,4 @@ public class EngineIntelligenceProjection {
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 
-    private static EngineIntelligenceComparison legacyComparisonIfIdentityAbsent(
-            EngineIntelligenceComparisonType comparisonType,
-            List<String> comparedEngineIds,
-            EngineIntelligenceAgreementStatus comparisonStatus,
-            EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
-            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket
-    ) {
-        if (comparisonType != null || comparedEngineIds != null) {
-            return null;
-        }
-        if (comparisonStatus == null || riskMismatchStatus == null || scoreDeltaBucket == null) {
-            return null;
-        }
-        return new EngineIntelligenceComparison(comparisonStatus, riskMismatchStatus, scoreDeltaBucket);
-    }
 }

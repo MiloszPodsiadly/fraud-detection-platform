@@ -63,11 +63,13 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
     }
 
     @Test
-    void instanceValidationAcceptsLegacyIncompleteResponseAsUnavailableAfterMapping() {
-        EngineIntelligenceProjection legacyProjection = new EngineIntelligenceProjection(
-                "txn-legacy-normalized",
+    void instanceValidationAcceptsIncompleteProjectionAsUnavailableAfterMapping() {
+        EngineIntelligenceProjection incompleteProjection = new EngineIntelligenceProjection(
+                "txn-incomplete",
                 1,
                 Instant.parse("2026-06-18T10:00:02Z"),
+                null,
+                null,
                 EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
                 EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                 EngineIntelligenceScoreDeltaBucket.UNAVAILABLE,
@@ -88,7 +90,7 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
         EngineIntelligenceResponse response;
         try {
             response = new EngineIntelligenceResponseMapper()
-                    .toResponse(new EngineIntelligenceReadModelMapper().map(legacyProjection));
+                    .toResponse(new EngineIntelligenceReadModelMapper().map(incompleteProjection));
         } catch (EngineIntelligenceProjectionReadUnavailableException exception) {
             response = new EngineIntelligenceResponseMapper().unavailable();
         }
