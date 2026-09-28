@@ -56,7 +56,7 @@ class RegulatedMutationCheckpointRenewalExecutionTest {
 
         assertThatThrownBy(() -> fixture.executor(null))
                 .isInstanceOf(NullPointerException.class)
-                .hasMessageContaining("production wiring requires checkpoint renewal service");
+                .hasMessage("Production regulated mutation wiring requires checkpoint renewal service.");
     }
 
     private RegulatedMutationCommand<String, String> command(AtomicInteger businessMutations) {

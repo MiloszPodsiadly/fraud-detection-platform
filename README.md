@@ -240,15 +240,6 @@ CI includes repository filesystem scanning for critical known vulnerabilities as
 not production image provenance; follow-up controls include digest pinning, SBOM generation, SLSA/provenance
 evidence, signed images and automated dependency updates.
 
-| Stack or overlay | Purpose | Uses demo secrets? | Production suitable? |
-| --- | --- | --- | --- |
-| Base | Full internal-only application stack and durable local dependencies, without host port publication. | Yes; the local trust authority has an HMAC fixture default. | No |
-| Dev | Local ports, demo auth and local service fixture wiring. | Yes | No |
-| OIDC local demo | Keycloak dev-mode browser login/BFF exercise. | Yes | No |
-| mTLS service identity local demo | Certificate-backed ML calls using generated local certificates. | Yes | No |
-| Trust-authority JWT local demo | JWT-authenticated calls to the local signing authority. | Yes | No |
-| Application container hardening overlay | Read-only Java, ML and UI containers with reduced application-container privileges for local verification. | Inherits selected stack. | No |
-
 #### What This Does Not Protect Against
 
 - Hostile users with access to the local workstation or committed fixture material.

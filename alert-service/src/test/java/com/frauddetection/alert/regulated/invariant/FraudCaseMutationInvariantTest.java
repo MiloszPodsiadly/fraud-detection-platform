@@ -53,7 +53,7 @@ class FraudCaseMutationInvariantTest {
 
         UpdateFraudCaseResponse response = fixture.service.updateCase("case-1", request(), "fraud-case-update-1");
 
-        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZING);
         assertThat(response.updatedCase()).isNull();
         assertThat(response.currentCaseSnapshot()).isNotNull();
         assertThat(response.currentCaseSnapshot().status()).isEqualTo(FraudCaseStatus.OPEN);
@@ -77,7 +77,7 @@ class FraudCaseMutationInvariantTest {
 
         UpdateFraudCaseResponse response = fixture.service.updateCase("case-1", request(), "fraud-case-update-1");
 
-        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.RECOVERY_REQUIRED);
+        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED);
         assertThat(response.updatedCase()).isNull();
         assertThat(response.currentCaseSnapshot()).isNotNull();
         assertThat(response.currentCaseSnapshot().status()).isEqualTo(FraudCaseStatus.OPEN);

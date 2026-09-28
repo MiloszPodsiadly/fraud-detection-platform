@@ -54,7 +54,7 @@ class RegulatedMutationLocalAuditPhaseWriterIntegrationTest extends AbstractInte
 
     @BeforeEach
     void setUp() {
-        String databaseName = "regulated_mutation_local_audit_writer_" + UUID.randomUUID().toString().replace("-", "");
+        String databaseName = "rm_audit_" + UUID.randomUUID().toString().replace("-", "");
         databaseFactory = new SimpleMongoClientDatabaseFactory(
                 FraudPlatformContainers.mongodb().getReplicaSetUrl(databaseName)
         );

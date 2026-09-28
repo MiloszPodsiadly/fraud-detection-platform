@@ -22,6 +22,7 @@ class PublicApiDocumentationConsistencyTest {
             "HTTP",
             "WORM",
             "ACID",
+            "EVIDENCE_GATED_FINALIZE_V1",
             "FRAUD_CASE_VALIDATION_FAILED",
             "MISSING_IDEMPOTENCY_KEY"
     );

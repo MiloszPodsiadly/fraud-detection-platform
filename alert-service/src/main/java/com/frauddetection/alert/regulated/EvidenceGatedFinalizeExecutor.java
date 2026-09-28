@@ -100,7 +100,6 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
     }
 
     @Autowired
-    // Compatibility/unit-test constructor only. Production wiring must use Spring-managed checkpoint renewal service.
     public EvidenceGatedFinalizeExecutor(
             RegulatedMutationCommandRepository commandRepository,
             MongoTemplate mongoTemplate,
@@ -129,7 +128,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
         this.fencedCommandWriter = fencedCommandWriter;
         this.checkpointRenewalService = Objects.requireNonNull(
                 checkpointRenewalService,
-                "FDP-34 production wiring requires checkpoint renewal service."
+                "Production regulated mutation wiring requires checkpoint renewal service."
         );
     }
 

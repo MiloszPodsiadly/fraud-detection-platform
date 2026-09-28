@@ -167,10 +167,10 @@ class FraudCasePatchRegulatedMutationProofTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(payload("CONFIRMED_FRAUD", "spoofed-actor", "review")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.operation_status").value("FINALIZE_RECOVERY_REQUIRED"))
+                .andExpect(jsonPath("$.operation_status").value("FINALIZING"))
                 .andExpect(jsonPath("$.updated_case").value(nullValue()))
                 .andExpect(jsonPath("$.current_case_snapshot.status").value("OPEN"))
-                .andExpect(jsonPath("$.recovery_required_reason").value("FINALIZING"));
+                .andExpect(jsonPath("$.recovery_required_reason").value(nullValue()));
 
         assertThat(coordinator.mutationCount).isZero();
         verify(fraudCaseRepository, never()).save(any(FraudCaseDocument.class));

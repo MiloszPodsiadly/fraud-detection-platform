@@ -14,4 +14,5 @@ Status: current regulated mutation runtime test plan.
 | Public API | Pending and recovery responses do not expose requested state as completed | `AlertControllerTest`, `RegulatedMutationPostRestartApiBehaviorTest`, `RegulatedMutationPublicStatusMapperTest` |
 
 Current proof remains local to the supported mutation families and configured Mongo transaction boundary. It does not
-claim distributed ACID, exactly-once Kafka delivery, WORM storage, legal notarization, or external finality.
+claim distributed ACID or exactly-once Kafka delivery. It does not claim WORM storage, legal notarization, or external
+finality.

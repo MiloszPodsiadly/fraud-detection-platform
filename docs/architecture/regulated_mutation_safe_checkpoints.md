@@ -15,3 +15,7 @@ degradation.
 A successful checkpoint renewal is not proof that `ATTEMPTED` audit completed, business mutation completed, outbox was
 written, success audit was recorded, evidence was prepared, local finalize completed, external confirmation completed,
 Kafka delivered, or legal/auditor finality was reached.
+
+`regulated_mutation_checkpoint_no_progress_total` is not emitted for a normal successful checkpoint renewal.
+Worker renewing but not progressing is a separate operational condition and must be detected from durable lifecycle
+progress, not inferred from a successful renewal alone.

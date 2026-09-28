@@ -195,7 +195,7 @@ class AlertControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .header("X-Idempotency-Key", "idem-1")
                         .content(objectMapper.writeValueAsString(decisionRequest())))
-                .andExpect(status().isOk())
+                .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.operation_status").value("FINALIZE_RECOVERY_REQUIRED"))
                 .andExpect(jsonPath("$.resultingStatus").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.decisionEventId").value(org.hamcrest.Matchers.nullValue()))
@@ -312,7 +312,7 @@ class AlertControllerTest {
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.message").value("Audit persistence is unavailable; mutation was not executed."))
-                .andExpect(jsonPath("$.details[0]").value("reason:REJECTED_BEFORE_MUTATION"))
+                .andExpect(jsonPath("$.details[0]").value("reason:REJECTED_EVIDENCE_UNAVAILABLE"))
                 .andExpect(jsonPath("$.operation_status").doesNotExist());
     }
 

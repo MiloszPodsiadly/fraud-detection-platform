@@ -20,7 +20,7 @@ The release image must exclude FDP-38 fixture and test checkpoint code. The FDP-
 
 ## Non-Goals
 
-FDP-39 does not add mutation types, alternate runtime models, public statuses, transaction boundaries, Kafka/outbox semantics, executor behavior, coordinator behavior, external finality, distributed ACID, Kafka exactly-once delivery, legal notarization, WORM guarantee, production certification, or bank certification.
+FDP-39 does not add mutation types, alternate runtime models, public statuses, transaction boundaries, Kafka/outbox semantics, executor behavior, or coordinator behavior. It does not claim external finality, distributed ACID, Kafka exactly-once delivery, legal notarization, a WORM guarantee, production certification, or bank certification.
 
 ## Required Evidence
 
