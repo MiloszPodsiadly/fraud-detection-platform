@@ -164,6 +164,7 @@ class RegulatedMutationRecoveryServiceTest {
                 commandRepository,
                 mock(AlertServiceMetrics.class),
                 List.of(strategy),
+                mock(RegulatedMutationFencedCommandWriter.class),
                 Duration.ofMinutes(2)
         );
         RegulatedMutationCommandDocument command = new Fixture().command(RegulatedMutationState.FINALIZED_VISIBLE);
@@ -194,6 +195,23 @@ class RegulatedMutationRecoveryServiceTest {
         verify(fixture.metrics).recordRegulatedMutationRecoveryOutcome("STILL_PENDING");
         verify(fixture.metrics).recordRegulatedMutationRecoveryOutcome("RECOVERED");
         verify(fixture.metrics, atLeastOnce()).recordRegulatedMutationRecoveryBacklog(anyLong(), any(), anyLong(), anyLong());
+    }
+
+    @Test
+    void shouldSkipStaleRecoveryCandidateWhenAnotherWorkerAdvancesCommand() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.REQUESTED);
+        command.setExecutionStatus(RegulatedMutationExecutionStatus.NEW);
+        when(fixture.commandRepository.findTop100ByExecutionStatusInAndUpdatedAtBefore(anyCollection(), any()))
+                .thenReturn(List.of(command));
+        doThrow(new RegulatedMutationRecoveryWriteConflictException(command.getId()))
+                .when(fixture.fencedCommandWriter)
+                .recoveryTransition(any(), any(), any(), any(), any());
+
+        List<RegulatedMutationRecoveryResult> results = fixture.service.recoverStuckCommands();
+
+        assertThat(results).isEmpty();
+        assertThat(command.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.NEW);
     }
 
     @Test
@@ -316,16 +334,17 @@ class RegulatedMutationRecoveryServiceTest {
         private final AuditDegradationService auditDegradationService = mock(AuditDegradationService.class);
         private final AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
         private final AlertRepository alertRepository = mock(AlertRepository.class);
+        private final RegulatedMutationFencedCommandWriter fencedCommandWriter =
+                mock(RegulatedMutationFencedCommandWriter.class);
         private final RegulatedMutationRecoveryService service = new RegulatedMutationRecoveryService(
                 commandRepository,
                 metrics,
                 List.of(new SubmitDecisionRecoveryStrategy(alertRepository)),
+                fencedCommandWriter,
                 Duration.ofMinutes(2)
         );
 
         private Fixture() {
-            when(commandRepository.save(any(RegulatedMutationCommandDocument.class)))
-                    .thenAnswer(invocation -> invocation.getArgument(0));
             when(commandRepository.findTop100ByExecutionStatusInAndUpdatedAtBefore(anyCollection(), any()))
                     .thenReturn(List.of());
             when(commandRepository.findTop100ByStateInAndUpdatedAtBefore(anyCollection(), any()))

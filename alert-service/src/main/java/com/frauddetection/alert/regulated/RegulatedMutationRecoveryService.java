@@ -15,6 +15,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
+
+import org.springframework.data.mongodb.core.query.Update;
 
 @Service
 public class RegulatedMutationRecoveryService {
@@ -22,17 +25,20 @@ public class RegulatedMutationRecoveryService {
     private final RegulatedMutationCommandRepository commandRepository;
     private final AlertServiceMetrics metrics;
     private final List<RegulatedMutationRecoveryStrategy> recoveryStrategies;
+    private final RegulatedMutationFencedCommandWriter fencedCommandWriter;
     private final Duration stuckThreshold;
 
     public RegulatedMutationRecoveryService(
             RegulatedMutationCommandRepository commandRepository,
             AlertServiceMetrics metrics,
             List<RegulatedMutationRecoveryStrategy> recoveryStrategies,
+            RegulatedMutationFencedCommandWriter fencedCommandWriter,
             @Value("${app.regulated-mutation.recovery.stuck-threshold:PT2M}") Duration stuckThreshold
     ) {
         this.commandRepository = commandRepository;
         this.metrics = metrics;
         this.recoveryStrategies = recoveryStrategies == null ? List.of() : List.copyOf(recoveryStrategies);
+        this.fencedCommandWriter = fencedCommandWriter;
         this.stuckThreshold = stuckThreshold;
     }
 
@@ -62,7 +68,8 @@ public class RegulatedMutationRecoveryService {
                 .forEach(command -> commands.putIfAbsent(command.getIdempotencyKey(), command));
         List<RegulatedMutationRecoveryResult> results = commands.values().stream()
                 .filter(command -> !activeLease(command, now))
-                .map(this::recover)
+                .map(this::recoverWithoutRacingActiveWork)
+                .flatMap(Optional::stream)
                 .toList();
         results.forEach(result -> metrics.recordRegulatedMutationRecoveryOutcome(result.outcome().name()));
         recordBacklogMetric();
@@ -203,6 +210,16 @@ public class RegulatedMutationRecoveryService {
         );
     }
 
+    private Optional<RegulatedMutationRecoveryResult> recoverWithoutRacingActiveWork(
+            RegulatedMutationCommandDocument command
+    ) {
+        try {
+            return Optional.of(recover(command));
+        } catch (RegulatedMutationRecoveryWriteConflictException conflict) {
+            return Optional.empty();
+        }
+    }
+
     private void requireCurrentSupportedCommand(RegulatedMutationCommandDocument command) {
         if (command.getMutationModelVersion() != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
             throw new IllegalStateException("Unsupported persisted regulated mutation model version.");
@@ -218,12 +235,8 @@ public class RegulatedMutationRecoveryService {
     }
 
     private RegulatedMutationRecoveryOutcome stillPending(RegulatedMutationCommandDocument command) {
-        command.setExecutionStatus(RegulatedMutationExecutionStatus.NEW);
-        command.setLeaseOwner(null);
-        command.setLeaseExpiresAt(null);
-        command.setLastError(null);
-        command.setUpdatedAt(Instant.now());
-        commandRepository.save(command);
+        transition(command, command.getState(), RegulatedMutationExecutionStatus.NEW, null, update -> {
+        });
         return RegulatedMutationRecoveryOutcome.STILL_PENDING;
     }
 
@@ -233,31 +246,59 @@ public class RegulatedMutationRecoveryService {
                 return recoveryRequired(command);
             }
         }
-        command.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
-        command.setLeaseOwner(null);
-        command.setLeaseExpiresAt(null);
-        if (command.getState() == RegulatedMutationState.FINALIZED_VISIBLE) {
-            command.setState(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
-        }
-        command.setLastError(null);
-        command.setUpdatedAt(Instant.now());
-        commandRepository.save(command);
+        RegulatedMutationState targetState = command.getState() == RegulatedMutationState.FINALIZED_VISIBLE
+                ? RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+                : command.getState();
+        transition(
+                command,
+                targetState,
+                RegulatedMutationExecutionStatus.COMPLETED,
+                null,
+                update -> update
+                        .set("response_snapshot", command.getResponseSnapshot())
+                        .set("outbox_event_id", command.getOutboxEventId())
+        );
         return RegulatedMutationRecoveryOutcome.RECOVERED;
     }
 
     private RegulatedMutationRecoveryOutcome recoveryRequired(RegulatedMutationCommandDocument command) {
-        command.setExecutionStatus(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
-        command.setLastError("RECOVERY_REQUIRED");
-        command.setUpdatedAt(Instant.now());
-        commandRepository.save(command);
+        transition(
+                command,
+                RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
+                RegulatedMutationExecutionStatus.RECOVERY_REQUIRED,
+                "RECOVERY_REQUIRED",
+                update -> {
+                }
+        );
         return RegulatedMutationRecoveryOutcome.RECOVERY_REQUIRED;
     }
 
     private RegulatedMutationRecoveryOutcome failedTerminal(RegulatedMutationCommandDocument command) {
-        command.setExecutionStatus(RegulatedMutationExecutionStatus.FAILED);
-        command.setUpdatedAt(Instant.now());
-        commandRepository.save(command);
+        transition(command, command.getState(), RegulatedMutationExecutionStatus.FAILED, command.getLastError(), update -> {
+        });
         return RegulatedMutationRecoveryOutcome.FAILED_TERMINAL;
+    }
+
+    private void transition(
+            RegulatedMutationCommandDocument command,
+            RegulatedMutationState targetState,
+            RegulatedMutationExecutionStatus targetExecutionStatus,
+            String lastError,
+            Consumer<Update> additionalUpdates
+    ) {
+        fencedCommandWriter.recoveryTransition(
+                command,
+                targetState,
+                targetExecutionStatus,
+                lastError,
+                additionalUpdates
+        );
+        command.setState(targetState);
+        command.setExecutionStatus(targetExecutionStatus);
+        command.setLeaseOwner(null);
+        command.setLeaseExpiresAt(null);
+        command.setLastError(lastError);
+        command.setUpdatedAt(Instant.now());
     }
 
     private boolean reconstructSnapshot(RegulatedMutationCommandDocument command) {

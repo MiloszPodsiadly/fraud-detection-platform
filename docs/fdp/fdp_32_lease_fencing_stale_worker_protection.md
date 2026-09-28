@@ -9,13 +9,15 @@ lease, execution status, and current model version. There is no silent `reposito
 the active lease before business execution and uses the fenced writer for lifecycle transitions. A stale worker must not
 write snapshots, outbox ids, local commit markers, audit flags, or terminal status.
 
-`allowedFieldUpdates` is not a general document mutation API. Identity, lease, ownership, idempotency, request,
-resource, action, creation, attempt-count, and mutation-model fields are immutable.
+`allowedFieldUpdates` is not a general document mutation API.
+Identity, lease, ownership, idempotency, request, resource, action, creation, attempt-count, and mutation-model fields are immutable.
 
 Command transition fencing is not business-side-effect rollback by itself. The current runtime requires
 transaction-mode `REQUIRED` so command, business, local evidence, outbox, and snapshot writes share the local Mongo
 transaction boundary. This does not expand transaction scope beyond Mongo and does not provide a distributed lock or
 distributed ACID.
+
+There is no distributed lock.
 
 Missing, null, retired, unknown, or mismatched model versions fail closed. The read-only persisted-model preflight
 identifies unsupported retained records; lease fencing never reinterprets them.

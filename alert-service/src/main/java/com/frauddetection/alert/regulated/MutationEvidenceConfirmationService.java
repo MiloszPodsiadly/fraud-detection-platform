@@ -34,6 +34,7 @@ public class MutationEvidenceConfirmationService {
     private final MongoTemplate mongoTemplate;
     private final AlertServiceMetrics metrics;
     private final RegulatedMutationPublicStatusMapper publicStatusMapper;
+    private final RegulatedMutationFencedCommandWriter fencedCommandWriter;
     private final boolean externalAnchorRequired;
     private final boolean signatureRequired;
 
@@ -45,6 +46,7 @@ public class MutationEvidenceConfirmationService {
             AuditEventPublicationStatusLookup publicationStatusLookup,
             MongoTemplate mongoTemplate,
             AlertServiceMetrics metrics,
+            RegulatedMutationFencedCommandWriter fencedCommandWriter,
             @Value("${app.audit.external-anchoring.publication.required:${app.audit.external-anchoring.enabled:false}}") boolean externalAnchorRequired,
             @Value("${app.audit.trust-authority.signing-required:false}") boolean signatureRequired
     ) {
@@ -55,6 +57,7 @@ public class MutationEvidenceConfirmationService {
         this.mongoTemplate = mongoTemplate;
         this.metrics = metrics;
         this.publicStatusMapper = new RegulatedMutationPublicStatusMapper();
+        this.fencedCommandWriter = fencedCommandWriter;
         this.externalAnchorRequired = externalAnchorRequired;
         this.signatureRequired = signatureRequired;
     }
@@ -63,10 +66,11 @@ public class MutationEvidenceConfirmationService {
             RegulatedMutationCommandRepository commandRepository,
             TransactionalOutboxRecordRepository outboxRepository,
             AlertServiceMetrics metrics,
+            RegulatedMutationFencedCommandWriter fencedCommandWriter,
             boolean externalAnchorRequired,
             boolean signatureRequired
     ) {
-        this(commandRepository, outboxRepository, null, null, null, metrics, externalAnchorRequired, signatureRequired);
+        this(commandRepository, outboxRepository, null, null, null, metrics, fencedCommandWriter, externalAnchorRequired, signatureRequired);
     }
 
     public int confirmPendingEvidence(int limit) {
@@ -87,7 +91,11 @@ public class MutationEvidenceConfirmationService {
             if (command.getMutationModelVersion() != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
                 throw new IllegalStateException("Unsupported persisted regulated mutation model version.");
             }
-            promoted += confirmEvidenceGatedCommand(command);
+            try {
+                promoted += confirmEvidenceGatedCommand(command);
+            } catch (RegulatedMutationRecoveryWriteConflictException conflict) {
+                // Another worker advanced the command after this batch read; keep the newer durable state.
+            }
         }
         return promoted;
     }
@@ -95,19 +103,23 @@ public class MutationEvidenceConfirmationService {
     private int confirmEvidenceGatedCommand(RegulatedMutationCommandDocument command) {
         EvidenceDecision decision = decision(command);
         if (decision.outcome() == EvidenceConfirmationOutcome.CONFIRMED) {
-            command.setState(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
-            command.setPublicStatus(publicStatusMapper.submitDecisionStatus(command));
-            command.setUpdatedAt(java.time.Instant.now());
-            commandRepository.save(command);
+            transition(
+                    command,
+                    RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED,
+                    null,
+                    null
+            );
             updateAlertOperationStatus(command, command.getPublicStatus());
             return 1;
         }
         if (decision.outcome() == EvidenceConfirmationOutcome.PENDING) {
             if (command.getState() == RegulatedMutationState.FINALIZED_VISIBLE) {
-                command.setState(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
-                command.setPublicStatus(publicStatusMapper.currentStatus(command));
-                command.setUpdatedAt(java.time.Instant.now());
-                commandRepository.save(command);
+                transition(
+                        command,
+                        RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                        null,
+                        null
+                );
                 updateAlertOperationStatus(command, command.getPublicStatus());
                 metrics.recordEvidenceGatedFinalizeStuckVisible();
             }
@@ -117,17 +129,51 @@ public class MutationEvidenceConfirmationService {
             return 0;
         }
         if (decision.outcome() == EvidenceConfirmationOutcome.FAILED) {
-            command.setState(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
-            command.setPublicStatus(publicStatusMapper.currentStatus(command));
-            command.setDegradationReason(decision.reason());
-            command.setLastError(decision.reason());
-            command.setUpdatedAt(java.time.Instant.now());
-            commandRepository.save(command);
+            transition(
+                    command,
+                    RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
+                    decision.reason(),
+                    decision.reason()
+            );
             updateAlertOperationStatus(command, command.getPublicStatus());
             metrics.recordEvidenceGatedFinalizeRecoveryRequired(decision.reason());
             metrics.recordEvidenceConfirmationFailed(decision.reason());
         }
         return 0;
+    }
+
+    private void transition(
+            RegulatedMutationCommandDocument command,
+            RegulatedMutationState targetState,
+            String lastError,
+            String degradationReason
+    ) {
+        SubmitDecisionOperationStatus publicStatus = publicStatusMapper.currentStatus(targetState);
+        RegulatedMutationExecutionStatus executionStatus = targetState == RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
+                ? RegulatedMutationExecutionStatus.RECOVERY_REQUIRED
+                : RegulatedMutationExecutionStatus.COMPLETED;
+        fencedCommandWriter.recoveryTransition(
+                command,
+                targetState,
+                executionStatus,
+                lastError,
+                update -> {
+                    update.set("public_status", publicStatus);
+                    if (degradationReason != null) {
+                        update.set("degradation_reason", degradationReason);
+                    }
+                }
+        );
+        command.setState(targetState);
+        command.setExecutionStatus(executionStatus);
+        command.setLeaseOwner(null);
+        command.setLeaseExpiresAt(null);
+        command.setPublicStatus(publicStatus);
+        command.setLastError(lastError);
+        if (degradationReason != null) {
+            command.setDegradationReason(degradationReason);
+        }
+        command.setUpdatedAt(java.time.Instant.now());
     }
 
     public EvidenceDecision decision(RegulatedMutationCommandDocument command) {

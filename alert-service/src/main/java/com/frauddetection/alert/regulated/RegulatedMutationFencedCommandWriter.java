@@ -76,6 +76,10 @@ public class RegulatedMutationFencedCommandWriter {
                 .set("updated_at", now)
                 .set("last_heartbeat_at", now)
                 .set("last_error", lastError);
+        if (newExecutionStatus != RegulatedMutationExecutionStatus.PROCESSING) {
+            update.set("lease_owner", null);
+            update.set("lease_expires_at", null);
+        }
         Map<String, Map<String, Object>> protectedBaseline = protectedFieldBaseline(update);
         if (allowedFieldUpdates != null) {
             allowedFieldUpdates.accept(update);
@@ -198,6 +202,10 @@ public class RegulatedMutationFencedCommandWriter {
                 .set("updated_at", now)
                 .set("last_heartbeat_at", now)
                 .set("last_error", lastError);
+        if (newExecutionStatus != RegulatedMutationExecutionStatus.PROCESSING) {
+            update.set("lease_owner", null);
+            update.set("lease_expires_at", null);
+        }
         Map<String, Map<String, Object>> protectedBaseline = protectedFieldBaseline(update);
         if (allowedFieldUpdates != null) {
             allowedFieldUpdates.accept(update);

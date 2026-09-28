@@ -220,6 +220,7 @@ class RegulatedMutationProductionReadinessE2ETest extends AbstractIntegrationTes
                 commandRepository,
                 metrics,
                 List.of(new SubmitDecisionRecoveryStrategy(alertRepository)),
+                new RegulatedMutationFencedCommandWriter(mongoTemplate, metrics),
                 Duration.ofMinutes(2)
         );
     }

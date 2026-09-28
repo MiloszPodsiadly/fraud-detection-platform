@@ -139,6 +139,7 @@ class RegulatedMutationRollbackReadinessTest {
                 repository,
                 mock(AlertServiceMetrics.class),
                 List.of(),
+                mock(RegulatedMutationFencedCommandWriter.class),
                 Duration.ofMinutes(2)
         );
 
