@@ -865,7 +865,7 @@ jobs:
           esac
 
       - name: Run FDP-38 live runtime checkpoint suite
-        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp38.live-runtime-checkpoint.enabled=true" "-Dfdp38.alert-service.fixture-image=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE}" "-Dfdp38.alert-service.fixture-image-id=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE_ID}" "-Dfdp38.alert-service.fixture-image-digest=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE_DIGEST}" "-Dgroups=fdp38,live-runtime-checkpoint-chaos,docker-chaos,integration" "-Dtest=RegulatedMutationLiveCheckpointBeforeBusinessMutationIT,RegulatedMutationLiveCheckpointAfterAttemptedAuditIT,RegulatedMutationLiveCheckpointBeforeFdp29FinalizeIT,RegulatedMutationLiveCheckpointBeforeSuccessAuditRetryIT" test
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp38.live-runtime-checkpoint.enabled=true" "-Dfdp38.alert-service.fixture-image=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE}" "-Dfdp38.alert-service.fixture-image-id=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE_ID}" "-Dfdp38.alert-service.fixture-image-digest=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE_DIGEST}" "-Dgroups=fdp38,live-runtime-checkpoint-chaos,docker-chaos,integration" "-Dtest=RegulatedMutationLiveCheckpointBeforeEvidencePreparationIT,RegulatedMutationLiveCheckpointAfterEvidencePreparedBeforeFinalizeIT,RegulatedMutationLiveCheckpointBeforeEvidenceGatedFinalizeIT" test
 
       - name: Verify FDP-38 proof artifacts
         if: always()

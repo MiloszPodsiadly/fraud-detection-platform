@@ -19,35 +19,29 @@ for (const path of [summaryMd, summaryJson, evidenceMd, provenanceJson]) {
 }
 
 for (const checkpoint of [
-  "after-attempted-audit-before-business-mutation",
-  "before-legacy-business-mutation",
-  "before-fdp29-local-finalize",
-  "before-success-audit-retry"
+  "before-evidence-preparation",
+  "after-evidence-prepared-before-finalize",
+  "before-evidence-gated-finalize"
 ]) {
   assertFile(`alert-service/target/fdp38-chaos/fdp38-proof-summary-${checkpoint}.md`);
   assertFile(`alert-service/target/fdp38-chaos/fdp38-proof-summary-${checkpoint}.json`);
 }
 
 const required = {
-  BEFORE_LEGACY_BUSINESS_MUTATION: {
-    className: "RegulatedMutationLiveCheckpointBeforeBusinessMutationIT",
-    method: "beforeLegacyBusinessMutationLiveKillDoesNotCommitOrPublish",
+  BEFORE_EVIDENCE_PREPARATION: {
+    className: "RegulatedMutationLiveCheckpointBeforeEvidencePreparationIT",
+    method: "killBeforeEvidencePreparationDoesNotCommitOrPublish",
     precondition_setup: "LIVE_HTTP_FLOW_FROM_INITIAL_REQUEST"
   },
-  AFTER_ATTEMPTED_AUDIT_BEFORE_BUSINESS_MUTATION: {
-    className: "RegulatedMutationLiveCheckpointAfterAttemptedAuditIT",
-    method: "afterAttemptedAuditBeforeBusinessMutationLiveKillPreservesAttemptedAuditOnly",
+  AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE: {
+    className: "RegulatedMutationLiveCheckpointAfterEvidencePreparedBeforeFinalizeIT",
+    method: "killAfterEvidencePreparedDoesNotCommitOrPublish",
     precondition_setup: "LIVE_HTTP_FLOW_FROM_INITIAL_REQUEST"
   },
-  BEFORE_FDP29_LOCAL_FINALIZE: {
-    className: "RegulatedMutationLiveCheckpointBeforeFdp29FinalizeIT",
-    method: "beforeFdp29LocalFinalizeLiveKillDoesNotClaimFinality",
+  BEFORE_EVIDENCE_GATED_FINALIZE: {
+    className: "RegulatedMutationLiveCheckpointBeforeEvidenceGatedFinalizeIT",
+    method: "killBeforeEvidenceGatedFinalizeDoesNotClaimFinality",
     precondition_setup: "LIVE_HTTP_FLOW_FROM_INITIAL_REQUEST"
-  },
-  BEFORE_SUCCESS_AUDIT_RETRY: {
-    className: "RegulatedMutationLiveCheckpointBeforeSuccessAuditRetryIT",
-    method: "beforeSuccessAuditRetryLiveKillDoesNotDuplicateBusinessMutationOrOutbox",
-    precondition_setup: "SEEDED_DURABLE_PRECONDITION_THEN_RUNTIME_REACHED_CHECKPOINT"
   }
 };
 
