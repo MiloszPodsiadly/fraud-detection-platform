@@ -12,7 +12,7 @@ FDP-35 provides modeled restart/recovery proof in CI. It verifies durable post-c
 ## Non-Goals
 
 - no new mutation semantics
-- no FDP-29 production enablement
+- no alternate regulated mutation runtime or fallback
 - no scheduler/heartbeat expansion
 - no Kafka/outbox semantic changes
 - no external finality
@@ -37,7 +37,7 @@ True OS/JVM/container termination chaos remains future scope unless explicitly i
 | long-running PROCESSING is observable | `fdp35-production-readiness` | `RegulatedMutationProductionReadinessE2ETest.longRunningProcessingIsObservableE2E` | `fdp35-production-readiness-test-reports` |
 | rollback disables new risky behavior without hiding recovery | `regulated-mutation-regression` | `RegulatedMutationRollbackReadinessTest.rollbackKeepsRecoveryCommandsVisible` | `regulated-mutation-regression-test-reports` |
 | Docker/Testcontainers proof is green | `fdp35-production-readiness` | `RegulatedMutationProductionReadinessE2ETest.legacySubmitDecisionHappyPathE2E` | `fdp35-production-readiness-test-reports` |
-| FDP-29/FDP-32/FDP-33/FDP-34 regressions are green | `regulated-mutation-regression` | `EvidenceGatedFinalizeCoordinatorIntegrationTest.shouldFinalizeSubmitDecisionThroughRealMongoCoordinatorPath`; `RegulatedMutationLeaseFencingIntegrationTest.nonClaimedRecoveryTransitionCannotOverwriteCurrentOwnerAfterLeaseTakeover`; `RegulatedMutationLeaseRenewalIntegrationTest.concurrentRenewalAtLastAllowedSlotAllowsOnlyOneSuccess`; `RegulatedMutationStaleWorkerExecutorIntegrationTest.legacyCheckpointBudgetExceededStopsBeforeBusinessMutationThroughRealMongoExecutorPath` | `regulated-mutation-regression-test-reports` |
+| Finalize, fencing, renewal, and checkpoint regressions are green | `regulated-mutation-regression` | `EvidenceGatedFinalizeCoordinatorIntegrationTest.shouldFinalizeSubmitDecisionThroughRealMongoCoordinatorPath`; `RegulatedMutationLeaseFencingIntegrationTest.nonClaimedRecoveryTransitionCannotOverwriteCurrentOwnerAfterLeaseTakeover`; `RegulatedMutationLeaseRenewalIntegrationTest.concurrentRenewalAtLastAllowedSlotAllowsOnlyOneSuccess`; `RegulatedMutationStaleWorkerExecutorIntegrationTest.evidenceGatedCheckpointBudgetExceededStopsBeforeFinalizeMutationThroughRealMongoExecutorPath` | `regulated-mutation-regression-test-reports` |
 
 ## Required Proof Matrix
 

@@ -2,7 +2,7 @@
 
 FDP-37 is a proof, operations, and release-gate branch. It builds the `alert-service` image from the release Dockerfile, tags it with the current commit SHA, kills the real image/container, restarts that image against durable Mongo state, and verifies regulated mutation API, recovery, outbox, audit, and inspection invariants after restart.
 
-FDP-37 does not change runtime semantics, public statuses, transaction boundaries, Kafka/outbox semantics, or production flags. It does not enable FDP-29 production mode and does not add production chaos hooks.
+FDP-37 does not change current-only runtime semantics, public statuses, transaction boundaries, or Kafka/outbox semantics, and it does not add production chaos hooks.
 
 FDP-37 runs the production-like image under explicit CI/test configuration against Testcontainers dependencies. This is production-image chaos proof, not production environment configuration certification.
 
@@ -26,12 +26,12 @@ FDP-37 runs the production-like image under explicit CI/test configuration again
 
 FDP-37 covers selected durable regulated mutation crash windows:
 
-- claimed before attempted audit
-- attempted audit before business mutation
-- legacy business committing requiring recovery
-- legacy success audit pending replay/recovery
-- FDP-29 finalizing recovery-required without external confirmation
-- FDP-29 finalized evidence pending external
+- claimed before evidence preparation
+- attempted audit before evidence preparation
+- current-model finalizing requiring recovery
+- finalize-recovery replay without repeated business mutation
+- finalizing recovery-required without external confirmation
+- finalized evidence pending external
 - at least one `transaction-mode=REQUIRED` production-image chaos scenario
 - rollback validation with no new success claims
 

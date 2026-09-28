@@ -27,4 +27,4 @@ replace environment-specific release approval.
 - Fixture images and fixture profiles must not be described as release images or release profiles.
 - `OFF` transaction mode is compatibility/demo behavior for regulated paths.
 - `REQUIRED` transaction mode is expected for bank/prod-style regulated mutation safety.
-- FDP-29 evidence-gated finalize requires a separate config PR and explicit release approval.
+- `EVIDENCE_GATED_FINALIZE_V1` is the only executable regulated mutation model; unsupported persisted versions fail closed.

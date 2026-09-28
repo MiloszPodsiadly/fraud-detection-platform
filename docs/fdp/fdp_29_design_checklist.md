@@ -7,12 +7,12 @@ This checklist maps FDP-29 design questions to the project documentation that an
 
 | Check | Evidence |
 | --- | --- |
-| Is visible business commit clearly defined? | `docs/adr/fdp_29_evidence_gated_finalize.md` |
+| Is visible business commit clearly defined? | `docs/adr/evidence_gated_regulated_mutation_finalize.md` |
 | Are evidence preconditions explicit? | `docs/architecture/evidence_gated_finalize_preconditions.md` |
 | Is the local ACID boundary clear? | ADR and evidence preconditions |
 | Are external/eventual effects clearly outside ACID? | ADR, failure windows, migration rollout |
 | Are API statuses unambiguous? | `docs/api/evidence_gated_finalize_response_contract.md` |
-| Are old statuses mapped? | `docs/architecture/evidence_gated_finalize_compatibility_matrix.md` |
+| Are unsupported persisted versions rejected without reinterpretation? | `docs/architecture/regulated_mutation_runtime_handoff.md` |
 | Is idempotency replay defined for every state? | `docs/architecture/evidence_gated_finalize_idempotency_replay.md` |
 | Are failure windows defined? | `docs/architecture/evidence_gated_finalize_failure_windows.md` |
 | Are non-goals explicit? | ADR non-goals section |

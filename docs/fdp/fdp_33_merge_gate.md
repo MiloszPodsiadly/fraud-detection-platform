@@ -3,7 +3,7 @@
 Status: branch evidence.
 
 
-FDP-33 is merge-safe only as primitive + readiness: bounded owner-fenced lease renewal for regulated mutation commands, durable budget-exceeded recovery, operational runbook, and low-cardinality metrics. It is not production enablement for FDP-29 and not an external-finality claim.
+FDP-33 is merge-safe only as primitive + readiness: bounded owner-fenced lease renewal for regulated mutation commands, durable budget-exceeded recovery, operational runbook, and low-cardinality metrics. It is not production approval or an external-finality claim.
 
 ## Merge-Safe Scope
 
@@ -35,11 +35,11 @@ FDP-33 is merge-safe only as primitive + readiness: bounded owner-fenced lease r
 - observability dashboard contract exists at `docs/observability/fdp_33_lease_renewal_dashboard.md`
 - FDP-32 stale-worker and fencing tests pass
 - FDP-31 claim and replay tests pass
-- FDP-29 integration tests pass
+- current evidence-gated finalize integration tests pass
 - public API statuses unchanged
 - Kafka and outbox semantics unchanged
 - transaction boundaries unchanged
-- FDP-29 feature flags unchanged
+- current-only model routing and persisted-version policy unchanged
 
 ## Production And Bank Enablement Gate
 
@@ -67,7 +67,7 @@ Required tests before merge:
 - `AlertServiceMetricsTest`
 - `RegulatedMutationArchitectureTest`
 - FDP-32 stale-worker fencing tests
-- FDP-29 integration tests
+- current evidence-gated finalize integration tests
 
 Required CI command:
 
@@ -91,4 +91,4 @@ mvn "-Dmaven.repo.local=$PWD\.m2repo" -pl alert-service -am test
 - no public heartbeat API
 - no new mutation types
 - no automatic heartbeat scheduler
-- no FDP-29 production enablement
+- no alternate regulated mutation runtime or fallback

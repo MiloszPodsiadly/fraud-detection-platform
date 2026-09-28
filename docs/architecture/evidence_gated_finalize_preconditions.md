@@ -96,10 +96,10 @@ fork, or indefinitely wait on the local audit chain.
 
 Writer health is exposed through low-cardinality metrics:
 
-- `fdp29_local_audit_chain_append_total{outcome}`
-- `fdp29_local_audit_chain_retry_total{reason}`
-- `fdp29_local_audit_chain_append_duration_ms`
-- `fdp29_local_audit_chain_lock_release_failure_total`
+- `regulated_mutation_local_audit_chain_append_total{outcome}`
+- `regulated_mutation_local_audit_chain_retry_total{reason}`
+- `regulated_mutation_local_audit_chain_append_duration_ms`
+- `regulated_mutation_local_audit_chain_lock_release_failure_total`
 
 These metrics are operational signals only. They are not compliance evidence and must not use dynamic labels such as
 actors, resources, command ids, audit ids, lock owners, paths, or exception messages.

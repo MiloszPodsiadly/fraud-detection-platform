@@ -14,7 +14,7 @@ registry promotion policy, environment protection, required checks, and enableme
 
 FDP-40 is a release and platform governance readiness branch. It validates the evidence shape required before any future regulated mutation production enablement request can be reviewed.
 
-FDP-40 does not change runtime mutation behavior, public statuses, transaction boundaries, Kafka or outbox semantics, or FDP-29 production enablement.
+FDP-40 does not change current-only runtime mutation behavior, public statuses, transaction boundaries, or Kafka/outbox semantics.
 
 FDP-40 does not perform real cosign signature verification by default.
 It does not verify Sigstore or Rekor transparency evidence, does not enforce registry immutability,

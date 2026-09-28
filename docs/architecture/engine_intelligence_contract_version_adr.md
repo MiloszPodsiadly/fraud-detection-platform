@@ -16,15 +16,12 @@ The v1 comparison object is not all-engine agreement. It is explicitly `comparis
 `comparedEngineIds=["rules.primary","ml.python.primary"]`. Velocity remains a separate diagnostic result and signal;
 it must not participate in Rules-vs-ML score delta semantics. New v1 producers must emit explicit comparison identity.
 
-Legacy v1 comparison objects produced before FDP-129 that contain exactly the three semantic fields
-`agreementStatus`, `riskMismatchStatus`, and `scoreDeltaBucket` without `comparisonType` and without
-`comparedEngineIds` are normalized only at the historical `TransactionScoredEvent` read boundary when the outer event
-proves `modelVersion=v1`. They are normalized to `RULES_VS_ML` and
-`["rules.primary","ml.python.primary"]`, then validated by the same strict constructor rules as new payloads. Partial
-identity, reversed IDs, Velocity-containing comparison IDs, otherwise incorrect identity, and current events missing
-identity are rejected rather than completed.
+Every comparison object must carry explicit `comparisonType=RULES_VS_ML` and
+`comparedEngineIds=["rules.primary","ml.python.primary"]`. The read boundary does not infer either field from the
+outer event `modelVersion`. Missing or partial identity, reversed IDs, Velocity-containing comparison IDs, unknown
+IDs, and inconsistent comparison semantics are rejected rather than completed.
 
-This is not compatibility-by-dropping. Consumers must not hide Velocity, map it to Rules or ML, or fabricate a v1 shape
-from a richer future payload. The repository controls in-repository consumers, but this does not prove the absence of
-external consumers. The compatibility adapter is intentionally narrow and only covers the actual legacy v1 comparison
-shape.
+The repository-controlled hard cut deliberately retires historical comparison normalization. This does not prove the
+absence of external consumers; it records the accepted compatibility break for retained payloads that do not satisfy
+the current contract. Consumers must not hide Velocity, map it to Rules or ML, or fabricate a current shape from a
+malformed historical payload.

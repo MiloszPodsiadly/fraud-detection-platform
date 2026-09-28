@@ -30,7 +30,7 @@ Out of scope:
 | Condition | Symptom | Impact | Safe action | Endpoint or control | Authority | Evidence | Retry or rollback guidance | Escalation |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `REGULATED_MUTATION_RECOVERY_REQUIRED` | Trust level reason code or recovery backlog | Mutation needs reconciliation | Inspect command and run bounded recovery | `POST /api/v1/regulated-mutations/recover` | `regulated-mutation:recover` | command id or idempotency hash | No manual business rollback claim | engineering |
-| `COMMITTED_DEGRADED` | committed degraded count > 0 | Post-commit audit degradation | Inspect command and degradation | inspection plus audit degradation endpoints | ops admin | command snapshot and audit ids | No `FULLY_ANCHORED` claim | security |
+| `FINALIZE_RECOVERY_REQUIRED` | finalize recovery required count > 0 | Finalize outcome requires recovery | Inspect command and local evidence | inspection plus regulated recovery endpoints | ops admin | command snapshot and evidence ids | No finalized or externally confirmed claim | security |
 | `PUBLISH_CONFIRMATION_UNKNOWN` | outbox unknown count > 0 | Delivery confirmation ambiguous | Inspect outbox and resolve with evidence | `/api/v1/outbox/.../resolve-confirmation` | ops admin | broker evidence | Manual resolution requires idempotency and evidence | platform |
 | `OUTBOX_FAILED_TERMINAL` | terminal delivery count > 0 | Outbox delivery stopped | Repair cause and resolve | outbox recovery | ops admin | event id | Do not silently republish with a new key | platform |
 | `OUTBOX_PROJECTION_MISMATCH` | projection mismatch count > 0 | Alert cache disagrees with outbox source | Run bounded recovery | `POST /api/v1/outbox/recovery/run` | ops admin | outbox record | Outbox record remains source of truth | engineering |
@@ -38,7 +38,7 @@ Out of scope:
 | `TRUST_INCIDENT_UNACKNOWLEDGED_CRITICAL` | unacknowledged critical count | Unowned risk | Acknowledge | `/api/v1/trust/incidents/{id}/ack` | ops admin | incident id | Read endpoints remain read-only | security |
 | `TRUST_INCIDENT_REFRESH_PARTIAL` | refresh partial | Local/dev semantics attempted | Switch config to `ATOMIC` | config/startup | operator | config diff | Bank/prod must fail closed | engineering |
 | `EVIDENCE_CONFIRMATION_PENDING_TOO_LONG` | pending evidence age grows | External evidence delayed | Inspect evidence/export state | evidence export | audit read/admin | export fingerprint | Bounded retry only | platform |
-| `EVIDENCE_CONFIRMATION_FAILED` | failed evidence count | Evidence incomplete | Inspect command and anchors | inspection/export | ops admin | anchor status | No `FULLY_ANCHORED` claim | security |
+| `EVIDENCE_CONFIRMATION_RECOVERY_REQUIRED` | evidence confirmation recovery count | Evidence confirmation requires recovery | Inspect command and anchors | inspection/export | ops admin | anchor status | No externally confirmed claim | security |
 | `AUDIT_DEGRADATION_UNRESOLVED` | unresolved degradation | Audit trust degraded | Resolve with verified evidence | audit degradation endpoint | ops admin | evidence reference | No hidden repair | security |
 | `TRANSACTION_CAPABILITY_FAILURE` | startup fails | Bank/prod stays closed | Fix Mongo transaction capability | startup | operator | startup logs without secrets | No fail-open | database |
 | `SENSITIVE_READ_AUDIT_UNAVAILABLE` | sensitive read returns `503` | Operational reads blocked | Restore audit persistence | affected GET endpoint | audit read/admin | stable error code/message | Do not disable audit | database |

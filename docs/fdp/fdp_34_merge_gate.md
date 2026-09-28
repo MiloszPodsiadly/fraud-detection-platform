@@ -27,8 +27,8 @@ FDP-34 is merge-safe only as explicit safe checkpoint adoption of the FDP-33 bou
 - production executors require the Spring-managed checkpoint renewal service
 - FDP-32 stale-worker tests still pass
 - FDP-33 renewal primitive tests still pass
-- FDP-29 integration tests still pass
-- real Mongo executor-path checkpoint tests cover legacy and FDP-29 success, stale/expired, and budget paths
+- current evidence-gated finalize integration tests still pass
+- real Mongo executor-path checkpoint tests cover current-model success, stale/expired, and budget paths
 - metrics are low-cardinality
 - `regulated_mutation_checkpoint_no_progress_total` is not emitted for successful renewal
 - architecture tests guard checkpoint boundaries
@@ -51,7 +51,7 @@ FDP-34 is merge-safe only as explicit safe checkpoint adoption of the FDP-33 bou
 
 ## Required Commands
 
-Focused FDP-34/FDP-33/FDP-32/FDP-29 regression:
+Focused checkpoint, renewal, fencing, and finalize regression:
 
 ```bash
 mvn "-Dmaven.repo.local=$PWD\.m2repo" "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=RegulatedMutationSafeCheckpointPolicyTest,RegulatedMutationCheckpointRenewalServiceTest,RegulatedMutationCheckpointRenewalExecutionTest,RegulatedMutationArchitectureTest,RegulatedMutationLeaseRenewalIntegrationTest,EvidenceGatedFinalizeCoordinatorIntegrationTest,RegulatedMutationStaleWorkerExecutorIntegrationTest" test
@@ -81,5 +81,5 @@ FDP-34 does not enable production or bank behavior by itself. Production or bank
 - no distributed lock
 - no distributed ACID
 - no process-kill chaos proof
-- no FDP-29 production enablement
+- no alternate regulated mutation runtime or fallback
 -

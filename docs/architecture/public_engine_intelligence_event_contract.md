@@ -4,7 +4,7 @@ Status: current public Engine Intelligence event contract with historical FDP-92
 
 ## Purpose
 
-The public Engine Intelligence event is a safe, bounded, backward-compatible optional
+The public Engine Intelligence event is a safe, bounded, optional
 `TransactionScoredEvent.engineIntelligence` summary. Historical FDP-92 defined the contract-only foundation. Later
 scoped work wires disabled-by-default producer emission, alert-service projection, bounded API/OpenAPI, and Analyst
 Console rendering without making engine intelligence a final decision source.
@@ -34,12 +34,11 @@ wiring requires a consumer-first rollout: consumers must deploy the FDP-92 contr
 producer emits `engineIntelligence`, because historical consumers may reject an unknown top-level
 field.
 
-Compatibility is intentionally narrow. Old events without `engineIntelligence` are accepted as absent. Legacy v1
-comparison objects without both identity fields are normalized only at the historical `TransactionScoredEvent` read
-boundary when the outer event proves `modelVersion=v1` and the three legacy semantic fields are present. Partial
-comparison identity, current summaries missing Rules or ML, current summaries missing comparison identity, and
-malformed current canonical feature values are rejected or fail closed; compatibility adapters must not repair current
-corruption.
+Compatibility is intentionally narrow. A valid current event may omit `engineIntelligence` or carry explicit null,
+which is accepted as absence and does not invent model lineage. When a summary is present, its comparison identity must
+be complete and explicit regardless of the outer event `modelVersion`. Historical identity-free comparisons, partial
+comparison identity, summaries missing Rules or ML, incorrect engine ordering, unsupported IDs, and malformed current
+canonical values are rejected or fail closed; the read boundary does not repair them.
 
 ## Payload Limits
 
@@ -64,8 +63,8 @@ allowlists.
 `ml.python.primary` may include a bounded `modelIdentity` object with `modelName`, `modelVersion`, and
 `featureContractVersion`. This identity belongs to the ML engine-intelligence result, not to the top-level final
 scoring fields on `TransactionScoredEvent`. Rules and Velocity engine results must omit it. The field is additive and
-optional so historical events without ML lineage remain readable; new producer publication must use the validated ML
-engine result as its source.
+optional so the valid current absent-lineage state remains readable; new producer publication must use the validated
+ML engine result as its source. The reader does not invent missing model identity.
 
 ## Field Omission Rules
 

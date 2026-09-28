@@ -30,13 +30,13 @@ True OS/JVM/container termination chaos remains future scope unless explicitly i
 | explicit no new success claims observed | required yes/no |
 | post-rollback owner signoff | required owner name and timestamp |
 
-## Disable FDP-29 Evidence-Gated Finalize Flags
+## Preserve The Current Runtime Model
 
-- Set global FDP-29 evidence-gated finalize flag false.
-- Set submit-decision FDP-29 flag false.
-- Existing FDP-29 commands continue to replay with their stored `mutation_model_version`.
-- Do not downgrade existing `EVIDENCE_GATED_FINALIZE_V1` commands to legacy semantics.
-- Dual control is required.
+- Roll back only to a build that supports `EVIDENCE_GATED_FINALIZE_V1` and the current persisted contract.
+- Run the read-only persisted-model preflight before restart.
+- Do not add a runtime selector or reinterpret missing, retired, or unknown versions.
+- Do not downgrade current commands to removed semantics.
+- Dual control is required for deployment rollback.
 
 ## Disable Or Neutralize Checkpoint Adoption
 
@@ -80,7 +80,7 @@ After rollback:
 - `RegulatedMutationRollbackReadinessTest.disablingCheckpointRenewal_doesNotDisableFencing`
 - `RegulatedMutationRollbackReadinessTest.shrinkingRenewalBudget_doesNotCreateFalseSuccess`
 - `RegulatedMutationRollbackReadinessTest.rollbackKeepsRecoveryCommandsVisible`
-- `RegulatedMutationRollbackReadinessTest.rollbackDoesNotEnableFdp29Production`
+- `RegulatedMutationRollbackReadinessTest.currentRuntimeDoesNotStartAutonomousMutationSchedulers`
 - `RegulatedMutationRollbackReadinessTest.rollbackApiSmoke_doesNotHideRecovery`
 
 ## Filled Sample Output
@@ -92,8 +92,8 @@ rollback_id: FDP35-ROLLBACK-2026-05-05-001
 owner: fraud-platform-on-call
 approver: fraud-platform-incident-lead
 timestamp: 2026-05-05T18:30:00Z
-config_before: checkpoint_renewal_enabled=true, fdp29_submit_decision=false
-config_after: checkpoint_renewal_enabled=false, fdp29_submit_decision=false
+config_before: transaction_mode=REQUIRED, checkpoint_renewal_enabled=true
+config_after: transaction_mode=REQUIRED, checkpoint_renewal_enabled=false
 ci_job_link: local RegulatedMutationRollbackReadinessTest
 recovery_backlog_before: total=2, FINALIZE_RECOVERY_REQUIRED=1
 recovery_backlog_after: total=2, FINALIZE_RECOVERY_REQUIRED=1

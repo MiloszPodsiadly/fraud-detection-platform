@@ -15,7 +15,7 @@ Fixture proof is not production proof. `READY_FOR_ENABLEMENT_REVIEW` is not `PRO
 - no distributed ACID
 - no Kafka exactly-once delivery
 - no legal/WORM notarization
-- no automatic FDP-29 production enablement
+- no alternate regulated mutation runtime or fallback
 - no full production config certification
 - no proof that fixture image is release image
 - no all-instruction-boundary live chaos coverage

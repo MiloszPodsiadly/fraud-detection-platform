@@ -17,7 +17,7 @@
 - Deployment references release manifest.
 - Deployment references rollback plan.
 - Deployment must not reference a fixture image.
-- FDP-29 enablement requires a separate config PR.
+- Release preserves the current-only regulated mutation model and fail-closed persisted-model preflight.
 
 These gates are platform readiness requirements and do not claim production certification.
 Production enablement remains false until a separate config PR is reviewed and approved.

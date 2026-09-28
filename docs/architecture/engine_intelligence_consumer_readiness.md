@@ -14,9 +14,9 @@ compatibility guidance.
 
 | Area | Known consumer or usage path | FDP-93 treatment |
 | --- | --- | --- |
-| Shared contract | `common-events` `TransactionScoredEvent` and compatibility tests | Shared old, minimal, full-bounded, unknown-nested, and unknown-top-level fixtures |
+| Shared contract | `common-events` `TransactionScoredEvent` and contract tests | Shared current-absent, minimal, full-bounded, unknown-nested, and unknown-top-level fixtures |
 | Alert Kafka consumer | `AlertKafkaConfig` -> `TransactionScoredEventListener` | Kafka `JsonDeserializer` compatibility proof |
-| Alert monitoring projection | `TransactionMonitoringService` -> `ScoredTransactionDocumentMapper` -> `ScoredTransactionDocument` | Existing projection compared against the old event shape |
+| Alert monitoring projection | `TransactionMonitoringService` -> `ScoredTransactionDocumentMapper` -> `ScoredTransactionDocument` | Existing projection compared against the current shape without Engine Intelligence |
 | Alert creation path | `AlertManagementService` -> `AlertCaseFactory` -> `AlertDocument` | Historical inventory only; no FDP-93 engine-intelligence projection |
 | Fraud-case path | `FraudCaseManagementService` -> `FraudCaseDocument` and `FraudCaseTransactionDocument` | Historical inventory only; no FDP-93 engine-intelligence projection |
 | Suspicious transaction path | `SuspiciousTransactionProjectionService` -> `SuspiciousTransactionDocument` | Historical inventory only; no FDP-93 engine-intelligence projection |
@@ -38,13 +38,14 @@ consumers must be added to the inventory intentionally. The bounded failure mess
 ## Fixture Strategy
 
 Shared fixtures live under `common-events/src/test/resources/fixtures/transaction-scored-event/`.
-They cover the old event shape, a minimal bounded summary, the full bounded summary, unknown nested
+They cover a current event with the optional summary absent, a minimal bounded summary, the full bounded summary, unknown nested
 summary fields, and an unknown top-level event field.
-Fixture name prefix v1/v2 describes the TransactionScoredEvent fixture shape used for compatibility tests.
-`v1_without_engine_intelligence` means the pre-FDP-92 scored-event shape.
-`v2_*_engine_intelligence` means the scored-event shape with optional engineIntelligence present.
+Fixture names describe the current `TransactionScoredEvent` shape used for contract tests.
+`v2_without_engine_intelligence` proves legitimate optional absence.
+`v2_*_engine_intelligence` means the current scored-event shape with optional engineIntelligence present.
 This does not change `EngineIntelligenceSummary.contractVersion`.
 The nested public engine-intelligence contract remains `contractVersion = 1`.
+Identity-free historical comparison payloads are not fixtures and are rejected rather than normalized during replay.
 
 ## Alert-service Readiness
 
@@ -104,7 +105,7 @@ Producer emission must not hide projection/API/UI changes unless they are explic
 ## Merge Gates
 
 - Shared fixtures deserialize in `common-events`.
-- Alert-service deserializes old and new fixture shapes through its Kafka deserializer boundary.
+- Alert-service deserializes current absent and present fixture shapes through its Kafka deserializer boundary.
 - Alert-service projection remains unchanged for the new and forward-compatible fixture shapes.
 - Source scans remain green for consumer inventory, producer isolation, persistence isolation, and API/UI isolation.
 - FDP-93 did not expose engineIntelligence through API/UI.

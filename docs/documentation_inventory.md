@@ -7,7 +7,7 @@ Scope: repository documentation only. Excludes `documents/` prompt inputs, build
 | .github/PULL_REQUEST_TEMPLATE/fdp_enablement_config_change.md | project | current-source-of-truth |
 | deployment/service-identity/mtls/README.md | project | current-source-of-truth |
 | deployment/service-identity/README.md | project | current-source-of-truth |
-| docs/adr/fdp_29_evidence_gated_finalize.md | architecture | branch-evidence-or-template |
+| docs/adr/evidence_gated_regulated_mutation_finalize.md | architecture | current-source-of-truth |
 | docs/adr/fdp_36_real_chaos_enable_readiness.md | architecture | branch-evidence-or-template |
 | docs/adr/fdp_37_production_image_chaos_enable_gate.md | architecture | branch-evidence-or-template |
 | docs/adr/fdp_38_live_runtime_checkpoint_fixture_proof.md | architecture | branch-evidence-or-template |
@@ -28,7 +28,6 @@ Scope: repository documentation only. Excludes `documents/` prompt inputs, build
 | docs/architecture/alert_service_write_path_inventory.md | architecture | current-source-of-truth |
 | docs/architecture/current_architecture.md | architecture | current-source-of-truth |
 | docs/architecture/diagrams.md | architecture | current-source-of-truth |
-| docs/architecture/evidence_gated_finalize_compatibility_matrix.md | architecture | current-source-of-truth |
 | docs/architecture/evidence_gated_finalize_failure_windows.md | architecture | current-source-of-truth |
 | docs/architecture/evidence_gated_finalize_idempotency_replay.md | architecture | current-source-of-truth |
 | docs/architecture/evidence_gated_finalize_preconditions.md | architecture | current-source-of-truth |
@@ -36,6 +35,8 @@ Scope: repository documentation only. Excludes `documents/` prompt inputs, build
 | docs/architecture/evidence_gated_finalize_state_machine.md | architecture | current-source-of-truth |
 | docs/architecture/fraud_case_management_architecture.md | architecture | current-source-of-truth |
 | docs/architecture/index.md | architecture | current-source-of-truth |
+| docs/architecture/regulated_mutation_implementation_gate.md | architecture | current-source-of-truth |
+| docs/architecture/regulated_mutation_runtime_handoff.md | architecture | current-source-of-truth |
 | docs/architecture/regulated_mutation_safe_checkpoint_policy.md | architecture | current-source-of-truth |
 | docs/architecture/regulated_mutation_safe_checkpoints.md | architecture | current-source-of-truth |
 | docs/assets/architecture_alert_case_roadmap.svg | asset | current-source-of-truth |
@@ -60,15 +61,9 @@ Scope: repository documentation only. Excludes `documents/` prompt inputs, build
 | docs/documentation_style_guide.md | project | current-source-of-truth |
 | docs/fdp/branch_index.md | branch-evidence | branch-evidence-or-template |
 | docs/fdp/evidence_status.md | branch-evidence | branch-evidence-or-template |
-| docs/fdp/fdp_25_regulated_mutation_commit.md | branch-evidence | branch-evidence-or-template |
 | docs/fdp/fdp_27_merge_gate.md | branch-evidence | branch-evidence-or-template |
-| docs/fdp/fdp_28_invariant_proof_report.md | branch-evidence | branch-evidence-or-template |
 | docs/fdp/fdp_28b_chaos_handoff.md | branch-evidence | branch-evidence-or-template |
 | docs/fdp/fdp_29_design_checklist.md | branch-evidence | branch-evidence-or-template |
-| docs/fdp/fdp_29_evidence_gated_finalize_handoff.md | branch-evidence | branch-evidence-or-template |
-| docs/fdp/fdp_29_implementation_merge_gate.md | branch-evidence | branch-evidence-or-template |
-| docs/fdp/fdp_30_executor_split.md | branch-evidence | branch-evidence-or-template |
-| docs/fdp/fdp_31_claim_replay_policy_extraction.md | branch-evidence | branch-evidence-or-template |
 | docs/fdp/fdp_32_lease_fencing_stale_worker_protection.md | branch-evidence | branch-evidence-or-template |
 | docs/fdp/fdp_32_merge_gate.md | branch-evidence | branch-evidence-or-template |
 | docs/fdp/fdp_33_lease_renewal_operational_readiness.md | branch-evidence | branch-evidence-or-template |

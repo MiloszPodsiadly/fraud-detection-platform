@@ -835,7 +835,7 @@ paths:
   /api/v1/regulated-mutations/recover:
     post:
       summary: Run bounded regulated mutation recovery
-      description: Requires regulated-mutation:recover. Runs bounded recovery for stale or recovery-required FDP-25 command records. Recovery releases only safe pre-mutation commands, validates reconstructed business state against stored canonical intent, binds existing idempotent phase audits, retries only missing success evidence where safe, and never re-runs business mutation after BUSINESS_COMMITTING. This endpoint does not claim rollback safety, workflow automation, scoring changes, Kafka contract changes, or full evidence anchoring.
+      description: Requires regulated-mutation:recover. Runs bounded recovery for stale or recovery-required current-model commands. Recovery validates reconstructed business state against canonical intent, preserves owner fencing, binds idempotent evidence, and never blindly re-runs business mutation. Unsupported persisted model versions are handled by the read-only startup preflight, not this endpoint. Recovery does not claim external finality, workflow automation, scoring changes, or exactly-once Kafka delivery.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -899,7 +899,7 @@ paths:
   /api/v1/alerts/{alertId}/decision:
     post:
       summary: Submit analyst decision
-      description: Records an analyst decision through the regulated mutation coordinator. X-Idempotency-Key is required. The command stores canonical intent fields, an idempotency-key hash, and mutation_model_version; null or missing model version is LEGACY_REGULATED_MUTATION. By default the legacy FDP-26 path is unchanged. FDP-29 can enable EVIDENCE_GATED_FINALIZE_V1 only for submit-decision with app.regulated-mutations.evidence-gated-finalize.enabled=true and app.regulated-mutations.evidence-gated-finalize.submit-decision.enabled=true. That path is a local evidence-precondition-gated finalize model and requires app.regulated-mutations.transaction-mode=REQUIRED, Mongo transaction capability, transactional outbox repository, outbox recovery, submit-decision recovery strategy, bounded local audit writer retry config, and required local audit-chain unique indexes at startup; otherwise it fails closed. The same idempotency key and request body replay the stored response snapshot; the same key with a different body or different backend-resolved actor returns 409; a missing key returns 400. Kafka publication is asynchronous from authoritative transactional_outbox_records and at-least-once unless consumers dedupe by event id. FraudDecisionEvent carries delivery=AT_LEAST_ONCE and dedupeKey=eventId. operation_status is mandatory. Legacy statuses include REJECTED_BEFORE_MUTATION, IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN, COMMITTED_EVIDENCE_PENDING, COMMITTED_EVIDENCE_CONFIRMED, and COMMITTED_EVIDENCE_INCOMPLETE. FDP-29 statuses include EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, and FINALIZE_RECOVERY_REQUIRED. New FDP-29 submit-decision commands durably persist FINALIZED_EVIDENCE_PENDING_EXTERNAL as the local-visible state; FINALIZED_VISIBLE is compatibility/repair only. The local finalize transaction writes local SUCCESS audit evidence through RegulatedMutationLocalAuditPhaseWriter and does not use generic AuditService publisher fanout. FDP-29 execution is isolated in EvidenceGatedFinalizeExecutor; the shared coordinator only routes by mutation model version. External anchor readiness and Trust Authority signing readiness are not part of the current local finalize transaction. Pending/finalizing responses must not be interpreted as committed requested decision state. FDP-29 is not distributed ACID across MongoDB, external witnesses, trust-authority signing, and Kafka, and it does not provide exactly-once broker delivery, WORM storage, legal notarization, SIEM integration, or certified archive evidence.
+      description: Records an analyst decision through the current evidence-gated regulated mutation coordinator. X-Idempotency-Key is required. Every executable command declares EVIDENCE_GATED_FINALIZE_V1; missing, null, retired, and unknown persisted mutation_model_version values fail closed and are never reinterpreted as current. The local Mongo transaction persists the business state, command transition, local success audit, transactional outbox record, response snapshot, and local finalize marker. Matching canonical intent replays the stored result; conflicting key reuse returns 409. Kafka delivery and external evidence confirmation remain asynchronous. Preparation, finalizing, and recovery statuses are not completed success. This contract does not claim distributed ACID, exactly-once broker delivery, WORM storage, legal notarization, SIEM integration, or certified archive evidence.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1701,7 +1701,7 @@ components:
     SystemTrustLevelResponse:
       type: object
       additionalProperties: false
-      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, unresolved_degradation_count, pending_degradation_resolution_count, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, outbox_pending_count, outbox_processing_count, outbox_publish_attempted_count, outbox_confirmation_unknown_count, outbox_projection_mismatch_count, terminal_outbox_failure_count, outbox_publish_confirmation_unknown_count, unknown_outbox_confirmation_count, pending_outbox_resolution_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds, regulated_mutation_recovery_required_count, stale_processing_lease_count, committed_degraded_count, evidence_confirmation_pending_count, evidence_confirmation_failed_count, repeated_recovery_failure_count, oldest_recovery_required_age_seconds, transaction_mode, transaction_capability_status, outbox_delivery_mode, evidence_confirmation_mode, open_critical_incident_count, open_high_incident_count, unacknowledged_critical_incident_count, oldest_open_incident_age_seconds, top_incident_types, incident_health_status]
+      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, unresolved_degradation_count, pending_degradation_resolution_count, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, outbox_pending_count, outbox_processing_count, outbox_publish_attempted_count, outbox_confirmation_unknown_count, outbox_projection_mismatch_count, terminal_outbox_failure_count, outbox_publish_confirmation_unknown_count, unknown_outbox_confirmation_count, pending_outbox_resolution_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds, regulated_mutation_recovery_required_count, stale_processing_lease_count, finalize_recovery_required_count, evidence_confirmation_pending_count, evidence_confirmation_recovery_required_count, repeated_recovery_failure_count, oldest_recovery_required_age_seconds, transaction_mode, transaction_capability_status, outbox_delivery_mode, evidence_confirmation_mode, open_critical_incident_count, open_high_incident_count, unacknowledged_critical_incident_count, oldest_open_incident_age_seconds, top_incident_types, incident_health_status]
       properties:
         guarantee_level:
           type: string
@@ -1813,21 +1813,21 @@ components:
           format: int64
           minimum: 0
           description: Number of regulated mutation commands with expired processing leases. Any value greater than zero degrades deployment trust posture.
-        committed_degraded_count:
+        finalize_recovery_required_count:
           type: integer
           format: int64
           minimum: 0
-          description: Number of regulated mutation commands committed with degraded evidence. Any value greater than zero degrades deployment trust posture.
+          description: Number of regulated mutation commands requiring finalize recovery. Any value greater than zero degrades deployment trust posture.
         evidence_confirmation_pending_count:
           type: integer
           format: int64
           minimum: 0
           description: Number of locally committed regulated mutation commands still awaiting asynchronous evidence confirmation.
-        evidence_confirmation_failed_count:
+        evidence_confirmation_recovery_required_count:
           type: integer
           format: int64
           minimum: 0
-          description: Number of regulated mutation commands whose evidence confirmation failed into a degraded committed state. Any value greater than zero degrades deployment trust posture.
+          description: Number of regulated mutation commands whose evidence confirmation requires recovery. Any value greater than zero degrades deployment trust posture.
         repeated_recovery_failure_count:
           type: integer
           format: int64
@@ -1911,7 +1911,7 @@ components:
       properties:
         status:
           type: string
-          enum: [AVAILABLE, PARTIAL, FAILED, REQUESTED, AUDIT_ATTEMPTED, BUSINESS_COMMITTING, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING, SUCCESS_AUDIT_RECORDED, EVIDENCE_PENDING, EVIDENCE_CONFIRMED, COMMITTED, COMMITTED_DEGRADED, REJECTED]
+          enum: [AVAILABLE, PARTIAL, FAILED, IN_PROGRESS, RECOVERY_REQUIRED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED]
         signal_count:
           type: integer
           minimum: 0
@@ -1937,7 +1937,7 @@ components:
         failure_reason:
           type: string
           nullable: true
-          enum: [PERSISTENCE_UNAVAILABLE, COMMITTED_DEGRADED, FAILED]
+          enum: [PERSISTENCE_UNAVAILABLE, FAILED]
         incidents:
           type: array
           maxItems: 100
@@ -1945,8 +1945,8 @@ components:
             $ref: "#/components/schemas/TrustIncidentResponse"
         operation_status:
           type: string
-          description: AVAILABLE for completed refresh, COMMITTED_DEGRADED only for verified non-transactional partial refresh, or the regulated command state for non-terminal replay/status responses.
-          enum: [AVAILABLE, FAILED, REQUESTED, AUDIT_ATTEMPTED, BUSINESS_COMMITTING, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING, SUCCESS_AUDIT_RECORDED, EVIDENCE_PENDING, EVIDENCE_CONFIRMED, COMMITTED, COMMITTED_DEGRADED, REJECTED]
+          description: AVAILABLE for completed refresh, FAILED for failed materialization, or the current regulated command status for non-terminal replay/status responses.
+          enum: [AVAILABLE, FAILED, IN_PROGRESS, RECOVERY_REQUIRED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED]
         transaction_mode:
           type: string
           nullable: true
@@ -1958,7 +1958,7 @@ components:
         recovery_required_reason:
           type: string
           nullable: true
-          enum: [PERSISTENCE_UNAVAILABLE, COMMITTED_DEGRADED, FAILED, TRUST_INCIDENT_REFRESH_PARTIAL_OFF_MODE, TRUST_INCIDENT_REFRESH_ROLLED_BACK]
+          enum: [PERSISTENCE_UNAVAILABLE, FAILED, TRUST_INCIDENT_REFRESH_PARTIAL_OFF_MODE, TRUST_INCIDENT_REFRESH_ROLLED_BACK]
           description: Stable non-sensitive reason code for degraded or failed refresh responses.
     TrustSignalPreviewResponse:
       type: object
@@ -1984,7 +1984,7 @@ components:
       properties:
         type:
           type: string
-          enum: [OUTBOX_TERMINAL_FAILURE, OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN, OUTBOX_PROJECTION_MISMATCH, REGULATED_MUTATION_RECOVERY_REQUIRED, REGULATED_MUTATION_COMMITTED_DEGRADED, EVIDENCE_CONFIRMATION_FAILED, AUDIT_DEGRADATION_UNRESOLVED, EXTERNAL_ANCHOR_GAP, COVERAGE_UNAVAILABLE, TRUST_AUTHORITY_UNAVAILABLE]
+          enum: [OUTBOX_TERMINAL_FAILURE, OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN, OUTBOX_PROJECTION_MISMATCH, REGULATED_MUTATION_RECOVERY_REQUIRED, REGULATED_MUTATION_FINALIZE_RECOVERY_REQUIRED, EVIDENCE_CONFIRMATION_RECOVERY_REQUIRED, AUDIT_DEGRADATION_UNRESOLVED, EXTERNAL_ANCHOR_GAP, COVERAGE_UNAVAILABLE, TRUST_AUTHORITY_UNAVAILABLE]
         severity:
           type: string
           nullable: true
@@ -2011,7 +2011,7 @@ components:
           type: string
         type:
           type: string
-          enum: [OUTBOX_TERMINAL_FAILURE, OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN, OUTBOX_PROJECTION_MISMATCH, REGULATED_MUTATION_RECOVERY_REQUIRED, REGULATED_MUTATION_COMMITTED_DEGRADED, EVIDENCE_CONFIRMATION_FAILED, AUDIT_DEGRADATION_UNRESOLVED, EXTERNAL_ANCHOR_GAP, COVERAGE_UNAVAILABLE, TRUST_AUTHORITY_UNAVAILABLE]
+          enum: [OUTBOX_TERMINAL_FAILURE, OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN, OUTBOX_PROJECTION_MISMATCH, REGULATED_MUTATION_RECOVERY_REQUIRED, REGULATED_MUTATION_FINALIZE_RECOVERY_REQUIRED, EVIDENCE_CONFIRMATION_RECOVERY_REQUIRED, AUDIT_DEGRADATION_UNRESOLVED, EXTERNAL_ANCHOR_GAP, COVERAGE_UNAVAILABLE, TRUST_AUTHORITY_UNAVAILABLE]
         severity:
           type: string
           enum: [CRITICAL, HIGH, MEDIUM]
@@ -2329,7 +2329,7 @@ components:
           nullable: true
         status:
           type: string
-          enum: [PUBLISH_CONFIRMATION_UNKNOWN, PUBLISHED, PENDING, REQUESTED, AUDIT_ATTEMPTED, BUSINESS_COMMITTING, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING, SUCCESS_AUDIT_RECORDED, EVIDENCE_PENDING, EVIDENCE_CONFIRMED, COMMITTED, COMMITTED_DEGRADED, REJECTED, FAILED]
+          enum: [PUBLISH_CONFIRMATION_UNKNOWN, PUBLISHED, PENDING, IN_PROGRESS, RECOVERY_REQUIRED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED, FAILED]
         decided_at:
           type: string
           format: date-time
@@ -2793,8 +2793,8 @@ components:
       properties:
         operation_status:
           type: string
-          enum: [REJECTED_BEFORE_MUTATION, IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED, COMMITTED_EVIDENCE_PENDING, COMMITTED_EVIDENCE_CONFIRMED, COMMITTED_EVIDENCE_INCOMPLETE]
-          description: Mandatory operation state. IN_PROGRESS, RECOVERY_REQUIRED, and COMMIT_UNKNOWN must not be interpreted as a committed fraud-case update.
+          enum: [IN_PROGRESS, RECOVERY_REQUIRED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED]
+          description: Mandatory operation state. Processing, finalizing, and recovery states must not be interpreted as a committed fraud-case update.
         command_id:
           type: string
           nullable: true
@@ -2811,7 +2811,7 @@ components:
           nullable: true
           allOf:
             - $ref: "#/components/schemas/GenericObject"
-          description: Present only for committed/evidence-pending committed states. Absent for IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN, and rejected states.
+          description: Present only when current-model durable state proves local finalize. Absent for processing, recovery, and rejected states.
         recovery_required_reason:
           type: string
           nullable: true
@@ -2863,8 +2863,8 @@ components:
           nullable: true
         operation_status:
           type: string
-          enum: [REJECTED_BEFORE_MUTATION, IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED, COMMITTED_EVIDENCE_PENDING, COMMITTED_EVIDENCE_CONFIRMED, COMMITTED_EVIDENCE_INCOMPLETE]
-          description: Mandatory operation state. REJECTED_BEFORE_MUTATION and REJECTED_EVIDENCE_UNAVAILABLE mean mutation was not executed. IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN, evidence preparation, finalizing, and recovery-required states are returned as HTTP 202 and must not be treated as completed success. COMMITTED_EVIDENCE_PENDING and FINALIZED_EVIDENCE_PENDING_EXTERNAL are conservative states before full evidence completion is persisted. COMMITTED_EVIDENCE_CONFIRMED and FINALIZED_EVIDENCE_CONFIRMED mean local commit marker, success audit, authoritative PUBLISHED transactional outbox evidence, and any configured external/signature evidence are present; they are not external WORM/notarization proof. COMMITTED_EVIDENCE_INCOMPLETE means the business decision and durable outbox committed while post-commit evidence completion degraded. This is not a rollback claim. COMMITTED_FULLY_ANCHORED is intentionally not exposed.
+          enum: [IN_PROGRESS, RECOVERY_REQUIRED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED]
+          description: Mandatory current-model operation state. Processing, preparation, finalizing, and recovery states are returned conservatively and must not be treated as completed success. FINALIZED_EVIDENCE_PENDING_EXTERNAL proves local finalize only; FINALIZED_EVIDENCE_CONFIRMED additionally requires configured evidence confirmation. Neither status claims external WORM storage, legal notarization, or distributed ACID.
     PagedGenericObject:
       type: object
       required:

@@ -71,7 +71,7 @@ current system:
 
 | Document set | Current implementation area |
 | --- | --- |
-| [Evidence-gated finalize compatibility matrix](evidence_gated_finalize_compatibility_matrix.md), [evidence preconditions](evidence_gated_finalize_preconditions.md), [failure windows](evidence_gated_finalize_failure_windows.md), [idempotency replay](evidence_gated_finalize_idempotency_replay.md), [migration rollout](evidence_gated_finalize_rollout.md), [state machine](evidence_gated_finalize_state_machine.md) | Feature-flagged local evidence-precondition-gated submit-decision finalize path. |
+| [Evidence-gated finalize ADR](../adr/evidence_gated_regulated_mutation_finalize.md), [runtime handoff](regulated_mutation_runtime_handoff.md), [implementation gate](regulated_mutation_implementation_gate.md), [evidence preconditions](evidence_gated_finalize_preconditions.md), [failure windows](evidence_gated_finalize_failure_windows.md), [idempotency replay](evidence_gated_finalize_idempotency_replay.md), [runtime contract](evidence_gated_finalize_rollout.md), [state machine](evidence_gated_finalize_state_machine.md) | Current-only local evidence-precondition-gated regulated mutation runtime. |
 | [Regulated mutation safe checkpoint policy](regulated_mutation_safe_checkpoint_policy.md), [safe checkpoints](regulated_mutation_safe_checkpoints.md) | Current safe checkpoint renewal policy for regulated mutation execution. |
 
 ## Maintenance Rules

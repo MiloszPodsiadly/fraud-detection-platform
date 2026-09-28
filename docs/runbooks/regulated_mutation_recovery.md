@@ -62,9 +62,6 @@ This runbook does not provide WORM storage, legal notarization, distributed ACID
 
 Approved checkpoints covered by this runbook:
 
-- `BEFORE_ATTEMPTED_AUDIT`
-- `BEFORE_LEGACY_BUSINESS_COMMIT`
-- `BEFORE_SUCCESS_AUDIT_RETRY`
 - `BEFORE_EVIDENCE_PREPARATION`
 - `AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE`
 - `BEFORE_EVIDENCE_GATED_FINALIZE`
@@ -73,9 +70,6 @@ Checkpoint-specific rules:
 
 | Checkpoint failure | Safe action | Forbidden action |
 | --- | --- | --- |
-| before attempted audit | Stop worker and inspect command ownership. | Do not write attempted audit manually. |
-| before legacy business commit | Stop worker and confirm no business mutation was committed. | Do not run business mutation by hand. |
-| before success audit retry | Stop retry path and preserve post-commit degradation visibility. | Do not hide audit degradation. |
 | before evidence preparation | Stop worker and inspect evidence preconditions. | Do not fabricate evidence. |
 | after evidence prepared before finalize | Inspect local evidence, outbox, and audit phases. | Do not mark evidence confirmed. |
 | before evidence-gated finalize | Treat as finalize recovery risk. | Do not expose stale success. |

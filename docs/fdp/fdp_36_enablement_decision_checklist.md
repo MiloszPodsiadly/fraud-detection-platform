@@ -45,9 +45,9 @@ This checklist must not say production enabled, auto-enabled, deploy enabled, or
 
 | Invariant | Test class/method | CI job | Artifact expected | Proof level |
 | --- | --- | --- | --- | --- |
-| no false committed success after real service kill | `RegulatedMutationRealAlertServiceChaosIT.shouldNotReturnFalseSuccessAfterKillDuringLegacyBusinessCommitting` | `fdp36-real-chaos` | `target/fdp36-chaos/evidence-summary.md` | `REAL_ALERT_SERVICE_KILL`, `REAL_ALERT_SERVICE_RESTART_API_PROOF` |
-| pending external remains pending | `RegulatedMutationRealAlertServiceChaosIT.shouldRemainPendingExternalAfterKillWhenFdp29LocalCommitCompletedButExternalEvidencePending` | `fdp36-real-chaos` | `target/fdp36-chaos/evidence-summary.md` | `REAL_ALERT_SERVICE_KILL`, `REAL_ALERT_SERVICE_RESTART_API_PROOF` |
-| live in-flight checkpoint kill does not falsely commit | `RegulatedMutationLiveInFlightKillIT.liveInFlightBeforeBusinessMutationKillDoesNotCommitOrPublish` | `fdp36-real-chaos` | `target/fdp36-chaos/fdp36-proof-summary.md` | `REAL_ALERT_SERVICE_KILL`, `REAL_ALERT_SERVICE_RESTART_API_PROOF`, `LIVE_IN_FLIGHT_REQUEST_KILL` |
+| no false committed success after real service kill | `RegulatedMutationRealAlertServiceChaosIT.shouldNotReturnFalseSuccessAfterKillDuringFinalizing` | `fdp36-real-chaos` | `target/fdp36-chaos/evidence-summary.md` | `REAL_ALERT_SERVICE_KILL`, `REAL_ALERT_SERVICE_RESTART_API_PROOF` |
+| pending external remains pending | `RegulatedMutationRealAlertServiceChaosIT.shouldRemainPendingExternalAfterKillWhenLocalFinalizeCompletedButExternalEvidencePending` | `fdp36-real-chaos` | `target/fdp36-chaos/evidence-summary.md` | `REAL_ALERT_SERVICE_KILL`, `REAL_ALERT_SERVICE_RESTART_API_PROOF` |
+| live in-flight checkpoint kill does not falsely commit | `RegulatedMutationLiveInFlightKillIT.liveInFlightBeforeEvidenceGatedFinalizeKillDoesNotCommitOrPublish` | `fdp36-real-chaos` | `target/fdp36-chaos/fdp36-proof-summary.md` | `REAL_ALERT_SERVICE_KILL`, `REAL_ALERT_SERVICE_RESTART_API_PROOF`, `LIVE_IN_FLIGHT_REQUEST_KILL` |
 | duplicate outbox blocked after restart | `RegulatedMutationRealAlertServiceEvidenceIntegrityIT.replayAfterRestartMustNotCreateSecondOutboxRecord` | `fdp36-real-chaos` | surefire report | `REAL_ALERT_SERVICE_KILL`, `REAL_ALERT_SERVICE_RESTART_API_PROOF` |
 | persisted-state API safety | `RegulatedMutationPostRestartApiBehaviorTest.inspectionAfterRestartDoesNotExposeRawSensitiveFields` | `regulated-mutation-regression` | surefire report | `API_PERSISTED_STATE_PROOF` |
 

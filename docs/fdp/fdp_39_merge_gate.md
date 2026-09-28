@@ -42,6 +42,6 @@ FDP-39 is mergeable only as release artifact separation and enablement governanc
 
 ## NO-GO Criteria
 
-FDP-39 is NO-GO if it changes runtime mutation semantics, adds public statuses, changes transaction boundaries, changes Kafka/outbox semantics, enables FDP-29 production mode, allows fixture image promotion, accepts mutable tag-only proof, or claims production enablement, bank certification, external finality, distributed ACID, Kafka exactly-once delivery, legal notarization, WORM guarantee, or full production config certification.
+FDP-39 is NO-GO if it changes current-only runtime mutation semantics, adds an alternate model fallback, adds public statuses, changes transaction boundaries or Kafka/outbox semantics, allows fixture image promotion, accepts mutable tag-only proof, or claims production enablement, bank certification, external finality, distributed ACID, Kafka exactly-once delivery, legal notarization, WORM guarantee, or full production config certification.
 
 FDP-39 is also NO-GO if branch protection, required CI checks, image signing or attestation, registry immutability, deployment environment protection, dual-control release approval, and release/config PR requirements are presented as already enforced by FDP-39 alone. FDP-39 is repository/CI governance hardening, not a complete enterprise release-control platform.
