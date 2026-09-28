@@ -115,7 +115,7 @@ public class AlertServiceExceptionHandler {
                         503,
                         "Service Unavailable",
                         "Audit persistence is unavailable; mutation was not executed.",
-                        List.of("reason:REJECTED_BEFORE_MUTATION")
+                        List.of("reason:REJECTED_EVIDENCE_UNAVAILABLE")
                 )
         );
     }
@@ -128,7 +128,7 @@ public class AlertServiceExceptionHandler {
                         202,
                         "Accepted",
                         exception.getMessage(),
-                        List.of("operation_status:COMMITTED_EVIDENCE_INCOMPLETE")
+                        List.of("operation_status:FINALIZE_RECOVERY_REQUIRED")
                 )
         );
     }

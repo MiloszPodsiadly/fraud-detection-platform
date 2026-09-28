@@ -126,9 +126,9 @@ public class RegulatedMutationLeaseRenewalService {
                 && (claimToken.claimedAt() == null || !current.getLastLeaseRenewedAt().isBefore(claimToken.claimedAt()))
                 && current.leaseRenewalCountOrZero() >= policy.maxRenewalCount()
                 && current.leaseRenewalCountOrZero() > 0
-                && current.mutationModelVersionOrLegacy() == claimToken.mutationModelVersion()
+                && current.getMutationModelVersion() == claimToken.mutationModelVersion()
                 && policy.isRenewable(
-                        current.mutationModelVersionOrLegacy(),
+                        current.getMutationModelVersion(),
                         current.getState(),
                         current.getExecutionStatus()
                 );
@@ -155,9 +155,9 @@ public class RegulatedMutationLeaseRenewalService {
                 && afterRace.getLeaseExpiresAt().isAfter(now)
                 && afterRace.getLeaseExpiresAt().isAfter(beforeUpdate.getLeaseExpiresAt())
                 && afterRace.leaseRenewalCountOrZero() > beforeUpdate.leaseRenewalCountOrZero()
-                && afterRace.mutationModelVersionOrLegacy() == beforeUpdate.mutationModelVersionOrLegacy()
+                && afterRace.getMutationModelVersion() == beforeUpdate.getMutationModelVersion()
                 && policy.isRenewable(
-                        afterRace.mutationModelVersionOrLegacy(),
+                        afterRace.getMutationModelVersion(),
                         afterRace.getState(),
                         afterRace.getExecutionStatus()
                 );
@@ -196,12 +196,8 @@ public class RegulatedMutationLeaseRenewalService {
     }
 
     private Criteria mutationModelCriteria(RegulatedMutationModelVersion modelVersion) {
-        if (modelVersion == RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION) {
-            return new Criteria().orOperator(
-                    Criteria.where("mutation_model_version").is(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
-                    Criteria.where("mutation_model_version").exists(false),
-                    Criteria.where("mutation_model_version").is(null)
-            );
+        if (modelVersion != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
+            throw new IllegalStateException("Unsupported regulated mutation model version.");
         }
         return Criteria.where("mutation_model_version").is(modelVersion);
     }

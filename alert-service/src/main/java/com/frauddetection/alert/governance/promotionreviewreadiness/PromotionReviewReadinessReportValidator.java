@@ -170,7 +170,10 @@ class PromotionReviewReadinessReportValidator {
         require(evaluation != null, "checkInputs.evaluation is missing");
         safeString(evaluation.evaluationCardType(), "checkInputs.evaluation.evaluationCardType");
         safeString(evaluation.evaluationCardVersion(), "checkInputs.evaluation.evaluationCardVersion");
-        safeString(evaluation.evaluationReportType(), "checkInputs.evaluation.evaluationReportType");
+        require(
+                PlatformEvaluationArtifactIdentityPolicy.isCanonicalReportType(evaluation.evaluationReportType()),
+                "checkInputs.evaluation.evaluationReportType is unsupported"
+        );
         require("ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK".equals(inputs.metricBasis()), "checkInputs.metricBasis is unsupported");
         boundedCount(inputs.minimumDiagnosticEvidenceRecords(), "checkInputs.minimumDiagnosticEvidenceRecords");
         require(inputs.minimumDiagnosticEvidenceRecords() > 0, "checkInputs.minimumDiagnosticEvidenceRecords must be positive");

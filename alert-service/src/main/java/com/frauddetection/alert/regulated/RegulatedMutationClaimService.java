@@ -75,6 +75,11 @@ public class RegulatedMutationClaimService {
         Query query = new Query(new Criteria().andOperator(
                 Criteria.where("idempotency_key").is(idempotencyKey),
                 Criteria.where("request_hash").is(command.requestHash()),
+                Criteria.where("mutation_model_version").is(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
+                Criteria.where("action").is(command.action().name()),
+                Criteria.where("resource_type").is(command.resourceType().name()),
+                Criteria.where("resource_id").is(command.resourceId()),
+                Criteria.where("intent_actor_id").is(command.actorId()),
                 claimable
         ));
         Update update = new Update()
@@ -107,7 +112,7 @@ public class RegulatedMutationClaimService {
         }
         if (metrics != null && claimed.getAttemptCount() > 1) {
             metrics.recordRegulatedMutationLeaseTakeover(
-                    claimed.mutationModelVersionOrLegacy(),
+                    claimed.getMutationModelVersion(),
                     claimed.getState()
             );
         }
@@ -117,7 +122,7 @@ public class RegulatedMutationClaimService {
                 claimed.getLeaseExpiresAt(),
                 now,
                 claimed.getAttemptCount(),
-                claimed.mutationModelVersionOrLegacy(),
+                claimed.getMutationModelVersion(),
                 claimed.getState(),
                 claimed.getExecutionStatus()
         ));

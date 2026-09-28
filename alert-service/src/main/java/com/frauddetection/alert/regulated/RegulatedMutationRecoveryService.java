@@ -1,8 +1,6 @@
 package com.frauddetection.alert.regulated;
 
 import com.frauddetection.alert.audit.AuditAction;
-import com.frauddetection.alert.audit.AuditDegradationService;
-import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,26 +19,18 @@ import java.util.Set;
 @Service
 public class RegulatedMutationRecoveryService {
 
-    private static final String POST_COMMIT_AUDIT_DEGRADED = "POST_COMMIT_AUDIT_DEGRADED";
-
     private final RegulatedMutationCommandRepository commandRepository;
-    private final RegulatedMutationAuditPhaseService auditPhaseService;
-    private final AuditDegradationService auditDegradationService;
     private final AlertServiceMetrics metrics;
     private final List<RegulatedMutationRecoveryStrategy> recoveryStrategies;
     private final Duration stuckThreshold;
 
     public RegulatedMutationRecoveryService(
             RegulatedMutationCommandRepository commandRepository,
-            RegulatedMutationAuditPhaseService auditPhaseService,
-            AuditDegradationService auditDegradationService,
             AlertServiceMetrics metrics,
             List<RegulatedMutationRecoveryStrategy> recoveryStrategies,
             @Value("${app.regulated-mutation.recovery.stuck-threshold:PT2M}") Duration stuckThreshold
     ) {
         this.commandRepository = commandRepository;
-        this.auditPhaseService = auditPhaseService;
-        this.auditDegradationService = auditDegradationService;
         this.metrics = metrics;
         this.recoveryStrategies = recoveryStrategies == null ? List.of() : List.copyOf(recoveryStrategies);
         this.stuckThreshold = stuckThreshold;
@@ -62,12 +52,10 @@ public class RegulatedMutationRecoveryService {
         commandRepository.findTop100ByStateInAndUpdatedAtBefore(
                         Set.of(
                                 RegulatedMutationState.REQUESTED,
-                                RegulatedMutationState.AUDIT_ATTEMPTED,
-                                RegulatedMutationState.BUSINESS_COMMITTING,
-                                RegulatedMutationState.BUSINESS_COMMITTED,
-                                RegulatedMutationState.SUCCESS_AUDIT_PENDING,
-                                RegulatedMutationState.COMMITTED_DEGRADED,
-                                RegulatedMutationState.EVIDENCE_PENDING
+                                RegulatedMutationState.EVIDENCE_PREPARING,
+                                RegulatedMutationState.EVIDENCE_PREPARED,
+                                RegulatedMutationState.FINALIZING,
+                                RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
                         ),
                         cutoff
                 )
@@ -169,19 +157,19 @@ public class RegulatedMutationRecoveryService {
         );
     }
 
-    public long committedDegradedCount() {
-        return commandRepository.countByState(RegulatedMutationState.COMMITTED_DEGRADED);
+    public long finalizeRecoveryRequiredCount() {
+        return commandRepository.countByState(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
     }
 
     public long evidenceConfirmationPendingCount() {
         return commandRepository.countByStateIn(List.of(
-                RegulatedMutationState.EVIDENCE_PENDING,
+                RegulatedMutationState.FINALIZED_VISIBLE,
                 RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
         ));
     }
 
-    public long evidenceConfirmationFailedCount() {
-        return commandRepository.countByState(RegulatedMutationState.COMMITTED_DEGRADED);
+    public long evidenceConfirmationRecoveryRequiredCount() {
+        return commandRepository.countByState(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
     }
 
     public long repeatedRecoveryFailureCount() {
@@ -199,15 +187,13 @@ public class RegulatedMutationRecoveryService {
     }
 
     RegulatedMutationRecoveryResult recover(RegulatedMutationCommandDocument command) {
+        requireCurrentSupportedCommand(command);
         RegulatedMutationRecoveryOutcome outcome = switch (command.getState()) {
-            case REQUESTED, AUDIT_ATTEMPTED, EVIDENCE_PREPARING, EVIDENCE_PREPARED -> stillPending(command);
-            case BUSINESS_COMMITTING, FINALIZING, FINALIZE_RECOVERY_REQUIRED -> recoveryRequired(command);
-            case BUSINESS_COMMITTED -> recoverBusinessCommitted(command);
-            case SUCCESS_AUDIT_PENDING -> recoverSuccessAuditPending(command);
-            case SUCCESS_AUDIT_RECORDED, EVIDENCE_PENDING, EVIDENCE_CONFIRMED, COMMITTED, COMMITTED_DEGRADED,
-                 FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED ->
+            case REQUESTED, EVIDENCE_PREPARING, EVIDENCE_PREPARED -> stillPending(command);
+            case FINALIZING, FINALIZE_RECOVERY_REQUIRED -> recoveryRequired(command);
+            case FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED ->
                     completeIfSnapshotExists(command);
-            case REJECTED, FAILED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION -> failedTerminal(command);
+            case FAILED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION -> failedTerminal(command);
         };
         return new RegulatedMutationRecoveryResult(
                 command.getIdempotencyKey(),
@@ -215,6 +201,20 @@ public class RegulatedMutationRecoveryService {
                 command.getExecutionStatus(),
                 outcome
         );
+    }
+
+    private void requireCurrentSupportedCommand(RegulatedMutationCommandDocument command) {
+        if (command.getMutationModelVersion() != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
+            throw new IllegalStateException("Unsupported persisted regulated mutation model version.");
+        }
+        try {
+            RegulatedMutationDefinitions.requireSupported(
+                    AuditAction.valueOf(command.getAction()),
+                    AuditResourceType.valueOf(command.getResourceType())
+            );
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException("Unsupported persisted regulated mutation operation.", exception);
+        }
     }
 
     private RegulatedMutationRecoveryOutcome stillPending(RegulatedMutationCommandDocument command) {
@@ -227,51 +227,6 @@ public class RegulatedMutationRecoveryService {
         return RegulatedMutationRecoveryOutcome.STILL_PENDING;
     }
 
-    private RegulatedMutationRecoveryOutcome recoverSuccessAuditPending(RegulatedMutationCommandDocument command) {
-        if (command.getResponseSnapshot() == null) {
-            if (!reconstructSnapshot(command)) {
-                return recoveryRequired(command);
-            }
-        }
-        if (!command.isSuccessAuditRecorded()) {
-            try {
-                String auditId = auditPhaseService.findPhaseAuditId(command, RegulatedMutationAuditPhase.SUCCESS);
-                if (auditId == null) {
-                    auditId = auditPhaseService.recordPhase(
-                            command,
-                            AuditAction.valueOf(command.getAction()),
-                            AuditResourceType.valueOf(command.getResourceType()),
-                            AuditOutcome.SUCCESS,
-                            null
-                    );
-                }
-                command.setSuccessAuditId(auditId);
-                command.setSuccessAuditRecorded(true);
-            } catch (RuntimeException exception) {
-                command.setState(RegulatedMutationState.COMMITTED_DEGRADED);
-                command.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
-                command.setLastError("POST_COMMIT_AUDIT_DEGRADED");
-                command.setUpdatedAt(Instant.now());
-                commandRepository.save(command);
-                auditDegradationService.recordPostCommitDegraded(
-                        AuditAction.valueOf(command.getAction()),
-                        AuditResourceType.valueOf(command.getResourceType()),
-                        command.getResourceId(),
-                        POST_COMMIT_AUDIT_DEGRADED,
-                        command.getId()
-                );
-                metrics.recordPostCommitAuditDegraded(command.getAction());
-                return RegulatedMutationRecoveryOutcome.RECOVERED;
-            }
-        }
-        command.setState(RegulatedMutationState.EVIDENCE_PENDING);
-        command.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
-        command.setLastError(null);
-        command.setUpdatedAt(Instant.now());
-        commandRepository.save(command);
-        return RegulatedMutationRecoveryOutcome.RECOVERED;
-    }
-
     private RegulatedMutationRecoveryOutcome completeIfSnapshotExists(RegulatedMutationCommandDocument command) {
         if (command.getResponseSnapshot() == null) {
             if (!reconstructSnapshot(command)) {
@@ -281,6 +236,9 @@ public class RegulatedMutationRecoveryService {
         command.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
         command.setLeaseOwner(null);
         command.setLeaseExpiresAt(null);
+        if (command.getState() == RegulatedMutationState.FINALIZED_VISIBLE) {
+            command.setState(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        }
         command.setLastError(null);
         command.setUpdatedAt(Instant.now());
         commandRepository.save(command);
@@ -293,16 +251,6 @@ public class RegulatedMutationRecoveryService {
         command.setUpdatedAt(Instant.now());
         commandRepository.save(command);
         return RegulatedMutationRecoveryOutcome.RECOVERY_REQUIRED;
-    }
-
-    private RegulatedMutationRecoveryOutcome recoverBusinessCommitted(RegulatedMutationCommandDocument command) {
-        if (!reconstructSnapshot(command)) {
-            return recoveryRequired(command);
-        }
-        command.setState(RegulatedMutationState.SUCCESS_AUDIT_PENDING);
-        command.setUpdatedAt(Instant.now());
-        commandRepository.save(command);
-        return recoverSuccessAuditPending(command);
     }
 
     private RegulatedMutationRecoveryOutcome failedTerminal(RegulatedMutationCommandDocument command) {

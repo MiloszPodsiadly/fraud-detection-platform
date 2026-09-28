@@ -6,7 +6,9 @@ import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.regulated.RegulatedMutationCommand;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
+import com.frauddetection.alert.regulated.RegulatedMutationIntent;
 import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
+import com.frauddetection.alert.regulated.RegulatedMutationModelVersion;
 import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.outbox.OutboxConfirmationResolutionMutationHandler;
@@ -98,7 +100,7 @@ public class OutboxRecoveryService {
                 actorId,
                 eventId,
                 AuditResourceType.DECISION_OUTBOX,
-                AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
+                AuditAction.RESOLVE_TRANSACTIONAL_OUTBOX_CONFIRMATION,
                 null,
                 requestHash,
                 context -> resolutionMutationHandler.resolve(eventId, request, actorId),
@@ -106,7 +108,8 @@ public class OutboxRecoveryService {
                 RegulatedMutationResponseSnapshot::from,
                 RegulatedMutationResponseSnapshot::toOutboxRecordResponse,
                 state -> statusResponse(eventId, state),
-                null
+                resolutionIntent(eventId, request, actorId, requestHash),
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
         );
         return repository.findById(regulatedMutationCoordinator.commit(command).response().eventId())
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "unknown outbox event"));
@@ -183,6 +186,36 @@ public class OutboxRecoveryService {
                 null,
                 null,
                 null
+        );
+    }
+
+    private RegulatedMutationIntent resolutionIntent(
+            String eventId,
+            OutboxConfirmationResolutionRequest request,
+            String actorId,
+            String payloadHash
+    ) {
+        String reasonHash = RegulatedMutationIntentHasher.hash(request.reason());
+        String intentHash = RegulatedMutationIntentHasher.hash(
+                "resourceId=" + RegulatedMutationIntentHasher.canonicalValue(eventId)
+                        + "|action=" + AuditAction.RESOLVE_TRANSACTIONAL_OUTBOX_CONFIRMATION.name()
+                        + "|actorId=" + RegulatedMutationIntentHasher.canonicalValue(actorId)
+                        + "|resolution=" + RegulatedMutationIntentHasher.canonicalValue(request.resolution())
+                        + "|reasonHash=" + reasonHash
+                        + "|payloadHash=" + payloadHash
+        );
+        return new RegulatedMutationIntent(
+                intentHash,
+                eventId,
+                AuditAction.RESOLVE_TRANSACTIONAL_OUTBOX_CONFIRMATION.name(),
+                actorId,
+                null,
+                reasonHash,
+                null,
+                request.resolution() == null ? null : request.resolution().name(),
+                null,
+                reasonHash,
+                payloadHash
         );
     }
 

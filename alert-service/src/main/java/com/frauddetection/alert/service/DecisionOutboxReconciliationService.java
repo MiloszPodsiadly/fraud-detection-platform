@@ -7,6 +7,9 @@ import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationCommand;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
+import com.frauddetection.alert.regulated.RegulatedMutationIntent;
+import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
+import com.frauddetection.alert.regulated.RegulatedMutationModelVersion;
 import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.decisionoutbox.DecisionOutboxReconciliationMutationHandler;
@@ -79,6 +82,7 @@ public class DecisionOutboxReconciliationService {
         }
 
         String normalizedAlertId = normalize(alertId, 160, "");
+        String requestHash = requestHash(normalizedAlertId, resolution, normalizedReason, evidenceReference, normalizedActor);
         RegulatedMutationCommand<UnknownConfirmation, UnknownConfirmation> command = new RegulatedMutationCommand<>(
                 idempotencyKey,
                 normalizedActor,
@@ -86,7 +90,7 @@ public class DecisionOutboxReconciliationService {
                 AuditResourceType.DECISION_OUTBOX,
                 AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
                 null,
-                requestHash(normalizedAlertId, resolution, normalizedReason, evidenceReference, normalizedActor),
+                requestHash,
                 context -> mutationHandler.applyResolution(
                         normalizedAlertId,
                         resolution,
@@ -98,7 +102,9 @@ public class DecisionOutboxReconciliationService {
                 (result, state) -> result,
                 DecisionOutboxReconciliationService::snapshot,
                 DecisionOutboxReconciliationService::restore,
-                state -> statusResponse(normalizedAlertId, state)
+                state -> statusResponse(normalizedAlertId, state),
+                reconciliationIntent(normalizedAlertId, resolution, normalizedReason, normalizedActor, requestHash),
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
         );
         return regulatedMutationCoordinator.commit(command).response();
     }
@@ -202,6 +208,37 @@ public class DecisionOutboxReconciliationService {
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is unavailable.");
         }
+    }
+
+    private RegulatedMutationIntent reconciliationIntent(
+            String alertId,
+            Resolution resolution,
+            String reason,
+            String actorId,
+            String payloadHash
+    ) {
+        String reasonHash = RegulatedMutationIntentHasher.hash(reason);
+        String intentHash = RegulatedMutationIntentHasher.hash(
+                "resourceId=" + RegulatedMutationIntentHasher.canonicalValue(alertId)
+                        + "|action=" + AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION.name()
+                        + "|actorId=" + RegulatedMutationIntentHasher.canonicalValue(actorId)
+                        + "|resolution=" + resolution.name()
+                        + "|reasonHash=" + reasonHash
+                        + "|payloadHash=" + payloadHash
+        );
+        return new RegulatedMutationIntent(
+                intentHash,
+                alertId,
+                AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION.name(),
+                actorId,
+                null,
+                reasonHash,
+                null,
+                resolution.name(),
+                null,
+                reasonHash,
+                payloadHash
+        );
     }
 
     private static String normalizeReason(String reason) {

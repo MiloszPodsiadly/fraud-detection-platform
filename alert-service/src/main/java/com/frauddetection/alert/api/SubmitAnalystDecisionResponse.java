@@ -22,7 +22,8 @@ public record SubmitAnalystDecisionResponse(
             String decisionEventId,
             Instant decidedAt
     ) {
-        this(alertId, decision, resultingStatus, decisionEventId, decidedAt, SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING);
+        this(alertId, decision, resultingStatus, decisionEventId, decidedAt,
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
     }
 
     @Override

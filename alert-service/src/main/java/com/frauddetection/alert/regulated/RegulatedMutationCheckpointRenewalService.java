@@ -63,27 +63,6 @@ public class RegulatedMutationCheckpointRenewalService {
         return enabled;
     }
 
-    public RegulatedMutationCheckpointRenewalDecision beforeAttemptedAudit(
-            RegulatedMutationClaimToken claimToken,
-            RegulatedMutationCommandDocument document
-    ) {
-        return checkpoint(claimToken, document, RegulatedMutationRenewalCheckpoint.BEFORE_ATTEMPTED_AUDIT);
-    }
-
-    public RegulatedMutationCheckpointRenewalDecision beforeLegacyBusinessCommit(
-            RegulatedMutationClaimToken claimToken,
-            RegulatedMutationCommandDocument document
-    ) {
-        return checkpoint(claimToken, document, RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT);
-    }
-
-    public RegulatedMutationCheckpointRenewalDecision beforeSuccessAuditRetry(
-            RegulatedMutationClaimToken claimToken,
-            RegulatedMutationCommandDocument document
-    ) {
-        return checkpoint(claimToken, document, RegulatedMutationRenewalCheckpoint.BEFORE_SUCCESS_AUDIT_RETRY);
-    }
-
     public RegulatedMutationCheckpointRenewalDecision beforeEvidencePreparation(
             RegulatedMutationClaimToken claimToken,
             RegulatedMutationCommandDocument document
@@ -120,7 +99,10 @@ public class RegulatedMutationCheckpointRenewalService {
             throw new IllegalArgumentException("Regulated mutation checkpoint renewal requires command document.");
         }
         Instant startedAt = clock.instant();
-        RegulatedMutationModelVersion modelVersion = document.mutationModelVersionOrLegacy();
+        RegulatedMutationModelVersion modelVersion = document.getMutationModelVersion();
+        if (modelVersion != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
+            throw new IllegalStateException("Unsupported persisted regulated mutation model version.");
+        }
         RegulatedMutationLeaseRenewalReason policyReason = checkpointPolicy.rejectionReason(
                 modelVersion,
                 document.getState(),

@@ -1,7 +1,6 @@
 package com.frauddetection.alert.regulated;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -16,27 +15,7 @@ public class RegulatedMutationReplayPolicyRegistry {
 
     @Autowired
     public RegulatedMutationReplayPolicyRegistry(
-            List<RegulatedMutationReplayPolicy> policies,
-            @Value("${app.regulated-mutations.evidence-gated-finalize.enabled:false}") boolean evidenceGatedFinalizeEnabled,
-            @Value("${app.regulated-mutations.evidence-gated-finalize.submit-decision.enabled:false}") boolean submitDecisionEnabled,
-            @Value("${app.regulated-mutations.evidence-gated-finalize.fraud-case-update.enabled:false}") boolean fraudCaseUpdateEnabled,
-            @Value("${app.regulated-mutations.evidence-gated-finalize.trust-incident.enabled:false}") boolean trustIncidentEnabled,
-            @Value("${app.regulated-mutations.evidence-gated-finalize.outbox-resolution.enabled:false}") boolean outboxResolutionEnabled
-    ) {
-        this(
-                policies,
-                evidenceGatedFinalizeEnabled && (
-                        submitDecisionEnabled
-                                || fraudCaseUpdateEnabled
-                                || trustIncidentEnabled
-                                || outboxResolutionEnabled
-                )
-        );
-    }
-
-    public RegulatedMutationReplayPolicyRegistry(
-            List<RegulatedMutationReplayPolicy> policies,
-            boolean evidenceGatedFinalizeActive
+            List<RegulatedMutationReplayPolicy> policies
     ) {
         if (policies == null || policies.isEmpty()) {
             throw new IllegalStateException("Regulated mutation replay policy registry requires at least one policy.");
@@ -53,10 +32,7 @@ public class RegulatedMutationReplayPolicyRegistry {
                         + policy.modelVersion() + ".");
             }
         }
-        requirePresent(byVersion, RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
-        if (evidenceGatedFinalizeActive) {
-            requirePresent(byVersion, RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
-        }
+        requirePresent(byVersion, RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
         this.policies = Map.copyOf(byVersion);
     }
 
@@ -64,16 +40,16 @@ public class RegulatedMutationReplayPolicyRegistry {
         if (document == null) {
             throw new IllegalArgumentException("Regulated mutation command document is required.");
         }
-        return policyFor(document.mutationModelVersionOrLegacy()).resolve(document, now);
+        return policyFor(document.getMutationModelVersion()).resolve(document, now);
     }
 
     public RegulatedMutationReplayPolicy policyFor(RegulatedMutationModelVersion modelVersion) {
-        RegulatedMutationModelVersion resolved = modelVersion == null
-                ? RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION
-                : modelVersion;
-        RegulatedMutationReplayPolicy policy = policies.get(resolved);
+        if (modelVersion != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
+            throw new IllegalStateException("Unsupported persisted regulated mutation model version.");
+        }
+        RegulatedMutationReplayPolicy policy = policies.get(modelVersion);
         if (policy == null) {
-            throw new IllegalStateException("No regulated mutation replay policy registered for model version " + resolved + ".");
+            throw new IllegalStateException("No regulated mutation replay policy registered for model version " + modelVersion + ".");
         }
         return policy;
     }

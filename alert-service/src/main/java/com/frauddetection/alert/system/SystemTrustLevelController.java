@@ -229,9 +229,9 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 live.outboxOldestAmbiguousAgeSeconds(),
                 live.regulatedMutationRecoveryRequiredCount(),
                 live.staleProcessingLeaseCount(),
-                live.committedDegradedCount(),
+                live.finalizeRecoveryRequiredCount(),
                 live.evidenceConfirmationPendingCount(),
-                live.evidenceConfirmationFailedCount(),
+                live.evidenceConfirmationRecoveryRequiredCount(),
                 live.repeatedRecoveryFailureCount(),
                 live.oldestRecoveryRequiredAgeSeconds(),
                 live.reasonCode(),
@@ -311,9 +311,13 @@ public class SystemTrustLevelController implements ApplicationRunner {
         long postCommitDegradedResolved = auditDegradationService == null ? 0L : auditDegradationService.resolvedCount();
         long regulatedRecoveryRequired = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.recoveryRequiredCount();
         long staleProcessingLeaseCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.staleProcessingLeaseCount();
-        long committedDegradedCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.committedDegradedCount();
+        long finalizeRecoveryRequiredCount = regulatedMutationRecoveryService == null
+                ? 0L
+                : regulatedMutationRecoveryService.finalizeRecoveryRequiredCount();
         long evidenceConfirmationPendingCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.evidenceConfirmationPendingCount();
-        long evidenceConfirmationFailedCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.evidenceConfirmationFailedCount();
+        long evidenceConfirmationRecoveryRequiredCount = regulatedMutationRecoveryService == null
+                ? 0L
+                : regulatedMutationRecoveryService.evidenceConfirmationRecoveryRequiredCount();
         long repeatedRecoveryFailureCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.repeatedRecoveryFailureCount();
         Long oldestRecoveryRequiredAgeSeconds = regulatedMutationRecoveryService == null ? null : regulatedMutationRecoveryService.oldestRecoveryRequiredAgeSeconds();
         OutboxState outboxState = outboxState();
@@ -354,8 +358,8 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 && !outboxState.stalePending()
                 && regulatedRecoveryRequired == 0
                 && staleProcessingLeaseCount == 0
-                && committedDegradedCount == 0
-                && evidenceConfirmationFailedCount == 0
+                && finalizeRecoveryRequiredCount == 0
+                && evidenceConfirmationRecoveryRequiredCount == 0
                 && repeatedRecoveryFailureCount == 0
                 && oldestRecoveryRequiredAgeSeconds == null
                 && incidentSummary.openCriticalIncidentCount() == 0
@@ -393,11 +397,11 @@ public class SystemTrustLevelController implements ApplicationRunner {
         if (reasonCode == null && staleProcessingLeaseCount > 0) {
             reasonCode = "REGULATED_MUTATION_STALE_PROCESSING_LEASE";
         }
-        if (reasonCode == null && committedDegradedCount > 0) {
-            reasonCode = "REGULATED_MUTATION_COMMITTED_DEGRADED";
+        if (reasonCode == null && finalizeRecoveryRequiredCount > 0) {
+            reasonCode = "REGULATED_MUTATION_FINALIZE_RECOVERY_REQUIRED";
         }
-        if (reasonCode == null && evidenceConfirmationFailedCount > 0) {
-            reasonCode = "EVIDENCE_CONFIRMATION_FAILED";
+        if (reasonCode == null && evidenceConfirmationRecoveryRequiredCount > 0) {
+            reasonCode = "EVIDENCE_CONFIRMATION_RECOVERY_REQUIRED";
         }
         if (reasonCode == null && repeatedRecoveryFailureCount > 0) {
             reasonCode = "REGULATED_MUTATION_REPEATED_RECOVERY_FAILURE";
@@ -429,9 +433,9 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 outboxState.oldestAmbiguousAgeSeconds(),
                 regulatedRecoveryRequired,
                 staleProcessingLeaseCount,
-                committedDegradedCount,
+                finalizeRecoveryRequiredCount,
                 evidenceConfirmationPendingCount,
-                evidenceConfirmationFailedCount,
+                evidenceConfirmationRecoveryRequiredCount,
                 repeatedRecoveryFailureCount,
                 oldestRecoveryRequiredAgeSeconds,
                 reasonCode,
@@ -585,9 +589,9 @@ public class SystemTrustLevelController implements ApplicationRunner {
             Long outboxOldestAmbiguousAgeSeconds,
             long regulatedMutationRecoveryRequiredCount,
             long staleProcessingLeaseCount,
-            long committedDegradedCount,
+            long finalizeRecoveryRequiredCount,
             long evidenceConfirmationPendingCount,
-            long evidenceConfirmationFailedCount,
+            long evidenceConfirmationRecoveryRequiredCount,
             long repeatedRecoveryFailureCount,
             Long oldestRecoveryRequiredAgeSeconds,
             String reasonCode,

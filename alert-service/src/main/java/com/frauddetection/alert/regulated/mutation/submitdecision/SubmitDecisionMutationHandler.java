@@ -46,7 +46,7 @@ public class SubmitDecisionMutationHandler {
                 idempotencyKey,
                 requestHash,
                 mutationCommandId,
-                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
         );
     }
 

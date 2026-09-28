@@ -179,26 +179,26 @@ public class RegulatedMutationLocalAuditPhaseWriter {
 
     private void recordAppend(String outcome, long startedAt) {
         if (metrics != null) {
-            metrics.recordFdp29LocalAuditChainAppend(outcome);
-            metrics.recordFdp29LocalAuditChainAppendDuration(Duration.ofNanos(System.nanoTime() - startedAt));
+            metrics.recordRegulatedMutationLocalAuditChainAppend(outcome);
+            metrics.recordRegulatedMutationLocalAuditChainAppendDuration(Duration.ofNanos(System.nanoTime() - startedAt));
         }
     }
 
     private void recordAppendAttempt(String outcome) {
         if (metrics != null) {
-            metrics.recordFdp29LocalAuditChainAppend(outcome);
+            metrics.recordRegulatedMutationLocalAuditChainAppend(outcome);
         }
     }
 
     private void recordRetry(String reason) {
         if (metrics != null) {
-            metrics.recordFdp29LocalAuditChainRetry(reason);
+            metrics.recordRegulatedMutationLocalAuditChainRetry(reason);
         }
     }
 
     private void recordLockReleaseFailure() {
         if (metrics != null) {
-            metrics.recordFdp29LocalAuditChainLockReleaseFailure();
+            metrics.recordRegulatedMutationLocalAuditChainLockReleaseFailure();
         }
     }
 

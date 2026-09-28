@@ -21,7 +21,6 @@ import com.frauddetection.alert.security.principal.AnalystActorResolver;
 import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -33,8 +32,6 @@ public class SubmitDecisionRegulatedMutationService {
     private final SubmitDecisionMutationHandler mutationHandler;
     private final RegulatedMutationCoordinator regulatedMutationCoordinator;
     private final RegulatedMutationPublicStatusMapper publicStatusMapper;
-    private final boolean evidenceGatedFinalizeEnabled;
-    private final boolean submitDecisionEvidenceGatedFinalizeEnabled;
 
     public SubmitDecisionRegulatedMutationService(
             AlertRepository alertRepository,
@@ -44,21 +41,7 @@ public class SubmitDecisionRegulatedMutationService {
             RegulatedMutationCoordinator regulatedMutationCoordinator
     ) {
         this(alertRepository, analystDecisionStatusMapper, analystActorResolver, mutationHandler,
-                regulatedMutationCoordinator, new RegulatedMutationPublicStatusMapper(), false, false);
-    }
-
-    public SubmitDecisionRegulatedMutationService(
-            AlertRepository alertRepository,
-            AnalystDecisionStatusMapper analystDecisionStatusMapper,
-            AnalystActorResolver analystActorResolver,
-            SubmitDecisionMutationHandler mutationHandler,
-            RegulatedMutationCoordinator regulatedMutationCoordinator,
-            boolean evidenceGatedFinalizeEnabled,
-            boolean submitDecisionEvidenceGatedFinalizeEnabled
-    ) {
-        this(alertRepository, analystDecisionStatusMapper, analystActorResolver, mutationHandler,
-                regulatedMutationCoordinator, new RegulatedMutationPublicStatusMapper(),
-                evidenceGatedFinalizeEnabled, submitDecisionEvidenceGatedFinalizeEnabled);
+                regulatedMutationCoordinator, new RegulatedMutationPublicStatusMapper());
     }
 
     @Autowired
@@ -68,9 +51,7 @@ public class SubmitDecisionRegulatedMutationService {
             AnalystActorResolver analystActorResolver,
             SubmitDecisionMutationHandler mutationHandler,
             RegulatedMutationCoordinator regulatedMutationCoordinator,
-            RegulatedMutationPublicStatusMapper publicStatusMapper,
-            @Value("${app.regulated-mutations.evidence-gated-finalize.enabled:false}") boolean evidenceGatedFinalizeEnabled,
-            @Value("${app.regulated-mutations.evidence-gated-finalize.submit-decision.enabled:false}") boolean submitDecisionEvidenceGatedFinalizeEnabled
+            RegulatedMutationPublicStatusMapper publicStatusMapper
     ) {
         this.alertRepository = alertRepository;
         this.analystDecisionStatusMapper = analystDecisionStatusMapper;
@@ -78,8 +59,6 @@ public class SubmitDecisionRegulatedMutationService {
         this.mutationHandler = mutationHandler;
         this.regulatedMutationCoordinator = regulatedMutationCoordinator;
         this.publicStatusMapper = publicStatusMapper;
-        this.evidenceGatedFinalizeEnabled = evidenceGatedFinalizeEnabled;
-        this.submitDecisionEvidenceGatedFinalizeEnabled = submitDecisionEvidenceGatedFinalizeEnabled;
     }
 
     public SubmitAnalystDecisionResponse submit(String alertId, SubmitAnalystDecisionRequest request, String idempotencyKey) {
@@ -94,10 +73,7 @@ public class SubmitDecisionRegulatedMutationService {
                 request.decisionReason(),
                 request.tags()
         );
-        boolean evidenceGatedFinalize = evidenceGatedFinalizeEnabled && submitDecisionEvidenceGatedFinalizeEnabled;
-        RegulatedMutationModelVersion modelVersion = evidenceGatedFinalize
-                ? RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
-                : RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION;
+        RegulatedMutationModelVersion modelVersion = RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1;
         RegulatedMutationCommand<AlertDocument, SubmitAnalystDecisionResponse> command = new RegulatedMutationCommand<>(
                 idempotencyKey,
                 actorId,
@@ -114,16 +90,12 @@ public class SubmitDecisionRegulatedMutationService {
                         idempotencyKey,
                         requestHash,
                         context.commandId(),
-                        evidenceGatedFinalize
-                                ? SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
-                                : SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
+                        SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
                 ),
                 (saved, state) -> response(saved, request, resultingStatus, publicStatus(state, modelVersion)),
                 RegulatedMutationResponseSnapshot::from,
                 RegulatedMutationResponseSnapshot::toSubmitDecisionResponse,
-                state -> evidenceGatedFinalize
-                        ? evidenceGatedStatusResponse(current, publicStatus(state, modelVersion))
-                        : statusResponse(alertId, request, resultingStatus, publicStatus(state, modelVersion)),
+                state -> evidenceGatedStatusResponse(current, publicStatus(state, modelVersion)),
                 intent,
                 modelVersion
         );

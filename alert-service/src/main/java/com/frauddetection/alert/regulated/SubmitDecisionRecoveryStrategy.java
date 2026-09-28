@@ -38,7 +38,7 @@ public class SubmitDecisionRecoveryStrategy implements RegulatedMutationRecovery
                         alert.getAlertStatus() == null ? AlertStatus.RESOLVED : alert.getAlertStatus(),
                         alert.getDecisionOutboxEvent().eventId(),
                         alert.getDecidedAt(),
-                        SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
+                        SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
                 ));
     }
 

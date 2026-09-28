@@ -146,9 +146,6 @@ public class RegulatedMutationCommandDocument {
     public void setIntentPayloadHash(String intentPayloadHash) { this.intentPayloadHash = intentPayloadHash; }
     public RegulatedMutationModelVersion getMutationModelVersion() { return mutationModelVersion; }
     public void setMutationModelVersion(RegulatedMutationModelVersion mutationModelVersion) { this.mutationModelVersion = mutationModelVersion; }
-    public RegulatedMutationModelVersion mutationModelVersionOrLegacy() {
-        return mutationModelVersion == null ? RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION : mutationModelVersion;
-    }
     public RegulatedMutationState getState() { return state; }
     public void setState(RegulatedMutationState state) { this.state = state; }
     public RegulatedMutationExecutionStatus getExecutionStatus() { return executionStatus; }

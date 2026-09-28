@@ -207,12 +207,12 @@ public class RegulatedMutationFencedCommandWriter {
         UpdateResult result = mongoTemplate.updateFirst(query, update, RegulatedMutationCommandDocument.class);
         if (result.getMatchedCount() == 0) {
             metrics.recordRegulatedMutationStaleWriteRejected(
-                    document.mutationModelVersionOrLegacy(),
+                    requireCurrentModel(document),
                     document.getState(),
                     StaleRegulatedMutationLeaseReason.RECOVERY_WRITE_CONFLICT.name()
             );
             metrics.recordRegulatedMutationRecoveryWriteConflict(
-                    document.mutationModelVersionOrLegacy(),
+                    requireCurrentModel(document),
                     document.getState(),
                     StaleRegulatedMutationLeaseReason.RECOVERY_WRITE_CONFLICT.name()
             );
@@ -318,7 +318,7 @@ public class RegulatedMutationFencedCommandWriter {
                 Criteria.where("state").is(document.getState()),
                 Criteria.where("execution_status").is(document.getExecutionStatus()),
                 leaseOwnerFence,
-                mutationModelCriteria(document.mutationModelVersionOrLegacy()),
+                mutationModelCriteria(requireCurrentModel(document)),
                 nonClaimedRecoveryCondition
         }
                 : new Criteria[]{
@@ -327,21 +327,24 @@ public class RegulatedMutationFencedCommandWriter {
                 Criteria.where("execution_status").is(document.getExecutionStatus()),
                 Criteria.where("public_status").is(document.getPublicStatus()),
                 leaseOwnerFence,
-                mutationModelCriteria(document.mutationModelVersionOrLegacy()),
+                mutationModelCriteria(requireCurrentModel(document)),
                 nonClaimedRecoveryCondition
         };
         return new Query(new Criteria().andOperator(criteria));
     }
 
     private Criteria mutationModelCriteria(RegulatedMutationModelVersion modelVersion) {
-        if (modelVersion == RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION) {
-            return new Criteria().orOperator(
-                    Criteria.where("mutation_model_version").is(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
-                    Criteria.where("mutation_model_version").exists(false),
-                    Criteria.where("mutation_model_version").is(null)
-            );
+        if (modelVersion != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
+            throw new IllegalStateException("Unsupported regulated mutation model version.");
         }
         return Criteria.where("mutation_model_version").is(modelVersion);
+    }
+
+    private RegulatedMutationModelVersion requireCurrentModel(RegulatedMutationCommandDocument document) {
+        if (document.getMutationModelVersion() != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
+            throw new IllegalStateException("Unsupported persisted regulated mutation model version.");
+        }
+        return document.getMutationModelVersion();
     }
 
     private StaleRegulatedMutationLeaseReason classifyRejection(

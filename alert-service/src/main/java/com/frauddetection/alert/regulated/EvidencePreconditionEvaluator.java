@@ -73,7 +73,7 @@ public class EvidencePreconditionEvaluator {
             return EvidencePreconditionResult.satisfied(List.of("DISABLED_TEST_COMPATIBILITY"), skipped);
         }
         checked.add("MUTATION_MODEL_VERSION");
-        if (document.mutationModelVersionOrLegacy() != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
+        if (document.getMutationModelVersion() != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
             return EvidencePreconditionResult.rejectedEvidenceUnavailable(
                     BUSINESS_VALIDATION_FAILED,
                     checked,
@@ -88,13 +88,22 @@ public class EvidencePreconditionEvaluator {
         if (!document.isAttemptedAuditRecorded()) {
             return EvidencePreconditionResult.rejectedEvidenceUnavailable(ATTEMPTED_AUDIT_UNAVAILABLE, checked, skipped);
         }
-        checked.add("TRANSACTIONAL_OUTBOX_REPOSITORY_PRESENT");
-        if (outboxRepository == null) {
-            return EvidencePreconditionResult.rejectedEvidenceUnavailable(OUTBOX_REPOSITORY_UNAVAILABLE, checked, skipped);
-        }
-        checked.add("OUTBOX_RECOVERY_ENABLED");
-        if (!outboxRecoveryEnabled) {
-            return EvidencePreconditionResult.rejectedEvidenceUnavailable(OUTBOX_RECOVERY_DISABLED, checked, skipped);
+        RegulatedMutationDefinition definition = RegulatedMutationDefinitions.requireSupported(
+                command.action(),
+                command.resourceType()
+        );
+        checked.add("SUPPORTED_OPERATION");
+        if (definition.requiresTransactionalOutbox()) {
+            checked.add("TRANSACTIONAL_OUTBOX_REPOSITORY_PRESENT");
+            if (outboxRepository == null) {
+                return EvidencePreconditionResult.rejectedEvidenceUnavailable(OUTBOX_REPOSITORY_UNAVAILABLE, checked, skipped);
+            }
+            checked.add("OUTBOX_RECOVERY_ENABLED");
+            if (!outboxRecoveryEnabled) {
+                return EvidencePreconditionResult.rejectedEvidenceUnavailable(OUTBOX_RECOVERY_DISABLED, checked, skipped);
+            }
+        } else {
+            skipped.add("TRANSACTIONAL_OUTBOX_NOT_REQUIRED_FOR_OPERATION");
         }
         checked.add("RECOVERY_STRATEGY_REGISTERED");
         if (recoveryStrategies.stream().noneMatch(strategy -> strategy.supports(command.action(), command.resourceType()))) {

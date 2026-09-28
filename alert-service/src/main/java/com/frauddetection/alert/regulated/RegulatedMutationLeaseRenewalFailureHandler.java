@@ -39,7 +39,7 @@ public class RegulatedMutationLeaseRenewalFailureHandler {
                     RegulatedMutationLeaseRenewalReason.BUDGET_EXCEEDED
             );
         }
-        RegulatedMutationModelVersion modelVersion = current.mutationModelVersionOrLegacy();
+        RegulatedMutationModelVersion modelVersion = current.getMutationModelVersion();
         RegulatedMutationState recoveryState = policy.recoveryStateForBudgetExceeded(modelVersion, current.getState());
         Update update = new Update()
                 .set("execution_status", RegulatedMutationExecutionStatus.RECOVERY_REQUIRED)
@@ -77,7 +77,7 @@ public class RegulatedMutationLeaseRenewalFailureHandler {
                 Criteria.where("execution_status").is(RegulatedMutationExecutionStatus.PROCESSING),
                 Criteria.where("state").is(current.getState()),
                 mutationModelCriteria(claimToken.mutationModelVersion()),
-                renewableStateCriteria(current.mutationModelVersionOrLegacy(), current.getState())
+                renewableStateCriteria(current.getMutationModelVersion(), current.getState())
         ));
     }
 
@@ -89,12 +89,8 @@ public class RegulatedMutationLeaseRenewalFailureHandler {
     }
 
     private Criteria mutationModelCriteria(RegulatedMutationModelVersion modelVersion) {
-        if (modelVersion == RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION) {
-            return new Criteria().orOperator(
-                    Criteria.where("mutation_model_version").is(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
-                    Criteria.where("mutation_model_version").exists(false),
-                    Criteria.where("mutation_model_version").is(null)
-            );
+        if (modelVersion != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
+            throw new IllegalStateException("Unsupported regulated mutation model version.");
         }
         return Criteria.where("mutation_model_version").is(modelVersion);
     }

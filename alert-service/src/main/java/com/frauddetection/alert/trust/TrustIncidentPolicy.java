@@ -25,8 +25,8 @@ public class TrustIncidentPolicy {
                  "TRUST_AUTHORITY_UNAVAILABLE" -> TrustIncidentSeverity.CRITICAL;
             case "OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN",
                  "OUTBOX_PROJECTION_MISMATCH",
-                 "REGULATED_MUTATION_COMMITTED_DEGRADED",
-                 "EVIDENCE_CONFIRMATION_FAILED",
+                 "REGULATED_MUTATION_FINALIZE_RECOVERY_REQUIRED",
+                 "EVIDENCE_CONFIRMATION_RECOVERY_REQUIRED",
                  "AUDIT_DEGRADATION_UNRESOLVED",
                  "COVERAGE_UNAVAILABLE" -> TrustIncidentSeverity.HIGH;
             default -> TrustIncidentSeverity.MEDIUM;

@@ -44,91 +44,6 @@ public record RegulatedMutationCommandInspectionResponse(
         @JsonProperty("updated_at")
         Instant updatedAt
 ) {
-    public RegulatedMutationCommandInspectionResponse(
-            String idempotencyKeyHash,
-            String idempotencyKeyMasked,
-            String action,
-            String resourceType,
-            String resourceId,
-            String state,
-            String executionStatus,
-            String leaseOwner,
-            Instant leaseExpiresAt,
-            boolean responseSnapshotPresent,
-            String attemptedAuditId,
-            String successAuditId,
-            String failedAuditId,
-            String degradationReason,
-            String lastError,
-            Instant updatedAt
-    ) {
-        this(
-                idempotencyKeyHash,
-                idempotencyKeyMasked,
-                action,
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION.name(),
-                resourceType,
-                resourceId != null && !resourceId.isBlank(),
-                safeResourceIdHash(resourceId),
-                state,
-                executionStatus,
-                leaseOwner != null && !leaseOwner.isBlank(),
-                safeLeaseOwnerHash(leaseOwner),
-                leaseExpiresAt,
-                0,
-                responseSnapshotPresent,
-                attemptedAuditId,
-                successAuditId,
-                failedAuditId,
-                degradationReason,
-                safeErrorCode(lastError),
-                updatedAt
-        );
-    }
-
-    public RegulatedMutationCommandInspectionResponse(
-            String idempotencyKeyHash,
-            String idempotencyKeyMasked,
-            String action,
-            String resourceType,
-            String resourceId,
-            String state,
-            String executionStatus,
-            String leaseOwner,
-            Instant leaseExpiresAt,
-            int leaseRenewalCount,
-            boolean responseSnapshotPresent,
-            String attemptedAuditId,
-            String successAuditId,
-            String failedAuditId,
-            String degradationReason,
-            String lastError,
-            Instant updatedAt
-    ) {
-        this(
-                idempotencyKeyHash,
-                idempotencyKeyMasked,
-                action,
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION.name(),
-                resourceType,
-                resourceId != null && !resourceId.isBlank(),
-                safeResourceIdHash(resourceId),
-                state,
-                executionStatus,
-                leaseOwner != null && !leaseOwner.isBlank(),
-                safeLeaseOwnerHash(leaseOwner),
-                leaseExpiresAt,
-                leaseRenewalCount,
-                responseSnapshotPresent,
-                attemptedAuditId,
-                successAuditId,
-                failedAuditId,
-                degradationReason,
-                safeErrorCode(lastError),
-                updatedAt
-        );
-    }
-
     public String lastError() {
         return lastErrorCode;
     }
@@ -138,7 +53,7 @@ public record RegulatedMutationCommandInspectionResponse(
                 idempotencyKeyHash(command),
                 mask(command.getIdempotencyKey()),
                 command.getAction(),
-                command.mutationModelVersionOrLegacy().name(),
+                command.getMutationModelVersion() == null ? null : command.getMutationModelVersion().name(),
                 command.getResourceType(),
                 command.getResourceId() != null && !command.getResourceId().isBlank(),
                 safeResourceIdHash(command.getResourceId()),

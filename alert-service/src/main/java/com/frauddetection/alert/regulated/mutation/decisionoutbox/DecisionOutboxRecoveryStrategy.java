@@ -68,11 +68,7 @@ public class DecisionOutboxRecoveryStrategy implements RegulatedMutationRecovery
     }
 
     private Optional<AlertDocument> alert(RegulatedMutationCommandDocument command) {
-        Optional<AlertDocument> byAlertId = alertRepository.findById(command.getResourceId());
-        if (byAlertId.isPresent()) {
-            return byAlertId;
-        }
-        return alertRepository.findByDecisionOutboxEventEventId(command.getResourceId());
+        return alertRepository.findById(command.getResourceId());
     }
 
     private String eventId(AlertDocument alert) {

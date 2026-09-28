@@ -93,14 +93,14 @@ public record SystemTrustLevelResponse(
         @JsonProperty("stale_processing_lease_count")
         long staleProcessingLeaseCount,
 
-        @JsonProperty("committed_degraded_count")
-        long committedDegradedCount,
+        @JsonProperty("finalize_recovery_required_count")
+        long finalizeRecoveryRequiredCount,
 
         @JsonProperty("evidence_confirmation_pending_count")
         long evidenceConfirmationPendingCount,
 
-        @JsonProperty("evidence_confirmation_failed_count")
-        long evidenceConfirmationFailedCount,
+        @JsonProperty("evidence_confirmation_recovery_required_count")
+        long evidenceConfirmationRecoveryRequiredCount,
 
         @JsonProperty("repeated_recovery_failure_count")
         long repeatedRecoveryFailureCount,

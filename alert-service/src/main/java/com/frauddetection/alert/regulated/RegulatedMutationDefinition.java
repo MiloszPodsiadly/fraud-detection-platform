@@ -8,9 +8,10 @@ public record RegulatedMutationDefinition(
         AuditResourceType resourceType,
         boolean requiresRecoveryStrategy,
         boolean requiresIdempotencyKey,
-        boolean bankModeRequired
+        boolean bankModeRequired,
+        boolean requiresTransactionalOutbox
 ) {
     public RegulatedMutationDefinition(AuditAction action, AuditResourceType resourceType) {
-        this(action, resourceType, true, true, true);
+        this(action, resourceType, true, true, true, false);
     }
 }

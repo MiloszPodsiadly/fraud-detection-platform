@@ -554,28 +554,28 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         ).increment();
     }
 
-    public void recordFdp29LocalAuditChainAppend(String outcome) {
+    public void recordRegulatedMutationLocalAuditChainAppend(String outcome) {
         counter(
-                "fdp29_local_audit_chain_append_total",
-                "outcome", normalizeFdp29LocalAuditChainAppendOutcome(outcome)
+                "regulated_mutation_local_audit_chain_append_total",
+                "outcome", normalizeRegulatedMutationLocalAuditChainAppendOutcome(outcome)
         ).increment();
     }
 
-    public void recordFdp29LocalAuditChainRetry(String reason) {
+    public void recordRegulatedMutationLocalAuditChainRetry(String reason) {
         counter(
-                "fdp29_local_audit_chain_retry_total",
-                "reason", normalizeFdp29LocalAuditChainRetryReason(reason)
+                "regulated_mutation_local_audit_chain_retry_total",
+                "reason", normalizeRegulatedMutationLocalAuditChainRetryReason(reason)
         ).increment();
     }
 
-    public void recordFdp29LocalAuditChainAppendDuration(Duration duration) {
-        Timer.builder("fdp29_local_audit_chain_append_duration_ms")
+    public void recordRegulatedMutationLocalAuditChainAppendDuration(Duration duration) {
+        Timer.builder("regulated_mutation_local_audit_chain_append_duration_ms")
                 .register(meterRegistry)
                 .record(duration == null || duration.isNegative() ? Duration.ZERO : duration);
     }
 
-    public void recordFdp29LocalAuditChainLockReleaseFailure() {
-        counter("fdp29_local_audit_chain_lock_release_failure_total").increment();
+    public void recordRegulatedMutationLocalAuditChainLockReleaseFailure() {
+        counter("regulated_mutation_local_audit_chain_lock_release_failure_total").increment();
     }
 
     public void recordExternalCoverageRequestCost(String status, int cost) {
@@ -1227,8 +1227,8 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
                  "OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN",
                  "OUTBOX_PROJECTION_MISMATCH",
                  "REGULATED_MUTATION_RECOVERY_REQUIRED",
-                 "REGULATED_MUTATION_COMMITTED_DEGRADED",
-                 "EVIDENCE_CONFIRMATION_FAILED",
+                 "REGULATED_MUTATION_FINALIZE_RECOVERY_REQUIRED",
+                 "EVIDENCE_CONFIRMATION_RECOVERY_REQUIRED",
                  "AUDIT_DEGRADATION_UNRESOLVED",
                  "COVERAGE_UNAVAILABLE",
                  "EXTERNAL_ANCHOR_GAP",
@@ -1451,7 +1451,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
             return "UNKNOWN";
         }
         return switch (modelVersion.name()) {
-            case "LEGACY_REGULATED_MUTATION", "EVIDENCE_GATED_FINALIZE_V1" -> modelVersion.name();
+            case "EVIDENCE_GATED_FINALIZE_V1" -> modelVersion.name();
             default -> "UNKNOWN";
         };
     }
@@ -1464,9 +1464,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
             case "REQUESTED", "EVIDENCE_PREPARING", "EVIDENCE_PREPARED", "FINALIZING",
                  "FINALIZED_VISIBLE", "FINALIZED_EVIDENCE_PENDING_EXTERNAL", "FINALIZED_EVIDENCE_CONFIRMED",
                  "REJECTED_EVIDENCE_UNAVAILABLE", "FAILED_BUSINESS_VALIDATION", "FINALIZE_RECOVERY_REQUIRED",
-                 "AUDIT_ATTEMPTED", "BUSINESS_COMMITTING", "BUSINESS_COMMITTED", "SUCCESS_AUDIT_PENDING",
-                 "SUCCESS_AUDIT_RECORDED", "EVIDENCE_PENDING", "EVIDENCE_CONFIRMED", "COMMITTED",
-                 "COMMITTED_DEGRADED", "REJECTED", "FAILED" -> state.name();
+                 "FAILED" -> state.name();
             default -> "UNKNOWN";
         };
     }
@@ -1515,8 +1513,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
             return "UNKNOWN";
         }
         return switch (checkpoint.name()) {
-            case "BEFORE_ATTEMPTED_AUDIT", "BEFORE_LEGACY_BUSINESS_COMMIT",
-                 "BEFORE_SUCCESS_AUDIT_RETRY", "BEFORE_EVIDENCE_PREPARATION",
+            case "BEFORE_EVIDENCE_PREPARATION",
                  "BEFORE_EVIDENCE_GATED_FINALIZE", "AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE" -> checkpoint.name();
             default -> "UNKNOWN";
         };
@@ -1529,7 +1526,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         };
     }
 
-    private String normalizeFdp29LocalAuditChainAppendOutcome(String outcome) {
+    private String normalizeRegulatedMutationLocalAuditChainAppendOutcome(String outcome) {
         return switch (outcome) {
             case "SUCCESS", "DUPLICATE_PHASE", "CHAIN_CONFLICT_RETRY", "CHAIN_CONFLICT_EXHAUSTED",
                  "AUDIT_INSERT_FAILED", "ANCHOR_INSERT_FAILED", "LOCK_RELEASE_FAILED" -> outcome;
@@ -1537,7 +1534,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         };
     }
 
-    private String normalizeFdp29LocalAuditChainRetryReason(String reason) {
+    private String normalizeRegulatedMutationLocalAuditChainRetryReason(String reason) {
         return switch (reason) {
             case "CHAIN_CONFLICT", "DUPLICATE_KEY", "LOCK_CONFLICT" -> reason;
             default -> "CHAIN_CONFLICT";
