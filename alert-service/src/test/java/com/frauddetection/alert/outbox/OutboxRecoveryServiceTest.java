@@ -2,9 +2,11 @@ package com.frauddetection.alert.outbox;
 
 import com.frauddetection.alert.audit.ResolutionEvidenceReference;
 import com.frauddetection.alert.audit.ResolutionEvidenceType;
+import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
 import com.frauddetection.alert.regulated.RegulatedMutationResult;
+import com.frauddetection.alert.regulated.RegulatedMutationModelVersion;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.outbox.OutboxConfirmationResolutionMutationHandler;
 import com.frauddetection.alert.service.DecisionOutboxStatus;
@@ -74,7 +76,7 @@ class OutboxRecoveryServiceTest {
         Fixture fixture = new Fixture();
         TransactionalOutboxRecordDocument record = record("event-1", TransactionalOutboxStatus.PUBLISHED);
         when(fixture.regulatedMutationCoordinator.commit(any())).thenReturn(new RegulatedMutationResult<>(
-                RegulatedMutationState.EVIDENCE_PENDING,
+                RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 OutboxRecordResponse.from(record)
         ));
         when(fixture.repository.findById("event-1")).thenReturn(Optional.of(record));
@@ -89,7 +91,10 @@ class OutboxRecoveryServiceTest {
         assertThat(response.getEventId()).isEqualTo("event-1");
         verify(fixture.regulatedMutationCoordinator).commit(argThat(command ->
                 "outbox-confirm-event-1".equals(command.idempotencyKey())
-                        && "event-1".equals(command.resourceId())));
+                        && "event-1".equals(command.resourceId())
+                        && command.action() == AuditAction.RESOLVE_TRANSACTIONAL_OUTBOX_CONFIRMATION
+                        && command.mutationModelVersion() == RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
+                        && command.intent() != null));
     }
 
     private OutboxConfirmationResolutionRequest request() {

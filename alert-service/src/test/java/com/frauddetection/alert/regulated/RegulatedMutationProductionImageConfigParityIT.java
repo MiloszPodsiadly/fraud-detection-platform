@@ -19,7 +19,7 @@ class RegulatedMutationProductionImageConfigParityIT extends AbstractRegulatedMu
     @Test
     void productionImageStartsWithSafeRegulatedMutationDefaultsAndNoChaosProfile() {
         chaosHarness.startAlertService("config-parity", List.of(
-                "--app.regulated-mutations.transaction-mode=OFF",
+                "--app.regulated-mutations.transaction-mode=REQUIRED",
                 "--app.regulated-mutation.lease-duration=PT30S",
                 "--app.regulated-mutations.checkpoint-renewal.extension=PT10S",
                 "--app.regulated-mutations.lease-renewal.max-renewal-count=3"
@@ -34,7 +34,7 @@ class RegulatedMutationProductionImageConfigParityIT extends AbstractRegulatedMu
                         "--app.outbox.publisher.enabled=false",
                         "--app.evidence-confirmation.enabled=false",
                         "--app.regulated-mutation.recovery.scheduler.enabled=false",
-                        "--app.regulated-mutations.transaction-mode=OFF",
+                        "--app.regulated-mutations.transaction-mode=REQUIRED",
                         "--app.regulated-mutation.lease-duration=PT30S",
                         "--app.regulated-mutations.checkpoint-renewal.extension=PT10S",
                         "--app.regulated-mutations.lease-renewal.max-renewal-count=3"

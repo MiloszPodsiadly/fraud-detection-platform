@@ -24,8 +24,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RegulatedMutationProductionImageEvidenceIntegrityIT extends AbstractRegulatedMutationProductionImageChaosIT {
 
     @Test
-    void legacyReplayAfterProductionImageRestartDoesNotCreateSecondOutboxRecord() {
-        RegulatedMutationChaosScenario scenario = committedLegacyScenario("legacy-replay-no-second-outbox");
+    void finalizedReplayAfterProductionImageRestartDoesNotCreateSecondOutboxRecord() {
+        RegulatedMutationChaosScenario scenario = finalizedConfirmedScenario("finalized-replay-no-second-outbox");
 
         RegulatedMutationChaosResult result = chaosHarness.runDurableStateScenario(scenario);
         chaosHarness.inspectByIdempotencyKey(scenario.idempotencyKey());
@@ -36,8 +36,8 @@ class RegulatedMutationProductionImageEvidenceIntegrityIT extends AbstractRegula
     }
 
     @Test
-    void legacyReplayAfterProductionImageRestartDoesNotCreateSecondSuccessAudit() {
-        RegulatedMutationChaosScenario scenario = committedLegacyScenario("legacy-replay-no-second-success-audit");
+    void finalizedReplayAfterProductionImageRestartDoesNotCreateSecondSuccessAudit() {
+        RegulatedMutationChaosScenario scenario = finalizedConfirmedScenario("finalized-replay-no-second-success-audit");
 
         RegulatedMutationChaosResult result = chaosHarness.runDurableStateScenario(scenario);
         chaosHarness.inspectByIdempotencyKey(scenario.idempotencyKey());
@@ -48,15 +48,15 @@ class RegulatedMutationProductionImageEvidenceIntegrityIT extends AbstractRegula
     }
 
     @Test
-    void successAuditPendingRecoveryRetriesAuditOnlyWithoutSecondBusinessMutation() {
+    void finalizeRecoveryCompletesEvidenceWithoutSecondBusinessMutation() {
         RegulatedMutationChaosScenario scenario = scenario(
-                "success-audit-pending-integrity",
-                RegulatedMutationChaosWindow.LEGACY_SUCCESS_AUDIT_PENDING,
-                RegulatedMutationState.SUCCESS_AUDIT_PENDING,
+                "finalize-recovery-integrity",
+                RegulatedMutationChaosWindow.FINALIZE_RECOVERY_REQUIRED,
+                RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 command -> {
                     mutateAlert(command.getResourceId());
-                    command.setResponseSnapshot(snapshot(command.getResourceId(), SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING));
+                    command.setResponseSnapshot(snapshot(command.getResourceId(), SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL));
                     command.setOutboxEventId("event-" + command.getResourceId());
                     command.setLeaseOwner("owner-fdp37-success-integrity");
                     command.setLeaseExpiresAt(Instant.now().minusSeconds(5));
@@ -75,8 +75,8 @@ class RegulatedMutationProductionImageEvidenceIntegrityIT extends AbstractRegula
     }
 
     @Test
-    void fdp29PendingExternalReplayDoesNotCreateDuplicateOutboxOrLocalSuccessAudit() {
-        RegulatedMutationChaosScenario scenario = fdp29PendingExternalScenario("fdp29-pending-integrity");
+    void pendingExternalReplayDoesNotCreateDuplicateOutboxOrLocalSuccessAudit() {
+        RegulatedMutationChaosScenario scenario = pendingExternalScenario("pending-external-integrity");
 
         RegulatedMutationChaosResult result = chaosHarness.runDurableStateScenario(scenario);
         chaosHarness.inspectByIdempotencyKey(scenario.idempotencyKey());
@@ -90,18 +90,18 @@ class RegulatedMutationProductionImageEvidenceIntegrityIT extends AbstractRegula
         assertThat(afterReplay.publicStatus()).isNotEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED);
     }
 
-    private RegulatedMutationChaosScenario committedLegacyScenario(String suffix) {
+    private RegulatedMutationChaosScenario finalizedConfirmedScenario(String suffix) {
         return scenario(
                 suffix,
-                RegulatedMutationChaosWindow.LEGACY_SUCCESS_AUDIT_PENDING,
-                RegulatedMutationState.EVIDENCE_CONFIRMED,
+                RegulatedMutationChaosWindow.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED,
                 RegulatedMutationExecutionStatus.COMPLETED,
                 command -> {
                     mutateAlert(command.getResourceId());
-                    command.setPublicStatus(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED);
-                    command.setResponseSnapshot(snapshot(command.getResourceId(), SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED));
+                    command.setPublicStatus(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED);
+                    command.setResponseSnapshot(snapshot(command.getResourceId(), SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED));
                     command.setOutboxEventId("event-" + command.getResourceId());
-                    command.setLocalCommitMarker("LOCAL_COMMITTED");
+                    command.setLocalCommitMarker("EVIDENCE_GATED_FINALIZED");
                     command.setLocalCommittedAt(Instant.now());
                     command.setAttemptedAuditRecorded(true);
                     command.setAttemptedAuditId(insertAudit(command.getResourceId(), AuditOutcome.ATTEMPTED, "attempted-" + command.getId()));
@@ -112,10 +112,10 @@ class RegulatedMutationProductionImageEvidenceIntegrityIT extends AbstractRegula
         );
     }
 
-    private RegulatedMutationChaosScenario fdp29PendingExternalScenario(String suffix) {
+    private RegulatedMutationChaosScenario pendingExternalScenario(String suffix) {
         return scenario(
                 suffix,
-                RegulatedMutationChaosWindow.FDP29_FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                RegulatedMutationChaosWindow.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 RegulatedMutationExecutionStatus.COMPLETED,
                 RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,

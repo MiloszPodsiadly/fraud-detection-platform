@@ -132,6 +132,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.any;
+import static com.frauddetection.alert.regulated.RegulatedMutationInspectionTestFixtures.currentInspection;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
@@ -783,13 +784,13 @@ class AlertSecurityConfigTest {
         when(regulatedMutationRecoveryService.backlog())
                 .thenReturn(new RegulatedMutationRecoveryBacklogResponse(0, 0, null, 0, 0, Map.of(), Map.of()));
         when(regulatedMutationRecoveryService.inspect("idem-1"))
-                .thenReturn(new RegulatedMutationCommandInspectionResponse(
+                .thenReturn(currentInspection(
                         "96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b",
                         "...em-1",
                         "SUBMIT_ANALYST_DECISION",
                         "ALERT",
                         "alert-1",
-                        "EVIDENCE_PENDING",
+                        "FINALIZED_EVIDENCE_PENDING_EXTERNAL",
                         "COMPLETED",
                         null,
                         null,
@@ -802,13 +803,13 @@ class AlertSecurityConfigTest {
                         Instant.parse("2026-05-01T00:00:00Z")
                 ));
         when(regulatedMutationRecoveryService.inspectByCommandId("mutation-1"))
-                .thenReturn(new RegulatedMutationCommandInspectionResponse(
+                .thenReturn(currentInspection(
                         "96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b",
                         "...em-1",
                         "SUBMIT_ANALYST_DECISION",
                         "ALERT",
                         "alert-1",
-                        "EVIDENCE_PENDING",
+                        "FINALIZED_EVIDENCE_PENDING_EXTERNAL",
                         "COMPLETED",
                         null,
                         null,
@@ -821,13 +822,13 @@ class AlertSecurityConfigTest {
                         Instant.parse("2026-05-01T00:00:00Z")
                 ));
         when(regulatedMutationRecoveryService.inspectByIdempotencyHash("96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b"))
-                .thenReturn(new RegulatedMutationCommandInspectionResponse(
+                .thenReturn(currentInspection(
                         "96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b",
                         "...em-1",
                         "SUBMIT_ANALYST_DECISION",
                         "ALERT",
                         "alert-1",
-                        "EVIDENCE_PENDING",
+                        "FINALIZED_EVIDENCE_PENDING_EXTERNAL",
                         "COMPLETED",
                         null,
                         null,
@@ -1081,13 +1082,13 @@ class AlertSecurityConfigTest {
     @Test
     void shouldFailClosedWhenRegulatedMutationInspectionAuditFails() throws Exception {
         when(regulatedMutationRecoveryService.inspectByCommandId("mutation-1"))
-                .thenReturn(new RegulatedMutationCommandInspectionResponse(
+                .thenReturn(currentInspection(
                         "96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b",
                         "...em-1",
                         "SUBMIT_ANALYST_DECISION",
                         "ALERT",
                         "alert-1",
-                        "EVIDENCE_PENDING",
+                        "FINALIZED_EVIDENCE_PENDING_EXTERNAL",
                         "COMPLETED",
                         null,
                         null,
@@ -1330,7 +1331,7 @@ class AlertSecurityConfigTest {
                 List.of()
         );
         return new UpdateFraudCaseResponse(
-                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING,
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 null,
                 "idem-hash",
                 "case-1",

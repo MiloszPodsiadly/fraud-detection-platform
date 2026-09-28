@@ -19,7 +19,8 @@ class Fdp40EnvironmentProtectionGateTest {
         assertThat(Files.readString(Path.of("../docs/release/fdp_40_environment_protection_gates.md")))
                 .contains("single release owner model")
                 .contains("does not require dual-control")
-                .contains("FDP-29 enablement requires a separate config PR");
+                .contains("current-only regulated mutation model")
+                .contains("fail-closed persisted-model preflight");
         Map<String, Object> gates = readJson(Path.of("../docs/release/fdp_40_environment_protection_gates.json"));
 
         assertGatesValid(gates);
@@ -37,7 +38,7 @@ class Fdp40EnvironmentProtectionGateTest {
         assertInvalid(valid, gates -> gates.put("deployment_references_immutable_digest", false));
         assertInvalid(valid, gates -> gates.put("deployment_uses_fixture_image", true));
         assertInvalid(valid, gates -> gates.put("rollback_owner_required", false));
-        assertInvalid(valid, gates -> gates.put("fdp29_enablement_requires_separate_config_pr", false));
+        assertInvalid(valid, gates -> gates.put("regulated_mutation_current_model_required", false));
         assertInvalid(valid, gates -> gates.put("dual_control_required", true));
     }
 
@@ -58,7 +59,7 @@ class Fdp40EnvironmentProtectionGateTest {
         assertThat(bool(gates, "deployment_references_release_manifest")).isTrue();
         assertThat(bool(gates, "deployment_references_rollback_plan")).isTrue();
         assertThat(bool(gates, "deployment_uses_fixture_image")).isFalse();
-        assertThat(bool(gates, "fdp29_enablement_requires_separate_config_pr")).isTrue();
+        assertThat(bool(gates, "regulated_mutation_current_model_required")).isTrue();
     }
 
     private void assertInvalid(Map<String, Object> valid, java.util.function.Consumer<Map<String, Object>> mutation) {

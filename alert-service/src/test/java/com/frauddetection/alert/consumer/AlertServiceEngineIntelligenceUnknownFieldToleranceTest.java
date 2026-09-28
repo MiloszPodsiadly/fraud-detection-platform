@@ -28,6 +28,6 @@ class AlertServiceEngineIntelligenceUnknownFieldToleranceTest {
 
         assertThat(mapper.toDocument(unknownNested))
                 .usingRecursiveComparison()
-                .isEqualTo(mapper.toDocument(AlertServiceTransactionScoredEventFixtureLoader.oldWithoutEngineIntelligence()));
+                .isEqualTo(mapper.toDocument(AlertServiceTransactionScoredEventFixtureLoader.withoutEngineIntelligence()));
     }
 }

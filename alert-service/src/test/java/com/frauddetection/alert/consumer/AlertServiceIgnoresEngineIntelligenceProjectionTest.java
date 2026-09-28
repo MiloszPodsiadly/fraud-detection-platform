@@ -26,8 +26,8 @@ class AlertServiceIgnoresEngineIntelligenceProjectionTest {
     private final ScoredTransactionDocumentMapper mapper = new ScoredTransactionDocumentMapper();
 
     @Test
-    void oldEventWithoutEngineIntelligenceProducesSameProjectionShapeAsBefore() {
-        assertThat(mapper.toDocument(AlertServiceTransactionScoredEventFixtureLoader.oldWithoutEngineIntelligence()))
+    void currentEventWithoutEngineIntelligenceProducesBaselineProjectionShape() {
+        assertThat(mapper.toDocument(AlertServiceTransactionScoredEventFixtureLoader.withoutEngineIntelligence()))
                 .isNotNull();
     }
 
@@ -63,6 +63,6 @@ class AlertServiceIgnoresEngineIntelligenceProjectionTest {
     private void assertProjectionUnchanged(TransactionScoredEvent event) {
         assertThat(mapper.toDocument(event))
                 .usingRecursiveComparison()
-                .isEqualTo(mapper.toDocument(AlertServiceTransactionScoredEventFixtureLoader.oldWithoutEngineIntelligence()));
+                .isEqualTo(mapper.toDocument(AlertServiceTransactionScoredEventFixtureLoader.withoutEngineIntelligence()));
     }
 }

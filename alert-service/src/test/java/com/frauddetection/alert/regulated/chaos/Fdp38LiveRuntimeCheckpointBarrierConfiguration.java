@@ -72,13 +72,22 @@ class Fdp38LiveRuntimeCheckpointBarrierConfiguration {
         }
 
         @Override
-        public RegulatedMutationCheckpointRenewalDecision beforeLegacyBusinessCommit(
+        public RegulatedMutationCheckpointRenewalDecision beforeEvidencePreparation(
                 RegulatedMutationClaimToken claimToken,
                 RegulatedMutationCommandDocument document
         ) {
-            RegulatedMutationCheckpointRenewalDecision decision = super.beforeLegacyBusinessCommit(claimToken, document);
-            blockIfTarget(document, Fdp38LiveRuntimeCheckpoint.BEFORE_LEGACY_BUSINESS_MUTATION);
-            blockIfTarget(document, Fdp38LiveRuntimeCheckpoint.AFTER_ATTEMPTED_AUDIT_BEFORE_BUSINESS_MUTATION);
+            RegulatedMutationCheckpointRenewalDecision decision = super.beforeEvidencePreparation(claimToken, document);
+            blockIfTarget(document, Fdp38LiveRuntimeCheckpoint.BEFORE_EVIDENCE_PREPARATION);
+            return decision;
+        }
+
+        @Override
+        public RegulatedMutationCheckpointRenewalDecision afterEvidencePreparedBeforeFinalize(
+                RegulatedMutationClaimToken claimToken,
+                RegulatedMutationCommandDocument document
+        ) {
+            RegulatedMutationCheckpointRenewalDecision decision = super.afterEvidencePreparedBeforeFinalize(claimToken, document);
+            blockIfTarget(document, Fdp38LiveRuntimeCheckpoint.AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE);
             return decision;
         }
 
@@ -88,17 +97,7 @@ class Fdp38LiveRuntimeCheckpointBarrierConfiguration {
                 RegulatedMutationCommandDocument document
         ) {
             RegulatedMutationCheckpointRenewalDecision decision = super.beforeEvidenceGatedFinalize(claimToken, document);
-            blockIfTarget(document, Fdp38LiveRuntimeCheckpoint.BEFORE_FDP29_LOCAL_FINALIZE);
-            return decision;
-        }
-
-        @Override
-        public RegulatedMutationCheckpointRenewalDecision beforeSuccessAuditRetry(
-                RegulatedMutationClaimToken claimToken,
-                RegulatedMutationCommandDocument document
-        ) {
-            RegulatedMutationCheckpointRenewalDecision decision = super.beforeSuccessAuditRetry(claimToken, document);
-            blockIfTarget(document, Fdp38LiveRuntimeCheckpoint.BEFORE_SUCCESS_AUDIT_RETRY);
+            blockIfTarget(document, Fdp38LiveRuntimeCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE);
             return decision;
         }
 

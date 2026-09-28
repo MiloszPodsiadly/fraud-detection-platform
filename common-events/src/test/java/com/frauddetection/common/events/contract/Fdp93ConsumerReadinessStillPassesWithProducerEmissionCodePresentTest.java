@@ -11,8 +11,8 @@ class Fdp93ConsumerReadinessStillPassesWithProducerEmissionCodePresentTest {
     private final ObjectMapper objectMapper = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
 
     @Test
-    void oldEventWithoutEngineIntelligenceStillDeserializes() throws Exception {
-        assertThat(read(TransactionScoredEventFixtureLoader.oldWithoutEngineIntelligenceJson()).engineIntelligence())
+    void currentEventWithoutEngineIntelligenceStillDeserializes() throws Exception {
+        assertThat(read(TransactionScoredEventFixtureLoader.withoutEngineIntelligenceJson()).engineIntelligence())
                 .isNull();
     }
 

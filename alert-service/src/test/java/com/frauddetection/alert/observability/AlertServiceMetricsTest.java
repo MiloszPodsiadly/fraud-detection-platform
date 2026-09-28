@@ -329,12 +329,12 @@ class AlertServiceMetricsTest {
         metrics.recordEvidenceConfirmationFailed("idempotency-key-raw-value");
         metrics.recordEvidenceGatedFinalizeStuckVisible();
         metrics.recordEvidenceGatedFinalizeEnabled("SUBMIT_ANALYST_DECISION", true);
-        metrics.recordFdp29LocalAuditChainAppend("SUCCESS");
-        metrics.recordFdp29LocalAuditChainAppend("raw-command-id");
-        metrics.recordFdp29LocalAuditChainRetry("LOCK_CONFLICT");
-        metrics.recordFdp29LocalAuditChainRetry("raw-lock-owner");
-        metrics.recordFdp29LocalAuditChainAppendDuration(Duration.ofMillis(3));
-        metrics.recordFdp29LocalAuditChainLockReleaseFailure();
+        metrics.recordRegulatedMutationLocalAuditChainAppend("SUCCESS");
+        metrics.recordRegulatedMutationLocalAuditChainAppend("raw-command-id");
+        metrics.recordRegulatedMutationLocalAuditChainRetry("LOCK_CONFLICT");
+        metrics.recordRegulatedMutationLocalAuditChainRetry("raw-lock-owner");
+        metrics.recordRegulatedMutationLocalAuditChainAppendDuration(Duration.ofMillis(3));
+        metrics.recordRegulatedMutationLocalAuditChainLockReleaseFailure();
 
         Meter transition = meterRegistry.get("evidence_gated_finalize_state_transition_total").meter();
         Meter recovery = meterRegistry.get("evidence_gated_finalize_recovery_required_total").meter();
@@ -342,17 +342,17 @@ class AlertServiceMetricsTest {
         Meter rollback = meterRegistry.get("evidence_gated_finalize_transaction_rollback_total").meter();
         Meter stuck = meterRegistry.get("evidence_gated_finalize_stuck_visible_total").meter();
         Meter enabled = meterRegistry.get("evidence_gated_finalize_enabled").meter();
-        Meter localAuditAppendSuccess = meterRegistry.get("fdp29_local_audit_chain_append_total")
+        Meter localAuditAppendSuccess = meterRegistry.get("regulated_mutation_local_audit_chain_append_total")
                 .tag("outcome", "SUCCESS")
                 .meter();
-        Meter localAuditAppendUnknown = meterRegistry.get("fdp29_local_audit_chain_append_total")
+        Meter localAuditAppendUnknown = meterRegistry.get("regulated_mutation_local_audit_chain_append_total")
                 .tag("outcome", "CHAIN_CONFLICT_EXHAUSTED")
                 .meter();
-        Meter localAuditRetry = meterRegistry.get("fdp29_local_audit_chain_retry_total")
+        Meter localAuditRetry = meterRegistry.get("regulated_mutation_local_audit_chain_retry_total")
                 .tag("reason", "LOCK_CONFLICT")
                 .meter();
-        Meter localAuditAppendDuration = meterRegistry.get("fdp29_local_audit_chain_append_duration_ms").meter();
-        Meter localAuditLockReleaseFailure = meterRegistry.get("fdp29_local_audit_chain_lock_release_failure_total").meter();
+        Meter localAuditAppendDuration = meterRegistry.get("regulated_mutation_local_audit_chain_append_duration_ms").meter();
+        Meter localAuditLockReleaseFailure = meterRegistry.get("regulated_mutation_local_audit_chain_lock_release_failure_total").meter();
 
         assertThat(transition.getId().getTags())
                 .extracting(Tag::getKey)
@@ -398,7 +398,7 @@ class AlertServiceMetricsTest {
                 .tag("reason", "UNKNOWN")
                 .counter()
                 .count()).isEqualTo(1.0d);
-        assertThat(meterRegistry.get("fdp29_local_audit_chain_retry_total")
+        assertThat(meterRegistry.get("regulated_mutation_local_audit_chain_retry_total")
                 .tag("reason", "CHAIN_CONFLICT")
                 .counter()
                 .count()).isEqualTo(1.0d);
@@ -407,9 +407,9 @@ class AlertServiceMetricsTest {
     @Test
     void shouldUseLowCardinalityRegulatedMutationFencingMetricLabels() {
         metrics.recordRegulatedMutationFencedTransition(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.REQUESTED,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.EVIDENCE_PREPARING,
+                RegulatedMutationState.EVIDENCE_PREPARED,
                 "SUCCESS",
                 "NONE"
         );
@@ -419,18 +419,18 @@ class AlertServiceMetricsTest {
                 "EXPIRED_LEASE"
         );
         metrics.recordRegulatedMutationLeaseTakeover(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.REQUESTED
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.EVIDENCE_PREPARING
         );
         metrics.recordRegulatedMutationLeaseRemainingAtTransition(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.REQUESTED,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 "SUCCESS",
                 Duration.ofSeconds(3)
         );
         metrics.recordRegulatedMutationTransitionLatency(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.REQUESTED,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 "SUCCESS",
                 Duration.ofMillis(3)
         );
@@ -440,13 +440,13 @@ class AlertServiceMetricsTest {
                 "RECOVERY_WRITE_CONFLICT"
         );
         metrics.recordRegulatedMutationLeaseBudgetWarning(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.REQUESTED,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 "LOW_REMAINING"
         );
         metrics.recordRegulatedMutationLeaseRenewal(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.REQUESTED,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 "SUCCESS",
                 "NONE"
         );
@@ -457,13 +457,13 @@ class AlertServiceMetricsTest {
                 "raw alert-123 actor-456 exception"
         );
         metrics.recordRegulatedMutationLeaseRenewalBudgetRemaining(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.REQUESTED,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 Duration.ofSeconds(30)
         );
         metrics.recordRegulatedMutationLeaseRenewalExtension(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.REQUESTED,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 "SUCCESS",
                 Duration.ofSeconds(5)
         );
@@ -474,26 +474,26 @@ class AlertServiceMetricsTest {
         );
         for (RegulatedMutationLeaseRenewalReason reason : RegulatedMutationLeaseRenewalReason.values()) {
             metrics.recordRegulatedMutationLeaseRenewalRejected(
-                    RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                    RegulatedMutationState.REQUESTED,
+                    RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                    RegulatedMutationState.EVIDENCE_PREPARING,
                     reason.name()
             );
         }
         metrics.recordRegulatedMutationLeaseRenewalBudgetExceeded(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.REQUESTED
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.EVIDENCE_PREPARING
         );
         metrics.recordRegulatedMutationLeaseRenewalSingleExtensionCapped(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.REQUESTED
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.EVIDENCE_PREPARING
         );
         metrics.recordRegulatedMutationLeaseRenewalTotalBudgetCapped(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.REQUESTED
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.EVIDENCE_PREPARING
         );
         metrics.recordRegulatedMutationCheckpointRenewal(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationRenewalCheckpoint.AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE,
                 "RENEWED",
                 "NONE"
         );
@@ -509,13 +509,13 @@ class AlertServiceMetricsTest {
                 "NON_RENEWABLE_STATE"
         );
         metrics.recordRegulatedMutationCheckpointDuration(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationRenewalCheckpoint.AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE,
                 Duration.ofMillis(2)
         );
         metrics.recordRegulatedMutationCheckpointNoProgress(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationRenewalCheckpoint.AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE,
                 "NON_RENEWABLE_STATE"
         );
 
@@ -646,9 +646,6 @@ class AlertServiceMetricsTest {
     @Test
     void shouldCoverEveryRegulatedMutationCheckpointMetricLabel() {
         assertThat(java.util.List.of(
-                RegulatedMutationRenewalCheckpoint.BEFORE_ATTEMPTED_AUDIT,
-                RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT,
-                RegulatedMutationRenewalCheckpoint.BEFORE_SUCCESS_AUDIT_RETRY,
                 RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_PREPARATION,
                 RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE,
                 RegulatedMutationRenewalCheckpoint.AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE
@@ -656,18 +653,18 @@ class AlertServiceMetricsTest {
 
         for (RegulatedMutationRenewalCheckpoint checkpoint : RegulatedMutationRenewalCheckpoint.values()) {
             metrics.recordRegulatedMutationCheckpointRenewal(
-                    RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                    RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                     checkpoint,
                     "BLOCKED",
                     RegulatedMutationLeaseRenewalReason.NON_RENEWABLE_STATE.name()
             );
             metrics.recordRegulatedMutationCheckpointRenewalBlocked(
-                    RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                    RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                     checkpoint,
                     RegulatedMutationLeaseRenewalReason.NON_RENEWABLE_STATE.name()
             );
             metrics.recordRegulatedMutationCheckpointNoProgress(
-                    RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                    RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                     checkpoint,
                     RegulatedMutationLeaseRenewalReason.NON_RENEWABLE_STATE.name()
             );

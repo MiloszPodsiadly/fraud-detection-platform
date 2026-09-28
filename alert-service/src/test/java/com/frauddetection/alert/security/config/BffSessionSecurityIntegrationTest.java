@@ -421,7 +421,7 @@ class BffSessionSecurityIntegrationTest {
                 List.of()
         );
         return new UpdateFraudCaseResponse(
-                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING,
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 null,
                 "idem-hash",
                 "case-1",

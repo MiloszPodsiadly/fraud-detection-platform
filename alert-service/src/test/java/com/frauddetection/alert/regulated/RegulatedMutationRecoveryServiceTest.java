@@ -47,7 +47,7 @@ class RegulatedMutationRecoveryServiceTest {
         AuditEventRepository auditEventRepository = mock(AuditEventRepository.class);
         AuditService auditService = mock(AuditService.class);
         RegulatedMutationAuditPhaseService phaseService = new RegulatedMutationAuditPhaseService(auditEventRepository, auditService);
-        RegulatedMutationCommandDocument command = new Fixture().command(RegulatedMutationState.SUCCESS_AUDIT_PENDING);
+        RegulatedMutationCommandDocument command = new Fixture().command(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
         AuditEventDocument existingAudit = mock(AuditEventDocument.class);
         when(existingAudit.auditId()).thenReturn("audit-success-1");
         when(auditEventRepository.findByRequestId("mutation-1:SUCCESS"))
@@ -77,34 +77,9 @@ class RegulatedMutationRecoveryServiceTest {
     }
 
     @Test
-    void shouldRetryOnlySuccessAuditForSuccessAuditPendingCommandWithSnapshot() {
+    void shouldMarkFinalizingWithoutSnapshotAsRecoveryRequired() {
         Fixture fixture = new Fixture();
-        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.SUCCESS_AUDIT_PENDING);
-        command.setResponseSnapshot(snapshot());
-
-        RegulatedMutationRecoveryResult result = fixture.service.recover(command);
-
-        assertThat(result.outcome()).isEqualTo(RegulatedMutationRecoveryOutcome.RECOVERED);
-        assertThat(command.isSuccessAuditRecorded()).isTrue();
-        assertThat(command.getState()).isEqualTo(RegulatedMutationState.EVIDENCE_PENDING);
-        assertThat(command.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.COMPLETED);
-        verify(fixture.auditService).audit(
-                eq(AuditAction.SUBMIT_ANALYST_DECISION),
-                eq(AuditResourceType.ALERT),
-                eq("alert-1"),
-                eq("corr-1"),
-                eq("principal-7"),
-                eq(AuditOutcome.SUCCESS),
-                isNull(),
-                any(AuditEventMetadataSummary.class),
-                eq("mutation-1:SUCCESS")
-        );
-    }
-
-    @Test
-    void shouldMarkBusinessCommittingWithoutSnapshotAsRecoveryRequired() {
-        Fixture fixture = new Fixture();
-        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.BUSINESS_COMMITTING);
+        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZING);
 
         RegulatedMutationRecoveryResult result = fixture.service.recover(command);
 
@@ -132,59 +107,16 @@ class RegulatedMutationRecoveryServiceTest {
     }
 
     @Test
-    void shouldDegradeWhenSuccessAuditRetryFailsWithoutRerunningBusinessMutation() {
-        Fixture fixture = new Fixture();
-        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.SUCCESS_AUDIT_PENDING);
-        command.setResponseSnapshot(snapshot());
-        doThrow(new IllegalStateException("audit unavailable")).when(fixture.auditService).audit(
-                eq(AuditAction.SUBMIT_ANALYST_DECISION),
-                eq(AuditResourceType.ALERT),
-                eq("alert-1"),
-                eq("corr-1"),
-                eq("principal-7"),
-                eq(AuditOutcome.SUCCESS),
-                isNull(),
-                any(AuditEventMetadataSummary.class),
-                eq("mutation-1:SUCCESS")
-        );
-
-        RegulatedMutationRecoveryResult result = fixture.service.recover(command);
-
-        assertThat(result.outcome()).isEqualTo(RegulatedMutationRecoveryOutcome.RECOVERED);
-        assertThat(command.getState()).isEqualTo(RegulatedMutationState.COMMITTED_DEGRADED);
-        assertThat(command.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.COMPLETED);
-        assertThat(command.getLastError()).isEqualTo("POST_COMMIT_AUDIT_DEGRADED");
-    }
-
-    @Test
-    void shouldBindExistingSuccessAuditWithoutCreatingDuplicateWhenRecovering() {
-        Fixture fixture = new Fixture();
-        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.SUCCESS_AUDIT_PENDING);
-        command.setResponseSnapshot(snapshot());
-        AuditEventDocument existingAudit = mock(AuditEventDocument.class);
-        when(existingAudit.auditId()).thenReturn("audit-success-1");
-        when(fixture.auditEventRepository.findByRequestId("mutation-1:SUCCESS")).thenReturn(Optional.of(existingAudit));
-
-        RegulatedMutationRecoveryResult result = fixture.service.recover(command);
-
-        assertThat(result.outcome()).isEqualTo(RegulatedMutationRecoveryOutcome.RECOVERED);
-        assertThat(command.isSuccessAuditRecorded()).isTrue();
-        assertThat(command.getSuccessAuditId()).isEqualTo("audit-success-1");
-        assertThat(command.getState()).isEqualTo(RegulatedMutationState.EVIDENCE_PENDING);
-        verify(fixture.auditService, never()).audit(any(), any(), anyString(), any(), anyString(), any(), any(), any(), any());
-    }
-
-    @Test
     void shouldReconstructSnapshotFromCommittedBusinessStateAndOutboxWithoutRerunningMutation() {
         Fixture fixture = new Fixture();
-        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.BUSINESS_COMMITTED);
+        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZED_VISIBLE);
         setSubmitDecisionIntent(command, AnalystDecision.CONFIRMED_FRAUD, "Manual review", List.of("chargeback"), "principal-7");
         when(fixture.alertRepository.findById("alert-1")).thenReturn(Optional.of(committedAlert(DecisionOutboxStatus.PUBLISHED)));
 
         RegulatedMutationRecoveryResult result = fixture.service.recover(command);
 
         assertThat(result.outcome()).isEqualTo(RegulatedMutationRecoveryOutcome.RECOVERED);
-        assertThat(command.getState()).isEqualTo(RegulatedMutationState.EVIDENCE_PENDING);
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         assertThat(command.getResponseSnapshot()).isNotNull();
         assertThat(command.getResponseSnapshot().decisionEventId()).isEqualTo("event-1");
         assertThat(command.getOutboxEventId()).isEqualTo("event-1");
@@ -193,7 +125,7 @@ class RegulatedMutationRecoveryServiceTest {
     @Test
     void shouldRequireRecoveryWhenCommittedBusinessStateDoesNotMatchIntent() {
         Fixture fixture = new Fixture();
-        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.BUSINESS_COMMITTED);
+        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZED_VISIBLE);
         setSubmitDecisionIntent(command, AnalystDecision.CONFIRMED_FRAUD, "Manual review", List.of("chargeback"), "principal-7");
         AlertDocument mismatched = committedAlert(DecisionOutboxStatus.PUBLISHED);
         mismatched.setAnalystDecision(AnalystDecision.MARKED_LEGITIMATE);
@@ -210,7 +142,7 @@ class RegulatedMutationRecoveryServiceTest {
     @Test
     void shouldMarkUnsupportedMutationRecoveryRequiredWithoutGuessingSnapshot() {
         Fixture fixture = new Fixture();
-        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.BUSINESS_COMMITTED);
+        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZED_VISIBLE);
         command.setAction(AuditAction.UPDATE_FRAUD_CASE.name());
         command.setResourceType(AuditResourceType.FRAUD_CASE.name());
 
@@ -230,13 +162,11 @@ class RegulatedMutationRecoveryServiceTest {
         when(commandRepository.save(any(RegulatedMutationCommandDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
         RegulatedMutationRecoveryService service = new RegulatedMutationRecoveryService(
                 commandRepository,
-                new RegulatedMutationAuditPhaseService(mock(AuditEventRepository.class), mock(AuditService.class)),
-                mock(AuditDegradationService.class),
                 mock(AlertServiceMetrics.class),
                 List.of(strategy),
                 Duration.ofMinutes(2)
         );
-        RegulatedMutationCommandDocument command = new Fixture().command(RegulatedMutationState.BUSINESS_COMMITTED);
+        RegulatedMutationCommandDocument command = new Fixture().command(RegulatedMutationState.FINALIZED_VISIBLE);
 
         RegulatedMutationRecoveryResult result = service.recover(command);
 
@@ -248,7 +178,7 @@ class RegulatedMutationRecoveryServiceTest {
     void shouldScanBoundedStuckCommands() {
         Fixture fixture = new Fixture();
         RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.REQUESTED);
-        RegulatedMutationCommandDocument evidencePending = fixture.command(RegulatedMutationState.EVIDENCE_PENDING);
+        RegulatedMutationCommandDocument evidencePending = fixture.command(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         evidencePending.setIdempotencyKey("idem-2");
         evidencePending.setResponseSnapshot(snapshot());
         when(fixture.commandRepository.findTop100ByExecutionStatusInAndUpdatedAtBefore(anyCollection(), any()))
@@ -269,7 +199,7 @@ class RegulatedMutationRecoveryServiceTest {
     @Test
     void shouldInspectCommandWithoutPayloadDump() {
         Fixture fixture = new Fixture();
-        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.EVIDENCE_PENDING);
+        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         command.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
         command.setResponseSnapshot(snapshot());
         command.setAttemptedAuditId("audit-attempted");
@@ -285,7 +215,7 @@ class RegulatedMutationRecoveryServiceTest {
         assertThat(response.resourceType()).isEqualTo(AuditResourceType.ALERT.name());
         assertThat(response.resourceIdPresent()).isTrue();
         assertThat(response.resourceIdHash()).isEqualTo(RegulatedMutationIntentHasher.hash("resourceId=alert-1"));
-        assertThat(response.state()).isEqualTo(RegulatedMutationState.EVIDENCE_PENDING.name());
+        assertThat(response.state()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL.name());
         assertThat(response.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.COMPLETED.name());
         assertThat(response.responseSnapshotPresent()).isTrue();
         assertThat(response.attemptedAuditId()).isEqualTo("audit-attempted");
@@ -296,7 +226,7 @@ class RegulatedMutationRecoveryServiceTest {
     @Test
     void shouldInspectCommandByCommandIdAndIdempotencyHash() {
         Fixture fixture = new Fixture();
-        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.EVIDENCE_PENDING);
+        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         command.setIdempotencyKeyHash(RegulatedMutationIntentHasher.hash("idem-1"));
         when(fixture.commandRepository.findById("mutation-1")).thenReturn(Optional.of(command));
         when(fixture.commandRepository.findByIdempotencyKeyHash(command.getIdempotencyKeyHash())).thenReturn(Optional.of(command));
@@ -320,7 +250,7 @@ class RegulatedMutationRecoveryServiceTest {
                 AlertStatus.RESOLVED,
                 "event-1",
                 Instant.parse("2026-05-01T00:00:00Z"),
-                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
         );
     }
 
@@ -388,8 +318,6 @@ class RegulatedMutationRecoveryServiceTest {
         private final AlertRepository alertRepository = mock(AlertRepository.class);
         private final RegulatedMutationRecoveryService service = new RegulatedMutationRecoveryService(
                 commandRepository,
-                new RegulatedMutationAuditPhaseService(auditEventRepository, auditService),
-                auditDegradationService,
                 metrics,
                 List.of(new SubmitDecisionRecoveryStrategy(alertRepository)),
                 Duration.ofMinutes(2)
@@ -418,6 +346,7 @@ class RegulatedMutationRecoveryServiceTest {
             command.setAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
             command.setCorrelationId("corr-1");
             command.setRequestHash("request-hash");
+            command.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
             command.setState(state);
             command.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
             command.setCreatedAt(Instant.now().minusSeconds(300));

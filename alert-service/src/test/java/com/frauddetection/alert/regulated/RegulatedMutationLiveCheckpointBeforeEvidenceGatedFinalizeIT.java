@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 
-import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -17,37 +16,40 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Tag("fdp38")
 @Tag("live-runtime-checkpoint-chaos")
 @Tag("docker-chaos")
+@Tag("evidence-gated-finalize")
 @Tag("integration")
 @EnabledIf("fdp38LiveCheckpointEnabled")
-class RegulatedMutationLiveCheckpointBeforeBusinessMutationIT extends AbstractRegulatedMutationFdp38LiveCheckpointIT {
+class RegulatedMutationLiveCheckpointBeforeEvidenceGatedFinalizeIT
+        extends AbstractRegulatedMutationFdp38LiveCheckpointIT {
 
     @Test
-    void beforeLegacyBusinessMutationLiveKillDoesNotCommitOrPublish() throws Exception {
-        String alertId = "alert-fdp38-before-business";
-        String idempotencyKey = "idem-fdp38-before-business";
+    void killBeforeEvidenceGatedFinalizeDoesNotClaimFinality() throws Exception {
+        String alertId = "alert-fdp38-before-evidence-finalize";
+        String idempotencyKey = "idem-fdp38-before-evidence-finalize";
         alertRepository.save(alert(alertId));
 
         chaosHarness.startFixture(
-                "before-legacy-business-mutation",
-                Fdp38LiveRuntimeCheckpoint.BEFORE_LEGACY_BUSINESS_MUTATION,
+                "before-evidence-gated-finalize",
+                Fdp38LiveRuntimeCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE,
                 idempotencyKey,
-                List.of()
+                evidenceGatedArgs()
         );
 
-        var submitFuture = chaosHarness.submitDecisionAsync(alertId, idempotencyKey, decisionJson("before-business"));
-        Document barrier = awaitBarrier(idempotencyKey, Fdp38LiveRuntimeCheckpoint.BEFORE_LEGACY_BUSINESS_MUTATION);
+        var submitFuture = chaosHarness.submitDecisionAsync(alertId, idempotencyKey, decisionJson("before-evidence-finalize"));
+        Document barrier = awaitBarrier(idempotencyKey, Fdp38LiveRuntimeCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE);
         RegulatedMutationCommandDocument command = awaitCommand(idempotencyKey);
         assertThat(barrier.getString("mutation_command_id")).isEqualTo(command.getId());
-        assertThat(command.getState()).isEqualTo(RegulatedMutationState.AUDIT_ATTEMPTED);
-        assertThat(command.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
+        assertThat(command.getMutationModelVersion()).isEqualTo(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZING);
 
         chaosHarness.killFixtureAbruptly();
         submitFuture.handle((response, failure) -> null).get(10, TimeUnit.SECONDS);
-        chaosHarness.restartFixture("after-before-business-kill", List.of());
+        chaosHarness.restartFixture("after-evidence-finalize-kill", evidenceGatedArgs());
 
         RegulatedMutationChaosResult result = chaosHarness.collectEvidence(
-                scenario("before-legacy-business-mutation", RegulatedMutationChaosWindow.BEFORE_LEGACY_BUSINESS_MUTATION, command),
-                Fdp38LiveRuntimeCheckpoint.BEFORE_LEGACY_BUSINESS_MUTATION,
+                scenario("before-evidence-gated-finalize",
+                        RegulatedMutationChaosWindow.BEFORE_EVIDENCE_GATED_FINALIZE, command),
+                Fdp38LiveRuntimeCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE,
                 chaosHarness.inspectByCommandId(command.getId()),
                 null
         );
@@ -55,6 +57,7 @@ class RegulatedMutationLiveCheckpointBeforeBusinessMutationIT extends AbstractRe
         RegulatedMutationCommandDocument persistedCommand = commandRepository.findById(command.getId()).orElseThrow();
         AlertDocument persistedAlert = alertRepository.findById(alertId).orElseThrow();
         assertFixtureKillAndRestart(result);
+        assertThat(persistedCommand.getLocalCommitMarker()).isNull();
         assertNoCommittedSuccess(persistedCommand, persistedAlert, result);
         assertThat(result.attemptedAuditEvents()).isEqualTo(1L);
     }

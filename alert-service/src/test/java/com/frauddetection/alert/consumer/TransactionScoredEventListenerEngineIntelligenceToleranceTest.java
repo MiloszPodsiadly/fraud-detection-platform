@@ -61,8 +61,8 @@ class TransactionScoredEventListenerEngineIntelligenceToleranceTest {
 
     private static Stream<Arguments> reviewedFixtures() {
         return Stream.of(
-                Arguments.of("old-without-engine-intelligence",
-                        AlertServiceTransactionScoredEventFixtureLoader.oldWithoutEngineIntelligence()),
+                Arguments.of("current-without-engine-intelligence",
+                        AlertServiceTransactionScoredEventFixtureLoader.withoutEngineIntelligence()),
                 Arguments.of("minimal-engine-intelligence",
                         AlertServiceTransactionScoredEventFixtureLoader.minimalEngineIntelligence()),
                 Arguments.of("full-bounded-engine-intelligence",

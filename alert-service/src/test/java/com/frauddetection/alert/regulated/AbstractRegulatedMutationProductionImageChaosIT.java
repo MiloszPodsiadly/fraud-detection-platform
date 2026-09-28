@@ -88,7 +88,8 @@ abstract class AbstractRegulatedMutationProductionImageChaosIT extends AbstractI
             RegulatedMutationExecutionStatus executionStatus,
             java.util.function.Consumer<RegulatedMutationCommandDocument> customizer
     ) {
-        return scenario(suffix, window, state, executionStatus, RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION, customizer);
+        return scenario(suffix, window, state, executionStatus,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1, customizer);
     }
 
     protected RegulatedMutationChaosScenario scenario(

@@ -227,7 +227,7 @@ class FraudCaseSecurityIntegrationTest {
     void shouldDenyMutationsForReadOnlyAuthorityAndAllowUpdateAuthorityOnCurrentPath() throws Exception {
         when(fraudCaseManagementService.updateCase(any(), any(), any()))
                 .thenReturn(new UpdateFraudCaseResponse(
-                        SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED,
+                        SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED,
                         "command-1",
                         "hash-1",
                         "case-1",

@@ -98,48 +98,19 @@ class RegulatedMutationProductionReadinessE2ETest extends AbstractIntegrationTes
     }
 
     @Test
-    void legacySubmitDecisionHappyPathE2E() {
-        saveCommandAndAlert("idem-legacy-e2e", "alert-legacy-e2e", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
-        AtomicInteger businessMutations = new AtomicInteger();
-
-        RegulatedMutationResult<SubmitDecisionOperationStatus> result = legacyExecutor().execute(
-                command("idem-legacy-e2e", "alert-legacy-e2e", businessMutations, true, SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING),
-                "idem-legacy-e2e",
-                commandRepository.findByIdempotencyKey("idem-legacy-e2e").orElseThrow()
-        );
-        RegulatedMutationResult<SubmitDecisionOperationStatus> replay = legacyExecutor().execute(
-                command("idem-legacy-e2e", "alert-legacy-e2e", businessMutations, true, SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING),
-                "idem-legacy-e2e",
-                commandRepository.findByIdempotencyKey("idem-legacy-e2e").orElseThrow()
-        );
-
-        RegulatedMutationCommandDocument command = commandRepository.findByIdempotencyKey("idem-legacy-e2e").orElseThrow();
-        AlertDocument alert = alertRepository.findById("alert-legacy-e2e").orElseThrow();
-        assertThat(result.state()).isEqualTo(RegulatedMutationState.EVIDENCE_PENDING);
-        assertThat(replay.response()).isEqualTo(result.response());
-        assertThat(businessMutations).hasValue(1);
-        assertThat(alert.getAnalystDecision()).isEqualTo(AnalystDecision.CONFIRMED_FRAUD);
-        assertThat(command.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.COMPLETED);
-        assertThat(command.getResponseSnapshot()).isNotNull();
-        assertThat(command.getAttemptedAuditId()).isEqualTo("attempted-audit");
-        assertThat(command.getSuccessAuditId()).isEqualTo("success-audit");
-        assertThat(outboxRepository.findByMutationCommandId(command.getId())).isPresent();
-    }
-
-    @Test
-    void evidenceGatedSubmitDecisionHappyPathE2EWithFlagsEnabledOnlyForTest() {
-        saveCommandAndAlert("idem-fdp29-e2e", "alert-fdp29-e2e", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+    void canonicalSubmitDecisionHappyPathE2E() {
+        saveCommandAndAlert("idem-current-e2e", "alert-current-e2e", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
         AtomicInteger businessMutations = new AtomicInteger();
 
         RegulatedMutationResult<SubmitDecisionOperationStatus> result = evidenceExecutor().execute(
-                command("idem-fdp29-e2e", "alert-fdp29-e2e", businessMutations, true, SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                command("idem-current-e2e", "alert-current-e2e", businessMutations, true, SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                         RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
-                "idem-fdp29-e2e",
-                commandRepository.findByIdempotencyKey("idem-fdp29-e2e").orElseThrow()
+                "idem-current-e2e",
+                commandRepository.findByIdempotencyKey("idem-current-e2e").orElseThrow()
         );
 
-        RegulatedMutationCommandDocument command = commandRepository.findByIdempotencyKey("idem-fdp29-e2e").orElseThrow();
-        AlertDocument alert = alertRepository.findById("alert-fdp29-e2e").orElseThrow();
+        RegulatedMutationCommandDocument command = commandRepository.findByIdempotencyKey("idem-current-e2e").orElseThrow();
+        AlertDocument alert = alertRepository.findById("alert-current-e2e").orElseThrow();
         assertThat(result.state()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         assertThat(result.response()).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         assertThat(result.response()).isNotEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED);
@@ -153,38 +124,44 @@ class RegulatedMutationProductionReadinessE2ETest extends AbstractIntegrationTes
 
     @Test
     void recoveryStateBeatsSnapshotE2E() {
-        saveCommandAndAlert("idem-recovery-snapshot", "alert-recovery-snapshot", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
+        saveCommandAndAlert("idem-recovery-snapshot", "alert-recovery-snapshot", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
         RegulatedMutationCommandDocument command = commandRepository.findByIdempotencyKey("idem-recovery-snapshot").orElseThrow();
-        command.setState(RegulatedMutationState.EVIDENCE_PENDING);
+        command.setState(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
         command.setExecutionStatus(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
-        command.setResponseSnapshot(snapshot("alert-recovery-snapshot", SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING));
+        command.setResponseSnapshot(snapshot("alert-recovery-snapshot", SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL));
         commandRepository.save(command);
         AtomicInteger businessMutations = new AtomicInteger();
 
-        RegulatedMutationResult<SubmitDecisionOperationStatus> replay = legacyExecutor().execute(
-                command("idem-recovery-snapshot", "alert-recovery-snapshot", businessMutations, false, SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING),
+        RegulatedMutationResult<SubmitDecisionOperationStatus> replay = evidenceExecutor().execute(
+                command("idem-recovery-snapshot", "alert-recovery-snapshot", businessMutations, false,
+                        SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                        RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
                 "idem-recovery-snapshot",
                 command
         );
 
-        assertThat(replay.response()).isNotEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING);
-        assertThat(replay.response()).isNotEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED);
+        assertThat(replay.state()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(replay.response()).isNotEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED);
         assertThat(businessMutations).hasValue(0);
         assertThat(alertRepository.findById("alert-recovery-snapshot").orElseThrow().getAnalystDecision()).isNull();
     }
 
     @Test
     void checkpointRenewalIsNotProgressE2E() {
-        saveCommandAndAlert("idem-checkpoint-only", "alert-checkpoint-only", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
+        saveCommandAndAlert("idem-checkpoint-only", "alert-checkpoint-only", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
         RegulatedMutationCommand<AlertDocument, SubmitDecisionOperationStatus> command =
-                command("idem-checkpoint-only", "alert-checkpoint-only", new AtomicInteger(), false, SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING);
+                command("idem-checkpoint-only", "alert-checkpoint-only", new AtomicInteger(), false,
+                        SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                        RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
         RegulatedMutationClaimToken claim = claimService.claim(command, "idem-checkpoint-only").orElseThrow();
         RegulatedMutationCommandDocument claimed = commandRepository.findByIdempotencyKey("idem-checkpoint-only").orElseThrow();
+        claimed.setState(RegulatedMutationState.EVIDENCE_PREPARING);
+        commandRepository.save(claimed);
 
-        checkpointRenewalService(3).beforeAttemptedAudit(claim, claimed);
+        checkpointRenewalService(3).beforeEvidencePreparation(claim, claimed);
 
         RegulatedMutationCommandDocument persisted = commandRepository.findByIdempotencyKey("idem-checkpoint-only").orElseThrow();
-        assertThat(persisted.getState()).isEqualTo(RegulatedMutationState.REQUESTED);
+        assertThat(persisted.getState()).isEqualTo(RegulatedMutationState.EVIDENCE_PREPARING);
         assertThat(persisted.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
         assertThat(persisted.leaseRenewalCountOrZero()).isEqualTo(1);
         assertThat(persisted.getAttemptedAuditId()).isNull();
@@ -192,7 +169,7 @@ class RegulatedMutationProductionReadinessE2ETest extends AbstractIntegrationTes
         assertThat(outboxRepository.count()).isZero();
         assertThat(alertRepository.findById("alert-checkpoint-only").orElseThrow().getAnalystDecision()).isNull();
         assertThat(meterRegistry.find("regulated_mutation_checkpoint_renewal_total")
-                .tag("checkpoint", RegulatedMutationRenewalCheckpoint.BEFORE_ATTEMPTED_AUDIT.name())
+                .tag("checkpoint", RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_PREPARATION.name())
                 .tag("outcome", "RENEWED")
                 .counter()).isNotNull();
         assertThat(meterRegistry.find("regulated_mutation_checkpoint_no_progress_total").counter()).isNull();
@@ -200,9 +177,9 @@ class RegulatedMutationProductionReadinessE2ETest extends AbstractIntegrationTes
 
     @Test
     void longRunningProcessingIsObservableE2E() {
-        saveCommandAndAlert("idem-long-processing", "alert-long-processing", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
+        saveCommandAndAlert("idem-long-processing", "alert-long-processing", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
         RegulatedMutationCommandDocument command = commandRepository.findByIdempotencyKey("idem-long-processing").orElseThrow();
-        command.setState(RegulatedMutationState.AUDIT_ATTEMPTED);
+        command.setState(RegulatedMutationState.EVIDENCE_PREPARING);
         command.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
         command.setLeaseOwner("owner-long");
         command.setLeaseExpiresAt(Instant.parse("2026-05-05T18:10:00Z"));
@@ -212,30 +189,12 @@ class RegulatedMutationProductionReadinessE2ETest extends AbstractIntegrationTes
 
         RegulatedMutationCommandInspectionResponse inspection = recoveryService().inspect("idem-long-processing");
 
-        assertThat(inspection.state()).isEqualTo("AUDIT_ATTEMPTED");
+        assertThat(inspection.state()).isEqualTo("EVIDENCE_PREPARING");
         assertThat(inspection.executionStatus()).isEqualTo("PROCESSING");
         assertThat(inspection.leaseExpiresAt()).isEqualTo(Instant.parse("2026-05-05T18:10:00Z"));
         assertThat(inspection.leaseRenewalCount()).isEqualTo(2);
         assertThat(inspection.degradationReason()).isEqualTo("LONG_RUNNING_PROCESSING");
         assertThat(inspection.responseSnapshotPresent()).isFalse();
-    }
-
-    private LegacyRegulatedMutationExecutor legacyExecutor() {
-        return new LegacyRegulatedMutationExecutor(
-                commandRepository,
-                mongoTemplate,
-                auditPhaseService,
-                mock(AuditDegradationService.class),
-                metrics,
-                transactionRunner,
-                new RegulatedMutationPublicStatusMapper(),
-                false,
-                claimService,
-                new RegulatedMutationConflictPolicy(),
-                new RegulatedMutationReplayResolver(replayPolicyRegistry(true)),
-                new RegulatedMutationFencedCommandWriter(mongoTemplate, metrics),
-                checkpointRenewalService(3)
-        );
     }
 
     private EvidenceGatedFinalizeExecutor evidenceExecutor() {
@@ -250,7 +209,7 @@ class RegulatedMutationProductionReadinessE2ETest extends AbstractIntegrationTes
                 localAuditPhaseWriter,
                 claimService,
                 new RegulatedMutationConflictPolicy(),
-                new RegulatedMutationReplayResolver(replayPolicyRegistry(true)),
+                new RegulatedMutationReplayResolver(replayPolicyRegistry()),
                 new RegulatedMutationFencedCommandWriter(mongoTemplate, metrics),
                 checkpointRenewalService(3)
         );
@@ -259,8 +218,6 @@ class RegulatedMutationProductionReadinessE2ETest extends AbstractIntegrationTes
     private RegulatedMutationRecoveryService recoveryService() {
         return new RegulatedMutationRecoveryService(
                 commandRepository,
-                auditPhaseService,
-                mock(AuditDegradationService.class),
                 metrics,
                 List.of(new SubmitDecisionRecoveryStrategy(alertRepository)),
                 Duration.ofMinutes(2)
@@ -291,14 +248,10 @@ class RegulatedMutationProductionReadinessE2ETest extends AbstractIntegrationTes
         );
     }
 
-    private RegulatedMutationReplayPolicyRegistry replayPolicyRegistry(boolean evidenceGatedFinalizeActive) {
+    private RegulatedMutationReplayPolicyRegistry replayPolicyRegistry() {
         RegulatedMutationLeasePolicy leasePolicy = new RegulatedMutationLeasePolicy();
         return new RegulatedMutationReplayPolicyRegistry(
-                List.of(
-                        new LegacyRegulatedMutationReplayPolicy(leasePolicy),
-                        new EvidenceGatedFinalizeReplayPolicy(leasePolicy)
-                ),
-                evidenceGatedFinalizeActive
+                List.of(new EvidenceGatedFinalizeReplayPolicy(leasePolicy))
         );
     }
 
@@ -310,7 +263,7 @@ class RegulatedMutationProductionReadinessE2ETest extends AbstractIntegrationTes
             SubmitDecisionOperationStatus snapshotStatus
     ) {
         return command(idempotencyKey, alertId, businessMutations, writeOutbox, snapshotStatus,
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
     }
 
     private RegulatedMutationCommand<AlertDocument, SubmitDecisionOperationStatus> command(

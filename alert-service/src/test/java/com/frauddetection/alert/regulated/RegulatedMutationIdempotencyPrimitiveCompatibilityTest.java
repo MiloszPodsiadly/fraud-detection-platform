@@ -107,6 +107,8 @@ class RegulatedMutationIdempotencyPrimitiveCompatibilityTest {
         document.setIntentActorId(actorId);
         document.setAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
         document.setResourceType(AuditResourceType.ALERT.name());
+        document.setResourceId("alert-1");
+        document.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
         document.setState(RegulatedMutationState.REQUESTED);
         return document;
     }
@@ -128,10 +130,12 @@ class RegulatedMutationIdempotencyPrimitiveCompatibilityTest {
                         AlertStatus.RESOLVED,
                         "event-1",
                         java.time.Instant.parse("2026-05-10T10:00:00Z"),
-                        com.frauddetection.alert.api.SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
+                        com.frauddetection.alert.api.SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
                 ),
                 snapshot -> snapshot.operationStatus().name(),
-                state -> state.name()
+                state -> state.name(),
+                null,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
         );
     }
 }

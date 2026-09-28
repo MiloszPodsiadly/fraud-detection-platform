@@ -212,14 +212,14 @@ class DecisionOutboxReconciliationServiceTest {
                 isNull(),
                 eq("ops-admin"),
                 eq(AuditOutcome.FAILED),
-                eq("BUSINESS_WRITE_FAILED"),
+                eq("EVIDENCE_GATED_FINALIZE_FAILED"),
                 any(AuditEventMetadataSummary.class),
                 eq("mutation-1:FAILED")
         );
     }
 
     @Test
-    void shouldRecordPostCommitDegradationWhenSuccessAuditFailsAfterMutation() {
+    void shouldFailClosedWhenTransactionalSuccessAuditFails() {
         AlertRepository repository = mock(AlertRepository.class);
         AuditService auditService = mock(AuditService.class);
         AuditDegradationService degradationService = mock(AuditDegradationService.class);
@@ -239,25 +239,17 @@ class DecisionOutboxReconciliationServiceTest {
                 eq("mutation-1:SUCCESS")
         );
 
-        DecisionOutboxReconciliationService.UnknownConfirmation degraded = service.resolve(
+        assertThatThrownBy(() -> service.resolve(
                 "alert-1",
                 DecisionOutboxReconciliationService.Resolution.PUBLISHED,
                 "confirmed",
                 brokerEvidence(),
                 "ops-admin",
                 "idem-1"
-        );
+        )).isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("audit down");
 
-        assertThat(document.getDecisionOutboxStatus()).isEqualTo(DecisionOutboxStatus.PUBLISHED);
-        assertThat(degraded.status()).isEqualTo(DecisionOutboxStatus.PUBLISHED);
-        assertThat(degraded.status()).isNotEqualTo("COMMITTED_FULLY_ANCHORED");
-        verify(degradationService).recordPostCommitDegraded(
-                AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
-                AuditResourceType.DECISION_OUTBOX,
-                "alert-1",
-                "POST_COMMIT_AUDIT_DEGRADED",
-                "mutation-1"
-        );
+        verify(degradationService, never()).recordPostCommitDegraded(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -423,14 +415,11 @@ class DecisionOutboxReconciliationServiceTest {
         });
         return new DecisionOutboxReconciliationService(
                 repository,
-                new MongoRegulatedMutationCoordinator(
+                com.frauddetection.alert.regulated.CanonicalRegulatedMutationTestRuntime.coordinator(
                         commandRepository,
                         mongoTemplate,
                         new RegulatedMutationAuditPhaseService(auditEventRepository, auditService),
-                        degradationService,
-                        metrics,
-                        bankMode,
-                        Duration.ofSeconds(30)
+                        metrics
                 ),
                 new DecisionOutboxReconciliationMutationHandler(repository),
                 bankMode

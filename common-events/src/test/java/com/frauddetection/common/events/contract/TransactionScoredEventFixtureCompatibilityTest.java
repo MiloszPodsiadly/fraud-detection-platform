@@ -16,11 +16,11 @@ class TransactionScoredEventFixtureCompatibilityTest {
     private final ObjectMapper objectMapper = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
 
     @Test
-    void oldFixtureDeserializes() throws Exception {
-        TransactionScoredEvent event = read(TransactionScoredEventFixtureLoader.oldWithoutEngineIntelligenceJson());
+    void currentFixtureWithoutEngineIntelligenceDeserializes() throws Exception {
+        TransactionScoredEvent event = read(TransactionScoredEventFixtureLoader.withoutEngineIntelligenceJson());
 
         assertThat(event.engineIntelligence()).isNull();
-        assertThat(event.modelVersion()).isEqualTo("v1");
+        assertThat(event.modelVersion()).isEqualTo("v2");
     }
 
     @Test
@@ -70,7 +70,7 @@ class TransactionScoredEventFixtureCompatibilityTest {
 
     @Test
     void fixtureLoaderReadsAllFixtures() {
-        assertThat(fdp93Fixtures()).allMatch(json -> !json.isBlank());
+        assertThat(reviewedFixtures()).allMatch(json -> !json.isBlank());
     }
 
     @Test
@@ -130,9 +130,9 @@ class TransactionScoredEventFixtureCompatibilityTest {
         }
     }
 
-    private List<String> fdp93Fixtures() {
+    private List<String> reviewedFixtures() {
         return List.of(
-                TransactionScoredEventFixtureLoader.oldWithoutEngineIntelligenceJson(),
+                TransactionScoredEventFixtureLoader.withoutEngineIntelligenceJson(),
                 TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson(),
                 TransactionScoredEventFixtureLoader.fullBoundedEngineIntelligenceJson(),
                 TransactionScoredEventFixtureLoader.unknownNestedEngineIntelligenceFieldsJson(),

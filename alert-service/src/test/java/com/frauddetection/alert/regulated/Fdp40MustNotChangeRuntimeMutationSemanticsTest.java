@@ -22,7 +22,6 @@ class Fdp40MustNotChangeRuntimeMutationSemanticsTest {
 
     private static final List<String> PROTECTED_RUNTIME_PATH_FRAGMENTS = List.of(
             "alert-service/src/main/java/com/frauddetection/alert/regulated/MongoRegulatedMutationCoordinator",
-            "alert-service/src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor",
             "alert-service/src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor",
             "alert-service/src/main/java/com/frauddetection/alert/regulated/mutation/",
             "alert-service/src/main/java/com/frauddetection/alert/outbox/",
@@ -75,7 +74,7 @@ class Fdp40MustNotChangeRuntimeMutationSemanticsTest {
         }
         String application = Files.readString(Path.of("src/main/resources/application.yml"));
         assertThat(application)
-                .contains("evidence-gated-finalize:")
+                .doesNotContain("evidence-gated-finalize:")
                 .doesNotContain("fdp40")
                 .doesNotContain("production-enabled: true");
     }

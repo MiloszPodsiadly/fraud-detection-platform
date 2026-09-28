@@ -19,7 +19,7 @@ class RegulatedMutationProductionImageChaosHarnessTest {
         Files.writeString(
                 evidence,
                 """
-                        - scenario=legacy-off; state_reach_method=DURABLE_STATE_SEEDED; transaction_mode=OFF; result=PASS
+                        - scenario=current-finalizing; state_reach_method=DURABLE_STATE_SEEDED; transaction_mode=REQUIRED; result=PASS
                         - scenario=required-transaction; state_reach_method=DURABLE_STATE_SEEDED; transaction_mode=REQUIRED; result=PASS
                         """
         );
@@ -35,7 +35,7 @@ class RegulatedMutationProductionImageChaosHarnessTest {
                 evidence,
                 """
                         - note=transaction_mode=REQUIRED is mentioned in docs
-                        - scenario=legacy-off; state_reach_method=DURABLE_STATE_SEEDED; transaction_mode=OFF; result=PASS
+                        - scenario=current-finalizing; state_reach_method=DURABLE_STATE_SEEDED; transaction_mode=REQUIRED; result=PASS
                         """
         );
 

@@ -19,16 +19,16 @@ public final class InvariantAssert {
     }
 
     public static void postCommitDegradationIsExplicit(RegulatedMutationCommandDocument command) {
-        assertThat(command.getState()).isEqualTo(RegulatedMutationState.COMMITTED_DEGRADED);
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
         assertThat(command.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.COMPLETED);
-        assertThat(command.getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
+        assertThat(command.getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED);
         assertThat(command.getDegradationReason()).isEqualTo("POST_COMMIT_AUDIT_DEGRADED");
         assertThat(command.isSuccessAuditRecorded()).isFalse();
     }
 
     public static void recoveryRequiredIsNotCommitted(RegulatedMutationCommandDocument command) {
         assertThat(command.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
-        assertThat(command.getState()).isNotEqualTo(RegulatedMutationState.COMMITTED);
-        assertThat(command.getState()).isNotEqualTo(RegulatedMutationState.EVIDENCE_CONFIRMED);
+        assertThat(command.getState()).isNotEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        assertThat(command.getState()).isNotEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
     }
 }

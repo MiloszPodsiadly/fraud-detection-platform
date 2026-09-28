@@ -9,30 +9,6 @@ class RegulatedMutationSafeCheckpointPolicyTest {
     private final RegulatedMutationSafeCheckpointPolicy policy = new RegulatedMutationSafeCheckpointPolicy();
 
     @Test
-    void allowsOnlyApprovedLegacyCheckpointPairs() {
-        assertAllowed(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.REQUESTED,
-                RegulatedMutationRenewalCheckpoint.BEFORE_ATTEMPTED_AUDIT);
-        assertAllowed(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
-                RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT);
-        assertAllowed(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.BUSINESS_COMMITTING,
-                RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT);
-        assertAllowed(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.BUSINESS_COMMITTED,
-                RegulatedMutationRenewalCheckpoint.BEFORE_SUCCESS_AUDIT_RETRY);
-        assertAllowed(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.SUCCESS_AUDIT_PENDING,
-                RegulatedMutationRenewalCheckpoint.BEFORE_SUCCESS_AUDIT_RETRY);
-
-        assertRejected(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.REQUESTED,
-                RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT,
-                RegulatedMutationLeaseRenewalReason.NON_RENEWABLE_STATE);
-    }
-
-    @Test
     void allowsOnlyApprovedEvidenceGatedCheckpointPairs() {
         assertAllowed(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                 RegulatedMutationState.EVIDENCE_PREPARING,
@@ -55,20 +31,20 @@ class RegulatedMutationSafeCheckpointPolicyTest {
 
     @Test
     void rejectsTerminalRecoveryAndNonProcessingStates() {
-        assertRejected(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+        assertRejected(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                 RegulatedMutationState.FAILED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationRenewalCheckpoint.BEFORE_SUCCESS_AUDIT_RETRY,
+                RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE,
                 RegulatedMutationLeaseRenewalReason.RECOVERY_STATE);
         assertRejected(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                 RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE,
                 RegulatedMutationLeaseRenewalReason.TERMINAL_STATE);
-        assertRejected(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+        assertRejected(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.EVIDENCE_PREPARED,
                 RegulatedMutationExecutionStatus.COMPLETED,
-                RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT,
+                RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE,
                 RegulatedMutationLeaseRenewalReason.EXECUTION_STATUS_MISMATCH);
     }
 
@@ -84,10 +60,10 @@ class RegulatedMutationSafeCheckpointPolicyTest {
                 RegulatedMutationExecutionStatus.RECOVERY_REQUIRED,
                 RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE,
                 RegulatedMutationLeaseRenewalReason.RECOVERY_STATE);
-        assertRejected(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+        assertRejected(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.EVIDENCE_PREPARED,
                 RegulatedMutationExecutionStatus.RECOVERY_REQUIRED,
-                RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT,
+                RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE,
                 RegulatedMutationLeaseRenewalReason.RECOVERY_STATE);
         assertRejected(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                 RegulatedMutationState.FINALIZED_VISIBLE,
@@ -99,27 +75,28 @@ class RegulatedMutationSafeCheckpointPolicyTest {
                 RegulatedMutationExecutionStatus.PROCESSING,
                 RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE,
                 RegulatedMutationLeaseRenewalReason.TERMINAL_STATE);
-        assertRejected(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.COMMITTED_DEGRADED,
+        assertRejected(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationRenewalCheckpoint.BEFORE_SUCCESS_AUDIT_RETRY,
-                RegulatedMutationLeaseRenewalReason.TERMINAL_STATE);
+                RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE,
+                RegulatedMutationLeaseRenewalReason.RECOVERY_STATE);
     }
 
     @Test
     void nullCheckpointIsUnsupportedCheckpoint() {
-        assertRejected(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.REQUESTED,
+        assertRejected(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 null,
                 RegulatedMutationLeaseRenewalReason.UNSUPPORTED_CHECKPOINT);
     }
 
     @Test
-    void nullModelVersionUsesLegacyCompatibilityPolicy() {
-        assertAllowed(null,
-                RegulatedMutationState.REQUESTED,
-                RegulatedMutationRenewalCheckpoint.BEFORE_ATTEMPTED_AUDIT);
+    void nullModelVersionFailsClosed() {
+        assertRejected(null,
+                RegulatedMutationState.EVIDENCE_PREPARING,
+                RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_PREPARATION,
+                RegulatedMutationLeaseRenewalReason.NON_RENEWABLE_STATE);
     }
 
     private void assertAllowed(

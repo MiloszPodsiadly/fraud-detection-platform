@@ -174,7 +174,7 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
     public void restartFixture(String logName, List<String> additionalArgs) {
         startFixture(
                 logName,
-                Fdp38LiveRuntimeCheckpoint.BEFORE_LEGACY_BUSINESS_MUTATION,
+                Fdp38LiveRuntimeCheckpoint.BEFORE_EVIDENCE_PREPARATION,
                 "fdp38-restart-no-target",
                 additionalArgs
         );
@@ -406,14 +406,11 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
             Fdp38LiveRuntimeCheckpoint checkpoint
     ) {
         boolean publicSuccessStatusAbsent = !isCommittedOrFinalizedPublicStatus(result.publicStatus());
-        boolean committedSnapshotAbsentWhenNotAllowed = checkpoint == Fdp38LiveRuntimeCheckpoint.BEFORE_SUCCESS_AUDIT_RETRY
-                || !result.responseSnapshotPresent();
+        boolean committedSnapshotAbsentWhenNotAllowed = !result.responseSnapshotPresent();
         boolean finalizedStatusAbsentWhenNotAllowed = !isFinalizedPublicStatus(result.publicStatus());
         boolean successAuditAbsentWhenNotAllowed = result.successAuditEvents() == 0L;
-        boolean outboxAbsentWhenNotAllowed = checkpoint == Fdp38LiveRuntimeCheckpoint.BEFORE_SUCCESS_AUDIT_RETRY
-                || result.outboxRecords() == 0L;
-        boolean businessMutationAbsentWhenNotAllowed = checkpoint == Fdp38LiveRuntimeCheckpoint.BEFORE_SUCCESS_AUDIT_RETRY
-                || result.businessMutationCount() == 0L;
+        boolean outboxAbsentWhenNotAllowed = result.outboxRecords() == 0L;
+        boolean businessMutationAbsentWhenNotAllowed = result.businessMutationCount() == 0L;
         boolean duplicateMutationAbsent = result.businessMutationCount() <= 1L;
         boolean duplicateOutboxAbsent = result.outboxRecords() <= 1L;
         boolean duplicateSuccessAuditAbsent = result.successAuditEvents() <= 1L;
@@ -430,28 +427,21 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
         addFailureIfFalse(failedReasons, duplicateSuccessAuditAbsent, "duplicate_success_audit_absent");
 
         switch (checkpoint) {
-            case BEFORE_LEGACY_BUSINESS_MUTATION -> {
-                addFailureIfFalse(failedReasons, result.businessMutationCount() == 0L, "before_legacy_business_mutation_business_count_zero");
-                addFailureIfFalse(failedReasons, result.outboxRecords() == 0L, "before_legacy_business_mutation_outbox_zero");
-                addFailureIfFalse(failedReasons, result.successAuditEvents() == 0L, "before_legacy_business_mutation_success_audit_zero");
+            case BEFORE_EVIDENCE_PREPARATION -> {
+                addFailureIfFalse(failedReasons, result.attemptedAuditEvents() == 0L, "before_evidence_preparation_attempted_audit_zero");
+                addFailureIfFalse(failedReasons, result.businessMutationCount() == 0L, "before_evidence_preparation_business_count_zero");
+                addFailureIfFalse(failedReasons, result.outboxRecords() == 0L, "before_evidence_preparation_outbox_zero");
             }
-            case AFTER_ATTEMPTED_AUDIT_BEFORE_BUSINESS_MUTATION -> {
-                addFailureIfFalse(failedReasons, result.attemptedAuditEvents() == 1L, "after_attempted_audit_count_one");
-                addFailureIfFalse(failedReasons, result.businessMutationCount() == 0L, "after_attempted_business_count_zero");
-                addFailureIfFalse(failedReasons, result.outboxRecords() == 0L, "after_attempted_outbox_zero");
-                addFailureIfFalse(failedReasons, result.successAuditEvents() == 0L, "after_attempted_success_audit_zero");
+            case AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE -> {
+                addFailureIfFalse(failedReasons, result.attemptedAuditEvents() == 1L, "after_evidence_prepared_attempted_audit_one");
+                addFailureIfFalse(failedReasons, result.businessMutationCount() == 0L, "after_evidence_prepared_business_count_zero");
+                addFailureIfFalse(failedReasons, result.outboxRecords() == 0L, "after_evidence_prepared_outbox_zero");
             }
-            case BEFORE_FDP29_LOCAL_FINALIZE -> {
-                addFailureIfFalse(failedReasons, !result.localCommitMarkerPresent(), "before_fdp29_local_commit_marker_absent");
-                addFailureIfFalse(failedReasons, !result.responseSnapshotPresent(), "before_fdp29_response_snapshot_absent");
-                addFailureIfFalse(failedReasons, result.businessMutationCount() == 0L, "before_fdp29_business_count_zero");
-                addFailureIfFalse(failedReasons, result.outboxRecords() == 0L, "before_fdp29_outbox_zero");
-                addFailureIfFalse(failedReasons, result.successAuditEvents() == 0L, "before_fdp29_success_audit_zero");
-            }
-            case BEFORE_SUCCESS_AUDIT_RETRY -> {
-                addFailureIfFalse(failedReasons, result.businessMutationCount() == 1L, "before_success_audit_retry_business_count_one");
-                addFailureIfFalse(failedReasons, result.outboxRecords() == 1L, "before_success_audit_retry_outbox_one");
-                addFailureIfFalse(failedReasons, result.successAuditEvents() == 0L, "before_success_audit_retry_success_audit_zero");
+            case BEFORE_EVIDENCE_GATED_FINALIZE -> {
+                addFailureIfFalse(failedReasons, !result.localCommitMarkerPresent(), "before_evidence_finalize_local_commit_marker_absent");
+                addFailureIfFalse(failedReasons, !result.responseSnapshotPresent(), "before_evidence_finalize_response_snapshot_absent");
+                addFailureIfFalse(failedReasons, result.businessMutationCount() == 0L, "before_evidence_finalize_business_count_zero");
+                addFailureIfFalse(failedReasons, result.outboxRecords() == 0L, "before_evidence_finalize_outbox_zero");
             }
         }
 
@@ -470,8 +460,8 @@ public final class RegulatedMutationFdp38LiveCheckpointChaosHarness implements A
     }
 
     private boolean isCommittedOrFinalizedPublicStatus(SubmitDecisionOperationStatus publicStatus) {
-        return publicStatus == SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
-                || publicStatus == SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED
+        return publicStatus == SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+                || publicStatus == SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED
                 || isFinalizedPublicStatus(publicStatus);
     }
 

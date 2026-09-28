@@ -76,10 +76,10 @@ class RegulatedMutationRealAlertServiceChaosIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void shouldRecoverAfterAlertServiceKillAfterClaimBeforeAttemptedAudit() {
+    void shouldRecoverAfterAlertServiceKillBeforeEvidencePreparation() {
         RegulatedMutationChaosScenario scenario = scenario(
-                "claim-before-attempted",
-                RegulatedMutationChaosWindow.AFTER_CLAIM_BEFORE_ATTEMPTED_AUDIT,
+                "claim-before-evidence-preparation",
+                RegulatedMutationChaosWindow.AFTER_CLAIM_BEFORE_EVIDENCE_PREPARATION,
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 command -> {
@@ -99,18 +99,18 @@ class RegulatedMutationRealAlertServiceChaosIT extends AbstractIntegrationTest {
         assertThat(result.attemptedAuditEvents()).isZero();
         assertThat(result.successAuditEvents()).isZero();
         assertThat(result.publicStatus()).isNotIn(
-                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING,
-                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED,
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED,
                 SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED
         );
     }
 
     @Test
-    void shouldRecoverAfterAlertServiceKillAfterAttemptedAuditBeforeBusinessMutation() {
+    void shouldRecoverAfterAlertServiceKillAfterAttemptedAuditBeforeEvidencePreparation() {
         RegulatedMutationChaosScenario scenario = scenario(
-                "attempted-before-business",
-                RegulatedMutationChaosWindow.AFTER_ATTEMPTED_AUDIT_BEFORE_BUSINESS_MUTATION,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                "attempted-before-evidence-preparation",
+                RegulatedMutationChaosWindow.AFTER_ATTEMPTED_AUDIT_BEFORE_EVIDENCE_PREPARATION,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 command -> {
                     command.setAttemptedAuditRecorded(true);
@@ -123,7 +123,7 @@ class RegulatedMutationRealAlertServiceChaosIT extends AbstractIntegrationTest {
         RegulatedMutationChaosResult result = chaosHarness.run(scenario);
 
         assertAlertServiceRestarted(result);
-        assertThat(result.commandState()).isEqualTo(RegulatedMutationState.AUDIT_ATTEMPTED);
+        assertThat(result.commandState()).isEqualTo(RegulatedMutationState.EVIDENCE_PREPARING);
         assertThat(result.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
         assertThat(result.attemptedAuditEvents()).isOne();
         assertThat(result.successAuditEvents()).isZero();
@@ -132,11 +132,11 @@ class RegulatedMutationRealAlertServiceChaosIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void shouldNotReturnFalseSuccessAfterKillDuringLegacyBusinessCommitting() {
+    void shouldNotReturnFalseSuccessAfterKillDuringFinalizing() {
         RegulatedMutationChaosScenario scenario = scenario(
-                "legacy-business-committing",
-                RegulatedMutationChaosWindow.LEGACY_BUSINESS_COMMITTING,
-                RegulatedMutationState.BUSINESS_COMMITTING,
+                "evidence-gated-finalizing",
+                RegulatedMutationChaosWindow.EVIDENCE_GATED_FINALIZING,
+                RegulatedMutationState.FINALIZING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 command -> {
                     command.setAttemptedAuditRecorded(true);
@@ -157,7 +157,7 @@ class RegulatedMutationRealAlertServiceChaosIT extends AbstractIntegrationTest {
 
         assertAlertServiceRestarted(beforeRecovery);
         assertThat(recovery.path("recovery_required").asLong()).isEqualTo(1);
-        assertThat(afterRecovery.commandState()).isEqualTo(RegulatedMutationState.BUSINESS_COMMITTING);
+        assertThat(afterRecovery.commandState()).isEqualTo(RegulatedMutationState.FINALIZING);
         assertThat(afterRecovery.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
         assertThat(afterRecovery.responseSnapshotPresent()).isFalse();
         assertThat(afterRecovery.outboxRecords()).isZero();
@@ -166,15 +166,15 @@ class RegulatedMutationRealAlertServiceChaosIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void shouldRetrySuccessAuditOnlyAfterKillInSuccessAuditPendingWithoutSecondBusinessMutation() {
+    void shouldRecoverFinalizedVisibleAfterKillWithoutSecondBusinessMutation() {
         RegulatedMutationChaosScenario scenario = scenario(
-                "legacy-success-audit-pending",
-                RegulatedMutationChaosWindow.LEGACY_SUCCESS_AUDIT_PENDING,
-                RegulatedMutationState.SUCCESS_AUDIT_PENDING,
+                "finalize-recovery-required",
+                RegulatedMutationChaosWindow.FINALIZE_RECOVERY_REQUIRED,
+                RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 command -> {
                     mutateAlert(command.getResourceId());
-                    command.setResponseSnapshot(snapshot(command.getResourceId(), SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING));
+                    command.setResponseSnapshot(snapshot(command.getResourceId(), SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL));
                     command.setOutboxEventId("event-" + command.getResourceId());
                     command.setLeaseOwner("owner-success-audit-window");
                     command.setLeaseExpiresAt(Instant.now().minusSeconds(5));
@@ -193,7 +193,7 @@ class RegulatedMutationRealAlertServiceChaosIT extends AbstractIntegrationTest {
 
         assertAlertServiceRestarted(beforeRecovery);
         assertThat(recovery.path("recovered").asLong()).isEqualTo(1);
-        assertThat(afterRecovery.commandState()).isEqualTo(RegulatedMutationState.EVIDENCE_PENDING);
+        assertThat(afterRecovery.commandState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         assertThat(afterRecovery.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.COMPLETED);
         assertThat(afterRecovery.businessMutationCount()).isOne();
         assertThat(afterRecovery.outboxRecords()).isOne();
@@ -203,10 +203,10 @@ class RegulatedMutationRealAlertServiceChaosIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void shouldNotFinalizeSuccessAfterKillInFdp29FinalizingWithoutProof() {
+    void shouldNotFinalizeSuccessAfterKillInFinalizingWithoutProof() {
         RegulatedMutationChaosScenario scenario = scenario(
-                "fdp29-finalizing",
-                RegulatedMutationChaosWindow.FDP29_FINALIZING,
+                "finalizing-without-proof",
+                RegulatedMutationChaosWindow.EVIDENCE_GATED_FINALIZING,
                 RegulatedMutationState.FINALIZING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
@@ -240,10 +240,10 @@ class RegulatedMutationRealAlertServiceChaosIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void shouldRemainPendingExternalAfterKillWhenFdp29LocalCommitCompletedButExternalEvidencePending() {
+    void shouldRemainPendingExternalAfterKillWhenLocalFinalizeCompletedButExternalEvidencePending() {
         RegulatedMutationChaosScenario scenario = scenario(
-                "fdp29-pending-external",
-                RegulatedMutationChaosWindow.FDP29_FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                "pending-external",
+                RegulatedMutationChaosWindow.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 RegulatedMutationExecutionStatus.COMPLETED,
                 RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
@@ -279,7 +279,8 @@ class RegulatedMutationRealAlertServiceChaosIT extends AbstractIntegrationTest {
             RegulatedMutationExecutionStatus executionStatus,
             java.util.function.Consumer<RegulatedMutationCommandDocument> customizer
     ) {
-        return scenario(suffix, window, state, executionStatus, RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION, customizer);
+        return scenario(suffix, window, state, executionStatus,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1, customizer);
     }
 
     private RegulatedMutationChaosScenario scenario(

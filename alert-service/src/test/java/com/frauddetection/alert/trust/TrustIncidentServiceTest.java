@@ -75,7 +75,7 @@ class TrustIncidentServiceTest {
         when(coordinator.commit(any())).thenAnswer(invocation -> {
             RegulatedMutationCommand<TrustIncidentDocument, TrustIncidentResponse> command = invocation.getArgument(0);
             TrustIncidentResponse response = TrustIncidentResponse.from(incident);
-            return new RegulatedMutationResult<>(RegulatedMutationState.EVIDENCE_PENDING, response);
+            return new RegulatedMutationResult<>(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL, response);
         });
 
         TrustIncidentResponse response = service.acknowledge(
@@ -93,6 +93,8 @@ class TrustIncidentServiceTest {
         assertThat(captor.getValue().action()).isEqualTo(AuditAction.ACK_TRUST_INCIDENT);
         assertThat(captor.getValue().resourceType()).isEqualTo(AuditResourceType.TRUST_INCIDENT);
         assertThat(captor.getValue().idempotencyKey()).isEqualTo("ack-1");
+        assertThat(captor.getValue().mutationModelVersion())
+                .isEqualTo(com.frauddetection.alert.regulated.RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
     }
 
     @Test
@@ -114,7 +116,7 @@ class TrustIncidentServiceTest {
         when(coordinator.commit(any())).thenAnswer(invocation -> {
             RegulatedMutationCommand<TrustIncidentMaterializationResponse, TrustIncidentMaterializationResponse> command = invocation.getArgument(0);
             return new RegulatedMutationResult<>(
-                    RegulatedMutationState.EVIDENCE_PENDING,
+                    RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                     command.mutation().execute(new RegulatedMutationExecutionContext("cmd-1"))
             );
         });
@@ -130,7 +132,37 @@ class TrustIncidentServiceTest {
         assertThat(captor.getValue().resourceType()).isEqualTo(AuditResourceType.TRUST_INCIDENT);
         assertThat(captor.getValue().resourceId()).isEqualTo("trust-incidents");
         assertThat(captor.getValue().idempotencyKey()).isEqualTo("refresh-1");
+        assertThat(captor.getValue().mutationModelVersion())
+                .isEqualTo(com.frauddetection.alert.regulated.RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
         verify(refreshMutationHandler).refresh(signals);
+    }
+
+    @Test
+    void shouldRouteResolveThroughCanonicalRegulatedCoordinator() {
+        TrustIncidentRepository repository = mock(TrustIncidentRepository.class);
+        RegulatedMutationCoordinator coordinator = mock(RegulatedMutationCoordinator.class);
+        TrustIncidentService service = service(repository, coordinator);
+        TrustIncidentDocument incident = incident();
+        when(coordinator.commit(any())).thenAnswer(invocation -> new RegulatedMutationResult<>(
+                RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                TrustIncidentResponse.from(incident)
+        ));
+
+        service.resolve(
+                "incident-1",
+                new TrustIncidentResolutionRequest("resolved", evidence(), false),
+                "ops-2",
+                "resolve-1"
+        );
+
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<RegulatedMutationCommand<TrustIncidentDocument, TrustIncidentResponse>> captor =
+                org.mockito.ArgumentCaptor.forClass(RegulatedMutationCommand.class);
+        verify(coordinator).commit(captor.capture());
+        assertThat(captor.getValue().action()).isEqualTo(AuditAction.RESOLVE_TRUST_INCIDENT);
+        assertThat(captor.getValue().mutationModelVersion())
+                .isEqualTo(com.frauddetection.alert.regulated.RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        assertThat(captor.getValue().intent()).isNotNull();
     }
 
     @Test
@@ -185,7 +217,6 @@ class TrustIncidentServiceTest {
         return document;
     }
 
-    @SuppressWarnings("unused")
     private ResolutionEvidenceReference evidence() {
         return new ResolutionEvidenceReference(
                 ResolutionEvidenceType.RUNBOOK_STEP,

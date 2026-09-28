@@ -175,8 +175,8 @@ abstract class AbstractRegulatedMutationFdp38LiveCheckpointIT extends AbstractIn
     ) {
         assertThat(command.getResponseSnapshot()).isNull();
         assertThat(command.getPublicStatus()).isNotIn(
-                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING,
-                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED,
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED,
                 SubmitDecisionOperationStatus.FINALIZED_VISIBLE,
                 SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED
@@ -186,73 +186,6 @@ abstract class AbstractRegulatedMutationFdp38LiveCheckpointIT extends AbstractIn
         assertThat(result.businessMutationCount()).isZero();
         assertThat(result.outboxRecords()).isZero();
         assertThat(result.successAuditEvents()).isZero();
-    }
-
-    protected void seedSuccessAuditPendingCommand(String alertId, String commandId, String idempotencyKey) {
-        AlertDocument alert = alert(alertId);
-        alert.setAnalystDecision(AnalystDecision.CONFIRMED_FRAUD);
-        alert.setAlertStatus(AlertStatus.RESOLVED);
-        alert.setDecisionOperationStatus(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING.name());
-        alertRepository.save(alert);
-
-        RegulatedMutationCommandDocument command = new RegulatedMutationCommandDocument();
-        command.setId(commandId);
-        command.setIdempotencyKey(idempotencyKey);
-        command.setActorId("fdp38-operator");
-        command.setResourceId(alertId);
-        command.setResourceType(AuditResourceType.ALERT.name());
-        command.setAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
-        command.setCorrelationId("corr-" + alertId);
-        command.setRequestHash(submitDecisionRequestHash("before-success-audit-retry"));
-        command.setIdempotencyKeyHash(RegulatedMutationIntentHasher.hash(idempotencyKey));
-        RegulatedMutationIntent intent = RegulatedMutationIntentHasher.submitDecision(
-                alertId,
-                "fdp38-operator",
-                AnalystDecision.CONFIRMED_FRAUD,
-                "FDP-38 live runtime checkpoint proof",
-                List.of("fdp38", "live-checkpoint")
-        );
-        command.setIntentHash(intent.intentHash());
-        command.setIntentResourceId(alertId);
-        command.setIntentAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
-        command.setIntentActorId("fdp38-operator");
-        command.setIntentDecision(AnalystDecision.CONFIRMED_FRAUD.name());
-        command.setIntentReasonHash(intent.reasonHash());
-        command.setIntentTagsHash(intent.tagsHash());
-        command.setMutationModelVersion(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
-        command.setState(RegulatedMutationState.SUCCESS_AUDIT_PENDING);
-        command.setExecutionStatus(RegulatedMutationExecutionStatus.NEW);
-        command.setAttemptedAuditRecorded(true);
-        command.setAttemptedAuditId("attempted-" + commandId);
-        command.setResponseSnapshot(new RegulatedMutationResponseSnapshot(
-                alertId,
-                AnalystDecision.CONFIRMED_FRAUD,
-                AlertStatus.RESOLVED,
-                "event-" + alertId,
-                Instant.parse("2026-05-06T00:01:00Z"),
-                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
-        ));
-        command.setOutboxEventId("event-" + alertId);
-        command.setLocalCommitMarker("LOCAL_COMMITTED");
-        command.setLocalCommittedAt(Instant.now());
-        command.setCreatedAt(Instant.now());
-        command.setUpdatedAt(Instant.now());
-        commandRepository.save(command);
-
-        TransactionalOutboxRecordDocument outbox = new TransactionalOutboxRecordDocument();
-        outbox.setEventId("event-" + alertId);
-        outbox.setDedupeKey("dedupe-" + alertId);
-        outbox.setMutationCommandId(commandId);
-        outbox.setResourceType("ALERT");
-        outbox.setResourceId(alertId);
-        outbox.setEventType("FRAUD_DECISION");
-        outbox.setPayloadHash(RegulatedMutationIntentHasher.hash("payload-" + alertId));
-        outbox.setStatus(TransactionalOutboxStatus.PENDING);
-        outbox.setAttempts(1);
-        outbox.setCreatedAt(Instant.now());
-        outbox.setUpdatedAt(Instant.now());
-        mongoTemplate.save(outbox);
-        insertAudit(alertId, AuditOutcome.ATTEMPTED, "attempted-" + commandId);
     }
 
     protected void insertAudit(String alertId, AuditOutcome outcome, String auditId) {
@@ -266,8 +199,6 @@ abstract class AbstractRegulatedMutationFdp38LiveCheckpointIT extends AbstractIn
 
     protected List<String> evidenceGatedArgs() {
         return List.of(
-                "--app.regulated-mutations.evidence-gated-finalize.enabled=true",
-                "--app.regulated-mutations.evidence-gated-finalize.submit-decision.enabled=true",
                 "--app.regulated-mutations.transaction-mode=REQUIRED",
                 "--app.outbox.recovery.enabled=true"
         );

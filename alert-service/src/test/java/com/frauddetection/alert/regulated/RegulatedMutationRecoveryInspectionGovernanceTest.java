@@ -86,13 +86,13 @@ class RegulatedMutationRecoveryInspectionGovernanceTest {
     @Test
     void adminInspectionRequestIsMaskedAuditedAndBounded() throws Exception {
         when(inspectionRateLimiter.allow(any())).thenReturn(true);
-        when(recoveryService.inspect("idem-sensitive")).thenReturn(new RegulatedMutationCommandInspectionResponse(
+        when(recoveryService.inspect("idem-sensitive")).thenReturn(RegulatedMutationInspectionTestFixtures.currentInspection(
                 "96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b",
                 "idem-s...tive",
                 "SUBMIT_ANALYST_DECISION",
                 "ALERT",
                 "alert-sensitive",
-                "BUSINESS_COMMITTING",
+                "FINALIZING",
                 "RECOVERY_REQUIRED",
                 "lease-owner-sensitive",
                 Instant.parse("2026-05-06T10:00:00Z"),
@@ -109,7 +109,7 @@ class RegulatedMutationRecoveryInspectionGovernanceTest {
         mockMvc.perform(get("/api/v1/regulated-mutations/idem-sensitive")
                         .with(authentication(authenticationWith(AnalystAuthority.REGULATED_MUTATION_RECOVER))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.state").value("BUSINESS_COMMITTING"))
+                .andExpect(jsonPath("$.state").value("FINALIZING"))
                 .andExpect(jsonPath("$.execution_status").value("RECOVERY_REQUIRED"))
                 .andExpect(jsonPath("$.idempotency_key").doesNotExist())
                 .andExpect(jsonPath("$.idempotency_key_masked").value("idem-s...tive"))
@@ -159,13 +159,13 @@ class RegulatedMutationRecoveryInspectionGovernanceTest {
     @Test
     void sensitiveReadAuditFailureFailsClosed() throws Exception {
         when(inspectionRateLimiter.allow(any())).thenReturn(true);
-        when(recoveryService.inspect("idem-sensitive")).thenReturn(new RegulatedMutationCommandInspectionResponse(
+        when(recoveryService.inspect("idem-sensitive")).thenReturn(RegulatedMutationInspectionTestFixtures.currentInspection(
                 "96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b",
                 "idem-s...tive",
                 "SUBMIT_ANALYST_DECISION",
                 "ALERT",
                 "alert-sensitive",
-                "BUSINESS_COMMITTING",
+                "FINALIZING",
                 "RECOVERY_REQUIRED",
                 "lease-owner-sensitive",
                 Instant.parse("2026-05-06T10:00:00Z"),

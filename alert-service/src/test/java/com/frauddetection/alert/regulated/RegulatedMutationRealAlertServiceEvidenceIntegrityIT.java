@@ -74,7 +74,7 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
     void replayAfterRestartMustNotCreateSecondOutboxRecord() {
         RegulatedMutationChaosScenario scenario = committedScenario(
                 "outbox-dedupe",
-                RegulatedMutationChaosWindow.FDP29_FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                RegulatedMutationChaosWindow.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 command -> mongoTemplate.save(outboxRecord(command.getResourceId(), command.getId()))
         );
 
@@ -90,7 +90,7 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
     void replayAfterRestartMustNotCreateSecondSuccessAudit() {
         RegulatedMutationChaosScenario scenario = committedScenario(
                 "success-audit-dedupe",
-                RegulatedMutationChaosWindow.FDP29_FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                RegulatedMutationChaosWindow.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 command -> insertAudit(command.getResourceId(), AuditOutcome.SUCCESS, "success-" + command.getId())
         );
 
@@ -106,7 +106,7 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
     void replayAfterRestartMustNotCreateSecondLocalAuditAnchorForSameCommandPhase() {
         RegulatedMutationChaosScenario scenario = committedScenario(
                 "local-anchor-dedupe",
-                RegulatedMutationChaosWindow.FDP29_FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                RegulatedMutationChaosWindow.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 command -> insertLocalAnchor(command.getId(), RegulatedMutationAuditPhase.SUCCESS)
         );
 
@@ -118,12 +118,12 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
     }
 
     @Test
-    void retryAfterSuccessAuditPendingMustNotRerunBusinessMutation() {
+    void finalizeRecoveryMustNotRerunBusinessMutation() {
         RegulatedMutationChaosScenario scenario = committedScenario(
-                "success-audit-pending-no-business-rerun",
-                RegulatedMutationChaosWindow.LEGACY_SUCCESS_AUDIT_PENDING,
+                "finalize-recovery-no-business-rerun",
+                RegulatedMutationChaosWindow.FINALIZE_RECOVERY_REQUIRED,
                 command -> {
-                    command.setState(RegulatedMutationState.SUCCESS_AUDIT_PENDING);
+                    command.setState(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
                     command.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
                     command.setPublicStatus(SubmitDecisionOperationStatus.RECOVERY_REQUIRED);
                     mongoTemplate.save(outboxRecord(command.getResourceId(), command.getId()));
@@ -137,14 +137,14 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
         assertRealAlertServiceKill(result);
         assertThat(result.businessMutationCount()).isOne();
         assertThat(countOutbox(scenario.commandId())).isOne();
-        assertThat(countBusinessMutation("alert-success-audit-pending-no-business-rerun")).isOne();
+        assertThat(countBusinessMutation("alert-finalize-recovery-no-business-rerun")).isOne();
     }
 
     @Test
-    void fdp29PendingExternalReplayMustNotCreateDuplicateOutboxOrLocalSuccessAudit() {
+    void pendingExternalReplayMustNotCreateDuplicateOutboxOrLocalSuccessAudit() {
         RegulatedMutationChaosScenario scenario = committedScenario(
-                "fdp29-pending-external-dedupe",
-                RegulatedMutationChaosWindow.FDP29_FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                "pending-external-dedupe",
+                RegulatedMutationChaosWindow.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 command -> {
                     mongoTemplate.save(outboxRecord(command.getResourceId(), command.getId()));
                     insertAudit(command.getResourceId(), AuditOutcome.SUCCESS, "success-" + command.getId());

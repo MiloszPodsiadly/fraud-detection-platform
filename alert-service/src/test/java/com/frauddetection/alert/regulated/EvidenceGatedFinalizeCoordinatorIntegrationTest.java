@@ -97,7 +97,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
 
     @BeforeEach
     void setUp() {
-        String databaseName = "fdp29_coord_" + UUID.randomUUID().toString().replace("-", "");
+        String databaseName = "regulated_mutation_coord_" + UUID.randomUUID().toString().replace("-", "");
         databaseFactory = new SimpleMongoClientDatabaseFactory(
                 FraudPlatformContainers.mongodb().getReplicaSetUrl(databaseName)
         );
@@ -197,15 +197,8 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         );
         return new MongoRegulatedMutationCoordinator(
                 commandRepository,
-                transitionMongoTemplate,
-                auditPhaseService,
-                mock(AuditDegradationService.class),
-                metrics,
-                transactionRunner,
-                new RegulatedMutationPublicStatusMapper(),
-                evidenceGatedFinalizeExecutor,
-                false,
-                Duration.ofSeconds(30)
+                new RegulatedMutationExecutorRegistry(List.of(evidenceGatedFinalizeExecutor)),
+                new RegulatedMutationConflictPolicy()
         );
     }
 
@@ -248,15 +241,8 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         );
         return new MongoRegulatedMutationCoordinator(
                 commandRepository,
-                mongoTemplate,
-                auditPhaseService,
-                mock(AuditDegradationService.class),
-                metrics,
-                transactionRunner,
-                new RegulatedMutationPublicStatusMapper(),
-                evidenceGatedFinalizeExecutor,
-                false,
-                Duration.ofSeconds(30)
+                new RegulatedMutationExecutorRegistry(List.of(evidenceGatedFinalizeExecutor)),
+                new RegulatedMutationConflictPolicy()
         );
     }
 
@@ -470,7 +456,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
     }
 
     @Test
-    void shouldKeepAuditChainContinuousUnderConcurrentFdp29Finalizations() throws Exception {
+    void shouldKeepAuditChainContinuousUnderConcurrentFinalizations() throws Exception {
         alertRepository.save(alert("alert-concurrent-a"));
         alertRepository.save(alert("alert-concurrent-b"));
         coordinator = coordinatorWithPersistentAudit(
@@ -527,6 +513,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
             assertThat(command.getState()).isNotEqualTo(RegulatedMutationState.FINALIZING);
             if (command.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL) {
                 assertThat(countAudit(command.getId(), RegulatedMutationAuditPhase.SUCCESS)).isEqualTo(1);
+                assertThat(countAudit(command.getId(), RegulatedMutationAuditPhase.FAILED)).isZero();
                 assertThat(command.getResponseSnapshot()).isNotNull();
                 assertThat(command.getLocalCommitMarker()).isEqualTo("EVIDENCE_GATED_FINALIZED");
                 assertThat(command.isSuccessAuditRecorded()).isTrue();
@@ -535,6 +522,8 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
             } else {
                 assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
                 assertThat(countAudit(command.getId(), RegulatedMutationAuditPhase.SUCCESS)).isZero();
+                assertThat(countAudit(command.getId(), RegulatedMutationAuditPhase.FAILED)).isEqualTo(1);
+                assertThat(command.getFailedAuditId()).isNotBlank();
                 assertThat(command.getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED);
             }
         }
@@ -548,7 +537,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                 com.frauddetection.alert.audit.AuditAnchorDocument.class
         );
 
-        assertThat(auditEvents).hasSize((int) (2 + finalizedCommands));
+        assertThat(auditEvents).hasSize(2 + commands.size());
         assertContinuousChain(auditEvents);
         assertThat(auditEvents.stream().map(AuditEventDocument::auditId)).doesNotHaveDuplicates();
         assertThat(auditEvents.stream().map(AuditEventDocument::chainPosition)).doesNotHaveDuplicates();

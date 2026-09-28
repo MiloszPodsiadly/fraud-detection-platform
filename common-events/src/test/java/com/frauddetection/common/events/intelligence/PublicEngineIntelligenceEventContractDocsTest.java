@@ -17,7 +17,7 @@ class PublicEngineIntelligenceEventContractDocsTest {
                 .replaceAll("\\s+", " ");
 
         assertThat(docs).contains(
-                "safe, bounded, backward-compatible optional `transactionscoredevent.engineintelligence` summary",
+                "safe, bounded, optional `transactionscoredevent.engineintelligence` summary",
                 "historical fdp-92 defined the contract-only foundation",
                 "does not publish the internal aggregation model 1:1",
                 "allowlisted projection",

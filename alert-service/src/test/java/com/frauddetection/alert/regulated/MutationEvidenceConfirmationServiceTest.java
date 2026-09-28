@@ -72,8 +72,8 @@ class MutationEvidenceConfirmationServiceTest {
         assertThat(promoted).isEqualTo(1);
         ArgumentCaptor<RegulatedMutationCommandDocument> captor = ArgumentCaptor.forClass(RegulatedMutationCommandDocument.class);
         verify(commandRepository).save(captor.capture());
-        assertThat(captor.getValue().getState()).isEqualTo(RegulatedMutationState.EVIDENCE_CONFIRMED);
-        assertThat(captor.getValue().getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED);
+        assertThat(captor.getValue().getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
+        assertThat(captor.getValue().getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED);
     }
 
     @Test
@@ -98,8 +98,8 @@ class MutationEvidenceConfirmationServiceTest {
         assertThat(promoted).isZero();
         ArgumentCaptor<RegulatedMutationCommandDocument> captor = ArgumentCaptor.forClass(RegulatedMutationCommandDocument.class);
         verify(commandRepository).save(captor.capture());
-        assertThat(captor.getValue().getState()).isEqualTo(RegulatedMutationState.COMMITTED_DEGRADED);
-        assertThat(captor.getValue().getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
+        assertThat(captor.getValue().getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(captor.getValue().getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED);
         assertThat(captor.getValue().getDegradationReason()).isEqualTo("SUCCESS_AUDIT_MISSING");
     }
 
@@ -148,8 +148,8 @@ class MutationEvidenceConfirmationServiceTest {
         assertThat(promoted).isZero();
         ArgumentCaptor<RegulatedMutationCommandDocument> captor = ArgumentCaptor.forClass(RegulatedMutationCommandDocument.class);
         verify(commandRepository).save(captor.capture());
-        assertThat(captor.getValue().getState()).isEqualTo(RegulatedMutationState.COMMITTED_DEGRADED);
-        assertThat(captor.getValue().getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
+        assertThat(captor.getValue().getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(captor.getValue().getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED);
         assertThat(captor.getValue().getDegradationReason()).isEqualTo("OUTBOX_FAILED_TERMINAL");
     }
 
@@ -239,6 +239,23 @@ class MutationEvidenceConfirmationServiceTest {
     }
 
     @Test
+    void shouldConfirmCanonicalOperationThatDoesNotRequireTransactionalOutbox() {
+        Fixture fixture = new Fixture(false, false);
+        RegulatedMutationCommandDocument command = committedCommand();
+        command.setResourceId("case-1");
+        command.setResourceType(AuditResourceType.FRAUD_CASE.name());
+        command.setAction(AuditAction.UPDATE_FRAUD_CASE.name());
+        fixture.pending(command);
+
+        int promoted = fixture.service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isEqualTo(1);
+        verify(fixture.outboxRepository, never()).findByMutationCommandId(any());
+        verify(fixture.commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
+                saved.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED));
+    }
+
+    @Test
     void shouldRepairEvidenceGatedFinalizedVisibleToPendingExternalWhenEvidenceStillPending() {
         RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
         TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
@@ -279,7 +296,7 @@ class MutationEvidenceConfirmationServiceTest {
 
         assertThat(promoted).isEqualTo(1);
         verify(fixture.commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
-                saved.getPublicStatus() == SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED));
+                saved.getPublicStatus() == SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED));
     }
 
     @Test
@@ -309,7 +326,7 @@ class MutationEvidenceConfirmationServiceTest {
 
         assertThat(promoted).isEqualTo(1);
         verify(fixture.commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
-                saved.getPublicStatus() == SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED));
+                saved.getPublicStatus() == SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED));
     }
 
     @Test
@@ -339,8 +356,8 @@ class MutationEvidenceConfirmationServiceTest {
 
         assertThat(promoted).isZero();
         verify(fixture.commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
-                saved.getState() == RegulatedMutationState.COMMITTED_DEGRADED
-                        && saved.getPublicStatus() == SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE
+                saved.getState() == RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
+                        && saved.getPublicStatus() == SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED
                         && "SIGNATURE_INVALID".equals(saved.getDegradationReason())));
         verify(fixture.metrics).recordEvidenceConfirmationFailed("SIGNATURE_INVALID");
     }
@@ -368,7 +385,11 @@ class MutationEvidenceConfirmationServiceTest {
     private RegulatedMutationCommandDocument committedCommand() {
         RegulatedMutationCommandDocument command = new RegulatedMutationCommandDocument();
         command.setId("command-1");
-        command.setState(RegulatedMutationState.EVIDENCE_PENDING);
+        command.setResourceId("alert-1");
+        command.setResourceType(AuditResourceType.ALERT.name());
+        command.setAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
+        command.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        command.setState(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         command.setLocalCommitMarker("LOCAL_COMMITTED");
         command.setLocalCommittedAt(Instant.parse("2026-05-02T10:00:00Z"));
         command.setSuccessAuditRecorded(true);

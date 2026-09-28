@@ -19,17 +19,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RegulatedMutationRestartRecoveryProofTest {
 
     private final RegulatedMutationReplayPolicyRegistry replayPolicyRegistry = new RegulatedMutationReplayPolicyRegistry(
-            List.of(
-                    new LegacyRegulatedMutationReplayPolicy(new RegulatedMutationLeasePolicy()),
-                    new EvidenceGatedFinalizeReplayPolicy(new RegulatedMutationLeasePolicy())
-            ),
-            true
+            List.of(new EvidenceGatedFinalizeReplayPolicy(new RegulatedMutationLeasePolicy()))
     );
 
     @Test
     void crashAfterClaimBeforeAttemptedAuditDoesNotReturnSuccess() {
         RegulatedMutationCommandDocument command = command(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING
         );
@@ -46,10 +42,10 @@ class RegulatedMutationRestartRecoveryProofTest {
     }
 
     @Test
-    void crashAfterAttemptedAuditBeforeBusinessMutationDoesNotExposeUpdatedResource() {
+    void crashAfterEvidencePreparationBeforeFinalizeDoesNotExposeUpdatedResource() {
         RegulatedMutationCommandDocument command = command(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.EVIDENCE_PREPARED,
                 RegulatedMutationExecutionStatus.PROCESSING
         );
         command.setLeaseOwner("owner-a");
@@ -66,24 +62,7 @@ class RegulatedMutationRestartRecoveryProofTest {
     }
 
     @Test
-    void crashAfterBusinessCommitBeforeSuccessAuditLegacyRequiresOnlyExplicitRecoveryOrAuditRetry() {
-        RegulatedMutationCommandDocument command = command(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.SUCCESS_AUDIT_PENDING,
-                RegulatedMutationExecutionStatus.NEW
-        );
-        command.setAttemptedAuditRecorded(true);
-        command.setResponseSnapshot(snapshot(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING));
-
-        RegulatedMutationReplayDecision decision = replayPolicyRegistry.resolve(command, Instant.now());
-
-        assertThat(decision.type()).isEqualTo(RegulatedMutationReplayDecisionType.NONE);
-        assertThat(command.getResponseSnapshot()).isNotNull();
-        assertThat(command.isSuccessAuditRecorded()).isFalse();
-    }
-
-    @Test
-    void crashDuringFdp29FinalizeBeforeCommitRequiresRecoveryWithoutFalseFinalizedResponse() {
+    void crashDuringCanonicalFinalizeBeforeCommitRequiresRecoveryWithoutFalseFinalizedResponse() {
         RegulatedMutationCommandDocument command = command(
                 RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                 RegulatedMutationState.FINALIZING,
@@ -103,7 +82,7 @@ class RegulatedMutationRestartRecoveryProofTest {
     }
 
     @Test
-    void crashAfterFdp29LocalCommitBeforeExternalConfirmationDoesNotClaimConfirmedFinality() {
+    void crashAfterCanonicalLocalCommitBeforeExternalConfirmationDoesNotClaimConfirmedFinality() {
         RegulatedMutationCommandDocument command = command(
                 RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                 RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,

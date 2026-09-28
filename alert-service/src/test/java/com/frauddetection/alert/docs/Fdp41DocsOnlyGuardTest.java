@@ -38,7 +38,6 @@ class Fdp41DocsOnlyGuardTest {
             "/api/",
             "/regulated/mutation/",
             "/regulated/MongoRegulatedMutationCoordinator",
-            "/regulated/LegacyRegulatedMutationExecutor",
             "/regulated/EvidenceGatedFinalizeExecutor",
             "/outbox/",
             "/messaging/"

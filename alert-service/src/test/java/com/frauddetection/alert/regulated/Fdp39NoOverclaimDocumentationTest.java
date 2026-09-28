@@ -28,7 +28,7 @@ class Fdp39NoOverclaimDocumentationTest {
             "legal notarization",
             "WORM guarantee",
             "full production config certification",
-            "automatic FDP-29 enablement"
+            "runtime model fallback enabled"
     );
 
     @Test

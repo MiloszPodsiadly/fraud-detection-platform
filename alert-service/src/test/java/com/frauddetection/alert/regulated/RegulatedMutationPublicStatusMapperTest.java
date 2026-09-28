@@ -6,6 +6,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RegulatedMutationPublicStatusMapperTest {
 
@@ -22,9 +23,9 @@ class RegulatedMutationPublicStatusMapperTest {
     }
 
     @Test
-    void shouldMapEvidenceGatedDegradedLegacyStatesToFinalizeRecoveryRequired() {
+    void shouldMapCurrentRecoveryStateToFinalizeRecoveryRequired() {
         SubmitDecisionOperationStatus status = mapper.submitDecisionStatus(
-                RegulatedMutationState.COMMITTED_DEGRADED,
+                RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
                 RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
         );
 
@@ -32,13 +33,10 @@ class RegulatedMutationPublicStatusMapperTest {
     }
 
     @Test
-    void shouldKeepLegacyStatusMappingForLegacyCommands() {
-        SubmitDecisionOperationStatus status = mapper.submitDecisionStatus(
-                RegulatedMutationState.COMMITTED_DEGRADED,
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION
-        );
-
-        assertThat(status).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
+    void shouldRejectMissingModelVersion() {
+        assertThatThrownBy(() -> mapper.submitDecisionStatus(RegulatedMutationState.EVIDENCE_PREPARING, null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("requires EVIDENCE_GATED_FINALIZE_V1");
     }
 
     @ParameterizedTest
@@ -52,7 +50,6 @@ class RegulatedMutationPublicStatusMapperTest {
             "REJECTED_EVIDENCE_UNAVAILABLE",
             "FAILED_BUSINESS_VALIDATION",
             "FINALIZE_RECOVERY_REQUIRED",
-            "COMMITTED_DEGRADED",
             "FAILED"
     })
     void shouldUseMapperForEveryEvidenceGatedPublicStatus(RegulatedMutationState state) {

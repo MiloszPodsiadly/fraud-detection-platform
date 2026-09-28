@@ -39,7 +39,7 @@ class RegulatedMutationFencedCommandWriterTest {
                 token("owner-a", Instant.now().plusSeconds(30)),
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 null,
                 update -> update.set("attempted_audit_recorded", true)
@@ -53,7 +53,7 @@ class RegulatedMutationFencedCommandWriterTest {
         assertThat(queryJson).contains("state=REQUESTED");
         assertThat(queryJson).contains("execution_status=PROCESSING");
         Document set = setDocument();
-        assertThat(set.get("state")).isEqualTo(RegulatedMutationState.AUDIT_ATTEMPTED);
+        assertThat(set.get("state")).isEqualTo(RegulatedMutationState.EVIDENCE_PREPARING);
         assertThat(set.get("execution_status")).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
         assertThat(set.get("attempted_audit_recorded")).isEqualTo(true);
     }
@@ -158,7 +158,7 @@ class RegulatedMutationFencedCommandWriterTest {
                 .contains("execution_status=PROCESSING")
                 .contains("lease_expires_at");
         assertThat(meterRegistry.find("regulated_mutation_recovery_write_conflict_total")
-                .tag("model_version", "LEGACY_REGULATED_MUTATION")
+                .tag("model_version", "EVIDENCE_GATED_FINALIZE_V1")
                 .tag("state", "REQUESTED")
                 .tag("reason", "RECOVERY_WRITE_CONFLICT")
                 .counter()).isNotNull();
@@ -201,7 +201,7 @@ class RegulatedMutationFencedCommandWriterTest {
         when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
                 .thenReturn(UpdateResult.acknowledged(0, 0L, null));
         RegulatedMutationCommandDocument document = current("owner-a", Instant.now().minusSeconds(1));
-        document.setPublicStatus(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING);
+        document.setPublicStatus(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
 
         assertThatThrownBy(() -> writer.recoveryTransition(
                 document,
@@ -271,7 +271,7 @@ class RegulatedMutationFencedCommandWriterTest {
                 token("owner-a", Instant.now().plusSeconds(30)),
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.EVIDENCE_PENDING,
+                RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 RegulatedMutationExecutionStatus.COMPLETED,
                 null,
                 update -> {
@@ -280,7 +280,7 @@ class RegulatedMutationFencedCommandWriterTest {
                     update.set("local_commit_marker", "marker-1");
                     update.set("success_audit_id", "success-1");
                     update.set("degradation_reason", "NONE");
-                    update.set("public_status", SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING);
+                    update.set("public_status", SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
                 }
         );
 
@@ -290,7 +290,7 @@ class RegulatedMutationFencedCommandWriterTest {
         assertThat(set.get("local_commit_marker")).isEqualTo("marker-1");
         assertThat(set.get("success_audit_id")).isEqualTo("success-1");
         assertThat(set.get("degradation_reason")).isEqualTo("NONE");
-        assertThat(set.get("public_status")).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING);
+        assertThat(set.get("public_status")).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
     }
 
     @Test
@@ -304,7 +304,7 @@ class RegulatedMutationFencedCommandWriterTest {
                 token("owner-a", Instant.now().plusSeconds(30)),
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 null,
                 null
@@ -325,7 +325,7 @@ class RegulatedMutationFencedCommandWriterTest {
                 token("owner-a", Instant.now().minusSeconds(1)),
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 null,
                 null
@@ -340,14 +340,14 @@ class RegulatedMutationFencedCommandWriterTest {
         when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
                 .thenReturn(UpdateResult.acknowledged(0, 0L, null));
         RegulatedMutationCommandDocument current = current("owner-a", Instant.now().plusSeconds(30));
-        current.setState(RegulatedMutationState.BUSINESS_COMMITTING);
+        current.setState(RegulatedMutationState.FINALIZING);
         when(mongoTemplate.findById("command-1", RegulatedMutationCommandDocument.class)).thenReturn(current);
 
         assertThatThrownBy(() -> writer.transition(
                 token("owner-a", Instant.now().plusSeconds(30)),
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 null,
                 null
@@ -369,7 +369,7 @@ class RegulatedMutationFencedCommandWriterTest {
                 token("owner-a", Instant.now().plusSeconds(30)),
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 null,
                 null
@@ -390,24 +390,24 @@ class RegulatedMutationFencedCommandWriterTest {
                 token("owner-a", Instant.now().plusSeconds(30)),
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 null,
                 null
         )).isInstanceOf(StaleRegulatedMutationLeaseException.class);
 
         assertThat(meterRegistry.find("regulated_mutation_stale_write_rejected_total")
-                .tag("model_version", "LEGACY_REGULATED_MUTATION")
+                .tag("model_version", "EVIDENCE_GATED_FINALIZE_V1")
                 .tag("state", "REQUESTED")
                 .tag("reason", "STALE_LEASE_OWNER")
                 .counter()).isNotNull();
         assertThat(meterRegistry.find("regulated_mutation_lease_remaining_at_transition_seconds")
-                .tag("model_version", "LEGACY_REGULATED_MUTATION")
+                .tag("model_version", "EVIDENCE_GATED_FINALIZE_V1")
                 .tag("state", "REQUESTED")
                 .tag("outcome", "REJECTED")
                 .timer()).isNotNull();
         assertThat(meterRegistry.find("regulated_mutation_transition_latency_seconds")
-                .tag("model_version", "LEGACY_REGULATED_MUTATION")
+                .tag("model_version", "EVIDENCE_GATED_FINALIZE_V1")
                 .tag("state", "REQUESTED")
                 .tag("outcome", "REJECTED")
                 .timer()).isNotNull();
@@ -429,7 +429,7 @@ class RegulatedMutationFencedCommandWriterTest {
                         Instant.now().plusMillis(50),
                         Instant.now().minusMillis(1000),
                         1,
-                        RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                        RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                         RegulatedMutationState.REQUESTED,
                         RegulatedMutationExecutionStatus.PROCESSING
                 ),
@@ -438,7 +438,7 @@ class RegulatedMutationFencedCommandWriterTest {
         );
 
         assertThat(meterRegistry.find("regulated_mutation_lease_budget_warning_total")
-                .tag("model_version", "LEGACY_REGULATED_MUTATION")
+                .tag("model_version", "EVIDENCE_GATED_FINALIZE_V1")
                 .tag("state", "REQUESTED")
                 .tag("threshold", "LOW_REMAINING")
                 .counter()).isNotNull();
@@ -462,13 +462,13 @@ class RegulatedMutationFencedCommandWriterTest {
                         Instant.now().plusSeconds(30),
                         Instant.now(),
                         1,
-                        RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                        RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                         RegulatedMutationState.REQUESTED,
                         RegulatedMutationExecutionStatus.PROCESSING
                 ),
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 "raw exception path /api/v1/alerts/alert-123 actor-456 idem-789",
                 null
@@ -491,7 +491,7 @@ class RegulatedMutationFencedCommandWriterTest {
                 token("owner-a", Instant.now().plusSeconds(30)),
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 null,
                 update -> update.set(field, value)
@@ -519,7 +519,7 @@ class RegulatedMutationFencedCommandWriterTest {
                 expiresAt,
                 Instant.now(),
                 1,
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING
         );
@@ -530,6 +530,7 @@ class RegulatedMutationFencedCommandWriterTest {
         document.setId("command-1");
         document.setLeaseOwner(owner);
         document.setLeaseExpiresAt(expiresAt);
+        document.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
         document.setState(RegulatedMutationState.REQUESTED);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
         return document;

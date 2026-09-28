@@ -66,7 +66,7 @@ class SystemTrustLevelControllerTest {
         assertThat(response.outboxDeliveryMode()).isEqualTo("TRANSACTIONAL_OUTBOX_AT_LEAST_ONCE");
         assertThat(response.evidenceConfirmationMode()).isEqualTo("ENABLED");
         assertThat(response.evidenceConfirmationPendingCount()).isZero();
-        assertThat(response.evidenceConfirmationFailedCount()).isZero();
+        assertThat(response.evidenceConfirmationRecoveryRequiredCount()).isZero();
     }
 
     @Test
@@ -289,9 +289,9 @@ class SystemTrustLevelControllerTest {
         when(alertRepository.findTopByDecisionOutboxStatusInOrderByDecidedAtAsc(List.of(DecisionOutboxStatus.PENDING, DecisionOutboxStatus.PROCESSING, DecisionOutboxStatus.FAILED_RETRYABLE)))
                 .thenReturn(Optional.empty());
         when(recoveryService.staleProcessingLeaseCount()).thenReturn(1L);
-        when(recoveryService.committedDegradedCount()).thenReturn(2L);
+        when(recoveryService.finalizeRecoveryRequiredCount()).thenReturn(2L);
         when(recoveryService.evidenceConfirmationPendingCount()).thenReturn(4L);
-        when(recoveryService.evidenceConfirmationFailedCount()).thenReturn(2L);
+        when(recoveryService.evidenceConfirmationRecoveryRequiredCount()).thenReturn(2L);
         when(recoveryService.repeatedRecoveryFailureCount()).thenReturn(3L);
         when(recoveryService.oldestRecoveryRequiredAgeSeconds()).thenReturn(120L);
         SystemTrustLevelController controller = new SystemTrustLevelController(
@@ -313,9 +313,9 @@ class SystemTrustLevelControllerTest {
 
         assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
         assertThat(response.staleProcessingLeaseCount()).isEqualTo(1L);
-        assertThat(response.committedDegradedCount()).isEqualTo(2L);
+        assertThat(response.finalizeRecoveryRequiredCount()).isEqualTo(2L);
         assertThat(response.evidenceConfirmationPendingCount()).isEqualTo(4L);
-        assertThat(response.evidenceConfirmationFailedCount()).isEqualTo(2L);
+        assertThat(response.evidenceConfirmationRecoveryRequiredCount()).isEqualTo(2L);
         assertThat(response.repeatedRecoveryFailureCount()).isEqualTo(3L);
         assertThat(response.oldestRecoveryRequiredAgeSeconds()).isEqualTo(120L);
         assertThat(response.reasonCode()).isEqualTo("REGULATED_MUTATION_STALE_PROCESSING_LEASE");

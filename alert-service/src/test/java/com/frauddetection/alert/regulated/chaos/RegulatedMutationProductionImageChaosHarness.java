@@ -767,7 +767,8 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
         try (var lines = Files.lines(evidence)) {
             return lines.filter(line -> line.startsWith("- scenario="))
                     .map(RegulatedMutationProductionImageChaosHarness::parseEvidenceLine)
-                    .anyMatch(fields -> "REQUIRED".equals(fields.get("transaction_mode")));
+                    .anyMatch(fields -> "required-transaction".equals(fields.get("scenario"))
+                            && "REQUIRED".equals(fields.get("transaction_mode")));
         } catch (IOException exception) {
             throw new UncheckedIOException("Unable to inspect FDP-37 evidence transaction modes", exception);
         }

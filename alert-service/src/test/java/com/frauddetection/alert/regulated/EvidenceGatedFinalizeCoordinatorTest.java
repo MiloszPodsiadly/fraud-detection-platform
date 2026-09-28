@@ -55,7 +55,7 @@ class EvidenceGatedFinalizeCoordinatorTest {
         assertThat(result.state()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         assertThat(result.response()).isEqualTo("FINALIZED_EVIDENCE_PENDING_EXTERNAL");
         assertThat(businessWrites).hasValue(1);
-        assertThat(fixture.currentCommand.mutationModelVersionOrLegacy())
+        assertThat(fixture.currentCommand.getMutationModelVersion())
                 .isEqualTo(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
         assertThat(fixture.states).containsSubsequence(
                 RegulatedMutationState.REQUESTED,
@@ -322,15 +322,8 @@ class EvidenceGatedFinalizeCoordinatorTest {
             );
             coordinator = new MongoRegulatedMutationCoordinator(
                     commandRepository,
-                    mongoTemplate,
-                    new RegulatedMutationAuditPhaseService(auditEventRepository, auditService),
-                    degradationService,
-                    metrics,
-                    runner,
-                    new RegulatedMutationPublicStatusMapper(),
-                    evidenceGatedFinalizeExecutor,
-                    false,
-                    Duration.ofSeconds(30)
+                    new RegulatedMutationExecutorRegistry(List.of(evidenceGatedFinalizeExecutor)),
+                    new RegulatedMutationConflictPolicy()
             );
             when(auditEventRepository.findByRequestId(any())).thenReturn(Optional.empty());
             when(localAuditPhaseWriter.recordSuccessPhase(any(), any(), any())).thenReturn("success-audit-1");

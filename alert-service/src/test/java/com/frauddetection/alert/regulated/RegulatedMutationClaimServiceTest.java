@@ -88,6 +88,10 @@ class RegulatedMutationClaimServiceTest {
         String queryJson = query.getQueryObject().toString();
         assertThat(queryJson).contains("idempotency_key=idem-1");
         assertThat(queryJson).contains("request_hash=request-hash-1");
+        assertThat(queryJson).contains("mutation_model_version=EVIDENCE_GATED_FINALIZE_V1");
+        assertThat(queryJson).contains("action=SUBMIT_ANALYST_DECISION");
+        assertThat(queryJson).contains("resource_type=ALERT");
+        assertThat(queryJson).contains("resource_id=alert-1");
         assertThat(queryJson).contains("execution_status=NEW");
         assertThat(queryJson).contains("execution_status=PROCESSING");
         assertThat(queryJson).contains("lease_expires_at");
@@ -288,6 +292,7 @@ class RegulatedMutationClaimServiceTest {
         document.setLeaseExpiresAt(leaseExpiresAt);
         document.setState(RegulatedMutationState.REQUESTED);
         document.setAttemptCount(1);
+        document.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
         return document;
     }
 
@@ -304,7 +309,9 @@ class RegulatedMutationClaimServiceTest {
                 (result, state) -> state.name(),
                 response -> null,
                 snapshot -> "ok",
-                state -> state.name()
+                state -> state.name(),
+                null,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
         );
     }
 }

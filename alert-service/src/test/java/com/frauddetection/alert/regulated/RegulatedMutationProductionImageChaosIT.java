@@ -24,10 +24,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RegulatedMutationProductionImageChaosIT extends AbstractRegulatedMutationProductionImageChaosIT {
 
     @Test
-    void productionImageKillAfterClaimBeforeAttemptedAuditDoesNotCommit() {
+    void productionImageKillAfterClaimBeforeEvidencePreparationDoesNotCommit() {
         RegulatedMutationChaosScenario scenario = scenario(
-                "claim-before-attempted",
-                RegulatedMutationChaosWindow.AFTER_CLAIM_BEFORE_ATTEMPTED_AUDIT,
+                "claim-before-evidence-preparation",
+                RegulatedMutationChaosWindow.AFTER_CLAIM_BEFORE_EVIDENCE_PREPARATION,
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 command -> {
@@ -48,11 +48,11 @@ class RegulatedMutationProductionImageChaosIT extends AbstractRegulatedMutationP
     }
 
     @Test
-    void productionImageKillAfterAttemptedAuditBeforeBusinessMutationDoesNotPublish() {
+    void productionImageKillAfterAttemptedAuditBeforeEvidencePreparationDoesNotPublish() {
         RegulatedMutationChaosScenario scenario = scenario(
-                "attempted-before-business",
-                RegulatedMutationChaosWindow.AFTER_ATTEMPTED_AUDIT_BEFORE_BUSINESS_MUTATION,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                "attempted-before-evidence-preparation",
+                RegulatedMutationChaosWindow.AFTER_ATTEMPTED_AUDIT_BEFORE_EVIDENCE_PREPARATION,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 command -> {
                     command.setAttemptedAuditRecorded(true);
@@ -65,7 +65,7 @@ class RegulatedMutationProductionImageChaosIT extends AbstractRegulatedMutationP
         RegulatedMutationChaosResult result = chaosHarness.runDurableStateScenario(scenario);
 
         assertProductionImageRestarted(result);
-        assertThat(result.commandState()).isEqualTo(RegulatedMutationState.AUDIT_ATTEMPTED);
+        assertThat(result.commandState()).isEqualTo(RegulatedMutationState.EVIDENCE_PREPARING);
         assertThat(result.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
         assertThat(result.attemptedAuditEvents()).isOne();
         assertThat(result.successAuditEvents()).isZero();
@@ -74,11 +74,11 @@ class RegulatedMutationProductionImageChaosIT extends AbstractRegulatedMutationP
     }
 
     @Test
-    void productionImageKillDuringLegacyBusinessCommittingRequiresRecoveryWithoutFalseSuccess() {
+    void productionImageKillDuringFinalizingRequiresRecoveryWithoutFalseSuccess() {
         RegulatedMutationChaosScenario scenario = scenario(
-                "legacy-business-committing",
-                RegulatedMutationChaosWindow.LEGACY_BUSINESS_COMMITTING,
-                RegulatedMutationState.BUSINESS_COMMITTING,
+                "evidence-gated-finalizing",
+                RegulatedMutationChaosWindow.EVIDENCE_GATED_FINALIZING,
+                RegulatedMutationState.FINALIZING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 command -> {
                     command.setAttemptedAuditRecorded(true);
@@ -105,7 +105,7 @@ class RegulatedMutationProductionImageChaosIT extends AbstractRegulatedMutationP
 
         assertProductionImageRestarted(beforeRecovery);
         assertThat(recovery.path("recovery_required").asLong()).isEqualTo(1);
-        assertThat(afterRecovery.commandState()).isEqualTo(RegulatedMutationState.BUSINESS_COMMITTING);
+        assertThat(afterRecovery.commandState()).isEqualTo(RegulatedMutationState.FINALIZING);
         assertThat(afterRecovery.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
         assertThat(afterRecovery.responseSnapshotPresent()).isFalse();
         assertThat(afterRecovery.outboxRecords()).isZero();
@@ -114,15 +114,15 @@ class RegulatedMutationProductionImageChaosIT extends AbstractRegulatedMutationP
     }
 
     @Test
-    void productionImageKillInLegacySuccessAuditPendingDoesNotRepeatBusinessMutation() {
+    void productionImageKillInFinalizeRecoveryDoesNotRepeatBusinessMutation() {
         RegulatedMutationChaosScenario scenario = scenario(
-                "legacy-success-audit-pending",
-                RegulatedMutationChaosWindow.LEGACY_SUCCESS_AUDIT_PENDING,
-                RegulatedMutationState.SUCCESS_AUDIT_PENDING,
+                "finalize-recovery-required",
+                RegulatedMutationChaosWindow.FINALIZE_RECOVERY_REQUIRED,
+                RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 command -> {
                     mutateAlert(command.getResourceId());
-                    command.setResponseSnapshot(snapshot(command.getResourceId(), SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING));
+                    command.setResponseSnapshot(snapshot(command.getResourceId(), SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL));
                     command.setOutboxEventId("event-" + command.getResourceId());
                     command.setLeaseOwner("owner-fdp37-success-audit-window");
                     command.setLeaseExpiresAt(Instant.now().minusSeconds(5));
@@ -147,7 +147,7 @@ class RegulatedMutationProductionImageChaosIT extends AbstractRegulatedMutationP
 
         assertProductionImageRestarted(beforeRecovery);
         assertThat(recovery.path("recovered").asLong()).isEqualTo(1);
-        assertThat(afterRecovery.commandState()).isEqualTo(RegulatedMutationState.EVIDENCE_PENDING);
+        assertThat(afterRecovery.commandState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         assertThat(afterRecovery.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.COMPLETED);
         assertThat(afterRecovery.businessMutationCount()).isOne();
         assertThat(afterRecovery.outboxRecords()).isOne();
@@ -156,10 +156,10 @@ class RegulatedMutationProductionImageChaosIT extends AbstractRegulatedMutationP
     }
 
     @Test
-    void productionImageKillInFdp29FinalizingDoesNotFakeExternalConfirmation() {
+    void productionImageKillInFinalizingDoesNotFakeExternalConfirmation() {
         RegulatedMutationChaosScenario scenario = scenario(
-                "fdp29-finalizing",
-                RegulatedMutationChaosWindow.FDP29_FINALIZING,
+                "finalizing-without-proof",
+                RegulatedMutationChaosWindow.EVIDENCE_GATED_FINALIZING,
                 RegulatedMutationState.FINALIZING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
@@ -195,10 +195,10 @@ class RegulatedMutationProductionImageChaosIT extends AbstractRegulatedMutationP
     }
 
     @Test
-    void productionImageKillInFdp29PendingExternalRemainsPendingWithoutEvidence() {
+    void productionImageKillInPendingExternalRemainsPendingWithoutEvidence() {
         RegulatedMutationChaosScenario scenario = scenario(
-                "fdp29-pending-external",
-                RegulatedMutationChaosWindow.FDP29_FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                "pending-external",
+                RegulatedMutationChaosWindow.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 RegulatedMutationExecutionStatus.COMPLETED,
                 RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,

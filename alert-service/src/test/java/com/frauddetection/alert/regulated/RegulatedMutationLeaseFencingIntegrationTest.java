@@ -60,7 +60,7 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
 
     @Test
     void onlyOneWorkerCanClaimActiveCommand() throws Exception {
-        mongoTemplate.save(commandDocument("idem-claim-race", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION));
+        mongoTemplate.save(commandDocument("idem-claim-race", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1));
         RegulatedMutationCommand<String, String> command = command("idem-claim-race");
 
         List<Optional<RegulatedMutationClaimToken>> results;
@@ -78,7 +78,7 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
 
     @Test
     void expiredLeaseCanBeTakenOverAndStaleWorkerCannotWriteAfterTakeover() throws Exception {
-        mongoTemplate.save(commandDocument("idem-takeover", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION));
+        mongoTemplate.save(commandDocument("idem-takeover", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1));
         RegulatedMutationCommand<String, String> command = command("idem-takeover");
         RegulatedMutationClaimToken workerA = claimService.claim(command, "idem-takeover").orElseThrow();
         sleepPastLease();
@@ -92,7 +92,7 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
                 workerA,
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.SUCCESS_AUDIT_PENDING,
+                RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 null,
                 update -> update.set("success_audit_recorded", true)
@@ -106,21 +106,21 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
 
     @Test
     void currentLeaseOwnerCanWriteFencedTransition() {
-        mongoTemplate.save(commandDocument("idem-current-owner", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION));
+        mongoTemplate.save(commandDocument("idem-current-owner", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1));
         RegulatedMutationClaimToken token = claimService.claim(command("idem-current-owner"), "idem-current-owner").orElseThrow();
 
         fencedWriter.transition(
                 token,
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 null,
                 update -> update.set("attempted_audit_recorded", true)
         );
 
         RegulatedMutationCommandDocument persisted = mongoTemplate.findById("command-idem-current-owner", RegulatedMutationCommandDocument.class);
-        assertThat(persisted.getState()).isEqualTo(RegulatedMutationState.AUDIT_ATTEMPTED);
+        assertThat(persisted.getState()).isEqualTo(RegulatedMutationState.EVIDENCE_PREPARING);
         assertThat(persisted.isAttemptedAuditRecorded()).isTrue();
     }
 
@@ -146,7 +146,7 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
                             com.frauddetection.common.events.enums.AlertStatus.RESOLVED,
                             "event-stale",
                             Instant.now(),
-                            com.frauddetection.alert.api.SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
+                            com.frauddetection.alert.api.SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
                     ));
                     update.set("outbox_event_id", "event-stale");
                     update.set("local_commit_marker", "EVIDENCE_GATED_FINALIZED");
@@ -167,7 +167,7 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
 
     @Test
     void recoveryStateCannotBeOverwrittenByStaleWorker() throws Exception {
-        mongoTemplate.save(commandDocument("idem-recovery-stale", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION));
+        mongoTemplate.save(commandDocument("idem-recovery-stale", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1));
         RegulatedMutationCommand<String, String> command = command("idem-recovery-stale");
         RegulatedMutationClaimToken workerA = claimService.claim(command, "idem-recovery-stale").orElseThrow();
         sleepPastLease();
@@ -186,7 +186,7 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
                 workerA,
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.SUCCESS_AUDIT_PENDING,
+                RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 null,
                 null
@@ -199,7 +199,7 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
 
     @Test
     void nonClaimedRecoveryTransitionCannotOverwriteCurrentOwnerAfterLeaseTakeover() throws Exception {
-        mongoTemplate.save(commandDocument("idem-recovery-owner", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION));
+        mongoTemplate.save(commandDocument("idem-recovery-owner", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1));
         RegulatedMutationCommand<String, String> command = command("idem-recovery-owner");
         RegulatedMutationClaimToken workerA = claimService.claim(command, "idem-recovery-owner").orElseThrow();
         RegulatedMutationCommandDocument staleSnapshot = mongoTemplate.findById("command-idem-recovery-owner", RegulatedMutationCommandDocument.class);
@@ -231,6 +231,11 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
         document.setId("command-" + idempotencyKey);
         document.setIdempotencyKey(idempotencyKey);
         document.setRequestHash("request-hash-" + idempotencyKey);
+        document.setActorId("principal-7");
+        document.setIntentActorId("principal-7");
+        document.setResourceId("alert-1");
+        document.setResourceType(AuditResourceType.ALERT.name());
+        document.setAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
         document.setMutationModelVersion(modelVersion);
         document.setState(RegulatedMutationState.REQUESTED);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.NEW);
@@ -253,7 +258,9 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
                 (result, state) -> state.name(),
                 response -> null,
                 snapshot -> "ok",
-                state -> state.name()
+                state -> state.name(),
+                null,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
         );
     }
 }

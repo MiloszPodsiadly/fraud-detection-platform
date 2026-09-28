@@ -23,11 +23,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RegulatedMutationProductionImageRollbackIT extends AbstractRegulatedMutationProductionImageChaosIT {
 
     @Test
-    void rollbackRestartKeepsFdp32FencingAndDoesNotCreateNewSuccessClaims() {
+    void rollbackRestartKeepsLeaseFencingAndDoesNotCreateNewSuccessClaims() {
         RegulatedMutationChaosScenario scenario = scenario(
-                "rollback-business-committing",
-                RegulatedMutationChaosWindow.LEGACY_BUSINESS_COMMITTING,
-                RegulatedMutationState.BUSINESS_COMMITTING,
+                "rollback-finalizing",
+                RegulatedMutationChaosWindow.EVIDENCE_GATED_FINALIZING,
+                RegulatedMutationState.FINALIZING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 command -> {
                     command.setAttemptedAuditRecorded(true);
@@ -62,8 +62,8 @@ class RegulatedMutationProductionImageRollbackIT extends AbstractRegulatedMutati
         assertThat(result.killedTargetName()).contains("alert-service");
         assertThat(afterRollbackRecovery.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
         assertThat(afterRollbackRecovery.publicStatus()).isNotIn(
-                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING,
-                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED,
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED,
                 SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED
         );
         assertThat(afterRollbackRecovery.outboxRecords()).isZero();

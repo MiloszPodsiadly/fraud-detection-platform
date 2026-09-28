@@ -30,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RegulatedMutationProductionImageLiveInFlightKillIT extends AbstractRegulatedMutationProductionImageChaosIT {
 
     @Test
-    void productionImageLiveInFlightBeforeBusinessMutationKillDoesNotCommitOrPublish() throws Exception {
+    void productionImageLiveInFlightBeforeEvidenceGatedFinalizeKillDoesNotCommitOrPublish() throws Exception {
         Assumptions.assumeTrue(
                 Boolean.getBoolean("fdp37.live-in-flight.enabled"),
                 "FDP-37 live in-flight production-image proof requires an explicit test-fixture image with test-only checkpoint support."
@@ -39,7 +39,7 @@ class RegulatedMutationProductionImageLiveInFlightKillIT extends AbstractRegulat
         String idempotencyKey = "idem-fdp37-live-inflight";
         alertRepository.save(alert(alertId));
 
-        chaosHarness.startAlertService("live-before-business", List.of(
+        chaosHarness.startAlertService("live-before-evidence-gated-finalize", List.of(
                 "--spring.profiles.active=test,fdp36-live-in-flight",
                 "--app.fdp36.live-in-flight.idempotency-key=" + idempotencyKey,
                 "--app.regulated-mutation.lease-duration=PT5S"
@@ -60,15 +60,15 @@ class RegulatedMutationProductionImageLiveInFlightKillIT extends AbstractRegulat
         RegulatedMutationCommandDocument command = awaitCommand(idempotencyKey);
         assertThat(command.getLeaseOwner()).isNotBlank();
         assertThat(command.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
-        assertThat(command.getState()).isIn(RegulatedMutationState.AUDIT_ATTEMPTED, RegulatedMutationState.BUSINESS_COMMITTING);
+        assertThat(command.getState()).isIn(RegulatedMutationState.EVIDENCE_PREPARING, RegulatedMutationState.FINALIZING);
 
         chaosHarness.killAlertServiceContainerAbruptly();
         submitFuture.handle((response, failure) -> null).get(10, TimeUnit.SECONDS);
         chaosHarness.restartAlertService("live-after-restart", List.of());
 
         RegulatedMutationChaosScenario scenario = new RegulatedMutationChaosScenario(
-                "live-inflight-before-business",
-                RegulatedMutationChaosWindow.LIVE_IN_FLIGHT_BEFORE_BUSINESS_MUTATION,
+                "live-inflight-before-evidence-gated-finalize",
+                RegulatedMutationChaosWindow.LIVE_IN_FLIGHT_BEFORE_EVIDENCE_GATED_FINALIZE,
                 RegulatedMutationStateReachMethod.RUNTIME_REACHED_TEST_FIXTURE,
                 command.getId(),
                 idempotencyKey,
@@ -98,8 +98,8 @@ class RegulatedMutationProductionImageLiveInFlightKillIT extends AbstractRegulat
         assertThat(persistedCommand.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
         assertThat(persistedCommand.getResponseSnapshot()).isNull();
         assertThat(persistedCommand.getPublicStatus()).isNotIn(
-                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING,
-                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED,
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED,
                 SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED
         );
         assertThat(persistedAlert.getAlertStatus()).isEqualTo(AlertStatus.OPEN);

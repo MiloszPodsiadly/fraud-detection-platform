@@ -12,11 +12,14 @@ import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.regulated.MongoRegulatedMutationCoordinator;
+import com.frauddetection.alert.regulated.CanonicalRegulatedMutationTestRuntime;
+import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
 import com.frauddetection.alert.regulated.RegulatedMutationAuditPhaseService;
 import com.frauddetection.alert.regulated.RegulatedMutationCommand;
 import com.frauddetection.alert.regulated.RegulatedMutationCommandDocument;
 import com.frauddetection.alert.regulated.RegulatedMutationCommandRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationExecutionStatus;
+import com.frauddetection.alert.regulated.RegulatedMutationModelVersion;
 import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
 import com.frauddetection.alert.regulated.RegulatedMutationResult;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
@@ -94,18 +97,11 @@ class ConcurrentIdempotencyIntegrationTest extends AbstractIntegrationTest {
     void shouldNotDuplicateBusinessMutationUnderConcurrentSameIdempotencyKey() throws Exception {
         RegulatedMutationCommandRepository commandRepository = mongoBackedCommandRepository();
         AuditService auditService = mock(AuditService.class);
-        MongoRegulatedMutationCoordinator coordinator = new MongoRegulatedMutationCoordinator(
+        RegulatedMutationCoordinator coordinator = CanonicalRegulatedMutationTestRuntime.coordinator(
                 commandRepository,
                 mongoTemplate,
                 new RegulatedMutationAuditPhaseService(new AuditEventRepository(mongoTemplate), auditService),
-                mock(AuditDegradationService.class),
-                new AlertServiceMetrics(new SimpleMeterRegistry()),
-                new RegulatedMutationTransactionRunner(
-                        "REQUIRED",
-                        provider(new MongoTransactionManager(mongoClientDatabaseFactory))
-                ),
-                true,
-                Duration.ofSeconds(30)
+                new AlertServiceMetrics(new SimpleMeterRegistry())
         );
         AtomicInteger businessWrites = new AtomicInteger();
         CountDownLatch start = new CountDownLatch(1);
@@ -128,11 +124,11 @@ class ConcurrentIdempotencyIntegrationTest extends AbstractIntegrationTest {
         assertThat(mongoTemplate.count(new Query(), AlertDocument.class)).isEqualTo(1L);
         assertThat(mongoTemplate.count(new Query(), TransactionalOutboxRecordDocument.class)).isEqualTo(1L);
         RegulatedMutationCommandDocument persisted = commandRepository.findByIdempotencyKey("idem-concurrent").orElseThrow();
-        assertThat(persisted.getState()).isEqualTo(RegulatedMutationState.EVIDENCE_PENDING);
+        assertThat(persisted.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         assertThat(persisted.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.COMPLETED);
         assertThat(persisted.isSuccessAuditRecorded()).isTrue();
         assertThat(results).extracting(RegulatedMutationResult::response)
-                .contains("EVIDENCE_PENDING", "REQUESTED");
+                .contains("FINALIZED_EVIDENCE_PENDING_EXTERNAL");
         verify(auditService, times(1)).audit(
                 eq(AuditAction.SUBMIT_ANALYST_DECISION),
                 eq(AuditResourceType.ALERT),
@@ -147,7 +143,7 @@ class ConcurrentIdempotencyIntegrationTest extends AbstractIntegrationTest {
     }
 
     private RegulatedMutationResult<String> commitAfterStart(
-            MongoRegulatedMutationCoordinator coordinator,
+            RegulatedMutationCoordinator coordinator,
             RegulatedMutationCommand<String, String> command,
             CountDownLatch start
     ) throws Exception {
@@ -192,10 +188,12 @@ class ConcurrentIdempotencyIntegrationTest extends AbstractIntegrationTest {
                         AlertStatus.RESOLVED,
                         "event-concurrent",
                         Instant.parse("2026-05-03T10:00:00Z"),
-                        SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
+                        SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
                 ),
                 snapshot -> snapshot == null ? "MISSING" : "RESTORED:" + snapshot.decisionEventId(),
-                RegulatedMutationState::name
+                RegulatedMutationState::name,
+                null,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
         );
     }
 

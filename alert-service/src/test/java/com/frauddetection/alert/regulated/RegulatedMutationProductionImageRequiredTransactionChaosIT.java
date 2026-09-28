@@ -24,11 +24,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RegulatedMutationProductionImageRequiredTransactionChaosIT extends AbstractRegulatedMutationProductionImageChaosIT {
 
     @Test
-    void requiredTransactionModeBusinessCommittingRestartRequiresRecoveryWithoutFalseSuccess() {
+    void requiredTransactionModeFinalizingRestartRequiresRecoveryWithoutFalseSuccess() {
         RegulatedMutationChaosScenario scenario = scenario(
-                "required-transaction-business-committing",
-                RegulatedMutationChaosWindow.LEGACY_BUSINESS_COMMITTING,
-                RegulatedMutationState.BUSINESS_COMMITTING,
+                "required-transaction-finalizing",
+                RegulatedMutationChaosWindow.EVIDENCE_GATED_FINALIZING,
+                RegulatedMutationState.FINALIZING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 command -> {
                     command.setAttemptedAuditRecorded(true);
@@ -60,7 +60,7 @@ class RegulatedMutationProductionImageRequiredTransactionChaosIT extends Abstrac
         assertThat(chaosHarness.lastEffectiveArgs())
                 .contains("--app.regulated-mutations.transaction-mode=REQUIRED");
         assertThat(recovery.path("recovery_required").asLong()).isEqualTo(1);
-        assertThat(afterRecovery.commandState()).isEqualTo(RegulatedMutationState.BUSINESS_COMMITTING);
+        assertThat(afterRecovery.commandState()).isEqualTo(RegulatedMutationState.FINALIZING);
         assertThat(afterRecovery.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
         assertThat(afterRecovery.responseSnapshotPresent()).isFalse();
         assertThat(afterRecovery.outboxRecords()).isZero();

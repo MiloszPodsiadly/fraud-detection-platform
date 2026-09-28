@@ -15,13 +15,13 @@ class RegulatedMutationReplayPolicyRegistryTest {
     private static final Instant NOW = Instant.parse("2026-05-04T12:00:00Z");
 
     @Test
-    void nullModelVersionResolvesLegacyPolicy() {
+    void nullModelVersionFailsClosed() {
         RegulatedMutationCommandDocument document = document(null);
         document.setState(RegulatedMutationState.REQUESTED);
 
-        RegulatedMutationReplayDecision decision = registry(false).resolve(document, NOW);
-
-        assertThat(decision.type()).isEqualTo(RegulatedMutationReplayDecisionType.NONE);
+        assertThatThrownBy(() -> registry().resolve(document, NOW))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Unsupported persisted");
     }
 
     @Test
@@ -31,59 +31,43 @@ class RegulatedMutationReplayPolicyRegistryTest {
         document.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
         document.setLeaseExpiresAt(NOW.minusSeconds(1));
 
-        RegulatedMutationReplayDecision decision = registry(true).resolve(document, NOW);
+        RegulatedMutationReplayDecision decision = registry().resolve(document, NOW);
 
         assertThat(decision.type()).isEqualTo(RegulatedMutationReplayDecisionType.FINALIZING_REQUIRES_RECOVERY);
     }
 
     @Test
     void duplicatePolicyRegistrationFails() {
-        RegulatedMutationReplayPolicy first = mockPolicy(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
-        RegulatedMutationReplayPolicy second = mockPolicy(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
+        RegulatedMutationReplayPolicy first = mockPolicy(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        RegulatedMutationReplayPolicy second = mockPolicy(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
 
-        assertThatThrownBy(() -> new RegulatedMutationReplayPolicyRegistry(List.of(first, second), false))
+        assertThatThrownBy(() -> new RegulatedMutationReplayPolicyRegistry(List.of(first, second)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Duplicate regulated mutation replay policy");
     }
 
     @Test
-    void legacyPolicyIsMandatory() {
-        RegulatedMutationReplayPolicy evidence = mockPolicy(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+    void nullModelPolicyRegistrationFailsClosed() {
+        RegulatedMutationReplayPolicy invalid = mockPolicy(null);
 
-        assertThatThrownBy(() -> new RegulatedMutationReplayPolicyRegistry(List.of(evidence), false))
+        assertThatThrownBy(() -> new RegulatedMutationReplayPolicyRegistry(List.of(invalid)))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Missing regulated mutation replay policy for model version LEGACY_REGULATED_MUTATION");
+                .hasMessageContaining("null model version");
     }
 
     @Test
-    void evidencePolicyIsMandatoryWhenEvidenceGatedFinalizeActive() {
-        RegulatedMutationReplayPolicy legacy = mockPolicy(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
+    void missingModelVersionFailsClosed() {
+        RegulatedMutationReplayPolicyRegistry registry = registry();
 
-        assertThatThrownBy(() -> new RegulatedMutationReplayPolicyRegistry(List.of(legacy), true))
+        assertThatThrownBy(() -> registry.policyFor(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Missing regulated mutation replay policy for model version EVIDENCE_GATED_FINALIZE_V1");
+                .hasMessageContaining("Unsupported persisted");
     }
 
-    @Test
-    void unsupportedModelVersionFailsClosed() {
-        RegulatedMutationReplayPolicyRegistry registry = new RegulatedMutationReplayPolicyRegistry(
-                List.of(new LegacyRegulatedMutationReplayPolicy(new RegulatedMutationLeasePolicy())),
-                false
-        );
-
-        assertThatThrownBy(() -> registry.policyFor(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("No regulated mutation replay policy registered");
-    }
-
-    private RegulatedMutationReplayPolicyRegistry registry(boolean evidenceGatedActive) {
+    private RegulatedMutationReplayPolicyRegistry registry() {
         RegulatedMutationLeasePolicy leasePolicy = new RegulatedMutationLeasePolicy();
         return new RegulatedMutationReplayPolicyRegistry(
-                List.of(
-                        new LegacyRegulatedMutationReplayPolicy(leasePolicy),
-                        new EvidenceGatedFinalizeReplayPolicy(leasePolicy)
-                ),
-                evidenceGatedActive
+                List.of(new EvidenceGatedFinalizeReplayPolicy(leasePolicy))
         );
     }
 

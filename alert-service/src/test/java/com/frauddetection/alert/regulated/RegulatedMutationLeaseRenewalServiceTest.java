@@ -61,7 +61,7 @@ class RegulatedMutationLeaseRenewalServiceTest {
                 .contains("lease_owner=owner-1")
                 .contains("lease_expires_at")
                 .contains("execution_status=PROCESSING")
-                .contains("state=REQUESTED")
+                .contains("state=EVIDENCE_PREPARING")
                 .contains("mutation_model_version");
 
         Document set = updateDocument("$set");
@@ -124,9 +124,9 @@ class RegulatedMutationLeaseRenewalServiceTest {
                 .thenReturn(
                         document(),
                         document(
-                                RegulatedMutationState.COMMITTED,
+                                RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                                 RegulatedMutationExecutionStatus.PROCESSING,
-                                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION
+                                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
                         )
                 );
         when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
@@ -148,7 +148,7 @@ class RegulatedMutationLeaseRenewalServiceTest {
                         document(
                                 RegulatedMutationState.FAILED,
                                 RegulatedMutationExecutionStatus.RECOVERY_REQUIRED,
-                                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION
+                                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
                         )
                 );
         when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
@@ -187,7 +187,7 @@ class RegulatedMutationLeaseRenewalServiceTest {
                         document(
                                 RegulatedMutationState.EVIDENCE_PREPARING,
                                 RegulatedMutationExecutionStatus.PROCESSING,
-                                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
+                                null
                         )
                 );
         when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
@@ -241,9 +241,9 @@ class RegulatedMutationLeaseRenewalServiceTest {
 
     private RegulatedMutationCommandDocument document() {
         return document(
-                RegulatedMutationState.REQUESTED,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
         );
     }
 
@@ -270,8 +270,8 @@ class RegulatedMutationLeaseRenewalServiceTest {
                 NOW.plusSeconds(5),
                 NOW,
                 1,
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.REQUESTED,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING
         );
     }

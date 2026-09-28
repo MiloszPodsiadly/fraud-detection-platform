@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 
-import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -17,44 +16,41 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Tag("fdp38")
 @Tag("live-runtime-checkpoint-chaos")
 @Tag("docker-chaos")
+@Tag("evidence-gated-finalize")
 @Tag("integration")
 @EnabledIf("fdp38LiveCheckpointEnabled")
-class RegulatedMutationLiveCheckpointAfterAttemptedAuditIT extends AbstractRegulatedMutationFdp38LiveCheckpointIT {
+class RegulatedMutationLiveCheckpointAfterEvidencePreparedBeforeFinalizeIT
+        extends AbstractRegulatedMutationFdp38LiveCheckpointIT {
 
     @Test
-    void afterAttemptedAuditBeforeBusinessMutationLiveKillPreservesAttemptedAuditOnly() throws Exception {
-        String alertId = "alert-fdp38-after-attempted";
-        String idempotencyKey = "idem-fdp38-after-attempted";
+    void killAfterEvidencePreparedDoesNotCommitOrPublish() throws Exception {
+        String alertId = "alert-fdp38-after-evidence-prepared";
+        String idempotencyKey = "idem-fdp38-after-evidence-prepared";
         alertRepository.save(alert(alertId));
 
         chaosHarness.startFixture(
-                "after-attempted-before-business",
-                Fdp38LiveRuntimeCheckpoint.AFTER_ATTEMPTED_AUDIT_BEFORE_BUSINESS_MUTATION,
+                "after-evidence-prepared-before-finalize",
+                Fdp38LiveRuntimeCheckpoint.AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE,
                 idempotencyKey,
-                List.of()
+                evidenceGatedArgs()
         );
 
-        var submitFuture = chaosHarness.submitDecisionAsync(alertId, idempotencyKey, decisionJson("after-attempted"));
-        Document barrier = awaitBarrier(
-                idempotencyKey,
-                Fdp38LiveRuntimeCheckpoint.AFTER_ATTEMPTED_AUDIT_BEFORE_BUSINESS_MUTATION
-        );
+        var submitFuture = chaosHarness.submitDecisionAsync(alertId, idempotencyKey, decisionJson("after-evidence-prepared"));
+        Document barrier = awaitBarrier(idempotencyKey, Fdp38LiveRuntimeCheckpoint.AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE);
         RegulatedMutationCommandDocument command = awaitCommand(idempotencyKey);
         assertThat(barrier.getString("mutation_command_id")).isEqualTo(command.getId());
+        assertThat(command.getMutationModelVersion()).isEqualTo(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.EVIDENCE_PREPARED);
         assertThat(command.isAttemptedAuditRecorded()).isTrue();
-        assertThat(command.getState()).isEqualTo(RegulatedMutationState.AUDIT_ATTEMPTED);
 
         chaosHarness.killFixtureAbruptly();
         submitFuture.handle((response, failure) -> null).get(10, TimeUnit.SECONDS);
-        chaosHarness.restartFixture("after-attempted-restart", List.of());
+        chaosHarness.restartFixture("after-evidence-prepared-kill", evidenceGatedArgs());
 
         RegulatedMutationChaosResult result = chaosHarness.collectEvidence(
-                scenario(
-                        "after-attempted-audit-before-business",
-                        RegulatedMutationChaosWindow.AFTER_ATTEMPTED_AUDIT_BEFORE_BUSINESS_MUTATION,
-                        command
-                ),
-                Fdp38LiveRuntimeCheckpoint.AFTER_ATTEMPTED_AUDIT_BEFORE_BUSINESS_MUTATION,
+                scenario("after-evidence-prepared-before-finalize",
+                        RegulatedMutationChaosWindow.AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE, command),
+                Fdp38LiveRuntimeCheckpoint.AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE,
                 chaosHarness.inspectByCommandId(command.getId()),
                 null
         );

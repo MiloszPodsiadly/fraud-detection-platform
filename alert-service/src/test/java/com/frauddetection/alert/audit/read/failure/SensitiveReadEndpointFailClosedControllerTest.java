@@ -45,6 +45,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static com.frauddetection.alert.regulated.RegulatedMutationInspectionTestFixtures.currentInspection;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -84,13 +85,13 @@ class SensitiveReadEndpointFailClosedControllerTest {
     void shouldFailClosedWhenRegulatedMutationInspectionAuditFailsInBankMode() {
         failAudit();
         RegulatedMutationRecoveryService service = mock(RegulatedMutationRecoveryService.class);
-        when(service.inspect("idem-raw-secret")).thenReturn(new RegulatedMutationCommandInspectionResponse(
+        when(service.inspect("idem-raw-secret")).thenReturn(currentInspection(
                 "hash",
                 "idem-r...cret",
                 "SUBMIT_ANALYST_DECISION",
                 "ALERT",
                 "alert-1",
-                "EVIDENCE_PENDING",
+                "FINALIZED_EVIDENCE_PENDING_EXTERNAL",
                 "COMPLETED",
                 null,
                 null,

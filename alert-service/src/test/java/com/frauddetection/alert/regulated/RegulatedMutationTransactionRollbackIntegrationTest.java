@@ -83,11 +83,11 @@ class RegulatedMutationTransactionRollbackIntegrationTest extends AbstractIntegr
 
     @Test
     void shouldRollbackCommandTransitionBusinessAndOutboxWhenTransitionFailsInsideRequiredTransaction() {
-        RegulatedMutationCommandDocument command = command("command-transition-fail", RegulatedMutationState.AUDIT_ATTEMPTED);
+        RegulatedMutationCommandDocument command = command("command-transition-fail", RegulatedMutationState.EVIDENCE_PREPARING);
         mongoTemplate.save(command);
 
         assertThatThrownBy(() -> runner.runLocalCommit(() -> {
-            command.setState(RegulatedMutationState.BUSINESS_COMMITTED);
+            command.setState(RegulatedMutationState.FINALIZED_VISIBLE);
             command.setUpdatedAt(Instant.parse("2026-05-02T10:01:00Z"));
             mongoTemplate.save(command);
             mongoTemplate.save(alert("alert-transition-fail", AlertStatus.CLOSED));
@@ -97,25 +97,25 @@ class RegulatedMutationTransactionRollbackIntegrationTest extends AbstractIntegr
 
         RegulatedMutationCommandDocument restored = mongoTemplate.findById("command-transition-fail", RegulatedMutationCommandDocument.class);
         assertThat(restored).isNotNull();
-        assertThat(restored.getState()).isEqualTo(RegulatedMutationState.AUDIT_ATTEMPTED);
+        assertThat(restored.getState()).isEqualTo(RegulatedMutationState.EVIDENCE_PREPARING);
         assertThat(mongoTemplate.count(new Query(), AlertDocument.class)).isZero();
         assertThat(mongoTemplate.count(new Query(), TransactionalOutboxRecordDocument.class)).isZero();
     }
 
     @Test
     void shouldRollbackCommandSnapshotBusinessAndOutboxWithoutSuccessAuditTruth() {
-        RegulatedMutationCommandDocument command = command("command-local-boundary-fail", RegulatedMutationState.AUDIT_ATTEMPTED);
+        RegulatedMutationCommandDocument command = command("command-local-boundary-fail", RegulatedMutationState.EVIDENCE_PREPARING);
         mongoTemplate.save(command);
 
         assertThatThrownBy(() -> runner.runLocalCommit(() -> {
-            command.setState(RegulatedMutationState.SUCCESS_AUDIT_PENDING);
+            command.setState(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
             command.setResponseSnapshot(new RegulatedMutationResponseSnapshot(
                     "alert-local-boundary-fail",
                     com.frauddetection.common.events.enums.AnalystDecision.CONFIRMED_FRAUD,
                     AlertStatus.RESOLVED,
                     "event-local-boundary-fail",
                     Instant.parse("2026-05-02T10:01:00Z"),
-                    com.frauddetection.alert.api.SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
+                    com.frauddetection.alert.api.SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
             ));
             command.setLocalCommitMarker("LOCAL_COMMITTED");
             command.setUpdatedAt(Instant.parse("2026-05-02T10:01:00Z"));
@@ -127,7 +127,7 @@ class RegulatedMutationTransactionRollbackIntegrationTest extends AbstractIntegr
 
         RegulatedMutationCommandDocument restored = mongoTemplate.findById("command-local-boundary-fail", RegulatedMutationCommandDocument.class);
         assertThat(restored).isNotNull();
-        assertThat(restored.getState()).isEqualTo(RegulatedMutationState.AUDIT_ATTEMPTED);
+        assertThat(restored.getState()).isEqualTo(RegulatedMutationState.EVIDENCE_PREPARING);
         assertThat(restored.getResponseSnapshot()).isNull();
         assertThat(restored.getLocalCommitMarker()).isNull();
         assertThat(restored.isSuccessAuditRecorded()).isFalse();
