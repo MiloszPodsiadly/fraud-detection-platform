@@ -367,6 +367,11 @@ describe("alertsApi auth headers", () => {
     ["oversizedMinimumDiagnosticEvidenceRecords", (report) => { report.inputs.minimumDiagnosticEvidenceRecords = 1001; }],
     ["negativeRecordsEvaluated", (report) => { report.inputs.recordsEvaluated = -1; }],
     ["oversizedRecordsEvaluated", (report) => { report.inputs.recordsEvaluated = 1001; }],
+    ["retiredEvaluationReportType", (report) => { report.checkInputs.evaluation.evaluationReportType = "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"; }],
+    ["unknownEvaluationReportType", (report) => { report.checkInputs.evaluation.evaluationReportType = "UNKNOWN_PLATFORM_EVALUATION"; }],
+    ["modelEvaluationReportType", (report) => { report.checkInputs.evaluation.evaluationReportType = "ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1"; }],
+    ["missingEvaluationReportType", (report) => { delete report.checkInputs.evaluation.evaluationReportType; }],
+    ["nullEvaluationReportType", (report) => { report.checkInputs.evaluation.evaluationReportType = null; }],
     ["missingChecks", (report) => { delete report.checks; }],
     ["checksNotArray", (report) => { report.checks = {}; }],
     ["emptyChecks", (report) => { report.checks = []; }],
@@ -395,6 +400,16 @@ describe("alertsApi auth headers", () => {
   ])("promotionReviewReadinessValidationRejects%s", (_name, mutate) => {
     const report = promotionReviewReadinessReport();
     mutate(report);
+
+    expect(isValidPromotionReviewReadinessReport(report)).toBe(false);
+  });
+
+  it("promotionReviewReadinessValidationRejectsConsistentFailureForUnsupportedEvaluationType", () => {
+    const report = promotionReviewReadinessReport();
+    report.checkInputs.evaluation.evaluationReportType = "UNKNOWN_PLATFORM_EVALUATION";
+    report.checks[10].status = "FAIL";
+    report.readinessStatus = "NOT_REVIEWABLE";
+    report.reasonCodes = ["EVALUATION_REPORT_TYPE_SUPPORTED_FAILED"];
 
     expect(isValidPromotionReviewReadinessReport(report)).toBe(false);
   });

@@ -228,7 +228,7 @@ function isValidCheckInputs(inputs) {
     && hasExactKeys(evaluation, ["evaluationCardType", "evaluationCardVersion", "evaluationReportType"])
     && isBoundedNonEmptyString(evaluation.evaluationCardType, 128)
     && isBoundedNonEmptyString(evaluation.evaluationCardVersion, 128)
-    && isBoundedNonEmptyString(evaluation.evaluationReportType, 128)
+    && evaluation.evaluationReportType === PLATFORM_EVALUATION_REPORT_TYPE
     && inputs.metricBasis === "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK"
     && isBoundedInteger(inputs.minimumDiagnosticEvidenceRecords, 1, MAX_DIAGNOSTIC_RECORDS)
     && isBoundedInteger(inputs.recordsEvaluated, 0, MAX_DIAGNOSTIC_RECORDS)

@@ -86,6 +86,28 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
             self.assertEqual(64, len(report["checkInputs"]["sourceShadowSummaryManifestSha256"]))
             self.assertTrue(paths.output.with_name("manifest.json").exists())
 
+    def test_nonCanonicalEvaluationReportTypeIsRejectedEvenWhenFailureStateIsConsistent(self):
+        for value in (
+                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "UNKNOWN_PLATFORM_EVALUATION",
+                "ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1",
+                None,
+        ):
+            with self.subTest(value=value):
+                report = build_report()
+                report["checkInputs"]["evaluation"]["evaluationReportType"] = value
+                report["checks"][10]["status"] = "FAIL"
+                report["readinessStatus"] = "NOT_REVIEWABLE"
+                report["reasonCodes"] = ["EVALUATION_REPORT_TYPE_SUPPORTED_FAILED"]
+
+                with self.assertRaises(PromotionReviewReadinessValidationError):
+                    validate_promotion_review_readiness_report(report)
+
+        missing = build_report()
+        del missing["checkInputs"]["evaluation"]["evaluationReportType"]
+        with self.assertRaises(PromotionReviewReadinessValidationError):
+            validate_promotion_review_readiness_report(missing)
+
     def test_canonicalTimestampMatrixAcceptedByPromotionReadinessValidation(self):
         for value in VALID_CANONICAL_TIMESTAMPS:
             with self.subTest(value=value):
@@ -208,6 +230,33 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
             manifest_payload["files"][0]["sha256"] = "b" * 64
             manifest.write_text(json.dumps(manifest_payload, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
             self.assertPromotionArtifactRejected(paths.output, manifest, "sha256", paths.root)
+
+    def test_correctlyResealedManifestDoesNotRescueNonCanonicalEvaluationReportType(self):
+        with workspace() as paths:
+            report = generate(paths)
+            report["checkInputs"]["evaluation"]["evaluationReportType"] = "UNKNOWN_PLATFORM_EVALUATION"
+            report["checks"][10]["status"] = "FAIL"
+            report["readinessStatus"] = "NOT_REVIEWABLE"
+            report["reasonCodes"] = ["EVALUATION_REPORT_TYPE_SUPPORTED_FAILED"]
+            payload = json.dumps(report, sort_keys=True, separators=(",", ":")) + "\n"
+            paths.output.write_text(payload, encoding="utf-8", newline="\n")
+
+            manifest = paths.output.with_name("manifest.json")
+            manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
+            manifest_payload["files"][0]["sha256"] = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+            manifest_payload["files"][0]["sizeBytes"] = len(payload.encode("utf-8"))
+            manifest.write_text(
+                json.dumps(manifest_payload, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            self.assertPromotionArtifactRejected(
+                paths.output,
+                manifest,
+                "evaluationReportType",
+                paths.root,
+            )
 
     def test_promotionReadinessManifestSizeMismatchRejected(self):
         for value in (1, 1_000_000, -1, True):

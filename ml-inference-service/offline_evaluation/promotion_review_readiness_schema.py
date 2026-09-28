@@ -462,7 +462,11 @@ def _check_inputs(raw: Any) -> dict[str, Any]:
         "evaluation": {
             "evaluationCardType": _required_string(evaluation, "evaluationCardType", 128),
             "evaluationCardVersion": _required_string(evaluation, "evaluationCardVersion", 128),
-            "evaluationReportType": _required_string(evaluation, "evaluationReportType", 128),
+            "evaluationReportType": _required_constant(
+                evaluation,
+                "evaluationReportType",
+                EXPECTED_EVALUATION_REPORT_TYPE,
+            ),
         },
         "metricBasis": _required_string(raw, "metricBasis", 128),
         "minimumDiagnosticEvidenceRecords": minimum,
