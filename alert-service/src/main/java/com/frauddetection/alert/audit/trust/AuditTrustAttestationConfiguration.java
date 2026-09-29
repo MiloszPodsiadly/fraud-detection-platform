@@ -51,7 +51,7 @@ public class AuditTrustAttestationConfiguration {
     ) {
         return args -> {
             if ("disabled".equals(externalAnchorSink.sinkType())) {
-                log.warn("Trust attestation relies on FDP-20 external anchors, but sink is disabled.");
+                log.warn("Trust attestation relies on external audit anchors, but the anchor sink is disabled.");
             }
             log.info(
                     "Audit trust attestation runtime guard. signer_mode={} signature_strength={} production_ready={}",

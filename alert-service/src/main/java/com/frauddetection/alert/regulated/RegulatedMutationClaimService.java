@@ -80,6 +80,7 @@ public class RegulatedMutationClaimService {
                 Criteria.where("resource_type").is(command.resourceType().name()),
                 Criteria.where("resource_id").is(command.resourceId()),
                 Criteria.where("intent_actor_id").is(command.actorId()),
+                Criteria.where("revision").gte(0L).lt(Long.MAX_VALUE),
                 claimable
         ));
         Update update = new Update()
@@ -91,7 +92,8 @@ public class RegulatedMutationClaimService {
                 .set("lease_budget_started_at", now)
                 .set("last_lease_renewed_at", null)
                 .set("updated_at", now)
-                .inc("attempt_count", 1);
+                .inc("attempt_count", 1)
+                .inc("revision", 1);
         RegulatedMutationCommandDocument claimed = mongoTemplate.findAndModify(
                 query,
                 update,
@@ -101,6 +103,7 @@ public class RegulatedMutationClaimService {
         if (claimed == null) {
             return Optional.empty();
         }
+        claimed.requireRevision();
         if (claimed.getLeaseOwner() == null || claimed.getLeaseOwner().isBlank()) {
             claimed.setLeaseOwner(leaseOwner);
         }

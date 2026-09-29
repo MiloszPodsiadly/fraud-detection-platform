@@ -100,6 +100,8 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
                 RegulatedMutationCommandDocument.class
         );
         assertThat(decision.type()).isEqualTo(RegulatedMutationLeaseRenewalDecisionType.RENEW);
+        assertThat(decision.resultingRevision()).isEqualTo(2L);
+        assertThat(persisted.getRevision()).isEqualTo(2L);
         assertThat(persisted.getLeaseExpiresAt()).isAfter(originalExpiry);
         assertThat(persisted.getLeaseOwner()).isEqualTo(token.leaseOwner());
         assertThat(persisted.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
@@ -133,6 +135,7 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
         );
         assertThat(persisted.getLeaseOwner()).isEqualTo(workerB.leaseOwner());
         assertThat(persisted.getLeaseOwner()).isNotEqualTo(workerA.leaseOwner());
+        assertThat(persisted.getRevision()).isEqualTo(2L);
     }
 
     @Test
@@ -155,6 +158,7 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
         );
         assertThat(persisted.getLeaseExpiresAt()).isEqualTo(token.leaseExpiresAt());
         assertThat(persisted.leaseRenewalCountOrZero()).isZero();
+        assertThat(persisted.getRevision()).isEqualTo(1L);
     }
 
     @Test
@@ -206,6 +210,7 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
         assertThat(after.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
         assertThat(after.getDegradationReason()).isEqualTo(RegulatedMutationLeaseRenewalFailureHandler.BUDGET_EXCEEDED_REASON);
         assertThat(after.getLastError()).isEqualTo(RegulatedMutationLeaseRenewalFailureHandler.BUDGET_EXCEEDED_REASON);
+        assertThat(after.getRevision()).isEqualTo(2L);
         assertNoBusinessEvidenceFields(after);
     }
 
@@ -465,6 +470,7 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
         document.setResourceType(AuditResourceType.ALERT.name());
         document.setAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
         document.setMutationModelVersion(modelVersion);
+        document.setRevision(0L);
         document.setState(RegulatedMutationState.EVIDENCE_PREPARING);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.NEW);
         document.setAttemptCount(0);

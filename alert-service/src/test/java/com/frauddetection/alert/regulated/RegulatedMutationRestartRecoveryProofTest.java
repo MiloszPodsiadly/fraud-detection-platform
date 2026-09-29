@@ -12,15 +12,24 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 @Tag("recovery-proof")
 @Tag("production-readiness")
 @Tag("integration")
 class RegulatedMutationRestartRecoveryProofTest {
 
+    private final RegulatedMutationDurableLocalFinalizationProof durableProof =
+            mock(RegulatedMutationDurableLocalFinalizationProof.class);
     private final RegulatedMutationReplayPolicyRegistry replayPolicyRegistry = new RegulatedMutationReplayPolicyRegistry(
-            List.of(new EvidenceGatedFinalizeReplayPolicy(new RegulatedMutationLeasePolicy()))
+            List.of(new EvidenceGatedFinalizeReplayPolicy(new RegulatedMutationLeasePolicy(), durableProof))
     );
+
+    RegulatedMutationRestartRecoveryProofTest() {
+        when(durableProof.verify(any())).thenReturn(DurableLocalFinalizationProofResult.accepted());
+    }
 
     @Test
     void crashAfterClaimBeforeAttemptedAuditDoesNotReturnSuccess() {
@@ -135,6 +144,7 @@ class RegulatedMutationRestartRecoveryProofTest {
         document.setRequestHash("request-hash-1");
         document.setIntentHash("request-hash-1");
         document.setMutationModelVersion(modelVersion);
+        document.setRevision(0L);
         document.setState(state);
         document.setExecutionStatus(executionStatus);
         document.setCreatedAt(Instant.parse("2026-05-01T00:00:00Z"));

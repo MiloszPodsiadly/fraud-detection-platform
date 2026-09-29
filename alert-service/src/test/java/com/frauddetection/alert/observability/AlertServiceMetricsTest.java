@@ -328,7 +328,7 @@ class AlertServiceMetricsTest {
         metrics.recordEvidenceGatedFinalizeTransactionRollback("EVIDENCE_GATED_FINALIZE_FAILED");
         metrics.recordEvidenceConfirmationFailed("idempotency-key-raw-value");
         metrics.recordEvidenceGatedFinalizeStuckVisible();
-        metrics.recordEvidenceGatedFinalizeEnabled("SUBMIT_ANALYST_DECISION", true);
+        metrics.recordEvidenceGatedFinalizeEnabled(AuditAction.SUBMIT_ANALYST_DECISION, true);
         metrics.recordRegulatedMutationLocalAuditChainAppend("SUCCESS");
         metrics.recordRegulatedMutationLocalAuditChainAppend("raw-command-id");
         metrics.recordRegulatedMutationLocalAuditChainRetry("LOCK_CONFLICT");
@@ -341,7 +341,9 @@ class AlertServiceMetricsTest {
         Meter rejected = meterRegistry.get("evidence_gated_finalize_rejected_total").meter();
         Meter rollback = meterRegistry.get("evidence_gated_finalize_transaction_rollback_total").meter();
         Meter stuck = meterRegistry.get("evidence_gated_finalize_stuck_visible_total").meter();
-        Meter enabled = meterRegistry.get("evidence_gated_finalize_enabled").meter();
+        Meter enabled = meterRegistry.get("evidence_gated_finalize_enabled")
+                .tag("mutation_type", "SUBMIT_ANALYST_DECISION")
+                .meter();
         Meter localAuditAppendSuccess = meterRegistry.get("regulated_mutation_local_audit_chain_append_total")
                 .tag("outcome", "SUCCESS")
                 .meter();
@@ -402,6 +404,62 @@ class AlertServiceMetricsTest {
                 .tag("reason", "CHAIN_CONFLICT")
                 .counter()
                 .count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void shouldExposeOneCanonicalRecoveryGaugePerConcern() {
+        metrics.recordRegulatedMutationRecoveryBacklog(4, 17L, 2, 3);
+
+        assertThat(meterRegistry.get("regulated_mutation_recovery_required_count").gauge().value()).isEqualTo(4.0d);
+        assertThat(meterRegistry.get("regulated_mutation_recovery_oldest_age_seconds").gauge().value()).isEqualTo(17.0d);
+        assertThat(meterRegistry.get("regulated_mutation_recovery_failed_terminal_count").gauge().value()).isEqualTo(2.0d);
+        assertThat(meterRegistry.get("regulated_mutation_recovery_repeated_failures_count").gauge().value()).isEqualTo(3.0d);
+        assertThat(meterRegistry.getMeters())
+                .filteredOn(meter -> meter.getId().getName().startsWith("regulated_mutation_recovery_")
+                        && meter.getId().getType() == Meter.Type.GAUGE)
+                .hasSize(4);
+    }
+
+    @Test
+    void shouldExposeEnablementForEveryCanonicalRegulatedMutationOperation() {
+        Set<AuditAction> operations = Set.of(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditAction.UPDATE_FRAUD_CASE,
+                AuditAction.RESOLVE_TRANSACTIONAL_OUTBOX_CONFIRMATION,
+                AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
+                AuditAction.ACK_TRUST_INCIDENT,
+                AuditAction.RESOLVE_TRUST_INCIDENT,
+                AuditAction.REFRESH_TRUST_INCIDENTS
+        );
+
+        operations.forEach(action -> metrics.recordEvidenceGatedFinalizeEnabled(action, true));
+
+        assertThat(meterRegistry.find("evidence_gated_finalize_enabled").gauges()).hasSize(operations.size());
+        operations.forEach(action -> assertThat(meterRegistry.get("evidence_gated_finalize_enabled")
+                .tag("mutation_type", action.name())
+                .gauge()
+                .value()).isEqualTo(1.0d));
+    }
+
+    @Test
+    void shouldUseBoundedAlertStatusProjectionMetricLabels() {
+        metrics.recordRegulatedMutationAlertStatusProjection("SUCCESS", "UPDATED");
+        metrics.recordRegulatedMutationAlertStatusProjection("raw-alert-id", "raw exception text");
+
+        assertThat(meterRegistry.get("regulated_mutation_alert_status_projection_total")
+                .tag("outcome", "SUCCESS")
+                .tag("reason", "UPDATED")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.get("regulated_mutation_alert_status_projection_total")
+                .tag("outcome", "FAILED")
+                .tag("reason", "DATA_ACCESS_ERROR")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.getMeters())
+                .filteredOn(meter -> meter.getId().getName().equals("regulated_mutation_alert_status_projection_total"))
+                .allSatisfy(meter -> assertThat(meter.getId().getTags().toString())
+                        .doesNotContain("alert-id", "exception", "text"));
     }
 
     @Test

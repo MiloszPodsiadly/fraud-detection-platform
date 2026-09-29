@@ -40,13 +40,14 @@ class RegulatedMutationCheckpointRenewalServiceTest {
                 Duration.ofSeconds(30),
                 false,
                 false
-        ));
+        ).withResultingRevision(1L));
 
         RegulatedMutationCheckpointRenewalDecision decision = service.beforeEvidenceGatedFinalize(token, document);
 
         assertThat(decision.type()).isEqualTo(RegulatedMutationCheckpointRenewalDecisionType.RENEWED);
         assertThat(decision.checkpoint()).isEqualTo(RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE);
         assertThat(document.getLeaseExpiresAt()).isEqualTo(renewedUntil);
+        assertThat(document.getRevision()).isEqualTo(1L);
         verify(leaseRenewalService).renew(token, Duration.ofSeconds(10));
         assertThat(meterRegistry.get("regulated_mutation_checkpoint_renewal_total")
                 .tag("checkpoint", "BEFORE_EVIDENCE_GATED_FINALIZE")
@@ -118,6 +119,7 @@ class RegulatedMutationCheckpointRenewalServiceTest {
         RegulatedMutationCommandDocument document = new RegulatedMutationCommandDocument();
         document.setId("command-1");
         document.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        document.setRevision(0L);
         document.setState(state);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
         document.setLeaseOwner("owner-1");

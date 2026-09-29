@@ -1,5 +1,6 @@
 package com.frauddetection.alert.regulated;
 
+import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosResult;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosScenario;
@@ -32,8 +33,8 @@ class RegulatedMutationProductionImageRequiredTransactionChaosIT extends Abstrac
                 RegulatedMutationExecutionStatus.PROCESSING,
                 command -> {
                     command.setAttemptedAuditRecorded(true);
-                    command.setAttemptedAuditId(insertAudit(command.getResourceId(), AuditOutcome.ATTEMPTED, "attempted-" + command.getId()));
-                    command.setLeaseOwner("owner-fdp37-required-transaction");
+                    command.setAttemptedAuditId(insertAudit(command, AuditOutcome.ATTEMPTED, "attempted-" + command.getId()));
+                    command.setLeaseOwner("owner-production-image-required-transaction");
                     command.setLeaseExpiresAt(Instant.now().minusSeconds(5));
                     command.setUpdatedAt(staleForRecovery());
                 }
@@ -60,8 +61,9 @@ class RegulatedMutationProductionImageRequiredTransactionChaosIT extends Abstrac
         assertThat(chaosHarness.lastEffectiveArgs())
                 .contains("--app.regulated-mutations.transaction-mode=REQUIRED");
         assertThat(recovery.path("recovery_required").asLong()).isEqualTo(1);
-        assertThat(afterRecovery.commandState()).isEqualTo(RegulatedMutationState.FINALIZING);
+        assertThat(afterRecovery.commandState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
         assertThat(afterRecovery.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
+        assertThat(afterRecovery.publicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED);
         assertThat(afterRecovery.responseSnapshotPresent()).isFalse();
         assertThat(afterRecovery.outboxRecords()).isZero();
         assertThat(afterRecovery.successAuditEvents()).isZero();

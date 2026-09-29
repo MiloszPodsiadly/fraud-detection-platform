@@ -48,6 +48,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
             RegulatedMutationPublicStatusMapper publicStatusMapper,
             EvidencePreconditionEvaluator evidencePreconditionEvaluator,
             RegulatedMutationLocalAuditPhaseWriter localAuditPhaseWriter,
+            RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof,
             @Value("${app.regulated-mutation.lease-duration:PT30S}") Duration leaseDuration
     ) {
         this(
@@ -61,7 +62,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                 localAuditPhaseWriter,
                 new RegulatedMutationClaimService(mongoTemplate, leaseDuration),
                 new RegulatedMutationConflictPolicy(),
-                new RegulatedMutationReplayResolver(compatibilityReplayPolicyRegistry()),
+                new RegulatedMutationReplayResolver(compatibilityReplayPolicyRegistry(durableLocalFinalizationProof)),
                 new RegulatedMutationFencedCommandWriter(mongoTemplate, metrics),
                 RegulatedMutationCheckpointRenewalService.disabled()
         );
@@ -310,7 +311,8 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                 fencedCommandWriter.validateActiveLease(
                         claimToken,
                         RegulatedMutationState.FINALIZING,
-                        document.getExecutionStatus()
+                        document.getExecutionStatus(),
+                        document.requireRevision()
                 );
                 R result = command.mutation().execute(new RegulatedMutationExecutionContext(document.getId()));
                 S response = command.responseMapper().response(result, RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
@@ -324,7 +326,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                         command.resourceType()
                 );
                 document.setOutboxEventId(definition.requiresTransactionalOutbox() ? snapshot.decisionEventId() : null);
-                document.setLocalCommitMarker("EVIDENCE_GATED_FINALIZED");
+                document.setLocalCommitMarker(RegulatedMutationDurableLocalFinalizationProof.LOCAL_COMMIT_MARKER);
                 document.setLocalCommittedAt(Instant.now());
                 transition(
                         document,
@@ -471,10 +473,11 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
         RegulatedMutationExecutionStatus previousExecutionStatus = document.getExecutionStatus();
         stateMachine.requireTransition(document.getState(), state);
         var publicStatus = publicStatusMapper.currentStatus(state);
-        fencedCommandWriter.transition(
+        long resultingRevision = fencedCommandWriter.transition(
                 claimToken,
                 previous,
                 previousExecutionStatus,
+                document.requireRevision(),
                 state,
                 executionStatus,
                 lastError,
@@ -484,6 +487,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                 }
         );
         applyTransition(document, state, executionStatus, lastError);
+        document.setRevision(resultingRevision);
         document.setPublicStatus(publicStatus);
         metrics.recordEvidenceGatedFinalizeStateTransition(previous, state, lastError == null ? "SUCCESS" : "FAILED");
     }
@@ -497,9 +501,16 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
     ) {
         RegulatedMutationState previous = document.getState();
         stateMachine.requireTransition(document.getState(), state);
-        fencedCommandWriter.recoveryTransition(document, state, executionStatus, lastError, allowedFieldUpdates);
+        long resultingRevision = fencedCommandWriter.recoveryTransition(
+                document,
+                state,
+                executionStatus,
+                lastError,
+                allowedFieldUpdates
+        );
         document.setPublicStatus(publicStatusMapper.currentStatus(state));
         applyTransition(document, state, executionStatus, lastError);
+        document.setRevision(resultingRevision);
         metrics.recordEvidenceGatedFinalizeStateTransition(previous, state, lastError == null ? "SUCCESS" : "FAILED");
     }
 
@@ -540,10 +551,12 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
     ) {
     }
 
-    private static RegulatedMutationReplayPolicyRegistry compatibilityReplayPolicyRegistry() {
+    private static RegulatedMutationReplayPolicyRegistry compatibilityReplayPolicyRegistry(
+            RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof
+    ) {
         RegulatedMutationLeasePolicy leasePolicy = new RegulatedMutationLeasePolicy();
         return new RegulatedMutationReplayPolicyRegistry(
-                List.of(new EvidenceGatedFinalizeReplayPolicy(leasePolicy))
+                List.of(new EvidenceGatedFinalizeReplayPolicy(leasePolicy, durableLocalFinalizationProof))
         );
     }
 }

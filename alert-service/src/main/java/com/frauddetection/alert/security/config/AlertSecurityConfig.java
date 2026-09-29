@@ -44,7 +44,7 @@ public class AlertSecurityConfig {
      * - unknown backend-looking routes are denied explicitly
      * - only allowlisted SPA/static/OAuth routes remain public
      *
-     * FDP-49 keeps one SecurityFilterChain. Authorization matchers are decomposed into route groups,
+     * Keep one SecurityFilterChain. Authorization matchers are decomposed into route groups,
      * but AlertSecurityConfig remains the filter-chain owner.
      */
 

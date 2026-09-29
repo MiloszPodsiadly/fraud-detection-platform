@@ -67,7 +67,10 @@ class RegulatedMutationReplayPolicyRegistryTest {
     private RegulatedMutationReplayPolicyRegistry registry() {
         RegulatedMutationLeasePolicy leasePolicy = new RegulatedMutationLeasePolicy();
         return new RegulatedMutationReplayPolicyRegistry(
-                List.of(new EvidenceGatedFinalizeReplayPolicy(leasePolicy))
+                List.of(new EvidenceGatedFinalizeReplayPolicy(
+                        leasePolicy,
+                        mock(RegulatedMutationDurableLocalFinalizationProof.class)
+                ))
         );
     }
 
@@ -80,6 +83,7 @@ class RegulatedMutationReplayPolicyRegistryTest {
     private RegulatedMutationCommandDocument document(RegulatedMutationModelVersion modelVersion) {
         RegulatedMutationCommandDocument document = new RegulatedMutationCommandDocument();
         document.setMutationModelVersion(modelVersion);
+        document.setRevision(0L);
         return document;
     }
 }

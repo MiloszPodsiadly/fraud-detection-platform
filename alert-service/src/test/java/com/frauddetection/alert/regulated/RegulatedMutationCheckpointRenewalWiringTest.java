@@ -60,7 +60,10 @@ class RegulatedMutationCheckpointRenewalWiringTest {
             .withBean(RegulatedMutationConflictPolicy.class)
             .withBean(RegulatedMutationLeasePolicy.class)
             .withBean(RegulatedMutationReplayPolicyRegistry.class, () -> new RegulatedMutationReplayPolicyRegistry(
-                    List.of(new EvidenceGatedFinalizeReplayPolicy(new RegulatedMutationLeasePolicy()))
+                    List.of(new EvidenceGatedFinalizeReplayPolicy(
+                            new RegulatedMutationLeasePolicy(),
+                            mock(RegulatedMutationDurableLocalFinalizationProof.class)
+                    ))
             ))
             .withBean(RegulatedMutationReplayResolver.class)
             .withBean(RegulatedMutationFencedCommandWriter.class)

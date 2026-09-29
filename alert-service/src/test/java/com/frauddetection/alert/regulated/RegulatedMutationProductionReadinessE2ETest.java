@@ -59,6 +59,7 @@ class RegulatedMutationProductionReadinessE2ETest extends AbstractIntegrationTes
     private SimpleMeterRegistry meterRegistry;
     private AlertServiceMetrics metrics;
     private RegulatedMutationTransactionRunner transactionRunner;
+    private RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof;
 
     @BeforeEach
     void setUp() {
@@ -81,6 +82,9 @@ class RegulatedMutationProductionReadinessE2ETest extends AbstractIntegrationTes
         when(auditPhaseService.recordPhase(any(), any(), any(), eq(AuditOutcome.SUCCESS), eq(null)))
                 .thenReturn("success-audit");
         when(localAuditPhaseWriter.recordSuccessPhase(any(), any(), any())).thenReturn("local-success-audit");
+        durableLocalFinalizationProof = mock(RegulatedMutationDurableLocalFinalizationProof.class);
+        when(durableLocalFinalizationProof.verify(any()))
+                .thenReturn(DurableLocalFinalizationProofResult.accepted());
         transactionRunner = new RegulatedMutationTransactionRunner(
                 RegulatedMutationTransactionMode.REQUIRED,
                 new TransactionTemplate(new MongoTransactionManager(databaseFactory))
@@ -221,6 +225,8 @@ class RegulatedMutationProductionReadinessE2ETest extends AbstractIntegrationTes
                 metrics,
                 List.of(new SubmitDecisionRecoveryStrategy(alertRepository)),
                 new RegulatedMutationFencedCommandWriter(mongoTemplate, metrics),
+                durableLocalFinalizationProof,
+                new RegulatedMutationPublicStatusMapper(),
                 Duration.ofMinutes(2)
         );
     }
@@ -252,7 +258,7 @@ class RegulatedMutationProductionReadinessE2ETest extends AbstractIntegrationTes
     private RegulatedMutationReplayPolicyRegistry replayPolicyRegistry() {
         RegulatedMutationLeasePolicy leasePolicy = new RegulatedMutationLeasePolicy();
         return new RegulatedMutationReplayPolicyRegistry(
-                List.of(new EvidenceGatedFinalizeReplayPolicy(leasePolicy))
+                List.of(new EvidenceGatedFinalizeReplayPolicy(leasePolicy, durableLocalFinalizationProof))
         );
     }
 
@@ -353,6 +359,7 @@ class RegulatedMutationProductionReadinessE2ETest extends AbstractIntegrationTes
         document.setIntentActorId("principal-7");
         document.setIntentDecision(AnalystDecision.CONFIRMED_FRAUD.name());
         document.setMutationModelVersion(modelVersion);
+        document.setRevision(0L);
         document.setState(RegulatedMutationState.REQUESTED);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.NEW);
         document.setCreatedAt(Instant.now());

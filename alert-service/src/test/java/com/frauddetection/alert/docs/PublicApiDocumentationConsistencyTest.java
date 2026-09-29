@@ -28,6 +28,17 @@ class PublicApiDocumentationConsistencyTest {
     );
 
     @Test
+    void alertServiceOpenApiUsesSemanticVersionAndCurrentDomainLanguage() throws Exception {
+        String openApi = Files.readString(
+                DocumentationTestSupport.docsRoot().resolve("openapi/alert_service.openapi.yaml")
+        );
+
+        assertThat(openApi)
+                .contains("version: \"1.0.0\"")
+                .doesNotContainPattern("\\bFDP-\\d+\\b");
+    }
+
+    @Test
     void publicStatusDocsCoverEverySubmitDecisionOperationStatus() throws Exception {
         Path docsRoot = DocumentationTestSupport.docsRoot();
         String truthTable = Files.readString(docsRoot.resolve("api/status_truth_table.md"));

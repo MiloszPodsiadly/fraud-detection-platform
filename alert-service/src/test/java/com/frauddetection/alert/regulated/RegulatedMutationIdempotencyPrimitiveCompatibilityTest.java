@@ -109,6 +109,7 @@ class RegulatedMutationIdempotencyPrimitiveCompatibilityTest {
         document.setResourceType(AuditResourceType.ALERT.name());
         document.setResourceId("alert-1");
         document.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        document.setRevision(0L);
         document.setState(RegulatedMutationState.REQUESTED);
         return document;
     }

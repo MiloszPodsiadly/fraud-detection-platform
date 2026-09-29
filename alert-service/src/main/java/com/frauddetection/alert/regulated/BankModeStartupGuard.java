@@ -87,7 +87,9 @@ public class BankModeStartupGuard implements ApplicationRunner {
         boolean prodLike = bankModeFailClosed || prodLikeProfile();
         if (transactionRunner.mode() == RegulatedMutationTransactionMode.REQUIRED && transactionCapabilityProbeEnabled) {
             if (transactionCapabilityProbe == null) {
-                throw new IllegalStateException("FDP-27 requires app.regulated-mutations.transaction-capability-probe.enabled=true with a transaction capability probe when transaction-mode=REQUIRED.");
+                throw new IllegalStateException("Regulated mutation transaction-mode=REQUIRED requires "
+                        + "app.regulated-mutations.transaction-capability-probe.enabled=true with a transaction "
+                        + "capability probe.");
             }
             transactionCapabilityProbe.verify();
         }
@@ -105,13 +107,14 @@ public class BankModeStartupGuard implements ApplicationRunner {
         require("app.outbox.confirmation.dual-control.enabled", "true", outboxConfirmationDualControlEnabled, "manual outbox confirmation resolution requires dual control.");
         require("app.sensitive-reads.audit.fail-closed", "true", sensitiveReadAuditFailClosed, "sensitive operational reads must fail closed in bank/prod.");
         require("app.outbox.max-attempts", ">0", maxAttempts > 0, "outbox retries must be bounded and positive.");
-        require("app.audit.external-anchoring.publication.enabled", "true", externalPublicationEnabled, "bank/prod requires FDP-24 external proof publication.");
-        require("app.audit.external-anchoring.publication.required", "true", externalPublicationRequired, "bank/prod requires FDP-24 external proof as a hard dependency.");
+        require("app.audit.external-anchoring.publication.enabled", "true", externalPublicationEnabled, "bank/prod requires external proof publication.");
+        require("app.audit.external-anchoring.publication.required", "true", externalPublicationRequired, "bank/prod requires external proof as a hard dependency.");
         require("app.audit.external-anchoring.publication.fail-closed", "true", externalPublicationFailClosed, "bank/prod must fail closed when external proof publication is unavailable.");
         require("app.audit.external-anchoring.sink", "non-local production-capable sink", productionCapableExternalSink(), "disabled/noop/local/same-database external anchor sinks cannot be used in bank/prod.");
         require("app.audit.trust-authority.enabled", "true", trustAuthorityEnabled, "bank/prod requires signed external evidence.");
         require("app.audit.trust-authority.signing-required", "true", trustAuthoritySigningRequired, "bank/prod requires Trust Authority signing for external evidence.");
-        log.info("FDP-27 bank profile active: transaction-mode=REQUIRED, trust-incidents.refresh-mode=ATOMIC, outbox dual-control and sensitive-read fail-closed enabled.");
+        log.info("Bank profile active: transaction-mode=REQUIRED, trust-incidents.refresh-mode=ATOMIC, "
+                + "outbox dual-control and sensitive-read fail-closed enabled.");
     }
 
     private boolean prodLikeProfile() {
@@ -133,7 +136,7 @@ public class BankModeStartupGuard implements ApplicationRunner {
 
     private void require(String setting, String required, boolean valid, String reason) {
         if (!valid) {
-            throw new IllegalStateException("FDP-27 bank/prod startup guard failed: setting="
+            throw new IllegalStateException("Bank/prod startup guard failed: setting="
                     + setting + "; required=" + required + "; reason=" + reason);
         }
     }

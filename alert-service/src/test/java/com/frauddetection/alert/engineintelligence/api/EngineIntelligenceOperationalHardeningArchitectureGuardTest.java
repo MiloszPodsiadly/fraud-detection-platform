@@ -283,7 +283,7 @@ class EngineIntelligenceOperationalHardeningArchitectureGuardTest {
     }
 
     @Test
-    void apiSurfaceStatesNoNewPublicApiForFdp100() throws Exception {
+    void apiSurfaceStatesNoNewPublicApiForOperationalHardening() throws Exception {
         assertThat(source("docs/api/api_surface_v1.md"))
                 .contains("FDP-100 adds engine-intelligence operational metrics and runbook documentation only")
                 .contains("does not add public API");

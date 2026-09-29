@@ -1,6 +1,6 @@
 package com.frauddetection.alert.regulated;
 
-import com.frauddetection.alert.regulated.chaos.Fdp38LiveRuntimeCheckpoint;
+import com.frauddetection.alert.regulated.chaos.LiveRuntimeCheckpoint;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import org.junit.jupiter.api.Test;
@@ -366,7 +366,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp31ExecutorsMustUseSharedClaimConflictAndReplayPolicies() throws Exception {
+    void executorsMustUseSharedClaimConflictAndReplayPolicies() throws Exception {
         String evidenceExecutor = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
         ));
@@ -381,7 +381,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp31ClaimServiceMustBeOnlyDirectMongoClaimBoundary() throws Exception {
+    void claimServiceMustBeOnlyDirectMongoClaimBoundary() throws Exception {
         String claimService = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationClaimService.java"
         ));
@@ -399,7 +399,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp31ReplayResolverMustRemainPureDecisionLogic() throws Exception {
+    void replayResolverMustRemainPureDecisionLogic() throws Exception {
         String replayResolver = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationReplayResolver.java"
         ));
@@ -427,7 +427,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp31ConflictPolicyMustNotWriteOrExecuteMutation() throws Exception {
+    void conflictPolicyMustNotWriteOrExecuteMutation() throws Exception {
         String conflictPolicy = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationConflictPolicy.java"
         ));
@@ -441,7 +441,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp32ClaimedTransitionsMustUseFencedCommandWriter() throws Exception {
+    void claimedTransitionsMustUseFencedCommandWriter() throws Exception {
         String evidenceExecutor = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
         ));
@@ -481,7 +481,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp32ExecutorsMustNotUseRepositorySaveForStateTransitions() throws Exception {
+    void executorsMustNotUseRepositorySaveForStateTransitions() throws Exception {
         String evidenceExecutor = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
         ));
@@ -499,11 +499,11 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp32AllowedFieldUpdatesMustNotBeGeneralMutationApi() throws Exception {
+    void allowedFieldUpdatesMustNotBeGeneralMutationApi() throws Exception {
         String writer = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationFencedCommandWriter.java"
         ));
-        String docs = Files.readString(Path.of("../docs/fdp/fdp_32_lease_fencing_stale_worker_protection.md"));
+        String docs = Files.readString(Path.of("../docs/architecture/regulated_mutation_lease_fencing.md"));
 
         assertThat(writer).contains("PROTECTED_UPDATE_FIELDS");
         assertThat(writer).contains("\"lease_owner\"");
@@ -516,7 +516,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp33LeaseRenewalMustNotBePublicApiOrControllerDependency() throws Exception {
+    void leaseRenewalMustNotBePublicApiOrControllerDependency() throws Exception {
         List<Path> javaFiles;
         try (Stream<Path> stream = Files.walk(Path.of("src/main/java/com/frauddetection/alert"))) {
             javaFiles = stream
@@ -531,7 +531,7 @@ class RegulatedMutationArchitectureTest {
             }
             String source = Files.readString(path);
             assertThat(source)
-                    .as("controllers must not expose or depend on FDP-33 lease renewal: " + path)
+                    .as("controllers must not expose or depend on regulated mutation lease renewal: " + path)
                     .doesNotContain("RegulatedMutationLeaseRenewalService")
                     .doesNotContain("lease-renew")
                     .doesNotContain("renewLease")
@@ -540,7 +540,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp33LeaseRenewalMustStayOutOfPublicApiAndPublishingBoundariesAtTypeLevel() {
+    void leaseRenewalMustStayOutOfPublicApiAndPublishingBoundariesAtTypeLevel() {
         JavaClasses classes = new ClassFileImporter().importPackages("com.frauddetection.alert");
 
         noClasses().that().resideInAnyPackage("..controller..", "..api..")
@@ -555,7 +555,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp33LeaseRenewalMustOnlyUpdateLeaseMetadata() throws Exception {
+    void leaseRenewalMustOnlyUpdateLeaseMetadata() throws Exception {
         String service = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationLeaseRenewalService.java"
         ));
@@ -583,7 +583,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp33BudgetExceededRecoveryHandlerMustOnlyMarkRecoveryFields() throws Exception {
+    void budgetExceededRecoveryHandlerMustOnlyMarkRecoveryFields() throws Exception {
         String handler = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationLeaseRenewalFailureHandler.java"
         ));
@@ -616,7 +616,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp33LeaseRenewalMustStayAwayFromBrokerOutboxAuditAndBusinessBoundaries() throws Exception {
+    void leaseRenewalMustStayAwayFromBrokerOutboxAuditAndBusinessBoundaries() throws Exception {
         String service = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationLeaseRenewalService.java"
         ));
@@ -661,7 +661,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp35MustNotAddRegulatedMutationPublicSemantics() throws Exception {
+    void readinessMustNotAddRegulatedMutationPublicSemantics() throws Exception {
         String statuses = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/api/SubmitDecisionOperationStatus.java"
         ));
@@ -704,7 +704,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp35ReadinessMustNotExposeHeartbeatOrRenewalControllerSemantics() throws Exception {
+    void readinessMustNotExposeHeartbeatOrRenewalControllerSemantics() throws Exception {
         List<Path> controllers;
         try (Stream<Path> stream = Files.walk(Path.of("src/main/java/com/frauddetection/alert"))) {
             controllers = stream
@@ -727,7 +727,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp35ReadinessTestsMustNotCallExternalAnchorOrTrustAuthority() throws Exception {
+    void readinessTestsMustNotCallExternalAnchorOrTrustAuthority() throws Exception {
         List<Path> readinessTests;
         try (Stream<Path> stream = Files.walk(Path.of("src/test/java/com/frauddetection/alert"))) {
             readinessTests = stream
@@ -744,7 +744,7 @@ class RegulatedMutationArchitectureTest {
         for (Path test : readinessTests) {
             String source = Files.readString(test);
             assertThat(source)
-                    .as("FDP-35 proof tests must not depend on external finality: " + test)
+                    .as("Readiness proof tests must not depend on external finality: " + test)
                     .doesNotContain("ExternalAuditAnchorPublisher")
                     .doesNotContain("AuditTrustAuthorityClient")
                     .doesNotContain("HttpAuditTrustAuthorityClient")
@@ -753,17 +753,17 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp35DocsMustPreserveProofOnlyLowCardinalityClaims() throws Exception {
-        String combined = combinedFdp35Docs();
+    void readinessDocsMustPreserveProofOnlyLowCardinalityClaims() throws Exception {
+        String combined = combinedReadinessDocs();
 
-        assertContainsRequiredFdp35Wording(combined);
+        assertContainsRequiredReadinessWording(combined);
         assertNoForbiddenProcessKillOverclaim(combined);
         assertNoProductionEnablementOverclaim(combined);
         assertThat(combined).contains("Do not include command id, alert id, actor id, lease owner, idempotency key, request hash, resource id");
     }
 
     @Test
-    void fdp35InspectionResponseMustNotExposeUnsafeFields() throws Exception {
+    void readinessInspectionResponseMustNotExposeUnsafeFields() throws Exception {
         String response = readSource("src/main/java/com/frauddetection/alert/regulated/RegulatedMutationCommandInspectionResponse.java");
         String openApi = readSource("../docs/openapi/alert_service.openapi.yaml");
 
@@ -772,15 +772,15 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp35CiMustBlockReadinessAndRegressionJobs() throws Exception {
+    void readinessCiMustBlockReadinessAndRegressionJobs() throws Exception {
         String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
 
-        assertCiContainsRequiredFdp35Jobs(ci);
+        assertCiContainsRequiredReadinessJobs(ci);
     }
 
     @Test
-    void fdp35DocsMustNotUsePlaceholderOutput() throws Exception {
-        assertThat(combinedFdp35Docs())
+    void readinessDocsMustNotUsePlaceholderOutput() throws Exception {
+        assertThat(combinedReadinessDocs())
                 .doesNotContain("TBD")
                 .doesNotContain("TODO")
                 .doesNotContain("Tests run: X")
@@ -790,22 +790,22 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp35DashboardThresholdsMustUseConcreteValues() throws Exception {
-        String thresholds = readDoc("observability/fdp_35_regulated_mutation_alert_thresholds.md");
-        String dashboard = readDoc("observability/fdp_35_regulated_mutation_dashboard_spec.md");
+    void readinessDashboardThresholdsMustUseConcreteValues() throws Exception {
+        String thresholds = readDoc("observability/regulated_mutation_alert_thresholds.md");
+        String dashboard = readDoc("observability/regulated_mutation_dashboard.md");
 
         assertDocsHaveConcreteThresholds(thresholds);
         assertThat(dashboard)
                 .contains("Threshold overlays")
-                .contains("fdp_35_regulated_mutation_alert_thresholds.md");
+                .contains("regulated_mutation_alert_thresholds.md");
     }
 
     @Test
-    void fdp35ProofMatrixMustMapExactTestMethods() throws Exception {
-        String matrix = readDoc("testing/fdp_35_regulated_mutation_readiness_proof.md");
+    void readinessProofMatrixMustMapExactTestMethods() throws Exception {
+        String matrix = readDoc("testing/regulated_mutation_readiness_proof.md");
 
         assertThat(matrix)
-                .contains("FDP-35 must prove readiness, not claim enablement.")
+                .contains("The suite must prove readiness, not claim enablement.")
                 .contains("| Invariant | Test class | Test method | Type | CI job | Failure meaning | Allowed production claim | Forbidden production claim |")
                 .contains("EvidenceGatedFinalizeCoordinatorIntegrationTest` | `shouldFinalizeSubmitDecisionThroughRealMongoCoordinatorPath")
                 .contains("EvidenceGatedFinalizeCoordinatorTest` | `shouldNotReplayStaleCommittedSnapshotWhenFinalizeRecoveryRequired")
@@ -852,23 +852,22 @@ class RegulatedMutationArchitectureTest {
         return Files.readString(Path.of("../docs/" + relativePath));
     }
 
-    private String combinedFdp35Docs() throws Exception {
-        return readDoc("testing/fdp_35_regulated_mutation_readiness_proof.md")
-                + readDoc("fdp/fdp_35_merge_gate.md")
-                + readDoc("testing/fdp_35_regulated_mutation_readiness_proof.md")
-                + readDoc("testing/fdp_35_regulated_mutation_readiness_proof.md")
-                + readDoc("observability/fdp_35_regulated_mutation_dashboard_spec.md")
-                + readDoc("observability/fdp_35_regulated_mutation_alert_thresholds.md")
+    private String combinedReadinessDocs() throws Exception {
+        return readDoc("testing/regulated_mutation_readiness_proof.md")
+                + readDoc("testing/regulated_mutation_readiness_proof.md")
+                + readDoc("testing/regulated_mutation_readiness_proof.md")
+                + readDoc("observability/regulated_mutation_dashboard.md")
+                + readDoc("observability/regulated_mutation_alert_thresholds.md")
                 + readDoc("runbooks/regulated_mutation_drills.md")
                 + readDoc("runbooks/regulated_mutation_drills.md")
-                + readDoc("operations/fdp_35_regulated_mutation_rollback_plan.md");
+                + readDoc("operations/regulated_mutation_rollback_plan.md");
     }
 
     private void assertNoForbiddenTerms(String source, String category, String... forbiddenClaims) {
         String normalized = source.toLowerCase();
         for (String forbiddenClaim : forbiddenClaims) {
             assertThat(normalized)
-                    .as("forbidden FDP-35 " + category + " term must be absent: " + forbiddenClaim)
+                    .as("forbidden readiness " + category + " term must be absent: " + forbiddenClaim)
                     .doesNotContain(forbiddenClaim.toLowerCase());
         }
     }
@@ -888,7 +887,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     private void assertNoProductionEnablementOverclaim(String source) {
-        // FDP-35 proves readiness evidence only; it does not enable production/bank operation.
+        // Readiness evidence does not enable production or bank operation.
         assertNoForbiddenTerms(
                 source,
                 "production enablement overclaim",
@@ -903,14 +902,14 @@ class RegulatedMutationArchitectureTest {
         );
     }
 
-    private void assertContainsRequiredFdp35Wording(String source) {
+    private void assertContainsRequiredReadinessWording(String source) {
         assertThat(source)
-                .contains("production-readiness proof branch")
-                .contains("FDP-35 provides modeled restart/recovery proof in CI. It verifies durable post-crash command states, replay policy, recovery API behavior, and operator visibility. It does not claim real OS/JVM/container process-kill chaos unless an explicit real-chaos job is implemented and run.")
+                .contains("modeled restart and recovery readiness")
+                .contains("CI provides modeled restart/recovery proof. It verifies durable post-crash command states, replay policy")
                 .contains("True OS/JVM/container termination chaos remains future scope unless explicitly implemented.")
                 .contains("No new public API statuses")
                 .contains("Checkpoint renewal must not be treated as business progress")
-                .contains("FDP-35 must prove readiness, not claim enablement.")
+                .contains("The suite must prove readiness, not claim enablement.")
                 .contains("Modeled restart/recovery, controller recovery behavior, Docker/Testcontainers readiness, rollback, dashboard, alert, and operator drill evidence are covered.");
     }
 
@@ -948,7 +947,7 @@ class RegulatedMutationArchitectureTest {
                 .doesNotContain("last_error:");
     }
 
-    private void assertCiContainsRequiredFdp35Jobs(String source) {
+    private void assertCiContainsRequiredReadinessJobs(String source) {
         // Both jobs must block Docker build and publish reports for CI triage.
         assertThat(source)
                 .contains("fdp35-production-readiness")
@@ -983,7 +982,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp33LeaseRenewalModelPolicySeamMustOwnModelStateTables() throws Exception {
+    void leaseRenewalModelPolicyMustOwnModelStateTables() throws Exception {
         String policy = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationLeaseRenewalPolicy.java"
         ));
@@ -1001,7 +1000,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp33ExecutorsMustNotRenewLeasesDirectlyOrUpdateLeaseExpiryWithMongo() throws Exception {
+    void executorsMustNotRenewLeasesDirectlyOrUpdateLeaseExpiryWithMongo() throws Exception {
         String evidenceExecutor = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
         ));
@@ -1012,7 +1011,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp34CheckpointRenewalMustNotBeSchedulerPublicApiOrBoundaryLeak() throws Exception {
+    void checkpointRenewalMustNotBeSchedulerPublicApiOrBoundaryLeak() throws Exception {
         String service = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationCheckpointRenewalService.java"
         ));
@@ -1069,7 +1068,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp34ExecutorsMustUseNamedCheckpointMethodsInsteadOfDirectRenewal() throws Exception {
+    void executorsMustUseNamedCheckpointMethodsInsteadOfDirectRenewal() throws Exception {
         String evidenceExecutor = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
         ));
@@ -1083,7 +1082,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp34EveryCheckpointMustHavePolicyDocsRunbookAndMetricCoverage() throws Exception {
+    void everyCheckpointMustHavePolicyDocsRunbookAndMetricCoverage() throws Exception {
         String policyTest = Files.readString(Path.of(
                 "src/test/java/com/frauddetection/alert/regulated/RegulatedMutationSafeCheckpointPolicyTest.java"
         ));
@@ -1102,7 +1101,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp34SafeCheckpointPolicyMustRemainExplicitWithoutWildcardAllows() throws Exception {
+    void safeCheckpointPolicyMustRemainExplicitWithoutWildcardAllows() throws Exception {
         String policy = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationSafeCheckpointPolicy.java"
         ));
@@ -1119,7 +1118,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp34CheckpointRenewalServiceMustRemainNarrowOwnershipAdapter() throws Exception {
+    void checkpointRenewalServiceMustRemainNarrowOwnershipAdapter() throws Exception {
         String service = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationCheckpointRenewalService.java"
         ));
@@ -1139,7 +1138,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp34DisabledCheckpointRenewalMustStayOutOfProductionBeanGraph() throws Exception {
+    void disabledCheckpointRenewalMustStayOutOfProductionBeanGraph() throws Exception {
         String service = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/RegulatedMutationCheckpointRenewalService.java"
         ));
@@ -1159,7 +1158,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp34ProductionWiringMustNotSilentlyDisableCheckpointRenewal() throws Exception {
+    void productionWiringMustNotSilentlyDisableCheckpointRenewal() throws Exception {
         String evidenceExecutor = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
         ));
@@ -1170,12 +1169,12 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp34DocsMustDescribeCheckpointAdoptionWithoutReviewNotes() throws Exception {
+    void checkpointRenewalDocsMustDescribeAdoptionWithoutReviewNotes() throws Exception {
         String architecture = Files.readString(Path.of("../docs/architecture/regulated_mutation_safe_checkpoint_policy.md"));
         String checkpoints = Files.readString(Path.of("../docs/architecture/regulated_mutation_safe_checkpoints.md"));
         String runbook = Files.readString(Path.of("../docs/runbooks/regulated_mutation_recovery.md"));
-        String mergeGate = Files.readString(Path.of("../docs/fdp/fdp_34_merge_gate.md"));
-        String combined = architecture + "\n" + checkpoints + "\n" + runbook + "\n" + mergeGate;
+        String adoption = Files.readString(Path.of("../docs/architecture/regulated_mutation_checkpoint_adoption.md"));
+        String combined = architecture + "\n" + checkpoints + "\n" + runbook + "\n" + adoption;
 
         assertThat(combined).contains("Renewal preserves ownership, not progress");
         assertThat(combined).contains("Checkpoint renewal preserves bounded lease ownership. It does not prove business progress");
@@ -1201,10 +1200,8 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp32DocsMustDescribeLeaseFencingWithoutReviewNotes() throws Exception {
-        String architecture = Files.readString(Path.of("../docs/fdp/fdp_32_lease_fencing_stale_worker_protection.md"));
-        String mergeGate = Files.readString(Path.of("../docs/fdp/fdp_32_merge_gate.md"));
-        String combined = architecture + "\n" + mergeGate;
+    void leaseFencingDocsMustDescribeProtectionWithoutReviewNotes() throws Exception {
+        String combined = Files.readString(Path.of("../docs/architecture/regulated_mutation_lease_fencing.md"));
 
         assertThat(combined).contains("claim acquisition is not write fencing");
         assertThat(combined).contains("post-claim transitions are fenced");
@@ -1216,7 +1213,7 @@ class RegulatedMutationArchitectureTest {
         assertThat(combined).contains("does not expand transaction scope");
         assertThat(combined).contains("no distributed lock");
         assertThat(combined).contains("Source-string architecture tests are guardrails, not complete architectural proof");
-        assertThat(combined).contains("FDP-32 is merge-safe as lease-owner fenced command transition hardening");
+        assertThat(combined).contains("lease-owner fenced command transition design is the current runtime contract");
         assertThat(combined).doesNotContain("Merge Decision");
         assertThat(combined).doesNotContain("GO:");
         assertThat(combined).doesNotContain("NO-GO:");
@@ -1224,12 +1221,11 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp33DocsMustDescribeBoundedRenewalWithoutReviewNotes() throws Exception {
-        String runbook = Files.readString(Path.of("../docs/fdp/fdp_33_lease_renewal_operational_readiness.md"));
-        String mergeGate = Files.readString(Path.of("../docs/fdp/fdp_33_merge_gate.md"));
+    void leaseRenewalDocsMustDescribeBoundedRenewalWithoutReviewNotes() throws Exception {
+        String runbook = Files.readString(Path.of("../docs/operations/regulated_mutation_lease_renewal.md"));
         String operatorRunbook = Files.readString(Path.of("../docs/runbooks/regulated_mutation_recovery.md"));
-        String dashboard = Files.readString(Path.of("../docs/observability/fdp_33_lease_renewal_dashboard.md"));
-        String combined = runbook + "\n" + mergeGate + "\n" + operatorRunbook + "\n" + dashboard;
+        String dashboard = Files.readString(Path.of("../docs/observability/regulated_mutation_lease_renewal_dashboard.md"));
+        String combined = runbook + "\n" + operatorRunbook + "\n" + dashboard;
 
         assertThat(combined).contains("owner-fenced");
         assertThat(combined).contains("bounded");
@@ -1402,11 +1398,11 @@ class RegulatedMutationArchitectureTest {
 
         assertThat(writer).contains("TransactionalOutboxRecordRepository");
         assertThat(writer).contains("outboxRepository.save(record");
-        assertThat(writer).contains("TransactionalOutboxRecordRepository is required");
+        assertThat(writer).contains("Transactional outbox repository is required");
     }
 
     @Test
-    void docsMustNotOverclaimFdp26() throws Exception {
+    void docsMustNotOverclaimLocalAuditEvidence() throws Exception {
         String readme = Files.readString(Path.of("../README.md"));
         String api = Files.readString(Path.of("../docs/api/api_surface_v1.md"));
         String security = Files.readString(Path.of("../docs/security/security_architecture.md"));
@@ -1465,7 +1461,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp36ChaosHarnessMustStayOutsideRuntimeSource() throws Exception {
+    void realChaosHarnessMustStayOutsideRuntimeSource() throws Exception {
         assertThat(Files.exists(Path.of("src/main/java/com/frauddetection/alert/regulated/chaos/RegulatedMutationDockerChaosHarness.java")))
                 .isFalse();
         assertThat(Files.exists(Path.of("src/test/java/com/frauddetection/alert/regulated/chaos/RegulatedMutationDockerChaosHarness.java")))
@@ -1511,7 +1507,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp36ExecutorsCoordinatorsAndPoliciesMustNotContainChaosCode() throws Exception {
+    void realChaosMustNotLeakIntoExecutorsCoordinatorsOrPolicies() throws Exception {
         List<Path> protectedRuntimeFiles = List.of(
                 Path.of("src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"),
                 Path.of("src/main/java/com/frauddetection/alert/regulated/MongoRegulatedMutationCoordinator.java"),
@@ -1536,7 +1532,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp36DocsMustDescribeRealChaosWithoutEnablementOverclaims() throws Exception {
+    void realChaosDocsMustAvoidEnablementOverclaims() throws Exception {
         String adr = Files.readString(Path.of("../docs/adr/fdp_36_real_chaos_enable_readiness.md"));
         String mergeGate = Files.readString(Path.of("../docs/fdp/fdp_36_merge_gate.md"));
         String checklist = Files.readString(Path.of("../docs/fdp/fdp_36_enablement_decision_checklist.md"));
@@ -1560,21 +1556,21 @@ class RegulatedMutationArchitectureTest {
         assertThat(combined).contains("READY_FOR_ENABLEMENT_REVIEW is not production enablement.");
         assertThat(combined).contains("no runtime chaos hooks in executors, coordinators, or domain services");
         assertThat(combined).contains("no alternate regulated mutation runtime or fallback");
-        assertFdp36ForbiddenPhraseIsContextual(combined, "production enabled");
-        assertFdp36ForbiddenPhraseIsContextual(combined, "production certified");
-        assertFdp36ForbiddenPhraseIsContextual(combined, "external finality");
-        assertFdp36ForbiddenPhraseIsContextual(combined, "distributed ACID");
-        assertFdp36ForbiddenPhraseIsContextual(combined, "distributed lock");
-        assertFdp36ForbiddenPhraseIsContextual(combined, "exactly-once Kafka");
-        assertFdp36ForbiddenPhraseIsContextual(combined, "WORM");
-        assertFdp36ForbiddenPhraseIsContextual(combined, "legal notarization");
-        assertFdp36ForbiddenPhraseIsContextual(combined, "KMS/HSM");
-        assertFdp36ForbiddenPhraseIsContextual(combined, "automatic bank enablement");
-        assertFdp36ForbiddenPhraseIsContextual(combined, "alternate model enablement");
+        assertRealChaosForbiddenPhraseIsContextual(combined, "production enabled");
+        assertRealChaosForbiddenPhraseIsContextual(combined, "production certified");
+        assertRealChaosForbiddenPhraseIsContextual(combined, "external finality");
+        assertRealChaosForbiddenPhraseIsContextual(combined, "distributed ACID");
+        assertRealChaosForbiddenPhraseIsContextual(combined, "distributed lock");
+        assertRealChaosForbiddenPhraseIsContextual(combined, "exactly-once Kafka");
+        assertRealChaosForbiddenPhraseIsContextual(combined, "WORM");
+        assertRealChaosForbiddenPhraseIsContextual(combined, "legal notarization");
+        assertRealChaosForbiddenPhraseIsContextual(combined, "KMS/HSM");
+        assertRealChaosForbiddenPhraseIsContextual(combined, "automatic bank enablement");
+        assertRealChaosForbiddenPhraseIsContextual(combined, "alternate model enablement");
     }
 
     @Test
-    void fdp36ProofMatrixRowsMustMapToConcreteTestsAndCiJobs() throws Exception {
+    void realChaosProofMatrixRowsMustMapToConcreteTestsAndCiJobs() throws Exception {
         String matrix = Files.readString(Path.of("../docs/testing/fdp_36_real_chaos_proof.md"));
 
         assertThat(matrix).contains("Proof Level");
@@ -1609,7 +1605,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp36CiMustContainRequiredRealChaosJobAndArtifacts() throws Exception {
+    void realChaosCiMustContainRequiredJobAndArtifacts() throws Exception {
         String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
         String verifier = Files.readString(Path.of("../scripts/ci/verify-fdp36-artifacts.mjs"));
 
@@ -1633,7 +1629,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp37ProductionImageChaosMustStayOutsideRuntimeSource() throws Exception {
+    void productionImageChaosMustStayOutsideRuntimeSource() throws Exception {
         assertThat(Files.exists(Path.of("src/test/java/com/frauddetection/alert/regulated/chaos/RegulatedMutationProductionImageChaosHarness.java")))
                 .isTrue();
         assertThat(Files.exists(Path.of("src/main/java/com/frauddetection/alert/regulated/chaos/RegulatedMutationProductionImageChaosHarness.java")))
@@ -1681,7 +1677,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp37ExecutorsCoordinatorsAndPoliciesMustNotContainChaosCode() throws Exception {
+    void productionImageChaosMustNotLeakIntoExecutorsCoordinatorsOrPolicies() throws Exception {
         List<Path> protectedRuntimeFiles = List.of(
                 Path.of("src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"),
                 Path.of("src/main/java/com/frauddetection/alert/regulated/MongoRegulatedMutationCoordinator.java"),
@@ -1706,7 +1702,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp37LiveInFlightCheckpointSupportMustStayTestOnly() throws Exception {
+    void productionImageLiveInFlightCheckpointSupportMustStayTestOnly() throws Exception {
         List<Path> runtimeFiles;
         try (Stream<Path> stream = Files.walk(Path.of("src/main/java/com/frauddetection/alert"))) {
             runtimeFiles = stream.filter(path -> path.toString().endsWith(".java")).toList();
@@ -1722,7 +1718,7 @@ class RegulatedMutationArchitectureTest {
         }
 
         String fixture = Files.readString(Path.of(
-                "src/test/java/com/frauddetection/alert/regulated/chaos/Fdp36LiveInFlightMutationBlockerConfiguration.java"
+                "src/test/java/com/frauddetection/alert/regulated/chaos/LiveInFlightMutationBlockerConfiguration.java"
         ));
         String configParity = Files.readString(Path.of(
                 "src/test/java/com/frauddetection/alert/regulated/RegulatedMutationProductionImageConfigParityIT.java"
@@ -1737,8 +1733,8 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp38LiveRuntimeCheckpointSupportMustStayInTestFixtureOnly() throws Exception {
-        assertThat(Files.exists(Path.of("src/test/java/com/frauddetection/alert/regulated/chaos/Fdp38LiveRuntimeCheckpointBarrierConfiguration.java")))
+    void liveRuntimeCheckpointSupportMustStayInTestFixtureOnly() throws Exception {
+        assertThat(Files.exists(Path.of("src/test/java/com/frauddetection/alert/regulated/chaos/LiveRuntimeCheckpointBarrierConfiguration.java")))
                 .isTrue();
         assertThat(Files.exists(Path.of("../deployment/Dockerfile.alert-service-fdp38-fixture")))
                 .isTrue();
@@ -1754,7 +1750,7 @@ class RegulatedMutationArchitectureTest {
                     .as("FDP-38 checkpoint barrier must not leak into runtime source: " + path)
                     .doesNotContain("FDP38")
                     .doesNotContain("fdp38-live-runtime-checkpoint")
-                    .doesNotContain("Fdp38LiveRuntimeCheckpoint")
+                    .doesNotContain("LiveRuntimeCheckpoint")
                     .doesNotContain("ChaosBarrier")
                     .doesNotContain("LIVE_IN_FLIGHT_REQUEST_KILL")
                     .doesNotContain("RUNTIME_REACHED_TEST_FIXTURE");
@@ -1776,10 +1772,10 @@ class RegulatedMutationArchitectureTest {
         }
 
         String fixture = Files.readString(Path.of(
-                "src/test/java/com/frauddetection/alert/regulated/chaos/Fdp38LiveRuntimeCheckpointBarrierConfiguration.java"
+                "src/test/java/com/frauddetection/alert/regulated/chaos/LiveRuntimeCheckpointBarrierConfiguration.java"
         ));
         String dockerfile = Files.readString(Path.of("../deployment/Dockerfile.alert-service-fdp38-fixture"));
-        String fdp37ConfigParity = Files.readString(Path.of(
+        String productionImageConfigParity = Files.readString(Path.of(
                 "src/test/java/com/frauddetection/alert/regulated/RegulatedMutationProductionImageConfigParityIT.java"
         ));
 
@@ -1795,7 +1791,7 @@ class RegulatedMutationArchitectureTest {
                 .contains("target/test-classes")
                 .contains("AlertServiceApplication");
         assertThat(Files.readString(Path.of(
-                "src/test/java/com/frauddetection/alert/regulated/chaos/RegulatedMutationFdp38LiveCheckpointChaosHarness.java"
+                "src/test/java/com/frauddetection/alert/regulated/chaos/RegulatedMutationLiveCheckpointChaosHarness.java"
         )))
                 .contains("contains_test_classes")
                 .contains("contains_test_profiles")
@@ -1804,12 +1800,12 @@ class RegulatedMutationArchitectureTest {
                 .contains("false_success_evaluation")
                 .contains("failed_false_success_reasons")
                 .contains("precondition_setup");
-        assertThat(fdp37ConfigParity)
+        assertThat(productionImageConfigParity)
                 .contains("noneMatch(argument -> argument.contains(\"fdp38-live-runtime-checkpoint\"))");
     }
 
     @Test
-    void fdp38DocsMustNotOverclaimFixtureProof() throws Exception {
+    void liveRuntimeCheckpointDocsMustNotOverclaimFixtureProof() throws Exception {
         String adr = Files.readString(Path.of("../docs/adr/fdp_38_live_runtime_checkpoint_fixture_proof.md"));
         String mergeGate = Files.readString(Path.of("../docs/fdp/fdp_38_merge_gate.md"));
         String matrix = Files.readString(Path.of("../docs/testing/fdp_38_live_runtime_checkpoint_proof.md"));
@@ -1829,27 +1825,27 @@ class RegulatedMutationArchitectureTest {
         assertThat(combined).contains("production_deployable: false");
         assertThat(combined).contains("production_enablement: false");
         assertThat(combined).contains("LIVE_HTTP_FLOW_FROM_INITIAL_REQUEST");
-        assertThat(combined).contains("Every `Fdp38LiveRuntimeCheckpoint` enum value must be represented");
+        assertThat(combined).contains("Every `LiveRuntimeCheckpoint` enum value must be represented");
         assertThat(combined).contains("false_success_evaluation");
         assertThat(combined).contains("failed_false_success_reasons: []");
         assertThat(combined).contains("The release image does not contain checkpoint barrier support");
 
-        assertFdp38ForbiddenPhraseIsContextual(combined, "production certified");
-        assertFdp38ForbiddenPhraseIsContextual(combined, "bank certified");
-        assertFdp38ForbiddenPhraseIsContextual(combined, "final production image live checkpoint proof");
-        assertFdp38ForbiddenPhraseIsContextual(combined, "all crash windows killed live");
-        assertFdp38ForbiddenPhraseIsContextual(combined, "full instruction-boundary coverage");
-        assertFdp38ForbiddenPhraseIsContextual(combined, "production enablement");
-        assertFdp38ForbiddenPhraseIsContextual(combined, "external finality");
-        assertFdp38ForbiddenPhraseIsContextual(combined, "distributed ACID");
-        assertFdp38ForbiddenPhraseIsContextual(combined, "Kafka exactly-once");
-        assertFdp38ForbiddenPhraseIsContextual(combined, "legal notarization");
-        assertFdp38ForbiddenPhraseIsContextual(combined, "WORM guarantee");
-        assertFdp38ForbiddenPhraseIsContextual(combined, "production deployable");
+        assertLiveCheckpointForbiddenPhraseIsContextual(combined, "production certified");
+        assertLiveCheckpointForbiddenPhraseIsContextual(combined, "bank certified");
+        assertLiveCheckpointForbiddenPhraseIsContextual(combined, "final production image live checkpoint proof");
+        assertLiveCheckpointForbiddenPhraseIsContextual(combined, "all crash windows killed live");
+        assertLiveCheckpointForbiddenPhraseIsContextual(combined, "full instruction-boundary coverage");
+        assertLiveCheckpointForbiddenPhraseIsContextual(combined, "production enablement");
+        assertLiveCheckpointForbiddenPhraseIsContextual(combined, "external finality");
+        assertLiveCheckpointForbiddenPhraseIsContextual(combined, "distributed ACID");
+        assertLiveCheckpointForbiddenPhraseIsContextual(combined, "Kafka exactly-once");
+        assertLiveCheckpointForbiddenPhraseIsContextual(combined, "legal notarization");
+        assertLiveCheckpointForbiddenPhraseIsContextual(combined, "WORM guarantee");
+        assertLiveCheckpointForbiddenPhraseIsContextual(combined, "production deployable");
     }
 
     @Test
-    void fdp38CiMustRequireLiveCheckpointFixtureProof() throws Exception {
+    void liveRuntimeCheckpointCiMustRequireFixtureProof() throws Exception {
         String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
         String verifier = Files.readString(Path.of("../scripts/ci/verify-fdp38-artifacts.mjs"));
         String verifierHelpers = Files.readString(Path.of("../scripts/ci/artifact-verification-helpers.mjs"));
@@ -1884,15 +1880,15 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp38CheckpointRegistrationMustBeExplicitInDocsTestsAndCi() throws Exception {
+    void liveRuntimeCheckpointRegistrationMustBeExplicitInDocsTestsAndCi() throws Exception {
         String matrix = Files.readString(Path.of("../docs/testing/fdp_38_live_runtime_checkpoint_proof.md"));
         String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
         String verifier = Files.readString(Path.of("../scripts/ci/verify-fdp38-artifacts.mjs"));
         String harness = Files.readString(Path.of(
-                "src/test/java/com/frauddetection/alert/regulated/chaos/RegulatedMutationFdp38LiveCheckpointChaosHarness.java"
+                "src/test/java/com/frauddetection/alert/regulated/chaos/RegulatedMutationLiveCheckpointChaosHarness.java"
         ));
         String enumSource = Files.readString(Path.of(
-                "src/test/java/com/frauddetection/alert/regulated/chaos/Fdp38LiveRuntimeCheckpoint.java"
+                "src/test/java/com/frauddetection/alert/regulated/chaos/LiveRuntimeCheckpoint.java"
         ));
 
         assertThat(enumSource).contains("LIVE_HTTP_FLOW_FROM_INITIAL_REQUEST");
@@ -1907,7 +1903,7 @@ class RegulatedMutationArchitectureTest {
                 .contains("duplicate_outbox_absent")
                 .contains("duplicate_success_audit_absent");
 
-        for (Fdp38LiveRuntimeCheckpoint checkpoint : Fdp38LiveRuntimeCheckpoint.values()) {
+        for (LiveRuntimeCheckpoint checkpoint : LiveRuntimeCheckpoint.values()) {
             assertThat(matrix)
                     .as("FDP-38 proof matrix must register checkpoint " + checkpoint)
                     .contains(checkpoint.name());
@@ -1926,30 +1922,30 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp38FixtureDockerfileMustNotBeUsedByReleasePaths() throws Exception {
+    void liveRuntimeCheckpointFixtureDockerfileMustNotBeUsedByReleasePaths() throws Exception {
         String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
         String compose = Files.readString(Path.of("../deployment/docker-compose.yml"));
-        String fdp38Job = ci.substring(
+        String liveCheckpointJob = ci.substring(
                 ci.indexOf("fdp38-live-runtime-checkpoint-chaos:"),
                 ci.indexOf("\n  fdp39-release-governance:", ci.indexOf("fdp38-live-runtime-checkpoint-chaos:"))
         );
-        String fdp39Job = ci.substring(
+        String releaseGovernanceJob = ci.substring(
                 ci.indexOf("fdp39-release-governance:"),
                 ci.indexOf("\n  fdp40-release-controls:", ci.indexOf("fdp39-release-governance:"))
         );
-        String ciOutsideFdp38AndFdp39 = ci.replace(fdp38Job, "").replace(fdp39Job, "");
+        String ciOutsideFixtureJobs = ci.replace(liveCheckpointJob, "").replace(releaseGovernanceJob, "");
 
         assertThat(compose).doesNotContain("Dockerfile.alert-service-fdp38-fixture");
-        assertThat(ciOutsideFdp38AndFdp39).doesNotContain("Dockerfile.alert-service-fdp38-fixture");
-        assertThat(fdp38Job).contains("Dockerfile.alert-service-fdp38-fixture");
-        assertThat(fdp39Job).contains("Dockerfile.alert-service-fdp38-fixture");
+        assertThat(ciOutsideFixtureJobs).doesNotContain("Dockerfile.alert-service-fdp38-fixture");
+        assertThat(liveCheckpointJob).contains("Dockerfile.alert-service-fdp38-fixture");
+        assertThat(releaseGovernanceJob).contains("Dockerfile.alert-service-fdp38-fixture");
         assertThat(ci).contains(
                 "docker build -f deployment/Dockerfile.backend --build-arg MODULE_NAME=alert-service -t fdp37-alert-service"
         );
     }
 
     @Test
-    void fdp37DocsMustDescribeProductionImageChaosWithoutEnablementOverclaims() throws Exception {
+    void productionImageChaosDocsMustAvoidEnablementOverclaims() throws Exception {
         String adr = Files.readString(Path.of("../docs/adr/fdp_37_production_image_chaos_enable_gate.md"));
         String mergeGate = Files.readString(Path.of("../docs/fdp/fdp_37_merge_gate.md"));
         String checklist = Files.readString(Path.of("../docs/fdp/fdp_37_enablement_decision_checklist.md"));
@@ -1985,16 +1981,16 @@ class RegulatedMutationArchitectureTest {
         assertThat(combined).doesNotContain("network_mode: host");
         assertThat(combined).doesNotContain("Linux CI host networking");
         assertThat(combined).doesNotContain("PRODUCTION_ENABLED");
-        assertFdp36ForbiddenPhraseIsContextual(combined, "production enablement");
-        assertFdp36ForbiddenPhraseIsContextual(combined, "bank certification");
-        assertFdp36ForbiddenPhraseIsContextual(combined, "external finality");
-        assertFdp36ForbiddenPhraseIsContextual(combined, "distributed ACID");
-        assertFdp36ForbiddenPhraseIsContextual(combined, "distributed lock");
-        assertFdp36ForbiddenPhraseIsContextual(combined, "Kafka exactly-once");
+        assertRealChaosForbiddenPhraseIsContextual(combined, "production enablement");
+        assertRealChaosForbiddenPhraseIsContextual(combined, "bank certification");
+        assertRealChaosForbiddenPhraseIsContextual(combined, "external finality");
+        assertRealChaosForbiddenPhraseIsContextual(combined, "distributed ACID");
+        assertRealChaosForbiddenPhraseIsContextual(combined, "distributed lock");
+        assertRealChaosForbiddenPhraseIsContextual(combined, "Kafka exactly-once");
     }
 
     @Test
-    void fdp37ProofMatrixRowsMustMapToConcreteTestsAndCiJobs() throws Exception {
+    void productionImageChaosProofMatrixRowsMustMapToConcreteTestsAndCiJobs() throws Exception {
         String matrix = Files.readString(Path.of("../docs/testing/fdp_37_production_image_chaos_proof.md"));
 
         assertThat(matrix).contains("Scenario | Crash window | State reach method | Killed target | Proof level | Post-restart verification | Invariants checked | Test class/method");
@@ -2012,7 +2008,7 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void fdp37CiMustContainRequiredProductionImageChaosJobAndArtifacts() throws Exception {
+    void productionImageChaosCiMustContainRequiredJobAndArtifacts() throws Exception {
         String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
         String verifier = Files.readString(Path.of("../scripts/ci/verify-fdp37-artifacts.mjs"));
         String verifierHelpers = Files.readString(Path.of("../scripts/ci/artifact-verification-helpers.mjs"));
@@ -2064,7 +2060,7 @@ class RegulatedMutationArchitectureTest {
             int end = Math.min(lowerSource.length(), index + lowerPhrase.length() + 220);
             String context = lowerSource.substring(start, end);
             assertThat(context)
-                    .as("Forbidden FDP-26 wording must be negated, limited, or future-contextual: " + phrase)
+                    .as("Forbidden overclaim wording must be negated, limited, or future-contextual: " + phrase)
                     .containsAnyOf(
                             "does not",
                             "do not",
@@ -2085,7 +2081,7 @@ class RegulatedMutationArchitectureTest {
         }
     }
 
-    private void assertFdp36ForbiddenPhraseIsContextual(String source, String phrase) {
+    private void assertRealChaosForbiddenPhraseIsContextual(String source, String phrase) {
         String lowerSource = source.toLowerCase(java.util.Locale.ROOT);
         String lowerPhrase = phrase.toLowerCase(java.util.Locale.ROOT);
         int index = lowerSource.indexOf(lowerPhrase);
@@ -2113,7 +2109,7 @@ class RegulatedMutationArchitectureTest {
         }
     }
 
-    private void assertFdp38ForbiddenPhraseIsContextual(String source, String phrase) {
+    private void assertLiveCheckpointForbiddenPhraseIsContextual(String source, String phrase) {
         String lowerSource = source.toLowerCase(java.util.Locale.ROOT);
         String lowerPhrase = phrase.toLowerCase(java.util.Locale.ROOT);
         int index = lowerSource.indexOf(lowerPhrase);

@@ -58,6 +58,9 @@ public class RegulatedMutationLeaseRenewalService {
                 claimToken.commandId(),
                 RegulatedMutationCommandDocument.class
         );
+        if (current != null) {
+            current.requireRevision();
+        }
         RegulatedMutationLeaseRenewalDecision decision = policy.evaluate(
                 claimToken,
                 current,
@@ -73,6 +76,7 @@ public class RegulatedMutationLeaseRenewalService {
         }
 
         Instant budgetStartedAt = policy.budgetStartedAt(claimToken, current, now);
+        long resultingRevision = current.nextRevision();
         Query query = renewalQuery(claimToken, current, now);
         Update update = new Update()
                 .set("lease_expires_at", decision.newLeaseExpiresAt())
@@ -80,7 +84,8 @@ public class RegulatedMutationLeaseRenewalService {
                 .set("last_lease_renewed_at", now)
                 .set("lease_budget_started_at", budgetStartedAt)
                 .set("updated_at", now)
-                .inc("lease_renewal_count", 1);
+                .inc("lease_renewal_count", 1)
+                .inc("revision", 1);
         UpdateResult result = mongoTemplate.updateFirst(query, update, RegulatedMutationCommandDocument.class);
         if (result.getMatchedCount() == 0) {
             RegulatedMutationCommandDocument afterRace = mongoTemplate.findById(
@@ -101,7 +106,7 @@ public class RegulatedMutationLeaseRenewalService {
         }
 
         recordSuccess(claimToken, current, decision);
-        return decision;
+        return decision.withResultingRevision(resultingRevision);
     }
 
     private boolean sameOwnerRenewalAlreadyAdvancedFromClaim(
@@ -190,6 +195,7 @@ public class RegulatedMutationLeaseRenewalService {
                 Criteria.where("lease_expires_at").gt(now),
                 Criteria.where("execution_status").is(RegulatedMutationExecutionStatus.PROCESSING),
                 Criteria.where("state").is(current.getState()),
+                Criteria.where("revision").is(current.requireRevision()),
                 mutationModelCriteria(claimToken.mutationModelVersion()),
                 renewalCountWithinBudget
         ));

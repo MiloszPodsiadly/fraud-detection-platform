@@ -35,6 +35,7 @@ public class RegulatedMutationFencedCommandWriter {
             "attempt_count",
             "created_at",
             "mutation_model_version",
+            "revision",
             "resource_id",
             "action",
             "resource_type"
@@ -55,10 +56,11 @@ public class RegulatedMutationFencedCommandWriter {
         this.clock = clock == null ? Clock.systemUTC() : clock;
     }
 
-    public void transition(
+    public long transition(
             RegulatedMutationClaimToken claimToken,
             RegulatedMutationState expectedState,
             RegulatedMutationExecutionStatus expectedExecutionStatus,
+            long expectedRevision,
             RegulatedMutationState newState,
             RegulatedMutationExecutionStatus newExecutionStatus,
             String lastError,
@@ -67,15 +69,17 @@ public class RegulatedMutationFencedCommandWriter {
         if (claimToken == null) {
             throw new IllegalArgumentException("Regulated mutation fenced transition requires claim token.");
         }
+        long resultingRevision = Math.incrementExact(expectedRevision);
         Instant now = clock.instant();
         Instant startedAt = now;
-        Query query = activeLeaseQuery(claimToken, expectedState, expectedExecutionStatus, now);
+        Query query = activeLeaseQuery(claimToken, expectedState, expectedExecutionStatus, expectedRevision, now);
         Update update = new Update()
                 .set("state", newState)
                 .set("execution_status", newExecutionStatus)
                 .set("updated_at", now)
                 .set("last_heartbeat_at", now)
-                .set("last_error", lastError);
+                .set("last_error", lastError)
+                .inc("revision", 1);
         if (newExecutionStatus != RegulatedMutationExecutionStatus.PROCESSING) {
             update.set("lease_owner", null);
             update.set("lease_expires_at", null);
@@ -92,6 +96,7 @@ public class RegulatedMutationFencedCommandWriter {
                     claimToken,
                     expectedState,
                     expectedExecutionStatus,
+                    expectedRevision,
                     now
             );
             metrics.recordRegulatedMutationFencedTransition(
@@ -141,19 +146,21 @@ public class RegulatedMutationFencedCommandWriter {
                 Duration.between(startedAt, clock.instant())
         );
         recordLeaseBudgetWarningIfNeeded(claimToken, expectedState, now);
+        return resultingRevision;
     }
 
     public void validateActiveLease(
             RegulatedMutationClaimToken claimToken,
             RegulatedMutationState expectedState,
-            RegulatedMutationExecutionStatus expectedExecutionStatus
+            RegulatedMutationExecutionStatus expectedExecutionStatus,
+            long expectedRevision
     ) {
         if (claimToken == null) {
             throw new IllegalArgumentException("Regulated mutation lease validation requires claim token.");
         }
         Instant now = clock.instant();
         long matches = mongoTemplate.count(
-                activeLeaseQuery(claimToken, expectedState, expectedExecutionStatus, now),
+                activeLeaseQuery(claimToken, expectedState, expectedExecutionStatus, expectedRevision, now),
                 RegulatedMutationCommandDocument.class
         );
         if (matches == 0) {
@@ -161,6 +168,7 @@ public class RegulatedMutationFencedCommandWriter {
                     claimToken,
                     expectedState,
                     expectedExecutionStatus,
+                    expectedRevision,
                     now
             );
             metrics.recordRegulatedMutationStaleWriteRejected(
@@ -182,9 +190,9 @@ public class RegulatedMutationFencedCommandWriter {
     /**
      * Only for non-claimed replay/recovery repair paths. Claimed worker transitions must use
      * {@link #transition(RegulatedMutationClaimToken, RegulatedMutationState, RegulatedMutationExecutionStatus,
-     * RegulatedMutationState, RegulatedMutationExecutionStatus, String, Consumer)}.
+     * long, RegulatedMutationState, RegulatedMutationExecutionStatus, String, Consumer)}.
      */
-    public void recoveryTransition(
+    public long recoveryTransition(
             RegulatedMutationCommandDocument document,
             RegulatedMutationState newState,
             RegulatedMutationExecutionStatus newExecutionStatus,
@@ -194,6 +202,8 @@ public class RegulatedMutationFencedCommandWriter {
         if (document == null || document.getId() == null || document.getId().isBlank()) {
             throw new IllegalArgumentException("Regulated mutation recovery transition requires persisted command document.");
         }
+        long expectedRevision = document.requireRevision();
+        long resultingRevision = document.nextRevision();
         Instant now = clock.instant();
         Query query = recoveryQuery(document, now);
         Update update = new Update()
@@ -201,7 +211,8 @@ public class RegulatedMutationFencedCommandWriter {
                 .set("execution_status", newExecutionStatus)
                 .set("updated_at", now)
                 .set("last_heartbeat_at", now)
-                .set("last_error", lastError);
+                .set("last_error", lastError)
+                .inc("revision", 1);
         if (newExecutionStatus != RegulatedMutationExecutionStatus.PROCESSING) {
             update.set("lease_owner", null);
             update.set("lease_expires_at", null);
@@ -226,6 +237,7 @@ public class RegulatedMutationFencedCommandWriter {
             );
             throw new RegulatedMutationRecoveryWriteConflictException(document.getId());
         }
+        return resultingRevision;
     }
 
     private void recordLeaseBudgetWarningIfNeeded(
@@ -295,6 +307,7 @@ public class RegulatedMutationFencedCommandWriter {
             RegulatedMutationClaimToken claimToken,
             RegulatedMutationState expectedState,
             RegulatedMutationExecutionStatus expectedExecutionStatus,
+            long expectedRevision,
             Instant now
     ) {
         return new Query(new Criteria().andOperator(
@@ -303,6 +316,7 @@ public class RegulatedMutationFencedCommandWriter {
                 Criteria.where("lease_expires_at").gt(now),
                 Criteria.where("state").is(expectedState),
                 Criteria.where("execution_status").is(expectedExecutionStatus),
+                Criteria.where("revision").is(expectedRevision),
                 mutationModelCriteria(claimToken.mutationModelVersion())
         ));
     }
@@ -325,6 +339,7 @@ public class RegulatedMutationFencedCommandWriter {
                 Criteria.where("_id").is(document.getId()),
                 Criteria.where("state").is(document.getState()),
                 Criteria.where("execution_status").is(document.getExecutionStatus()),
+                Criteria.where("revision").is(document.requireRevision()),
                 leaseOwnerFence,
                 mutationModelCriteria(requireCurrentModel(document)),
                 nonClaimedRecoveryCondition
@@ -334,6 +349,7 @@ public class RegulatedMutationFencedCommandWriter {
                 Criteria.where("state").is(document.getState()),
                 Criteria.where("execution_status").is(document.getExecutionStatus()),
                 Criteria.where("public_status").is(document.getPublicStatus()),
+                Criteria.where("revision").is(document.requireRevision()),
                 leaseOwnerFence,
                 mutationModelCriteria(requireCurrentModel(document)),
                 nonClaimedRecoveryCondition
@@ -359,6 +375,7 @@ public class RegulatedMutationFencedCommandWriter {
             RegulatedMutationClaimToken claimToken,
             RegulatedMutationState expectedState,
             RegulatedMutationExecutionStatus expectedExecutionStatus,
+            long expectedRevision,
             Instant now
     ) {
         RegulatedMutationCommandDocument current = mongoTemplate.findById(
@@ -379,6 +396,9 @@ public class RegulatedMutationFencedCommandWriter {
         }
         if (current.getExecutionStatus() != expectedExecutionStatus) {
             return StaleRegulatedMutationLeaseReason.EXPECTED_STATUS_MISMATCH;
+        }
+        if (current.getRevision() == null || current.getRevision() != expectedRevision) {
+            return StaleRegulatedMutationLeaseReason.REVISION_MISMATCH;
         }
         return StaleRegulatedMutationLeaseReason.UNKNOWN;
     }

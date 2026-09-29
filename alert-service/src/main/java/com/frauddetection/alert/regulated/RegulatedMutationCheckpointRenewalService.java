@@ -117,7 +117,11 @@ public class RegulatedMutationCheckpointRenewalService {
 
         try {
             RegulatedMutationLeaseRenewalDecision renewal = leaseRenewalService.renew(claimToken, requestedExtension);
+            if (renewal.resultingRevision() == null) {
+                throw new IllegalStateException("Successful lease renewal requires resulting command revision.");
+            }
             document.setLeaseExpiresAt(renewal.newLeaseExpiresAt());
+            document.setRevision(renewal.resultingRevision());
             recordRenewed(modelVersion, checkpoint, startedAt);
             return RegulatedMutationCheckpointRenewalDecision.renewed(checkpoint, renewal.newLeaseExpiresAt());
         } catch (RegulatedMutationLeaseRenewalBudgetExceededException exception) {

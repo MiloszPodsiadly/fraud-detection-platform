@@ -299,7 +299,7 @@ public class AuditTrustAttestationService {
         limitations.add("not_worm_storage");
         limitations.add("not_siem_integration");
         limitations.add("not_kms_hsm_signing_unless_explicitly_integrated");
-        limitations.add("derived_from_fdp19_fdp20_source_of_truth");
+        limitations.add("derived_from_audit_integrity_and_external_anchor_state");
         if (!"VALID".equals(internal.status())) {
             limitations.add("internal_integrity_not_valid");
         }

@@ -31,7 +31,7 @@ class RegulatedMutationProductionImageChaosIT extends AbstractRegulatedMutationP
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 command -> {
-                    command.setLeaseOwner("owner-fdp37-claim-window");
+                    command.setLeaseOwner("owner-production-image-claim-window");
                     command.setLeaseExpiresAt(Instant.now().plusSeconds(30));
                 }
         );
@@ -56,8 +56,8 @@ class RegulatedMutationProductionImageChaosIT extends AbstractRegulatedMutationP
                 RegulatedMutationExecutionStatus.PROCESSING,
                 command -> {
                     command.setAttemptedAuditRecorded(true);
-                    command.setAttemptedAuditId(insertAudit(command.getResourceId(), AuditOutcome.ATTEMPTED, "attempted-" + command.getId()));
-                    command.setLeaseOwner("owner-fdp37-attempted-window");
+                    command.setAttemptedAuditId(insertAudit(command, AuditOutcome.ATTEMPTED, "attempted-" + command.getId()));
+                    command.setLeaseOwner("owner-production-image-attempted-window");
                     command.setLeaseExpiresAt(Instant.now().plusSeconds(30));
                 }
         );
@@ -82,8 +82,8 @@ class RegulatedMutationProductionImageChaosIT extends AbstractRegulatedMutationP
                 RegulatedMutationExecutionStatus.PROCESSING,
                 command -> {
                     command.setAttemptedAuditRecorded(true);
-                    command.setAttemptedAuditId(insertAudit(command.getResourceId(), AuditOutcome.ATTEMPTED, "attempted-" + command.getId()));
-                    command.setLeaseOwner("owner-fdp37-business-window");
+                    command.setAttemptedAuditId(insertAudit(command, AuditOutcome.ATTEMPTED, "attempted-" + command.getId()));
+                    command.setLeaseOwner("owner-production-image-business-window");
                     command.setLeaseExpiresAt(Instant.now().minusSeconds(5));
                     command.setUpdatedAt(staleForRecovery());
                 }
@@ -105,8 +105,9 @@ class RegulatedMutationProductionImageChaosIT extends AbstractRegulatedMutationP
 
         assertProductionImageRestarted(beforeRecovery);
         assertThat(recovery.path("recovery_required").asLong()).isEqualTo(1);
-        assertThat(afterRecovery.commandState()).isEqualTo(RegulatedMutationState.FINALIZING);
+        assertThat(afterRecovery.commandState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
         assertThat(afterRecovery.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
+        assertThat(afterRecovery.publicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED);
         assertThat(afterRecovery.responseSnapshotPresent()).isFalse();
         assertThat(afterRecovery.outboxRecords()).isZero();
         assertThat(afterRecovery.successAuditEvents()).isZero();
@@ -116,15 +117,19 @@ class RegulatedMutationProductionImageChaosIT extends AbstractRegulatedMutationP
     @Test
     void productionImageKillInFinalizeRecoveryDoesNotRepeatBusinessMutation() {
         RegulatedMutationChaosScenario scenario = scenario(
-                "finalize-recovery-required",
-                RegulatedMutationChaosWindow.FINALIZE_RECOVERY_REQUIRED,
-                RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
+                "finalized-visible-local-commit",
+                RegulatedMutationChaosWindow.FINALIZED_VISIBLE_LOCAL_COMMIT,
+                RegulatedMutationState.FINALIZED_VISIBLE,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 command -> {
                     mutateAlert(command.getResourceId());
                     command.setResponseSnapshot(snapshot(command.getResourceId(), SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL));
                     command.setOutboxEventId("event-" + command.getResourceId());
-                    command.setLeaseOwner("owner-fdp37-success-audit-window");
+                    command.setLocalCommitMarker(RegulatedMutationDurableLocalFinalizationProof.LOCAL_COMMIT_MARKER);
+                    command.setLocalCommittedAt(Instant.now());
+                    command.setSuccessAuditRecorded(true);
+                    command.setSuccessAuditId(insertAudit(command, AuditOutcome.SUCCESS, "success-" + command.getId()));
+                    command.setLeaseOwner("owner-production-image-success-audit-window");
                     command.setLeaseExpiresAt(Instant.now().minusSeconds(5));
                     command.setUpdatedAt(staleForRecovery());
                     mongoTemplate.save(outboxRecord(command.getResourceId(), command.getId()));
@@ -165,7 +170,7 @@ class RegulatedMutationProductionImageChaosIT extends AbstractRegulatedMutationP
                 RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                 command -> {
                     command.setPublicStatus(SubmitDecisionOperationStatus.FINALIZING);
-                    command.setLeaseOwner("owner-fdp37-finalizing-window");
+                    command.setLeaseOwner("owner-production-image-finalizing-window");
                     command.setLeaseExpiresAt(Instant.now().minusSeconds(5));
                     command.setUpdatedAt(staleForRecovery());
                 }
@@ -187,9 +192,9 @@ class RegulatedMutationProductionImageChaosIT extends AbstractRegulatedMutationP
 
         assertProductionImageRestarted(beforeRecovery);
         assertThat(recovery.path("recovery_required").asLong()).isEqualTo(1);
-        assertThat(afterRecovery.commandState()).isEqualTo(RegulatedMutationState.FINALIZING);
+        assertThat(afterRecovery.commandState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
         assertThat(afterRecovery.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
-        assertThat(afterRecovery.publicStatus()).isNotEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED);
+        assertThat(afterRecovery.publicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED);
         assertThat(afterRecovery.outboxRecords()).isZero();
         assertThat(afterRecovery.successAuditEvents()).isZero();
     }
@@ -210,7 +215,7 @@ class RegulatedMutationProductionImageChaosIT extends AbstractRegulatedMutationP
                     command.setLocalCommitMarker("EVIDENCE_GATED_FINALIZED");
                     command.setLocalCommittedAt(Instant.now());
                     command.setSuccessAuditRecorded(true);
-                    command.setSuccessAuditId(insertAudit(command.getResourceId(), AuditOutcome.SUCCESS, "success-" + command.getId()));
+                    command.setSuccessAuditId(insertAudit(command, AuditOutcome.SUCCESS, "success-" + command.getId()));
                     mongoTemplate.save(outboxRecord(command.getResourceId(), command.getId()));
                 }
         );

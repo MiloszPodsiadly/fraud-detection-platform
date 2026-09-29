@@ -273,7 +273,8 @@ class SubmitDecisionRegulatedMutationServiceTest {
                 "mutation-1"
         ))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("TransactionalOutboxRecordRepository is required");
+                .hasMessageContaining("Transactional outbox repository is required")
+                .hasMessageContaining("regulated mutation decision outbox writes");
     }
 
     @Test
@@ -450,6 +451,7 @@ class SubmitDecisionRegulatedMutationServiceTest {
             existing.setCorrelationId("corr-1");
             existing.setIntentActorId("principal-7");
             existing.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+            existing.setRevision(0L);
             existing.setState(state);
             existing.setUpdatedAt(Instant.now().minusSeconds(60));
             return existing;

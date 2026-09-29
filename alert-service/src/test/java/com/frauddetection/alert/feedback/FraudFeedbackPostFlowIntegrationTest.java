@@ -29,6 +29,7 @@ import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
@@ -325,6 +326,8 @@ class FraudFeedbackPostFlowIntegrationTest {
                 1,
                 Instant.parse("2026-06-25T09:00:03Z"),
                 new EngineIntelligenceComparisonReadModel(
+                        EngineIntelligenceComparisonType.RULES_VS_ML,
+                        List.of("rules.primary", "ml.python.primary"),
                         EngineIntelligenceAgreementStatus.PARTIAL,
                         EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                         EngineIntelligenceScoreDeltaBucket.UNAVAILABLE

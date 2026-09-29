@@ -34,7 +34,7 @@ class FeedbackDatasetEligibilityPolicyTest {
     }
 
     @Test
-    void trainingExportIsFalseForAllFdp122Labels() {
+    void trainingExportIsFalseForAllFeedbackLabels() {
         assertThat(Arrays.stream(FraudFeedbackLabel.values())
                 .allMatch(label -> !policy.eligibleForTrainingExport(label)))
                 .isTrue();

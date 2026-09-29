@@ -114,7 +114,12 @@ class ConcurrentIdempotencyIntegrationTest extends AbstractIntegrationTest {
             var first = executor.submit(() -> commitAfterStart(coordinator, command, start));
             var second = executor.submit(() -> commitAfterStart(coordinator, command, start));
             start.countDown();
-            assertThat(mutationEntered.await(5, TimeUnit.SECONDS)).isTrue();
+            if (!mutationEntered.await(5, TimeUnit.SECONDS)) {
+                releaseMutation.countDown();
+                first.get(5, TimeUnit.SECONDS);
+                second.get(5, TimeUnit.SECONDS);
+                throw new AssertionError("Concurrent regulated mutation workers completed without entering the mutation.");
+            }
             Thread.sleep(50L);
             releaseMutation.countDown();
             results = List.of(first.get(5, TimeUnit.SECONDS), second.get(5, TimeUnit.SECONDS));
@@ -229,6 +234,10 @@ class ConcurrentIdempotencyIntegrationTest extends AbstractIntegrationTest {
             Query query = Query.query(Criteria.where("idempotency_key").is(idempotencyKey));
             return Optional.ofNullable(mongoTemplate.findOne(query, RegulatedMutationCommandDocument.class));
         });
+        when(repository.findById(any())).thenAnswer(invocation -> Optional.ofNullable(mongoTemplate.findById(
+                invocation.<String>getArgument(0),
+                RegulatedMutationCommandDocument.class
+        )));
         when(repository.save(any(RegulatedMutationCommandDocument.class))).thenAnswer(invocation -> mongoTemplate.save(invocation.getArgument(0)));
         return repository;
     }

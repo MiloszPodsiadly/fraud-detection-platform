@@ -14,6 +14,7 @@ import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
+import com.mongodb.client.result.UpdateResult;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.junit.jupiter.api.Test;
 
@@ -22,7 +23,9 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -41,6 +44,7 @@ class MutationEvidenceConfirmationServiceTest {
                 outboxRepository,
                 metrics,
                 mock(RegulatedMutationFencedCommandWriter.class),
+                acceptedProof(),
                 false,
                 false
         );
@@ -62,6 +66,7 @@ class MutationEvidenceConfirmationServiceTest {
                 outboxRepository,
                 metrics,
                 mock(RegulatedMutationFencedCommandWriter.class),
+                acceptedProof(),
                 false,
                 false
         );
@@ -86,6 +91,7 @@ class MutationEvidenceConfirmationServiceTest {
                 outboxRepository,
                 metrics,
                 mock(RegulatedMutationFencedCommandWriter.class),
+                proofReturning(DurableLocalFinalizationProofResult.invalid("SUCCESS_AUDIT_MISSING")),
                 false,
                 false
         );
@@ -112,6 +118,7 @@ class MutationEvidenceConfirmationServiceTest {
                 outboxRepository,
                 metrics,
                 mock(RegulatedMutationFencedCommandWriter.class),
+                acceptedProof(),
                 false,
                 false
         );
@@ -136,6 +143,7 @@ class MutationEvidenceConfirmationServiceTest {
                 outboxRepository,
                 metrics,
                 mock(RegulatedMutationFencedCommandWriter.class),
+                acceptedProof(),
                 false,
                 false
         );
@@ -162,6 +170,7 @@ class MutationEvidenceConfirmationServiceTest {
                 outboxRepository,
                 metrics,
                 mock(RegulatedMutationFencedCommandWriter.class),
+                acceptedProof(),
                 false,
                 false
         );
@@ -182,7 +191,7 @@ class MutationEvidenceConfirmationServiceTest {
     }
 
     @Test
-    void shouldMapEvidenceGatedMissingOutboxAfterLocalCommitToFinalizeRecoveryRequired() {
+    void shouldMapMissingRequiredOutboxProofToFinalizeRecoveryRequired() {
         RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
         TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
@@ -191,6 +200,7 @@ class MutationEvidenceConfirmationServiceTest {
                 outboxRepository,
                 metrics,
                 mock(RegulatedMutationFencedCommandWriter.class),
+                proofReturning(DurableLocalFinalizationProofResult.invalid("TRANSACTIONAL_OUTBOX_PROOF_MISSING")),
                 false,
                 false
         );
@@ -206,8 +216,8 @@ class MutationEvidenceConfirmationServiceTest {
         assertThat(promoted).isZero();
         assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
         assertThat(command.getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED);
-        assertThat(command.getDegradationReason()).isEqualTo("OUTBOX_RECORD_MISSING_AFTER_LOCAL_COMMIT");
-        verify(metrics).recordEvidenceGatedFinalizeRecoveryRequired("OUTBOX_RECORD_MISSING_AFTER_LOCAL_COMMIT");
+        assertThat(command.getDegradationReason()).isEqualTo("TRANSACTIONAL_OUTBOX_PROOF_MISSING");
+        verify(metrics).recordEvidenceGatedFinalizeRecoveryRequired("TRANSACTIONAL_OUTBOX_PROOF_MISSING");
     }
 
     @Test
@@ -220,6 +230,7 @@ class MutationEvidenceConfirmationServiceTest {
                 outboxRepository,
                 metrics,
                 mock(RegulatedMutationFencedCommandWriter.class),
+                acceptedProof(),
                 false,
                 false
         );
@@ -263,6 +274,7 @@ class MutationEvidenceConfirmationServiceTest {
                 outboxRepository,
                 metrics,
                 mock(RegulatedMutationFencedCommandWriter.class),
+                acceptedProof(),
                 false,
                 false
         );
@@ -293,6 +305,7 @@ class MutationEvidenceConfirmationServiceTest {
                 outboxRepository,
                 metrics,
                 fencedWriter,
+                acceptedProof(),
                 false,
                 false
         );
@@ -404,15 +417,39 @@ class MutationEvidenceConfirmationServiceTest {
         verify(fixture.metrics).recordEvidenceGatedFinalizeRecoveryRequired("SIGNATURE_INVALID");
     }
 
+    @Test
+    void shouldFailClosedWhenAlertStatusProjectionTargetDoesNotMatch() {
+        Fixture fixture = new Fixture(false, false);
+        RegulatedMutationCommandDocument command = committedCommand();
+        when(fixture.mongoTemplate.updateFirst(any(), any(), eq(com.frauddetection.alert.persistence.AlertDocument.class)))
+                .thenReturn(UpdateResult.acknowledged(0, 0L, null));
+        when(fixture.mongoTemplate.findById("alert-1", com.frauddetection.alert.persistence.AlertDocument.class))
+                .thenReturn(null);
+
+        assertThatThrownBy(() -> fixture.service.updateAlertOperationStatus(
+                command,
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED
+        )).isInstanceOf(RegulatedMutationAlertProjectionException.class);
+
+        verify(fixture.metrics).recordRegulatedMutationAlertStatusProjection(
+                "FAILED",
+                "TARGET_NOT_FOUND_OR_MISMATCH"
+        );
+    }
+
     private RegulatedMutationCommandDocument committedCommand() {
         RegulatedMutationCommandDocument command = new RegulatedMutationCommandDocument();
         command.setId("command-1");
+        command.setIdempotencyKey("idem-1");
+        command.setActorId("principal-7");
+        command.setCorrelationId("corr-1");
         command.setResourceId("alert-1");
         command.setResourceType(AuditResourceType.ALERT.name());
         command.setAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
         command.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        command.setRevision(0L);
         command.setState(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
-        command.setLocalCommitMarker("LOCAL_COMMITTED");
+        command.setLocalCommitMarker(RegulatedMutationDurableLocalFinalizationProof.LOCAL_COMMIT_MARKER);
         command.setLocalCommittedAt(Instant.parse("2026-05-02T10:00:00Z"));
         command.setSuccessAuditRecorded(true);
         command.setSuccessAuditId("audit-success-1");
@@ -467,9 +504,12 @@ class MutationEvidenceConfirmationServiceTest {
         private final AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
         private final RegulatedMutationFencedCommandWriter fencedCommandWriter =
                 mock(RegulatedMutationFencedCommandWriter.class);
+        private final RegulatedMutationDurableLocalFinalizationProof durableProof = acceptedProof();
         private final MutationEvidenceConfirmationService service;
 
         private Fixture(boolean externalAnchorRequired, boolean signatureRequired) {
+            when(mongoTemplate.updateFirst(any(), any(), eq(com.frauddetection.alert.persistence.AlertDocument.class)))
+                    .thenReturn(UpdateResult.acknowledged(1, 1L, null));
             this.service = new MutationEvidenceConfirmationService(
                     commandRepository,
                     outboxRepository,
@@ -478,6 +518,7 @@ class MutationEvidenceConfirmationServiceTest {
                     mongoTemplate,
                     metrics,
                     fencedCommandWriter,
+                    durableProof,
                     externalAnchorRequired,
                     signatureRequired
             );
@@ -497,5 +538,18 @@ class MutationEvidenceConfirmationServiceTest {
             when(publicationStatusLookup.evidenceStatusesByAuditEventId(List.of(auditEvent)))
                     .thenReturn(java.util.Map.of("audit-success-1", status));
         }
+    }
+
+    private static RegulatedMutationDurableLocalFinalizationProof acceptedProof() {
+        return proofReturning(DurableLocalFinalizationProofResult.accepted());
+    }
+
+    private static RegulatedMutationDurableLocalFinalizationProof proofReturning(
+            DurableLocalFinalizationProofResult result
+    ) {
+        RegulatedMutationDurableLocalFinalizationProof proof =
+                mock(RegulatedMutationDurableLocalFinalizationProof.class);
+        when(proof.verify(any())).thenReturn(result);
+        return proof;
     }
 }

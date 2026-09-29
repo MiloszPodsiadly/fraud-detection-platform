@@ -67,6 +67,7 @@ class RegulatedMutationConflictPolicyTest {
         document.setResourceType(AuditResourceType.ALERT.name());
         document.setAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
         document.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        document.setRevision(0L);
         return document;
     }
 

@@ -125,7 +125,9 @@ class ExternalAuditAnchorSinkConfiguration {
             );
         }
         if ("external-object-store".equals(sink)) {
-            throw new IllegalStateException("Use app.audit.external-anchoring.sink=object-store for FDP-22 object-store anchoring.");
+            throw new IllegalStateException(
+                    "Use app.audit.external-anchoring.sink=object-store for object-store audit anchoring."
+            );
         }
         if (strictPublication) {
             throw new IllegalStateException("External anchoring is enabled but no verified external witness publisher is configured.");

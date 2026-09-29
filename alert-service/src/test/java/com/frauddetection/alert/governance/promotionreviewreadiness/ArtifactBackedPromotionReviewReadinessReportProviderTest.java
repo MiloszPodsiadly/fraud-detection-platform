@@ -43,7 +43,7 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
     }
 
     @Test
-    void realFdp111GeneratedReportFixtureCanBeReadByProvider() throws Exception {
+    void realGeneratedReportFixtureCanBeReadByProvider() throws Exception {
         Path artifact = copyFixture();
 
         Optional<PromotionReviewReadinessReport> result = provider(artifact).currentReport();
@@ -302,7 +302,7 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
     }
 
     @Test
-    void acceptsValidFdp111ReportWithRecordsEvaluatedAbove500() throws Exception {
+    void acceptsValidReportWithRecordsEvaluatedAbove500() throws Exception {
         JsonNode root = objectMapper.readTree(validReportJson());
         ((ObjectNode) root.get("inputs")).put("recordsEvaluated", 501);
         ((ObjectNode) root.get("checkInputs")).put("recordsEvaluated", 501);
@@ -315,7 +315,7 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
     }
 
     @Test
-    void acceptsValidFdp111ReportWithMinimumDiagnosticEvidenceRecordsAbove500() throws Exception {
+    void acceptsValidReportWithMinimumDiagnosticEvidenceRecordsAbove500() throws Exception {
         JsonNode root = objectMapper.readTree(validReportJson());
         ((ObjectNode) root.get("inputs")).put("minimumDiagnosticEvidenceRecords", 501);
         ((ObjectNode) root.get("inputs")).put("recordsEvaluated", 501);

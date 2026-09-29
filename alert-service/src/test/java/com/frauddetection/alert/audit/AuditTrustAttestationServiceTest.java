@@ -58,7 +58,7 @@ class AuditTrustAttestationServiceTest {
         assertThat(response.limitations()).contains(
                 "external_anchor_not_valid",
                 "external_trust_incomplete",
-                "derived_from_fdp19_fdp20_source_of_truth"
+                "derived_from_audit_integrity_and_external_anchor_state"
         );
     }
 

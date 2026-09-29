@@ -55,7 +55,7 @@ class FraudFeedbackOpenApiContractTest {
                 .contains("NEEDS_MORE_INFO reason codes: NEEDS_CUSTOMER_CONTACT")
                 .contains("$ref: \"#/components/schemas/FraudFeedbackReasonCode\"")
                 .contains("notesPresent")
-                .contains("does not expose raw notes")
+                .contains("raw notes are not exposed")
                 .contains("Bounded analyst feedback record and write-action audit intent created");
     }
 

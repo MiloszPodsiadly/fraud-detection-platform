@@ -44,7 +44,9 @@ public class DecisionOutboxWriter {
     ) {
         FraudDecisionEvent event = fraudDecisionEventMapper.toEvent(alertCase, request, resultingStatus, actorId);
         if (outboxRepository == null) {
-            throw new IllegalStateException("TransactionalOutboxRecordRepository is required for FDP-26 decision outbox writes.");
+            throw new IllegalStateException(
+                    "Transactional outbox repository is required for regulated mutation decision outbox writes."
+            );
         }
         document.setDecisionOutboxEvent(event);
         document.setDecisionOutboxStatus(DecisionOutboxStatus.PENDING);

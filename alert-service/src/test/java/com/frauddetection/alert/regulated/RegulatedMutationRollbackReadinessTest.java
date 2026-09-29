@@ -58,6 +58,7 @@ class RegulatedMutationRollbackReadinessTest {
                 token("command-stale-owner", "stale-owner"),
                 RegulatedMutationState.EVIDENCE_PREPARED,
                 RegulatedMutationExecutionStatus.PROCESSING,
+                0L,
                 RegulatedMutationState.FINALIZING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 null,
@@ -140,6 +141,8 @@ class RegulatedMutationRollbackReadinessTest {
                 mock(AlertServiceMetrics.class),
                 List.of(),
                 mock(RegulatedMutationFencedCommandWriter.class),
+                mock(RegulatedMutationDurableLocalFinalizationProof.class),
+                new RegulatedMutationPublicStatusMapper(),
                 Duration.ofMinutes(2)
         );
 
@@ -236,6 +239,7 @@ class RegulatedMutationRollbackReadinessTest {
         command.setState(state);
         command.setExecutionStatus(status);
         command.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        command.setRevision(0L);
         command.setUpdatedAt(Instant.now().minusSeconds(120));
         return command;
     }

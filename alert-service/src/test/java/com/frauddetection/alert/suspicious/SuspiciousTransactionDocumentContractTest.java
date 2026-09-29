@@ -48,7 +48,7 @@ class SuspiciousTransactionDocumentContractTest {
     }
 
     @Test
-    void evidenceSnapshotAndLinkedCaseFieldsAreNotPresentInFdp60() {
+    void evidenceSnapshotAndLinkedCaseFieldsAreNotPresent() {
         assertThat(List.of(SuspiciousTransactionDocument.class.getDeclaredFields()).stream().map(Field::getName))
                 .doesNotContain("evidenceSnapshot", "linkedCaseId");
     }

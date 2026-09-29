@@ -707,6 +707,8 @@ class FraudFeedbackServiceTest {
                 1,
                 Instant.parse("2026-06-25T09:00:03Z"),
                 new EngineIntelligenceComparisonReadModel(
+                        EngineIntelligenceComparisonType.RULES_VS_ML,
+                        List.of("rules.primary", "ml.python.primary"),
                         EngineIntelligenceAgreementStatus.PARTIAL,
                         EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                         EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
@@ -744,6 +746,8 @@ class FraudFeedbackServiceTest {
                 1,
                 Instant.parse("2026-06-25T09:00:03Z"),
                 new EngineIntelligenceComparisonReadModel(
+                        EngineIntelligenceComparisonType.RULES_VS_ML,
+                        List.of("rules.primary", "ml.python.primary"),
                         EngineIntelligenceAgreementStatus.AGREEMENT,
                         EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
                         EngineIntelligenceScoreDeltaBucket.SMALL

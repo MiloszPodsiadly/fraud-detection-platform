@@ -248,7 +248,7 @@ class SuspiciousTransactionLinkedAlertContextDocsContractTest {
     }
 
     @Test
-    void DocsMentionFdp71ContractOwnershipTest() throws Exception {
+    void docsMentionLinkedAlertContractOwnership() throws Exception {
         assertThat(docs())
                 .contains("WorkspaceDetailRouter` owns route/source readiness")
                 .contains("AlertReadOnlyContextPage` owns resolver state rendering")

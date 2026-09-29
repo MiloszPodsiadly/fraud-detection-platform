@@ -1118,7 +1118,7 @@ class AlertSecurityConfigTest {
     }
 
     @Test
-    void shouldRequireDedicatedFdp20AuthoritiesInsteadOfAuditRead() throws Exception {
+    void shouldRequireDedicatedOperationalAuthoritiesInsteadOfAuditRead() throws Exception {
         when(externalAuditIntegrityService.verify(any(), any()))
                 .thenReturn(new ExternalAuditIntegrityResponse("VALID", 0, 100, "alert-service", "source_service:alert-service", null, null, null, null, List.of()));
         when(externalAuditIntegrityService.coverage(any(), any(), any()))

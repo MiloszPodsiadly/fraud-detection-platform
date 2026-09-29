@@ -31,8 +31,8 @@ class RegulatedMutationProductionImageRollbackIT extends AbstractRegulatedMutati
                 RegulatedMutationExecutionStatus.PROCESSING,
                 command -> {
                     command.setAttemptedAuditRecorded(true);
-                    command.setAttemptedAuditId(insertAudit(command.getResourceId(), AuditOutcome.ATTEMPTED, "attempted-" + command.getId()));
-                    command.setLeaseOwner("owner-fdp37-rollback");
+                    command.setAttemptedAuditId(insertAudit(command, AuditOutcome.ATTEMPTED, "attempted-" + command.getId()));
+                    command.setLeaseOwner("owner-production-image-rollback");
                     command.setLeaseExpiresAt(Instant.now().minusSeconds(5));
                     command.setUpdatedAt(staleForRecovery());
                 }

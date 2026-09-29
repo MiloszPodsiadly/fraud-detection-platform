@@ -50,6 +50,7 @@ public final class CanonicalRegulatedMutationTestRuntime {
                 new RegulatedMutationPublicStatusMapper(),
                 new EvidencePreconditionEvaluator(),
                 localAuditWriter,
+                RegulatedMutationProofTestFixtures.accepted(),
                 Duration.ofSeconds(30)
         );
         return new MongoRegulatedMutationCoordinator(

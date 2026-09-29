@@ -26,6 +26,8 @@ public class RegulatedMutationRecoveryService {
     private final AlertServiceMetrics metrics;
     private final List<RegulatedMutationRecoveryStrategy> recoveryStrategies;
     private final RegulatedMutationFencedCommandWriter fencedCommandWriter;
+    private final RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof;
+    private final RegulatedMutationPublicStatusMapper publicStatusMapper;
     private final Duration stuckThreshold;
 
     public RegulatedMutationRecoveryService(
@@ -33,12 +35,16 @@ public class RegulatedMutationRecoveryService {
             AlertServiceMetrics metrics,
             List<RegulatedMutationRecoveryStrategy> recoveryStrategies,
             RegulatedMutationFencedCommandWriter fencedCommandWriter,
+            RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof,
+            RegulatedMutationPublicStatusMapper publicStatusMapper,
             @Value("${app.regulated-mutation.recovery.stuck-threshold:PT2M}") Duration stuckThreshold
     ) {
         this.commandRepository = commandRepository;
         this.metrics = metrics;
         this.recoveryStrategies = recoveryStrategies == null ? List.of() : List.copyOf(recoveryStrategies);
         this.fencedCommandWriter = fencedCommandWriter;
+        this.durableLocalFinalizationProof = durableLocalFinalizationProof;
+        this.publicStatusMapper = publicStatusMapper;
         this.stuckThreshold = stuckThreshold;
     }
 
@@ -61,7 +67,9 @@ public class RegulatedMutationRecoveryService {
                                 RegulatedMutationState.EVIDENCE_PREPARING,
                                 RegulatedMutationState.EVIDENCE_PREPARED,
                                 RegulatedMutationState.FINALIZING,
-                                RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
+                                RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
+                                RegulatedMutationState.FINALIZED_VISIBLE,
+                                RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
                         ),
                         cutoff
                 )
@@ -175,10 +183,6 @@ public class RegulatedMutationRecoveryService {
         ));
     }
 
-    public long evidenceConfirmationRecoveryRequiredCount() {
-        return commandRepository.countByState(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
-    }
-
     public long repeatedRecoveryFailureCount() {
         return commandRepository.countByExecutionStatusAndAttemptCountGreaterThanEqual(
                 RegulatedMutationExecutionStatus.RECOVERY_REQUIRED,
@@ -198,8 +202,8 @@ public class RegulatedMutationRecoveryService {
         RegulatedMutationRecoveryOutcome outcome = switch (command.getState()) {
             case REQUESTED, EVIDENCE_PREPARING, EVIDENCE_PREPARED -> stillPending(command);
             case FINALIZING, FINALIZE_RECOVERY_REQUIRED -> recoveryRequired(command);
-            case FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED ->
-                    completeIfSnapshotExists(command);
+            case FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL -> completeIfDurablyFinalized(command);
+            case FINALIZED_EVIDENCE_CONFIRMED -> alreadyConfirmed(command);
             case FAILED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION -> failedTerminal(command);
         };
         return new RegulatedMutationRecoveryResult(
@@ -224,6 +228,7 @@ public class RegulatedMutationRecoveryService {
         if (command.getMutationModelVersion() != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
             throw new IllegalStateException("Unsupported persisted regulated mutation model version.");
         }
+        command.requireRevision();
         try {
             RegulatedMutationDefinitions.requireSupported(
                     AuditAction.valueOf(command.getAction()),
@@ -240,10 +245,14 @@ public class RegulatedMutationRecoveryService {
         return RegulatedMutationRecoveryOutcome.STILL_PENDING;
     }
 
-    private RegulatedMutationRecoveryOutcome completeIfSnapshotExists(RegulatedMutationCommandDocument command) {
+    private RegulatedMutationRecoveryOutcome completeIfDurablyFinalized(RegulatedMutationCommandDocument command) {
+        DurableLocalFinalizationProofResult proof = durableLocalFinalizationProof.verify(command);
+        if (!proof.valid()) {
+            return recoveryRequired(command, proof.reasonCode());
+        }
         if (command.getResponseSnapshot() == null) {
             if (!reconstructSnapshot(command)) {
-                return recoveryRequired(command);
+                return recoveryRequired(command, command.getLastError());
             }
         }
         RegulatedMutationState targetState = command.getState() == RegulatedMutationState.FINALIZED_VISIBLE
@@ -261,15 +270,27 @@ public class RegulatedMutationRecoveryService {
         return RegulatedMutationRecoveryOutcome.RECOVERED;
     }
 
+    private RegulatedMutationRecoveryOutcome alreadyConfirmed(RegulatedMutationCommandDocument command) {
+        return RegulatedMutationRecoveryOutcome.RECOVERED;
+    }
+
     private RegulatedMutationRecoveryOutcome recoveryRequired(RegulatedMutationCommandDocument command) {
+        return recoveryRequired(command, "RECOVERY_REQUIRED");
+    }
+
+    private RegulatedMutationRecoveryOutcome recoveryRequired(
+            RegulatedMutationCommandDocument command,
+            String reason
+    ) {
+        String reasonCode = reason == null || reason.isBlank() ? "RECOVERY_REQUIRED" : reason;
         transition(
                 command,
                 RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
                 RegulatedMutationExecutionStatus.RECOVERY_REQUIRED,
-                "RECOVERY_REQUIRED",
-                update -> {
-                }
+                reasonCode,
+                update -> update.set("degradation_reason", reasonCode)
         );
+        command.setDegradationReason(reasonCode);
         return RegulatedMutationRecoveryOutcome.RECOVERY_REQUIRED;
     }
 
@@ -286,19 +307,25 @@ public class RegulatedMutationRecoveryService {
             String lastError,
             Consumer<Update> additionalUpdates
     ) {
-        fencedCommandWriter.recoveryTransition(
+        var publicStatus = publicStatusMapper.currentStatus(targetState);
+        long resultingRevision = fencedCommandWriter.recoveryTransition(
                 command,
                 targetState,
                 targetExecutionStatus,
                 lastError,
-                additionalUpdates
+                update -> {
+                    update.set("public_status", publicStatus);
+                    additionalUpdates.accept(update);
+                }
         );
         command.setState(targetState);
         command.setExecutionStatus(targetExecutionStatus);
         command.setLeaseOwner(null);
         command.setLeaseExpiresAt(null);
         command.setLastError(lastError);
+        command.setPublicStatus(publicStatus);
         command.setUpdatedAt(Instant.now());
+        command.setRevision(resultingRevision);
     }
 
     private boolean reconstructSnapshot(RegulatedMutationCommandDocument command) {

@@ -561,7 +561,7 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
 
     public void writeRollbackValidationArtifact(
             boolean checkpointRenewalCanBeDisabledWithoutDisablingFencing,
-            boolean fdp32FencingRemainsActive,
+            boolean leaseFencingRemainsActive,
             boolean recoveryCommandsVisibleAfterRollback,
             boolean apiReturnsRecoveryOrInProgressAfterRollback,
             boolean noNewSuccessClaimsAfterRollback
@@ -569,7 +569,7 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
         ObjectNode root = objectMapper.createObjectNode();
         root.put("checkpoint_renewal_can_be_disabled_without_disabling_fencing",
                 checkpointRenewalCanBeDisabledWithoutDisablingFencing);
-        root.put("FDP32_fencing_remains_active", fdp32FencingRemainsActive);
+        root.put("FDP32_fencing_remains_active", leaseFencingRemainsActive);
         root.put("recovery_commands_visible_after_rollback", recoveryCommandsVisibleAfterRollback);
         root.put("API_returns_recovery_or_in_progress_after_rollback", apiReturnsRecoveryOrInProgressAfterRollback);
         root.put("no_new_success_claims_after_rollback", noNewSuccessClaimsAfterRollback);
@@ -581,7 +581,7 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
                     logDirectory.resolve(ROLLBACK_VALIDATION_MD),
                     "# FDP-37 Rollback Validation Artifact\n\n"
                             + "- checkpoint_renewal_can_be_disabled_without_disabling_fencing: `" + checkpointRenewalCanBeDisabledWithoutDisablingFencing + "`\n"
-                            + "- FDP32_fencing_remains_active: `" + fdp32FencingRemainsActive + "`\n"
+                            + "- FDP32_fencing_remains_active: `" + leaseFencingRemainsActive + "`\n"
                             + "- recovery_commands_visible_after_rollback: `" + recoveryCommandsVisibleAfterRollback + "`\n"
                             + "- API_returns_recovery_or_in_progress_after_rollback: `" + apiReturnsRecoveryOrInProgressAfterRollback + "`\n"
                             + "- no_new_success_claims_after_rollback: `" + noNewSuccessClaimsAfterRollback + "`\n"

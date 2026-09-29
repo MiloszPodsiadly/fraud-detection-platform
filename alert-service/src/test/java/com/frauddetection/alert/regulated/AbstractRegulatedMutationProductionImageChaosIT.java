@@ -11,6 +11,8 @@ import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosScenario;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosWindow;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationProductionImageChaosHarness;
+import com.frauddetection.alert.service.DecisionOutboxStatus;
+import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -26,12 +28,16 @@ import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
 import org.springframework.data.mongodb.repository.support.MongoRepositoryFactory;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 abstract class AbstractRegulatedMutationProductionImageChaosIT extends AbstractIntegrationTest {
 
     protected static final long RECOVERY_STUCK_THRESHOLD_MARGIN_SECONDS = 300L;
+    protected static final String ACTOR_ID = "principal-production-image-chaos";
+    protected static final String DECISION_REASON = "Production image restart recovery proof";
+    protected static final List<String> DECISION_TAGS = List.of("production-image", "restart-proof");
 
     protected SimpleMongoClientDatabaseFactory databaseFactory;
     protected MongoTemplate mongoTemplate;
@@ -57,7 +63,7 @@ abstract class AbstractRegulatedMutationProductionImageChaosIT extends AbstractI
                         + " or "
                         + RegulatedMutationProductionImageChaosHarness.IMAGE_ENV
         );
-        String databaseName = "fdp37_prod_image_" + UUID.randomUUID().toString().replace("-", "");
+        String databaseName = "regulated_mutation_prod_image_" + UUID.randomUUID().toString().replace("-", "");
         String mongoUri = FraudPlatformContainers.mongodb().getReplicaSetUrl(databaseName);
         String alertServiceMongoUri = FraudPlatformContainers.mongodbNetworkReplicaSetUrl(databaseName);
         databaseFactory = new SimpleMongoClientDatabaseFactory(mongoUri);
@@ -100,9 +106,9 @@ abstract class AbstractRegulatedMutationProductionImageChaosIT extends AbstractI
             RegulatedMutationModelVersion modelVersion,
             java.util.function.Consumer<RegulatedMutationCommandDocument> customizer
     ) {
-        String idempotencyKey = "idem-fdp37-" + suffix;
-        String alertId = "alert-fdp37-" + suffix;
-        String commandId = "command-fdp37-" + suffix;
+        String idempotencyKey = "idem-production-image-" + suffix;
+        String alertId = "alert-production-image-" + suffix;
+        String commandId = "command-production-image-" + suffix;
         return new RegulatedMutationChaosScenario(
                 suffix,
                 window,
@@ -129,7 +135,7 @@ abstract class AbstractRegulatedMutationProductionImageChaosIT extends AbstractI
         RegulatedMutationCommandDocument document = new RegulatedMutationCommandDocument();
         document.setId(commandId);
         document.setIdempotencyKey(idempotencyKey);
-        document.setActorId("principal-fdp37");
+        document.setActorId(ACTOR_ID);
         document.setResourceId(alertId);
         document.setResourceType(AuditResourceType.ALERT.name());
         document.setAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
@@ -139,9 +145,10 @@ abstract class AbstractRegulatedMutationProductionImageChaosIT extends AbstractI
         document.setIntentHash(RegulatedMutationIntentHasher.hash("intent-" + idempotencyKey));
         document.setIntentResourceId(alertId);
         document.setIntentAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
-        document.setIntentActorId("principal-fdp37");
+        document.setIntentActorId(ACTOR_ID);
         document.setIntentDecision(AnalystDecision.CONFIRMED_FRAUD.name());
         document.setMutationModelVersion(modelVersion);
+        document.setRevision(0L);
         document.setCreatedAt(Instant.now());
         document.setUpdatedAt(Instant.now());
         return document;
@@ -166,23 +173,52 @@ abstract class AbstractRegulatedMutationProductionImageChaosIT extends AbstractI
         AlertDocument alert = alertRepository.findById(alertId).orElseThrow();
         alert.setAnalystDecision(AnalystDecision.CONFIRMED_FRAUD);
         alert.setAlertStatus(AlertStatus.RESOLVED);
+        alert.setAnalystId(ACTOR_ID);
+        alert.setDecisionReason(DECISION_REASON);
+        alert.setDecisionTags(DECISION_TAGS);
+        alert.setDecidedAt(Instant.parse("2026-05-06T00:01:00Z"));
+        alert.setDecisionOutboxEvent(fraudDecisionEvent(alertId));
+        alert.setDecisionOutboxStatus(DecisionOutboxStatus.PENDING);
+        alert.setDecisionOperationStatus(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL.name());
         alertRepository.save(alert);
     }
 
     protected TransactionalOutboxRecordDocument outboxRecord(String alertId, String commandId) {
+        FraudDecisionEvent event = fraudDecisionEvent(alertId);
         TransactionalOutboxRecordDocument record = new TransactionalOutboxRecordDocument();
-        record.setEventId("event-" + alertId);
-        record.setDedupeKey("dedupe-" + alertId);
+        record.setEventId(event.eventId());
+        record.setDedupeKey(event.dedupeKey());
         record.setMutationCommandId(commandId);
         record.setResourceType("ALERT");
         record.setResourceId(alertId);
         record.setEventType("FRAUD_DECISION");
-        record.setPayloadHash(RegulatedMutationIntentHasher.hash("payload-" + alertId));
+        record.setPayloadHash(RegulatedMutationIntentHasher.hash(event));
+        record.setPayload(event);
         record.setStatus(TransactionalOutboxStatus.PENDING);
-        record.setAttempts(1);
+        record.setAttempts(0);
         record.setCreatedAt(Instant.now());
         record.setUpdatedAt(Instant.now());
         return record;
+    }
+
+    protected FraudDecisionEvent fraudDecisionEvent(String alertId) {
+        Instant decidedAt = Instant.parse("2026-05-06T00:01:00Z");
+        return new FraudDecisionEvent(
+                "event-" + alertId,
+                "decision-" + alertId,
+                alertId,
+                alertId + "-txn",
+                alertId + "-customer",
+                "corr-" + alertId,
+                ACTOR_ID,
+                AnalystDecision.CONFIRMED_FRAUD,
+                AlertStatus.RESOLVED,
+                DECISION_REASON,
+                DECISION_TAGS,
+                Map.of("proof", "regulated-mutation-production-image-restart"),
+                decidedAt,
+                decidedAt
+        );
     }
 
     protected RegulatedMutationResponseSnapshot snapshot(String alertId, SubmitDecisionOperationStatus status) {
@@ -196,11 +232,18 @@ abstract class AbstractRegulatedMutationProductionImageChaosIT extends AbstractI
         );
     }
 
-    protected String insertAudit(String alertId, AuditOutcome outcome, String auditId) {
+    protected String insertAudit(
+            RegulatedMutationCommandDocument command,
+            AuditOutcome outcome,
+            String auditId
+    ) {
         mongoTemplate.getCollection("audit_events").insertOne(new Document("_id", auditId)
-                .append("resource_id", alertId)
-                .append("resource_type", AuditResourceType.ALERT.name())
-                .append("action", AuditAction.SUBMIT_ANALYST_DECISION.name())
+                .append("resource_id", command.getResourceId())
+                .append("resource_type", command.getResourceType())
+                .append("action", command.getAction())
+                .append("actor_id", command.getActorId())
+                .append("correlation_id", command.getCorrelationId())
+                .append("request_id", command.getId() + ":" + outcome.name())
                 .append("outcome", outcome.name())
                 .append("created_at", Instant.now()));
         return auditId;

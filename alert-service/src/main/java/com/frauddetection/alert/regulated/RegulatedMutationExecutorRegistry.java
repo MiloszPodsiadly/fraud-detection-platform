@@ -41,6 +41,7 @@ public class RegulatedMutationExecutorRegistry {
         if (document == null) {
             throw new IllegalArgumentException("Regulated mutation command document is required.");
         }
+        document.requireRevision();
         RegulatedMutationExecutor executor = executorFor(document.getMutationModelVersion());
         AuditAction action = parseAction(document.getAction());
         AuditResourceType resourceType = parseResourceType(document.getResourceType());

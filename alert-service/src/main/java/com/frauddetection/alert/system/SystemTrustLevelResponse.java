@@ -99,9 +99,6 @@ public record SystemTrustLevelResponse(
         @JsonProperty("evidence_confirmation_pending_count")
         long evidenceConfirmationPendingCount,
 
-        @JsonProperty("evidence_confirmation_recovery_required_count")
-        long evidenceConfirmationRecoveryRequiredCount,
-
         @JsonProperty("repeated_recovery_failure_count")
         long repeatedRecoveryFailureCount,
 

@@ -12,6 +12,7 @@ import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.persistence.AlertDocument;
+import com.mongodb.client.result.UpdateResult;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
@@ -35,6 +36,8 @@ public class MutationEvidenceConfirmationService {
     private final AlertServiceMetrics metrics;
     private final RegulatedMutationPublicStatusMapper publicStatusMapper;
     private final RegulatedMutationFencedCommandWriter fencedCommandWriter;
+    private final RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof;
+    private final RegulatedMutationTransactionRunner transactionRunner;
     private final boolean externalAnchorRequired;
     private final boolean signatureRequired;
 
@@ -47,6 +50,8 @@ public class MutationEvidenceConfirmationService {
             MongoTemplate mongoTemplate,
             AlertServiceMetrics metrics,
             RegulatedMutationFencedCommandWriter fencedCommandWriter,
+            RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof,
+            RegulatedMutationTransactionRunner transactionRunner,
             @Value("${app.audit.external-anchoring.publication.required:${app.audit.external-anchoring.enabled:false}}") boolean externalAnchorRequired,
             @Value("${app.audit.trust-authority.signing-required:false}") boolean signatureRequired
     ) {
@@ -58,6 +63,8 @@ public class MutationEvidenceConfirmationService {
         this.metrics = metrics;
         this.publicStatusMapper = new RegulatedMutationPublicStatusMapper();
         this.fencedCommandWriter = fencedCommandWriter;
+        this.durableLocalFinalizationProof = durableLocalFinalizationProof;
+        this.transactionRunner = transactionRunner;
         this.externalAnchorRequired = externalAnchorRequired;
         this.signatureRequired = signatureRequired;
     }
@@ -65,12 +72,34 @@ public class MutationEvidenceConfirmationService {
     MutationEvidenceConfirmationService(
             RegulatedMutationCommandRepository commandRepository,
             TransactionalOutboxRecordRepository outboxRepository,
+            AuditEventRepository auditEventRepository,
+            AuditEventPublicationStatusLookup publicationStatusLookup,
+            MongoTemplate mongoTemplate,
             AlertServiceMetrics metrics,
             RegulatedMutationFencedCommandWriter fencedCommandWriter,
+            RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof,
             boolean externalAnchorRequired,
             boolean signatureRequired
     ) {
-        this(commandRepository, outboxRepository, null, null, null, metrics, fencedCommandWriter, externalAnchorRequired, signatureRequired);
+        this(commandRepository, outboxRepository, auditEventRepository, publicationStatusLookup, mongoTemplate,
+                metrics, fencedCommandWriter, durableLocalFinalizationProof,
+                new RegulatedMutationTransactionRunner(RegulatedMutationTransactionMode.OFF, null),
+                externalAnchorRequired, signatureRequired);
+    }
+
+    MutationEvidenceConfirmationService(
+            RegulatedMutationCommandRepository commandRepository,
+            TransactionalOutboxRecordRepository outboxRepository,
+            AlertServiceMetrics metrics,
+            RegulatedMutationFencedCommandWriter fencedCommandWriter,
+            RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof,
+            boolean externalAnchorRequired,
+            boolean signatureRequired
+    ) {
+        this(commandRepository, outboxRepository, null, null, null, metrics, fencedCommandWriter,
+                durableLocalFinalizationProof,
+                new RegulatedMutationTransactionRunner(RegulatedMutationTransactionMode.OFF, null),
+                externalAnchorRequired, signatureRequired);
     }
 
     public int confirmPendingEvidence(int limit) {
@@ -91,10 +120,13 @@ public class MutationEvidenceConfirmationService {
             if (command.getMutationModelVersion() != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
                 throw new IllegalStateException("Unsupported persisted regulated mutation model version.");
             }
+            command.requireRevision();
             try {
                 promoted += confirmEvidenceGatedCommand(command);
             } catch (RegulatedMutationRecoveryWriteConflictException conflict) {
                 // Another worker advanced the command after this batch read; keep the newer durable state.
+            } catch (RegulatedMutationAlertProjectionException projectionFailure) {
+                // The transaction rolled back, so leave this command retryable without starving the batch.
             }
         }
         return promoted;
@@ -103,24 +135,30 @@ public class MutationEvidenceConfirmationService {
     private int confirmEvidenceGatedCommand(RegulatedMutationCommandDocument command) {
         EvidenceDecision decision = decision(command);
         if (decision.outcome() == EvidenceConfirmationOutcome.CONFIRMED) {
-            transition(
-                    command,
-                    RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED,
-                    null,
-                    null
-            );
-            updateAlertOperationStatus(command, command.getPublicStatus());
+            AlertStatusProjectionResult projectionResult = transactionRunner.runLocalCommit(() -> {
+                transition(
+                        command,
+                        RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED,
+                        null,
+                        null
+                );
+                return updateAlertOperationStatus(command, command.getPublicStatus());
+            });
+            recordSuccessfulProjection(projectionResult);
             return 1;
         }
         if (decision.outcome() == EvidenceConfirmationOutcome.PENDING) {
             if (command.getState() == RegulatedMutationState.FINALIZED_VISIBLE) {
-                transition(
-                        command,
-                        RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
-                        null,
-                        null
-                );
-                updateAlertOperationStatus(command, command.getPublicStatus());
+                AlertStatusProjectionResult projectionResult = transactionRunner.runLocalCommit(() -> {
+                    transition(
+                            command,
+                            RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                            null,
+                            null
+                    );
+                    return updateAlertOperationStatus(command, command.getPublicStatus());
+                });
+                recordSuccessfulProjection(projectionResult);
                 metrics.recordEvidenceGatedFinalizeStuckVisible();
             }
             if (decision.reason() != null) {
@@ -129,13 +167,16 @@ public class MutationEvidenceConfirmationService {
             return 0;
         }
         if (decision.outcome() == EvidenceConfirmationOutcome.FAILED) {
-            transition(
-                    command,
-                    RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
-                    decision.reason(),
-                    decision.reason()
-            );
-            updateAlertOperationStatus(command, command.getPublicStatus());
+            AlertStatusProjectionResult projectionResult = transactionRunner.runLocalCommit(() -> {
+                transition(
+                        command,
+                        RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
+                        decision.reason(),
+                        decision.reason()
+                );
+                return updateAlertOperationStatus(command, command.getPublicStatus());
+            });
+            recordSuccessfulProjection(projectionResult);
             metrics.recordEvidenceGatedFinalizeRecoveryRequired(decision.reason());
             metrics.recordEvidenceConfirmationFailed(decision.reason());
         }
@@ -152,7 +193,7 @@ public class MutationEvidenceConfirmationService {
         RegulatedMutationExecutionStatus executionStatus = targetState == RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
                 ? RegulatedMutationExecutionStatus.RECOVERY_REQUIRED
                 : RegulatedMutationExecutionStatus.COMPLETED;
-        fencedCommandWriter.recoveryTransition(
+        long resultingRevision = fencedCommandWriter.recoveryTransition(
                 command,
                 targetState,
                 executionStatus,
@@ -174,14 +215,13 @@ public class MutationEvidenceConfirmationService {
             command.setDegradationReason(degradationReason);
         }
         command.setUpdatedAt(java.time.Instant.now());
+        command.setRevision(resultingRevision);
     }
 
     public EvidenceDecision decision(RegulatedMutationCommandDocument command) {
-        if (command == null || command.getLocalCommitMarker() == null) {
-            return new EvidenceDecision(EvidenceConfirmationOutcome.FAILED, "LOCAL_COMMIT_MISSING");
-        }
-        if (!command.isSuccessAuditRecorded() || command.getSuccessAuditId() == null) {
-            return new EvidenceDecision(EvidenceConfirmationOutcome.FAILED, "SUCCESS_AUDIT_MISSING");
+        DurableLocalFinalizationProofResult proof = durableLocalFinalizationProof.verify(command);
+        if (!proof.valid()) {
+            return new EvidenceDecision(EvidenceConfirmationOutcome.FAILED, proof.reasonCode());
         }
         RegulatedMutationDefinition definition;
         try {
@@ -237,26 +277,74 @@ public class MutationEvidenceConfirmationService {
         return statuses.get(successAudit.auditId());
     }
 
-    private void updateAlertOperationStatus(
+    AlertStatusProjectionResult updateAlertOperationStatus(
             RegulatedMutationCommandDocument command,
             SubmitDecisionOperationStatus status
     ) {
         if (mongoTemplate == null || command.getResourceId() == null || command.getResourceId().isBlank()) {
-            return;
+            return AlertStatusProjectionResult.NOT_APPLICABLE;
         }
         if (!AuditAction.SUBMIT_ANALYST_DECISION.name().equals(command.getAction())
                 || !AuditResourceType.ALERT.name().equals(command.getResourceType())) {
-            return;
+            return AlertStatusProjectionResult.NOT_APPLICABLE;
         }
         try {
-            mongoTemplate.updateFirst(
-                    Query.query(Criteria.where("_id").is(command.getResourceId())),
-                    new Update().set("decisionOperationStatus", status.name()),
+            long revision = command.requireRevision();
+            UpdateResult result = mongoTemplate.updateFirst(
+                    Query.query(new Criteria().andOperator(
+                            Criteria.where("_id").is(command.getResourceId()),
+                            Criteria.where("decisionIdempotencyKey").is(command.getIdempotencyKey()),
+                            new Criteria().orOperator(
+                                    Criteria.where("decisionOperationRevision").exists(false),
+                                    Criteria.where("decisionOperationRevision").is(null),
+                                    Criteria.where("decisionOperationRevision").lt(revision)
+                            )
+                    )),
+                    new Update()
+                            .set("decisionOperationStatus", status.name())
+                            .set("decisionOperationRevision", revision),
                     AlertDocument.class
             );
+            if (result.getMatchedCount() == 0 && !alreadyProjectedAtSameOrNewerRevision(command, status, revision)) {
+                metrics.recordRegulatedMutationAlertStatusProjection("FAILED", "TARGET_NOT_FOUND_OR_MISMATCH");
+                throw new RegulatedMutationAlertProjectionException(
+                        command.getId(),
+                        "Alert operation status projection target was not found or did not match the command identity."
+                );
+            }
+            return result.getMatchedCount() == 0
+                    ? AlertStatusProjectionResult.ALREADY_CURRENT
+                    : AlertStatusProjectionResult.UPDATED;
         } catch (DataAccessException exception) {
-            metrics.recordOutboxProjectionMismatch(1);
+            metrics.recordRegulatedMutationAlertStatusProjection("FAILED", "DATA_ACCESS_ERROR");
+            throw new RegulatedMutationAlertProjectionException(
+                    command.getId(),
+                    "Alert operation status projection failed.",
+                    exception
+            );
         }
+    }
+
+    private void recordSuccessfulProjection(AlertStatusProjectionResult result) {
+        if (result != AlertStatusProjectionResult.NOT_APPLICABLE) {
+            metrics.recordRegulatedMutationAlertStatusProjection("SUCCESS", result.name());
+        }
+    }
+
+    private boolean alreadyProjectedAtSameOrNewerRevision(
+            RegulatedMutationCommandDocument command,
+            SubmitDecisionOperationStatus status,
+            long revision
+    ) {
+        AlertDocument current = mongoTemplate.findById(command.getResourceId(), AlertDocument.class);
+        if (current == null
+                || !java.util.Objects.equals(current.getDecisionIdempotencyKey(), command.getIdempotencyKey())
+                || current.getDecisionOperationRevision() == null
+                || current.getDecisionOperationRevision() < revision) {
+            return false;
+        }
+        return current.getDecisionOperationRevision() > revision
+                || status.name().equals(current.getDecisionOperationStatus());
     }
 
     public enum EvidenceConfirmationOutcome {
@@ -266,5 +354,11 @@ public class MutationEvidenceConfirmationService {
     }
 
     public record EvidenceDecision(EvidenceConfirmationOutcome outcome, String reason) {
+    }
+
+    enum AlertStatusProjectionResult {
+        UPDATED,
+        ALREADY_CURRENT,
+        NOT_APPLICABLE
     }
 }

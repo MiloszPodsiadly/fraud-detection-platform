@@ -117,7 +117,7 @@ class RegulatedMutationTransactionRollbackIntegrationTest extends AbstractIntegr
                     Instant.parse("2026-05-02T10:01:00Z"),
                     com.frauddetection.alert.api.SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
             ));
-            command.setLocalCommitMarker("LOCAL_COMMITTED");
+            command.setLocalCommitMarker(RegulatedMutationDurableLocalFinalizationProof.LOCAL_COMMIT_MARKER);
             command.setUpdatedAt(Instant.parse("2026-05-02T10:01:00Z"));
             mongoTemplate.save(command);
             mongoTemplate.save(alert("alert-local-boundary-fail", AlertStatus.CLOSED));
@@ -222,6 +222,7 @@ class RegulatedMutationTransactionRollbackIntegrationTest extends AbstractIntegr
         document.setResourceId("alert-transition-fail");
         document.setResourceType("ALERT");
         document.setAction("SUBMIT_ANALYST_DECISION");
+        document.setRevision(0L);
         document.setState(state);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
         document.setCreatedAt(Instant.parse("2026-05-02T10:00:00Z"));

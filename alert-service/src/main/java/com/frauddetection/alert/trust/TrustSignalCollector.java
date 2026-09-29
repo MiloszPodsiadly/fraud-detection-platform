@@ -67,10 +67,6 @@ public class TrustSignalCollector {
             signals.add(signal("REGULATED_MUTATION_FINALIZE_RECOVERY_REQUIRED", "regulated_mutation",
                     "state=FINALIZE_RECOVERY_REQUIRED"));
         }
-        if (recoveryService.evidenceConfirmationRecoveryRequiredCount() > 0) {
-            signals.add(signal("EVIDENCE_CONFIRMATION_RECOVERY_REQUIRED", "regulated_mutation",
-                    "evidence_confirmation=RECOVERY_REQUIRED"));
-        }
     }
 
     private void collectAuditDegradation(List<TrustSignal> signals) {

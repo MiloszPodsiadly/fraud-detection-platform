@@ -230,6 +230,18 @@ public final class RegulatedMutationAlertServiceProcessChaosHarness implements A
         );
     }
 
+    public JsonNode submitDecision(String alertId, String idempotencyKey, String requestBody) {
+        return requestJson(
+                HttpRequest.newBuilder(uri("/api/v1/alerts/" + alertId + "/decision"))
+                        .timeout(Duration.ofSeconds(20))
+                        .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                        .header("Content-Type", "application/json")
+                        .header("X-Idempotency-Key", idempotencyKey)
+                        .headers(demoHeaders())
+                        .build()
+        );
+    }
+
     public String evidenceSummary() {
         return "killed_target=" + ALERT_SERVICE_TARGET_NAME
                 + ";killed_process=" + killedProcessId

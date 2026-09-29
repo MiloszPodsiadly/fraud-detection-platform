@@ -34,6 +34,7 @@ public class RegulatedMutationConflictPolicy {
                 || command.mutationModelVersion() != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
             throw new IllegalStateException("Unsupported persisted regulated mutation model version.");
         }
+        existing.requireRevision();
         if (!Objects.equals(existing.getAction(), command.action().name())
                 || !Objects.equals(existing.getResourceType(), command.resourceType().name())
                 || !Objects.equals(existing.getResourceId(), command.resourceId())) {

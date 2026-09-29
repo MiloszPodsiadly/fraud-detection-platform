@@ -240,7 +240,7 @@ class BankModeStartupGuardTest {
         );
 
         assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
-        assertThat(output).contains("FDP-27 bank profile active: transaction-mode=REQUIRED, trust-incidents.refresh-mode=ATOMIC, outbox dual-control and sensitive-read fail-closed enabled.");
+        assertThat(output).contains("Bank profile active: transaction-mode=REQUIRED, trust-incidents.refresh-mode=ATOMIC, outbox dual-control and sensitive-read fail-closed enabled.");
     }
 
     @Test
@@ -427,7 +427,7 @@ class BankModeStartupGuardTest {
         BankModeStartupGuard guard = bankGuardWithExternal(true, true, true, "object-store");
 
         assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
-        assertThat(output).contains("FDP-27 bank profile active");
+        assertThat(output).contains("Bank profile active");
     }
 
     @Test

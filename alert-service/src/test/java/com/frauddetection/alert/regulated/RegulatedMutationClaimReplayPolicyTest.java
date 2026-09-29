@@ -13,6 +13,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -21,9 +22,19 @@ class RegulatedMutationClaimReplayPolicyTest {
     private static final Instant NOW = Instant.parse("2026-05-04T12:00:00Z");
 
     private final RegulatedMutationConflictPolicy conflictPolicy = new RegulatedMutationConflictPolicy();
+    private final RegulatedMutationDurableLocalFinalizationProof durableProof =
+            mock(RegulatedMutationDurableLocalFinalizationProof.class);
     private final RegulatedMutationReplayPolicyRegistry replayPolicyRegistry = new RegulatedMutationReplayPolicyRegistry(
-            List.of(new EvidenceGatedFinalizeReplayPolicy(new RegulatedMutationLeasePolicy()))
+            List.of(new EvidenceGatedFinalizeReplayPolicy(
+                    new RegulatedMutationLeasePolicy(),
+                    durableProof
+            ))
     );
+
+    RegulatedMutationClaimReplayPolicyTest() {
+        when(durableProof.verify(any()))
+                .thenReturn(DurableLocalFinalizationProofResult.invalid("SUCCESS_AUDIT_MISSING"));
+    }
 
     @Test
     void missingIdempotencyKeyIsRejectedForCurrentCommand() {
@@ -118,6 +129,7 @@ class RegulatedMutationClaimReplayPolicyTest {
         RegulatedMutationCommandDocument document = currentDocument(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
         document.setResponseSnapshot(snapshot(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL));
+        when(durableProof.verify(document)).thenReturn(DurableLocalFinalizationProofResult.accepted());
 
         assertThat(replayPolicyRegistry.resolve(document, NOW).type())
                 .isEqualTo(RegulatedMutationReplayDecisionType.REPLAY_SNAPSHOT);
@@ -130,6 +142,7 @@ class RegulatedMutationClaimReplayPolicyTest {
         document.setResponseSnapshot(snapshot(SubmitDecisionOperationStatus.FINALIZED_VISIBLE));
         document.setLocalCommitMarker("EVIDENCE_GATED_FINALIZED");
         document.setSuccessAuditRecorded(true);
+        when(durableProof.verify(document)).thenReturn(DurableLocalFinalizationProofResult.accepted());
 
         assertThat(replayPolicyRegistry.resolve(document, NOW).type())
                 .isEqualTo(RegulatedMutationReplayDecisionType.FINALIZED_VISIBLE_REPAIRABLE);
@@ -189,6 +202,7 @@ class RegulatedMutationClaimReplayPolicyTest {
         document.setResourceType(AuditResourceType.ALERT.name());
         document.setResourceId("alert-1");
         document.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        document.setRevision(0L);
         document.setState(state);
         return document;
     }

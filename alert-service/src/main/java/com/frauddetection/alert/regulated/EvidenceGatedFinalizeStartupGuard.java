@@ -60,7 +60,7 @@ public class EvidenceGatedFinalizeStartupGuard implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         RegulatedMutationDefinitions.all().forEach(definition ->
-                metrics.recordEvidenceGatedFinalizeEnabled(definition.action().name(), true));
+                metrics.recordEvidenceGatedFinalizeEnabled(definition.action(), true));
         require(
                 transactionRunner.mode() == RegulatedMutationTransactionMode.REQUIRED,
                 "app.regulated-mutations.transaction-mode",

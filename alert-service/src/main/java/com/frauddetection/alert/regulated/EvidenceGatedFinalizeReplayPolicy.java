@@ -8,9 +8,14 @@ import java.time.Instant;
 public class EvidenceGatedFinalizeReplayPolicy implements RegulatedMutationReplayPolicy {
 
     private final RegulatedMutationLeasePolicy leasePolicy;
+    private final RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof;
 
-    public EvidenceGatedFinalizeReplayPolicy(RegulatedMutationLeasePolicy leasePolicy) {
+    public EvidenceGatedFinalizeReplayPolicy(
+            RegulatedMutationLeasePolicy leasePolicy,
+            RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof
+    ) {
         this.leasePolicy = leasePolicy;
+        this.durableLocalFinalizationProof = durableLocalFinalizationProof;
     }
 
     @Override
@@ -35,9 +40,8 @@ public class EvidenceGatedFinalizeReplayPolicy implements RegulatedMutationRepla
             );
         }
         if (document.getState() == RegulatedMutationState.FINALIZED_VISIBLE) {
-            if (document.getResponseSnapshot() != null
-                    && document.getLocalCommitMarker() != null
-                    && document.isSuccessAuditRecorded()) {
+            DurableLocalFinalizationProofResult proof = durableLocalFinalizationProof.verify(document);
+            if (document.getResponseSnapshot() != null && proof.valid()) {
                 return RegulatedMutationReplayDecision.of(
                         RegulatedMutationReplayDecisionType.FINALIZED_VISIBLE_REPAIRABLE,
                         RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
@@ -47,7 +51,7 @@ public class EvidenceGatedFinalizeReplayPolicy implements RegulatedMutationRepla
             return RegulatedMutationReplayDecision.of(
                     RegulatedMutationReplayDecisionType.FINALIZED_VISIBLE_RECOVERY_REQUIRED,
                     RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
-                    "FINALIZED_VISIBLE_MISSING_PROOF"
+                    proof.valid() ? "RESPONSE_SNAPSHOT_MISSING" : proof.reasonCode()
             );
         }
         if (document.getExecutionStatus() == RegulatedMutationExecutionStatus.RECOVERY_REQUIRED
@@ -64,6 +68,31 @@ public class EvidenceGatedFinalizeReplayPolicy implements RegulatedMutationRepla
                     RegulatedMutationReplayDecisionType.REJECTED_RESPONSE,
                     document.getState(),
                     null
+            );
+        }
+        if (document.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL) {
+            DurableLocalFinalizationProofResult proof = durableLocalFinalizationProof.verify(document);
+            if (!proof.valid()) {
+                return RegulatedMutationReplayDecision.of(
+                        RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE,
+                        RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
+                        proof.reasonCode()
+                );
+            }
+            if (document.getResponseSnapshot() == null) {
+                return RegulatedMutationReplayDecision.of(
+                        RegulatedMutationReplayDecisionType.FINALIZED_VISIBLE_RECOVERY_REQUIRED,
+                        RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
+                        "RESPONSE_SNAPSHOT_MISSING"
+                );
+            }
+        }
+        if (document.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED
+                && document.getResponseSnapshot() == null) {
+            return RegulatedMutationReplayDecision.of(
+                    RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE,
+                    RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED,
+                    "RESPONSE_SNAPSHOT_MISSING"
             );
         }
         if (document.getResponseSnapshot() != null) {

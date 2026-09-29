@@ -15,6 +15,7 @@ import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
@@ -305,6 +306,8 @@ class EngineIntelligenceResponseMapperTest {
                 1,
                 Instant.parse("2026-06-18T10:00:00Z"),
                 new EngineIntelligenceComparisonReadModel(
+                        EngineIntelligenceComparisonType.RULES_VS_ML,
+                        List.of("rules.primary", "ml.python.primary"),
                         EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
                         EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                         EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
@@ -429,6 +432,8 @@ class EngineIntelligenceResponseMapperTest {
                 1,
                 Instant.parse("2026-06-18T10:00:00Z"),
                 new EngineIntelligenceComparisonReadModel(
+                        EngineIntelligenceComparisonType.RULES_VS_ML,
+                        List.of("rules.primary", "ml.python.primary"),
                         agreementStatus,
                         riskMismatchStatus,
                         scoreDeltaBucket
@@ -505,6 +510,8 @@ class EngineIntelligenceResponseMapperTest {
                 1,
                 Instant.parse("2026-06-18T10:00:00Z"),
                 new EngineIntelligenceComparisonReadModel(
+                        EngineIntelligenceComparisonType.RULES_VS_ML,
+                        List.of("rules.primary", "ml.python.primary"),
                         EngineIntelligenceAgreementStatus.AGREEMENT,
                         EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
                         EngineIntelligenceScoreDeltaBucket.NONE
@@ -524,6 +531,8 @@ class EngineIntelligenceResponseMapperTest {
                 1,
                 Instant.parse("2026-06-18T10:00:00Z"),
                 new EngineIntelligenceComparisonReadModel(
+                        EngineIntelligenceComparisonType.RULES_VS_ML,
+                        List.of("rules.primary", "ml.python.primary"),
                         EngineIntelligenceAgreementStatus.AGREEMENT,
                         EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
                         EngineIntelligenceScoreDeltaBucket.NONE
@@ -567,6 +576,8 @@ class EngineIntelligenceResponseMapperTest {
                 summary.contractVersion(),
                 summary.generatedAt(),
                 new EngineIntelligenceComparisonReadModel(
+                        summary.comparison().comparisonType(),
+                        summary.comparison().comparedEngineIds(),
                         summary.comparison().agreementStatus(),
                         summary.comparison().riskMismatchStatus(),
                         summary.comparison().scoreDeltaBucket()

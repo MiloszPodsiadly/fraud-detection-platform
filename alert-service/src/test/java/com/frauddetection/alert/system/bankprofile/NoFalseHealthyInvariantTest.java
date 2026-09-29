@@ -9,7 +9,6 @@ import com.frauddetection.alert.audit.external.ExternalWitnessCapabilities;
 import com.frauddetection.alert.audit.external.ExternalWitnessTimestampType;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorCoverageResponse;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorMissingRange;
-import com.frauddetection.alert.fdp28.InvariantAssert;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.persistence.AlertRepository;
@@ -43,7 +42,7 @@ class NoFalseHealthyInvariantTest {
 
         SystemTrustLevelResponse response = fixture.controller().trustLevel();
 
-        InvariantAssert.noFalseHealthy(response);
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
         assertThat(response.reasonCode()).isEqualTo("OUTBOX_STATUS_UNAVAILABLE");
         assertThat(response.outboxFailedTerminalCount()).isEqualTo(1L);
         assertThat(response.outboxConfirmationUnknownCount()).isEqualTo(1L);
@@ -56,7 +55,7 @@ class NoFalseHealthyInvariantTest {
 
         SystemTrustLevelResponse response = fixture.controller().trustLevel();
 
-        InvariantAssert.noFalseHealthy(response);
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
         assertThat(response.reasonCode()).isEqualTo("TRUST_INCIDENT_UNACKNOWLEDGED_CRITICAL");
         assertThat(response.incidentHealthStatus()).isEqualTo("CRITICAL");
     }
@@ -79,7 +78,7 @@ class NoFalseHealthyInvariantTest {
 
         SystemTrustLevelResponse response = fixture.controller().trustLevel();
 
-        InvariantAssert.noFalseHealthy(response);
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
         assertThat(response.coverageStatus()).isEqualTo("DEGRADED");
         assertThat(response.reasonCode()).isEqualTo("HEAD_SCAN_PAGINATION_UNSUPPORTED");
     }
@@ -102,7 +101,7 @@ class NoFalseHealthyInvariantTest {
 
         SystemTrustLevelResponse response = fixture.controller().trustLevel();
 
-        InvariantAssert.noFalseHealthy(response);
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
         assertThat(response.coverageStatus()).isEqualTo("DEGRADED");
         assertThat(response.reasonCode()).isEqualTo("EXTERNAL_WITNESS_UNAVAILABLE");
         assertThat(response.externalAnchorStrength()).isEqualTo("NONE");
@@ -127,7 +126,7 @@ class NoFalseHealthyInvariantTest {
 
         SystemTrustLevelResponse response = fixture.controller().trustLevel();
 
-        InvariantAssert.noFalseHealthy(response);
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
         assertThat(response.coverageStatus()).isEqualTo("DEGRADED");
         assertThat(response.missingRanges()).isEqualTo(1);
     }
@@ -139,7 +138,7 @@ class NoFalseHealthyInvariantTest {
 
         SystemTrustLevelResponse response = fixture.controller().trustLevel();
 
-        InvariantAssert.noFalseHealthy(response);
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
         assertThat(response.requiredPublicationFailures()).isEqualTo(1);
     }
 
@@ -150,7 +149,7 @@ class NoFalseHealthyInvariantTest {
 
         SystemTrustLevelResponse response = fixture.controller().trustLevel();
 
-        InvariantAssert.noFalseHealthy(response);
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
         assertThat(response.localStatusUnverified()).isEqualTo(1);
     }
 
@@ -198,7 +197,7 @@ class NoFalseHealthyInvariantTest {
 
         SystemTrustLevelResponse response = fixture.controller().trustLevel();
 
-        InvariantAssert.noFalseHealthy(response);
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
         assertThat(response.reasonCode()).isEqualTo("SIGNATURE_UNAVAILABLE_REQUIRED");
     }
 
@@ -216,7 +215,7 @@ class NoFalseHealthyInvariantTest {
 
         SystemTrustLevelResponse response = fixture.controller().trustLevel();
 
-        InvariantAssert.noFalseHealthy(response);
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
         assertThat(response.reasonCode()).isEqualTo("TRUST_INCIDENT_OPEN_CRITICAL");
         assertThat(response.openCriticalIncidentCount()).isEqualTo(1L);
     }

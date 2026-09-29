@@ -60,7 +60,7 @@ public class AuthenticationStartupGuard implements ApplicationRunner {
 
     private void require(String setting, String required, boolean valid, String reason) {
         if (!valid) {
-            throw new IllegalStateException("FDP-27 authentication startup guard failed: setting="
+            throw new IllegalStateException("Authentication startup guard failed: setting="
                     + setting + "; required=" + required + "; reason=" + reason);
         }
     }

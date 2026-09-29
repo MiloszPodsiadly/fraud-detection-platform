@@ -1,7 +1,7 @@
 package com.frauddetection.alert.regulated;
 
 import com.frauddetection.alert.persistence.AlertDocument;
-import com.frauddetection.alert.regulated.chaos.Fdp38LiveRuntimeCheckpoint;
+import com.frauddetection.alert.regulated.chaos.LiveRuntimeCheckpoint;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosResult;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosWindow;
 import org.bson.Document;
@@ -18,9 +18,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Tag("docker-chaos")
 @Tag("evidence-gated-finalize")
 @Tag("integration")
-@EnabledIf("fdp38LiveCheckpointEnabled")
+@EnabledIf("liveCheckpointEnabled")
 class RegulatedMutationLiveCheckpointAfterEvidencePreparedBeforeFinalizeIT
-        extends AbstractRegulatedMutationFdp38LiveCheckpointIT {
+        extends AbstractRegulatedMutationLiveCheckpointIT {
 
     @Test
     void killAfterEvidencePreparedDoesNotCommitOrPublish() throws Exception {
@@ -30,13 +30,13 @@ class RegulatedMutationLiveCheckpointAfterEvidencePreparedBeforeFinalizeIT
 
         chaosHarness.startFixture(
                 "after-evidence-prepared-before-finalize",
-                Fdp38LiveRuntimeCheckpoint.AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE,
+                LiveRuntimeCheckpoint.AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE,
                 idempotencyKey,
                 evidenceGatedArgs()
         );
 
         var submitFuture = chaosHarness.submitDecisionAsync(alertId, idempotencyKey, decisionJson("after-evidence-prepared"));
-        Document barrier = awaitBarrier(idempotencyKey, Fdp38LiveRuntimeCheckpoint.AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE);
+        Document barrier = awaitBarrier(idempotencyKey, LiveRuntimeCheckpoint.AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE);
         RegulatedMutationCommandDocument command = awaitCommand(idempotencyKey);
         assertThat(barrier.getString("mutation_command_id")).isEqualTo(command.getId());
         assertThat(command.getMutationModelVersion()).isEqualTo(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
@@ -50,7 +50,7 @@ class RegulatedMutationLiveCheckpointAfterEvidencePreparedBeforeFinalizeIT
         RegulatedMutationChaosResult result = chaosHarness.collectEvidence(
                 scenario("after-evidence-prepared-before-finalize",
                         RegulatedMutationChaosWindow.AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE, command),
-                Fdp38LiveRuntimeCheckpoint.AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE,
+                LiveRuntimeCheckpoint.AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE,
                 chaosHarness.inspectByCommandId(command.getId()),
                 null
         );

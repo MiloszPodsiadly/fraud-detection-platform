@@ -22,7 +22,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.time.Duration;
+import java.util.EnumMap;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -47,7 +49,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     private final AtomicLong outboxProjectionMismatch = new AtomicLong(0);
     private final AtomicLong outboxOldestPendingAgeSeconds = new AtomicLong(0);
     private final AtomicLong evidenceConfirmationPending = new AtomicLong(0);
-    private final AtomicInteger evidenceGatedFinalizeSubmitDecisionEnabled = new AtomicInteger(0);
+    private final Map<AuditAction, AtomicInteger> evidenceGatedFinalizeEnabled = new EnumMap<>(AuditAction.class);
 
     public AlertServiceMetrics(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
@@ -63,21 +65,13 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         Gauge.builder("fraud_audit_integrity_status", auditIntegrityInvalid, AtomicInteger::get)
                 .tag("status", "INVALID")
                 .register(meterRegistry);
-        Gauge.builder("regulated_mutation_recovery_required_total", regulatedMutationRecoveryRequired, AtomicLong::get)
-                .register(meterRegistry);
         Gauge.builder("regulated_mutation_recovery_required_count", regulatedMutationRecoveryRequired, AtomicLong::get)
                 .register(meterRegistry);
         Gauge.builder("regulated_mutation_recovery_oldest_age_seconds", regulatedMutationRecoveryOldestAgeSeconds, AtomicLong::get)
                 .register(meterRegistry);
-        Gauge.builder("oldest_recovery_required_age_seconds", regulatedMutationRecoveryOldestAgeSeconds, AtomicLong::get)
-                .register(meterRegistry);
         Gauge.builder("regulated_mutation_recovery_failed_terminal_count", regulatedMutationRecoveryFailedTerminal, AtomicLong::get)
                 .register(meterRegistry);
-        Gauge.builder("recovery_failed_terminal_count", regulatedMutationRecoveryFailedTerminal, AtomicLong::get)
-                .register(meterRegistry);
-        Gauge.builder("regulated_mutation_recovery_repeated_failures_total", regulatedMutationRecoveryRepeatedFailures, AtomicLong::get)
-                .register(meterRegistry);
-        Gauge.builder("repeated_recovery_failures_count", regulatedMutationRecoveryRepeatedFailures, AtomicLong::get)
+        Gauge.builder("regulated_mutation_recovery_repeated_failures_count", regulatedMutationRecoveryRepeatedFailures, AtomicLong::get)
                 .register(meterRegistry);
         Gauge.builder("outbox_pending_count", outboxPending, AtomicLong::get).register(meterRegistry);
         Gauge.builder("outbox_processing_count", outboxProcessing, AtomicLong::get).register(meterRegistry);
@@ -86,9 +80,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         Gauge.builder("outbox_projection_mismatch_count", outboxProjectionMismatch, AtomicLong::get).register(meterRegistry);
         Gauge.builder("outbox_oldest_pending_age_seconds", outboxOldestPendingAgeSeconds, AtomicLong::get).register(meterRegistry);
         Gauge.builder("evidence_confirmation_pending_count", evidenceConfirmationPending, AtomicLong::get).register(meterRegistry);
-        Gauge.builder("evidence_gated_finalize_enabled", evidenceGatedFinalizeSubmitDecisionEnabled, AtomicInteger::get)
-                .tag("mutation_type", "SUBMIT_ANALYST_DECISION")
-                .register(meterRegistry);
+        registerEvidenceGatedFinalizeEnablementGauges();
     }
 
     public void recordAnalystDecisionSubmitted() {
@@ -342,9 +334,37 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         counter("evidence_gated_finalize_stuck_visible_total").increment();
     }
 
-    public void recordEvidenceGatedFinalizeEnabled(String mutationType, boolean enabled) {
-        if ("SUBMIT_ANALYST_DECISION".equals(mutationType)) {
-            evidenceGatedFinalizeSubmitDecisionEnabled.set(enabled ? 1 : 0);
+    public void recordEvidenceGatedFinalizeEnabled(AuditAction mutationType, boolean enabled) {
+        AtomicInteger state = evidenceGatedFinalizeEnabled.get(mutationType);
+        if (state == null) {
+            throw new IllegalArgumentException("Unsupported evidence-gated mutation type: " + mutationType);
+        }
+        state.set(enabled ? 1 : 0);
+    }
+
+    public void recordRegulatedMutationAlertStatusProjection(String outcome, String reason) {
+        counter(
+                "regulated_mutation_alert_status_projection_total",
+                "outcome", normalizeAlertStatusProjectionOutcome(outcome),
+                "reason", normalizeAlertStatusProjectionReason(reason)
+        ).increment();
+    }
+
+    private void registerEvidenceGatedFinalizeEnablementGauges() {
+        for (AuditAction action : new AuditAction[]{
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditAction.UPDATE_FRAUD_CASE,
+                AuditAction.RESOLVE_TRANSACTIONAL_OUTBOX_CONFIRMATION,
+                AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
+                AuditAction.ACK_TRUST_INCIDENT,
+                AuditAction.RESOLVE_TRUST_INCIDENT,
+                AuditAction.REFRESH_TRUST_INCIDENTS
+        }) {
+            AtomicInteger state = new AtomicInteger(0);
+            evidenceGatedFinalizeEnabled.put(action, state);
+            Gauge.builder("evidence_gated_finalize_enabled", state, AtomicInteger::get)
+                    .tag("mutation_type", action.name())
+                    .register(meterRegistry);
         }
     }
 
@@ -1523,6 +1543,20 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         return switch (outcome) {
             case "RENEWED", "SKIPPED", "BLOCKED", "FAILED" -> outcome;
             default -> "FAILED";
+        };
+    }
+
+    private String normalizeAlertStatusProjectionOutcome(String outcome) {
+        return switch (outcome) {
+            case "SUCCESS", "FAILED" -> outcome;
+            default -> "FAILED";
+        };
+    }
+
+    private String normalizeAlertStatusProjectionReason(String reason) {
+        return switch (reason) {
+            case "UPDATED", "ALREADY_CURRENT", "TARGET_NOT_FOUND_OR_MISMATCH", "DATA_ACCESS_ERROR" -> reason;
+            default -> "DATA_ACCESS_ERROR";
         };
     }
 

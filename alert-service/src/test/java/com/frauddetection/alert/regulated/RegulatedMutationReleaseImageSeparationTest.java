@@ -20,10 +20,9 @@ class RegulatedMutationReleaseImageSeparationTest {
     private static final Path OUTPUT_DIR = Path.of("target", "fdp39-governance");
     private static final List<String> FORBIDDEN_RELEASE_IMAGE_TOKENS = List.of(
             "target/test-classes",
-            "BOOT-INF/classes/com/frauddetection/alert/regulated/Fdp38",
-            "Fdp38LiveRuntimeCheckpointBarrierConfiguration",
+            "LiveRuntimeCheckpointBarrierConfiguration",
             "fdp38-live-runtime-checkpoint",
-            "Fdp38LiveRuntimeCheckpoint",
+            "LiveRuntimeCheckpoint",
             "LIVE_IN_FLIGHT_REQUEST_KILL",
             "RUNTIME_REACHED_TEST_FIXTURE",
             "Dockerfile.alert-service-fdp38-fixture",

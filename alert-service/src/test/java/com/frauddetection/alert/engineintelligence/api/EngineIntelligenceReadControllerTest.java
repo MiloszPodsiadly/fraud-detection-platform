@@ -2,6 +2,7 @@ package com.frauddetection.alert.engineintelligence.api;
 
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import org.junit.jupiter.api.Test;
@@ -49,6 +50,8 @@ class EngineIntelligenceReadControllerTest {
                 1,
                 Instant.parse("2026-06-02T13:00:00Z"),
                 new EngineIntelligenceComparisonReadModel(
+                        EngineIntelligenceComparisonType.RULES_VS_ML,
+                        List.of("rules.primary", "ml.python.primary"),
                         EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
                         EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                         EngineIntelligenceScoreDeltaBucket.UNAVAILABLE),

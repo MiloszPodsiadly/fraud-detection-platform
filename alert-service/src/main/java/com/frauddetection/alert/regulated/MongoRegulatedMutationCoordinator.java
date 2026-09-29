@@ -75,6 +75,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         document.setRequestHash(command.requestHash());
         document.setIdempotencyKeyHash(RegulatedMutationIntentHasher.hash(idempotencyKey));
         document.setMutationModelVersion(command.mutationModelVersion());
+        document.setRevision(0L);
         applyIntent(command, document);
         document.setState(RegulatedMutationState.REQUESTED);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.NEW);

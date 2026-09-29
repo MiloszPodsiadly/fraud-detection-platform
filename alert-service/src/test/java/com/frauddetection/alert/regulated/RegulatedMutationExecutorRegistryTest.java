@@ -109,6 +109,7 @@ class RegulatedMutationExecutorRegistryTest {
     private RegulatedMutationCommandDocument document(AuditAction action, AuditResourceType resourceType) {
         RegulatedMutationCommandDocument document = new RegulatedMutationCommandDocument();
         document.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        document.setRevision(0L);
         document.setAction(action.name());
         document.setResourceType(resourceType.name());
         return document;
@@ -124,6 +125,7 @@ class RegulatedMutationExecutorRegistryTest {
                 null,
                 null,
                 null,
+                RegulatedMutationProofTestFixtures.accepted(),
                 Duration.ofSeconds(30)
         );
     }

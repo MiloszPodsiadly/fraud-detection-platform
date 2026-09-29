@@ -40,13 +40,16 @@ public class RegulatedMutationLeaseRenewalFailureHandler {
             );
         }
         RegulatedMutationModelVersion modelVersion = current.getMutationModelVersion();
+        current.requireRevision();
+        current.nextRevision();
         RegulatedMutationState recoveryState = policy.recoveryStateForBudgetExceeded(modelVersion, current.getState());
         Update update = new Update()
                 .set("execution_status", RegulatedMutationExecutionStatus.RECOVERY_REQUIRED)
                 .set("degradation_reason", BUDGET_EXCEEDED_REASON)
                 .set("last_error", BUDGET_EXCEEDED_REASON)
                 .set("updated_at", now)
-                .set("last_heartbeat_at", now);
+                .set("last_heartbeat_at", now)
+                .inc("revision", 1);
         if (recoveryState != current.getState()) {
             update.set("state", recoveryState)
                     .set("public_status", publicStatusMapper.submitDecisionStatus(recoveryState, modelVersion));
@@ -76,6 +79,7 @@ public class RegulatedMutationLeaseRenewalFailureHandler {
                 Criteria.where("lease_expires_at").gt(now),
                 Criteria.where("execution_status").is(RegulatedMutationExecutionStatus.PROCESSING),
                 Criteria.where("state").is(current.getState()),
+                Criteria.where("revision").is(current.requireRevision()),
                 mutationModelCriteria(claimToken.mutationModelVersion()),
                 renewableStateCriteria(current.getMutationModelVersion(), current.getState())
         ));

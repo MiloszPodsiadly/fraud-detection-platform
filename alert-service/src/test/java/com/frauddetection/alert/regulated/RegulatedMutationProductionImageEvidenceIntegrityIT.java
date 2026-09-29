@@ -51,14 +51,18 @@ class RegulatedMutationProductionImageEvidenceIntegrityIT extends AbstractRegula
     void finalizeRecoveryCompletesEvidenceWithoutSecondBusinessMutation() {
         RegulatedMutationChaosScenario scenario = scenario(
                 "finalize-recovery-integrity",
-                RegulatedMutationChaosWindow.FINALIZE_RECOVERY_REQUIRED,
-                RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
+                RegulatedMutationChaosWindow.FINALIZED_VISIBLE_LOCAL_COMMIT,
+                RegulatedMutationState.FINALIZED_VISIBLE,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 command -> {
                     mutateAlert(command.getResourceId());
                     command.setResponseSnapshot(snapshot(command.getResourceId(), SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL));
                     command.setOutboxEventId("event-" + command.getResourceId());
-                    command.setLeaseOwner("owner-fdp37-success-integrity");
+                    command.setLocalCommitMarker(RegulatedMutationDurableLocalFinalizationProof.LOCAL_COMMIT_MARKER);
+                    command.setLocalCommittedAt(Instant.now());
+                    command.setSuccessAuditRecorded(true);
+                    command.setSuccessAuditId(insertAudit(command, AuditOutcome.SUCCESS, "success-" + command.getId()));
+                    command.setLeaseOwner("owner-production-image-success-integrity");
                     command.setLeaseExpiresAt(Instant.now().minusSeconds(5));
                     command.setUpdatedAt(staleForRecovery());
                     mongoTemplate.save(outboxRecord(command.getResourceId(), command.getId()));
@@ -66,9 +70,13 @@ class RegulatedMutationProductionImageEvidenceIntegrityIT extends AbstractRegula
         );
 
         chaosHarness.runDurableStateScenario(scenario);
-        chaosHarness.recoverViaRestartedService();
+        var recovery = chaosHarness.recoverViaRestartedService();
         RegulatedMutationChaosResult result = collectAfterReplay(scenario);
 
+        assertThat(recovery.path("recovered").asLong()).isEqualTo(1);
+        assertThat(result.commandState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        assertThat(result.executionStatus()).isEqualTo(RegulatedMutationExecutionStatus.COMPLETED);
+        assertThat(result.publicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         assertThat(result.businessMutationCount()).isOne();
         assertThat(result.outboxRecords()).isOne();
         assertThat(result.successAuditEvents()).isOne();
@@ -104,9 +112,9 @@ class RegulatedMutationProductionImageEvidenceIntegrityIT extends AbstractRegula
                     command.setLocalCommitMarker("EVIDENCE_GATED_FINALIZED");
                     command.setLocalCommittedAt(Instant.now());
                     command.setAttemptedAuditRecorded(true);
-                    command.setAttemptedAuditId(insertAudit(command.getResourceId(), AuditOutcome.ATTEMPTED, "attempted-" + command.getId()));
+                    command.setAttemptedAuditId(insertAudit(command, AuditOutcome.ATTEMPTED, "attempted-" + command.getId()));
                     command.setSuccessAuditRecorded(true);
-                    command.setSuccessAuditId(insertAudit(command.getResourceId(), AuditOutcome.SUCCESS, "success-" + command.getId()));
+                    command.setSuccessAuditId(insertAudit(command, AuditOutcome.SUCCESS, "success-" + command.getId()));
                     mongoTemplate.save(outboxRecord(command.getResourceId(), command.getId()));
                 }
         );
@@ -127,9 +135,9 @@ class RegulatedMutationProductionImageEvidenceIntegrityIT extends AbstractRegula
                     command.setLocalCommitMarker("EVIDENCE_GATED_FINALIZED");
                     command.setLocalCommittedAt(Instant.now());
                     command.setAttemptedAuditRecorded(true);
-                    command.setAttemptedAuditId(insertAudit(command.getResourceId(), AuditOutcome.ATTEMPTED, "attempted-" + command.getId()));
+                    command.setAttemptedAuditId(insertAudit(command, AuditOutcome.ATTEMPTED, "attempted-" + command.getId()));
                     command.setSuccessAuditRecorded(true);
-                    command.setSuccessAuditId(insertAudit(command.getResourceId(), AuditOutcome.SUCCESS, "success-" + command.getId()));
+                    command.setSuccessAuditId(insertAudit(command, AuditOutcome.SUCCESS, "success-" + command.getId()));
                     mongoTemplate.save(outboxRecord(command.getResourceId(), command.getId()));
                 }
         );

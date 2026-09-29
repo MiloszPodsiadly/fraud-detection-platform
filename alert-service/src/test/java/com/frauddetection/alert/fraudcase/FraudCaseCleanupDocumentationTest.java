@@ -40,21 +40,21 @@ class FraudCaseCleanupDocumentationTest {
     }
 
     @Test
-    void fdp50ReleaseNoteSeparatesHistoricalGoneResponseFromCurrentFdp81Behavior() throws IOException {
-        String releaseNote = Files.readString(resolve("docs/release/fdp_50_legacy_api_removal.md"));
+    void releaseNoteSeparatesHistoricalGoneResponseFromCurrentBehavior() throws IOException {
+        String releaseNote = Files.readString(resolve("docs/release/fraud_case_api_cleanup.md"));
 
         assertThat(releaseNote)
-                .contains("Historical Behavior In FDP-50")
+                .contains("Historical Unversioned Route Behavior")
                 .contains("returned `410 Gone` with `code:LEGACY_FRAUD_CASE_ROUTE_REMOVED`")
-                .contains("FDP-81 removes the unversioned compatibility handler")
+                .contains("compatibility handler has since been removed")
                 .contains("must not rely on `410 Gone`")
                 .contains("unknown-route and security fallback behavior");
         assertThat(releaseNote).doesNotContain("current `/api/fraud-cases/**` still returns `410 Gone`");
     }
 
     @Test
-    void fdp81ReleaseNoteDocumentsBreakingCleanupAndUnaffectedSuspiciousSummary() throws IOException {
-        String releaseNote = Files.readString(resolve("docs/release/fdp_81_fraud_case_surface_cleanup.md"));
+    void releaseNoteDocumentsBreakingCleanupAndUnaffectedSuspiciousSummary() throws IOException {
+        String releaseNote = Files.readString(resolve("docs/release/fraud_case_api_cleanup.md"));
 
         assertThat(releaseNote)
                 .contains("intentional breaking API surface cleanup")

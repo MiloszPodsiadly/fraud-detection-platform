@@ -284,6 +284,7 @@ class EvidenceGatedFinalizeCoordinatorTest {
         document.setIntentAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
         document.setIntentActorId("principal-7");
         document.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        document.setRevision(0L);
         document.setState(state);
         document.setCreatedAt(Instant.parse("2026-05-01T00:00:00Z"));
         document.setUpdatedAt(Instant.parse("2026-05-01T00:00:00Z"));
@@ -318,6 +319,7 @@ class EvidenceGatedFinalizeCoordinatorTest {
                     new RegulatedMutationPublicStatusMapper(),
                     new EvidencePreconditionEvaluator(),
                     localAuditPhaseWriter,
+                    RegulatedMutationProofTestFixtures.accepted(),
                     Duration.ofSeconds(30)
             );
             coordinator = new MongoRegulatedMutationCoordinator(

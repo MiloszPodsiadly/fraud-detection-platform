@@ -60,6 +60,7 @@ public class AlertDocument {
     private String decisionIdempotencyKey;
     private String decisionIdempotencyRequestHash;
     private String decisionOperationStatus;
+    private Long decisionOperationRevision;
     private FraudDecisionEvent decisionOutboxEvent;
     private String decisionOutboxStatus;
     private String decisionOutboxLeaseOwner;
@@ -144,6 +145,8 @@ public class AlertDocument {
     public void setDecisionIdempotencyRequestHash(String decisionIdempotencyRequestHash) { this.decisionIdempotencyRequestHash = decisionIdempotencyRequestHash; }
     public String getDecisionOperationStatus() { return decisionOperationStatus; }
     public void setDecisionOperationStatus(String decisionOperationStatus) { this.decisionOperationStatus = decisionOperationStatus; }
+    public Long getDecisionOperationRevision() { return decisionOperationRevision; }
+    public void setDecisionOperationRevision(Long decisionOperationRevision) { this.decisionOperationRevision = decisionOperationRevision; }
     public FraudDecisionEvent getDecisionOutboxEvent() { return decisionOutboxEvent; }
     public void setDecisionOutboxEvent(FraudDecisionEvent decisionOutboxEvent) { this.decisionOutboxEvent = decisionOutboxEvent; }
     public String getDecisionOutboxStatus() { return decisionOutboxStatus; }

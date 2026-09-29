@@ -6,6 +6,7 @@ import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparison;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceDiagnosticSignal;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceEngineResult;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
@@ -146,7 +147,13 @@ final class EngineIntelligenceProjectionTestFixtures {
             EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
             EngineIntelligenceScoreDeltaBucket scoreDeltaBucket
     ) {
-        return new EngineIntelligenceComparison(agreementStatus, riskMismatchStatus, scoreDeltaBucket);
+        return new EngineIntelligenceComparison(
+                EngineIntelligenceComparisonType.RULES_VS_ML,
+                List.of("rules.primary", "ml.python.primary"),
+                agreementStatus,
+                riskMismatchStatus,
+                scoreDeltaBucket
+        );
     }
 
     static TransactionScoredEvent oldEvent() {

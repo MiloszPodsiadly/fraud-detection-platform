@@ -95,6 +95,7 @@ class RegulatedMutationClaimServiceTest {
         assertThat(queryJson).contains("execution_status=NEW");
         assertThat(queryJson).contains("execution_status=PROCESSING");
         assertThat(queryJson).contains("lease_expires_at");
+        assertThat(queryJson).contains("revision");
     }
 
     @Test
@@ -217,6 +218,7 @@ class RegulatedMutationClaimServiceTest {
         service.claim(command(), "idem-1");
 
         assertThat(incDocument().get("attempt_count")).isEqualTo(1);
+        assertThat(incDocument().get("revision")).isEqualTo(1);
     }
 
     @Test
@@ -293,6 +295,7 @@ class RegulatedMutationClaimServiceTest {
         document.setState(RegulatedMutationState.REQUESTED);
         document.setAttemptCount(1);
         document.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        document.setRevision(1L);
         return document;
     }
 

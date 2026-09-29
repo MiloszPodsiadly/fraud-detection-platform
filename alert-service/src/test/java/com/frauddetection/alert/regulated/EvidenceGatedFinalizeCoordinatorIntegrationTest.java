@@ -193,6 +193,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                 new RegulatedMutationPublicStatusMapper(),
                 evidencePreconditionEvaluator,
                 localAuditPhaseWriter,
+                RegulatedMutationProofTestFixtures.accepted(),
                 Duration.ofSeconds(30)
         );
         return new MongoRegulatedMutationCoordinator(
@@ -237,6 +238,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                 new RegulatedMutationPublicStatusMapper(),
                 evidencePreconditionEvaluator,
                 localAuditPhaseWriter,
+                RegulatedMutationProofTestFixtures.accepted(),
                 Duration.ofSeconds(30)
         );
         return new MongoRegulatedMutationCoordinator(

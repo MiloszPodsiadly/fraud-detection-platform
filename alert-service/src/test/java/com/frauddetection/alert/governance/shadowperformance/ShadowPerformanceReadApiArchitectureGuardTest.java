@@ -200,7 +200,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
     }
 
     @Test
-    void fdp108ProviderReadsOnlyConfiguredCurrentSummaryArtifact() throws Exception {
+    void providerReadsOnlyConfiguredCurrentSummaryArtifact() throws Exception {
         String source = Files.readString(PRODUCTION_ROOT.resolve(
                 "governance/shadowperformance/ArtifactBackedShadowPerformanceSummaryProvider.java"
         ));
@@ -258,7 +258,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
     }
 
     @Test
-    void fdp108ProviderDoesNotWriteOrMutateOperationalState() throws Exception {
+    void providerDoesNotWriteOrMutateOperationalState() throws Exception {
         String source = Files.readString(PRODUCTION_ROOT.resolve(
                 "governance/shadowperformance/ArtifactBackedShadowPerformanceSummaryProvider.java"
         ));
@@ -308,7 +308,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
     }
 
     @Test
-    void fdp107DashboardUiUsesOnlyCurrentReadEndpoint() throws Exception {
+    void dashboardUiUsesOnlyCurrentReadEndpoint() throws Exception {
         String uiSource = uiSource();
 
         assertThat(uiSource).contains(
@@ -370,7 +370,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
     }
 
     @Test
-    void docsDescribeFdp108CurrentProviderBoundaries() throws Exception {
+    void docsDescribeCurrentProviderBoundaries() throws Exception {
         String doc = Files.readString(ROOT.resolve("docs/architecture/shadow_performance_summary_current_provider.md"));
 
         assertThat(doc).contains(
@@ -738,7 +738,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
     }
 
     @Test
-    void fdp110UiCountersRemainShellContextAndDoNotEnterSummaryContract() throws Exception {
+    void uiCountersRemainShellContextAndDoNotEnterSummaryContract() throws Exception {
         String shell = Files.readString(UI_ROOT.resolve("workspace/WorkspaceDashboardShell.jsx"));
         String dashboard = Files.readString(UI_ROOT.resolve("components/ShadowPerformanceDashboard.jsx"));
         String runtime = Files.readString(UI_ROOT.resolve("workspace/ShadowPerformanceWorkspaceRuntime.jsx"));
@@ -772,13 +772,13 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
 
     @Test
     void generatedRuntimeBridgeDoesNotIntroduceScopeCreepTerms() throws Exception {
-        String fdp110Sources = String.join("\n",
+        String generatedRuntimeSources = String.join("\n",
                 Files.readString(GENERATED_COMPOSE),
                 Files.readString(GENERATED_RUNTIME_DOC),
                 makeTarget(Files.readString(MAKEFILE), "app-up-shadow-performance-generated")
         );
 
-        assertThat(fdp110Sources).doesNotContain(
+        assertThat(generatedRuntimeSources).doesNotContain(
                 "promotionReadiness",
                 "promotion readiness score",
                 "recommendedThreshold",

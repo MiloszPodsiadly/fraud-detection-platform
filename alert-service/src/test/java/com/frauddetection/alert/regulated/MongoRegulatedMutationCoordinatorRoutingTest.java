@@ -178,6 +178,7 @@ class MongoRegulatedMutationCoordinatorRoutingTest {
         document.setIntentAction(action.name());
         document.setIntentActorId("principal-7");
         document.setMutationModelVersion(modelVersion);
+        document.setRevision(0L);
         document.setState(RegulatedMutationState.REQUESTED);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.NEW);
         document.setCreatedAt(Instant.parse("2026-05-01T00:00:00Z"));

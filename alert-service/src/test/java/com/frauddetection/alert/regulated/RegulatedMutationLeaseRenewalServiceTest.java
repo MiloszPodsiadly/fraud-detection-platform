@@ -258,6 +258,7 @@ class RegulatedMutationLeaseRenewalServiceTest {
         document.setLeaseExpiresAt(NOW.plusSeconds(5));
         document.setLeaseBudgetStartedAt(NOW);
         document.setMutationModelVersion(modelVersion);
+        document.setRevision(1L);
         document.setState(state);
         document.setExecutionStatus(status);
         return document;

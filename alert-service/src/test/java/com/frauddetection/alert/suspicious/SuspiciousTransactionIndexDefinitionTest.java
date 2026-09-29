@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SuspiciousTransactionIndexDefinitionTest {
 
     @Test
-    void declaresOnlyFdp63SupportedReadIndexesAndIdempotencyIndex() {
+    void declaresOnlySupportedReadIndexesAndIdempotencyIndex() {
         assertThat(indexesByName().keySet()).containsExactlyInAnyOrderElementsOf(EXPECTED_INDEX_NAMES);
     }
 

@@ -58,6 +58,7 @@ public class RegulatedMutationCommandDocument {
     private String intentPayloadHash;
     @Field("mutation_model_version")
     private RegulatedMutationModelVersion mutationModelVersion;
+    private Long revision;
     private RegulatedMutationState state;
     @Field("execution_status")
     private RegulatedMutationExecutionStatus executionStatus;
@@ -146,6 +147,15 @@ public class RegulatedMutationCommandDocument {
     public void setIntentPayloadHash(String intentPayloadHash) { this.intentPayloadHash = intentPayloadHash; }
     public RegulatedMutationModelVersion getMutationModelVersion() { return mutationModelVersion; }
     public void setMutationModelVersion(RegulatedMutationModelVersion mutationModelVersion) { this.mutationModelVersion = mutationModelVersion; }
+    public Long getRevision() { return revision; }
+    public void setRevision(Long revision) { this.revision = revision; }
+    public long requireRevision() {
+        if (revision == null || revision < 0) {
+            throw new IllegalStateException("Persisted regulated mutation command requires a non-negative revision.");
+        }
+        return revision;
+    }
+    public long nextRevision() { return Math.incrementExact(requireRevision()); }
     public RegulatedMutationState getState() { return state; }
     public void setState(RegulatedMutationState state) { this.state = state; }
     public RegulatedMutationExecutionStatus getExecutionStatus() { return executionStatus; }

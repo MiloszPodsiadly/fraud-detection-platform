@@ -66,11 +66,10 @@ class SystemTrustLevelControllerTest {
         assertThat(response.outboxDeliveryMode()).isEqualTo("TRANSACTIONAL_OUTBOX_AT_LEAST_ONCE");
         assertThat(response.evidenceConfirmationMode()).isEqualTo("ENABLED");
         assertThat(response.evidenceConfirmationPendingCount()).isZero();
-        assertThat(response.evidenceConfirmationRecoveryRequiredCount()).isZero();
     }
 
     @Test
-    void shouldNotMarketBestEffortAsFdp24FailClosed() {
+    void shouldNotMarketBestEffortAsHealthyFailClosedMode() {
         ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
         ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
         AuditDegradationService degradationService = mock(AuditDegradationService.class);
@@ -291,7 +290,6 @@ class SystemTrustLevelControllerTest {
         when(recoveryService.staleProcessingLeaseCount()).thenReturn(1L);
         when(recoveryService.finalizeRecoveryRequiredCount()).thenReturn(2L);
         when(recoveryService.evidenceConfirmationPendingCount()).thenReturn(4L);
-        when(recoveryService.evidenceConfirmationRecoveryRequiredCount()).thenReturn(2L);
         when(recoveryService.repeatedRecoveryFailureCount()).thenReturn(3L);
         when(recoveryService.oldestRecoveryRequiredAgeSeconds()).thenReturn(120L);
         SystemTrustLevelController controller = new SystemTrustLevelController(
@@ -315,7 +313,6 @@ class SystemTrustLevelControllerTest {
         assertThat(response.staleProcessingLeaseCount()).isEqualTo(1L);
         assertThat(response.finalizeRecoveryRequiredCount()).isEqualTo(2L);
         assertThat(response.evidenceConfirmationPendingCount()).isEqualTo(4L);
-        assertThat(response.evidenceConfirmationRecoveryRequiredCount()).isEqualTo(2L);
         assertThat(response.repeatedRecoveryFailureCount()).isEqualTo(3L);
         assertThat(response.oldestRecoveryRequiredAgeSeconds()).isEqualTo(120L);
         assertThat(response.reasonCode()).isEqualTo("REGULATED_MUTATION_STALE_PROCESSING_LEASE");

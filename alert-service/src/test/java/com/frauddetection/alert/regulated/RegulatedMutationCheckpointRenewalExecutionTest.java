@@ -125,6 +125,7 @@ class RegulatedMutationCheckpointRenewalExecutionTest {
             document.setId("command-1");
             document.setIdempotencyKey("idem-1");
             document.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+            document.setRevision(0L);
             document.setState(state);
             document.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
             document.setLeaseOwner("owner-1");

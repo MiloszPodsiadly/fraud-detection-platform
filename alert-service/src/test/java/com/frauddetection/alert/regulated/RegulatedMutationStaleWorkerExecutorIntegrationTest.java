@@ -292,7 +292,10 @@ class RegulatedMutationStaleWorkerExecutorIntegrationTest extends AbstractIntegr
 
     private RegulatedMutationReplayPolicyRegistry replayPolicyRegistry() {
         return new RegulatedMutationReplayPolicyRegistry(List.of(
-                new EvidenceGatedFinalizeReplayPolicy(new RegulatedMutationLeasePolicy())
+                new EvidenceGatedFinalizeReplayPolicy(
+                        new RegulatedMutationLeasePolicy(),
+                        mock(RegulatedMutationDurableLocalFinalizationProof.class)
+                )
         ));
     }
 
@@ -361,6 +364,7 @@ class RegulatedMutationStaleWorkerExecutorIntegrationTest extends AbstractIntegr
         document.setIntentActorId("principal-7");
         document.setIntentDecision(AnalystDecision.CONFIRMED_FRAUD.name());
         document.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        document.setRevision(0L);
         document.setState(RegulatedMutationState.REQUESTED);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.NEW);
         document.setCreatedAt(Instant.now());
@@ -420,19 +424,21 @@ class RegulatedMutationStaleWorkerExecutorIntegrationTest extends AbstractIntegr
         }
 
         @Override
-        public void transition(
+        public long transition(
                 RegulatedMutationClaimToken claimToken,
                 RegulatedMutationState expectedState,
                 RegulatedMutationExecutionStatus expectedExecutionStatus,
+                long expectedRevision,
                 RegulatedMutationState newState,
                 RegulatedMutationExecutionStatus newExecutionStatus,
                 String lastError,
                 java.util.function.Consumer<Update> allowedFieldUpdates
         ) {
-            super.transition(
+            long resultingRevision = super.transition(
                     claimToken,
                     expectedState,
                     expectedExecutionStatus,
+                    expectedRevision,
                     newState,
                     newExecutionStatus,
                     lastError,
@@ -444,6 +450,7 @@ class RegulatedMutationStaleWorkerExecutorIntegrationTest extends AbstractIntegr
             if (newState == RegulatedMutationState.FINALIZING) {
                 afterFinalizing.run();
             }
+            return resultingRevision;
         }
     }
 }
