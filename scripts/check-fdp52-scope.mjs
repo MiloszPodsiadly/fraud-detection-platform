@@ -6,7 +6,7 @@ import {
   repoRoot,
   readFileIfExists,
   runGitDiff
-} from "./fdp-scope/scopeGuardHelpers.mjs";
+} from "./scope-guards/scopeGuardHelpers.mjs";
 import { execFileSync } from "node:child_process";
 
 const usingExplicitChangedFiles = Boolean(process.env.FDP52_SCOPE_CHANGED_FILES);
@@ -31,9 +31,9 @@ const outOfScopePattern = /\b(assign(?:ment)?|claim|bulk|mass|optimistic|Kafka|o
 const exportWorkflowPattern = /\bexport\s+(workflow|button|action|csv|download|file|report|data|results)\b/i;
 const fdp54GovernanceFiles = new Set([
   "scripts/check-doc-overclaims.mjs",
-  "scripts/check-fdp-scope-helpers-smoke.mjs",
+  "scripts/check-scope-guard-helpers-smoke.mjs",
   "scripts/compare-ci-jobs.mjs",
-  "scripts/fdp-scope/scopeGuardHelpers.mjs"
+  "scripts/scope-guards/scopeGuardHelpers.mjs"
 ]);
 
 for (const file of changedFiles) {

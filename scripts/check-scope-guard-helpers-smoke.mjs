@@ -8,7 +8,7 @@ import {
   isBackendProductionFile,
   isFrontendSourceFile,
   readFileIfExists
-} from "./fdp-scope/scopeGuardHelpers.mjs";
+} from "./scope-guards/scopeGuardHelpers.mjs";
 
 assert.equal(fileMatchesAnyPrefix("a/b/c.js", ["a/b/"]), true);
 assert.equal(isBackendProductionFile("alert-service/src/main/java/com/example/Foo.java"), true);
@@ -21,6 +21,6 @@ assert.deepEqual(
   findNamedImportsFrom("import { listAlerts, getAlert as readAlert } from '../api/alertsApi.js';", "api/alertsApi.js"),
   ["listAlerts", "getAlert"]
 );
-assert.equal(readFileIfExists("definitely-missing-fdp-scope-helper-smoke.txt"), "");
+assert.equal(readFileIfExists("definitely-missing-scope-helper-smoke.txt"), "");
 
-console.log("fdp scope helper smoke checks passed");
+console.log("scope guard helper smoke checks passed");

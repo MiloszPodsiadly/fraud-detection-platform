@@ -1,4 +1,4 @@
-# Explicit local override for using FDP-109 generated Shadow Performance Summary.
+# Explicit local override for using a generated Shadow Performance Summary.
 # This is not production scheduling and does not generate the artifact.
 services:
   alert-service:

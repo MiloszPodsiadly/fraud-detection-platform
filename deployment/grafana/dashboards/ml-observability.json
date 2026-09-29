@@ -397,7 +397,7 @@
   "schemaVersion": 39,
   "style": "dark",
   "tags": [
-    "fdp-5",
+    "ml-observability",
     "ml",
     "observability"
   ],
@@ -410,8 +410,8 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "FDP-5 ML Observability",
-  "uid": "fdp5-ml-observability",
+  "title": "ML Observability",
+  "uid": "ml-observability",
   "version": 1,
   "weekStart": ""
 }

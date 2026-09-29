@@ -1,5 +1,5 @@
 groups:
-  - name: fdp5-ml-observability
+  - name: ml-observability
     rules:
       - alert: MlInferenceLatencyHigh
         expr: |
