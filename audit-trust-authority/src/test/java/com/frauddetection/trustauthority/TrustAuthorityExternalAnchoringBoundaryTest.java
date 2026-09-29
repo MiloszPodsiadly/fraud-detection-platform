@@ -7,10 +7,10 @@ import java.nio.charset.StandardCharsets;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class TrustAuthorityFdp23BoundaryTest {
+class TrustAuthorityExternalAnchoringBoundaryTest {
 
     @Test
-    void shouldNotExposeExternalAnchoringRuntimeHookInFdp23() {
+    void shouldNotExposeExternalAnchoringRuntimeHook() {
         assertThatThrownBy(() -> Class.forName("com.frauddetection.trustauthority.TrustAuthorityExternalAnchorScheduler"))
                 .isInstanceOf(ClassNotFoundException.class);
         assertThatThrownBy(() -> Class.forName("com.frauddetection.trustauthority.NoopExternalAnchorPublisher"))

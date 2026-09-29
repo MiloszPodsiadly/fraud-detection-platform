@@ -35,7 +35,7 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
 
     @Test
     void reviewedProductionConsumerInventoryMatchesCurrentSourceScan() throws Exception {
-        assertThat(EngineIntelligenceFdp93SourceScanSupport.productionJavaFilesContaining("TransactionScoredEvent"))
+        assertThat(EngineIntelligenceSourceScanSupport.productionJavaFilesContaining("TransactionScoredEvent"))
                 .withFailMessage(MESSAGE)
                 .containsExactlyElementsOf(REVIEWED_PRODUCTION_REFERENCES);
     }
@@ -49,7 +49,7 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
 
     @Test
     void sourceScanIgnoresTestFixturesAndGeneratedOutputs() throws Exception {
-        assertThat(EngineIntelligenceFdp93SourceScanSupport.productionJavaFilesContaining("TransactionScoredEvent"))
+        assertThat(EngineIntelligenceSourceScanSupport.productionJavaFilesContaining("TransactionScoredEvent"))
                 .noneMatch(path -> path.contains("/src/test/"))
                 .noneMatch(path -> path.contains("/target/"))
                 .noneMatch(path -> path.contains("/generated/"))
@@ -58,7 +58,7 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
 
     @Test
     void docsMentionKnownConsumerPathsAndFixtureReaders() throws Exception {
-        assertThat(EngineIntelligenceFdp93SourceScanSupport.read(
+        assertThat(EngineIntelligenceSourceScanSupport.read(
                 "docs/architecture/engine_intelligence_consumer_readiness.md"
         )).contains(
                 "AlertKafkaConfig",

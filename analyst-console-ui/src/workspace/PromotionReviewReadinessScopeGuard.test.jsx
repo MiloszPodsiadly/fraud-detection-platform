@@ -18,7 +18,7 @@ const promotionSources = [
 
 const docs = readFileSync(join(process.cwd(), "../docs/architecture/promotion_review_readiness_ui_panel.md"), "utf8");
 
-describe("FDP-114 promotion review readiness UI scope guards", () => {
+describe("promotion review readiness UI scope guards", () => {
   it("apiClientCallsOnlyCurrentReadEndpoint", () => {
     expect(promotionApiSource).toContain(currentReadEndpoint);
     expect(promotionApiSource).not.toMatch(/\/generate|\/workflow|\/model-registry|\/threshold|\/scored|\/payments?/i);
@@ -61,7 +61,7 @@ describe("FDP-114 promotion review readiness UI scope guards", () => {
     expect(promotionSources).not.toMatch(/Raw FDP-10[234]|Raw artifact content|Transaction reference|Customer ID|Account ID|Card ID|Device ID|Merchant ID/);
   });
 
-  it("documentsFdp114ArchitectureBoundaries", () => {
+  it("documents promotion review readiness architecture boundaries", () => {
     expect(docs).toContain("FDP-114 is a read-only UI panel");
     expect(docs).toContain("consumes FDP-112");
     expect(docs).toContain("does not generate reports");

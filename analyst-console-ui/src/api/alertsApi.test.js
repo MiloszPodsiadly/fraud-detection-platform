@@ -669,7 +669,7 @@ describe("alertsApi auth headers", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(5, fraudCaseEvidenceTimelinePath("case-1"), expect.objectContaining({ signal: evidenceTimelineSignal }));
   });
 
-  it("FraudCaseEvidenceSummaryApiClientUsesFdp73EndpointTest", async () => {
+  it("uses the fraud case evidence summary endpoint", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(evidenceSummary()));
 
     await getFraudCaseEvidenceSummary("case-1");
@@ -751,7 +751,7 @@ describe("alertsApi auth headers", () => {
     expect(fetchMock.mock.calls[0][0]).not.toContain(apiPath("internal", "suspicious-transactions"));
   });
 
-  it("FraudCaseEvidenceTimelineApiClientUsesFdp76EndpointTest", async () => {
+  it("uses the fraud case evidence timeline endpoint", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(evidenceTimeline()));
 
     await getFraudCaseEvidenceTimeline("case-1");
@@ -890,7 +890,7 @@ describe("alertsApi auth headers", () => {
     await expect(getAlert("alert-1")).rejects.toBe(abortError);
   });
 
-  it("uses bff credentials without authorization for all FDP-48 read paths", async () => {
+  it("uses BFF credentials without authorization for all protected read paths", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(jsonResponse({ content: [] })));
     const authProvider = await refreshedBffProvider("X-CSRF-TOKEN", "csrf-read");
     resetApiClient(normalizeSession({ userId: "server-user-1", roles: ["FRAUD_OPS_ADMIN"] }), authProvider);
@@ -1254,7 +1254,7 @@ describe("alertsApi auth headers", () => {
     );
   });
 
-  it("loads scored transaction detail through the FDP-115 detail GET path only", async () => {
+  it("loads scored transaction detail through the detail GET path only", async () => {
     const signal = new AbortController().signal;
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(scoredTransactionDetail()));
 
@@ -1799,7 +1799,7 @@ describe("alertsApi auth headers", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("getEngineIntelligenceValidTransactionIdCallsFdp96Endpoint", async () => {
+  it("calls the engine intelligence endpoint for a valid transaction id", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable()));
 
     await getEngineIntelligence("txn-1");
@@ -2053,7 +2053,7 @@ describe("alertsApi auth headers", () => {
     });
   });
 
-  it("getEngineIntelligenceUsesSignalCategoryFromFdp96Contract", async () => {
+  it("uses the signal category from the engine intelligence contract", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(engineIntelligenceAvailable({
       diagnosticSignals: [diagnosticSignal({ signalCategory: "FRAUD_SIGNAL" })]
     })));

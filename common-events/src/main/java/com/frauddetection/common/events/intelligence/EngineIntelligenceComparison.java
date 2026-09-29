@@ -33,20 +33,6 @@ public record EngineIntelligenceComparison(
         );
     }
 
-    public EngineIntelligenceComparison(
-            EngineIntelligenceAgreementStatus agreementStatus,
-            EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
-            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket
-    ) {
-        this(
-                EngineIntelligenceComparisonType.RULES_VS_ML,
-                FraudEngineIdentityContract.rulesVsMlComparisonEngineIds(),
-                agreementStatus,
-                riskMismatchStatus,
-                scoreDeltaBucket
-        );
-    }
-
     public EngineIntelligenceComparison {
         Objects.requireNonNull(comparisonType, "comparisonType is required");
         if (comparisonType != EngineIntelligenceComparisonType.RULES_VS_ML) {

@@ -45,7 +45,7 @@ public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
         if (identityMode == TrustAuthorityIdentityMode.MTLS_READY || identityMode == TrustAuthorityIdentityMode.JWT_READY) {
             throw new IllegalStateException("Trust authority identity mode " + identityMode.configValue() + " is not implemented and fails closed.");
         }
-        enforceFdp23Scope();
+        enforceInternalCryptographicTrustScope();
         if (identityMode == TrustAuthorityIdentityMode.HMAC_LOCAL
                 && demoSecret(properties.getHmacSecret())
                 && !localFixtureProfile()) {
@@ -130,10 +130,10 @@ public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
         }
     }
 
-    private void enforceFdp23Scope() {
+    private void enforceInternalCryptographicTrustScope() {
         TrustAuthorityCapabilityLevel capabilityLevel = properties.capabilityLevelEnum();
         if (capabilityLevel != TrustAuthorityCapabilityLevel.INTERNAL_CRYPTOGRAPHIC_TRUST) {
-            throw new IllegalStateException("FDP-23 supports INTERNAL_CRYPTOGRAPHIC_TRUST only. External trust requires FDP-24.");
+            throw new IllegalStateException("This runtime supports INTERNAL_CRYPTOGRAPHIC_TRUST only. External trust requires the external anchoring contract.");
         }
         rejectUnsupportedClaim("app.trust-authority.external-anchoring.enabled", "external anchoring");
         rejectUnsupportedClaim("app.trust-authority.worm-compliance.enabled", "WORM compliance");
@@ -143,7 +143,7 @@ public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
     private void rejectUnsupportedClaim(String propertyName, String label) {
         String configured = environment.getProperty(propertyName);
         if (StringUtils.hasText(configured) && Boolean.parseBoolean(configured)) {
-            throw new IllegalStateException("FDP-23 does not support " + label + ". External trust requires FDP-24.");
+            throw new IllegalStateException("This runtime does not support " + label + ". External trust requires the external anchoring contract.");
         }
     }
 

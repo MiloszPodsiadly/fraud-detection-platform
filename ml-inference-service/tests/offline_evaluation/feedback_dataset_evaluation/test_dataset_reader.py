@@ -77,7 +77,7 @@ class FeedbackDatasetReaderTest(unittest.TestCase):
             with self.assertRaises(FeedbackDatasetFormatError):
                 read_feedback_dataset_jsonl(path)
 
-    def test_rejectsFdp102ExportMetadata(self):
+    def test_rejects_legacy_export_metadata(self):
         payload = '{"type":"EXPORT_METADATA","failureReason":null}\n'
 
         with jsonl_file(payload) as path:

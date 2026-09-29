@@ -11,9 +11,9 @@ import java.util.Collection;
 import java.util.List;
 import java.util.stream.Stream;
 
-final class EngineIntelligenceFdp93SourceScanSupport {
+final class EngineIntelligenceSourceScanSupport {
 
-    static final List<String> FDP97_ANALYST_CONSOLE_ENGINE_INTELLIGENCE_ALLOWED_FILES = List.of(
+    static final List<String> ANALYST_CONSOLE_ENGINE_INTELLIGENCE_ALLOWED_FILES = List.of(
             "analyst-console-ui/src/api/alertsApi.js",
             "analyst-console-ui/src/api/alertsApi.test.js",
             "analyst-console-ui/src/components/EngineIntelligenceAnalystUiDisplayDocsTest.test.js",
@@ -39,7 +39,7 @@ final class EngineIntelligenceFdp93SourceScanSupport {
             "analyst-console-ui/src/styles.css"
     );
 
-    private EngineIntelligenceFdp93SourceScanSupport() {
+    private EngineIntelligenceSourceScanSupport() {
     }
 
     static String read(String relativePath) throws IOException {
@@ -68,7 +68,7 @@ final class EngineIntelligenceFdp93SourceScanSupport {
                 .filter(path -> !normalize(root.relativize(path)).contains("/generated/"))
                 .filter(path -> fileContains(path, needle))
                 .map(root::relativize)
-                .map(EngineIntelligenceFdp93SourceScanSupport::normalize)
+                .map(EngineIntelligenceSourceScanSupport::normalize)
                 .sorted()
                 .toList();
     }
@@ -84,7 +84,7 @@ final class EngineIntelligenceFdp93SourceScanSupport {
                     .filter(Files::isRegularFile)
                     .filter(path -> needles.stream().anyMatch(needle -> fileContains(path, needle)))
                     .map(repositoryRoot::relativize)
-                    .map(EngineIntelligenceFdp93SourceScanSupport::normalize)
+                    .map(EngineIntelligenceSourceScanSupport::normalize)
                     .sorted()
                     .toList();
         }
@@ -115,7 +115,7 @@ final class EngineIntelligenceFdp93SourceScanSupport {
         try {
             return Files.readString(path).contains(needle);
         } catch (IOException exception) {
-            throw new IllegalStateException("FDP93_SOURCE_SCAN_READ_FAILED", exception);
+            throw new IllegalStateException("ENGINE_INTELLIGENCE_SOURCE_SCAN_READ_FAILED", exception);
         }
     }
 

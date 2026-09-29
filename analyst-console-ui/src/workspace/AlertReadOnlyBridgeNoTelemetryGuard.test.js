@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 const workspaceDir = dirname(fileURLToPath(import.meta.url));
 const srcDir = resolve(workspaceDir, "..");
 
-describe("FDP-67 alert read-only bridge telemetry guard", () => {
+describe("alert read-only bridge telemetry guard", () => {
   it("AlertBridgeDoesNotLogRawAlertIdTest", () => {
     expect(sensitiveSinkLines(/console\.(log|info|warn|error|debug)\s*\(/, ["alertId", "linkedAlertId"])).toEqual([]);
   });

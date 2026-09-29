@@ -16,7 +16,7 @@ const shadowSources = [
 
 const docs = readFileSync(join(process.cwd(), "../docs/architecture/shadow_performance_dashboard_ui.md"), "utf8");
 
-describe("FDP-107 shadow performance UI scope guards", () => {
+describe("shadow performance UI scope guards", () => {
   it("doesNotAddPromotionWorkflow", () => {
     expect(shadowSources).not.toMatch(/promotionWorkflow|promoteModel|safe to promote|promotion readiness score/i);
   });
@@ -73,7 +73,7 @@ describe("FDP-107 shadow performance UI scope guards", () => {
     expect(shadowSources).not.toMatch(/raw Platform Recommendation Evaluation Card view|rawEvaluationReport|rawDataset|FDP-102 JSONL/i);
   });
 
-  it("documentsFdp107ArchitectureBoundaries", () => {
+  it("documents shadow performance architecture boundaries", () => {
     expect(docs).toContain("dashboard consumes only the v2 current Shadow Performance Summary endpoint");
     expect(docs).toContain("FDP-107 does not compute metrics");
     expect(docs).toContain("FDP-107 does not recompute shadow performance");

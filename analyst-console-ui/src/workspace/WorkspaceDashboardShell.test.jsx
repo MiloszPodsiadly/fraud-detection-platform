@@ -12,7 +12,7 @@ const shadowRuntimeSource = readFileSync(resolve(dirname(fileURLToPath(import.me
 const shadowContainerSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "ShadowPerformanceWorkspaceContainer.jsx"), "utf8");
 const shadowPageSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../pages/ShadowPerformanceDashboardPage.jsx"), "utf8");
 
-describe("WorkspaceDashboardShell FDP-53 composition", () => {
+describe("WorkspaceDashboardShell composition", () => {
   it("renders the active workspace through WorkspaceRouteRegistry", () => {
     expect(shellSource).toContain("resolveWorkspaceRouteResult(workspacePage)");
     expect(shellSource).toContain("const ActiveWorkspaceRuntime = activeRoute.Runtime");

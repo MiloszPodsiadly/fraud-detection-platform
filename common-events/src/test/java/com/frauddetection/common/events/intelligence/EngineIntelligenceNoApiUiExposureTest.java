@@ -23,7 +23,7 @@ class EngineIntelligenceNoApiUiExposureTest {
 
     @Test
     void apiAndControllerProductionCodeExposeEngineIntelligenceOnlyThroughScoredTransactionDetail() throws Exception {
-        List<String> apiExposure = EngineIntelligenceFdp93SourceScanSupport.filesContainingAny(
+        List<String> apiExposure = EngineIntelligenceSourceScanSupport.filesContainingAny(
                 "alert-service/src/main/java/com/frauddetection/alert",
                 List.of("EngineIntelligenceSummary", "engineIntelligence", "diagnosticSignals",
                         "agreementStatus", "riskMismatchStatus", "scoreDeltaBucket")
@@ -37,13 +37,13 @@ class EngineIntelligenceNoApiUiExposureTest {
     }
 
     @Test
-    void analystConsoleExposesEngineIntelligenceOnlyThroughFdp97ReadOnlyDisplay() throws Exception {
-        assertThat(EngineIntelligenceFdp93SourceScanSupport.filesContainingAny(
+    void analystConsoleExposesEngineIntelligenceOnlyThroughReadOnlyDisplay() throws Exception {
+        assertThat(EngineIntelligenceSourceScanSupport.filesContainingAny(
                 "analyst-console-ui/src",
                 List.of("engineIntelligence", "diagnosticSignals", "agreementStatus",
                         "riskMismatchStatus", "scoreDeltaBucket")
         )).isSubsetOf(
-                EngineIntelligenceFdp93SourceScanSupport.FDP97_ANALYST_CONSOLE_ENGINE_INTELLIGENCE_ALLOWED_FILES
+                EngineIntelligenceSourceScanSupport.ANALYST_CONSOLE_ENGINE_INTELLIGENCE_ALLOWED_FILES
         );
     }
 }

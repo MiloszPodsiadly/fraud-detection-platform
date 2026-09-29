@@ -8,7 +8,7 @@ class EngineIntelligenceNoLoggingExposureTest {
 
     @Test
     void alertServiceProductionCodeDoesNotLogOrSerializeRawEngineIntelligence() throws Exception {
-        assertThat(EngineIntelligenceFdp93SourceScanSupport.sources(
+        assertThat(EngineIntelligenceSourceScanSupport.sources(
                 "alert-service/src/main/java/com/frauddetection/alert/engineintelligence"
         ))
                 .withFailMessage("ENGINE_INTELLIGENCE_LOGGING_EXPOSURE_OUT_OF_SCOPE")

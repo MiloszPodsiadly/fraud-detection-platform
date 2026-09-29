@@ -86,6 +86,8 @@ final class EngineIntelligenceTestSupport {
 
     static EngineIntelligenceComparison comparison() {
         return new EngineIntelligenceComparison(
+                EngineIntelligenceComparisonType.RULES_VS_ML,
+                List.of("rules.primary", "ml.python.primary"),
                 EngineIntelligenceAgreementStatus.AGREEMENT,
                 EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
                 EngineIntelligenceScoreDeltaBucket.NONE

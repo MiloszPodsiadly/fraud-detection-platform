@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class Fdp93ConsumerReadinessStillPassesWithProducerEmissionCodePresentTest {
+class TransactionScoredEventEngineIntelligenceCompatibilityTest {
 
     private final ObjectMapper objectMapper = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
 

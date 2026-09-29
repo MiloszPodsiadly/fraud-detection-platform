@@ -8,7 +8,7 @@ class EngineIntelligenceConsumerReadinessDocsTest {
 
     @Test
     void docsStateConsumerFirstBoundaryAndFutureProducerGate() throws Exception {
-        String docs = EngineIntelligenceFdp93SourceScanSupport.read(
+        String docs = EngineIntelligenceSourceScanSupport.read(
                 "docs/architecture/engine_intelligence_consumer_readiness.md"
         );
 
@@ -64,7 +64,7 @@ class EngineIntelligenceConsumerReadinessDocsTest {
 
     @Test
     void docsDoNotContainRolloutOverclaims() throws Exception {
-        assertThat(EngineIntelligenceFdp93SourceScanSupport.read(
+        assertThat(EngineIntelligenceSourceScanSupport.read(
                 "docs/architecture/engine_intelligence_consumer_readiness.md"
         )).doesNotContainIgnoringCase(
                 "production emission enabled",

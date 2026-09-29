@@ -136,7 +136,7 @@ class FraudScoringOrchestratorMetricsSafetyTest {
     }
 
     @Test
-    void requiredEngineFailedMetricAllowsOnlyRulesPrimaryForFdp90() {
+    void requiredEngineFailedMetricAllowsOnlyRulesPrimary() {
         metrics.recordRequiredEngineFailed(FraudSignalEngineRegistry.RULES_PRIMARY_ENGINE_ID);
 
         assertThatThrownBy(() -> metrics.recordRequiredEngineFailed(FraudSignalEngineRegistry.PYTHON_ML_PRIMARY_ENGINE_ID))

@@ -5,6 +5,7 @@ import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparison;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceEngineResult;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
@@ -283,6 +284,8 @@ class AnalystRecommendationServiceTest {
         EngineIntelligenceEngineResult ml = engine(engines, "ml.python.primary");
         if (rules.status() != FraudEngineStatus.AVAILABLE) {
             return new EngineIntelligenceComparison(
+                    EngineIntelligenceComparisonType.RULES_VS_ML,
+                    List.of("rules.primary", "ml.python.primary"),
                     EngineIntelligenceAgreementStatus.REQUIRED_ENGINE_NOT_COMPARABLE,
                     EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                     EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
@@ -290,6 +293,8 @@ class AnalystRecommendationServiceTest {
         }
         if (ml.status() != FraudEngineStatus.AVAILABLE) {
             return new EngineIntelligenceComparison(
+                    EngineIntelligenceComparisonType.RULES_VS_ML,
+                    List.of("rules.primary", "ml.python.primary"),
                     EngineIntelligenceAgreementStatus.PARTIAL,
                     EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                     EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
@@ -297,6 +302,8 @@ class AnalystRecommendationServiceTest {
         }
         EngineIntelligenceRiskMismatchStatus riskMismatch = riskMismatch(rules.riskLevel(), ml.riskLevel());
         return new EngineIntelligenceComparison(
+                EngineIntelligenceComparisonType.RULES_VS_ML,
+                List.of("rules.primary", "ml.python.primary"),
                 agreement(riskMismatch),
                 riskMismatch,
                 deltaBucket(rules.scoreBucket(), ml.scoreBucket())

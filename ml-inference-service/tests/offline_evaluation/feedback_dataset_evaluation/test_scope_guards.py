@@ -13,7 +13,7 @@ class FeedbackDatasetEvaluationScopeGuardTest(unittest.TestCase):
     def test_noForbiddenSourceOfTruthImports(self):
         self.assertNotInAnyFeedbackDatasetEvaluationFile("app.feedback.feedback_dataset", "app.data.dataset", "read_fdp102_jsonl")
 
-    def test_removedFdp102ReaderCannotResolve(self):
+    def test_removed_feedback_dataset_reader_cannot_resolve(self):
         with self.assertRaises(ModuleNotFoundError):
             importlib.import_module("offline_evaluation.dataset_reader")
 

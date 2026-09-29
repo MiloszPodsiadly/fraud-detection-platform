@@ -114,6 +114,16 @@ class TransactionScoredEventEngineIntelligenceContractTest {
     }
 
     @Test
+    void unsupportedComparisonTypeIsRejected() throws Exception {
+        ObjectNode eventJson = eventJson(TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson());
+        comparison(eventJson).put("comparisonType", "RULES_VS_RULES");
+
+        assertThatThrownBy(() -> read(eventJson.toString()))
+                .isInstanceOf(Exception.class)
+                .hasMessageContaining("RULES_VS_RULES");
+    }
+
+    @Test
     void incorrectEngineOrderingIsRejected() throws Exception {
         ObjectNode eventJson = eventJson(TransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson());
         ArrayNode engines = (ArrayNode) eventJson.path("engineIntelligence").path("engines");

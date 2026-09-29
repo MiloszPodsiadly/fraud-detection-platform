@@ -96,6 +96,13 @@ class EngineIntelligenceSummaryTest {
     }
 
     @Test
+    void comparisonHasNoConstructorThatSynthesizesIdentity() {
+        assertThat(Arrays.stream(EngineIntelligenceComparison.class.getDeclaredConstructors())
+                .mapToInt(constructor -> constructor.getParameterTypes().length))
+                .containsExactly(5);
+    }
+
+    @Test
     void rejectsSummaryMissingRequiredRulesOrMlEngines() {
         assertThatThrownBy(() -> EngineIntelligenceTestSupport.summary(List.of(), List.of(), List.of()))
                 .hasMessage("ENGINE_INTELLIGENCE_REQUIRED_ENGINES_MISSING");
@@ -116,6 +123,8 @@ class EngineIntelligenceSummaryTest {
                         EngineIntelligenceTestSupport.mlEngine(RiskLevel.LOW, EngineIntelligenceScoreBucket.LOW)
                 ),
                 new EngineIntelligenceComparison(
+                        EngineIntelligenceComparisonType.RULES_VS_ML,
+                        List.of("rules.primary", "ml.python.primary"),
                         EngineIntelligenceAgreementStatus.AGREEMENT,
                         EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
                         EngineIntelligenceScoreDeltaBucket.LARGE
@@ -135,6 +144,8 @@ class EngineIntelligenceSummaryTest {
                         EngineIntelligenceTestSupport.operationalMl(FraudEngineStatus.TIMEOUT)
                 ),
                 new EngineIntelligenceComparison(
+                        EngineIntelligenceComparisonType.RULES_VS_ML,
+                        List.of("rules.primary", "ml.python.primary"),
                         EngineIntelligenceAgreementStatus.AGREEMENT,
                         EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
                         EngineIntelligenceScoreDeltaBucket.SMALL
@@ -154,6 +165,8 @@ class EngineIntelligenceSummaryTest {
                         EngineIntelligenceTestSupport.mlEngine(RiskLevel.HIGH, EngineIntelligenceScoreBucket.HIGH)
                 ),
                 new EngineIntelligenceComparison(
+                        EngineIntelligenceComparisonType.RULES_VS_ML,
+                        List.of("rules.primary", "ml.python.primary"),
                         EngineIntelligenceAgreementStatus.AGREEMENT,
                         EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
                         EngineIntelligenceScoreDeltaBucket.MEDIUM
@@ -202,6 +215,8 @@ class EngineIntelligenceSummaryTest {
                         EngineIntelligenceTestSupport.operationalMl(FraudEngineStatus.TIMEOUT)
                 ),
                 new EngineIntelligenceComparison(
+                        EngineIntelligenceComparisonType.RULES_VS_ML,
+                        List.of("rules.primary", "ml.python.primary"),
                         EngineIntelligenceAgreementStatus.PARTIAL,
                         EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                         EngineIntelligenceScoreDeltaBucket.SMALL
@@ -268,6 +283,8 @@ class EngineIntelligenceSummaryTest {
                         EngineIntelligenceTestSupport.mlEngine(RiskLevel.LOW, mlBucket)
                 ),
                 new EngineIntelligenceComparison(
+                        EngineIntelligenceComparisonType.RULES_VS_ML,
+                        List.of("rules.primary", "ml.python.primary"),
                         EngineIntelligenceAgreementStatus.DISAGREEMENT,
                         EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH,
                         deltaBucket
