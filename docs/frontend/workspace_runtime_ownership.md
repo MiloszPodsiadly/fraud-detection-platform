@@ -1,11 +1,12 @@
-# FDP-53 Workspace Runtime Ownership
+# Workspace Runtime Ownership
 
-Status: branch evidence.
+Status: current frontend architecture.
 
 
 ## Goal
 
-FDP-53 moves workspace-specific runtime ownership out of `WorkspaceDashboardShell` so the shell remains a composition layer instead of becoming the next central application component.
+Workspace-specific runtime ownership stays outside `WorkspaceDashboardShell` so the shell remains a composition layer
+instead of becoming the next central application component.
 
 ## Architecture
 
@@ -46,7 +47,7 @@ Add no-duplicate-fetch tests proving only the active runtime fetches. Add sessio
 - No API client creation inside workspace runtime.
 - No speculative prefetching.
 - No hidden workspace sensitive reads.
-- No backend production changes in FDP-53.
+- No backend production changes are part of this frontend boundary.
 - No fake empty fallback states for not-mounted, unavailable, unauthorized, loading, or failed runtime data.
 
 ## Auth Model
@@ -55,7 +56,8 @@ The registry may reference capability keys such as `canReadFraudCases`; it must 
 
 ## Non-Goals
 
-FDP-53 does not add assignment, claim, export, bulk, or mass-action workflows. It does not add new mutations, idempotency semantics, Kafka/outbox/finality behavior, backend endpoints, or auth modes.
+This architecture does not add assignment, claim, export, bulk, or mass-action workflows. It does not add new
+mutations, idempotency semantics, Kafka/outbox/finality behavior, backend endpoints, or auth modes.
 
 ## Failure Modes
 

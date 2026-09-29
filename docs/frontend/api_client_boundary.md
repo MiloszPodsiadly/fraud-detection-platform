@@ -8,7 +8,7 @@ This document defines how auth-sensitive Analyst Console code calls backend APIs
 boundary, not a backend authorization boundary, not a product workflow specification, and not a replacement for
 server-side RBAC.
 
-FDP-50 removed unused legacy API wrappers and keeps guard coverage so they are not reintroduced.
+Unused legacy API wrappers are removed, and guard coverage prevents their reintroduction.
 
 ## Approved Pattern
 

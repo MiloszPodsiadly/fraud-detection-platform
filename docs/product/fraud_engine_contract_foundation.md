@@ -1,10 +1,10 @@
-# FDP-82 Engine Contract Foundation
+# Fraud Engine Contract Foundation
 
-Status: branch scope summary.
+Status: current contract scope.
 
 ## Summary
 
-This branch adds a multi-engine scoring contract foundation to the existing fraud intelligence platform.
+The multi-engine scoring contract provides a foundation for the fraud intelligence platform.
 
 ## Introduced
 

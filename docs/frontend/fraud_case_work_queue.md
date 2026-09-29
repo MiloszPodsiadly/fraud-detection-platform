@@ -1,16 +1,14 @@
-# FDP-46 Fraud Case Work Queue UI
+# Fraud Case Work Queue UI
 
-Status: branch evidence.
+Status: current frontend architecture.
 
-Historical note: FDP-81 supersedes references in this evidence document to the general fraud-case list endpoint; the
-dedicated work queue and detail/update UI paths remain current.
-
-FDP-46 adds a read-only investigator work queue view to the analyst console. The source of truth is the FDP-45 backend read model exposed by `GET /api/v1/fraud-cases/work-queue`.
+The analyst console provides a read-only investigator work queue. Its source of truth is the bounded backend read model
+exposed by `GET /api/v1/fraud-cases/work-queue`.
 
 ## Source Of Truth
 
 - The UI uses `listFraudCaseWorkQueue()` and the `/api/v1/fraud-cases/work-queue` endpoint only.
-- At FDP-46, `GET /api/v1/fraud-cases` was a separate summary view not used for work queue semantics; FDP-81 removes it.
+- The removed `GET /api/v1/fraud-cases` route is not used for work queue semantics.
 - Work queue filtering and sorting are backend-driven. The UI does not perform partial client-side work queue filtering.
 - Header and work queue counters show loaded client slices only. They are not global totals unless the backend explicitly returns an aggregate in a future scope.
 
@@ -79,7 +77,10 @@ Backend guardrails:
 
 Sensitive scored-transaction reads continue through the read-access audit response advice. Audit targets store endpoint category `SCORED_TRANSACTION_SEARCH`, bounded page/size metadata, filter bucket, bounded result count, and a query hash rather than raw query values. Rejected validation reads are audited as `REJECTED`; unexpected query failures are audited as `FAILED`.
 
-Scored-transaction metrics use only low-cardinality labels: endpoint family, outcome, filter bucket, and page-size sample. Metrics do not include raw query text, IDs, currency, exception messages, or actor identifiers. Repeated scored-transaction searches are sensitive-read activity; gateway or future service policy should enforce rate/misuse limits for high-volume production use. FDP-46 does not add bulk export or automated enumeration support.
+Scored-transaction metrics use only low-cardinality labels: endpoint family, outcome, filter bucket, and page-size
+sample. Metrics do not include raw query text, IDs, currency, exception messages, or actor identifiers. Repeated
+scored-transaction searches are sensitive-read activity; gateway or service policy should enforce rate/misuse limits
+for high-volume production use. This UI does not add bulk export or automated enumeration support.
 
 ## Error Handling
 
@@ -92,18 +93,20 @@ Scored-transaction metrics use only low-cardinality labels: endpoint family, out
 
 ## Non-Goals
 
-FDP-46 does not add lifecycle mutation UI, assignment workflows, exports, bulk actions, idempotency changes, audit mutation changes, RegulatedMutationCoordinator routing, Kafka/outbox behavior, finality claims, or global exactly-once claims.
+The work queue UI does not add lifecycle mutation UI, assignment workflows, exports, bulk actions, idempotency changes,
+audit mutation changes, `RegulatedMutationCoordinator` routing, Kafka/outbox behavior, finality claims, or global
+exactly-once claims.
 
 ## Required Verification
 
-FDP-46 proof is now split across the shared frontend baseline and the consolidated analyst console product gate:
+Verification is split across the shared frontend baseline and the consolidated analyst console product gate:
 
 - `npm test -- --run`
 - `npm run build`
 - `Analyst Console Product Gate`
-- `mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=ScoredTransactionControllerValidationTest,ScoredTransactionSearchPolicyTest,TransactionMonitoringServiceSearchTest,ScoredTransactionDocumentMapperTest,ScoredTransactionSearchIndexReadinessTest,ReadAccessAuditClassifierTest,ReadAccessAuditEndpointTest,ReadAccessAuditServiceTest,ReadAccessAuditResponseAdviceTest,Fdp45ReadAccessAuditResponseAdviceMarkerTest,AlertServiceMetricsTest,AlertSecurityConfigTest" test`
+- `mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=ScoredTransactionControllerValidationTest,ScoredTransactionSearchPolicyTest,TransactionMonitoringServiceSearchTest,ScoredTransactionDocumentMapperTest,ScoredTransactionSearchIndexReadinessTest,ReadAccessAuditClassifierTest,ReadAccessAuditEndpointTest,ReadAccessAuditServiceTest,ReadAccessAuditResponseAdviceTest,ReadAccessAuditResponseAdviceMarkerTest,AlertServiceMetricsTest,AlertSecurityConfigTest" test`
 - `node scripts/ci/verify-junit-reports.mjs --label FDP-46 --reports alert-service/target/surefire-reports --required ...`
 
 Required tests cover endpoint selection, request parameter minimization, cursor privacy, invalid cursor handling, no sensitive field rendering, no mutation/export controls, load-more append behavior, duplicate case de-duplication, backend-driven filter/sort reload behavior, scored-transaction query validation, capped filtered totals, audited sensitive search outcomes, low-cardinality scored search metrics, authorization precedence, and stale transaction stream response protection.
 
-The standalone `FDP-46 Fraud Case Work Queue UI` and `FDP-46 Scored Transaction Filtering` CI jobs were consolidated during FDP-54. See `docs/ci_evidence_map.md` for the current replacement mapping.
+See `docs/ci_evidence_map.md` for the current CI mapping.

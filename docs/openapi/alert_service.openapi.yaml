@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: Alert Service API
-  version: FDP-26
-  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, public trust key export, governance advisory lifecycle projection, and human-review audit. This portfolio API specification does not represent bank certification, production certification, external finality, distributed ACID, or exactly-once broker delivery. FDP-20 extends tamper evidence outside the primary database boundary. FDP-22 adds a pluggable object-store external anchor sink boundary, verified external anchor references, and explicit external_immutability_level=NONE|CONFIGURED|ENFORCED; no WORM or full immutability claim is valid unless the adapter verifies infrastructure controls and reports ENFORCED. FDP-23 adds a separate local-first audit trust authority for Ed25519 external anchor hash signatures and public verification key export; the alert-service does not hold the trust authority private key. FDP-24 adds fail-closed posture reporting, durable analyst-decision outbox/idempotency semantics, and publication-status source-of-truth semantics. FDP-25 adds a recoverable regulated mutation state machine for submit-decision writes with canonical intent, idempotent audit phase keys, bounded operational recovery, and rate-limited audited inspection endpoints. FDP-26 adds a REQUIRED local Mongo transaction boundary option for supported regulated mutations, regulated fraud-case update, a separate authoritative transactional outbox record, bounded outbox recovery APIs, asynchronous evidence confirmation, bank-mode dual-control for manual outbox confirmation, and a minimal trust incident control plane. Audit integrity, trust authority signatures, trust attestation, and FDP-26 transaction mode do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, distributed ACID across MongoDB/Kafka/external witnesses, exactly-once broker delivery, pre-commit/finalize commit, or final compliance archive.
+  version: "1.0.0"
+  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, public trust key export, governance advisory lifecycle projection, and human-review audit. The service supports tamper-evident audit chains, pluggable external anchor publication with explicit external_immutability_level=NONE|CONFIGURED|ENFORCED, a separate local trust authority for Ed25519 anchor signatures, fail-closed posture reporting, durable analyst-decision outbox and idempotency semantics, recoverable regulated mutations, an optional required local Mongo transaction boundary, asynchronous evidence confirmation, dual-control outbox confirmation, and bounded trust incident operations. This portfolio API specification does not represent bank certification, production certification, external finality, distributed ACID across MongoDB, Kafka, or external witnesses, exactly-once broker delivery, certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, or final compliance archive.
 servers:
   - url: http://localhost:8085
 paths:
@@ -283,7 +283,7 @@ paths:
   /api/v1/audit/trust/attestation:
     get:
       summary: Get derived audit trust attestation
-      description: Returns a bounded derived trust assessment over FDP-19 internal integrity and FDP-20 external anchor verification signals. Requires audit:verify and records READ_AUDIT_TRUST_ATTESTATION with bounded metadata. The attestation fingerprint includes source_service, limit, mode, signer_mode, signature_key_id when present, trust status fields, external_immutability_level, anchor coverage, latest chain fields, external anchor reference, and limitations so it can be reproduced externally. Clients must interpret trust_level together with attestation_signature_strength, external anchor signature_status, external integrity signature_verification_status, and external_immutability_level. SIGNED_BY_LOCAL_AUTHORITY requires signature_verification_status=VALID for external-anchor signature metadata from a separate local authority; stored signature fields alone never upgrade trust. SIGNED_ATTESTATION represents stronger trust only when attestation_signature_strength=PRODUCTION_READY, signer_mode is backed by externally managed KMS/HSM signing material, and external_immutability_level=ENFORCED. This endpoint does not implement a second external verification stack, a second evidence export, an external anchor sink, legal notarization, legal non-repudiation, regulator-certified archive, WORM storage, SIEM integration, or KMS/HSM signing unless explicitly integrated. Local-dev signing provides integrity metadata only and never upgrades trust level.
+      description: Returns a bounded derived trust assessment over internal audit-chain integrity and external anchor verification signals. Requires audit:verify and records READ_AUDIT_TRUST_ATTESTATION with bounded metadata. The attestation fingerprint includes source_service, limit, mode, signer_mode, signature_key_id when present, trust status fields, external_immutability_level, anchor coverage, latest chain fields, external anchor reference, and limitations so it can be reproduced externally. Clients must interpret trust_level together with attestation_signature_strength, external anchor signature_status, external integrity signature_verification_status, and external_immutability_level. SIGNED_BY_LOCAL_AUTHORITY requires signature_verification_status=VALID for external-anchor signature metadata from a separate local authority; stored signature fields alone never upgrade trust. SIGNED_ATTESTATION represents stronger trust only when attestation_signature_strength=PRODUCTION_READY, signer_mode is backed by externally managed KMS/HSM signing material, and external_immutability_level=ENFORCED. This endpoint does not implement a second external verification stack, a second evidence export, an external anchor sink, legal notarization, legal non-repudiation, regulator-certified archive, WORM storage, SIEM integration, or KMS/HSM signing unless explicitly integrated. Local-dev signing provides integrity metadata only and never upgrades trust level.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -349,7 +349,7 @@ paths:
   /system/trust-level:
     get:
       summary: Get deployment trust posture
-      description: Requires audit:verify. Returns bounded live deployment posture for external audit anchoring and FDP-26 local transaction/outbox/trust-incident modes. BEST_EFFORT and FDP24_DEGRADED must not be marketed as FDP-24 healthy fail-closed mode. SIGNED_EXTERNAL means trust-authority signing is enabled and required; it is not WORM, notarization, SIEM, mTLS, or legal trust. FDP24_HEALTHY requires zero unresolved degradations, zero pending degradation resolutions, zero unknown outbox confirmations, zero publish-attempted ambiguity, zero projection mismatches, zero pending outbox resolutions, zero terminal outbox failures, no regulated mutation recovery/evidence degradation, and no open/unacknowledged critical trust incidents. transaction_mode and transaction_capability_status describe the local Mongo transaction posture only; they are not distributed ACID or exactly-once delivery.
+      description: Requires audit:verify. Returns bounded live deployment posture for external audit anchoring and local transaction, outbox, and trust-incident modes. BEST_EFFORT and FDP24_DEGRADED must not be marketed as healthy fail-closed mode. SIGNED_EXTERNAL means trust-authority signing is enabled and required; it is not WORM, notarization, SIEM, mTLS, or legal trust. FDP24_HEALTHY requires zero unresolved degradations, zero pending degradation resolutions, zero unknown outbox confirmations, zero publish-attempted ambiguity, zero projection mismatches, zero pending outbox resolutions, zero terminal outbox failures, no regulated mutation recovery or evidence degradation, and no open or unacknowledged critical trust incidents. transaction_mode and transaction_capability_status describe the local Mongo transaction posture only; they are not distributed ACID or exactly-once delivery.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -645,7 +645,7 @@ paths:
   /api/v1/outbox/recovery/backlog:
     get:
       summary: Inspect transactional outbox recovery backlog
-      description: Requires outbox:inspect. Returns bounded counts for FDP-26 transactional outbox records. Transactional outbox records are authoritative; alert embedded outbox fields are projection/cache. This endpoint is operational metadata only and never returns event payloads, transaction data, customer/account/card identifiers, decision notes, response bodies, raw exception details, or unbounded exports.
+      description: Requires outbox:inspect. Returns bounded counts for transactional outbox records. Transactional outbox records are authoritative; alert embedded outbox fields are projection/cache. This endpoint is operational metadata only and never returns event payloads, transaction data, customer/account/card identifiers, decision notes, response bodies, raw exception details, or unbounded exports.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1311,7 +1311,7 @@ paths:
           description: Feedback could not be safely completed because durable write-action audit outbox intent could not be persisted. Reason code FRAUD_FEEDBACK_AUDIT_OUTBOX_UNAVAILABLE.
     get:
       summary: Read active bounded analyst fraud feedback for one scored transaction
-      description: Returns the active feedback record for an existing scored transaction. Requires fraud-feedback:read. Existing transactions without feedback return 404 in FDP-121 v1. This endpoint is read-only and does not export datasets, invoke scoring, update recommendations, trigger workflows, create cases, authorize payments, train models, promote models, or change thresholds.
+      description: Returns the active feedback record for an existing scored transaction. Requires fraud-feedback:read. Existing transactions without feedback return 404 under the current v1 contract. This endpoint is read-only and does not export datasets, invoke scoring, update recommendations, trigger workflows, create cases, authorize payments, train models, promote models, or change thresholds.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1373,7 +1373,7 @@ paths:
   /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback:
     get:
       summary: Read captured engine intelligence feedback for one scored transaction
-      description: Returns captured feedback through a bounded, authorized, transaction-scoped read model. FDP-99 returns the first bounded page of latest feedback. Cursor-based continuation is future scope. page.hasMore indicates additional feedback exists, not that FDP-99 provides navigation. Feedback can be reviewed, not executed. The read path requires engine-intelligence:feedback:read, validates the scored transaction before feedback lookup, returns an empty bounded page when no feedback exists, uses platform sensitive-read audit, and does not invoke scoring, ML, rules, orchestration, Kafka, payment authorization, model training, decisioning, analytics, global search, export, or case-level aggregation.
+      description: Returns captured feedback through a bounded, authorized, transaction-scoped read model. The endpoint returns the first bounded page of latest feedback. Cursor-based continuation is future scope. page.hasMore indicates additional feedback exists, not that navigation is currently available. Feedback can be reviewed, not executed. The read path requires engine-intelligence:feedback:read, validates the scored transaction before feedback lookup, returns an empty bounded page when no feedback exists, uses platform sensitive-read audit, and does not invoke scoring, ML, rules, orchestration, Kafka, payment authorization, model training, decisioning, analytics, global search, export, or case-level aggregation.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1650,7 +1650,7 @@ paths:
   /api/v1/governance/promotion-review-readiness/current:
     get:
       summary: Read current Promotion Review Readiness Report
-      description: Returns the current validated FDP-111 Promotion Review Readiness Report as a bounded read-only DTO. Requires promotion-readiness:read. The response is diagnostic-only and is not model promotion approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic approve/decline/block logic, and not analyst recommendation logic. This endpoint does not generate reports, mutate state, change scoring, trigger workflows, run schedulers, emit Kafka events, expose raw FDP-102 records, raw evaluation cards, raw evaluation reports, transaction references, customer identifiers, model registry data, secrets, paths, promotion fields, threshold recommendation fields, or decisioning fields.
+      description: Returns the current validated Promotion Review Readiness Report as a bounded read-only DTO. Requires promotion-readiness:read. The response is diagnostic-only and is not model promotion approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic approve/decline/block logic, and not analyst recommendation logic. This endpoint does not generate reports, mutate state, change scoring, trigger workflows, run schedulers, emit Kafka events, expose raw source performance records, raw evaluation cards, raw evaluation reports, transaction references, customer identifiers, model registry data, secrets, paths, promotion fields, threshold recommendation fields, or decisioning fields.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1701,7 +1701,7 @@ components:
     SystemTrustLevelResponse:
       type: object
       additionalProperties: false
-      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, unresolved_degradation_count, pending_degradation_resolution_count, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, outbox_pending_count, outbox_processing_count, outbox_publish_attempted_count, outbox_confirmation_unknown_count, outbox_projection_mismatch_count, terminal_outbox_failure_count, outbox_publish_confirmation_unknown_count, unknown_outbox_confirmation_count, pending_outbox_resolution_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds, regulated_mutation_recovery_required_count, stale_processing_lease_count, finalize_recovery_required_count, evidence_confirmation_pending_count, evidence_confirmation_recovery_required_count, repeated_recovery_failure_count, oldest_recovery_required_age_seconds, transaction_mode, transaction_capability_status, outbox_delivery_mode, evidence_confirmation_mode, open_critical_incident_count, open_high_incident_count, unacknowledged_critical_incident_count, oldest_open_incident_age_seconds, top_incident_types, incident_health_status]
+      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, unresolved_degradation_count, pending_degradation_resolution_count, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, outbox_pending_count, outbox_processing_count, outbox_publish_attempted_count, outbox_confirmation_unknown_count, outbox_projection_mismatch_count, terminal_outbox_failure_count, outbox_publish_confirmation_unknown_count, unknown_outbox_confirmation_count, pending_outbox_resolution_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds, regulated_mutation_recovery_required_count, stale_processing_lease_count, finalize_recovery_required_count, evidence_confirmation_pending_count, repeated_recovery_failure_count, oldest_recovery_required_age_seconds, transaction_mode, transaction_capability_status, outbox_delivery_mode, evidence_confirmation_mode, open_critical_incident_count, open_high_incident_count, unacknowledged_critical_incident_count, oldest_open_incident_age_seconds, top_incident_types, incident_health_status]
       properties:
         guarantee_level:
           type: string
@@ -1823,11 +1823,6 @@ components:
           format: int64
           minimum: 0
           description: Number of locally committed regulated mutation commands still awaiting asynchronous evidence confirmation.
-        evidence_confirmation_recovery_required_count:
-          type: integer
-          format: int64
-          minimum: 0
-          description: Number of regulated mutation commands whose evidence confirmation requires recovery. Any value greater than zero degrades deployment trust posture.
         repeated_recovery_failure_count:
           type: integer
           format: int64
@@ -1849,7 +1844,7 @@ components:
         transaction_capability_status:
           type: string
           enum: [LOCAL_MONGO_TRANSACTION_REQUIRED, NON_TRANSACTIONAL_RECOVERABLE_SAGA]
-          description: Interprets transaction_mode for FDP-26. OFF is a recoverable saga posture, not a regulated local ACID commit boundary.
+          description: Interprets transaction_mode. OFF is a recoverable saga posture, not a regulated local ACID commit boundary.
         outbox_delivery_mode:
           type: string
           enum: [TRANSACTIONAL_OUTBOX_AT_LEAST_ONCE, DISABLED]
@@ -3079,7 +3074,7 @@ components:
         - ANALYST_CONFIRMED_LEGITIMATE
         - ANALYST_INCONCLUSIVE
         - ANALYST_NEEDS_MORE_INFO
-      description: Bounded reason code allowlist for FDP-121 analyst feedback. Unknown uppercase strings are rejected.
+      description: Bounded reason code allowlist for analyst feedback. Unknown uppercase strings are rejected.
     CreateFraudFeedbackRequest:
       type: object
       additionalProperties: false
@@ -3115,7 +3110,7 @@ components:
           type: string
           nullable: true
           maxLength: 500
-          description: Optional bounded analyst-readable note. FDP-121 does not use notes for ML training or dataset export and rejects unsafe raw/internal terms.
+          description: Optional bounded analyst-readable note. Notes are not used for ML training or dataset export, and unsafe raw or internal terms are rejected.
     FraudFeedbackResponse:
       type: object
       additionalProperties: false
@@ -3165,7 +3160,7 @@ components:
             $ref: "#/components/schemas/FraudFeedbackReasonCode"
         notesPresent:
           type: boolean
-          description: FDP-121 stores bounded notes internally for analyst context only, but does not expose raw notes in feedback responses.
+          description: Bounded notes are stored internally for analyst context only, but raw notes are not exposed in feedback responses.
         fraudScore:
           type: number
           nullable: true
@@ -3440,7 +3435,7 @@ components:
           format: int64
           nullable: true
           minimum: 1
-          description: Unique per-partition chain position for FDP-19 audit records; null only for immutable legacy local records created before chain positions existed.
+          description: Unique per-partition chain position for audit records; null only for immutable legacy local records created before chain positions existed.
         request_id:
           type: string
           nullable: true
@@ -4283,7 +4278,7 @@ components:
         external_trust_dependency:
           type: string
           enum: [REQUIRED, OPTIONAL]
-          description: REQUIRED when the derived trust level depends on valid FDP-20 external anchors.
+          description: REQUIRED when the derived trust level depends on valid external audit anchors.
         source_service:
           type: string
           enum: [alert-service]
@@ -4295,7 +4290,7 @@ components:
           type: array
           items:
             type: string
-          description: Explicit limitations such as not_legal_notarization, not_worm_storage, not_siem_integration, not_kms_hsm_signing_unless_explicitly_integrated, local_signature_not_external_trust, external_immutability_not_enforced, no_worm_claim_without_infrastructure_enforcement, external_trust_incomplete, and derived_from_fdp19_fdp20_source_of_truth.
+          description: Explicit limitations such as not_legal_notarization, not_worm_storage, not_siem_integration, not_kms_hsm_signing_unless_explicitly_integrated, local_signature_not_external_trust, external_immutability_not_enforced, no_worm_claim_without_infrastructure_enforcement, external_trust_incomplete, and derived_from_audit_integrity_and_external_anchor_state.
     AuditTrustAttestationAnchorCoverage:
       type: object
       additionalProperties: false
@@ -5014,7 +5009,7 @@ components:
         comparisonType:
           type: string
           enum: [RULES_VS_ML]
-          description: Explicit comparison identity. FDP-129 compares only Rules against ML; Velocity is not included in score delta semantics.
+          description: Explicit comparison identity. The comparison includes only Rules and ML; Velocity is not included in score delta semantics.
         comparedEngineIds:
           type: array
           minItems: 2
@@ -5272,7 +5267,7 @@ components:
         comparisonType:
           type: string
           enum: [RULES_VS_ML]
-          description: Explicit comparison identity. FDP-129 compares only Rules against ML; Velocity is not included in score delta semantics.
+          description: Explicit comparison identity. The comparison includes only Rules and ML; Velocity is not included in score delta semantics.
         comparedEngineIds:
           type: array
           minItems: 2

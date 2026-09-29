@@ -15,7 +15,11 @@ This folder contains current Analyst Console frontend architecture guidance. FDP
 
 ## Related Documents
 
-- [FDP-50 frontend API client boundary](../fdp/fdp_50_frontend_api_client_boundary.md)
+- [Frontend API client boundary](api_client_boundary.md)
+- [BFF session and request lifecycle](bff_session_and_request_lifecycle.md)
+- [Fraud Case work queue UI](fraud_case_work_queue.md)
+- [Workspace detail UX](workspace_detail_ux.md)
+- [Workspace runtime ownership](workspace_runtime_ownership.md)
 - [Security documentation](../security/index.md)
 - [API documentation](../api/index.md)
 - [CI evidence map](../ci_evidence_map.md)

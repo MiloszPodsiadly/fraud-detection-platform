@@ -14,7 +14,7 @@ Fixture proof is not production proof. `READY_FOR_ENABLEMENT_REVIEW` is not `PRO
 The release image must not contain:
 
 - `target/test-classes`
-- `Fdp38LiveRuntimeCheckpointBarrierConfiguration`
+- `LiveRuntimeCheckpointBarrierConfiguration`
 - `fdp38-live-runtime-checkpoint`
 - FDP-38 fixture barrier classes
 - `LIVE_IN_FLIGHT_REQUEST_KILL`

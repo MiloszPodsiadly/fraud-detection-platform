@@ -17,7 +17,6 @@ subjects, idempotency keys, lease owners, or command ids as metric labels.
 | --- | --- | --- | --- |
 | `regulated_mutation_recovery_required_count` | `> 0` | Trust level degraded. | Inspect regulated mutation recovery backlog. |
 | `finalize_recovery_required_count` | `> 0` | Trust level degraded. | Inspect finalize recovery evidence and command state. |
-| `evidence_confirmation_recovery_required_count` | `> 0` | Trust level degraded. | Check confirmation worker and external witness path. |
 | `outbox_failed_terminal_count` | `> 0` | Trust level degraded. | Follow outbox ambiguity handling. |
 | `outbox_projection_mismatch_count` | `> 0` | Trust level degraded. | Compare authoritative outbox record with projection. |
 | `open_critical_incident_count` | `> 0` | Trust level degraded. | Assign incident owner and keep audit trail. |
@@ -45,6 +44,6 @@ subjects, idempotency keys, lease owners, or command ids as metric labels.
 - Green dashboards indicate current observed posture only.
 - Recovery metrics do not prove absence of duplicate broker delivery.
 - Audit metrics do not create WORM storage, legal notarization, or bank certification.
-- FDP-27 does not provide exactly-once Kafka delivery or distributed ACID.
+- The alert service does not provide exactly-once Kafka delivery or distributed ACID.
 - These metrics indicate recovery and trust posture, not absolute absence of duplicate delivery or cross-service
   atomicity.

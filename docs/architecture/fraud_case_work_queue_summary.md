@@ -1,11 +1,11 @@
-# FDP-47 Analyst Console UX and Summary Contract
+# Fraud Case Work Queue Summary
 
-Status: branch evidence.
+Status: current API and analyst-console contract.
 
 
 ## Scope
 
-FDP-47 keeps the fraud-case work queue slice and the global fraud-case count as separate read contracts.
+The fraud-case work queue slice and the global fraud-case count are separate read contracts.
 
 `GET /api/v1/fraud-cases/work-queue/summary` returns a point-in-time global count for analyst console navigation:
 
@@ -29,15 +29,15 @@ Summary request metrics are controller-level, post-auth observations for `succes
 
 ## Non-Goals
 
-FDP-47 does not add snapshot consistency between summary and queue slices, does not reintroduce exact count pagination for the work queue slice, does not add a legacy summary alias, and does not change mutation or idempotency semantics.
+The summary contract does not add snapshot consistency between summary and queue slices, reintroduce exact count
+pagination for the work queue slice, add a legacy summary alias, or change mutation or idempotency semantics.
 
 ## Required Verification
 
-FDP-47 is covered by `Analyst Console Product Gate`.
+The contract is covered by `Analyst Console Product Gate`.
 
-- FDP-47 backend summary tests must run and produce JUnit reports.
-- FDP-47 frontend summary tests must run.
+- Backend summary tests must run and produce JUnit reports.
+- Frontend summary tests must run.
 - The analyst console UI build must run.
-- FDP-46 product proof remains in the same gate, but it does not change FDP-47 summary semantics.
 
 See `docs/ci_evidence_map.md` for the current CI mapping.

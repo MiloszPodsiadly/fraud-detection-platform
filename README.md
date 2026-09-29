@@ -122,7 +122,7 @@ same Compose overlay combination as `make app-up`. From Git Bash on Windows with
 OpenSSL is used only to generate local identity fixture material. Private PEM keys are not committed to this
 repository.
 
-FDP-110 local startup runs the FDP-109 Python generator before Docker Compose starts, so `python` must be available on the host.
+Local startup runs the Python generator before Docker Compose starts, so `python` must be available on the host.
 
 ### Most Complete Local Security Demonstration Stack
 
@@ -415,7 +415,7 @@ Documentation and CI governance checks:
 ```bash
 node scripts/check-doc-overclaims.mjs
 node scripts/compare-ci-jobs.mjs
-node scripts/check-fdp-scope-helpers-smoke.mjs
+node scripts/check-scope-guard-helpers-smoke.mjs
 ```
 
 Integration tests use Docker/Testcontainers where applicable and are skipped automatically when Docker is not

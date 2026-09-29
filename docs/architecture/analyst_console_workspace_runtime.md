@@ -1,9 +1,9 @@
-# FDP-51 Workspace Runtime Provider
+# Analyst Console Workspace Runtime
 
-Status: branch evidence.
+Status: current frontend runtime architecture.
 
 
-FDP-51 creates the first explicit Analyst Console workspace runtime layer and moves runtime orchestration out of `App.jsx`.
+The Analyst Console workspace runtime layer keeps runtime orchestration out of `App.jsx`.
 `App.jsx` stays responsible for auth provider bootstrap, top-level routing, the shell layout, and session controls.
 Workspace data loading, counters, authority-derived workspace capability flags, and explicit API client creation live in `WorkspaceRuntimeProvider`, `WorkspaceDashboardShell`, and workspace-specific runtime hooks.
 
@@ -25,7 +25,7 @@ Workspace data loading, counters, authority-derived workspace capability flags, 
 - Governance advisory, analytics, and audit workflow wiring live in `useGovernanceWorkspaceRuntime`.
 - Detail-page routing lives in `WorkspaceDetailRouter`.
 - Refresh routing is isolated in `useWorkspaceRefreshController`; governance audit writes are isolated in `useGovernanceAuditWorkflow`.
-- FDP-49/FDP-50 API client and raw-fetch guardrails remain mandatory.
+- API client and raw-fetch guardrails remain mandatory.
 
 ## Runtime Boundary, Not Security Boundary
 
@@ -88,7 +88,8 @@ Governance advisory read intentionally follows the current backend authorization
 
 ## Workspace Composition
 
-FDP-51 creates a workspace runtime layer. `WorkspaceDashboardShell` composes the runtime hooks, `WorkspaceDetailRouter` owns detail-page routing, and `AlertsListPage` renders the current workspace surfaces.
+`WorkspaceDashboardShell` composes the runtime hooks, `WorkspaceDetailRouter` owns detail-page routing, and
+`AlertsListPage` renders the current workspace surfaces.
 Additional workflow logic must stay in workspace-specific hooks or containers instead of accumulating in the shell.
 
 ## UI Session Boundary
@@ -114,7 +115,8 @@ The guard is regex-based and intentionally conservative.
 - Open/closed: new workspace panels should consume runtime context or explicit clients without reintroducing global API state.
 - Interface segregation: hooks depend on the API methods they call through the explicit client, not on auth internals.
 - Dependency inversion: workspace data hooks accept an injected client for tests and receive the production client from runtime context.
-- ACID claims are intentionally out of scope. FDP-51 improves frontend runtime isolation and consistency of visible state, not transactional guarantees.
+- ACID claims are intentionally out of scope. This architecture improves frontend runtime isolation and consistency
+  of visible state, not transactional guarantees.
 
 ## Merge Gate
 
@@ -122,7 +124,7 @@ The guard is regex-based and intentionally conservative.
 - `npm run build`
 - `npm run check:api-client-boundary:fdp50`
 - `npm run check:scope:fdp51`
-- CI job: `Analyst Console Frontend Architecture Gate`, section `FDP-51 runtime provider`.
-- CI must reject `.skip` and `.only` in FDP-51 runtime, counter, workspace, app, and API boundary tests.
+- CI job: `Analyst Console Frontend Architecture Gate`.
+- CI must reject `.skip` and `.only` in runtime, counter, workspace, app, and API boundary tests.
 - See `docs/ci_evidence_map.md` for the current replacement mapping.
 - `documents/` remains uncommitted.

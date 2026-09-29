@@ -1,10 +1,10 @@
-# FDP-33 Lease Renewal Dashboard
+# Regulated Mutation Lease Renewal Dashboard
 
-Status: branch evidence and dashboard contract.
+Status: current dashboard contract.
 
 ## Scope
 
-FDP-33 renewal metrics make slow regulated mutation work visible without introducing high-cardinality labels. Renewal
+Renewal metrics make slow regulated mutation work visible without introducing high-cardinality labels. Renewal
 can preserve ownership but cannot prove progress. A worker that keeps renewing without state progress is an
 operational incident.
 

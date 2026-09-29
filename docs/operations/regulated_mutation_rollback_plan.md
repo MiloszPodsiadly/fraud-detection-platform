@@ -1,13 +1,13 @@
-# FDP-35 Regulated Mutation Rollback Plan
+# Regulated Mutation Rollback Plan
 
-Status: branch evidence and rollback review template.
+Status: current rollback review template.
 
 ## Scope
 
 Rollback must be explicit, reviewed, tested, and reversible. Operators must not manually edit regulated mutation
 command documents or business aggregates.
 
-FDP-35 provides modeled restart/recovery proof in CI. It verifies durable post-crash command states, replay policy,
+CI provides modeled restart/recovery proof. It verifies durable post-crash command states, replay policy,
 recovery API behavior, and operator visibility. It does not claim real OS/JVM/container process-kill chaos unless an
 explicit real-chaos job is implemented and run.
 

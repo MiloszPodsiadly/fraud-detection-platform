@@ -1,18 +1,10 @@
-# FDP-45 Fraud Case Work Queue Readiness
+# Fraud Case Work Queue
 
-Status: branch evidence.
+Status: current architecture and operational contract.
 
-Historical note: this document records the FDP-45 state. FDP-81 later removes the general fraud-case list HTTP
-surface and its below-controller list/audit/lifecycle support while retaining the dedicated work queue contract
-described below.
-
-FDP-45 hardens the fraud-case investigator work queue as a bounded read model on the existing fraud-case query path. The authoritative list and search semantics remain `FraudCaseQueryService` plus `FraudCaseSearchRepository`; FDP-45 does not add a second search subsystem.
-
-## Historical public list contract compatibility at FDP-45
-
-At FDP-45, `GET /api/v1/fraud-cases` returned `PagedResponse<FraudCaseSummaryResponse>`.
-FDP-45 did not change that then-existing public list/search contract; FDP-81 supersedes this statement by removing
-that HTTP handler.
+The fraud-case investigator work queue is a bounded read model on the existing fraud-case query path. The authoritative
+list and search semantics remain `FraudCaseQueryService` plus `FraudCaseSearchRepository`; this contract does not add a second search subsystem.
+The removed general fraud-case list route is not an active compatibility path.
 
 ## Dedicated work queue contract
 
@@ -36,7 +28,7 @@ idempotency records, raw persistence-only fields, or lifecycle mutation payloads
 Supported filters are allowlisted: `status`, `priority`, `riskLevel`, `assignee` or `assignedInvestigatorId`, `createdFrom`, `createdTo`, `updatedFrom`, `updatedTo`, and `linkedAlertId`.
 
 Unknown filters are rejected. Duplicate single-valued query params such as two `status` or `sort` values are rejected.
-Date ranges where `from` is after `to` are rejected. FDP-45 does not add regex, free-text search, customer-id search,
+Date ranges where `from` is after `to` are rejected. The work queue does not add regex, free-text search, customer-id search,
 export, or unbounded list-all behavior.
 
 String filters are bounded before query construction. `assignee`, `assignedInvestigatorId`, and `linkedAlertId` are
@@ -46,7 +38,10 @@ case-sensitive and does not apply identity aliasing beyond trimming.
 
 ## Sorting And Pagination
 
-Supported sort fields are `createdAt`, `updatedAt`, `priority`, `riskLevel`, and `caseNumber`. Sort directions are `asc` and `desc`. The Mongo query path appends `_id ASC` as a deterministic tie-breaker. `priority` and `riskLevel` sorting uses stored enum value order; FDP-45 does not claim a custom business severity ranking. Analysts should use `priority` or `riskLevel` filters for strict queue buckets; a future branch may add explicit rank fields such as `priorityRank` or `riskLevelRank` if business-severity ordering is required.
+Supported sort fields are `createdAt`, `updatedAt`, `priority`, `riskLevel`, and `caseNumber`. Sort directions are `asc`
+and `desc`. The Mongo query path appends `_id ASC` as a deterministic tie-breaker. `priority` and `riskLevel` sorting
+uses stored enum value order; it does not imply a custom business severity ranking. Analysts should use `priority` or
+`riskLevel` filters for strict queue buckets.
 
 Pagination is bounded to page numbers `0..1000` and page sizes `1..100`. Invalid page requests fail with
 `INVALID_PAGE_REQUEST` before repository access. The dedicated work queue uses bounded slice pagination and does not perform an exact Mongo count for broad queues.
@@ -66,33 +61,18 @@ Cursor mode and page mode are separate traversal contracts. `cursor` with missin
 
 Cursor pagination is not snapshot isolation. It does not freeze the work queue, does not guarantee a past
 point-in-time view, and does not add repeatable-read semantics. Concurrent inserts or fraud-case updates can move cases
-between pages. The cursor improves bounded traversal cost and binds continuation to the query/sort shape; FDP-45 does
-not change transaction boundaries or add read snapshot semantics.
+between pages. The cursor improves bounded traversal cost and binds continuation to the query/sort shape; it does not
+change transaction boundaries or add read snapshot semantics.
 
 Page mode remains as bounded offset compatibility mode for exploratory use. Repeated requests near
 `MAX_PAGE_NUMBER=1000` should be treated as an operational signal to refine filters or use cursor traversal.
 Low-cardinality alerting can watch for high-page work queue usage by endpoint family and outcome, but must not label by
 case id, assignee, linked alert id, raw query string, request hash, or cursor value.
 
-The versioned list endpoint keeps its `PagedResponse<FraudCaseSummaryResponse>` compatibility contract and therefore
-still performs exact count pagination. FDP-45 aligns its API boundary with the same `0..1000` and `1..100` bounds, but
-the list exact count remains compatibility debt. High-volume investigator queues should use the dedicated work queue
-slice endpoint with cursor traversal. A future hardening item may move the list contract to cursor/keyset pagination or
-a capped count after a versioned public API decision.
-
-## Release Notes
-
-### List pagination bound
-
-`GET /api/v1/fraud-cases` rejects `page > 1000`. This is an intentional abuse
-prevention safety boundary for the existing `PagedResponse` compatibility path. Deep operational browsing should use
-`/api/v1/fraud-cases/work-queue` with filters and cursor pagination.
-
-### Cursor traversal limits
-
 Work queue cursor mode is the preferred high-volume traversal path. The cursor is opaque, signed, not encrypted, bound
 to filters and sort, and not snapshot isolation. Offset page mode remains a bounded compatibility path for exploratory
-use only. Exact count list pagination remains compatibility behavior, not the recommended high-volume path.
+use only. The removed general list route is not a compatibility path, and the work queue does not perform an exact
+count.
 
 ## SLA Fields
 
@@ -109,9 +89,8 @@ startup. Local development may use the `application.yml` fallback value, but pro
 `FRAUD_CASE_WORK_QUEUE_CURSOR_SIGNING_SECRET` in `prod` and `bank`; local development may use the `application.yml`
 fallback only. The local default cursor signing secret exists only for local/test use. Production-like profiles reject
 known local cursor signing secrets. Rotating the cursor signing secret can invalidate existing cursors, so clients
-should restart traversal without cursor after rotation. Current FDP-45 supports one active cursor signing secret. A
-future hardening item may add a non-secret key id and a bounded multi-key verification window, but this branch does not
-implement KMS-backed rotation. The rotation runbook is
+should restart traversal without cursor after rotation. The current implementation supports one active cursor signing
+secret and does not implement KMS-backed rotation. The rotation runbook is
 `docs/runbooks/fraud_case_operations.md`. SLA is business policy, not persistence state. Closed or
 resolved fraud cases are `NOT_APPLICABLE`.
 Missing timestamps are `UNKNOWN`. These values are not persisted and do not mutate fraud-case state, audit records,
@@ -119,9 +98,9 @@ idempotency records, assignment, priority, or status. The derived SLA and age va
 
 ## Index Readiness
 
-Existing indexed fields cover the FDP-45 query shape: `status`, `priority`, `riskLevel`, `assignedInvestigatorId`,
+Existing indexed fields cover the work queue query shape: `status`, `priority`, `riskLevel`, `assignedInvestigatorId`,
 `linkedAlertIds`, `caseNumber`, `createdAt`, and `updatedAt`. Required proof checks that every allowlisted stable sort
-field has an index. FDP-45 ships compound index readiness for common query patterns aligned with the allowed filters
+field has an index. The work queue ships compound index readiness for common query patterns aligned with the allowed filters
 plus stable sort fields:
 
 - `status + createdAt + _id`
@@ -132,7 +111,7 @@ plus stable sort fields:
 - `status + updatedAt + _id`
 - `assignedInvestigatorId + updatedAt + _id`
 
-FDP-45 ships minimum allowed-sort index readiness plus these compound index definitions in `FraudCaseDocument`. This is
+The work queue ships minimum allowed-sort index readiness plus these compound index definitions in `FraudCaseDocument`. This is
 not a claim that every filter/sort combination is production-optimized.
 
 ## Security And Observability
@@ -146,7 +125,7 @@ audited as `FAILED`. These audit attempts use endpoint/resource metadata and res
 supplied values are not stored.
 
 For `/api/v1/fraud-cases/work-queue`, the controller owns the sensitive-read
-audit for `SUCCESS`, `REJECTED`, and `FAILED` outcomes because FDP-45 needs explicit outcome classification. The generic
+audit for `SUCCESS`, `REJECTED`, and `FAILED` outcomes because the endpoint needs explicit outcome classification. The generic
 response advice remains the owner for other sensitive reads when no manual audit has happened. `AUDITED_ATTRIBUTE`
 prevents response-advice duplicate writes after a manual work queue audit. Manual work queue audit preserves bounded
 query metadata such as query hash, page, and size; it does not store raw query strings, raw assignees, linked alert ids,
@@ -180,20 +159,21 @@ audit evidence.
 
 ## Non-Goals
 
-FDP-45 does not change lifecycle mutation semantics, idempotency semantics, audit mutation semantics, transaction boundaries, Kafka/outbox behavior, `RegulatedMutationCoordinator` routing, FDP-29 finality, global exactly-once guarantees, external finality, distributed ACID, export APIs, or bank certification claims.
+The work queue does not change lifecycle mutation semantics, idempotency semantics, audit mutation semantics,
+transaction boundaries, Kafka/outbox behavior, `RegulatedMutationCoordinator` routing, finality semantics, global exactly-once guarantees,
+external finality, distributed ACID, export APIs, or bank certification claims.
 
-## Merge Gate
+## Verification
 
-FDP-45 is GO only when the current head SHA has all required CI jobs completed successfully, including backend,
-FDP-42, FDP-43, FDP-44, regulated mutation regression, and the FDP-45 work queue proof suite. The FDP-45 proof suite
-must include contract compatibility, pagination bounds, duplicate-param rejection, filter normalization/length checks,
+The work queue proof suite includes contract compatibility, pagination bounds, duplicate-param rejection,
+filter normalization/length checks,
 allowlisted sorting, sort-field cursor coverage, cursor/keyset traversal, cursor size-change behavior, query binding, page/cursor conflict rejection, tamper rejection, profile
 secret safety, invalid-cursor observability, invalid-cursor rejected-audit proof, index readiness, real Mongo filter/sort/page proof,
 SLA config/derived fields, read-only safety, security, low-cardinality metrics, read-access audit
 success/rejected/failed outcomes, no duplicate work queue success audit, response-advice marker behavior, fail-closed
 audit precedence, OpenAPI truth, and no-overclaim docs proof.
 
-FDP-45 is NO-GO while any required job is pending, in progress, skipped, missing, cancelled, timed out, or failed. It is
-also NO-GO if the `GET /api/v1/fraud-cases` contract drifts, the work queue performs unbounded list/export/exact
+The contract is not ready if the work queue performs unbounded list/export/exact
 count behavior, unsupported filters silently fall back, failed sensitive-read attempts are not audited, successful work
-queue reads are audited twice, or docs claim mutation/idempotency/finality guarantees outside FDP-45 scope.
+queue reads are audited twice, or documentation claims mutation, idempotency, or finality guarantees outside the read
+model scope.

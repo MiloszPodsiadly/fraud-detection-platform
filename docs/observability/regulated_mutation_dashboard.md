@@ -1,10 +1,10 @@
-# FDP-35 Regulated Mutation Dashboard Spec
+# Regulated Mutation Dashboard
 
-Status: branch evidence and dashboard contract.
+Status: current dashboard contract.
 
 ## Scope
 
-This dashboard specification supports FDP-35 modeled restart/recovery proof review. It is not production enablement,
+This dashboard supports modeled restart/recovery proof review. It is not production enablement,
 not bank certification, and not real OS/JVM/container process-kill chaos evidence.
 
 All panels must use low-cardinality labels only. Forbidden labels include commandId, alertId, actorId, leaseOwner,
@@ -22,7 +22,7 @@ idempotencyKey, requestHash, resourceId, exception message, raw path, token, and
 
 ## Required Threshold Overlays
 
-Threshold overlays must match the concrete values in `fdp_35_regulated_mutation_alert_thresholds.md`.
+Threshold overlays must match the concrete values in `regulated_mutation_alert_thresholds.md`.
 
 - Stale owner rejection: warning `> 5 in 5m`, critical `> 20 in 5m`.
 - Expired lease rejection: warning `> 1 in 5m`, critical `> 5 in 5m`.
@@ -35,7 +35,9 @@ Threshold overlays must match the concrete values in `fdp_35_regulated_mutation_
 
 The checkpoint renewal panel must compare processing age against renewal count. Renewal count increasing without state transition is an investigation signal, not business progress.
 
-FDP-35 provides modeled restart/recovery proof in CI. It verifies durable post-crash command states, replay policy, recovery API behavior, and operator visibility. It does not claim real OS/JVM/container process-kill chaos unless an explicit real-chaos job is implemented and run.
+CI provides modeled restart/recovery proof. It verifies durable post-crash command states, replay policy, recovery API
+behavior, and operator visibility. It does not claim real OS/JVM/container process-kill chaos unless an explicit
+real-chaos job is implemented and run.
 
 True OS/JVM/container termination chaos remains future scope unless explicitly implemented.
 

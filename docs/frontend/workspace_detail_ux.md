@@ -1,13 +1,17 @@
-# FDP-52 Workspace Detail UX Pattern
+# Workspace Detail UX Pattern
 
-Status: branch evidence.
+Status: current frontend architecture.
 
 
-FDP-52 detail and mutation components are frontend runtime consumers only. Backend authorization remains authoritative, and UI capability checks are presentation guards.
+Detail and mutation components are frontend runtime consumers only. Backend authorization remains authoritative, and
+UI capability checks are presentation guards.
 
-FDP-52 introduces workspace-specific presentation boundaries. It moves rendering boundaries out of `AlertsListPage` and improves detail UX readiness. `WorkspaceDashboardShell` remains the runtime composition hub. Workspace containers are not security boundaries, and backend authorization remains authoritative. Frontend capability checks are UX/runtime gating only.
+Workspace-specific presentation boundaries keep rendering concerns out of `AlertsListPage`.
+`WorkspaceDashboardShell` remains the runtime composition hub. Workspace containers are not security boundaries, and
+backend authorization remains authoritative. Frontend capability checks are UX/runtime gating only.
 
-FDP-52 does not add backend endpoints, new mutation workflows, assignment, claim, export, bulk actions, idempotency semantics, Kafka/outbox/finality, or new auth modes. Future work may move hook ownership into workspace-specific runtime containers after lifecycle and duplicate-fetch risks are covered by tests.
+This pattern does not add backend endpoints, new mutation workflows, assignment, claim, export, bulk actions,
+idempotency semantics, Kafka/outbox/finality, or new auth modes.
 
 ## Detail Reads
 

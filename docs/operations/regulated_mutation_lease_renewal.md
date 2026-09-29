@@ -1,4 +1,4 @@
-# Regulated Mutation Lease Renewal Operational Readiness
+# Regulated Mutation Lease Renewal
 
 Status: current runtime contract.
 
@@ -47,6 +47,8 @@ The explicit current state/checkpoint table is:
 ## Budget Exhaustion
 
 Direct budget exhaustion is durable. The current command moves to `FINALIZE_RECOVERY_REQUIRED`, execution status becomes `RECOVERY_REQUIRED`, and degradation reason is `LEASE_RENEWAL_BUDGET_EXCEEDED`. Concurrent losers must not overwrite a peer's successful renewal.
+
+Bounded renewal cannot create infinite `PROCESSING`; exhausted budgets fail closed into durable recovery.
 
 The primitive returns bounded reasons including `INVALID_EXTENSION`, `COMMAND_NOT_FOUND`, `MODEL_VERSION_MISMATCH`, `EXECUTION_STATUS_MISMATCH`, `STALE_OWNER`, `EXPIRED_LEASE`, `NON_RENEWABLE_STATE`, `TERMINAL_STATE`, `RECOVERY_STATE`, and `BUDGET_EXCEEDED`.
 

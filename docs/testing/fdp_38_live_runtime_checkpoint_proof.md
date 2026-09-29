@@ -26,7 +26,7 @@ Required artifact fields include `commit_sha`, fixture image identity, `live_run
 
 ## Checkpoint Registration Guard
 
-Every `Fdp38LiveRuntimeCheckpoint` enum value must be represented here, in the FDP-38 CI artifact validation, and in a non-skipped test mapping. A future checkpoint must be explicitly marked `FUTURE_SCOPE`; otherwise it is required proof.
+Every `LiveRuntimeCheckpoint` enum value must be represented here, in the FDP-38 CI artifact validation, and in a non-skipped test mapping. A future checkpoint must be explicitly marked `FUTURE_SCOPE`; otherwise it is required proof.
 
 ## Non-Claims
 

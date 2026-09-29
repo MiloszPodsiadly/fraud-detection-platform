@@ -1,13 +1,11 @@
-# FDP-35 Regulated Mutation Readiness Proof
+# Regulated Mutation Readiness Proof
 
-Status: branch evidence and current regression reference.
+Status: current regression reference.
 
-FDP-35 is a production-readiness proof branch for modeled restart and recovery readiness.
-
-FDP-35 proves modeled restart and recovery readiness for the regulated mutation safety model. It does not enable
+The automated suite proves modeled restart and recovery readiness for the regulated mutation safety model. It does not enable
 production or bank mode, and it does not claim real OS/JVM/container process-kill chaos.
 
-No new public API statuses are introduced by FDP-35; it validates current recovery and inspection behavior.
+No new public API statuses are introduced by this proof; it validates current recovery and inspection behavior.
 Rollback guidance must preserve checkpoint renewal guardrails; operators must not bypass checkpoint renewal.
 Do not bypass checkpoint renewal.
 do not increase budget blindly. do not bypass checkpoint renewal.
@@ -46,7 +44,9 @@ mvn -B -pl alert-service -am test
 
 ## Proof Matrix
 
-FDP-35 must prove readiness, not claim enablement. Every row below maps one invariant to exact automated proof.
+The suite must prove readiness, not claim enablement. Every row below maps one invariant to exact automated proof.
+
+Modeled restart/recovery, controller recovery behavior, Docker/Testcontainers readiness, rollback, dashboard, alert, and operator drill evidence are covered.
 
 | Invariant | Test class | Test method | Type | CI job | Failure meaning | Allowed production claim | Forbidden production claim |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -54,7 +54,7 @@ FDP-35 must prove readiness, not claim enablement. Every row below maps one inva
 | Recovery state beats stale committed finalize snapshot | `EvidenceGatedFinalizeCoordinatorTest` | `shouldNotReplayStaleCommittedSnapshotWhenFinalizeRecoveryRequired` | unit | `regulated-mutation-regression` | Stale snapshot could mask recovery | Replay policy honors recovery | External confirmation not guaranteed |
 | Finalize outbox failure rolls back local state | `EvidenceGatedFinalizeCoordinatorIntegrationTest` | `shouldRollbackCoordinatorPathWhenOutboxWriteFailsInsideFinalize` | integration | `regulated-mutation-regression` | Local transaction rollback proof regressed | Mongo rollback path covered | No distributed ACID guarantee |
 | Finalize success-audit failure rolls back local state | `EvidenceGatedFinalizeCoordinatorIntegrationTest` | `shouldRollbackCoordinatorPathWhenSuccessAuditPersistenceFailsInsideFinalize` | integration | `regulated-mutation-regression` | Success-audit failure could expose false finality | Local failure path covered | Production operation approved |
-| Stale owner cannot write after takeover | `RegulatedMutationLeaseFencingIntegrationTest` | `expiredLeaseCanBeTakenOverAndStaleWorkerCannotWriteAfterTakeover` | integration | `regulated-mutation-regression` | FDP-32 owner fencing regressed | Lease-owner fencing covered | All stale worker writes impossible |
+| Stale owner cannot write after takeover | `RegulatedMutationLeaseFencingIntegrationTest` | `expiredLeaseCanBeTakenOverAndStaleWorkerCannotWriteAfterTakeover` | integration | `regulated-mutation-regression` | Lease-owner fencing regressed | Lease-owner fencing covered | All stale worker writes impossible |
 | Recovery state cannot be overwritten by stale worker | `RegulatedMutationLeaseFencingIntegrationTest` | `recoveryStateCannotBeOverwrittenByStaleWorker` | integration | `regulated-mutation-regression` | Recovery visibility could be lost | Recovery state is protected | Recovery auto-resolved |
 | Non-claimed recovery repair cannot overwrite current owner | `RegulatedMutationLeaseFencingIntegrationTest` | `nonClaimedRecoveryTransitionCannotOverwriteCurrentOwnerAfterLeaseTakeover` | integration | `regulated-mutation-regression` | Repair path could clobber active owner | Recovery repair is fenced | Global lock exists |
 | Expired lease rejected before business mutation | `RegulatedMutationFencedCommandWriterTest` | `activeLeaseValidationRejectsExpiredLeaseBeforeBusinessMutation` | unit | `regulated-mutation-regression` | Worker could continue past lease | Writer rejects expired lease | Business rollback not guaranteed |
@@ -70,7 +70,7 @@ FDP-35 must prove readiness, not claim enablement. Every row below maps one inva
 | Evidence-gated checkpoint failure stops before finalize | `RegulatedMutationStaleWorkerExecutorIntegrationTest` | `evidenceGatedCheckpointBudgetExceededStopsBeforeFinalizeMutationThroughRealMongoExecutorPath` | integration | `regulated-mutation-regression` | Finalize mutation could run after checkpoint failure | Real Mongo current executor stop covered | External confirmation not guaranteed |
 | Checkpoint renewal is not business progress | `RegulatedMutationProductionReadinessE2ETest` | `checkpointRenewalIsNotProgressE2E` | e2e | `fdp35-production-readiness` | Renewal metadata could satisfy progress checks | No-progress evidence covered | Long-running success inferred |
 | Checkpoint metrics use bounded labels | `AlertServiceMetricsTest` | `shouldCoverEveryRegulatedMutationCheckpointMetricLabel` | unit | `regulated-mutation-regression` | Metric labels could leak IDs/errors | Low-cardinality labels covered | Per-command metric labels allowed |
-| No public heartbeat/renewal endpoint | `RegulatedMutationArchitectureTest` | `fdp35ReadinessMustNotExposeHeartbeatOrRenewalControllerSemantics` | architecture | `regulated-mutation-regression` | Internal renewal becomes public API | No heartbeat controller exposed | New operational API created |
+| No public heartbeat/renewal endpoint | `RegulatedMutationArchitectureTest` | `readinessMustNotExposeHeartbeatOrRenewalControllerSemantics` | architecture | `regulated-mutation-regression` | Internal renewal becomes public API | No heartbeat controller exposed | New operational API created |
 | Modeled restart before attempted audit | `RegulatedMutationRestartRecoveryProofTest` | `crashAfterClaimBeforeAttemptedAuditDoesNotReturnSuccess` | e2e | `fdp35-production-readiness` | Claimed command could false-succeed after modeled restart | Durable state replay covered | Real OS/JVM/container termination chaos covered |
 | Modeled restart after business commit | `RegulatedMutationRestartRecoveryProofTest` | `crashAfterBusinessCommitBeforeSuccessAuditLegacyRequiresOnlyExplicitRecoveryOrAuditRetry` | e2e | `fdp35-production-readiness` | Post-business-commit state could false-succeed | Explicit recovery/audit retry covered | Production operation approved |
 | Current local finalize does not claim confirmation | `RegulatedMutationRestartRecoveryProofTest` | `crashAfterCanonicalLocalCommitBeforeExternalConfirmationDoesNotClaimConfirmedFinality` | e2e | `fdp35-production-readiness` | Pending external state could be returned as confirmed | Pending external remains pending | External confirmation not guaranteed |
@@ -84,8 +84,8 @@ FDP-35 must prove readiness, not claim enablement. Every row below maps one inva
 | Expired processing without proof is not committed success | `AlertControllerTest` | `expiredProcessingWithoutProof_mustNotReturnCommittedSuccess` | controller | `regulated-mutation-regression` | Expired processing could replay success | API exposes non-success state | Mutation committed |
 | Legacy budget recovery controller stays explicit | `AlertControllerTest` | `renewalBudgetExceededRecovery_mustReturnExplicitRecovery` | controller | `regulated-mutation-regression` | Budget recovery could return committed status | Recovery response covered | Production operation approved |
 | Inspection endpoint hides raw identifiers and errors | `RegulatedMutationRecoveryControllerTest` | `inspectionEndpointNeverReturnsRawSensitiveFieldsOrExceptionText` | controller | `regulated-mutation-regression` | Raw owner/resource/error/path/token could leak | Safe inspection response covered | Raw operational IDs exposed |
-| Inspection DTO hides raw fields by construction | `RegulatedMutationArchitectureTest` | `fdp35InspectionResponseMustNotExposeUnsafeFields` | architecture | `regulated-mutation-regression` | DTO/schema drift could reintroduce raw fields | `resource_id_present` and hashes only | Raw `resource_id` exposed |
-| Rollback keeps FDP-32 fencing active | `RegulatedMutationRollbackReadinessTest` | `disablingCheckpointRenewal_doesNotDisableFencing` | unit | `regulated-mutation-regression` | Rollback could disable fencing | Fencing survives checkpoint rollback | Stale writes safe everywhere |
+| Inspection DTO hides raw fields by construction | `RegulatedMutationArchitectureTest` | `readinessInspectionResponseMustNotExposeUnsafeFields` | architecture | `regulated-mutation-regression` | DTO/schema drift could reintroduce raw fields | `resource_id_present` and hashes only | Raw `resource_id` exposed |
+| Rollback keeps lease fencing active | `RegulatedMutationRollbackReadinessTest` | `disablingCheckpointRenewal_doesNotDisableFencing` | unit | `regulated-mutation-regression` | Rollback could disable fencing | Fencing survives checkpoint rollback | Stale writes safe everywhere |
 | Rollback budget shrink produces recovery, not success | `RegulatedMutationRollbackReadinessTest` | `shrinkingRenewalBudget_doesNotCreateFalseSuccess` | unit | `regulated-mutation-regression` | Budget shrink could create success evidence | Explicit recovery state covered | Business success inferred |
 | Rollback keeps recovery commands visible | `RegulatedMutationRollbackReadinessTest` | `rollbackKeepsRecoveryCommandsVisible` | unit | `regulated-mutation-regression` | Recovery backlog/inspection could hide commands | Recovery visibility covered | Recovery auto-cleared |
 | Rollback does not start autonomous mutation work | `RegulatedMutationRollbackReadinessTest` | `currentRuntimeDoesNotStartAutonomousMutationSchedulers` | architecture | `regulated-mutation-regression` | Rollback could start hidden schedulers | No autonomous scheduler drift covered | Production operation approved |

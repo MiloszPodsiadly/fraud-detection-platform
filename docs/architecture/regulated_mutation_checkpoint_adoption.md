@@ -1,13 +1,15 @@
-# FDP-34 Merge Gate
+# Regulated Mutation Checkpoint Adoption
 
-Status: branch evidence.
+Status: current runtime contract.
 
 
 Checkpoint renewal must not be treated as business progress.
 do not increase budget blindly. do not bypass checkpoint renewal.
 do not bypass fencing. do not increase lease budget blindly.
 
-FDP-34 is merge-safe only as explicit safe checkpoint adoption of the FDP-33 bounded renewal primitive. Renewal preserves bounded ownership, not progress. It is not a generic heartbeat system, production enablement, bank enablement, external-finality claim, or distributed lock.
+Checkpoint adoption uses the bounded renewal primitive explicitly. Renewal preserves bounded ownership, not progress.
+It is not a generic heartbeat system, production enablement, bank enablement, external-finality claim, or distributed
+lock.
 
 ## Merge Requirements
 
@@ -23,10 +25,10 @@ FDP-34 is merge-safe only as explicit safe checkpoint adoption of the FDP-33 bou
 - successful renewal is not treated as ATTEMPTED audit completed, business mutation completed, outbox written, success audit recorded, evidence prepared, local finalize completed, external confirmation completed, Kafka delivered, or legal/auditor finality reached
 - checkpoint failure stops execution immediately with no further mutation/outbox/audit/snapshot/transition
 - budget exceeded remains durable recovery
-- checkpoint-renewal extension is positive and within FDP-33 renewal budget
+- checkpoint-renewal extension is positive and within the configured renewal budget
 - production executors require the Spring-managed checkpoint renewal service
-- FDP-32 stale-worker tests still pass
-- FDP-33 renewal primitive tests still pass
+- stale-worker tests still pass
+- renewal primitive tests still pass
 - current evidence-gated finalize integration tests still pass
 - real Mongo executor-path checkpoint tests cover current-model success, stale/expired, and budget paths
 - metrics are low-cardinality
@@ -46,8 +48,8 @@ FDP-34 is merge-safe only as explicit safe checkpoint adoption of the FDP-33 bou
 - `RegulatedMutationArchitectureTest`
 - `RegulatedMutationLeaseRenewalIntegrationTest`
 - `EvidenceGatedFinalizeCoordinatorIntegrationTest`
-- existing FDP-32 stale worker tests
-- existing FDP-33 renewal tests
+- existing stale worker tests
+- existing renewal tests
 
 ## Required Commands
 
@@ -65,7 +67,10 @@ mvn "-Dmaven.repo.local=$PWD\.m2repo" -pl alert-service -am test
 
 ## Production And Bank Gate
 
-FDP-34 does not enable production or bank behavior by itself. Production or bank operation requires transaction-mode `REQUIRED` for bank-grade stale-worker business-write safety, positive checkpoint-renewal extension within FDP-33 `max-single-extension` and `max-total-lease-duration`, lease duration budget review, renewal budget review, dashboard for checkpoint failure/no-progress, dashboard for long-running `PROCESSING` despite renewals, alert on `BUDGET_EXCEEDED`, alert on `STALE_OWNER` and `EXPIRED_LEASE` spikes, operator drill, canary or staging soak, rollback plan to disable checkpoint adoption or renewal config safely, and separate operational approval.
+Checkpoint adoption does not enable production or bank behavior by itself. Production or bank operation requires
+transaction-mode `REQUIRED` for bank-grade stale-worker business-write safety, positive checkpoint-renewal extension
+within `max-single-extension` and `max-total-lease-duration`, lease duration and renewal budget review, dashboards and
+alerts, an operator drill, canary or staging soak, rollback planning, and separate operational approval.
 
 ## Non-Goals
 
@@ -82,4 +87,3 @@ FDP-34 does not enable production or bank behavior by itself. Production or bank
 - no distributed ACID
 - no process-kill chaos proof
 - no alternate regulated mutation runtime or fallback
--

@@ -1,7 +1,7 @@
 {
     "scope":  "Repository documentation audit inventory. Excludes documents/ prompt inputs, build outputs, dependency folders, .git internals, and local tmp folders.",
     "generated_on":  "2026-05-16",
-    "total_artifacts":  161,
+    "total_artifacts":  148,
     "artifacts":  [
                       {
                           "path":  ".github/PULL_REQUEST_TEMPLATE/fdp_enablement_config_change.md",
@@ -279,21 +279,6 @@
                           "status":  "branch-evidence-or-template"
                       },
                       {
-                          "path":  "docs/fdp/fdp_27_merge_gate.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
-                      },
-                      {
-                          "path":  "docs/fdp/fdp_28b_chaos_handoff.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
-                      },
-                      {
-                          "path":  "docs/fdp/fdp_29_design_checklist.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
-                      },
-                      {
                           "path":  "docs/architecture/regulated_mutation_runtime_handoff.md",
                           "type":  "architecture",
                           "status":  "current-source-of-truth"
@@ -304,34 +289,19 @@
                           "status":  "current-source-of-truth"
                       },
                       {
-                          "path":  "docs/fdp/fdp_32_lease_fencing_stale_worker_protection.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
+                          "path":  "docs/architecture/regulated_mutation_lease_fencing.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
                       },
                       {
-                          "path":  "docs/fdp/fdp_32_merge_gate.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
+                          "path":  "docs/operations/regulated_mutation_lease_renewal.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
                       },
                       {
-                          "path":  "docs/fdp/fdp_33_lease_renewal_operational_readiness.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
-                      },
-                      {
-                          "path":  "docs/fdp/fdp_33_merge_gate.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
-                      },
-                      {
-                          "path":  "docs/fdp/fdp_34_merge_gate.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
-                      },
-                      {
-                          "path":  "docs/fdp/fdp_35_merge_gate.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
+                          "path":  "docs/architecture/regulated_mutation_checkpoint_adoption.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
                       },
                       {
                           "path":  "docs/fdp/fdp_36_enablement_decision_checklist.md",
@@ -369,64 +339,39 @@
                           "status":  "branch-evidence-or-template"
                       },
                       {
-                          "path":  "docs/fdp/fdp_42_merge_gate.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
+                          "path":  "docs/architecture/fraud_case_work_queue.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
                       },
                       {
-                          "path":  "docs/fdp/fdp_42_summary.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
+                          "path":  "docs/frontend/fraud_case_work_queue.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
                       },
                       {
-                          "path":  "docs/fdp/fdp_43_merge_gate.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
+                          "path":  "docs/architecture/fraud_case_work_queue_summary.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
                       },
                       {
-                          "path":  "docs/fdp/fdp_44_merge_gate.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
+                          "path":  "docs/frontend/bff_session_and_request_lifecycle.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
                       },
                       {
-                          "path":  "docs/fdp/fdp_45_work_queue_readiness.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
+                          "path":  "docs/architecture/analyst_console_workspace_runtime.md",
+                          "type":  "architecture",
+                          "status":  "current-source-of-truth"
                       },
                       {
-                          "path":  "docs/fdp/fdp_46_fraud_case_work_queue_ui.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
+                          "path":  "docs/frontend/workspace_detail_ux.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
                       },
                       {
-                          "path":  "docs/fdp/fdp_47_analyst_console_ux_and_summary.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
-                      },
-                      {
-                          "path":  "docs/fdp/fdp_48_branch_readme.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
-                      },
-                      {
-                          "path":  "docs/fdp/fdp_50_frontend_api_client_boundary.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
-                      },
-                      {
-                          "path":  "docs/fdp/fdp_51_workspace_runtime_provider.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
-                      },
-                      {
-                          "path":  "docs/fdp/fdp_52_workspace_detail_ux.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
-                      },
-                      {
-                          "path":  "docs/fdp/fdp_53_workspace_runtime_ownership.md",
-                          "type":  "branch-evidence",
-                          "status":  "branch-evidence-or-template"
+                          "path":  "docs/frontend/workspace_runtime_ownership.md",
+                          "type":  "project",
+                          "status":  "current-source-of-truth"
                       },
                       {
                           "path":  "docs/fdp/index.md",
@@ -464,19 +409,19 @@
                           "status":  "current-source-of-truth"
                       },
                       {
-                          "path":  "docs/observability/fdp_33_lease_renewal_dashboard.md",
+                          "path":  "docs/observability/regulated_mutation_lease_renewal_dashboard.md",
                           "type":  "observability",
-                          "status":  "branch-evidence-or-template"
+                          "status":  "current-source-of-truth"
                       },
                       {
-                          "path":  "docs/observability/fdp_35_regulated_mutation_alert_thresholds.md",
+                          "path":  "docs/observability/regulated_mutation_alert_thresholds.md",
                           "type":  "observability",
-                          "status":  "branch-evidence-or-template"
+                          "status":  "current-source-of-truth"
                       },
                       {
-                          "path":  "docs/observability/fdp_35_regulated_mutation_dashboard_spec.md",
+                          "path":  "docs/observability/regulated_mutation_dashboard.md",
                           "type":  "observability",
-                          "status":  "branch-evidence-or-template"
+                          "status":  "current-source-of-truth"
                       },
                       {
                           "path":  "docs/observability/fraud_case_lifecycle_idempotency_dashboard.md",
@@ -509,9 +454,9 @@
                           "status":  "current-source-of-truth"
                       },
                       {
-                          "path":  "docs/operations/fdp_35_regulated_mutation_rollback_plan.md",
+                          "path":  "docs/operations/regulated_mutation_rollback_plan.md",
                           "type":  "project",
-                          "status":  "branch-evidence-or-template"
+                          "status":  "current-source-of-truth"
                       },
                       {
                           "path":  "docs/operations/index.md",
@@ -709,11 +654,6 @@
                           "status":  "branch-evidence-or-template"
                       },
                       {
-                          "path":  "docs/release/fdp_50_legacy_api_removal.md",
-                          "type":  "release-proof",
-                          "status":  "branch-evidence-or-template"
-                      },
-                      {
                           "path":  "docs/release/index.md",
                           "type":  "release-proof",
                           "status":  "current-source-of-truth"
@@ -774,19 +714,14 @@
                           "status":  "current-source-of-truth"
                       },
                       {
-                          "path":  "docs/templates/fdp_branch_readme_template.md",
-                          "type":  "project",
-                          "status":  "branch-evidence-or-template"
-                      },
-                      {
                           "path":  "docs/testing/evidence_gated_finalize_test_plan.md",
                           "type":  "release-proof",
                           "status":  "current-source-of-truth"
                       },
                       {
-                          "path":  "docs/testing/fdp_35_regulated_mutation_readiness_proof.md",
+                          "path":  "docs/testing/regulated_mutation_readiness_proof.md",
                           "type":  "release-proof",
-                          "status":  "branch-evidence-or-template"
+                          "status":  "current-source-of-truth"
                       },
                       {
                           "path":  "docs/testing/fdp_36_real_chaos_proof.md",

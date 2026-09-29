@@ -137,7 +137,7 @@ Old jobs:
 - `scripts/check-fdp53-scope.mjs`
 
 Proposed new job:
-- Keep branch-specific scripts, extract only generic helpers to `scripts/fdp-scope/scopeGuardHelpers.mjs`.
+- Keep externally coupled branch-specific scripts, and place generic helpers in `scripts/scope-guards/scopeGuardHelpers.mjs`.
 
 Why consolidate:
 - Changed-file lookup, prefix matching, diff execution, and common source scanners were duplicated.
@@ -149,7 +149,7 @@ No longer proves:
 - Nothing removed.
 
 Replacement tests/scripts:
-- `scripts/check-fdp-scope-helpers-smoke.mjs`
+- `scripts/check-scope-guard-helpers-smoke.mjs`
 - `scripts/check-fdp52-scope.mjs` uses shared helpers.
 
 Risk:
@@ -179,7 +179,7 @@ No longer proves:
 Replacement tests/scripts:
 - `scripts/check-doc-overclaims.mjs`
 - `scripts/compare-ci-jobs.mjs`
-- `scripts/check-fdp-scope-helpers-smoke.mjs`
+- `scripts/check-scope-guard-helpers-smoke.mjs`
 
 Risk:
 - low

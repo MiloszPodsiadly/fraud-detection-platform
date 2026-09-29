@@ -129,8 +129,10 @@ Required for merge:
 - Yes
 
 Primary proof files:
-- `alert-service/src/test/java/**/Fdp45*Test.java`
-- `docs/fdp/fdp_45_work_queue_readiness.md`
+- `alert-service/src/test/java/**/FraudCaseWorkQueue*Test.java`
+- `alert-service/src/test/java/**/FraudCase*Read*Test.java`
+- `alert-service/src/test/java/**/ReadAccessAuditResponseAdviceMarkerTest.java`
+- `docs/architecture/fraud_case_work_queue.md`
 
 Related FDP branches:
 - FDP-45
@@ -244,7 +246,7 @@ Required for merge:
 - Yes
 
 Primary proof files:
-- `alert-service/src/test/java/**/Fdp46*Test.java`
+- `alert-service/src/test/java/**/ScoredTransaction*Test.java`
 
 Related FDP branches:
 - FDP-46
@@ -268,7 +270,8 @@ Required for merge:
 - Yes
 
 Primary proof files:
-- `alert-service/src/test/java/**/Fdp28*Test.java`
+- `alert-service/src/test/java/**/failure/*IntegrationTest.java`
+- `alert-service/src/test/java/**/regulated/*IntegrationTest.java`
 - `.github/workflows/ci.yml`
 
 Related FDP branches:
@@ -293,8 +296,9 @@ Required for merge:
 - Yes
 
 Primary proof files:
-- `alert-service/src/test/java/**/Fdp35*Test.java`
-- `docs/testing/fdp_35_regulated_mutation_readiness_proof.md`
+- `alert-service/src/test/java/**/RegulatedMutation*Test.java`
+- `alert-service/src/test/java/**/RegulatedMutation*E2ETest.java`
+- `docs/testing/regulated_mutation_readiness_proof.md`
 
 Related FDP branches:
 - FDP-35
@@ -324,7 +328,7 @@ Primary proof files:
 - `analyst-console-ui/src/pages/AlertsListPage.test.jsx`
 - `analyst-console-ui/src/components/FraudCaseWorkQueuePanel.test.jsx`
 - `alert-service/src/test/java/**/ScoredTransaction*Test.java`
-- `alert-service/src/test/java/**/Fdp47*Test.java`
+- `alert-service/src/test/java/**/FraudCaseWorkQueueSummaryContractTest.java`
 - `scripts/ci/verify-junit-reports.mjs`
 
 Related FDP branches:
@@ -404,7 +408,7 @@ Required for merge:
 - Yes
 
 Primary proof files:
-- `scripts/check-fdp-scope-helpers-smoke.mjs`
+- `scripts/check-scope-guard-helpers-smoke.mjs`
 - `scripts/check-doc-overclaims.mjs`
 - `scripts/compare-ci-jobs.mjs`
 - `docs/ci_evidence_map.md`
@@ -616,7 +620,8 @@ Required for merge:
 - Yes
 
 Primary proof files:
-- `alert-service/src/test/java/**/Fdp37*Test.java`
+- `alert-service/src/test/java/**/RegulatedMutationProductionImage*IT.java`
+- `alert-service/src/test/java/**/RegulatedMutationProductionImage*Test.java`
 - `docs/testing/fdp_37_production_image_chaos_proof.md`
 - `.github/workflows/ci.yml`
 
@@ -643,7 +648,7 @@ Required for merge:
 
 Primary proof files:
 - `alert-service/src/test/java/**/RegulatedMutation*Test.java`
-- `docs/testing/fdp_35_regulated_mutation_readiness_proof.md`
+- `docs/testing/regulated_mutation_readiness_proof.md`
 
 Related FDP branches:
 - FDP-29
@@ -668,7 +673,7 @@ Required for merge:
 - Yes
 
 Primary proof files:
-- `alert-service/src/test/java/**/Fdp38*Test.java`
+- `alert-service/src/test/java/**/RegulatedMutationLiveCheckpoint*IT.java`
 - `docs/testing/fdp_38_live_runtime_checkpoint_proof.md`
 
 Related FDP branches:
@@ -694,7 +699,9 @@ Required for merge:
 
 Primary proof files:
 - `docs/release/fdp_39_*`
-- `alert-service/src/test/java/**/Fdp39*Test.java`
+- `alert-service/src/test/java/**/ReleaseGovernance*Test.java`
+- `alert-service/src/test/java/**/RegulatedMutationReleaseImageSeparationTest.java`
+- `alert-service/src/test/java/**/FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest.java`
 - `.github/workflows/ci.yml`
 
 Related FDP branches:
@@ -721,7 +728,9 @@ Required for merge:
 Primary proof files:
 - `docs/release/fdp_40_*`
 - `scripts/fdp40-*.sh`
-- `alert-service/src/test/java/**/Fdp40*Test.java`
+- `alert-service/src/test/java/**/ReleaseControl*Test.java`
+- `alert-service/src/test/java/**/ReleaseEvidence*Test.java`
+- `alert-service/src/test/java/**/ReleaseManifestValidationTest.java`
 
 Related FDP branches:
 - FDP-40

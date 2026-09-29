@@ -1,8 +1,8 @@
-# FDP-81 Fraud Case Surface Cleanup
+# Fraud Case API Cleanup
 
 Status: intentional breaking API surface cleanup.
 
-FDP-81 removes unused FraudCase HTTP handlers and retired lifecycle service, DTO, and local lifecycle-idempotency
+The current API removes unused FraudCase HTTP handlers and retired lifecycle service, DTO, and local lifecycle-idempotency
 internals. The retained product flow remains work queue, detail, regulated update, and bounded evidence reads.
 
 ## Removed Routes
@@ -35,8 +35,15 @@ List and search clients use the bounded work queue. A lifecycle action maps to r
 retained update contract supports that state change. Standalone notes, decisions, and audit-trail reads have no
 current product replacement. Unversioned compatibility calls are removed; clients use retained versioned routes.
 
+## Historical Unversioned Route Behavior
+
+At an earlier migration boundary, authenticated requests to `/api/fraud-cases/**` returned `410 Gone` with `code:LEGACY_FRAUD_CASE_ROUTE_REMOVED`;
+unauthenticated requests failed at the authentication boundary. The compatibility handler has since been removed.
+Clients must not rely on `410 Gone`; that response is historical. Removed unversioned routes now use normal
+unknown-route and security fallback behavior.
+
 ## Unaffected APIs
 
 Alerts API, Scored Transactions API, Suspicious Transactions API including
 `GET /internal/suspicious-transactions/summary`, the suspicious linked-alert resolver, Evidence Summary, Evidence
-Timeline, and governance/reporting routes used by the current frontend are not removed by FDP-81.
+Timeline, and governance/reporting routes used by the current frontend are unaffected by this cleanup.

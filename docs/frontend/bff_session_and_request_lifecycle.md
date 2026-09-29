@@ -1,11 +1,12 @@
-# FDP-48: Analyst Console Request Lifecycle & Workspace Decomposition
+# Analyst Console BFF Session And Request Lifecycle
 
-Status: branch evidence.
+Status: current frontend and BFF architecture.
 
 
 ## Summary
 
-FDP-48 hardens the Analyst Console frontend request lifecycle and reduces `App.jsx` ownership of workspace-specific data.
+The Analyst Console frontend uses an explicit request lifecycle and keeps workspace-specific data ownership out of
+`App.jsx`.
 
 ## Backend Scope
 
@@ -49,11 +50,11 @@ FDP-48 hardens the Analyst Console frontend request lifecycle and reduces `App.j
 - No optimistic mutation UI.
 - No summary snapshot-consistency claim.
 - No claim that browser DevTools can hide request headers for SPA bearer mode; the BFF mode avoids browser-side bearer API calls instead.
-- No claim that FDP-48 is complete enterprise IAM hardening.
+- No claim that this design is complete enterprise IAM hardening.
 
 ## Deployment Boundary
 
-FDP-48 provides a Docker/OIDC and production-like browser BFF foundation. It is not complete production enterprise IAM hardening.
+The Docker/OIDC browser BFF foundation is not complete production enterprise IAM hardening.
 
 Production deployment requirements:
 
@@ -93,7 +94,7 @@ Do not overclaim:
 - do not claim BFF is full production IAM hardening
 - do not claim direct SPA OIDC hides bearer headers
 
-## Merge Gate
+## Verification
 
 - Browser API calls in Docker/OIDC BFF mode must not include an `Authorization` header.
 - Mutating cookie-backed BFF requests must use CSRF metadata from `/api/v1/session`.
@@ -103,10 +104,11 @@ Do not overclaim:
 - Cursor remains opaque and is not rendered, stored, or logged.
 - Workspace-specific failures remain local to the active workspace.
 - CI must be green on the current head SHA.
-- Required FDP-48 CI job: `FDP-48 BFF Session & Request Lifecycle`.
-- The FDP-48 CI job must fail when required backend reports are missing and when required frontend tests are skipped, focused, missing from the JUnit report, failed, or not run.
+- Required CI job: `FDP-48 BFF Session & Request Lifecycle`.
+- The CI job must fail when required backend reports are missing and when required frontend tests are skipped, focused,
+  missing from the JUnit report, failed, or not run.
 
-## Required FDP-48 Checks
+## Required Checks
 
 Backend:
 
@@ -131,7 +133,7 @@ npm run build
 - `/api/v1/session`, `/bff/logout`, CSRF rejection, invalid-principal, and OIDC authority-mapping miss metrics use low-cardinality labels only.
 - BFF production hardening remains deployment-specific and documented as required deployment configuration, not implemented by local defaults.
 - Direct SPA OIDC remains a local compatibility mode. Production-like browser deployments should use BFF auth.
-- Governance hook cancellation parity is covered by the FDP-48 workspace hook tests and should stay mandatory in CI.
+- Governance hook cancellation parity is covered by workspace hook tests and should stay mandatory in CI.
 
 ## Final Audit Notes
 

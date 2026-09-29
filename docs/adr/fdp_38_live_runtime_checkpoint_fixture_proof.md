@@ -18,4 +18,4 @@ The proof level is `LIVE_IN_FLIGHT_REQUEST_KILL` and the state reach method is `
 
 Artifacts must identify the fixture image and commit, report `release_image: false`, `contains_test_classes: true`, `contains_test_profiles: true`, `release_candidate_allowed: false`, `production_deployable: false`, `production_enablement: false`, `false_success_evaluation`, and `failed_false_success_reasons: []`.
 
-Every `Fdp38LiveRuntimeCheckpoint` enum value must be represented by the proof matrix, CI selector, artifact verifier, and a non-skipped test. The release image does not contain checkpoint barrier support.
+Every `LiveRuntimeCheckpoint` enum value must be represented by the proof matrix, CI selector, artifact verifier, and a non-skipped test. The release image does not contain checkpoint barrier support.

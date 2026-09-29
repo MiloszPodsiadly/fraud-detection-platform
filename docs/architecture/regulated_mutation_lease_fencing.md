@@ -2,7 +2,7 @@
 
 Status: current invariant reference.
 
-The core rule is that claim acquisition is not write fencing. Every post-claim transition is fenced by command id, lease owner, unexpired
+The core rule is that claim acquisition is not write fencing. All post-claim transitions are fenced by command id, lease owner, unexpired
 lease, execution status, and current model version. There is no silent `repository.save` after claim.
 
 `RegulatedMutationFencedCommandWriter` owns conditional command transitions. `EvidenceGatedFinalizeExecutor` validates
@@ -25,3 +25,6 @@ identifies unsupported retained records; lease fencing never reinterprets them.
 Source-string architecture tests are guardrails, not complete architectural proof. Required proof includes conditional
 writer unit tests, real Mongo lease takeover tests, stale-worker executor integration, transaction rollback, replay,
 recovery, and restart tests.
+
+The lease-owner fenced command transition design is the current runtime contract. It is not production approval, a
+distributed lock, distributed ACID, external finality, or exactly-once Kafka delivery.

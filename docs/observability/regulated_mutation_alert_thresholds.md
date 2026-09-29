@@ -1,10 +1,10 @@
-# FDP-35 Regulated Mutation Alert Thresholds
+# Regulated Mutation Alert Thresholds
 
-Status: branch evidence and release-readiness threshold contract.
+Status: current release-readiness threshold contract.
 
 ## Scope
 
-These thresholds support FDP-35 modeled restart/recovery proof review. They are not production enablement, not bank
+These thresholds support modeled restart/recovery proof review. They are not production enablement, not bank
 certification, and not real OS/JVM/container process-kill chaos evidence.
 
 All alert labels must remain low-cardinality. Do not use command id, alert id, actor id, lease owner, idempotency key,
@@ -31,6 +31,8 @@ review must happen by 30 minutes when recovery backlog or false-success ambiguit
 | checkpoint renewal treated as progress guard | dashboard panel: processing age vs renewal count | renewal count increases while no state transition for `> configured lease duration * 2` | renewal count increases while no state transition for `> min(max total lease duration, 10m)` | `10m` | Treat as stuck processing until proven otherwise. |
 | inspection endpoint failures | `regulated_mutation_inspection_failed_total` or sensitive-read audit failure counter | `> 0` | any fail-closed audit persistence failure | `5m` | Verify audit persistence and recovery authority path before allowing inspection use. |
 
-FDP-35 provides modeled restart/recovery proof in CI. It verifies durable post-crash command states, replay policy, recovery API behavior, and operator visibility. It does not claim real OS/JVM/container process-kill chaos unless an explicit real-chaos job is implemented and run.
+CI provides modeled restart/recovery proof. It verifies durable post-crash command states, replay policy, recovery API
+behavior, and operator visibility. It does not claim real OS/JVM/container process-kill chaos unless an explicit
+real-chaos job is implemented and run.
 
 True OS/JVM/container termination chaos remains future scope unless explicitly implemented.
