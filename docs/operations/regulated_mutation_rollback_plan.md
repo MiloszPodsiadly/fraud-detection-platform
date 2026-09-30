@@ -20,7 +20,7 @@ True OS/JVM/container termination chaos remains future scope unless explicitly i
 | owner | Fraud Platform On-call |
 | approver | Fraud Platform Incident Lead |
 | timestamp | fill at execution time |
-| config before | capture feature flags, renewal budget, transaction mode |
+| config before | capture command ingress state, renewal budget, transaction mode |
 | config after | capture changed values |
 | CI job link | `fdp35-production-readiness` and `regulated-mutation-regression` |
 | recovery backlog before/after | capture totals and by-state counts |
@@ -70,7 +70,7 @@ After rollback:
 
 - Verify no new public statuses.
 - Verify no false success responses.
-- Verify existing model-versioned commands replay with their original model version.
+- Verify every command left in the active collection uses `EVIDENCE_GATED_FINALIZE_V1`; archive or migrate unsupported records offline before startup.
 - Verify recovery/no-progress alerts are understood and triaged.
 - Verify no `FINALIZE_RECOVERY_REQUIRED` command is hidden.
 - Record post-rollback owner signoff with timestamp after the monitoring window.

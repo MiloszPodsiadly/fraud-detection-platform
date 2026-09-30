@@ -24,7 +24,7 @@ preparation, and finalizing responses must not expose the requested resource sta
 for the same idempotency key and canonical intent; a different payload or backend-resolved actor is a conflict.
 
 Local evidence confirmation is not external finality. Local evidence is not external finality.
-FINALIZED_VISIBLE is a compatibility-visible status, and FINALIZED_VISIBLE is not external confirmation.
+FINALIZED_VISIBLE is an internal transitional repair status, and FINALIZED_VISIBLE is not external confirmation.
 Pending external evidence is not confirmed. Recovery required is not success, and every recovery status is not success.
 
 Checkpoint renewal preserves lease ownership only; it is not proof of business progress.

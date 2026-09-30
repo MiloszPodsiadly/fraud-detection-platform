@@ -25,6 +25,7 @@ replace environment-specific release approval.
 
 - `READY_FOR_ENABLEMENT_REVIEW` does not mean `PRODUCTION_ENABLED`.
 - Fixture images and fixture profiles must not be described as release images or release profiles.
-- `OFF` transaction mode is compatibility/demo behavior for regulated paths.
+- `OFF` transaction mode is non-production local/test behavior for shared transaction helpers; the canonical regulated
+  mutation finalize path refuses to execute or start with it.
 - `REQUIRED` transaction mode is expected for bank/prod-style regulated mutation safety.
 - `EVIDENCE_GATED_FINALIZE_V1` is the only executable regulated mutation model; unsupported persisted versions fail closed.

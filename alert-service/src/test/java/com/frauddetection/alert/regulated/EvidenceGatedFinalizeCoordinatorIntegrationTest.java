@@ -475,13 +475,14 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                 new AlertDocumentMapper(),
                 new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository)
         );
-        AtomicInteger businessMutations = new AtomicInteger();
+        AtomicInteger firstBusinessMutations = new AtomicInteger();
+        AtomicInteger secondBusinessMutations = new AtomicInteger();
         CountDownLatch start = new CountDownLatch(1);
         List<Future<RegulatedMutationResult<SubmitAnalystDecisionResponse>>> futures = new java.util.ArrayList<>();
 
         try (var executor = Executors.newFixedThreadPool(2)) {
-            futures.add(executor.submit(() -> concurrentCommit(start, "idem-concurrent-a", "alert-concurrent-a", businessMutations, handler)));
-            futures.add(executor.submit(() -> concurrentCommit(start, "idem-concurrent-b", "alert-concurrent-b", businessMutations, handler)));
+            futures.add(executor.submit(() -> concurrentCommit(start, "idem-concurrent-a", "alert-concurrent-a", firstBusinessMutations, handler)));
+            futures.add(executor.submit(() -> concurrentCommit(start, "idem-concurrent-b", "alert-concurrent-b", secondBusinessMutations, handler)));
             start.countDown();
 
             List<Throwable> failures = new java.util.ArrayList<>();
@@ -493,13 +494,21 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                     failures.add(exception.getCause());
                 }
             }
+            String failureDiagnostics = failureDiagnostics(failures);
 
             assertThat(results)
+                    .as("Concurrent finalization failures:%n%s", failureDiagnostics)
                     .extracting(RegulatedMutationResult::state)
                     .containsOnly(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
-            assertThat(results.size() + failures.size()).isEqualTo(2);
-            assertThat(results).isNotEmpty();
-            assertThat(failures).hasSizeLessThanOrEqualTo(1);
+            assertThat(results.size() + failures.size())
+                    .as("Concurrent finalization failures:%n%s", failureDiagnostics)
+                    .isEqualTo(2);
+            assertThat(results)
+                    .as("Concurrent finalization failures:%n%s", failureDiagnostics)
+                    .isNotEmpty();
+            assertThat(failures)
+                    .as("Concurrent finalization failures:%n%s", failureDiagnostics)
+                    .hasSizeLessThanOrEqualTo(1);
             assertThat(failures)
                     .allSatisfy(failure -> assertThat(failure)
                             .isInstanceOfAny(RuntimeException.class));
@@ -533,6 +542,10 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         long finalizedCommands = commands.stream()
                 .filter(command -> command.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL)
                 .count();
+        assertThat(firstBusinessMutations).hasValueLessThanOrEqualTo(1);
+        assertThat(secondBusinessMutations).hasValueLessThanOrEqualTo(1);
+        assertThat(firstBusinessMutations.get() + secondBusinessMutations.get())
+                .isBetween((int) finalizedCommands, 2);
         List<AuditEventDocument> auditEvents = auditEventRepository.findFullChain("source_service:alert-service", 10);
         List<com.frauddetection.alert.audit.AuditAnchorDocument> anchors = mongoTemplate.find(
                 new Query(),
@@ -664,6 +677,37 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         return document;
     }
 
+    private String failureDiagnostics(List<Throwable> failures) {
+        if (failures.isEmpty()) {
+            return "none";
+        }
+        StringBuilder diagnostics = new StringBuilder();
+        for (int index = 0; index < failures.size(); index++) {
+            appendCauseChain(diagnostics, "future[" + index + "]", failures.get(index), 0);
+        }
+        return diagnostics.toString();
+    }
+
+    private void appendCauseChain(StringBuilder diagnostics, String label, Throwable failure, int depth) {
+        if (failure == null) {
+            diagnostics.append(label).append(": <null>\n");
+            return;
+        }
+        diagnostics.append("  ".repeat(depth))
+                .append(label)
+                .append(": ")
+                .append(failure.getClass().getName())
+                .append(": ")
+                .append(failure.getMessage())
+                .append('\n');
+        for (Throwable suppressed : failure.getSuppressed()) {
+            appendCauseChain(diagnostics, "suppressed", suppressed, depth + 1);
+        }
+        if (failure.getCause() != null && failure.getCause() != failure) {
+            appendCauseChain(diagnostics, "caused by", failure.getCause(), depth + 1);
+        }
+    }
+
     private long countAudit(String commandId, RegulatedMutationAuditPhase phase) {
         return mongoTemplate.count(
                 Query.query(Criteria.where("request_id").is(commandId + ":" + phase.name())),
@@ -759,6 +803,11 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
     private static final class FailingLocalAuditPhaseWriter extends RegulatedMutationLocalAuditPhaseWriter {
         private FailingLocalAuditPhaseWriter() {
             super(null, null, null);
+        }
+
+        @Override
+        public <T> T withChainLock(java.util.function.Supplier<T> callback) {
+            return callback.get();
         }
 
         @Override

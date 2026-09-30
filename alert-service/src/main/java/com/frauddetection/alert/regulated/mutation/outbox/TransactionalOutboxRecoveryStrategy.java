@@ -2,7 +2,6 @@ package com.frauddetection.alert.regulated.mutation.outbox;
 
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditResourceType;
-import com.frauddetection.alert.outbox.OutboxRecordResponse;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.regulated.RecoveryValidationResult;
 import com.frauddetection.alert.regulated.RegulatedMutationCommandDocument;
@@ -15,12 +14,11 @@ import java.util.Optional;
 @Component
 public class TransactionalOutboxRecoveryStrategy implements RegulatedMutationRecoveryStrategy {
 
-    private static final String BUSINESS_STATE_NOT_RECONSTRUCTABLE = "BUSINESS_STATE_NOT_RECONSTRUCTABLE";
-
-    private final TransactionalOutboxRecordRepository repository;
+    private static final String IMMUTABLE_OPERATION_RESPONSE_EVIDENCE_UNAVAILABLE =
+            "IMMUTABLE_OPERATION_RESPONSE_EVIDENCE_UNAVAILABLE";
 
     public TransactionalOutboxRecoveryStrategy(TransactionalOutboxRecordRepository repository) {
-        this.repository = repository;
+        java.util.Objects.requireNonNull(repository, "repository");
     }
 
     @Override
@@ -31,15 +29,11 @@ public class TransactionalOutboxRecoveryStrategy implements RegulatedMutationRec
 
     @Override
     public Optional<RegulatedMutationResponseSnapshot> reconstructSnapshot(RegulatedMutationCommandDocument command) {
-        return repository.findById(command.getResourceId())
-                .map(OutboxRecordResponse::from)
-                .map(RegulatedMutationResponseSnapshot::from);
+        return Optional.empty();
     }
 
     @Override
     public RecoveryValidationResult validateBusinessState(RegulatedMutationCommandDocument command) {
-        return repository.findById(command.getResourceId()).isPresent()
-                ? RecoveryValidationResult.accepted()
-                : RecoveryValidationResult.recoveryRequired(BUSINESS_STATE_NOT_RECONSTRUCTABLE);
+        return RecoveryValidationResult.recoveryRequired(IMMUTABLE_OPERATION_RESPONSE_EVIDENCE_UNAVAILABLE);
     }
 }

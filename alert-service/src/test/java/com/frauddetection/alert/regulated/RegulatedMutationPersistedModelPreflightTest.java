@@ -12,7 +12,6 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
@@ -52,7 +51,7 @@ class RegulatedMutationPersistedModelPreflightTest {
         assertThat(report.unsupportedTerminalCount()).isEqualTo(3);
         assertThat(report.samples()).extracting(
                 RegulatedMutationPersistedModelPreflight.UnsupportedCommand::modelCategory
-        ).containsExactly("LEGACY", "UNKNOWN");
+        ).containsExactly("UNKNOWN", "UNKNOWN");
         assertThat(report.samples())
                 .extracting(RegulatedMutationPersistedModelPreflight.UnsupportedCommand::commandIdHash)
                 .noneMatch(hash -> hash.contains("raw-command-id") || hash.contains("unknown-command-id"));
@@ -66,7 +65,7 @@ class RegulatedMutationPersistedModelPreflightTest {
                 0,
                 List.of(new RegulatedMutationPersistedModelPreflight.UnsupportedCommand(
                         "command-hash",
-                        "LEGACY",
+                        "UNKNOWN",
                         "UPDATE_FRAUD_CASE",
                         "FRAUD_CASE",
                         "PROCESSING"
@@ -77,21 +76,34 @@ class RegulatedMutationPersistedModelPreflightTest {
 
         assertThatThrownBy(() -> guard.run(mock(ApplicationArguments.class)))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("unsupported unfinished persisted commands")
+                .hasMessageContaining("unsupported persisted commands in the active collection")
+                .hasMessageContaining("unfinishedCount=1")
+                .hasMessageContaining("terminalCount=0")
                 .hasMessageContaining("command-hash");
     }
 
     @Test
-    void shouldAllowImmutableUnsupportedTerminalCommandsForRetention() {
+    void shouldFailStartupWhenUnsupportedTerminalCommandsRemainInActiveCollection() {
         RegulatedMutationPersistedModelPreflight preflight = mock(RegulatedMutationPersistedModelPreflight.class);
         when(preflight.inspect(25)).thenReturn(new RegulatedMutationPersistedModelPreflight.Report(
                 0,
                 2,
-                List.of()
+                List.of(new RegulatedMutationPersistedModelPreflight.UnsupportedCommand(
+                        "terminal-command-hash",
+                        "UNKNOWN",
+                        "SUBMIT_ANALYST_DECISION",
+                        "ALERT",
+                        "COMPLETED"
+                ))
         ));
 
         RegulatedMutationPersistedModelStartupGuard guard = new RegulatedMutationPersistedModelStartupGuard(preflight);
 
-        assertThatCode(() -> guard.run(mock(ApplicationArguments.class))).doesNotThrowAnyException();
+        assertThatThrownBy(() -> guard.run(mock(ApplicationArguments.class)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("unsupported persisted commands in the active collection")
+                .hasMessageContaining("unfinishedCount=0")
+                .hasMessageContaining("terminalCount=2")
+                .hasMessageContaining("terminal-command-hash");
     }
 }

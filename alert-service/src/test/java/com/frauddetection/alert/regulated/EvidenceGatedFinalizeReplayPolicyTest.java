@@ -138,15 +138,79 @@ class EvidenceGatedFinalizeReplayPolicyTest {
     }
 
     @Test
-    void confirmedWithoutSnapshotRemainsTerminalAndCannotFallThroughToExecution() {
+    void confirmedWithSnapshotAndMissingSuccessAuditFailsClosed() {
         RegulatedMutationCommandDocument document = document(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
+        document.setResponseSnapshot(snapshot());
 
         RegulatedMutationReplayDecision decision = policy.resolve(document, now);
 
         assertThat(decision.type()).isEqualTo(RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE);
-        assertThat(decision.responseState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
+        assertThat(decision.responseState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(decision.reason()).isEqualTo("SUCCESS_AUDIT_MISSING");
+    }
+
+    @Test
+    void confirmedWithInconsistentRequiredOutboxFailsClosed() {
+        RegulatedMutationCommandDocument document = document(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
+        document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
+        document.setResponseSnapshot(snapshot());
+        when(durableProof.verify(document))
+                .thenReturn(DurableLocalFinalizationProofResult.invalid("TRANSACTIONAL_OUTBOX_PROOF_MISSING"));
+
+        RegulatedMutationReplayDecision decision = policy.resolve(document, now);
+
+        assertThat(decision.type()).isEqualTo(RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE);
+        assertThat(decision.responseState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(decision.reason()).isEqualTo("TRANSACTIONAL_OUTBOX_PROOF_MISSING");
+    }
+
+    @Test
+    void confirmedWithoutSnapshotRemainsTerminalAndFailsClosed() {
+        RegulatedMutationCommandDocument document = document(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
+        document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
+        when(durableProof.verify(document)).thenReturn(DurableLocalFinalizationProofResult.accepted());
+
+        RegulatedMutationReplayDecision decision = policy.resolve(document, now);
+
+        assertThat(decision.type()).isEqualTo(RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE);
+        assertThat(decision.responseState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
         assertThat(decision.reason()).isEqualTo("RESPONSE_SNAPSHOT_MISSING");
+    }
+
+    @Test
+    void confirmedWithCompleteDurableProofReplaysWithoutDowngrade() {
+        RegulatedMutationCommandDocument document = document(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
+        document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
+        document.setResponseSnapshot(snapshot());
+        when(durableProof.verify(document)).thenReturn(DurableLocalFinalizationProofResult.accepted());
+
+        RegulatedMutationReplayDecision decision = policy.resolve(document, now);
+
+        assertThat(decision.type()).isEqualTo(RegulatedMutationReplayDecisionType.REPLAY_SNAPSHOT);
+        assertThat(decision.responseState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
+    }
+
+    @Test
+    void failedTerminalWithStaleSuccessSnapshotCannotReplay() {
+        RegulatedMutationCommandDocument document = document(RegulatedMutationState.FAILED);
+        document.setExecutionStatus(RegulatedMutationExecutionStatus.FAILED);
+        document.setResponseSnapshot(snapshot());
+
+        RegulatedMutationReplayDecision decision = policy.resolve(document, now);
+
+        assertThat(decision.type()).isEqualTo(RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE);
+        assertThat(decision.responseState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(decision.reason()).isEqualTo("FAILED_TERMINAL");
+    }
+
+    @Test
+    void nonFinalizedStateCannotUseSnapshotAsSuccessfulFinalizationProof() {
+        RegulatedMutationCommandDocument document = document(RegulatedMutationState.EVIDENCE_PREPARED);
+        document.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
+        document.setResponseSnapshot(snapshot());
+
+        assertThat(policy.resolve(document, now).type()).isEqualTo(RegulatedMutationReplayDecisionType.NONE);
     }
 
     @Test

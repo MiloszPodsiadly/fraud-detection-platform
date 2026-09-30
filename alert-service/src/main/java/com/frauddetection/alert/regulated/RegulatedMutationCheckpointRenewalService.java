@@ -55,7 +55,7 @@ public class RegulatedMutationCheckpointRenewalService {
         this.enabled = enabled;
     }
 
-    static RegulatedMutationCheckpointRenewalService disabled() {
+    static RegulatedMutationCheckpointRenewalService disabledForTesting() {
         return new RegulatedMutationCheckpointRenewalService(null, null, null, Duration.ZERO, Clock.systemUTC(), false);
     }
 

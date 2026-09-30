@@ -33,6 +33,11 @@ public final class CanonicalRegulatedMutationTestRuntime {
                 null
         ) {
             @Override
+            public <T> T withChainLock(java.util.function.Supplier<T> callback) {
+                return callback.get();
+            }
+
+            @Override
             public String recordSuccessPhase(
                     RegulatedMutationCommandDocument command,
                     com.frauddetection.alert.audit.AuditAction action,

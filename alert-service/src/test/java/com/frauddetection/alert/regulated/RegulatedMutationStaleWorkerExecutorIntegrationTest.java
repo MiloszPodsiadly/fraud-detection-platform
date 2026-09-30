@@ -83,6 +83,8 @@ class RegulatedMutationStaleWorkerExecutorIntegrationTest extends AbstractIntegr
         when(auditPhaseService.recordPhase(any(), any(), any(), eq(AuditOutcome.ATTEMPTED), eq(null)))
                 .thenReturn("attempted-audit");
         when(localAuditPhaseWriter.recordSuccessPhase(any(), any(), any())).thenReturn("local-success-audit");
+        when(localAuditPhaseWriter.withChainLock(any())).thenAnswer(invocation ->
+                ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
         transactionRunner = new RegulatedMutationTransactionRunner(
                 RegulatedMutationTransactionMode.REQUIRED,
                 new TransactionTemplate(new MongoTransactionManager(databaseFactory))
@@ -242,7 +244,7 @@ class RegulatedMutationStaleWorkerExecutorIntegrationTest extends AbstractIntegr
     }
 
     private EvidenceGatedFinalizeExecutor evidenceExecutor(RegulatedMutationFencedCommandWriter writer) {
-        return evidenceExecutor(writer, RegulatedMutationCheckpointRenewalService.disabled());
+        return evidenceExecutor(writer, RegulatedMutationCheckpointRenewalService.disabledForTesting());
     }
 
     private EvidenceGatedFinalizeExecutor evidenceExecutor(

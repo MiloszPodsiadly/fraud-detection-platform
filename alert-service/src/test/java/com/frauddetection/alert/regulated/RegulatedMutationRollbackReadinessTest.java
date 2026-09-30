@@ -53,7 +53,7 @@ class RegulatedMutationRollbackReadinessTest {
         when(mongoTemplate.findById("command-stale-owner", RegulatedMutationCommandDocument.class))
                 .thenReturn(current);
 
-        assertThat(RegulatedMutationCheckpointRenewalService.disabled().isEnabledForTesting()).isFalse();
+        assertThat(RegulatedMutationCheckpointRenewalService.disabledForTesting().isEnabledForTesting()).isFalse();
         assertThatThrownBy(() -> writer.transition(
                 token("command-stale-owner", "stale-owner"),
                 RegulatedMutationState.EVIDENCE_PREPARED,

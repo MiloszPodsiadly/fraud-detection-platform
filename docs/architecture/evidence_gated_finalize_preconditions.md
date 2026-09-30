@@ -1,6 +1,7 @@
 # Evidence-Gated Finalize Preconditions
 
-This document defines the local evidence preconditions that must be satisfied before the feature-flagged submit-decision path may enter `FINALIZING`.
+This document defines the local evidence preconditions that must be satisfied before the canonical submit-decision
+path may enter `FINALIZING`.
 
 Do not require Kafka publish before finalize. Kafka publication is a downstream outbox effect after the local finalize transaction.
 
@@ -42,7 +43,7 @@ transaction that applies the business aggregate mutation, writes the transaction
 snapshot, writes local success audit evidence through `RegulatedMutationLocalAuditPhaseWriter`, and stores the local
 finalize marker.
 
-`FINALIZED_VISIBLE` is retained only as a compatibility/repair state for previously persisted or interrupted commands.
+`FINALIZED_VISIBLE` is retained only as a transitional repair state for interrupted current-model commands.
 
 ## Checked Preconditions
 

@@ -161,8 +161,19 @@ public class OutboxPublisherCoordinator {
                 .unset("lease_owner")
                 .unset("lease_expires_at");
         try {
-            mongoTemplate.updateFirst(leasedRecordQuery(record, TransactionalOutboxStatus.PUBLISH_ATTEMPTED), update, TransactionalOutboxRecordDocument.class);
-            updateAlertProjection(record, DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN, "OUTBOX_PUBLISH_CONFIRMATION_FAILED", null);
+            UpdateResult result = mongoTemplate.updateFirst(
+                    leasedRecordQuery(record, TransactionalOutboxStatus.PUBLISH_ATTEMPTED),
+                    update,
+                    TransactionalOutboxRecordDocument.class
+            );
+            if (result.getModifiedCount() == 1) {
+                updateAlertProjection(
+                        record,
+                        DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN,
+                        "OUTBOX_PUBLISH_CONFIRMATION_FAILED",
+                        null
+                );
+            }
         } catch (DataAccessException exception) {
             log.warn("Transactional outbox confirmation-unknown update failed: reason=OUTBOX_CONFIRMATION_UNKNOWN_UPDATE_FAILED");
         }
@@ -176,11 +187,17 @@ public class OutboxPublisherCoordinator {
                 .unset("lease_owner")
                 .unset("lease_expires_at");
         try {
-            mongoTemplate.updateFirst(leasedRecordQuery(record, TransactionalOutboxStatus.PROCESSING), update, TransactionalOutboxRecordDocument.class);
-            String alertStatus = status == TransactionalOutboxStatus.FAILED_TERMINAL
-                    ? DecisionOutboxStatus.FAILED_TERMINAL
-                    : DecisionOutboxStatus.FAILED_RETRYABLE;
-            updateAlertProjection(record, alertStatus, reason, null);
+            UpdateResult result = mongoTemplate.updateFirst(
+                    leasedRecordQuery(record, TransactionalOutboxStatus.PROCESSING),
+                    update,
+                    TransactionalOutboxRecordDocument.class
+            );
+            if (result.getModifiedCount() == 1) {
+                String alertStatus = status == TransactionalOutboxStatus.FAILED_TERMINAL
+                        ? DecisionOutboxStatus.FAILED_TERMINAL
+                        : DecisionOutboxStatus.FAILED_RETRYABLE;
+                updateAlertProjection(record, alertStatus, reason, null);
+            }
         } catch (DataAccessException exception) {
             log.warn("Transactional outbox status update failed: reason=OUTBOX_STATUS_UPDATE_FAILED");
         }
@@ -217,27 +234,53 @@ public class OutboxPublisherCoordinator {
             update.set("decisionOutboxLastError", reason).set("decisionOutboxFailureReason", reason);
         }
         try {
-            UpdateResult result = mongoTemplate.updateFirst(Query.query(Criteria.where("_id").is(record.getResourceId())), update, AlertDocument.class);
+            Criteria target = Criteria.where("_id").is(record.getResourceId());
+            if (!DecisionOutboxStatus.PUBLISHED.equals(status)
+                    && !DecisionOutboxStatus.FAILED_TERMINAL.equals(status)) {
+                target.and("decisionOutboxStatus").nin(
+                        DecisionOutboxStatus.PUBLISHED,
+                        DecisionOutboxStatus.FAILED_TERMINAL
+                );
+            }
+            UpdateResult result = mongoTemplate.updateFirst(Query.query(target), update, AlertDocument.class);
             if (result.getMatchedCount() == 0) {
-                markProjectionMismatch(record, "ALERT_PROJECTION_NOT_FOUND");
+                markProjectionMismatch(record, sourceStatus(status), "ALERT_PROJECTION_NOT_FOUND");
             }
         } catch (DataAccessException exception) {
-            markProjectionMismatch(record, "ALERT_PROJECTION_UPDATE_FAILED");
+            markProjectionMismatch(record, sourceStatus(status), "ALERT_PROJECTION_UPDATE_FAILED");
         }
     }
 
-    void markProjectionMismatch(TransactionalOutboxRecordDocument record, String reason) {
+    void markProjectionMismatch(
+            TransactionalOutboxRecordDocument record,
+            TransactionalOutboxStatus expectedStatus,
+            String reason
+    ) {
         try {
             Update update = new Update()
                     .set("projection_mismatch", true)
                     .set("projection_mismatch_reason", reason)
                     .set("updated_at", Instant.now());
-            mongoTemplate.updateFirst(Query.query(Criteria.where("_id").is(record.getEventId())), update, TransactionalOutboxRecordDocument.class);
+            mongoTemplate.updateFirst(Query.query(new Criteria().andOperator(
+                    Criteria.where("_id").is(record.getEventId()),
+                    Criteria.where("status").is(expectedStatus)
+            )), update, TransactionalOutboxRecordDocument.class);
             metrics.recordOutboxProjectionMismatch(1);
             log.warn("Transactional outbox projection mismatch: reason={}", reason);
         } catch (DataAccessException exception) {
             log.warn("Transactional outbox projection mismatch persistence failed: reason=OUTBOX_PROJECTION_MISMATCH_PERSIST_FAILED");
         }
+    }
+
+    private TransactionalOutboxStatus sourceStatus(String projectionStatus) {
+        return switch (projectionStatus) {
+            case DecisionOutboxStatus.PUBLISHED -> TransactionalOutboxStatus.PUBLISHED;
+            case DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN ->
+                    TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN;
+            case DecisionOutboxStatus.FAILED_TERMINAL -> TransactionalOutboxStatus.FAILED_TERMINAL;
+            case DecisionOutboxStatus.FAILED_RETRYABLE -> TransactionalOutboxStatus.FAILED_RETRYABLE;
+            default -> throw new IllegalArgumentException("Unsupported transactional outbox projection status.");
+        };
     }
 
     private Duration age(TransactionalOutboxRecordDocument record) {

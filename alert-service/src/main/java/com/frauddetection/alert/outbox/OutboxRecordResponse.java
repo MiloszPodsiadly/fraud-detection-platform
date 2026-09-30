@@ -40,7 +40,9 @@ public record OutboxRecordResponse(
         @JsonProperty("resolution_approved_by")
         String resolutionApprovedBy,
         @JsonProperty("resolution_approved_at")
-        Instant resolutionApprovedAt
+        Instant resolutionApprovedAt,
+        @JsonProperty("operation_status")
+        String operationStatus
 ) {
     public static OutboxRecordResponse from(TransactionalOutboxRecordDocument document) {
         return new OutboxRecordResponse(
@@ -62,7 +64,33 @@ public record OutboxRecordResponse(
                 document.getResolutionRequestedBy(),
                 document.getResolutionRequestedAt(),
                 document.getResolutionApprovedBy(),
-                document.getResolutionApprovedAt()
+                document.getResolutionApprovedAt(),
+                null
+        );
+    }
+
+    public OutboxRecordResponse withOperationStatus(String value) {
+        return new OutboxRecordResponse(
+                eventId,
+                dedupeKey,
+                mutationCommandId,
+                resourceType,
+                resourceId,
+                eventType,
+                payloadHash,
+                status,
+                attempts,
+                lastError,
+                publishedAt,
+                confirmationUnknownAt,
+                updatedAt,
+                resolutionPending,
+                resolutionControlMode,
+                resolutionRequestedBy,
+                resolutionRequestedAt,
+                resolutionApprovedBy,
+                resolutionApprovedAt,
+                value
         );
     }
 }

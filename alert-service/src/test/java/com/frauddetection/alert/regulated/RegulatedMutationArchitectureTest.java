@@ -1154,7 +1154,7 @@ class RegulatedMutationArchitectureTest {
         assertThat(wiringTest).contains("productionExecutorUsesEnabledSpringManagedCheckpointRenewalService");
         assertThat(wiringTest).contains("isEnabledForTesting()).isTrue()");
         assertThat(evidenceExecutor.substring(evidenceExecutor.indexOf("@Autowired")))
-                .doesNotContain("RegulatedMutationCheckpointRenewalService.disabled()");
+                .doesNotContain("RegulatedMutationCheckpointRenewalService.disabledForTesting()");
     }
 
     @Test
@@ -1164,7 +1164,7 @@ class RegulatedMutationArchitectureTest {
         ));
 
         assertThat(evidenceExecutor).contains("Objects.requireNonNull");
-        assertThat(evidenceExecutor).contains("Compatibility/unit-test constructor only");
+        assertThat(evidenceExecutor).contains("Test-support constructor only");
         assertThat(evidenceExecutor).doesNotContain("checkpointRenewalService == null");
     }
 

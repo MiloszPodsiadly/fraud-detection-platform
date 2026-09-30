@@ -62,13 +62,13 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                 localAuditPhaseWriter,
                 new RegulatedMutationClaimService(mongoTemplate, leaseDuration),
                 new RegulatedMutationConflictPolicy(),
-                new RegulatedMutationReplayResolver(compatibilityReplayPolicyRegistry(durableLocalFinalizationProof)),
+                new RegulatedMutationReplayResolver(canonicalReplayPolicyRegistry(durableLocalFinalizationProof)),
                 new RegulatedMutationFencedCommandWriter(mongoTemplate, metrics),
-                RegulatedMutationCheckpointRenewalService.disabled()
+                RegulatedMutationCheckpointRenewalService.disabledForTesting()
         );
     }
 
-    // Compatibility/unit-test constructor only. Production wiring must use Spring-managed checkpoint renewal service.
+    // Test-support constructor only. Production wiring must use Spring-managed checkpoint renewal service.
     public EvidenceGatedFinalizeExecutor(
             RegulatedMutationCommandRepository commandRepository,
             MongoTemplate mongoTemplate,
@@ -96,7 +96,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                 conflictPolicy,
                 replayResolver,
                 fencedCommandWriter,
-                RegulatedMutationCheckpointRenewalService.disabled()
+                RegulatedMutationCheckpointRenewalService.disabledForTesting()
         );
     }
 
@@ -307,7 +307,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
         transition(document, claimToken, RegulatedMutationState.FINALIZING, document.getExecutionStatus(), null);
         checkpointRenewalService.beforeEvidenceGatedFinalize(claimToken, document);
         try {
-            LocalCommit<R, S> localCommit = transactionRunner.runLocalCommit(() -> {
+            LocalCommit<R, S> localCommit = localAuditPhaseWriter.withChainLock(() -> transactionRunner.runLocalCommit(() -> {
                 fencedCommandWriter.validateActiveLease(
                         claimToken,
                         RegulatedMutationState.FINALIZING,
@@ -343,7 +343,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                                 .set("local_committed_at", document.getLocalCommittedAt())
                 );
                 return new LocalCommit<>(result, response, snapshot);
-            });
+            }));
             return new RegulatedMutationResult<>(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL, localCommit.pendingResponse());
         } catch (StaleRegulatedMutationLeaseException exception) {
             throw exception;
@@ -551,7 +551,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
     ) {
     }
 
-    private static RegulatedMutationReplayPolicyRegistry compatibilityReplayPolicyRegistry(
+    private static RegulatedMutationReplayPolicyRegistry canonicalReplayPolicyRegistry(
             RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof
     ) {
         RegulatedMutationLeasePolicy leasePolicy = new RegulatedMutationLeasePolicy();

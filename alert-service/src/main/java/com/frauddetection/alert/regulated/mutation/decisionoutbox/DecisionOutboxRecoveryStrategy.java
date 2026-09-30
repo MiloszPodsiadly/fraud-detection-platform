@@ -2,7 +2,6 @@ package com.frauddetection.alert.regulated.mutation.decisionoutbox;
 
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditResourceType;
-import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.regulated.RecoveryValidationResult;
 import com.frauddetection.alert.regulated.RegulatedMutationCommandDocument;
@@ -15,12 +14,11 @@ import java.util.Optional;
 @Component
 public class DecisionOutboxRecoveryStrategy implements RegulatedMutationRecoveryStrategy {
 
-    private static final String BUSINESS_STATE_NOT_RECONSTRUCTABLE = "BUSINESS_STATE_NOT_RECONSTRUCTABLE";
-
-    private final AlertRepository alertRepository;
+    private static final String IMMUTABLE_OPERATION_RESPONSE_EVIDENCE_UNAVAILABLE =
+            "IMMUTABLE_OPERATION_RESPONSE_EVIDENCE_UNAVAILABLE";
 
     public DecisionOutboxRecoveryStrategy(AlertRepository alertRepository) {
-        this.alertRepository = alertRepository;
+        java.util.Objects.requireNonNull(alertRepository, "alertRepository");
     }
 
     @Override
@@ -30,52 +28,11 @@ public class DecisionOutboxRecoveryStrategy implements RegulatedMutationRecovery
 
     @Override
     public Optional<RegulatedMutationResponseSnapshot> reconstructSnapshot(RegulatedMutationCommandDocument command) {
-        return alert(command)
-                .map(alert -> new RegulatedMutationResponseSnapshot(
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        alert.getAlertId(),
-                        eventId(alert),
-                        dedupeKey(alert),
-                        alert.getDecisionOutboxStatus(),
-                        alert.getDecidedAt(),
-                        alert.getDecisionOutboxAttempts(),
-                        alert.getDecisionOutboxLastAttemptAt(),
-                        alert.getDecisionOutboxPublishedAt(),
-                        alert.getDecisionOutboxFailureReason(),
-                        alert.isDecisionOutboxResolutionPending(),
-                        alert.getDecisionOutboxResolutionRequestedAt(),
-                        alert.getDecisionOutboxResolutionRequestedBy(),
-                        alert.getDecisionOutboxResolutionEvidenceType(),
-                        alert.getDecisionOutboxResolutionEvidenceReference(),
-                        alert.getDecisionOutboxResolutionEvidenceVerifiedAt(),
-                        alert.getDecisionOutboxResolutionEvidenceVerifiedBy(),
-                        alert.getDecisionOutboxResolutionApprovedAt(),
-                        alert.getDecisionOutboxResolutionApprovedBy(),
-                        alert.getDecisionOutboxResolutionApprovalReason()
-                ));
+        return Optional.empty();
     }
 
     @Override
     public RecoveryValidationResult validateBusinessState(RegulatedMutationCommandDocument command) {
-        return alert(command).isPresent()
-                ? RecoveryValidationResult.accepted()
-                : RecoveryValidationResult.recoveryRequired(BUSINESS_STATE_NOT_RECONSTRUCTABLE);
-    }
-
-    private Optional<AlertDocument> alert(RegulatedMutationCommandDocument command) {
-        return alertRepository.findById(command.getResourceId());
-    }
-
-    private String eventId(AlertDocument alert) {
-        return alert.getDecisionOutboxEvent() == null ? null : alert.getDecisionOutboxEvent().eventId();
-    }
-
-    private String dedupeKey(AlertDocument alert) {
-        return alert.getDecisionOutboxEvent() == null ? null : alert.getDecisionOutboxEvent().dedupeKey();
+        return RecoveryValidationResult.recoveryRequired(IMMUTABLE_OPERATION_RESPONSE_EVIDENCE_UNAVAILABLE);
     }
 }

@@ -5,8 +5,10 @@ Status: current implementation evidence.
 Merge requires:
 
 - only `EVIDENCE_GATED_FINALIZE_V1` is executable
-- missing, null, retired, and unknown persisted model versions fail closed
+- missing, null, retired, and unknown persisted contracts fail closed, including terminal records in the active
+  command collection
 - the read-only persisted-model preflight reports unsupported records without mutation
+- unsupported records are archived or migrated offline before startup; runtime startup never rewrites or deletes them
 - canonical intent conflicts are rejected before business mutation
 - lease ownership and every claimed transition are fenced
 - checkpoint renewal failure stops execution

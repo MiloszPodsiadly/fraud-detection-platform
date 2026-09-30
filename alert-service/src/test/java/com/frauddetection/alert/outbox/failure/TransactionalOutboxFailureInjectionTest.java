@@ -10,6 +10,7 @@ import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
 import com.frauddetection.alert.regulated.mutation.outbox.OutboxConfirmationResolutionMutationHandler;
 import com.frauddetection.alert.service.DecisionOutboxStatus;
+import com.mongodb.client.result.UpdateResult;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -102,14 +103,22 @@ class TransactionalOutboxFailureInjectionTest {
         private final RegulatedMutationCoordinator regulatedMutationCoordinator = mock(RegulatedMutationCoordinator.class);
         private final OutboxConfirmationResolutionMutationHandler resolutionMutationHandler = mock(OutboxConfirmationResolutionMutationHandler.class);
         private final AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        private final OutboxRecoveryService service = new OutboxRecoveryService(
-                repository,
-                mongoTemplate,
-                publisherCoordinator,
-                regulatedMutationCoordinator,
-                resolutionMutationHandler,
-                metrics,
-                Duration.ofMinutes(2)
-        );
+        private final OutboxRecoveryService service;
+
+        private Fixture() {
+            when(mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(TransactionalOutboxRecordDocument.class)))
+                    .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+            when(mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(com.frauddetection.alert.persistence.AlertDocument.class)))
+                    .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+            service = new OutboxRecoveryService(
+                    repository,
+                    mongoTemplate,
+                    publisherCoordinator,
+                    regulatedMutationCoordinator,
+                    resolutionMutationHandler,
+                    metrics,
+                    Duration.ofMinutes(2)
+            );
+        }
     }
 }

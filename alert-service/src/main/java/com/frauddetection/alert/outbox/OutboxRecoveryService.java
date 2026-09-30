@@ -10,6 +10,7 @@ import com.frauddetection.alert.regulated.RegulatedMutationIntent;
 import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
 import com.frauddetection.alert.regulated.RegulatedMutationModelVersion;
 import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
+import com.frauddetection.alert.regulated.RegulatedMutationResult;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.outbox.OutboxConfirmationResolutionMutationHandler;
 import com.frauddetection.alert.service.DecisionOutboxStatus;
@@ -85,7 +86,7 @@ public class OutboxRecoveryService {
         return new OutboxRecoveryRunResponse(released, markedUnknown, repaired, attempted);
     }
 
-    public TransactionalOutboxRecordDocument resolveConfirmation(
+    public OutboxRecordResponse resolveConfirmation(
             String eventId,
             OutboxConfirmationResolutionRequest request,
             String actorId,
@@ -111,8 +112,8 @@ public class OutboxRecoveryService {
                 resolutionIntent(eventId, request, actorId, requestHash),
                 RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
         );
-        return repository.findById(regulatedMutationCoordinator.commit(command).response().eventId())
-                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "unknown outbox event"));
+        RegulatedMutationResult<OutboxRecordResponse> result = regulatedMutationCoordinator.commit(command);
+        return result.response().withOperationStatus(result.state().name());
     }
 
     private int releaseStaleProcessing() {
@@ -121,13 +122,20 @@ public class OutboxRecoveryService {
                 .findTop100ByStatusAndLeaseExpiresAtBeforeOrderByCreatedAtAsc(TransactionalOutboxStatus.PROCESSING, cutoff);
         int released = 0;
         for (TransactionalOutboxRecordDocument record : stale) {
-            record.setStatus(TransactionalOutboxStatus.FAILED_RETRYABLE);
-            record.setLeaseOwner(null);
-            record.setLeaseExpiresAt(null);
-            record.setLastError("STALE_PROCESSING_LEASE_RELEASED");
-            record.setUpdatedAt(Instant.now());
-            repository.save(record);
-            released++;
+            Instant now = Instant.now();
+            Update update = new Update()
+                    .set("status", TransactionalOutboxStatus.FAILED_RETRYABLE)
+                    .set("last_error", "STALE_PROCESSING_LEASE_RELEASED")
+                    .set("updated_at", now)
+                    .unset("lease_owner")
+                    .unset("lease_expires_at");
+            if (mongoTemplate.updateFirst(
+                    staleLeaseQuery(record, TransactionalOutboxStatus.PROCESSING, cutoff),
+                    update,
+                    TransactionalOutboxRecordDocument.class
+            ).getModifiedCount() == 1) {
+                released++;
+            }
         }
         return released;
     }
@@ -138,15 +146,33 @@ public class OutboxRecoveryService {
                 .findTop100ByStatusAndLeaseExpiresAtBeforeOrderByCreatedAtAsc(TransactionalOutboxStatus.PUBLISH_ATTEMPTED, cutoff);
         int marked = 0;
         for (TransactionalOutboxRecordDocument record : stale) {
-            record.setStatus(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
-            record.setLeaseOwner(null);
-            record.setLeaseExpiresAt(null);
-            record.setLastError("STALE_PUBLISH_ATTEMPT_CONFIRMATION_UNKNOWN");
-            record.setConfirmationUnknownAt(Instant.now());
-            record.setUpdatedAt(Instant.now());
-            repository.save(record);
-            publisherCoordinator.updateAlertProjection(record, DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN, record.getLastError(), null);
-            marked++;
+            Instant now = Instant.now();
+            Update update = new Update()
+                    .set("status", TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN)
+                    .set("last_error", "STALE_PUBLISH_ATTEMPT_CONFIRMATION_UNKNOWN")
+                    .set("confirmation_unknown_at", now)
+                    .set("updated_at", now)
+                    .unset("lease_owner")
+                    .unset("lease_expires_at");
+            if (mongoTemplate.updateFirst(
+                    staleLeaseQuery(record, TransactionalOutboxStatus.PUBLISH_ATTEMPTED, cutoff),
+                    update,
+                    TransactionalOutboxRecordDocument.class
+            ).getModifiedCount() == 1) {
+                record.setStatus(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
+                record.setLeaseOwner(null);
+                record.setLeaseExpiresAt(null);
+                record.setLastError("STALE_PUBLISH_ATTEMPT_CONFIRMATION_UNKNOWN");
+                record.setConfirmationUnknownAt(now);
+                record.setUpdatedAt(now);
+                publisherCoordinator.updateAlertProjection(
+                        record,
+                        DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN,
+                        record.getLastError(),
+                        null
+                );
+                marked++;
+            }
         }
         return marked;
     }
@@ -154,12 +180,33 @@ public class OutboxRecoveryService {
     private int repairProjectionMismatches() {
         int repaired = 0;
         for (TransactionalOutboxRecordDocument record : repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc()) {
-            updateAlert(record, record.getStatus());
+            if (record.getStatus() != TransactionalOutboxStatus.PUBLISHED
+                    && record.getStatus() != TransactionalOutboxStatus.RECOVERY_REQUIRED) {
+                continue;
+            }
+            Instant repairedAt = Instant.now();
+            Query claim = Query.query(new Criteria().andOperator(
+                    Criteria.where("_id").is(record.getEventId()),
+                    Criteria.where("status").is(record.getStatus()),
+                    Criteria.where("projection_mismatch").is(true),
+                    Criteria.where("updated_at").is(record.getUpdatedAt())
+            ));
+            Update clearMismatch = new Update()
+                    .unset("projection_mismatch")
+                    .unset("projection_mismatch_reason")
+                    .set("updated_at", repairedAt);
+            if (mongoTemplate.updateFirst(claim, clearMismatch, TransactionalOutboxRecordDocument.class)
+                    .getModifiedCount() != 1) {
+                continue;
+            }
             record.setProjectionMismatch(false);
             record.setProjectionMismatchReason(null);
-            record.setUpdatedAt(Instant.now());
-            repository.save(record);
-            repaired++;
+            record.setUpdatedAt(repairedAt);
+            if (updateAlert(record, record.getStatus())) {
+                repaired++;
+            } else {
+                restoreProjectionMismatch(record, "ALERT_PROJECTION_REPAIR_FAILED");
+            }
         }
         metrics.recordOutboxProjectionMismatch(repository.countByProjectionMismatchTrue());
         return repaired;
@@ -174,7 +221,7 @@ public class OutboxRecoveryService {
                 null,
                 "FRAUD_DECISION",
                 null,
-                state.name(),
+                null,
                 0,
                 null,
                 null,
@@ -185,7 +232,8 @@ public class OutboxRecoveryService {
                 null,
                 null,
                 null,
-                null
+                null,
+                state.name()
         );
     }
 
@@ -219,14 +267,14 @@ public class OutboxRecoveryService {
         );
     }
 
-    private void updateAlert(TransactionalOutboxRecordDocument record, TransactionalOutboxStatus status) {
+    private boolean updateAlert(TransactionalOutboxRecordDocument record, TransactionalOutboxStatus status) {
         String alertStatus = switch (status) {
             case PUBLISHED -> DecisionOutboxStatus.PUBLISHED;
             case RECOVERY_REQUIRED -> DecisionOutboxStatus.FAILED_TERMINAL;
             default -> null;
         };
         if (alertStatus == null || record.getResourceId() == null) {
-            return;
+            return false;
         }
         Update update = new Update()
                 .set("decisionOutboxStatus", alertStatus)
@@ -237,7 +285,42 @@ public class OutboxRecoveryService {
         if (status == TransactionalOutboxStatus.PUBLISHED) {
             update.set("decisionOutboxPublishedAt", record.getPublishedAt());
         }
-        mongoTemplate.updateFirst(Query.query(Criteria.where("_id").is(record.getResourceId())), update, AlertDocument.class);
+        try {
+            return mongoTemplate.updateFirst(
+                    Query.query(Criteria.where("_id").is(record.getResourceId())),
+                    update,
+                    AlertDocument.class
+            ).getMatchedCount() == 1;
+        } catch (org.springframework.dao.DataAccessException exception) {
+            return false;
+        }
+    }
+
+    private Query staleLeaseQuery(
+            TransactionalOutboxRecordDocument record,
+            TransactionalOutboxStatus expectedStatus,
+            Instant cutoff
+    ) {
+        return Query.query(new Criteria().andOperator(
+                Criteria.where("_id").is(record.getEventId()),
+                Criteria.where("status").is(expectedStatus),
+                Criteria.where("lease_owner").is(record.getLeaseOwner()),
+                Criteria.where("lease_expires_at").is(record.getLeaseExpiresAt()).lte(cutoff),
+                Criteria.where("attempts").is(record.getAttempts())
+        ));
+    }
+
+    private void restoreProjectionMismatch(TransactionalOutboxRecordDocument record, String reason) {
+        Query query = Query.query(new Criteria().andOperator(
+                Criteria.where("_id").is(record.getEventId()),
+                Criteria.where("status").is(record.getStatus()),
+                Criteria.where("updated_at").is(record.getUpdatedAt())
+        ));
+        Update update = new Update()
+                .set("projection_mismatch", true)
+                .set("projection_mismatch_reason", reason)
+                .set("updated_at", Instant.now());
+        mongoTemplate.updateFirst(query, update, TransactionalOutboxRecordDocument.class);
     }
 
     private long ageSeconds(TransactionalOutboxRecordDocument record) {

@@ -4,6 +4,7 @@ import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
@@ -100,6 +101,25 @@ class EngineIntelligenceSummaryTest {
         assertThat(Arrays.stream(EngineIntelligenceComparison.class.getDeclaredConstructors())
                 .mapToInt(constructor -> constructor.getParameterTypes().length))
                 .containsExactly(5);
+    }
+
+    @Test
+    void identityFreeAndPartialHistoricalComparisonsAreRejected() {
+        for (List<String> removedFields : List.of(
+                List.of("comparisonType"),
+                List.of("comparedEngineIds"),
+                List.of("comparisonType", "comparedEngineIds")
+        )) {
+            ObjectNode payload = EngineIntelligenceTestSupport.objectMapper()
+                    .valueToTree(EngineIntelligenceTestSupport.summary());
+            ObjectNode comparison = (ObjectNode) payload.get("comparison");
+            removedFields.forEach(comparison::remove);
+
+            assertThatThrownBy(() -> EngineIntelligenceTestSupport.objectMapper()
+                    .readValue(payload.toString(), EngineIntelligenceSummary.class))
+                    .as("missing comparison identity fields %s", removedFields)
+                    .isInstanceOf(RuntimeException.class);
+        }
     }
 
     @Test

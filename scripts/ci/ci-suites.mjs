@@ -31,7 +31,7 @@ export const ciSuites = {
       "FraudCaseMutationInvariantTest",
       "FraudCaseControllerTest",
       "FraudCaseSecurityIntegrationTest",
-      "RegulatedMutationIdempotencyPrimitiveCompatibilityTest"
+      "RegulatedMutationIdempotencyPrimitiveStabilityTest"
     ]
   },
   fdp44: {

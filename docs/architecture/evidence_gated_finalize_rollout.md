@@ -11,9 +11,11 @@ The runtime requires Mongo transaction capability, the transactional outbox repo
 mutation recovery strategies, bounded local audit writing, required local audit-chain indexes, and a persisted-model
 preflight with no unsupported records. Startup fails closed when a requirement is missing.
 
-Missing, null, retired, and unknown `mutation_model_version` values are unsupported. Operators must run the read-only
-preflight, classify retained records, and follow an approved data-handling procedure. The application does not
-reinterpret, rewrite, purge, or silently migrate those records.
+Missing, null, retired, and unknown persisted contracts are unsupported. The read-only preflight checks raw model,
+revision, state, and execution-status values before domain mapping. Every unsupported document in the active command
+collection blocks startup, including terminal records. Operators must archive or migrate those records offline under
+an approved data-handling procedure before restart. The application does not reinterpret, rewrite, purge, or silently
+migrate them.
 
 ## Current State Flow
 

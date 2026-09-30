@@ -185,6 +185,33 @@ class EvidenceGatedFinalizeCoordinatorTest {
     }
 
     @Test
+    void shouldReplayConfirmedCanonicalCommandRepeatedlyWithoutRerunningMutation() {
+        Fixture fixture = new Fixture(true);
+        RegulatedMutationCommandDocument existing = evidenceGatedCommand(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
+        existing.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
+        existing.setResponseSnapshot(new RegulatedMutationResponseSnapshot(
+                "alert-1",
+                AnalystDecision.CONFIRMED_FRAUD,
+                AlertStatus.RESOLVED,
+                "event-1",
+                Instant.parse("2026-05-01T00:00:00Z"),
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED
+        ));
+        fixture.commandLookup(Optional.of(existing));
+        AtomicInteger businessWrites = new AtomicInteger();
+
+        RegulatedMutationResult<String> first = fixture.coordinator.commit(command(businessWrites));
+        RegulatedMutationResult<String> second = fixture.coordinator.commit(command(businessWrites));
+
+        assertThat(first.state()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
+        assertThat(second.state()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
+        assertThat(first.response()).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED.name());
+        assertThat(second.response()).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED.name());
+        assertThat(businessWrites).hasValue(0);
+        assertThat(fixture.currentCommand.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
+    }
+
+    @Test
     void shouldRejectSameIdempotencyKeyWithDifferentPayloadBeforeBusinessMutation() {
         Fixture fixture = new Fixture(true);
         RegulatedMutationCommandDocument existing = evidenceGatedCommand(RegulatedMutationState.EVIDENCE_PREPARED);
@@ -329,6 +356,8 @@ class EvidenceGatedFinalizeCoordinatorTest {
             );
             when(auditEventRepository.findByRequestId(any())).thenReturn(Optional.empty());
             when(localAuditPhaseWriter.recordSuccessPhase(any(), any(), any())).thenReturn("success-audit-1");
+            when(localAuditPhaseWriter.withChainLock(any())).thenAnswer(invocation ->
+                    ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
         }
 
         private void commandLookup(Optional<RegulatedMutationCommandDocument> existing) {

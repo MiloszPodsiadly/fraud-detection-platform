@@ -70,7 +70,7 @@ public class EvidencePreconditionEvaluator {
                 "EXTERNAL_WITNESS_POLICY_READINESS"
         ));
         if (disabled) {
-            return EvidencePreconditionResult.satisfied(List.of("DISABLED_TEST_COMPATIBILITY"), skipped);
+            return EvidencePreconditionResult.satisfied(List.of("TEST_SUPPORT_PRECONDITIONS_DISABLED"), skipped);
         }
         checked.add("MUTATION_MODEL_VERSION");
         if (document.getMutationModelVersion() != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {

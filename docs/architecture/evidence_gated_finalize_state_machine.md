@@ -1,7 +1,7 @@
 # Evidence-Gated Finalize State Machine
 
-This is the state machine contract for the feature-flagged submit-decision local evidence-precondition-gated finalize
-path. It applies only when both evidence-gated finalize flags are enabled for submit-decision.
+This is the state machine contract for the canonical submit-decision local evidence-precondition-gated finalize path.
+`EVIDENCE_GATED_FINALIZE_V1` is the only executable regulated mutation model; there is no runtime selector or fallback.
 
 ## Invariants
 
@@ -71,8 +71,8 @@ path. It applies only when both evidence-gated finalize flags are enabled for su
 
 ### FINALIZED_VISIBLE
 
-- Meaning: Compatibility/repair state for legacy or interrupted evidence-gated commands where the system observes a
-  local visible finalize marker before the command was promoted to `FINALIZED_EVIDENCE_PENDING_EXTERNAL`.
+- Meaning: Transitional repair state for an interrupted current-model command where the system observes a local
+  visible finalize marker before the command was promoted to `FINALIZED_EVIDENCE_PENDING_EXTERNAL`.
 - Authoritative source: Business aggregate plus command finalize marker.
 - Allowed transitions: `FINALIZED_EVIDENCE_PENDING_EXTERNAL`, `FINALIZE_RECOVERY_REQUIRED` only if local evidence inconsistency is later detected.
 - Forbidden transitions: Pre-finalize states.

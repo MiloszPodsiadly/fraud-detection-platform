@@ -109,7 +109,7 @@ jobs:
         run: docker version
 
       - name: Run FDP-43 retired lifecycle cleanup guard suite
-        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=IdempotencyCanonicalHasherTest,SharedIdempotencyKeyPolicyTest,FraudCasePatchRegulatedMutationProofTest,FraudCaseRemovedRouteRuntimeTest,FraudCaseRemovedApiSurfaceTest,FraudCaseCurrentApiSurfaceTest,FraudCaseMutationInvariantTest,FraudCaseControllerTest,FraudCaseSecurityIntegrationTest,RegulatedMutationIdempotencyPrimitiveCompatibilityTest" test
+        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=IdempotencyCanonicalHasherTest,SharedIdempotencyKeyPolicyTest,FraudCasePatchRegulatedMutationProofTest,FraudCaseRemovedRouteRuntimeTest,FraudCaseRemovedApiSurfaceTest,FraudCaseCurrentApiSurfaceTest,FraudCaseMutationInvariantTest,FraudCaseControllerTest,FraudCaseSecurityIntegrationTest,RegulatedMutationIdempotencyPrimitiveStabilityTest" test
 
       - name: Verify FDP-43 proof suite reports
         run: node scripts/ci/verify-junit-reports.mjs --suite fdp43

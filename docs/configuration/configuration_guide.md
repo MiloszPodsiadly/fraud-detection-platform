@@ -21,7 +21,10 @@ enable production mode and does not replace environment-specific release approva
 ## Regulated Mutation Settings
 
 - `app.regulated-mutations.transaction-mode=REQUIRED` is the supported default.
-- Missing, null, retired, and unknown persisted model versions fail closed and are reported by the read-only preflight.
+- Missing, null, retired, and unknown persisted contracts fail closed and are reported by the read-only preflight.
+  Every unsupported document in the active command collection blocks startup, including terminal records. Operators
+  must archive or migrate such records offline under an approved data procedure before restart; startup never deletes,
+  rewrites, or reinterprets them.
 - Lease duration, renewal, and checkpoint budgets must be reviewed with stale-worker metrics before enablement.
 - `EVIDENCE_GATED_FINALIZE_V1` is the only executable model; there is no runtime selector or fallback.
 - Checkpoint renewal is ownership preservation only. It is not proof of business progress.

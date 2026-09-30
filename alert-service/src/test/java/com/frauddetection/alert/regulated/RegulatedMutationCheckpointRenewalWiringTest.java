@@ -96,7 +96,7 @@ class RegulatedMutationCheckpointRenewalWiringTest {
 
     @Test
     void disabledCheckpointRenewalServiceIsExplicitlyMarkedDisabled() {
-        assertThat(RegulatedMutationCheckpointRenewalService.disabled().isEnabledForTesting()).isFalse();
+        assertThat(RegulatedMutationCheckpointRenewalService.disabledForTesting().isEnabledForTesting()).isFalse();
     }
 
     private RegulatedMutationCheckpointRenewalService checkpointServiceFrom(Object executor) throws Exception {

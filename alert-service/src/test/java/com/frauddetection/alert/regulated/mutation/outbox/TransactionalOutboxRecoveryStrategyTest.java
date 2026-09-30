@@ -18,7 +18,7 @@ import static org.mockito.Mockito.when;
 class TransactionalOutboxRecoveryStrategyTest {
 
     @Test
-    void reconstructsOnlyTheTransactionalOutboxRecordSelectedByResourceId() {
+    void mutableTransactionalOutboxRecordIsNotUsedToReconstructMissingSnapshot() {
         TransactionalOutboxRecordRepository repository = mock(TransactionalOutboxRecordRepository.class);
         TransactionalOutboxRecoveryStrategy strategy = new TransactionalOutboxRecoveryStrategy(repository);
         RegulatedMutationCommandDocument command = command("event-7");
@@ -33,8 +33,10 @@ class TransactionalOutboxRecoveryStrategyTest {
                 AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
                 AuditResourceType.DECISION_OUTBOX
         )).isFalse();
-        assertThat(strategy.reconstructSnapshot(command)).isPresent();
-        assertThat(strategy.validateBusinessState(command).valid()).isTrue();
+        assertThat(strategy.reconstructSnapshot(command)).isEmpty();
+        assertThat(strategy.validateBusinessState(command).valid()).isFalse();
+        assertThat(strategy.validateBusinessState(command).reasonCode())
+                .isEqualTo("IMMUTABLE_OPERATION_RESPONSE_EVIDENCE_UNAVAILABLE");
     }
 
     @Test
@@ -47,7 +49,21 @@ class TransactionalOutboxRecoveryStrategyTest {
         RecoveryValidationResult result = strategy.validateBusinessState(command);
 
         assertThat(result.valid()).isFalse();
-        assertThat(result.reasonCode()).isEqualTo("BUSINESS_STATE_NOT_RECONSTRUCTABLE");
+        assertThat(result.reasonCode()).isEqualTo("IMMUTABLE_OPERATION_RESPONSE_EVIDENCE_UNAVAILABLE");
+        assertThat(strategy.reconstructSnapshot(command)).isEmpty();
+    }
+
+    @Test
+    void laterOutboxStateDoesNotBecomeTheOriginalOperationResponse() {
+        TransactionalOutboxRecordRepository repository = mock(TransactionalOutboxRecordRepository.class);
+        TransactionalOutboxRecoveryStrategy strategy = new TransactionalOutboxRecoveryStrategy(repository);
+        RegulatedMutationCommandDocument command = command("event-7");
+        TransactionalOutboxRecordDocument laterState = record("event-7");
+        laterState.setStatus(com.frauddetection.alert.outbox.TransactionalOutboxStatus.PUBLISHED);
+        laterState.setPublishedAt(Instant.parse("2026-09-28T09:00:00Z"));
+        when(repository.findById("event-7")).thenReturn(Optional.of(laterState));
+
+        assertThat(strategy.validateBusinessState(command).valid()).isFalse();
         assertThat(strategy.reconstructSnapshot(command)).isEmpty();
     }
 

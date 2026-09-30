@@ -74,6 +74,7 @@ import com.frauddetection.alert.outbox.OutboxBacklogResponse;
 import com.frauddetection.alert.outbox.OutboxRecoveryController;
 import com.frauddetection.alert.outbox.OutboxRecoveryRunResponse;
 import com.frauddetection.alert.outbox.OutboxRecoveryService;
+import com.frauddetection.alert.outbox.OutboxRecordResponse;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.persistence.AlertRepository;
@@ -844,7 +845,8 @@ class AlertSecurityConfigTest {
         when(outboxRecoveryService.backlog()).thenReturn(new OutboxBacklogResponse(1, 0, 0, 0, 0, 0, 0, 0, 5L));
         when(outboxRecoveryService.recoverNow()).thenReturn(new OutboxRecoveryRunResponse(1, 0, 0, 1));
         when(outboxRecoveryService.resolveConfirmation(eq("event-1"), any(), any(), any()))
-                .thenReturn(outboxRecord("event-1", TransactionalOutboxStatus.PUBLISHED));
+                .thenReturn(OutboxRecordResponse.from(outboxRecord("event-1", TransactionalOutboxStatus.PUBLISHED))
+                        .withOperationStatus("FINALIZED_EVIDENCE_PENDING_EXTERNAL"));
 
         mockMvc.perform(get("/api/v1/audit/events").with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())

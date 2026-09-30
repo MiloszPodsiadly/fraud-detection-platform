@@ -53,6 +53,11 @@ public class OutboxRecoveryController {
             @Valid @RequestBody OutboxConfirmationResolutionRequest request,
             Authentication authentication
     ) {
-        return OutboxRecordResponse.from(service.resolveConfirmation(eventId, request, authentication == null ? null : authentication.getName(), idempotencyKey));
+        return service.resolveConfirmation(
+                eventId,
+                request,
+                authentication == null ? null : authentication.getName(),
+                idempotencyKey
+        );
     }
 }

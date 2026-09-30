@@ -34,7 +34,7 @@ This runbook does not provide WORM storage, legal notarization, distributed ACID
 - Recovery state wins over progress-looking fields.
 - Operators must inspect durable command state before acting.
 - Use command id or idempotency hash. Do not paste raw idempotency keys in tickets, logs, runbooks, or dashboards.
-- Manual state repair, rollback approval, feature flag disablement, and renewal budget changes require dual control.
+- Manual state repair, rollback approval, command-ingress suspension, and renewal budget changes require dual control.
 
 ## Required Authority
 
@@ -54,7 +54,7 @@ This runbook does not provide WORM storage, legal notarization, distributed ACID
 | `NON_RENEWABLE_STATE` | State must not renew. | Respect current terminal or recovery state. | Do not renew manually. |
 | `TERMINAL_STATE` | Command is already terminal. | Use replay result only and verify aggregate consistency. | Do not mutate terminal command fields. |
 | `RECOVERY_STATE` | Command already requires recovery. | Follow recovery endpoint or recovery owner path. | Do not replay stale snapshot as success. |
-| `MODEL_VERSION_MISMATCH` | Worker model version differs from stored command. | Inspect deployment and route to matching executor/recovery owner. | Do not downgrade `mutation_model_version`. |
+| `MODEL_VERSION_MISMATCH` | Active collection contains a command outside the current persisted contract. | Stop startup/recovery and route the record through the approved offline archive or migration process. | Do not execute it, restore a retired executor, or rewrite `mutation_model_version` in place. |
 | `EXECUTION_STATUS_MISMATCH` | Expected execution status no longer matches. | Re-read command and retry only through normal coordinator path. | Do not force status to `COMPLETED`. |
 | `UNKNOWN` | Guard returned an unclassified reason. | Treat as platform incident and inspect logs without raw payloads. | Do not add ad hoc recovery behavior. |
 
@@ -107,8 +107,9 @@ Safe response:
 
 1. Check Mongo health, lock contention, unique-index errors, and write concern failures.
 2. Check `app.audit.local-phase-writer.max-append-attempts`, `backoff-ms`, and `max-total-wait-ms`.
-3. Keep evidence-gated finalize flags disabled or roll them back if contention prevents safe local evidence append.
-4. Do not disable the local `SUCCESS` audit writer while evidence-gated finalize is enabled.
+3. Suspend regulated mutation ingress and roll back only to a compatible current-model build if contention prevents a
+   safe local evidence append.
+4. Do not bypass or disable the local `SUCCESS` audit writer.
 
 Metrics are operational signals only. They are not compliance evidence by themselves.
 

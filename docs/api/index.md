@@ -25,7 +25,7 @@ OpenAPI safety review. Do not merge them into one large API document.
 | [API error contract](api_error_contract.md) | Current source of truth | Canonical error envelope: `timestamp`, `status`, `error`, `message`, `details` | Endpoint-specific business response fields |
 | [Fraud Case API](fraud_case_api.md) | Current source of truth | Current fraud-case read/update endpoints, FDP-81 removals, local idempotency, and non-claims | Regulated mutation finality claims |
 | [OpenAPI safety audit](openapi_safety_audit.md) | Current audit artifact | Safety posture of `docs/openapi/*.yaml` examples and schemas | Runtime verification or code generation guarantees |
-| [Evidence-gated finalize response contract](evidence_gated_finalize_response_contract.md) | Current scoped contract | Feature-flagged submit-decision evidence-gated finalize response shape | General fraud-case lifecycle API behavior |
+| [Evidence-gated finalize response contract](evidence_gated_finalize_response_contract.md) | Current scoped contract | Canonical submit-decision evidence-gated finalize response shape | General fraud-case lifecycle API behavior |
 
 ## Related Specifications
 

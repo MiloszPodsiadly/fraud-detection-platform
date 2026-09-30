@@ -239,7 +239,8 @@ public record RegulatedMutationResponseSnapshot(
                 outboxResolutionRequestedBy,
                 outboxResolutionRequestedAt,
                 outboxResolutionApprovedBy,
-                outboxResolutionApprovedAt
+                outboxResolutionApprovedAt,
+                null
         );
     }
 

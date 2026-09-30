@@ -55,11 +55,14 @@ public class EvidenceGatedFinalizeReplayPolicy implements RegulatedMutationRepla
             );
         }
         if (document.getExecutionStatus() == RegulatedMutationExecutionStatus.RECOVERY_REQUIRED
-                || document.getState() == RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED) {
+                || document.getState() == RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
+                || document.getState() == RegulatedMutationState.FAILED) {
             return RegulatedMutationReplayDecision.of(
                     RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE,
                     RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
-                    "FINALIZE_RECOVERY_REQUIRED"
+                    document.getState() == RegulatedMutationState.FAILED
+                            ? "FAILED_TERMINAL"
+                            : "FINALIZE_RECOVERY_REQUIRED"
             );
         }
         if (document.getState() == RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE
@@ -70,7 +73,8 @@ public class EvidenceGatedFinalizeReplayPolicy implements RegulatedMutationRepla
                     null
             );
         }
-        if (document.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL) {
+        if (document.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+                || document.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED) {
             DurableLocalFinalizationProofResult proof = durableLocalFinalizationProof.verify(document);
             if (!proof.valid()) {
                 return RegulatedMutationReplayDecision.of(
@@ -80,22 +84,16 @@ public class EvidenceGatedFinalizeReplayPolicy implements RegulatedMutationRepla
                 );
             }
             if (document.getResponseSnapshot() == null) {
+                RegulatedMutationReplayDecisionType decisionType =
+                        document.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED
+                                ? RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE
+                                : RegulatedMutationReplayDecisionType.FINALIZED_VISIBLE_RECOVERY_REQUIRED;
                 return RegulatedMutationReplayDecision.of(
-                        RegulatedMutationReplayDecisionType.FINALIZED_VISIBLE_RECOVERY_REQUIRED,
+                        decisionType,
                         RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
                         "RESPONSE_SNAPSHOT_MISSING"
                 );
             }
-        }
-        if (document.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED
-                && document.getResponseSnapshot() == null) {
-            return RegulatedMutationReplayDecision.of(
-                    RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE,
-                    RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED,
-                    "RESPONSE_SNAPSHOT_MISSING"
-            );
-        }
-        if (document.getResponseSnapshot() != null) {
             return RegulatedMutationReplayDecision.of(
                     RegulatedMutationReplayDecisionType.REPLAY_SNAPSHOT,
                     document.getState(),

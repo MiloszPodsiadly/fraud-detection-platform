@@ -158,7 +158,14 @@ public class OutboxConfirmationResolutionMutationHandler {
                 .set("decisionOutboxResolutionEvidenceVerifiedAt", evidence.verifiedAt())
                 .set("decisionOutboxResolutionEvidenceVerifiedBy", evidence.verifiedBy());
         try {
-            UpdateResult result = mongoTemplate.updateFirst(Query.query(Criteria.where("_id").is(record.getResourceId())), update, AlertDocument.class);
+            Query query = Query.query(new Criteria().andOperator(
+                    Criteria.where("_id").is(record.getResourceId()),
+                    Criteria.where("decisionOutboxStatus").nin(
+                            DecisionOutboxStatus.PUBLISHED,
+                            DecisionOutboxStatus.FAILED_TERMINAL
+                    )
+            ));
+            UpdateResult result = mongoTemplate.updateFirst(query, update, AlertDocument.class);
             if (result.getMatchedCount() == 0) {
                 markProjectionMismatch(record, "ALERT_PROJECTION_NOT_FOUND");
             }
@@ -211,9 +218,15 @@ public class OutboxConfirmationResolutionMutationHandler {
     }
 
     private void markProjectionMismatch(TransactionalOutboxRecordDocument record, String reason) {
-        record.setProjectionMismatch(true);
-        record.setProjectionMismatchReason(reason);
-        record.setUpdatedAt(Instant.now());
-        repository.save(record);
+        Query query = Query.query(new Criteria().andOperator(
+                Criteria.where("_id").is(record.getEventId()),
+                Criteria.where("status").is(record.getStatus()),
+                Criteria.where("updated_at").is(record.getUpdatedAt())
+        ));
+        Update update = new Update()
+                .set("projection_mismatch", true)
+                .set("projection_mismatch_reason", reason)
+                .set("updated_at", Instant.now());
+        mongoTemplate.updateFirst(query, update, TransactionalOutboxRecordDocument.class);
     }
 }

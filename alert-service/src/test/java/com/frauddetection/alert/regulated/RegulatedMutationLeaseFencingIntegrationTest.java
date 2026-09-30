@@ -646,17 +646,32 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
                 rawCommand("command-missing-revision", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1.name(), false),
                 rawCommand("command-unsupported-model", "UNSUPPORTED_MODEL", true),
                 rawCommand("command-retired-model", "RETIRED_MODEL", true),
-                rawCommand("command-missing-model", null, true)
+                rawCommand("command-missing-model", null, true),
+                rawCommand("command-invalid-state", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1.name(), true)
+                        .append("state", "RETIRED_STATE"),
+                rawCommand("command-invalid-status", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1.name(), true)
+                        .append("execution_status", "RETIRED_STATUS"),
+                rawCommand("command-terminal-unsupported", "RETIRED_TERMINAL_MODEL", true)
+                        .append("execution_status", RegulatedMutationExecutionStatus.COMPLETED.name())
         ));
 
         RegulatedMutationPersistedModelPreflight.Report report =
                 new RegulatedMutationPersistedModelPreflight(mongoTemplate).inspect(10);
 
-        assertThat(report.unsupportedUnfinishedCount()).isEqualTo(4L);
+        assertThat(report.unsupportedUnfinishedCount()).isEqualTo(6L);
+        assertThat(report.unsupportedTerminalCount()).isEqualTo(1L);
         assertThat(report.blocksStartup()).isTrue();
         assertThat(report.samples())
                 .extracting(RegulatedMutationPersistedModelPreflight.UnsupportedCommand::modelCategory)
-                .containsExactlyInAnyOrder("MISSING_REVISION", "UNKNOWN", "UNKNOWN", "MISSING");
+                .containsExactlyInAnyOrder(
+                        "MISSING_REVISION",
+                        "UNKNOWN",
+                        "UNKNOWN",
+                        "MISSING",
+                        "UNKNOWN_STATE",
+                        "UNKNOWN_EXECUTION_STATUS",
+                        "UNKNOWN"
+                );
         assertThat(claimService.claim(command("missing-revision"), "missing-revision")).isEmpty();
         assertThat(claimService.claim(command("unsupported-model"), "unsupported-model")).isEmpty();
         assertThat(claimService.claim(command("retired-model"), "retired-model")).isEmpty();

@@ -1,6 +1,6 @@
 # Evidence-Gated Finalize Failure Windows
 
-This table defines expected behavior for the feature-flagged submit-decision evidence-gated finalize implementation.
+This table defines expected behavior for the canonical submit-decision evidence-gated finalize implementation.
 
 | Failure Window | Possible Persisted State | Visible Business State | API Replay Behavior | Trust-Level Impact | Recovery Behavior | Incident/Degradation |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -27,7 +27,7 @@ This table defines expected behavior for the feature-flagged submit-decision evi
 
 - Before local finalize completes, visible business state remains unchanged.
 - New evidence-gated submit-decision commands durably persist `FINALIZED_EVIDENCE_PENDING_EXTERNAL` as the local-visible
-  state. `FINALIZED_VISIBLE` is compatibility/repair state only.
+  state. `FINALIZED_VISIBLE` is a transitional repair state only.
 - After local finalize, failures are recovery/degradation problems, not silent rollback.
 - No failure window may report `FINALIZED_EVIDENCE_CONFIRMED` unless evidence confirmation is explicitly proven.
 - Idempotency replay must read command truth; it must not rerun finalization from ambiguous states.

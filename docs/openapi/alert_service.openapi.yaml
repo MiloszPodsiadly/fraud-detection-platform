@@ -2471,7 +2471,7 @@ components:
     OutboxRecordResponse:
       type: object
       additionalProperties: false
-      required: [event_id, dedupe_key, mutation_command_id, resource_type, resource_id, event_type, payload_hash, status, attempts, last_error, published_at, confirmation_unknown_at, updated_at, resolution_pending, resolution_control_mode, resolution_requested_by, resolution_requested_at, resolution_approved_by, resolution_approved_at]
+      required: [event_id, dedupe_key, mutation_command_id, resource_type, resource_id, event_type, payload_hash, status, attempts, last_error, published_at, confirmation_unknown_at, updated_at, resolution_pending, resolution_control_mode, resolution_requested_by, resolution_requested_at, resolution_approved_by, resolution_approved_at, operation_status]
       properties:
         event_id:
           type: string
@@ -2493,7 +2493,9 @@ components:
           description: Stable hash of the stored event payload; the raw payload is not returned by recovery APIs.
         status:
           type: string
-          enum: [PENDING, PROCESSING, PUBLISHED, PUBLISH_CONFIRMATION_UNKNOWN, FAILED_RETRYABLE, FAILED_TERMINAL, RECOVERY_REQUIRED]
+          nullable: true
+          enum: [PENDING, PROCESSING, PUBLISH_ATTEMPTED, PUBLISHED, PUBLISH_CONFIRMATION_UNKNOWN, FAILED_RETRYABLE, FAILED_TERMINAL, RECOVERY_REQUIRED]
+          description: Transactional outbox publication status. Null while the regulated mutation has not produced a committed outbox result.
         attempts:
           type: integer
           minimum: 0
@@ -2533,6 +2535,10 @@ components:
           type: string
           format: date-time
           nullable: true
+        operation_status:
+          type: string
+          enum: [REQUESTED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED, FAILED]
+          description: Regulated mutation lifecycle status. This is distinct from the transactional outbox publication status.
     FraudCaseStatus:
       type: string
       enum: [OPEN, IN_REVIEW, ESCALATED, RESOLVED, REOPENED, CONFIRMED_FRAUD, FALSE_POSITIVE, CLOSED]

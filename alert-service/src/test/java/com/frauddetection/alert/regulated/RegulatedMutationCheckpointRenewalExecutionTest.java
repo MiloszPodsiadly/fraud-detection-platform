@@ -96,6 +96,11 @@ class RegulatedMutationCheckpointRenewalExecutionTest {
         private final RegulatedMutationCheckpointRenewalService checkpointRenewalService =
                 mock(RegulatedMutationCheckpointRenewalService.class);
 
+        private Fixture() {
+            when(localAuditPhaseWriter.withChainLock(any())).thenAnswer(invocation ->
+                    ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
+        }
+
         private EvidenceGatedFinalizeExecutor executor() {
             return executor(checkpointRenewalService);
         }

@@ -119,7 +119,7 @@ class PublicApiDocumentationConsistencyTest {
                 .contains("not success")
                 .contains("not distributed exactly-once")
                 .contains("not proof of business correctness")
-                .contains("FINALIZED_VISIBLE is a compatibility-visible status")
+                .contains("FINALIZED_VISIBLE is an internal transitional repair status")
                 .contains("FINALIZED_VISIBLE is not external confirmation");
 
         assertThat(combined.toLowerCase())

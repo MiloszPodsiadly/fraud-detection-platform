@@ -14,9 +14,10 @@ that transaction and are reconciled asynchronously.
 
 ## Operator Handoff
 
-Before deployment, run the persisted-model preflight. Missing, null, retired, and unknown model versions block startup.
-The preflight is read-only: it identifies unsupported retained records but does not purge, rewrite, or migrate them.
-Resolution requires an approved operator data procedure outside the application startup path.
+Before deployment, run the persisted-model preflight. Missing, null, retired, unknown, or malformed persisted
+contracts block startup. This applies to unfinished and terminal documents in the active command collection. The
+preflight is read-only: it identifies unsupported records but does not purge, rewrite, or migrate them. Resolution
+requires an approved offline archive or migration procedure outside the application startup path.
 
 For recovery, inspect by command id or idempotency-key hash, preserve redaction, and use the authorized bounded recovery
 endpoint. Never edit command state, lease owner, snapshots, audit evidence, outbox records, or business aggregates by

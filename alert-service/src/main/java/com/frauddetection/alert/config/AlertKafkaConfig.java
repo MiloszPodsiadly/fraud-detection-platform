@@ -9,6 +9,7 @@ import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.Serializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
@@ -28,9 +29,14 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.kafka.support.serializer.DelegatingByTypeSerializer;
+import org.springframework.kafka.support.serializer.DeserializationException;
+import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer;
 import org.springframework.util.backoff.FixedBackOff;
 
+import java.time.Duration;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Configuration
@@ -52,7 +58,7 @@ public class AlertKafkaConfig {
         return new DefaultKafkaConsumerFactory<>(
                 properties,
                 new StringDeserializer(),
-                new JacksonKafkaDeserializer<>(TransactionScoredEvent.class)
+                new ErrorHandlingDeserializer<>(new JacksonKafkaDeserializer<>(TransactionScoredEvent.class))
         );
     }
 
@@ -120,11 +126,14 @@ public class AlertKafkaConfig {
 
         @SuppressWarnings("unchecked")
         Serializer<Object> keySerializer = (Serializer<Object>) (Serializer<?>) new StringSerializer();
+        Map<Class<?>, Serializer<?>> valueSerializers = new LinkedHashMap<>();
+        valueSerializers.put(byte[].class, new ByteArraySerializer());
+        valueSerializers.put(Object.class, new JacksonKafkaSerializer<>());
 
         return new DefaultKafkaProducerFactory<>(
                 properties,
                 keySerializer,
-                new JacksonKafkaSerializer<>()
+                new DelegatingByTypeSerializer(valueSerializers, true)
         );
     }
 
@@ -138,10 +147,14 @@ public class AlertKafkaConfig {
             KafkaOperations<Object, Object> deadLetterKafkaTemplate,
             KafkaTopicProperties kafkaTopicProperties
     ) {
-        return new DeadLetterPublishingRecoverer(
+        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
                 deadLetterKafkaTemplate,
                 (record, exception) -> new TopicPartition(kafkaTopicProperties.transactionsDeadLetter(), record.partition())
         );
+        recoverer.setFailIfSendResultIsError(true);
+        recoverer.setWaitForSendResultTimeout(Duration.ofSeconds(10));
+        recoverer.setLogRecoveryRecord(false);
+        return recoverer;
     }
 
     @Bean
@@ -152,15 +165,16 @@ public class AlertKafkaConfig {
         long retryAttempts = Math.max((kafkaConsumerProperties.retryAttempts() == null ? 3 : kafkaConsumerProperties.retryAttempts()) - 1L, 0L);
         long retryBackoffMillis = kafkaConsumerProperties.retryBackoffMillis() == null ? 1000L : kafkaConsumerProperties.retryBackoffMillis();
         DefaultErrorHandler errorHandler = new DefaultErrorHandler(deadLetterPublishingRecoverer, new FixedBackOff(retryBackoffMillis, retryAttempts));
+        errorHandler.addNotRetryableExceptions(DeserializationException.class);
+        errorHandler.setAckAfterHandle(true);
         errorHandler.setRetryListeners((ConsumerRecord<?, ?> record, Exception exception, int deliveryAttempt) ->
                 log.atWarn()
                         .addKeyValue("service", "alert-service")
                         .addKeyValue("topic", record.topic())
                         .addKeyValue("partition", record.partition())
                         .addKeyValue("offset", record.offset())
-                        .addKeyValue("key", record.key())
                         .addKeyValue("deliveryAttempt", deliveryAttempt)
-                        .setCause(exception)
+                        .addKeyValue("exceptionType", exception.getClass().getSimpleName())
                         .log("Retrying Kafka record processing before dead-letter handoff."));
         return errorHandler;
     }

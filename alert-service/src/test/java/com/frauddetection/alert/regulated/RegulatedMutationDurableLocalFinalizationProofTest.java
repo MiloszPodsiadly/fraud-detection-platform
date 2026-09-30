@@ -53,6 +53,19 @@ class RegulatedMutationDurableLocalFinalizationProofTest {
     }
 
     @Test
+    void rejectsMissingCommandIdentityBeforeConsultingDurableEvidence() {
+        RegulatedMutationCommandDocument command = command(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT
+        );
+        command.setId(null);
+
+        assertThat(proof.verify(command))
+                .isEqualTo(DurableLocalFinalizationProofResult.invalid("COMMAND_IDENTITY_MISSING"));
+        verify(auditRepository, never()).findByAuditId("audit-success");
+    }
+
+    @Test
     void rejectsMissingSuccessAudit() {
         RegulatedMutationCommandDocument command = command(
                 AuditAction.SUBMIT_ANALYST_DECISION,
@@ -87,6 +100,22 @@ class RegulatedMutationDurableLocalFinalizationProofTest {
         AuditEventDocument audit = successAudit(command);
         when(auditRepository.findByAuditId("audit-success")).thenReturn(Optional.of(audit));
         when(outboxRepository.findByMutationCommandId(command.getId())).thenReturn(Optional.empty());
+
+        assertThat(proof.verify(command))
+                .isEqualTo(DurableLocalFinalizationProofResult.invalid("TRANSACTIONAL_OUTBOX_PROOF_MISSING"));
+    }
+
+    @Test
+    void rejectsInconsistentRequiredTransactionalOutboxIdentity() {
+        RegulatedMutationCommandDocument command = command(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT
+        );
+        AuditEventDocument audit = successAudit(command);
+        TransactionalOutboxRecordDocument outbox = outbox(command);
+        outbox.setEventId("different-event");
+        when(auditRepository.findByAuditId("audit-success")).thenReturn(Optional.of(audit));
+        when(outboxRepository.findByMutationCommandId(command.getId())).thenReturn(Optional.of(outbox));
 
         assertThat(proof.verify(command))
                 .isEqualTo(DurableLocalFinalizationProofResult.invalid("TRANSACTIONAL_OUTBOX_PROOF_MISSING"));

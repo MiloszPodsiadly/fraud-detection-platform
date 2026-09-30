@@ -15,7 +15,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class RegulatedMutationIdempotencyPrimitiveCompatibilityTest {
+class RegulatedMutationIdempotencyPrimitiveStabilityTest {
 
     private final RegulatedMutationConflictPolicy conflictPolicy = new RegulatedMutationConflictPolicy();
 
@@ -34,7 +34,7 @@ class RegulatedMutationIdempotencyPrimitiveCompatibilityTest {
     }
 
     @Test
-    void canonicalValueFormatStaysCompatible() {
+    void canonicalValueFormatRemainsStable() {
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("z", null);
         value.put("a", List.of("one", "two"));

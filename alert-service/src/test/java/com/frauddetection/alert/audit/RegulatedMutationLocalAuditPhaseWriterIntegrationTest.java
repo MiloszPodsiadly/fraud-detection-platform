@@ -32,6 +32,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -257,6 +258,28 @@ class RegulatedMutationLocalAuditPhaseWriterIntegrationTest extends AbstractInte
         assertCounter("regulated_mutation_local_audit_chain_retry_total", "reason", "LOCK_CONFLICT", 1.0d);
     }
 
+    @Test
+    void chainLockAcquisitionRetryDoesNotRetryProtectedCommit() {
+        ConflictOnceAuditChainLockRepository conflictOnceLockRepository =
+                new ConflictOnceAuditChainLockRepository(mongoTemplate);
+        RegulatedMutationLocalAuditPhaseWriter retryingWriter = writer(
+                auditEventRepository,
+                auditAnchorRepository,
+                conflictOnceLockRepository,
+                twoAttemptProperties()
+        );
+        AtomicInteger protectedCommitCalls = new AtomicInteger();
+
+        String result = retryingWriter.withChainLock(() -> {
+            protectedCommitCalls.incrementAndGet();
+            return "committed";
+        });
+
+        assertThat(result).isEqualTo("committed");
+        assertThat(conflictOnceLockRepository.acquireAttempts()).isEqualTo(2);
+        assertThat(protectedCommitCalls).hasValue(1);
+    }
+
     private RegulatedMutationCommandDocument command(String commandId, String idempotencyKey, String alertId) {
         RegulatedMutationCommandDocument command = new RegulatedMutationCommandDocument();
         command.setId(commandId);
@@ -387,6 +410,26 @@ class RegulatedMutationLocalAuditPhaseWriterIntegrationTest extends AbstractInte
         @Override
         public AuditChainLockDocument acquire(String partitionKey, String ownerToken) throws DataAccessException {
             throw new AuditChainConflictException("always locked");
+        }
+    }
+
+    private static final class ConflictOnceAuditChainLockRepository extends AuditChainLockRepository {
+        private final AtomicInteger acquireAttempts = new AtomicInteger();
+
+        private ConflictOnceAuditChainLockRepository(MongoTemplate mongoTemplate) {
+            super(mongoTemplate);
+        }
+
+        @Override
+        public AuditChainLockDocument acquire(String partitionKey, String ownerToken) throws DataAccessException {
+            if (acquireAttempts.incrementAndGet() == 1) {
+                throw new AuditChainConflictException("first acquisition conflicts");
+            }
+            return super.acquire(partitionKey, ownerToken);
+        }
+
+        private int acquireAttempts() {
+            return acquireAttempts.get();
         }
     }
 

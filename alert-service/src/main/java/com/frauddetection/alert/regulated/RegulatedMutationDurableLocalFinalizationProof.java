@@ -33,6 +33,13 @@ public class RegulatedMutationDurableLocalFinalizationProof {
                 || command.getMutationModelVersion() != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
             return invalid("UNSUPPORTED_MUTATION_MODEL");
         }
+        if (!StringUtils.hasText(command.getId())
+                || !StringUtils.hasText(command.getIdempotencyKey())
+                || !StringUtils.hasText(command.getActorId())
+                || !StringUtils.hasText(command.getCorrelationId())
+                || !StringUtils.hasText(command.getResourceId())) {
+            return invalid("COMMAND_IDENTITY_MISSING");
+        }
         AuditAction action;
         AuditResourceType resourceType;
         RegulatedMutationDefinition definition;

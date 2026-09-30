@@ -82,6 +82,8 @@ class RegulatedMutationProductionReadinessE2ETest extends AbstractIntegrationTes
         when(auditPhaseService.recordPhase(any(), any(), any(), eq(AuditOutcome.SUCCESS), eq(null)))
                 .thenReturn("success-audit");
         when(localAuditPhaseWriter.recordSuccessPhase(any(), any(), any())).thenReturn("local-success-audit");
+        when(localAuditPhaseWriter.withChainLock(any())).thenAnswer(invocation ->
+                ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
         durableLocalFinalizationProof = mock(RegulatedMutationDurableLocalFinalizationProof.class);
         when(durableLocalFinalizationProof.verify(any()))
                 .thenReturn(DurableLocalFinalizationProofResult.accepted());
