@@ -10,6 +10,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -134,19 +136,26 @@ class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
         assertThat(persisted.getPublishedAt()).isEqualTo(publishedAt);
     }
 
-    @Test
-    void staleProjectionRepairCannotOverwriteNewerProjection() {
-        TransactionalOutboxRecordDocument original = record("event-projection", TransactionalOutboxStatus.PUBLISHED);
+    @ParameterizedTest
+    @EnumSource(value = TransactionalOutboxStatus.class, names = {
+            "PUBLISHED",
+            "PUBLISH_CONFIRMATION_UNKNOWN",
+            "FAILED_RETRYABLE",
+            "FAILED_TERMINAL",
+            "RECOVERY_REQUIRED"
+    })
+    void staleProjectionRepairCannotOverwriteNewerProjection(TransactionalOutboxStatus status) {
+        TransactionalOutboxRecordDocument original = record("event-projection-" + status.name(), status);
         original.setProjectionMismatch(true);
         original.setProjectionMismatchReason("ALERT_PROJECTION_UPDATE_FAILED");
         original.setPublishedAt(Instant.parse("2026-09-30T10:01:00Z"));
+        original.setLastError(status == TransactionalOutboxStatus.PUBLISHED ? null : "source-error");
         actualRepository.save(original);
 
         AlertDocument alert = new AlertDocument();
         alert.setAlertId("alert-1");
-        alert.setDecisionOutboxStatus("PUBLISHED");
+        alert.setDecisionOutboxStatus("PENDING");
         Instant newerPublishedAt = Instant.parse("2026-09-30T10:10:00Z");
-        alert.setDecisionOutboxPublishedAt(newerPublishedAt);
         mongoTemplate.save(alert);
 
         TransactionalOutboxRecordRepository intercepted = interceptedRepository();
@@ -154,22 +163,26 @@ class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
             List<TransactionalOutboxRecordDocument> stale = actualRepository
                     .findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc();
             mongoTemplate.updateFirst(
-                    Query.query(Criteria.where("_id").is(original.getEventId())),
+                    Query.query(Criteria.where("_id").is("alert-1")),
                     new Update()
-                            .unset("projection_mismatch")
-                            .unset("projection_mismatch_reason")
-                            .set("updated_at", Instant.now()),
-                    TransactionalOutboxRecordDocument.class
+                            .set("decisionOutboxStatus", "PUBLISHED")
+                            .set("decisionOutboxPublishedAt", newerPublishedAt)
+                            .set("decisionOutboxAttempts", original.getAttempts() + 1),
+                    AlertDocument.class
             );
             return stale;
         }).when(intercepted).findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc();
 
         OutboxRecoveryRunResponse response = service(intercepted).recoverNow();
         AlertDocument persisted = mongoTemplate.findById("alert-1", AlertDocument.class);
+        TransactionalOutboxRecordDocument persistedOutbox = actualRepository.findById(original.getEventId()).orElseThrow();
 
         assertThat(response.projectionRepaired()).isZero();
         assertThat(persisted).isNotNull();
+        assertThat(persisted.getDecisionOutboxStatus()).isEqualTo("PUBLISHED");
         assertThat(persisted.getDecisionOutboxPublishedAt()).isEqualTo(newerPublishedAt);
+        assertThat(persistedOutbox.isProjectionMismatch()).isTrue();
+        assertThat(persistedOutbox.getProjectionMismatchReason()).isEqualTo("ALERT_PROJECTION_REPAIR_FAILED");
     }
 
     @SuppressWarnings("unchecked")

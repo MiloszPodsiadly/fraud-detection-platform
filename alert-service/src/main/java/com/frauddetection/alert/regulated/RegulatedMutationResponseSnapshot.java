@@ -115,7 +115,23 @@ public record RegulatedMutationResponseSnapshot(
         @JsonProperty("trust_incident_resolution_evidence")
         ResolutionEvidenceReference trustIncidentResolutionEvidence,
         @JsonProperty("trust_incident_materialization")
-        TrustIncidentMaterializationResponse trustIncidentMaterialization
+        TrustIncidentMaterializationResponse trustIncidentMaterialization,
+        @JsonProperty("outbox_mutation_command_id")
+        String outboxMutationCommandId,
+        @JsonProperty("outbox_resource_type")
+        String outboxResourceType,
+        @JsonProperty("outbox_event_type")
+        String outboxEventType,
+        @JsonProperty("outbox_payload_hash")
+        String outboxPayloadHash,
+        @JsonProperty("outbox_confirmation_unknown_at")
+        Instant outboxConfirmationUnknownAt,
+        @JsonProperty("outbox_updated_at")
+        Instant outboxUpdatedAt,
+        @JsonProperty("outbox_resolution_control_mode")
+        String outboxResolutionControlMode,
+        @JsonProperty("outbox_operation_status")
+        String outboxOperationStatus
 ) {
     private static final int ZERO = 0;
 
@@ -131,7 +147,8 @@ public record RegulatedMutationResponseSnapshot(
                 null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null);
+                null,
+                null, null, null, null, null, null, null, null);
     }
 
     public RegulatedMutationResponseSnapshot(
@@ -169,7 +186,56 @@ public record RegulatedMutationResponseSnapshot(
                 outboxResolutionApprovedAt, outboxResolutionApprovedBy, outboxResolutionApprovalReason,
                 null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null);
+                null,
+                null, null, null, null, null, null, null, null);
+    }
+
+    private RegulatedMutationResponseSnapshot(
+            String alertId,
+            AnalystDecision decision,
+            AlertStatus resultingStatus,
+            String decisionEventId,
+            Instant decidedAt,
+            SubmitDecisionOperationStatus operationStatus,
+            String outboxAlertId,
+            String outboxEventId,
+            String outboxDedupeKey,
+            String outboxStatus,
+            Instant outboxDecidedAt,
+            Integer outboxAttempts,
+            Instant outboxLastAttemptAt,
+            Instant outboxPublishedAt,
+            String outboxFailureReason,
+            Boolean outboxResolutionPending,
+            Instant outboxResolutionRequestedAt,
+            String outboxResolutionRequestedBy,
+            String outboxResolutionEvidenceType,
+            String outboxResolutionEvidenceReference,
+            Instant outboxResolutionEvidenceVerifiedAt,
+            String outboxResolutionEvidenceVerifiedBy,
+            Instant outboxResolutionApprovedAt,
+            String outboxResolutionApprovedBy,
+            String outboxResolutionApprovalReason,
+            String outboxMutationCommandId,
+            String outboxResourceType,
+            String outboxEventType,
+            String outboxPayloadHash,
+            Instant outboxConfirmationUnknownAt,
+            Instant outboxUpdatedAt,
+            String outboxResolutionControlMode,
+            String outboxOperationStatus
+    ) {
+        this(alertId, decision, resultingStatus, decisionEventId, decidedAt, operationStatus,
+                outboxAlertId, outboxEventId, outboxDedupeKey, outboxStatus, outboxDecidedAt, outboxAttempts,
+                outboxLastAttemptAt, outboxPublishedAt, outboxFailureReason, outboxResolutionPending,
+                outboxResolutionRequestedAt, outboxResolutionRequestedBy, outboxResolutionEvidenceType,
+                outboxResolutionEvidenceReference, outboxResolutionEvidenceVerifiedAt, outboxResolutionEvidenceVerifiedBy,
+                outboxResolutionApprovedAt, outboxResolutionApprovedBy, outboxResolutionApprovalReason,
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                null,
+                outboxMutationCommandId, outboxResourceType, outboxEventType, outboxPayloadHash,
+                outboxConfirmationUnknownAt, outboxUpdatedAt, outboxResolutionControlMode, outboxOperationStatus);
     }
 
     public static RegulatedMutationResponseSnapshot from(SubmitAnalystDecisionResponse response) {
@@ -207,7 +273,7 @@ public record RegulatedMutationResponseSnapshot(
                 response.publishedAt(),
                 response.lastError(),
                 response.resolutionPending(),
-                response.confirmationUnknownAt(),
+                response.resolutionRequestedAt(),
                 response.resolutionRequestedBy(),
                 null,
                 null,
@@ -215,7 +281,15 @@ public record RegulatedMutationResponseSnapshot(
                 null,
                 response.resolutionApprovedAt(),
                 response.resolutionApprovedBy(),
-                null
+                null,
+                response.mutationCommandId(),
+                response.resourceType(),
+                response.eventType(),
+                response.payloadHash(),
+                response.confirmationUnknownAt(),
+                response.updatedAt(),
+                response.resolutionControlMode(),
+                response.operationStatus()
         );
     }
 
@@ -223,24 +297,24 @@ public record RegulatedMutationResponseSnapshot(
         return new OutboxRecordResponse(
                 outboxEventId,
                 outboxDedupeKey,
-                null,
-                null,
+                outboxMutationCommandId,
+                outboxResourceType,
                 outboxAlertId,
-                null,
-                null,
+                outboxEventType,
+                outboxPayloadHash,
                 outboxStatus,
                 outboxAttempts == null ? ZERO : outboxAttempts,
                 outboxFailureReason,
                 outboxPublishedAt,
-                outboxResolutionRequestedAt,
-                null,
+                outboxConfirmationUnknownAt,
+                outboxUpdatedAt,
                 outboxResolutionPending == null ? false : outboxResolutionPending,
-                null,
+                outboxResolutionControlMode,
                 outboxResolutionRequestedBy,
                 outboxResolutionRequestedAt,
                 outboxResolutionApprovedBy,
                 outboxResolutionApprovedAt,
-                null
+                outboxOperationStatus
         );
     }
 
@@ -256,7 +330,8 @@ public record RegulatedMutationResponseSnapshot(
                 document.getDecidedAt(),
                 document.getUpdatedAt(),
                 null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null
+                null,
+                null, null, null, null, null, null, null, null
         );
     }
 
@@ -285,7 +360,8 @@ public record RegulatedMutationResponseSnapshot(
                     null,
                     null,
                     null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                    null
+                    null,
+                    null, null, null, null, null, null, null, null
             );
         }
         return new RegulatedMutationResponseSnapshot(
@@ -299,7 +375,8 @@ public record RegulatedMutationResponseSnapshot(
                 response.updatedCase().decidedAt(),
                 response.updatedCase().updatedAt(),
                 null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null
+                null,
+                null, null, null, null, null, null, null, null
         );
     }
 
@@ -367,7 +444,8 @@ public record RegulatedMutationResponseSnapshot(
                 response.resolvedAt(),
                 response.resolutionReason(),
                 response.resolutionEvidence(),
-                null
+                null,
+                null, null, null, null, null, null, null, null
         );
     }
 
@@ -379,7 +457,8 @@ public record RegulatedMutationResponseSnapshot(
                 null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                response
+                response,
+                null, null, null, null, null, null, null, null
         );
     }
 

@@ -24,6 +24,7 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 public class OutboxRecoveryService {
@@ -180,32 +181,45 @@ public class OutboxRecoveryService {
     private int repairProjectionMismatches() {
         int repaired = 0;
         for (TransactionalOutboxRecordDocument record : repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc()) {
-            if (record.getStatus() != TransactionalOutboxStatus.PUBLISHED
-                    && record.getStatus() != TransactionalOutboxStatus.RECOVERY_REQUIRED) {
+            if (!isRepairableProjectionStatus(record.getStatus())) {
                 continue;
             }
-            Instant repairedAt = Instant.now();
+            String repairToken = UUID.randomUUID().toString();
+            Instant claimedAt = Instant.now();
             Query claim = Query.query(new Criteria().andOperator(
                     Criteria.where("_id").is(record.getEventId()),
                     Criteria.where("status").is(record.getStatus()),
                     Criteria.where("projection_mismatch").is(true),
                     Criteria.where("updated_at").is(record.getUpdatedAt())
             ));
-            Update clearMismatch = new Update()
-                    .unset("projection_mismatch")
-                    .unset("projection_mismatch_reason")
-                    .set("updated_at", repairedAt);
-            if (mongoTemplate.updateFirst(claim, clearMismatch, TransactionalOutboxRecordDocument.class)
+            Update claimRepair = new Update()
+                    .set("projection_repair_token", repairToken)
+                    .set("updated_at", claimedAt);
+            if (mongoTemplate.updateFirst(claim, claimRepair, TransactionalOutboxRecordDocument.class)
                     .getModifiedCount() != 1) {
                 continue;
             }
-            record.setProjectionMismatch(false);
-            record.setProjectionMismatchReason(null);
-            record.setUpdatedAt(repairedAt);
-            if (updateAlert(record, record.getStatus())) {
+            record.setUpdatedAt(claimedAt);
+            OutboxAlertProjectionPolicy.Projection projection = OutboxAlertProjectionPolicy.recovery(record);
+            if (!writeAlertProjection(record, projection)) {
+                retainProjectionMismatch(record, repairToken, "ALERT_PROJECTION_REPAIR_FAILED");
+                continue;
+            }
+            Query complete = Query.query(new Criteria().andOperator(
+                    Criteria.where("_id").is(record.getEventId()),
+                    Criteria.where("status").is(record.getStatus()),
+                    Criteria.where("projection_mismatch").is(true),
+                    Criteria.where("projection_repair_token").is(repairToken),
+                    Criteria.where("updated_at").is(claimedAt)
+            ));
+            Update clearMismatch = new Update()
+                    .unset("projection_mismatch")
+                    .unset("projection_mismatch_reason")
+                    .unset("projection_repair_token")
+                    .set("updated_at", Instant.now());
+            if (mongoTemplate.updateFirst(complete, clearMismatch, TransactionalOutboxRecordDocument.class)
+                    .getModifiedCount() == 1) {
                 repaired++;
-            } else {
-                restoreProjectionMismatch(record, "ALERT_PROJECTION_REPAIR_FAILED");
             }
         }
         metrics.recordOutboxProjectionMismatch(repository.countByProjectionMismatchTrue());
@@ -267,28 +281,17 @@ public class OutboxRecoveryService {
         );
     }
 
-    private boolean updateAlert(TransactionalOutboxRecordDocument record, TransactionalOutboxStatus status) {
-        String alertStatus = switch (status) {
-            case PUBLISHED -> DecisionOutboxStatus.PUBLISHED;
-            case RECOVERY_REQUIRED -> DecisionOutboxStatus.FAILED_TERMINAL;
-            default -> null;
-        };
-        if (alertStatus == null || record.getResourceId() == null) {
+    private boolean writeAlertProjection(
+            TransactionalOutboxRecordDocument record,
+            OutboxAlertProjectionPolicy.Projection projection
+    ) {
+        if (record.getResourceId() == null || record.getResourceId().isBlank()) {
             return false;
-        }
-        Update update = new Update()
-                .set("decisionOutboxStatus", alertStatus)
-                .unset("decisionOutboxLeaseOwner")
-                .unset("decisionOutboxLeaseExpiresAt")
-                .unset("decisionOutboxLastError")
-                .unset("decisionOutboxFailureReason");
-        if (status == TransactionalOutboxStatus.PUBLISHED) {
-            update.set("decisionOutboxPublishedAt", record.getPublishedAt());
         }
         try {
             return mongoTemplate.updateFirst(
-                    Query.query(Criteria.where("_id").is(record.getResourceId())),
-                    update,
+                    projection.target(record.getResourceId()),
+                    projection.update(),
                     AlertDocument.class
             ).getMatchedCount() == 1;
         } catch (org.springframework.dao.DataAccessException exception) {
@@ -310,17 +313,32 @@ public class OutboxRecoveryService {
         ));
     }
 
-    private void restoreProjectionMismatch(TransactionalOutboxRecordDocument record, String reason) {
+    private void retainProjectionMismatch(
+            TransactionalOutboxRecordDocument record,
+            String repairToken,
+            String reason
+    ) {
         Query query = Query.query(new Criteria().andOperator(
                 Criteria.where("_id").is(record.getEventId()),
                 Criteria.where("status").is(record.getStatus()),
+                Criteria.where("projection_mismatch").is(true),
+                Criteria.where("projection_repair_token").is(repairToken),
                 Criteria.where("updated_at").is(record.getUpdatedAt())
         ));
         Update update = new Update()
                 .set("projection_mismatch", true)
                 .set("projection_mismatch_reason", reason)
+                .unset("projection_repair_token")
                 .set("updated_at", Instant.now());
         mongoTemplate.updateFirst(query, update, TransactionalOutboxRecordDocument.class);
+    }
+
+    private boolean isRepairableProjectionStatus(TransactionalOutboxStatus status) {
+        return status == TransactionalOutboxStatus.PUBLISHED
+                || status == TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN
+                || status == TransactionalOutboxStatus.FAILED_RETRYABLE
+                || status == TransactionalOutboxStatus.FAILED_TERMINAL
+                || status == TransactionalOutboxStatus.RECOVERY_REQUIRED;
     }
 
     private long ageSeconds(TransactionalOutboxRecordDocument record) {

@@ -5,13 +5,18 @@ import com.frauddetection.alert.audit.ResolutionEvidenceType;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
+import com.frauddetection.alert.regulated.RegulatedMutationCommand;
 import com.frauddetection.alert.regulated.RegulatedMutationResult;
 import com.frauddetection.alert.regulated.RegulatedMutationModelVersion;
+import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.outbox.OutboxConfirmationResolutionMutationHandler;
 import com.frauddetection.alert.service.DecisionOutboxStatus;
 import com.mongodb.client.result.UpdateResult;
+import org.bson.Document;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
@@ -21,6 +26,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.ArrayList;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -28,10 +35,94 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class OutboxRecoveryServiceTest {
+
+    @ParameterizedTest
+    @EnumSource(value = TransactionalOutboxStatus.class, names = {
+            "PUBLISHED",
+            "PUBLISH_CONFIRMATION_UNKNOWN",
+            "FAILED_RETRYABLE",
+            "FAILED_TERMINAL",
+            "RECOVERY_REQUIRED"
+    })
+    void projectionMismatchIsClearedOnlyAfterSuccessfulProjectionWrite(TransactionalOutboxStatus status) {
+        Fixture fixture = new Fixture();
+        TransactionalOutboxRecordDocument record = mismatchedRecord(status);
+        when(fixture.repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc())
+                .thenReturn(List.of(record));
+        List<String> writeOrder = new ArrayList<>();
+        when(fixture.mongoTemplate.updateFirst(
+                any(Query.class),
+                any(Update.class),
+                eq(TransactionalOutboxRecordDocument.class)
+        )).thenAnswer(invocation -> {
+            Update update = invocation.getArgument(1);
+            Document updateObject = update.getUpdateObject();
+            Document unset = (Document) updateObject.get("$unset");
+            writeOrder.add(unset != null && unset.containsKey("projection_mismatch") ? "CLEAR" : "CLAIM");
+            return UpdateResult.acknowledged(1, 1L, null);
+        });
+        when(fixture.mongoTemplate.updateFirst(
+                any(Query.class),
+                any(Update.class),
+                eq(com.frauddetection.alert.persistence.AlertDocument.class)
+        )).thenAnswer(invocation -> {
+            writeOrder.add("PROJECT");
+            return UpdateResult.acknowledged(1, 1L, null);
+        });
+
+        OutboxRecoveryRunResponse response = fixture.service.recoverNow();
+
+        assertThat(response.projectionRepaired()).isOne();
+        assertThat(writeOrder).containsExactly("CLAIM", "PROJECT", "CLEAR");
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = TransactionalOutboxStatus.class, names = {
+            "PUBLISHED",
+            "PUBLISH_CONFIRMATION_UNKNOWN",
+            "FAILED_RETRYABLE",
+            "FAILED_TERMINAL",
+            "RECOVERY_REQUIRED"
+    })
+    void projectionMismatchRemainsWhenProjectionWriteFails(TransactionalOutboxStatus status) {
+        Fixture fixture = new Fixture();
+        TransactionalOutboxRecordDocument record = mismatchedRecord(status);
+        when(fixture.repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc())
+                .thenReturn(List.of(record));
+        List<Update> outboxUpdates = new ArrayList<>();
+        when(fixture.mongoTemplate.updateFirst(
+                any(Query.class),
+                any(Update.class),
+                eq(TransactionalOutboxRecordDocument.class)
+        )).thenAnswer(invocation -> {
+            outboxUpdates.add(invocation.getArgument(1));
+            return UpdateResult.acknowledged(1, 1L, null);
+        });
+        when(fixture.mongoTemplate.updateFirst(
+                any(Query.class),
+                any(Update.class),
+                eq(com.frauddetection.alert.persistence.AlertDocument.class)
+        )).thenReturn(UpdateResult.acknowledged(0, 0L, null));
+
+        OutboxRecoveryRunResponse response = fixture.service.recoverNow();
+
+        assertThat(response.projectionRepaired()).isZero();
+        assertThat(outboxUpdates).hasSize(2);
+        assertThat(outboxUpdates)
+                .noneMatch(update -> {
+                    Document unset = (Document) update.getUpdateObject().get("$unset");
+                    return unset != null && unset.containsKey("projection_mismatch");
+                });
+        Document retained = (Document) outboxUpdates.get(1).getUpdateObject().get("$set");
+        assertThat(retained.get("projection_mismatch")).isEqualTo(true);
+        assertThat(retained.getString("projection_mismatch_reason"))
+                .isEqualTo("ALERT_PROJECTION_REPAIR_FAILED");
+    }
 
     @Test
     void shouldReleaseStaleProcessingToRetryableButMarkStalePublishAttemptedUnknown() {
@@ -64,12 +155,18 @@ class OutboxRecoveryServiceTest {
         OutboxRecoveryRunResponse response = fixture.service.recoverNow();
 
         assertThat(response.projectionRepaired()).isEqualTo(1);
-        assertThat(record.isProjectionMismatch()).isFalse();
-        assertThat(record.getProjectionMismatchReason()).isNull();
         ArgumentCaptor<Update> updateCaptor = ArgumentCaptor.forClass(Update.class);
         verify(fixture.mongoTemplate).updateFirst(any(Query.class), updateCaptor.capture(), eq(com.frauddetection.alert.persistence.AlertDocument.class));
         org.bson.Document set = (org.bson.Document) updateCaptor.getValue().getUpdateObject().get("$set");
         assertThat(set.get("decisionOutboxStatus")).isEqualTo(DecisionOutboxStatus.PUBLISHED);
+        ArgumentCaptor<Update> outboxUpdateCaptor = ArgumentCaptor.forClass(Update.class);
+        verify(fixture.mongoTemplate, times(2)).updateFirst(
+                any(Query.class),
+                outboxUpdateCaptor.capture(),
+                eq(TransactionalOutboxRecordDocument.class)
+        );
+        Document clear = (Document) outboxUpdateCaptor.getAllValues().get(1).getUpdateObject().get("$unset");
+        assertThat(clear).containsKeys("projection_mismatch", "projection_mismatch_reason");
     }
 
     @Test
@@ -131,6 +228,44 @@ class OutboxRecoveryServiceTest {
     }
 
     @Test
+    void idempotentReplayPreservesSuccessfulOutboxResponse() {
+        Fixture fixture = new Fixture();
+        TransactionalOutboxRecordDocument record = record("event-1", TransactionalOutboxStatus.PUBLISHED);
+        record.setLastError("recorded-error");
+        record.setPublishedAt(Instant.parse("2026-05-02T10:30:00Z"));
+        record.setConfirmationUnknownAt(Instant.parse("2026-05-02T10:00:00Z"));
+        record.setUpdatedAt(Instant.parse("2026-05-02T10:45:00Z"));
+        record.setResolutionPending(true);
+        record.setResolutionControlMode("DUAL_CONTROL_REQUESTED");
+        record.setResolutionRequestedBy("ops-requester");
+        record.setResolutionRequestedAt(Instant.parse("2026-05-02T10:15:00Z"));
+        record.setResolutionApprovedBy("ops-approver");
+        record.setResolutionApprovedAt(Instant.parse("2026-05-02T10:25:00Z"));
+        AtomicReference<RegulatedMutationResponseSnapshot> persistedSnapshot = new AtomicReference<>();
+        when(fixture.regulatedMutationCoordinator.commit(any())).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            RegulatedMutationCommand<TransactionalOutboxRecordDocument, OutboxRecordResponse> command =
+                    invocation.getArgument(0);
+            OutboxRecordResponse response;
+            if (persistedSnapshot.get() == null) {
+                response = OutboxRecordResponse.from(record);
+                persistedSnapshot.set(command.responseSnapshotter().snapshot(response));
+            } else {
+                response = command.responseRestorer().restore(persistedSnapshot.get());
+            }
+            return new RegulatedMutationResult<>(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL, response);
+        });
+
+        OutboxRecordResponse first = fixture.service.resolveConfirmation(
+                "event-1", request(), "ops-admin", "outbox-confirm-event-1");
+        OutboxRecordResponse replayed = fixture.service.resolveConfirmation(
+                "event-1", request(), "ops-admin", "outbox-confirm-event-1");
+
+        assertThat(replayed).isEqualTo(first);
+        assertThat(replayed.confirmationUnknownAt()).isNotEqualTo(replayed.resolutionRequestedAt());
+    }
+
+    @Test
     void inProgressMutationDoesNotExposeExistingOutboxRecordAsResolved() {
         Fixture fixture = new Fixture();
         TransactionalOutboxRecordDocument existing = record(
@@ -187,6 +322,15 @@ class OutboxRecoveryServiceTest {
         record.setUpdatedAt(Instant.parse("2026-05-02T10:00:00Z"));
         record.setLeaseExpiresAt(Instant.parse("2026-05-02T10:01:00Z"));
         record.setAttempts(1);
+        return record;
+    }
+
+    private TransactionalOutboxRecordDocument mismatchedRecord(TransactionalOutboxStatus status) {
+        TransactionalOutboxRecordDocument record = record("event-" + status.name().toLowerCase(), status);
+        record.setProjectionMismatch(true);
+        record.setProjectionMismatchReason("ALERT_PROJECTION_UPDATE_FAILED");
+        record.setLastError(status == TransactionalOutboxStatus.PUBLISHED ? null : "source-error");
+        record.setPublishedAt(Instant.parse("2026-05-02T10:30:00Z"));
         return record;
     }
 
