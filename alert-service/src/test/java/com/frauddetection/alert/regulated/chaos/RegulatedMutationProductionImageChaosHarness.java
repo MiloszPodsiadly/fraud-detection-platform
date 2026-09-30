@@ -760,15 +760,17 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
         if (Files.exists(evidence)) {
             return evidenceContainsRequiredTransactionScenario(evidence);
         }
-        return scenarioTransactionModes.values().stream().anyMatch("REQUIRED"::equals);
+        return results.stream()
+                .anyMatch(result -> "REQUIRED".equals(scenarioTransactionModes.get(result.scenarioName())));
     }
 
     static boolean evidenceContainsRequiredTransactionScenario(Path evidence) {
         try (var lines = Files.lines(evidence)) {
             return lines.filter(line -> line.startsWith("- scenario="))
                     .map(RegulatedMutationProductionImageChaosHarness::parseEvidenceLine)
-                    .anyMatch(fields -> "required-transaction".equals(fields.get("scenario"))
-                            && "REQUIRED".equals(fields.get("transaction_mode")));
+                    .anyMatch(fields -> fields.containsKey("scenario")
+                            && "REQUIRED".equals(fields.get("transaction_mode"))
+                            && "PASS".equals(fields.get("result")));
         } catch (IOException exception) {
             throw new UncheckedIOException("Unable to inspect FDP-37 evidence transaction modes", exception);
         }
