@@ -25,6 +25,8 @@ public class RegulatedMutationPersistedModelPreflight {
     private static final String REVISION_FIELD = "revision";
     private static final String STATE_FIELD = "state";
     private static final String EXECUTION_STATUS_FIELD = "execution_status";
+    private static final String ACTION_FIELD = "action";
+    private static final String RESOURCE_TYPE_FIELD = "resource_type";
     private static final List<String> TERMINAL_EXECUTION_STATUSES = List.of("COMPLETED", "FAILED");
     private static final Set<String> CURRENT_STATES = enumNames(RegulatedMutationState.values());
     private static final Set<String> CURRENT_EXECUTION_STATUSES = enumNames(RegulatedMutationExecutionStatus.values());
@@ -54,11 +56,22 @@ public class RegulatedMutationPersistedModelPreflight {
         );
         Bson invalidState = invalidEnumField(STATE_FIELD, CURRENT_STATES);
         Bson invalidExecutionStatus = invalidEnumField(EXECUTION_STATUS_FIELD, CURRENT_EXECUTION_STATUSES);
+        Bson invalidAction = invalidEnumField(ACTION_FIELD, CURRENT_ACTIONS);
+        Bson invalidResourceType = invalidEnumField(RESOURCE_TYPE_FIELD, CURRENT_RESOURCE_TYPES);
+        Bson unsupportedActionResourcePair = Filters.nor(RegulatedMutationDefinitions.all().stream()
+                .map(definition -> Filters.and(
+                        Filters.eq(ACTION_FIELD, definition.action().name()),
+                        Filters.eq(RESOURCE_TYPE_FIELD, definition.resourceType().name())
+                ))
+                .toList());
         Bson unsupportedPersistedContract = Filters.or(
                 unsupportedModel,
                 invalidRevision,
                 invalidState,
-                invalidExecutionStatus
+                invalidExecutionStatus,
+                invalidAction,
+                invalidResourceType,
+                unsupportedActionResourcePair
         );
         Bson terminal = Filters.in(EXECUTION_STATUS_FIELD, TERMINAL_EXECUTION_STATUSES);
         Bson unfinished = Filters.or(
@@ -77,8 +90,8 @@ public class RegulatedMutationPersistedModelPreflight {
                             REVISION_FIELD,
                             STATE_FIELD,
                             EXECUTION_STATUS_FIELD,
-                            "action",
-                            "resource_type"
+                            ACTION_FIELD,
+                            RESOURCE_TYPE_FIELD
                     ))
                     .limit(boundedSampleLimit)
                     .forEach(document -> samples.add(sample(document)));
@@ -87,17 +100,17 @@ public class RegulatedMutationPersistedModelPreflight {
     }
 
     private UnsupportedCommand sample(Document document) {
-        Object rawModel = document.get(MODEL_FIELD);
         return new UnsupportedCommand(
                 RegulatedMutationIntentHasher.hash(String.valueOf(document.get("_id"))),
-                contractCategory(document, rawModel),
-                safeEnumValue(document, "action", CURRENT_ACTIONS),
-                safeEnumValue(document, "resource_type", CURRENT_RESOURCE_TYPES),
+                contractCategory(document),
+                safeEnumValue(document, ACTION_FIELD, CURRENT_ACTIONS),
+                safeEnumValue(document, RESOURCE_TYPE_FIELD, CURRENT_RESOURCE_TYPES),
                 safeEnumValue(document, EXECUTION_STATUS_FIELD, CURRENT_EXECUTION_STATUSES)
         );
     }
 
-    private String contractCategory(Document document, Object rawModel) {
+    String contractCategory(Document document) {
+        Object rawModel = document.get(MODEL_FIELD);
         if (!document.containsKey(MODEL_FIELD)) {
             return "MISSING";
         }
@@ -128,7 +141,19 @@ public class RegulatedMutationPersistedModelPreflight {
         if (!CURRENT_EXECUTION_STATUSES.contains(executionStatus)) {
             return executionStatus + "_EXECUTION_STATUS";
         }
-        return "UNKNOWN";
+        String action = safeEnumValue(document, ACTION_FIELD, CURRENT_ACTIONS);
+        if (!CURRENT_ACTIONS.contains(action)) {
+            return action + "_ACTION";
+        }
+        String resourceType = safeEnumValue(document, RESOURCE_TYPE_FIELD, CURRENT_RESOURCE_TYPES);
+        if (!CURRENT_RESOURCE_TYPES.contains(resourceType)) {
+            return resourceType + "_RESOURCE_TYPE";
+        }
+        boolean supportedPair = RegulatedMutationDefinitions.find(
+                AuditAction.valueOf(action),
+                AuditResourceType.valueOf(resourceType)
+        ).isPresent();
+        return supportedPair ? "SUPPORTED" : "UNSUPPORTED_ACTION_RESOURCE_PAIR";
     }
 
     private String safeEnumValue(Document document, String field, Set<String> allowedValues) {

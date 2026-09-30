@@ -1,5 +1,7 @@
 package com.frauddetection.alert.regulated;
 
+import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditResourceType;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import org.bson.Document;
@@ -19,6 +21,74 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class RegulatedMutationPersistedModelPreflightTest {
+
+    private final RegulatedMutationPersistedModelPreflight preflight =
+            new RegulatedMutationPersistedModelPreflight(mock(MongoTemplate.class));
+
+    @Test
+    void shouldAllowValidCanonicalActionResourcePair() {
+        assertThat(preflight.contractCategory(currentDocument(
+                AuditAction.SUBMIT_ANALYST_DECISION.name(),
+                AuditResourceType.ALERT.name()
+        ))).isEqualTo("SUPPORTED");
+    }
+
+    @Test
+    void shouldBlockUnknownAction() {
+        assertThat(preflight.contractCategory(currentDocument(
+                "REMOVED_ACTION",
+                AuditResourceType.ALERT.name()
+        ))).isEqualTo("UNKNOWN_ACTION");
+    }
+
+    @Test
+    void shouldBlockUnknownResourceType() {
+        assertThat(preflight.contractCategory(currentDocument(
+                AuditAction.SUBMIT_ANALYST_DECISION.name(),
+                "REMOVED_RESOURCE"
+        ))).isEqualTo("UNKNOWN_RESOURCE_TYPE");
+    }
+
+    @Test
+    void shouldBlockValidEnumsInUnsupportedCombination() {
+        assertThat(preflight.contractCategory(currentDocument(
+                AuditAction.SUBMIT_ANALYST_DECISION.name(),
+                AuditResourceType.TRUST_INCIDENT.name()
+        ))).isEqualTo("UNSUPPORTED_ACTION_RESOURCE_PAIR");
+    }
+
+    @Test
+    void shouldAllowCurrentSupportedPairWithCompletePersistedContract() {
+        assertThat(preflight.contractCategory(currentDocument(
+                AuditAction.UPDATE_FRAUD_CASE.name(),
+                AuditResourceType.FRAUD_CASE.name()
+        ))).isEqualTo("SUPPORTED");
+    }
+
+    @Test
+    void shouldClassifyMissingNullAndNonStringActionAndResourceType() {
+        Document missingAction = currentDocument(
+                AuditAction.SUBMIT_ANALYST_DECISION.name(),
+                AuditResourceType.ALERT.name()
+        );
+        missingAction.remove("action");
+        Document nullAction = currentDocument(null, AuditResourceType.ALERT.name());
+        Document nonStringAction = currentDocument(7, AuditResourceType.ALERT.name());
+        Document missingResource = currentDocument(
+                AuditAction.SUBMIT_ANALYST_DECISION.name(),
+                AuditResourceType.ALERT.name()
+        );
+        missingResource.remove("resource_type");
+        Document nullResource = currentDocument(AuditAction.SUBMIT_ANALYST_DECISION.name(), null);
+        Document nonStringResource = currentDocument(AuditAction.SUBMIT_ANALYST_DECISION.name(), 7);
+
+        assertThat(preflight.contractCategory(missingAction)).isEqualTo("MISSING_ACTION");
+        assertThat(preflight.contractCategory(nullAction)).isEqualTo("NULL_ACTION");
+        assertThat(preflight.contractCategory(nonStringAction)).isEqualTo("NON_STRING_ACTION");
+        assertThat(preflight.contractCategory(missingResource)).isEqualTo("MISSING_RESOURCE_TYPE");
+        assertThat(preflight.contractCategory(nullResource)).isEqualTo("NULL_RESOURCE_TYPE");
+        assertThat(preflight.contractCategory(nonStringResource)).isEqualTo("NON_STRING_RESOURCE_TYPE");
+    }
 
     @Test
     @SuppressWarnings("unchecked")
@@ -105,5 +175,14 @@ class RegulatedMutationPersistedModelPreflightTest {
                 .hasMessageContaining("unfinishedCount=0")
                 .hasMessageContaining("terminalCount=2")
                 .hasMessageContaining("terminal-command-hash");
+    }
+
+    private Document currentDocument(Object action, Object resourceType) {
+        return new Document("mutation_model_version", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1.name())
+                .append("revision", 0L)
+                .append("state", RegulatedMutationState.REQUESTED.name())
+                .append("execution_status", RegulatedMutationExecutionStatus.NEW.name())
+                .append("action", action)
+                .append("resource_type", resourceType);
     }
 }

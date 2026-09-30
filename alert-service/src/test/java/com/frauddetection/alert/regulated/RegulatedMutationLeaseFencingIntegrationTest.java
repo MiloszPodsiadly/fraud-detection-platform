@@ -678,6 +678,36 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
         assertThat(claimService.claim(command("missing-model"), "missing-model")).isEmpty();
     }
 
+    @Test
+    void persistedModelPreflightBlocksUnsupportedActionResourceContracts() {
+        mongoTemplate.getCollection(RegulatedMutationPersistedModelPreflight.COLLECTION).insertMany(List.of(
+                rawCommand("command-valid-alert", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1.name(), true),
+                rawCommand("command-valid-fraud-case", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1.name(), true)
+                        .append("action", AuditAction.UPDATE_FRAUD_CASE.name())
+                        .append("resource_type", AuditResourceType.FRAUD_CASE.name()),
+                rawCommand("command-unknown-action", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1.name(), true)
+                        .append("action", "REMOVED_ACTION"),
+                rawCommand("command-unknown-resource", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1.name(), true)
+                        .append("resource_type", "REMOVED_RESOURCE"),
+                rawCommand("command-unsupported-pair", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1.name(), true)
+                        .append("resource_type", AuditResourceType.TRUST_INCIDENT.name())
+        ));
+
+        RegulatedMutationPersistedModelPreflight.Report report =
+                new RegulatedMutationPersistedModelPreflight(mongoTemplate).inspect(10);
+
+        assertThat(report.unsupportedUnfinishedCount()).isEqualTo(3L);
+        assertThat(report.unsupportedTerminalCount()).isZero();
+        assertThat(report.blocksStartup()).isTrue();
+        assertThat(report.samples())
+                .extracting(RegulatedMutationPersistedModelPreflight.UnsupportedCommand::modelCategory)
+                .containsExactlyInAnyOrder(
+                        "UNKNOWN_ACTION",
+                        "UNKNOWN_RESOURCE_TYPE",
+                        "UNSUPPORTED_ACTION_RESOURCE_PAIR"
+                );
+    }
+
     private void sleepPastLease() throws InterruptedException {
         Thread.sleep(220);
     }
@@ -759,6 +789,8 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
                 .append("mutation_model_version", modelVersion)
                 .append("state", RegulatedMutationState.REQUESTED.name())
                 .append("execution_status", RegulatedMutationExecutionStatus.NEW.name())
+                .append("action", AuditAction.SUBMIT_ANALYST_DECISION.name())
+                .append("resource_type", AuditResourceType.ALERT.name())
                 .append("attempt_count", 0)
                 .append("created_at", Instant.now())
                 .append("updated_at", Instant.now());
