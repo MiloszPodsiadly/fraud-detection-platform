@@ -331,9 +331,9 @@ class EngineIntelligenceApiArchitectureGuardTest {
                 .contains("EngineIntelligenceFeedbackReadModel")
                 .contains("EngineIntelligenceFeedbackEntryReadModel")
                 .contains("EngineIntelligenceFeedbackPage")
-                .contains("FDP-99 returns the first bounded page of latest feedback.")
+                .contains("The endpoint returns the first bounded page of latest feedback.")
                 .contains("Cursor-based continuation is future scope.")
-                .contains("page.hasMore indicates additional feedback exists, not that FDP-99 provides navigation.")
+                .contains("page.hasMore indicates additional feedback exists, not that navigation is currently available.")
                 .contains("default: 25")
                 .contains("maximum: 50")
                 .contains("engine-intelligence:feedback:read");
@@ -350,13 +350,13 @@ class EngineIntelligenceApiArchitectureGuardTest {
 
         assertThat(docs)
                 .contains("Feedback can be reviewed, not executed.")
-                .contains("FDP-99 exposes captured feedback through a bounded, authorized, transaction-scoped read model.")
-                .contains("FDP-99 is governance/review only.")
-                .contains("FDP-99 does not add analytics dashboards, global search, case aggregation, training export, model retraining, rule updates, approve/decline/block, alert severity changes, or fraud case status changes.")
-                .contains("submittedBy is omitted by default in FDP-99 v1.")
+                .contains("The API exposes captured feedback through a bounded, authorized, transaction-scoped read model.")
+                .contains("The endpoint is governance/review only.")
+                .contains("The read model does not add analytics dashboards, global search, case aggregation, training export, model retraining, rule updates, approve/decline/block, alert severity changes, or fraud case status changes.")
+                .contains("submittedBy is omitted by default in the current contract.")
                 .contains("Any future submittedBy exposure requires stronger explicit permission and separate review.")
                 .contains("Feedback is analyst perception/review input, not ground truth, training label, model correction, scoring override, or final decision.")
-                .contains("FDP-99 returns the first bounded page of latest feedback.")
+                .contains("The endpoint returns the first bounded page of latest feedback.")
                 .contains("Cursor-based continuation is future scope.")
                 .contains("hasMore indicates additional feedback exists, not navigation state.")
                 .contains("No unbounded findAll/read-all endpoint is allowed.");
@@ -370,7 +370,7 @@ class EngineIntelligenceApiArchitectureGuardTest {
         assertThat(architectureIndex)
                 .contains("engine_intelligence_feedback_read_model.md")
                 .contains("Engine intelligence feedback read model")
-                .contains("FDP-99");
+                .contains("Bounded transaction-scoped feedback read model");
         assertThat(apiSurface)
                 .contains("GET /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback")
                 .contains("ENGINE_INTELLIGENCE_FEEDBACK_READ")

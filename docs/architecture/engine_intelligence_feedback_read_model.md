@@ -2,15 +2,15 @@
 
 ## Purpose
 
-FDP-99 exposes captured feedback through a bounded, authorized, transaction-scoped read model. Feedback can be reviewed, not executed.
+The API exposes captured feedback through a bounded, authorized, transaction-scoped read model. Feedback can be reviewed, not executed.
 
 ## Scope
 
-FDP-99 is governance/review only. It adds `GET /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback` for reading captured engine intelligence feedback for one scored transaction.
+The endpoint is governance/review only. It exposes `GET /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback` for reading captured engine intelligence feedback for one scored transaction.
 
 ## Non-goals
 
-FDP-99 does not add analytics dashboards, global search, case aggregation, training export, model retraining, rule updates, approve/decline/block, alert severity changes, or fraud case status changes.
+The read model does not add analytics dashboards, global search, case aggregation, training export, model retraining, rule updates, approve/decline/block, alert severity changes, or fraud case status changes.
 
 ## Endpoint
 
@@ -26,7 +26,7 @@ Feedback reads require `ENGINE_INTELLIGENCE_FEEDBACK_READ`. `TRANSACTION_MONITOR
 
 ## Bounded First Page
 
-Reads are bounded first-page reads. FDP-99 returns the first bounded page of latest feedback. The default limit is 25, the maximum limit is 50, and the service requests one extra row internally to compute `page.hasMore`. hasMore indicates additional feedback exists, not navigation state. Cursor-based continuation is future scope. No unbounded findAll/read-all endpoint is allowed.
+Reads are bounded first-page reads. The endpoint returns the first bounded page of latest feedback. The default limit is 25, the maximum limit is 50, and the service requests one extra row internally to compute `page.hasMore`. hasMore indicates additional feedback exists, not navigation state. Cursor-based continuation is future scope. No unbounded findAll/read-all endpoint is allowed.
 
 ## Missing Feedback Behavior
 
@@ -34,11 +34,11 @@ An existing scored transaction without feedback returns 200 with `feedback: []` 
 
 ## submittedBy Privacy
 
-submittedBy is omitted by default in FDP-99 v1. Any future submittedBy exposure requires stronger explicit permission and separate review.
+submittedBy is omitted by default in the current contract. Any future submittedBy exposure requires stronger explicit permission and separate review.
 
 ## Read Audit Policy
 
-FDP-99 follows existing read audit policy for sensitive analyst feedback. In fail-closed audit modes, read audit failure returns a bounded 503. Feedback read audit is bounded and does not include raw/internal data.
+The endpoint follows existing read audit policy for sensitive analyst feedback. In fail-closed audit modes, read audit failure returns a bounded 503. Feedback read audit is bounded and does not include raw/internal data.
 
 ## No Raw/Internal Leakage
 

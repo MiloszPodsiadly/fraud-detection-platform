@@ -1,24 +1,24 @@
 # Shadow Performance Generated Runtime Override
 
-Status: FDP-110 local generated Shadow Performance runtime loop.
+Status: Current local generated Shadow Performance runtime loop.
 
-FDP-110 completes the local generated Shadow Performance runtime loop. It invokes the FDP-109 local generator before Docker Compose starts, mounts the generated Shadow Performance artifact set into alert-service, lets FDP-108 read it, FDP-106 expose it, and FDP-107 display it.
+The local generated Shadow Performance runtime loop invokes the Python generator before Docker Compose starts, mounts the generated Shadow Performance artifact set into alert-service, lets the artifact provider read it, the authorized API expose it, and the dashboard display it.
 
-FDP-110 intentionally combines local generation before Compose, generated runtime mount, and shared global workspace counters as UI context.
+The local runtime intentionally combines local generation before Compose, generated runtime mount, and shared global workspace counters as UI context.
 
 Ownership remains split:
 
-- FDP-109 owns generation logic.
-- FDP-110 owns local launcher wiring and runtime mounting.
-- FDP-108 owns artifact reading.
-- FDP-106 owns the authorized read API.
-- FDP-107 owns dashboard display.
+- The Python offline-evaluation module owns generation logic.
+- The local launcher owns invocation and runtime mounting.
+- The alert-service artifact provider owns artifact reading.
+- The authorized read API owns exposure.
+- The dashboard owns display.
 
 ## Purpose
 
 Generation before Compose in a local developer launcher is allowed. Generation inside Docker Compose is forbidden. Generation inside alert-service runtime is forbidden.
 
-FDP-110 does not generate a Shadow Performance Summary inside Docker Compose or inside the application runtime. The local developer launcher invokes the FDP-109 generator before `docker compose up`, then mounts the generated `current-summary.json` plus sibling `manifest.json` into the local alert-service runtime.
+The local launcher does not generate a Shadow Performance Summary inside Docker Compose or inside the application runtime. It invokes the Python generator before `docker compose up`, then mounts the generated `current-summary.json` plus sibling `manifest.json` into the local alert-service runtime.
 
 This keeps generation and runtime wiring separate:
 
@@ -55,11 +55,11 @@ deployment/local-fixtures/shadow-performance/current-summary.json
 deployment/local-fixtures/shadow-performance/manifest.json
 ```
 
-Demo artifact is separate from generated artifact. Demo artifact is for UI smoke/demo only. Demo artifact is not FDP-109 generated output. Demo artifact is not production current summary. Demo artifact is not promotion readiness. Demo artifact is not threshold recommendation. Demo artifact is not production decisioning. Demo artifact is not payment authorization. Demo artifact is not analyst recommendation logic.
+Demo artifact is separate from generated artifact. Demo artifact is for UI smoke/demo only. Demo artifact is not generated current output. Demo artifact is not production current summary. Demo artifact is not promotion readiness. Demo artifact is not threshold recommendation. Demo artifact is not production decisioning. Demo artifact is not payment authorization. Demo artifact is not analyst recommendation logic.
 
 ## Generated Runtime
 
-Official local launcher runs FDP-109 generation before Compose. Generated runtime uses `docker-compose.shadow-performance-generated.yml`.
+The official local launcher runs Python summary generation before Compose. Generated runtime uses `docker-compose.shadow-performance-generated.yml`.
 
 Generated runtime uses:
 
@@ -91,7 +91,7 @@ The generated artifact set is separate. Generated runtime mounts `deployment/loc
 /run/shadow-performance
 ```
 
-Generated runtime exposes the manifest-validated summary through FDP-108/FDP-106/FDP-107.
+Generated runtime exposes the manifest-validated summary through the artifact provider, authorized read API, and dashboard.
 
 The generated runtime does not use a non-canonical demo summary filename. The generated runtime does not generate summary inside Docker Compose. If the generated artifact is still missing after local generation, `make app-up-shadow-performance-generated` fails before `docker compose up` with:
 
@@ -101,8 +101,8 @@ Generated Shadow Performance Summary not found. Run: make shadow-performance-sum
 
 ## No Compose Runtime Generation
 
-FDP-110 does not run the generator inside Docker Compose. FDP-110 does not add a scheduler. FDP-110 does not add cron.
-FDP-110 does not add a Kafka-triggered job. FDP-110 does not generate summary on application startup. The only
+The local launcher does not run the generator inside Docker Compose. It does not add a scheduler or cron.
+It does not add a Kafka-triggered job or generate summary on application startup. The only
 automatic generation is the local launcher step before Docker Compose starts.
 
 Generation happens before Docker Compose starts.
@@ -115,9 +115,9 @@ Shadow Performance workspace may render shared global workspace counters as shel
 
 These counters are not part of ShadowPerformanceSummary.
 They are not model evaluation metrics.
-They are not used by FDP-109 generation.
-They are not read by FDP-108 provider.
-They are not returned by FDP-106 current summary endpoint.
+They are not used by the Python generator.
+They are not read by the artifact provider.
+They are not returned by the current summary endpoint.
 They are not promotion readiness.
 They are not threshold recommendation.
 They are not production decisioning.
@@ -130,44 +130,44 @@ Generated runtime remains local/offline diagnostic. It is not promotion readines
 not threshold recommendation. It is not production decisioning. It is not payment authorization. It is not analyst
 recommendation logic.
 
-FDP-110 is not promotion readiness.
-FDP-110 is not promotion approval.
-FDP-110 is not threshold recommendation.
-FDP-110 is not production decisioning.
-FDP-110 is not payment authorization.
-FDP-110 is not analyst recommendation logic.
-FDP-110 does not mutate model registry.
-FDP-110 does not mutate model artifacts.
-FDP-110 does not change online scoring.
-FDP-110 does not emit Kafka events.
-FDP-110 does not add scheduler/cron/background daemon.
+The local generated runtime is not promotion readiness.
+It is not promotion approval.
+It is not threshold recommendation.
+It is not production decisioning.
+It is not payment authorization.
+It is not analyst recommendation logic.
+It does not mutate model registry.
+It does not mutate model artifacts.
+It does not change online scoring.
+It does not emit Kafka events.
+It does not add scheduler/cron/background daemon.
 
 ## Suggested PR Title
 
-FDP-110: Add local generated Shadow Performance runtime loop
+Add local generated Shadow Performance runtime loop
 
 ## Suggested PR Body
 
 ```markdown
 ## Summary
 
-Adds the FDP-110 local generated Shadow Performance runtime loop.
+Adds the local generated Shadow Performance runtime loop.
 
 This PR intentionally combines:
-1. local FDP-109 summary generation before Docker Compose starts,
+1. local summary generation before Docker Compose starts,
 2. a generated Shadow Performance Docker Compose override,
 3. shared global workspace counters as UI context.
 
 The local loop is:
 
 `make app-up`
--> FDP-109 generates `deployment/local-generated/shadow-performance/current-summary.json`
+-> the Python generator writes `deployment/local-generated/shadow-performance/current-summary.json`
    and `deployment/local-generated/shadow-performance/manifest.json`
 -> generated compose override mounts the artifact-set directory read-only into alert-service
--> FDP-108 reads `/run/shadow-performance/current-summary.json`
+-> the artifact provider reads `/run/shadow-performance/current-summary.json`
    and sibling `/run/shadow-performance/manifest.json`
--> FDP-106 exposes the current summary
--> FDP-107 displays the generated summary.
+-> the authorized API exposes the current summary
+-> the dashboard displays the generated summary.
 
 ## Included
 
@@ -186,9 +186,9 @@ The local loop is:
 
 Generation happens before Docker Compose starts in the local developer launcher.
 
-FDP-110 does not:
+The local generated runtime does not:
 
-- generation inside Docker Compose
+- generate inside Docker Compose
 - generate inside alert-service runtime
 - add scheduler/cron/background daemon
 - add Kafka-triggered generation

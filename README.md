@@ -154,13 +154,13 @@ docker compose --env-file deployment/.env \
   up --build -d
 ```
 
-The Shadow Performance dashboard uses the FDP-108 artifact-backed current provider. The base runtime is fail-closed by default, and the official full local launchers include
-`deployment/docker-compose.shadow-performance-generated.yml` so the dashboard uses the FDP-109 generated artifact.
+The Shadow Performance dashboard uses the artifact-backed current provider. The base runtime is fail-closed by default, and the official full local launchers include
+`deployment/docker-compose.shadow-performance-generated.yml` so the dashboard uses the generated artifact.
 If the generated artifact is still missing after local generation, startup fails with `Generated Shadow Performance Summary not found. Run: make shadow-performance-summary`.
 The provider must not display fake, sample, fallback, stale, demo, or zero metrics when no valid configured artifact
 is available.
 
-FDP-110 intentionally combines local generation before Compose, generated runtime mount, and shared global workspace counters as UI context. Global counters in the Shadow Performance workspace are shell-level context only; they are not part of `ShadowPerformanceSummary`, not model evaluation metrics, not promotion readiness, not threshold recommendation, not production decisioning, not payment authorization, and not analyst recommendation logic.
+The local launcher intentionally combines local generation before Compose, generated runtime mount, and shared global workspace counters as UI context. Global counters in the Shadow Performance workspace are shell-level context only; they are not part of `ShadowPerformanceSummary`, not model evaluation metrics, not promotion readiness, not threshold recommendation, not production decisioning, not payment authorization, and not analyst recommendation logic.
 
 To run the explicit generated-artifact path directly:
 
