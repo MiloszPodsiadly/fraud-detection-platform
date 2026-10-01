@@ -96,8 +96,6 @@ import com.frauddetection.alert.security.error.SecurityErrorResponseWriter;
 import com.frauddetection.alert.security.principal.AnalystPrincipal;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.AlertManagementUseCase;
-import com.frauddetection.alert.service.DecisionOutboxReconciliationController;
-import com.frauddetection.alert.service.DecisionOutboxReconciliationService;
 import com.frauddetection.alert.service.FraudCaseManagementService;
 import com.frauddetection.alert.service.ScoredTransactionSearchCriteria;
 import com.frauddetection.alert.service.ScoredTransactionSearchPolicy;
@@ -163,7 +161,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         AuditTrustAttestationController.class,
         AuditTrustKeysController.class,
         AuditDegradationController.class,
-        DecisionOutboxReconciliationController.class,
         RegulatedMutationRecoveryController.class,
         OutboxRecoveryController.class,
         TrustIncidentController.class,
@@ -245,9 +242,6 @@ class AlertSecurityConfigTest {
 
     @MockitoBean
     private AuditDegradationService auditDegradationService;
-
-    @MockitoBean
-    private DecisionOutboxReconciliationService decisionOutboxReconciliationService;
 
     @MockitoBean
     private RegulatedMutationRecoveryService regulatedMutationRecoveryService;
@@ -368,12 +362,6 @@ class AlertSecurityConfigTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"reason\":\"verified\"}"))
                 .andExpect(status().isUnauthorized());
-        mockMvc.perform(get("/api/v1/decision-outbox/unknown-confirmations"))
-                .andExpect(status().isUnauthorized());
-        mockMvc.perform(post("/api/v1/decision-outbox/unknown-confirmations/alert-1/resolve")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"resolution\":\"PUBLISHED\",\"reason\":\"kafka confirmed\"}"))
-                .andExpect(status().isUnauthorized());
         mockMvc.perform(post("/api/v1/regulated-mutations/recover"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/regulated-mutations/recovery/backlog"))
@@ -397,8 +385,6 @@ class AlertSecurityConfigTest {
         mockMvc.perform(post("/api/v1/trust/incidents/incident-1/resolve")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"reason\":\"verified\",\"false_positive\":false,\"resolution_evidence\":{\"type\":\"RUNBOOK_STEP\",\"reference\":\"runbook-1\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
-                .andExpect(status().isUnauthorized());
-        mockMvc.perform(get("/api/v1/regulated-mutations/idem-1"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/regulated-mutations/by-command/mutation-1"))
                 .andExpect(status().isUnauthorized());
@@ -777,32 +763,10 @@ class AlertSecurityConfigTest {
         when(auditDegradationService.unresolvedEvents()).thenReturn(List.of());
         when(auditDegradationService.resolveDegradation(eq("audit-1"), any(), any(), any()))
                 .thenReturn(auditDegradationDocument());
-        when(decisionOutboxReconciliationService.listUnknownConfirmations()).thenReturn(List.of());
-        when(decisionOutboxReconciliationService.resolve(eq("alert-1"), any(), any(), any(), any(), any()))
-                .thenReturn(unknownConfirmation());
         when(regulatedMutationRecoveryService.recoverNow())
                 .thenReturn(new RegulatedMutationRecoveryRunResponse(1, 0, 0, 0, 1));
         when(regulatedMutationRecoveryService.backlog())
                 .thenReturn(new RegulatedMutationRecoveryBacklogResponse(0, 0, null, 0, 0, Map.of(), Map.of()));
-        when(regulatedMutationRecoveryService.inspect("idem-1"))
-                .thenReturn(currentInspection(
-                        "96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b",
-                        "...em-1",
-                        "SUBMIT_ANALYST_DECISION",
-                        "ALERT",
-                        "alert-1",
-                        "FINALIZED_EVIDENCE_PENDING_EXTERNAL",
-                        "COMPLETED",
-                        null,
-                        null,
-                        true,
-                        "audit-attempted",
-                        "audit-success",
-                        null,
-                        null,
-                        null,
-                        Instant.parse("2026-05-01T00:00:00Z")
-                ));
         when(regulatedMutationRecoveryService.inspectByCommandId("mutation-1"))
                 .thenReturn(currentInspection(
                         "96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b",
@@ -894,29 +858,6 @@ class AlertSecurityConfigTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"reason\":\"verified\"}"))
                 .andExpect(status().isOk());
-        mockMvc.perform(get("/api/v1/decision-outbox/unknown-confirmations").with(demoUser("FRAUD_OPS_ADMIN")))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.events").isArray());
-        mockMvc.perform(post("/api/v1/decision-outbox/unknown-confirmations/alert-1/resolve")
-                        .with(demoUser("FRAUD_OPS_ADMIN"))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .header("X-Idempotency-Key", "outbox-resolve-1")
-                        .content("""
-                                {"resolution":"PUBLISHED","reason":"kafka confirmed","evidence_reference":{"type":"BROKER_OFFSET","reference":"topic=fraud-decisions,partition=0,offset=42","verified_at":"2026-04-30T12:00:00Z","verified_by":"ops-admin"}}
-                                """))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.alert_id").value("alert-1"));
-        mockMvc.perform(post("/api/v1/decision-outbox/unknown-confirmations/alert-1/resolve")
-                        .with(authorities(AnalystAuthority.AUDIT_VERIFY))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"resolution\":\"RETRY_REQUESTED\",\"reason\":\"not present\"}"))
-                .andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/v1/decision-outbox/unknown-confirmations/alert-1/resolve")
-                        .with(authorities(AnalystAuthority.DECISION_OUTBOX_RECONCILE))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .header("X-Idempotency-Key", "outbox-resolve-2")
-                        .content("{\"resolution\":\"RETRY_REQUESTED\",\"reason\":\"not present\"}"))
-                .andExpect(status().isOk());
         mockMvc.perform(post("/api/v1/regulated-mutations/recover").with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.recovered").value(1));
@@ -977,19 +918,6 @@ class AlertSecurityConfigTest {
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/trust/incidents/signals/preview").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isForbidden());
-        mockMvc.perform(get("/api/v1/regulated-mutations/idem-1").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.idempotency_key").doesNotExist())
-                .andExpect(jsonPath("$.request_hash").doesNotExist())
-                .andExpect(jsonPath("$.intent_hash").doesNotExist())
-                .andExpect(jsonPath("$.payload_hash").doesNotExist())
-                .andExpect(jsonPath("$.lease_owner").doesNotExist())
-                .andExpect(jsonPath("$.last_error").doesNotExist())
-                .andExpect(jsonPath("$.resource_id").doesNotExist())
-                .andExpect(jsonPath("$.resource_id_present").value(true))
-                .andExpect(jsonPath("$.resource_id_hash").exists())
-                .andExpect(jsonPath("$.idempotency_key_hash").value("96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b"))
-                .andExpect(jsonPath("$.idempotency_key_masked").value("...em-1"));
         mockMvc.perform(get("/api/v1/regulated-mutations/by-command/mutation-1").with(authorities(AnalystAuthority.AUDIT_VERIFY)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.idempotency_key").doesNotExist())
@@ -1039,8 +967,6 @@ class AlertSecurityConfigTest {
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/audit/degradations").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
-        mockMvc.perform(get("/api/v1/decision-outbox/unknown-confirmations").with(demoUser("ANALYST")))
-                .andExpect(status().isForbidden());
         mockMvc.perform(post("/api/v1/regulated-mutations/recover").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/regulated-mutations/recovery/backlog").with(demoUser("ANALYST")))
@@ -1057,8 +983,6 @@ class AlertSecurityConfigTest {
         mockMvc.perform(get("/api/v1/trust/incidents").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/trust/incidents/signals/preview").with(demoUser("ANALYST")))
-                .andExpect(status().isForbidden());
-        mockMvc.perform(get("/api/v1/regulated-mutations/idem-1").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/regulated-mutations/by-command/mutation-1").with(demoUser("ANALYST")))
                 .andExpect(status().isForbidden());
@@ -1370,30 +1294,6 @@ class AlertSecurityConfigTest {
         document.setResolvedBy("analyst-1");
         document.setResolvedAt(Instant.parse("2026-04-30T12:05:00Z"));
         return document;
-    }
-
-    private DecisionOutboxReconciliationService.UnknownConfirmation unknownConfirmation() {
-        return new DecisionOutboxReconciliationService.UnknownConfirmation(
-                "alert-1",
-                "event-1",
-                "event-1",
-                "PUBLISHED",
-                Instant.parse("2026-04-30T12:00:00Z"),
-                1,
-                Instant.parse("2026-04-30T12:01:00Z"),
-                Instant.parse("2026-04-30T12:02:00Z"),
-                "confirmed",
-                false,
-                null,
-                null,
-                "BROKER_OFFSET",
-                "topic=fraud-decisions,partition=0,offset=42",
-                Instant.parse("2026-04-30T12:00:00Z"),
-                "ops-admin",
-                Instant.parse("2026-04-30T12:05:00Z"),
-                "ops-admin",
-                "confirmed"
-        );
     }
 
     private ExternalWitnessCapabilities providerCapabilities() {

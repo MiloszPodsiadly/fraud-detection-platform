@@ -88,9 +88,9 @@ public class SystemTrustLevelController implements ApplicationRunner {
 
     @Autowired
     public SystemTrustLevelController(
-            @Value("${app.audit.external-anchoring.publication.enabled:${app.audit.external-anchoring.enabled:false}}") boolean publicationEnabled,
-            @Value("${app.audit.external-anchoring.publication.required:${app.audit.external-anchoring.enabled:false}}") boolean publicationRequired,
-            @Value("${app.audit.external-anchoring.publication.fail-closed:${app.audit.external-anchoring.publication.required:${app.audit.external-anchoring.enabled:false}}}") boolean failClosed,
+            @Value("${app.audit.external-anchoring.publication.enabled:false}") boolean publicationEnabled,
+            @Value("${app.audit.external-anchoring.publication.required:false}") boolean publicationRequired,
+            @Value("${app.audit.external-anchoring.publication.fail-closed:false}") boolean failClosed,
             @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed,
             @Value("${app.audit.trust-authority.enabled:false}") boolean trustAuthorityEnabled,
             @Value("${app.audit.trust-authority.signing-required:false}") boolean signingRequired,

@@ -136,28 +136,6 @@ class RegulatedMutationClaimReplayPolicyTest {
     }
 
     @Test
-    void finalizedVisibleWithProofKeepsRepairPath() {
-        RegulatedMutationCommandDocument document = currentDocument(RegulatedMutationState.FINALIZED_VISIBLE);
-        document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
-        document.setResponseSnapshot(snapshot(SubmitDecisionOperationStatus.FINALIZED_VISIBLE));
-        document.setLocalCommitMarker("EVIDENCE_GATED_FINALIZED");
-        document.setSuccessAuditRecorded(true);
-        when(durableProof.verify(document)).thenReturn(DurableLocalFinalizationProofResult.accepted());
-
-        assertThat(replayPolicyRegistry.resolve(document, NOW).type())
-                .isEqualTo(RegulatedMutationReplayDecisionType.FINALIZED_VISIBLE_REPAIRABLE);
-    }
-
-    @Test
-    void finalizedVisibleWithoutProofRequiresRecovery() {
-        RegulatedMutationCommandDocument document = currentDocument(RegulatedMutationState.FINALIZED_VISIBLE);
-        document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
-
-        assertThat(replayPolicyRegistry.resolve(document, NOW).type())
-                .isEqualTo(RegulatedMutationReplayDecisionType.FINALIZED_VISIBLE_RECOVERY_REQUIRED);
-    }
-
-    @Test
     void unsupportedCurrentExecutorOperationFailsClosed() {
         RegulatedMutationExecutor current = mock(RegulatedMutationExecutor.class);
         when(current.modelVersion()).thenReturn(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);

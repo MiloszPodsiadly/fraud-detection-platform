@@ -31,9 +31,9 @@ class ExternalAuditAnchorSinkConfiguration {
             ObjectProvider<ObjectStoreAuditAnchorClient> objectStoreClient,
             AlertServiceMetrics metrics,
             Environment environment,
-            @Value("${app.audit.external-anchoring.publication.enabled:${app.audit.external-anchoring.enabled:false}}") boolean publicationEnabled,
-            @Value("${app.audit.external-anchoring.publication.required:${app.audit.external-anchoring.enabled:false}}") boolean publicationRequired,
-            @Value("${app.audit.external-anchoring.publication.fail-closed:${app.audit.external-anchoring.publication.required:${app.audit.external-anchoring.enabled:false}}}") boolean publicationFailClosed,
+            @Value("${app.audit.external-anchoring.publication.enabled:false}") boolean publicationEnabled,
+            @Value("${app.audit.external-anchoring.publication.required:false}") boolean publicationRequired,
+            @Value("${app.audit.external-anchoring.publication.fail-closed:false}") boolean publicationFailClosed,
             @Value("${app.audit.external-anchoring.sink:disabled}") String sink,
             @Value("${app.audit.external-anchoring.local-file.path:./target/audit-external-anchors.jsonl}") String localFilePath,
             @Value("${app.audit.external-anchoring.allow-local-file-in-prod:false}") boolean allowLocalFileInProd,
@@ -57,7 +57,6 @@ class ExternalAuditAnchorSinkConfiguration {
             @Value("${app.audit.external-anchoring.policy.allow-separate-account-in-prod:false}") boolean allowSeparateAccountInProd,
             @Value("${HOSTNAME:alert-service}") String instanceId
     ) {
-        warnIfLegacyExternalAnchoringEnabled(environment);
         validatePublicationPolicy(publicationRequired, publicationFailClosed);
         boolean strictPublication = publicationRequired || publicationFailClosed;
         validateForbiddenPublisher(sink, publicationEnabled || strictPublication);
@@ -251,17 +250,6 @@ class ExternalAuditAnchorSinkConfiguration {
     private void validatePublicationPolicy(boolean publicationRequired, boolean publicationFailClosed) {
         if (publicationFailClosed && !publicationRequired) {
             throw new IllegalStateException("app.audit.external-anchoring.publication.fail-closed=true requires publication.required=true.");
-        }
-    }
-
-    private void warnIfLegacyExternalAnchoringEnabled(Environment environment) {
-        if (environment == null) {
-            return;
-        }
-        boolean legacyEnabled = "true".equalsIgnoreCase(environment.getProperty("AUDIT_EXTERNAL_ANCHORING_ENABLED"))
-                || "true".equalsIgnoreCase(environment.getProperty("app.audit.external-anchoring.enabled"));
-        if (legacyEnabled) {
-            log.warn("app.audit.external-anchoring.enabled is deprecated; use app.audit.external-anchoring.publication.enabled, publication.required, and publication.fail-closed.");
         }
     }
 

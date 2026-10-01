@@ -24,7 +24,6 @@ class AnalystRoleTest {
                         AnalystAuthority.AUDIT_VERIFY,
                         AnalystAuthority.AUDIT_EXPORT,
                         AnalystAuthority.AUDIT_DEGRADATION_RESOLVE,
-                        AnalystAuthority.DECISION_OUTBOX_RECONCILE,
                         AnalystAuthority.SUSPICIOUS_TRANSACTION_READ
                 );
     }
@@ -42,8 +41,7 @@ class AnalystRoleTest {
                         AnalystAuthority.AUDIT_READ,
                         AnalystAuthority.AUDIT_VERIFY,
                         AnalystAuthority.AUDIT_EXPORT,
-                        AnalystAuthority.AUDIT_DEGRADATION_RESOLVE,
-                        AnalystAuthority.DECISION_OUTBOX_RECONCILE
+                        AnalystAuthority.AUDIT_DEGRADATION_RESOLVE
                 );
     }
 
@@ -59,8 +57,7 @@ class AnalystRoleTest {
                         AnalystAuthority.AUDIT_READ,
                         AnalystAuthority.AUDIT_VERIFY,
                         AnalystAuthority.AUDIT_EXPORT,
-                        AnalystAuthority.AUDIT_DEGRADATION_RESOLVE,
-                        AnalystAuthority.DECISION_OUTBOX_RECONCILE
+                        AnalystAuthority.AUDIT_DEGRADATION_RESOLVE
                 );
     }
 

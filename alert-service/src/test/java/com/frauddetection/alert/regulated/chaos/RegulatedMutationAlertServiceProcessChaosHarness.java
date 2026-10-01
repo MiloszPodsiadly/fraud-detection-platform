@@ -88,16 +88,6 @@ public final class RegulatedMutationAlertServiceProcessChaosHarness implements A
         );
     }
 
-    public JsonNode inspectByIdempotencyKey(String idempotencyKey) {
-        return requestJson(
-                HttpRequest.newBuilder(uri("/api/v1/regulated-mutations/" + idempotencyKey))
-                        .timeout(Duration.ofSeconds(20))
-                        .GET()
-                        .headers(demoHeaders())
-                        .build()
-        );
-    }
-
     public RegulatedMutationChaosResult collectEvidence(RegulatedMutationChaosScenario scenario) {
         return collectEvidence(scenario, inspectByCommandId(scenario.commandId()), null);
     }

@@ -79,12 +79,8 @@ final class SecurityRouteOwnershipRegistry {
         route(routes, "POST", "/api/v1/trust/incidents/refresh", "TrustAuthorizationRules");
         route(routes, "POST", "/api/v1/trust/incidents/{incidentId}/ack", "TrustAuthorizationRules");
         route(routes, "POST", "/api/v1/trust/incidents/{incidentId}/resolve", "TrustAuthorizationRules");
-        route(routes, "GET", "/api/v1/decision-outbox/unknown-confirmations", "RecoveryAuthorizationRules");
-        route(routes, "POST", "/api/v1/decision-outbox/unknown-confirmations/{alertId}/resolve",
-                "RecoveryAuthorizationRules");
         route(routes, "POST", "/api/v1/regulated-mutations/recover", "RecoveryAuthorizationRules");
         route(routes, "GET", "/api/v1/regulated-mutations/recovery/backlog", "RecoveryAuthorizationRules");
-        route(routes, "GET", "/api/v1/regulated-mutations/{idempotencyKey}", "RecoveryAuthorizationRules");
         route(routes, "GET", "/api/v1/regulated-mutations/by-command/{commandId}", "RecoveryAuthorizationRules");
         route(routes, "GET", "/api/v1/regulated-mutations/by-idempotency-hash/{hash}",
                 "RecoveryAuthorizationRules");

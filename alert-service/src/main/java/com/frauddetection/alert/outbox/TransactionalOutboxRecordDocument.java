@@ -57,8 +57,12 @@ public class TransactionalOutboxRecordDocument {
     private String resolutionRequestedBy;
     @Field("resolution_requested_at")
     private Instant resolutionRequestedAt;
+    @Field("resolution_request_reason")
+    private String resolutionRequestReason;
+    @Field("resolution_approval_reason")
+    private String resolutionApprovalReason;
     @Field("resolution_reason")
-    private String resolutionReason;
+    private String persistedResolutionReason;
     @Field("resolution_evidence_type")
     private String resolutionEvidenceType;
     @Field("resolution_evidence_reference")
@@ -120,8 +124,18 @@ public class TransactionalOutboxRecordDocument {
     public void setResolutionRequestedBy(String resolutionRequestedBy) { this.resolutionRequestedBy = resolutionRequestedBy; }
     public Instant getResolutionRequestedAt() { return resolutionRequestedAt; }
     public void setResolutionRequestedAt(Instant resolutionRequestedAt) { this.resolutionRequestedAt = resolutionRequestedAt; }
-    public String getResolutionReason() { return resolutionReason; }
-    public void setResolutionReason(String resolutionReason) { this.resolutionReason = resolutionReason; }
+    public String getResolutionRequestReason() {
+        return resolutionRequestReason != null
+                ? resolutionRequestReason
+                : resolutionPending ? persistedResolutionReason : null;
+    }
+    public void setResolutionRequestReason(String resolutionRequestReason) { this.resolutionRequestReason = resolutionRequestReason; }
+    public String getResolutionApprovalReason() {
+        return resolutionApprovalReason != null
+                ? resolutionApprovalReason
+                : resolutionPending ? null : persistedResolutionReason;
+    }
+    public void setResolutionApprovalReason(String resolutionApprovalReason) { this.resolutionApprovalReason = resolutionApprovalReason; }
     public String getResolutionEvidenceType() { return resolutionEvidenceType; }
     public void setResolutionEvidenceType(String resolutionEvidenceType) { this.resolutionEvidenceType = resolutionEvidenceType; }
     public String getResolutionEvidenceReference() { return resolutionEvidenceReference; }

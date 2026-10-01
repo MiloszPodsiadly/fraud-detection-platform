@@ -177,9 +177,9 @@ class RegulatedMutationPostRestartApiBehaviorTest {
                 .andExpect(content().string(not(containsString("/api/v1"))));
     }
 
-    private RegulatedMutationRecoveryService service(String idempotencyKey, RegulatedMutationCommandInspectionResponse response) {
+    private RegulatedMutationRecoveryService service(String commandId, RegulatedMutationCommandInspectionResponse response) {
         RegulatedMutationRecoveryService service = mock(RegulatedMutationRecoveryService.class);
-        when(service.inspect(idempotencyKey)).thenReturn(response);
+        when(service.inspectByCommandId(commandId)).thenReturn(response);
         return service;
     }
 
@@ -233,8 +233,8 @@ class RegulatedMutationPostRestartApiBehaviorTest {
         return "UNSAFE_ERROR_REDACTED";
     }
 
-    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder inspect(String idempotencyKey) {
-        return get("/api/v1/regulated-mutations/" + idempotencyKey)
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder inspect(String commandId) {
+        return get("/api/v1/regulated-mutations/by-command/" + commandId)
                 .principal(new TestingAuthenticationToken("ops-admin", "n/a", "FRAUD_OPS_ADMIN"));
     }
 

@@ -5,6 +5,8 @@ import com.frauddetection.alert.observability.AlertServiceMetrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.convert.ApplicationConversionService;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.mock.env.MockEnvironment;
 
@@ -21,6 +23,25 @@ import static org.mockito.Mockito.when;
 class ExternalAuditAnchorSinkConfigurationTest {
 
     private final ExternalAuditAnchorSinkConfiguration configuration = new ExternalAuditAnchorSinkConfiguration();
+
+    @Test
+    void retiredAliasDoesNotEnableExternalPublication() {
+        new ApplicationContextRunner()
+                .withInitializer(context -> context.getBeanFactory().setConversionService(
+                        ApplicationConversionService.getSharedInstance()
+                ))
+                .withUserConfiguration(ExternalAuditAnchorSinkConfiguration.class)
+                .withBean(ObjectMapper.class, ObjectMapper::new)
+                .withBean(AlertServiceMetrics.class, this::metrics)
+                .withPropertyValues(
+                        "app.audit.external-anchoring.enabled=true",
+                        "AUDIT_EXTERNAL_ANCHORING_ENABLED=true"
+                )
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context.getBean(ExternalAuditAnchorSink.class).sinkType()).isEqualTo("disabled");
+                });
+    }
 
     @Test
     void shouldAllowLocalFileSinkForTestProfile() {

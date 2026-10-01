@@ -85,7 +85,7 @@ class SensitiveReadEndpointFailClosedControllerTest {
     void shouldFailClosedWhenRegulatedMutationInspectionAuditFailsInBankMode() {
         failAudit();
         RegulatedMutationRecoveryService service = mock(RegulatedMutationRecoveryService.class);
-        when(service.inspect("idem-raw-secret")).thenReturn(currentInspection(
+        when(service.inspectByCommandId("command-sensitive")).thenReturn(currentInspection(
                 "hash",
                 "idem-r...cret",
                 "SUBMIT_ANALYST_DECISION",
@@ -109,7 +109,7 @@ class SensitiveReadEndpointFailClosedControllerTest {
                 sensitiveReadAuditService
         );
 
-        assertFailClosed(() -> controller.inspect("idem-raw-secret", auth(), request));
+        assertFailClosed(() -> controller.inspectByCommandId("command-sensitive", auth(), request));
     }
 
     @Test

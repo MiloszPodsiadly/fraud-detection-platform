@@ -84,7 +84,16 @@ public final class OutboxAlertProjectionPolicy {
                     .set("decisionOutboxFailureReason", effectiveReason);
         }
         copyResolutionFields(update, record);
-        return new Projection(sourceStatus, projectionStatus, publishedAt, record.getAttempts(), update);
+        return new Projection(
+                sourceStatus,
+                projectionStatus,
+                publishedAt,
+                record.getAttempts(),
+                record.isResolutionPending(),
+                record.getResolutionRequestedAt(),
+                record.getResolutionApprovedAt(),
+                update
+        );
     }
 
     private static void copyResolutionFields(Update update, TransactionalOutboxRecordDocument record) {
@@ -95,7 +104,8 @@ public final class OutboxAlertProjectionPolicy {
         }
         copyOrUnset(update, "decisionOutboxResolutionRequestedAt", record.getResolutionRequestedAt());
         copyOrUnset(update, "decisionOutboxResolutionRequestedBy", record.getResolutionRequestedBy());
-        copyOrUnset(update, "decisionOutboxResolutionApprovalReason", record.getResolutionReason());
+        copyOrUnset(update, "decisionOutboxResolutionRequestReason", record.getResolutionRequestReason());
+        copyOrUnset(update, "decisionOutboxResolutionApprovalReason", record.getResolutionApprovalReason());
         copyOrUnset(update, "decisionOutboxResolutionEvidenceType", record.getResolutionEvidenceType());
         copyOrUnset(update, "decisionOutboxResolutionEvidenceReference", record.getResolutionEvidenceReference());
         copyOrUnset(update, "decisionOutboxResolutionEvidenceVerifiedAt", record.getResolutionEvidenceVerifiedAt());
@@ -117,6 +127,9 @@ public final class OutboxAlertProjectionPolicy {
             String projectionStatus,
             Instant publishedAt,
             int attempts,
+            boolean resolutionPending,
+            Instant resolutionRequestedAt,
+            Instant resolutionApprovedAt,
             Update update
     ) {
         public Query target(String resourceId) {
@@ -145,12 +158,34 @@ public final class OutboxAlertProjectionPolicy {
                             Criteria.where("decisionOutboxPublishedAt").lte(publishedAt)
                     )
                     : new Criteria();
+            Criteria resolutionFreshness = resolutionFreshness();
             return Query.query(new Criteria().andOperator(
                     Criteria.where("_id").is(resourceId),
                     attemptsNotNewer,
                     statusNotNewer,
-                    freshness
+                    freshness,
+                    resolutionFreshness
             ));
+        }
+
+        private Criteria resolutionFreshness() {
+            if (resolutionApprovedAt != null) {
+                return new Criteria().orOperator(
+                        Criteria.where("decisionOutboxResolutionApprovedAt").exists(false),
+                        Criteria.where("decisionOutboxResolutionApprovedAt").lte(resolutionApprovedAt)
+                );
+            }
+            if (resolutionPending && resolutionRequestedAt != null) {
+                return new Criteria().andOperator(
+                        Criteria.where("decisionOutboxResolutionApprovedAt").exists(false),
+                        new Criteria().orOperator(
+                                Criteria.where("decisionOutboxResolutionRequestedAt").exists(false),
+                                Criteria.where("decisionOutboxResolutionRequestedAt")
+                                        .lte(resolutionRequestedAt)
+                        )
+                );
+            }
+            return new Criteria();
         }
     }
 }

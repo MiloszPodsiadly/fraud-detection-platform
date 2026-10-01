@@ -58,8 +58,6 @@ import com.frauddetection.alert.regulated.RegulatedMutationRecoveryService;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.security.session.AnalystSessionController;
 import com.frauddetection.alert.service.AlertManagementUseCase;
-import com.frauddetection.alert.service.DecisionOutboxReconciliationController;
-import com.frauddetection.alert.service.DecisionOutboxReconciliationService;
 import com.frauddetection.alert.service.FraudCaseEvidenceSummaryService;
 import com.frauddetection.alert.service.FraudCaseEvidenceTimelineService;
 import com.frauddetection.alert.service.FraudCaseManagementService;
@@ -117,7 +115,6 @@ import static org.assertj.core.api.Assertions.assertThat;
         AuditTrustAttestationController.class,
         AuditTrustKeysController.class,
         AuditDegradationController.class,
-        DecisionOutboxReconciliationController.class,
         RegulatedMutationRecoveryController.class,
         OutboxRecoveryController.class,
         TrustIncidentController.class,
@@ -206,9 +203,6 @@ class RouteCoverageAgainstMvcMappingsTest {
 
     @MockitoBean
     private AuditDegradationService auditDegradationService;
-
-    @MockitoBean
-    private DecisionOutboxReconciliationService decisionOutboxReconciliationService;
 
     @MockitoBean
     private RegulatedMutationRecoveryService regulatedMutationRecoveryService;

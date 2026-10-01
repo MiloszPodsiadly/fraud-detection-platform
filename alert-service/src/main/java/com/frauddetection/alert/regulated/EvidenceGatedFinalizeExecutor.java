@@ -200,24 +200,8 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                     document.getState(),
                     command.statusResponseFactory().response(decision.responseState())
             );
-            case FINALIZING_REQUIRES_RECOVERY, FINALIZED_VISIBLE_RECOVERY_REQUIRED ->
+            case FINALIZING_REQUIRES_RECOVERY ->
                     markRecoveryRequired(command, document, decision.reason());
-            case FINALIZED_VISIBLE_REPAIRABLE -> {
-                metrics.recordEvidenceGatedFinalizeStuckVisible();
-                recoveryTransition(
-                        document,
-                        RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
-                        RegulatedMutationExecutionStatus.COMPLETED,
-                        null,
-                        update -> update.set(
-                                "public_status",
-                                publicStatusMapper.currentStatus(
-                                        RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
-                                )
-                        )
-                );
-                yield replay(command, document);
-            }
             case RECOVERY_REQUIRED_RESPONSE -> new RegulatedMutationResult<>(
                     document.getState(),
                     command.statusResponseFactory().response(decision.responseState())

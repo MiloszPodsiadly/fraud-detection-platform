@@ -31,7 +31,7 @@ This is the state machine contract for the canonical submit-decision local evide
 - Meaning: Required evidence preconditions are being prepared before visible mutation.
 - Authoritative source: Command document.
 - Allowed transitions: `EVIDENCE_PREPARED`, `REJECTED_EVIDENCE_UNAVAILABLE`, `FAILED_BUSINESS_VALIDATION`.
-- Forbidden transitions: `FINALIZED_VISIBLE`, `FINALIZED_EVIDENCE_CONFIRMED`.
+- Forbidden transitions: Any finalized state.
 - API-visible status: `EVIDENCE_PREPARING`.
 - Idempotency replay: Same key returns in-progress or prepared state; does not rerun unsafe work.
 - Recovery: Retry evidence preparation when lease expires and no finalize started.
@@ -69,21 +69,6 @@ This is the state machine contract for the canonical submit-decision local evide
   publication, Trust Authority signing confirmation, and Kafka delivery remain asynchronous evidence confirmation
   steps.
 
-### FINALIZED_VISIBLE
-
-- Meaning: Transitional repair state for an interrupted current-model command where the system observes a local
-  visible finalize marker before the command was promoted to `FINALIZED_EVIDENCE_PENDING_EXTERNAL`.
-- Authoritative source: Business aggregate plus command finalize marker.
-- Allowed transitions: `FINALIZED_EVIDENCE_PENDING_EXTERNAL`, `FINALIZE_RECOVERY_REQUIRED` only if local evidence inconsistency is later detected.
-- Forbidden transitions: Pre-finalize states.
-- API-visible status: `FINALIZED_EVIDENCE_PENDING_EXTERNAL` for evidence-gated submit-decision replay. Clients must
-  not depend on `FINALIZED_VISIBLE` as a stable new-command response.
-- Idempotency replay: Return committed response snapshot; never rerun business mutation.
-- Recovery: Reconstruct response from snapshot or aggregate if strategy permits.
-- Trust-level impact: Healthy only if no required evidence gaps remain.
-- Outbox impact: Outbox publish may proceed asynchronously.
-- Audit/evidence impact: Local evidence is available; external evidence may not be confirmed.
-
 ### FINALIZED_EVIDENCE_PENDING_EXTERNAL
 
 - Meaning: Visible commit is complete locally; external witness or broker confirmation is still pending.
@@ -115,7 +100,7 @@ This is the state machine contract for the canonical submit-decision local evide
 - Meaning: Required evidence could not be prepared before visible mutation.
 - Authoritative source: Command document and failure reason code.
 - Allowed transitions: Retry to `EVIDENCE_PREPARING` only with explicit operator/system retry policy and no visible mutation.
-- Forbidden transitions: `FINALIZED_VISIBLE` without restarting evidence gate.
+- Forbidden transitions: Any finalized state without restarting the evidence gate.
 - API-visible status: `REJECTED_EVIDENCE_UNAVAILABLE`.
 - Idempotency replay: Same key returns rejection; different payload conflicts.
 - Recovery: No business rollback required because no visible mutation occurred.
@@ -140,7 +125,7 @@ This is the state machine contract for the canonical submit-decision local evide
 
 - Meaning: The system cannot prove whether finalization completed safely or cannot reconstruct required committed evidence.
 - Authoritative source: Command recovery state and inspection results.
-- Allowed transitions: `FINALIZED_VISIBLE`, `FINALIZED_EVIDENCE_PENDING_EXTERNAL`, or terminal failure only after explicit recovery proves state.
+- Allowed transitions: `FINALIZED_EVIDENCE_PENDING_EXTERNAL`, `FINALIZED_EVIDENCE_CONFIRMED`, or terminal failure only after explicit recovery proves state.
 - Forbidden transitions: Reporting successful commit without proof.
 - API-visible status: `FINALIZE_RECOVERY_REQUIRED`.
 - Idempotency replay: Return recovery-required; do not rerun finalize blindly.

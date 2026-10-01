@@ -26,11 +26,32 @@ class RegulatedMutationPersistedModelPreflightTest {
             new RegulatedMutationPersistedModelPreflight(mock(MongoTemplate.class));
 
     @Test
+    void removedAlertOwnedOutboxActionIsUnsupportedAsAnActiveCommand() {
+        Document document = currentDocument(
+                "RESOLVE_DECISION_OUTBOX_CONFIRMATION",
+                "DECISION_OUTBOX"
+        );
+
+        assertThat(preflight.contractCategory(document)).isEqualTo("UNSUPPORTED_ACTION_RESOURCE_PAIR");
+    }
+
+    @Test
     void shouldAllowValidCanonicalActionResourcePair() {
         assertThat(preflight.contractCategory(currentDocument(
                 AuditAction.SUBMIT_ANALYST_DECISION.name(),
                 AuditResourceType.ALERT.name()
         ))).isEqualTo("SUPPORTED");
+    }
+
+    @Test
+    void removedFinalizedVisibleStateIsUnsupported() {
+        Document document = currentDocument(
+                AuditAction.SUBMIT_ANALYST_DECISION.name(),
+                AuditResourceType.ALERT.name()
+        );
+        document.put("state", "FINALIZED_VISIBLE");
+
+        assertThat(preflight.contractCategory(document)).isEqualTo("UNKNOWN_STATE");
     }
 
     @Test

@@ -168,16 +168,6 @@ public final class RegulatedMutationProductionImageChaosHarness implements AutoC
         );
     }
 
-    public JsonNode inspectByIdempotencyKey(String idempotencyKey) {
-        return requestJson(
-                HttpRequest.newBuilder(uri("/api/v1/regulated-mutations/" + idempotencyKey))
-                        .timeout(Duration.ofSeconds(20))
-                        .GET()
-                        .headers(demoHeaders())
-                        .build()
-        );
-    }
-
     public CompletableFuture<HttpResponse<String>> submitDecisionAsync(
             String alertId,
             String idempotencyKey,

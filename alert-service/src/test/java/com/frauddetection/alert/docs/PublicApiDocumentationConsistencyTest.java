@@ -118,9 +118,7 @@ class PublicApiDocumentationConsistencyTest {
                 .contains("Local evidence is not external finality")
                 .contains("not success")
                 .contains("not distributed exactly-once")
-                .contains("not proof of business correctness")
-                .contains("FINALIZED_VISIBLE is an internal transitional repair status")
-                .contains("FINALIZED_VISIBLE is not external confirmation");
+                .contains("not proof of business correctness");
 
         assertThat(combined.toLowerCase())
                 .doesNotContain("local committed == external finality")

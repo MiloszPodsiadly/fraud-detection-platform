@@ -87,7 +87,7 @@ class RegulatedMutationTransactionRollbackIntegrationTest extends AbstractIntegr
         mongoTemplate.save(command);
 
         assertThatThrownBy(() -> runner.runLocalCommit(() -> {
-            command.setState(RegulatedMutationState.FINALIZED_VISIBLE);
+            command.setState(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
             command.setUpdatedAt(Instant.parse("2026-05-02T10:01:00Z"));
             mongoTemplate.save(command);
             mongoTemplate.save(alert("alert-transition-fail", AlertStatus.CLOSED));

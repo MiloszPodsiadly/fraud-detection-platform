@@ -29,10 +29,6 @@ class TransactionalOutboxRecoveryStrategyTest {
                 AuditAction.RESOLVE_TRANSACTIONAL_OUTBOX_CONFIRMATION,
                 AuditResourceType.DECISION_OUTBOX
         )).isTrue();
-        assertThat(strategy.supports(
-                AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
-                AuditResourceType.DECISION_OUTBOX
-        )).isFalse();
         assertThat(strategy.reconstructSnapshot(command)).isEmpty();
         assertThat(strategy.validateBusinessState(command).valid()).isFalse();
         assertThat(strategy.validateBusinessState(command).reasonCode())

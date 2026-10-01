@@ -14,7 +14,6 @@ public class RegulatedMutationSafeCheckpointPolicy {
             RegulatedMutationState.FAILED
     );
     private static final Set<RegulatedMutationState> TERMINAL_STATES = Set.of(
-            RegulatedMutationState.FINALIZED_VISIBLE,
             RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
             RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED,
             RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE,

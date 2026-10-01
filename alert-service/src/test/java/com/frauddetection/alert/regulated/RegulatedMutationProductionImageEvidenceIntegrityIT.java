@@ -28,7 +28,7 @@ class RegulatedMutationProductionImageEvidenceIntegrityIT extends AbstractRegula
         RegulatedMutationChaosScenario scenario = finalizedConfirmedScenario("finalized-replay-no-second-outbox");
 
         RegulatedMutationChaosResult result = chaosHarness.runDurableStateScenario(scenario);
-        chaosHarness.inspectByIdempotencyKey(scenario.idempotencyKey());
+        chaosHarness.inspectByCommandId(scenario.commandId());
         RegulatedMutationChaosResult afterReplay = collectAfterReplay(scenario);
 
         assertThat(result.outboxRecords()).isOne();
@@ -40,7 +40,7 @@ class RegulatedMutationProductionImageEvidenceIntegrityIT extends AbstractRegula
         RegulatedMutationChaosScenario scenario = finalizedConfirmedScenario("finalized-replay-no-second-success-audit");
 
         RegulatedMutationChaosResult result = chaosHarness.runDurableStateScenario(scenario);
-        chaosHarness.inspectByIdempotencyKey(scenario.idempotencyKey());
+        chaosHarness.inspectByCommandId(scenario.commandId());
         RegulatedMutationChaosResult afterReplay = collectAfterReplay(scenario);
 
         assertThat(result.successAuditEvents()).isOne();
@@ -51,9 +51,9 @@ class RegulatedMutationProductionImageEvidenceIntegrityIT extends AbstractRegula
     void finalizeRecoveryCompletesEvidenceWithoutSecondBusinessMutation() {
         RegulatedMutationChaosScenario scenario = scenario(
                 "finalize-recovery-integrity",
-                RegulatedMutationChaosWindow.FINALIZED_VISIBLE_LOCAL_COMMIT,
-                RegulatedMutationState.FINALIZED_VISIBLE,
-                RegulatedMutationExecutionStatus.PROCESSING,
+                RegulatedMutationChaosWindow.FINALIZED_EVIDENCE_PENDING_EXTERNAL_LOCAL_COMMIT,
+                RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                RegulatedMutationExecutionStatus.COMPLETED,
                 command -> {
                     mutateAlert(command.getResourceId());
                     command.setResponseSnapshot(snapshot(command.getResourceId(), SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL));
@@ -87,7 +87,7 @@ class RegulatedMutationProductionImageEvidenceIntegrityIT extends AbstractRegula
         RegulatedMutationChaosScenario scenario = pendingExternalScenario("pending-external-integrity");
 
         RegulatedMutationChaosResult result = chaosHarness.runDurableStateScenario(scenario);
-        chaosHarness.inspectByIdempotencyKey(scenario.idempotencyKey());
+        chaosHarness.inspectByCommandId(scenario.commandId());
         RegulatedMutationChaosResult afterReplay = collectAfterReplay(scenario);
 
         assertThat(result.outboxRecords()).isOne();

@@ -11,7 +11,6 @@ durable state proves local finalize.
 | `FINALIZING` | 202 | No | Finalize is not safely reportable as success. |
 | `RECOVERY_REQUIRED` | 202 | No | Authorized recovery must inspect durable state. |
 | `FINALIZE_RECOVERY_REQUIRED` | 202 | No unless recovered evidence proves a stable snapshot | Never infer success from a stale snapshot. |
-| `FINALIZED_VISIBLE` | 200 | Yes | Internal repair state; public mapping remains conservative. |
 | `FINALIZED_EVIDENCE_PENDING_EXTERNAL` | 200 | Yes | Local finalize succeeded; external evidence is pending. |
 | `FINALIZED_EVIDENCE_CONFIRMED` | 200 | Yes | Configured evidence policy is explicitly satisfied. |
 | `REJECTED_EVIDENCE_UNAVAILABLE` | Endpoint policy | No | Required evidence was unavailable before finalize. |

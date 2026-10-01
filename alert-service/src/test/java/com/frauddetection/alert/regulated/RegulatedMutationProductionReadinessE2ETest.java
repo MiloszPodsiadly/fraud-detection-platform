@@ -193,7 +193,7 @@ class RegulatedMutationProductionReadinessE2ETest extends AbstractIntegrationTes
         command.setDegradationReason("LONG_RUNNING_PROCESSING");
         commandRepository.save(command);
 
-        RegulatedMutationCommandInspectionResponse inspection = recoveryService().inspect("idem-long-processing");
+        RegulatedMutationCommandInspectionResponse inspection = recoveryService().inspectByCommandId(command.getId());
 
         assertThat(inspection.state()).isEqualTo("EVIDENCE_PREPARING");
         assertThat(inspection.executionStatus()).isEqualTo("PROCESSING");

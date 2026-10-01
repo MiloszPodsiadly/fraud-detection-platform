@@ -327,7 +327,6 @@ class AlertServiceMetricsTest {
         metrics.recordEvidenceGatedFinalizeRejected("ATTEMPTED_AUDIT_UNAVAILABLE");
         metrics.recordEvidenceGatedFinalizeTransactionRollback("EVIDENCE_GATED_FINALIZE_FAILED");
         metrics.recordEvidenceConfirmationFailed("idempotency-key-raw-value");
-        metrics.recordEvidenceGatedFinalizeStuckVisible();
         metrics.recordEvidenceGatedFinalizeEnabled(AuditAction.SUBMIT_ANALYST_DECISION, true);
         metrics.recordRegulatedMutationLocalAuditChainAppend("SUCCESS");
         metrics.recordRegulatedMutationLocalAuditChainAppend("raw-command-id");
@@ -340,7 +339,6 @@ class AlertServiceMetricsTest {
         Meter recovery = meterRegistry.get("evidence_gated_finalize_recovery_required_total").meter();
         Meter rejected = meterRegistry.get("evidence_gated_finalize_rejected_total").meter();
         Meter rollback = meterRegistry.get("evidence_gated_finalize_transaction_rollback_total").meter();
-        Meter stuck = meterRegistry.get("evidence_gated_finalize_stuck_visible_total").meter();
         Meter enabled = meterRegistry.get("evidence_gated_finalize_enabled")
                 .tag("mutation_type", "SUBMIT_ANALYST_DECISION")
                 .meter();
@@ -368,7 +366,6 @@ class AlertServiceMetricsTest {
         assertThat(rollback.getId().getTags())
                 .extracting(Tag::getKey)
                 .containsExactly("reason");
-        assertThat(stuck.getId().getTags()).isEmpty();
         assertThat(enabled.getId().getTags())
                 .extracting(Tag::getKey)
                 .containsExactly("mutation_type");
@@ -426,7 +423,6 @@ class AlertServiceMetricsTest {
                 AuditAction.SUBMIT_ANALYST_DECISION,
                 AuditAction.UPDATE_FRAUD_CASE,
                 AuditAction.RESOLVE_TRANSACTIONAL_OUTBOX_CONFIRMATION,
-                AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
                 AuditAction.ACK_TRUST_INCIDENT,
                 AuditAction.RESOLVE_TRUST_INCIDENT,
                 AuditAction.REFRESH_TRUST_INCIDENTS

@@ -16,15 +16,13 @@ The canonical status set is:
 
 - processing: `IN_PROGRESS`, `EVIDENCE_PREPARING`, `EVIDENCE_PREPARED`, `FINALIZING`
 - recovery: `RECOVERY_REQUIRED`, `FINALIZE_RECOVERY_REQUIRED`
-- finalized: `FINALIZED_VISIBLE`, `FINALIZED_EVIDENCE_PENDING_EXTERNAL`, `FINALIZED_EVIDENCE_CONFIRMED`
+- finalized: `FINALIZED_EVIDENCE_PENDING_EXTERNAL`, `FINALIZED_EVIDENCE_CONFIRMED`
 - rejected or failed: `REJECTED_EVIDENCE_UNAVAILABLE`, `FAILED_BUSINESS_VALIDATION`
 
-`FINALIZED_VISIBLE` is an internal repair state and is mapped conservatively as pending external evidence. Recovery,
-preparation, and finalizing responses must not expose the requested resource state as completed. Replay is safe only
+Recovery, preparation, and finalizing responses must not expose the requested resource state as completed. Replay is safe only
 for the same idempotency key and canonical intent; a different payload or backend-resolved actor is a conflict.
 
 Local evidence confirmation is not external finality. Local evidence is not external finality.
-FINALIZED_VISIBLE is an internal transitional repair status, and FINALIZED_VISIBLE is not external confirmation.
 Pending external evidence is not confirmed. Recovery required is not success, and every recovery status is not success.
 
 Checkpoint renewal preserves lease ownership only; it is not proof of business progress.

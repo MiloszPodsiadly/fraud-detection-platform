@@ -177,7 +177,6 @@ abstract class AbstractRegulatedMutationLiveCheckpointIT extends AbstractIntegra
         assertThat(command.getPublicStatus()).isNotIn(
                 SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED,
-                SubmitDecisionOperationStatus.FINALIZED_VISIBLE,
                 SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED
         );

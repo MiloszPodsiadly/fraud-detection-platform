@@ -32,6 +32,34 @@ class AlertServiceBankGradeArchitectureTest {
     }
 
     @Test
+    void retiredExternalAnchoringAliasMustNotBeARuntimeSelector() throws Exception {
+        try (java.util.stream.Stream<Path> stream = Files.walk(Path.of("src/main/java"))) {
+            for (Path source : stream.filter(path -> path.toString().endsWith(".java")).toList()) {
+                assertThat(Files.readString(source)).as(source.toString())
+                        .doesNotContain("app.audit.external-anchoring.enabled")
+                        .doesNotContain("AUDIT_EXTERNAL_ANCHORING_ENABLED");
+            }
+        }
+
+        String application = Files.readString(Path.of("src/main/resources/application.yml"));
+        String compose = Files.readString(Path.of("../deployment/docker-compose.yml"));
+        String apiDocs = Files.readString(Path.of("../docs/api/api_surface_v1.md"));
+        assertThat(application)
+                .doesNotContain("AUDIT_EXTERNAL_ANCHORING_ENABLED")
+                .contains("AUDIT_EXTERNAL_ANCHORING_PUBLICATION_ENABLED:false")
+                .contains("AUDIT_EXTERNAL_ANCHORING_PUBLICATION_REQUIRED:false")
+                .contains("AUDIT_EXTERNAL_ANCHORING_PUBLICATION_FAIL_CLOSED:false");
+        assertThat(compose)
+                .doesNotContain("AUDIT_EXTERNAL_ANCHORING_ENABLED")
+                .contains("AUDIT_EXTERNAL_ANCHORING_PUBLICATION_ENABLED")
+                .contains("AUDIT_EXTERNAL_ANCHORING_PUBLICATION_REQUIRED")
+                .contains("AUDIT_EXTERNAL_ANCHORING_PUBLICATION_FAIL_CLOSED");
+        assertThat(apiDocs)
+                .doesNotContain("app.audit.external-anchoring.enabled")
+                .contains("app.audit.external-anchoring.publication.enabled");
+    }
+
+    @Test
     void regulatedMutationHandlersMustNotPublishOrAuditSuccessDirectly() throws Exception {
         try (java.util.stream.Stream<Path> stream = Files.walk(Path.of("src/main/java/com/frauddetection/alert/regulated/mutation"))) {
             List<Path> handlers = stream.filter(path -> path.toString().endsWith(".java")).toList();

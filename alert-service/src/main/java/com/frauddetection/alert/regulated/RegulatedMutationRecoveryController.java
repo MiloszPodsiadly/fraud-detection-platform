@@ -51,19 +51,6 @@ public class RegulatedMutationRecoveryController {
         return response;
     }
 
-    @GetMapping("/{idempotencyKey}")
-    @AuditedSensitiveRead
-    public RegulatedMutationCommandInspectionResponse inspect(
-            @PathVariable String idempotencyKey,
-            Authentication authentication,
-            HttpServletRequest request
-    ) {
-        enforceRateLimit(authentication, request);
-        RegulatedMutationCommandInspectionResponse response = recoveryService.inspect(idempotencyKey);
-        auditInspection(response, request);
-        return response;
-    }
-
     @GetMapping("/by-command/{commandId}")
     @AuditedSensitiveRead
     public RegulatedMutationCommandInspectionResponse inspectByCommandId(

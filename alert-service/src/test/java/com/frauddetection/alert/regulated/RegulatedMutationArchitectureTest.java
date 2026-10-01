@@ -110,24 +110,19 @@ class RegulatedMutationArchitectureTest {
     }
 
     @Test
-    void decisionOutboxReconciliationServiceMustNotWriteRepositoryDirectly() throws Exception {
-        String source = Files.readString(Path.of(
-                "src/main/java/com/frauddetection/alert/service/DecisionOutboxReconciliationService.java"
-        ));
-
-        assertThat(source).doesNotContain("alertRepository.save");
-        assertThat(source).contains("mutationHandler.applyResolution");
-    }
-
-    @Test
-    void decisionOutboxMutationHandlerIsTheAllowedDomainWriteAdapter() throws Exception {
-        String source = Files.readString(Path.of(
-                "src/main/java/com/frauddetection/alert/regulated/mutation/decisionoutbox/DecisionOutboxReconciliationMutationHandler.java"
-        ));
-
-        assertThat(source).contains("alertRepository.save");
-        assertThat(source).doesNotContain("auditService.audit");
-        assertThat(source).doesNotContain("AuditMutationRecorder");
+    void alertOwnedDecisionOutboxReconciliationRuntimeStaysRemoved() {
+        assertThat(Path.of("src/main/java/com/frauddetection/alert/service/DecisionOutboxReconciliationController.java"))
+                .doesNotExist();
+        assertThat(Path.of("src/main/java/com/frauddetection/alert/service/DecisionOutboxReconciliationService.java"))
+                .doesNotExist();
+        assertThat(Path.of("src/main/java/com/frauddetection/alert/regulated/mutation/decisionoutbox/DecisionOutboxReconciliationMutationHandler.java"))
+                .doesNotExist();
+        assertThat(Path.of("src/main/java/com/frauddetection/alert/regulated/mutation/decisionoutbox/DecisionOutboxRecoveryStrategy.java"))
+                .doesNotExist();
+        assertThat(RegulatedMutationDefinitions.find(
+                com.frauddetection.alert.audit.AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
+                com.frauddetection.alert.audit.AuditResourceType.DECISION_OUTBOX
+        )).isEmpty();
     }
 
     @Test
@@ -678,7 +673,6 @@ class RegulatedMutationArchitectureTest {
                 "EVIDENCE_PREPARING",
                 "EVIDENCE_PREPARED",
                 "FINALIZING",
-                "FINALIZED_VISIBLE",
                 "FINALIZED_EVIDENCE_PENDING_EXTERNAL",
                 "FINALIZED_EVIDENCE_CONFIRMED",
                 "REJECTED_EVIDENCE_UNAVAILABLE",
@@ -690,7 +684,6 @@ class RegulatedMutationArchitectureTest {
                 "EVIDENCE_PREPARING",
                 "EVIDENCE_PREPARED",
                 "FINALIZING",
-                "FINALIZED_VISIBLE",
                 "FINALIZED_EVIDENCE_PENDING_EXTERNAL",
                 "FINALIZED_EVIDENCE_CONFIRMED",
                 "REJECTED_EVIDENCE_UNAVAILABLE",
@@ -1246,7 +1239,6 @@ class RegulatedMutationArchitectureTest {
         assertThat(combined).contains("`execution_status` and recovery precedence remain authoritative");
         assertThat(combined).contains("EVIDENCE_PREPARING");
         assertThat(combined).contains("FINALIZING");
-        assertThat(combined).contains("FINALIZED_VISIBLE");
         assertThat(combined).contains("FINALIZE_RECOVERY_REQUIRED");
         assertThat(combined).contains("INVALID_EXTENSION");
         assertThat(combined).contains("COMMAND_NOT_FOUND");

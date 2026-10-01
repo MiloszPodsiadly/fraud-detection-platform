@@ -9,7 +9,6 @@ Status: current regulated mutation public contract.
 | `EVIDENCE_PREPARING` | Required local evidence is being prepared. | No | No | Retry the same key later. |
 | `EVIDENCE_PREPARED` | Local preconditions are staged. | No | No | Retry the same key later. |
 | `FINALIZING` | Local finalize is in progress. | Not safely reportable | No | Retry the same key; investigate if stale. |
-| `FINALIZED_VISIBLE` | Internal repair state mapped conservatively by public APIs. | Yes | No | Monitor or recover. |
 | `FINALIZED_EVIDENCE_PENDING_EXTERNAL` | Local finalize and required local evidence exist. | Yes | No | Monitor asynchronous evidence. |
 | `FINALIZED_EVIDENCE_CONFIRMED` | Configured evidence policy is satisfied. | Yes | Yes when configured evidence proves it | No retry required. |
 | `REJECTED_EVIDENCE_UNAVAILABLE` | Required evidence was unavailable before finalize. | No | No | Restore dependency; follow endpoint retry policy. |

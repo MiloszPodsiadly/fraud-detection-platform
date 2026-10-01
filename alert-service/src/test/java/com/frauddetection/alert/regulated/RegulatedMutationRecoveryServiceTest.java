@@ -105,7 +105,7 @@ class RegulatedMutationRecoveryServiceTest {
     @Test
     void shouldRejectExistingSnapshotWhenLocalCommitMarkerIsMissing() {
         Fixture fixture = new Fixture();
-        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZED_VISIBLE);
+        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         command.setResponseSnapshot(snapshot());
         when(fixture.durableLocalFinalizationProof.verify(command)).thenReturn(
                 DurableLocalFinalizationProofResult.invalid("LOCAL_COMMIT_MARKER_MISSING")
@@ -122,7 +122,7 @@ class RegulatedMutationRecoveryServiceTest {
     @Test
     void shouldRejectExistingSnapshotWhenSuccessAuditIsMissing() {
         Fixture fixture = new Fixture();
-        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZED_VISIBLE);
+        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         command.setResponseSnapshot(snapshot());
         when(fixture.durableLocalFinalizationProof.verify(command)).thenReturn(
                 DurableLocalFinalizationProofResult.invalid("SUCCESS_AUDIT_MISSING")
@@ -137,7 +137,7 @@ class RegulatedMutationRecoveryServiceTest {
     @Test
     void shouldNotUseMatchingBusinessStateAsSubstituteForDurableProof() {
         Fixture fixture = new Fixture();
-        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZED_VISIBLE);
+        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         setSubmitDecisionIntent(command, AnalystDecision.CONFIRMED_FRAUD, "Manual review", List.of("chargeback"), "principal-7");
         when(fixture.alertRepository.findById("alert-1")).thenReturn(Optional.of(committedAlert(DecisionOutboxStatus.PUBLISHED)));
         when(fixture.durableLocalFinalizationProof.verify(command)).thenReturn(
@@ -154,7 +154,7 @@ class RegulatedMutationRecoveryServiceTest {
     @Test
     void shouldRejectMissingRequiredOutboxProof() {
         Fixture fixture = new Fixture();
-        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZED_VISIBLE);
+        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         command.setResponseSnapshot(snapshot());
         when(fixture.durableLocalFinalizationProof.verify(command)).thenReturn(
                 DurableLocalFinalizationProofResult.invalid("TRANSACTIONAL_OUTBOX_PROOF_MISSING")
@@ -186,7 +186,7 @@ class RegulatedMutationRecoveryServiceTest {
     @Test
     void shouldReconstructSnapshotFromCommittedBusinessStateAndOutboxWithoutRerunningMutation() {
         Fixture fixture = new Fixture();
-        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZED_VISIBLE);
+        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         setSubmitDecisionIntent(command, AnalystDecision.CONFIRMED_FRAUD, "Manual review", List.of("chargeback"), "principal-7");
         when(fixture.alertRepository.findById("alert-1")).thenReturn(Optional.of(committedAlert(DecisionOutboxStatus.PUBLISHED)));
 
@@ -204,7 +204,7 @@ class RegulatedMutationRecoveryServiceTest {
     @Test
     void shouldRequireRecoveryWhenCommittedBusinessStateDoesNotMatchIntent() {
         Fixture fixture = new Fixture();
-        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZED_VISIBLE);
+        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         setSubmitDecisionIntent(command, AnalystDecision.CONFIRMED_FRAUD, "Manual review", List.of("chargeback"), "principal-7");
         AlertDocument mismatched = committedAlert(DecisionOutboxStatus.PUBLISHED);
         mismatched.setAnalystDecision(AnalystDecision.MARKED_LEGITIMATE);
@@ -236,7 +236,7 @@ class RegulatedMutationRecoveryServiceTest {
     @Test
     void shouldMarkUnsupportedMutationRecoveryRequiredWithoutGuessingSnapshot() {
         Fixture fixture = new Fixture();
-        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZED_VISIBLE);
+        RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         command.setAction(AuditAction.UPDATE_FRAUD_CASE.name());
         command.setResourceType(AuditResourceType.FRAUD_CASE.name());
 
@@ -263,7 +263,7 @@ class RegulatedMutationRecoveryServiceTest {
                 new RegulatedMutationPublicStatusMapper(),
                 Duration.ofMinutes(2)
         );
-        RegulatedMutationCommandDocument command = new Fixture().command(RegulatedMutationState.FINALIZED_VISIBLE);
+        RegulatedMutationCommandDocument command = new Fixture().command(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
 
         RegulatedMutationRecoveryResult result = service.recover(command);
 
@@ -292,8 +292,7 @@ class RegulatedMutationRecoveryServiceTest {
         verify(fixture.metrics).recordRegulatedMutationRecoveryOutcome("RECOVERED");
         verify(fixture.metrics, atLeastOnce()).recordRegulatedMutationRecoveryBacklog(anyLong(), any(), anyLong(), anyLong());
         verify(fixture.commandRepository).findTop100ByStateInAndUpdatedAtBefore(
-                argThat(states -> states.contains(RegulatedMutationState.FINALIZED_VISIBLE)
-                        && states.contains(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL)),
+                argThat(states -> states.contains(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL)),
                 any()
         );
     }
@@ -324,9 +323,9 @@ class RegulatedMutationRecoveryServiceTest {
         command.setAttemptedAuditId("audit-attempted");
         command.setSuccessAuditId("audit-success");
         command.setLastError("RECOVERY_REQUIRED");
-        when(fixture.commandRepository.findByIdempotencyKey("idem-1")).thenReturn(Optional.of(command));
+        when(fixture.commandRepository.findById("mutation-1")).thenReturn(Optional.of(command));
 
-        RegulatedMutationCommandInspectionResponse response = fixture.service.inspect(" idem-1 ");
+        RegulatedMutationCommandInspectionResponse response = fixture.service.inspectByCommandId(" mutation-1 ");
 
         assertThat(response.idempotencyKeyHash()).isEqualTo(RegulatedMutationIntentHasher.hash("idem-1"));
         assertThat(response.idempotencyKeyMasked()).isEqualTo("...em-1");
@@ -358,7 +357,7 @@ class RegulatedMutationRecoveryServiceTest {
     void shouldReturnNotFoundForMissingInspectionCommand() {
         Fixture fixture = new Fixture();
 
-        assertThatThrownBy(() -> fixture.service.inspect("missing"))
+        assertThatThrownBy(() -> fixture.service.inspectByCommandId("missing"))
                 .isInstanceOf(ResponseStatusException.class);
     }
 

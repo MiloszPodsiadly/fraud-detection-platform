@@ -52,7 +52,7 @@ public class MutationEvidenceConfirmationService {
             RegulatedMutationFencedCommandWriter fencedCommandWriter,
             RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof,
             RegulatedMutationTransactionRunner transactionRunner,
-            @Value("${app.audit.external-anchoring.publication.required:${app.audit.external-anchoring.enabled:false}}") boolean externalAnchorRequired,
+            @Value("${app.audit.external-anchoring.publication.required:false}") boolean externalAnchorRequired,
             @Value("${app.audit.trust-authority.signing-required:false}") boolean signatureRequired
     ) {
         this.commandRepository = commandRepository;
@@ -109,7 +109,6 @@ public class MutationEvidenceConfirmationService {
         int promoted = 0;
         List<RegulatedMutationCommandDocument> commands = commandRepository.findTop100ByStateInAndUpdatedAtBefore(
                 List.of(
-                        RegulatedMutationState.FINALIZED_VISIBLE,
                         RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
                 ),
                 java.time.Instant.now().plusSeconds(1)
@@ -148,19 +147,6 @@ public class MutationEvidenceConfirmationService {
             return 1;
         }
         if (decision.outcome() == EvidenceConfirmationOutcome.PENDING) {
-            if (command.getState() == RegulatedMutationState.FINALIZED_VISIBLE) {
-                AlertStatusProjectionResult projectionResult = transactionRunner.runLocalCommit(() -> {
-                    transition(
-                            command,
-                            RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
-                            null,
-                            null
-                    );
-                    return updateAlertOperationStatus(command, command.getPublicStatus());
-                });
-                recordSuccessfulProjection(projectionResult);
-                metrics.recordEvidenceGatedFinalizeStuckVisible();
-            }
             if (decision.reason() != null) {
                 metrics.recordEvidenceConfirmationFailed(decision.reason());
             }

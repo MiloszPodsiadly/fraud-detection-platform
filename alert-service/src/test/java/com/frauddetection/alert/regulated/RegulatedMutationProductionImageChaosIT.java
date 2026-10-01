@@ -117,10 +117,10 @@ class RegulatedMutationProductionImageChaosIT extends AbstractRegulatedMutationP
     @Test
     void productionImageKillInFinalizeRecoveryDoesNotRepeatBusinessMutation() {
         RegulatedMutationChaosScenario scenario = scenario(
-                "finalized-visible-local-commit",
-                RegulatedMutationChaosWindow.FINALIZED_VISIBLE_LOCAL_COMMIT,
-                RegulatedMutationState.FINALIZED_VISIBLE,
-                RegulatedMutationExecutionStatus.PROCESSING,
+                "finalized-evidence-pending-external-local-commit",
+                RegulatedMutationChaosWindow.FINALIZED_EVIDENCE_PENDING_EXTERNAL_LOCAL_COMMIT,
+                RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                RegulatedMutationExecutionStatus.COMPLETED,
                 command -> {
                     mutateAlert(command.getResourceId());
                     command.setResponseSnapshot(snapshot(command.getResourceId(), SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL));

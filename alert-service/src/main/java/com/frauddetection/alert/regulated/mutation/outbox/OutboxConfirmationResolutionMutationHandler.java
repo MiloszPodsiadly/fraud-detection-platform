@@ -12,6 +12,7 @@ import com.mongodb.client.result.UpdateResult;
 import org.springframework.dao.DataAccessException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -61,8 +62,7 @@ public class OutboxConfirmationResolutionMutationHandler {
         if (bankModeFailClosed && dualControlEnabled) {
             return approveResolution(record, request, actorId);
         }
-        record.setResolutionControlMode("SINGLE_CONTROL_OPERATOR_ATTESTED");
-        return applyResolution(record, request, actorId);
+        return applySingleControlResolution(record, request, actorId);
     }
 
     private TransactionalOutboxRecordDocument requestResolution(
@@ -72,18 +72,22 @@ public class OutboxConfirmationResolutionMutationHandler {
     ) {
         Instant now = Instant.now();
         ResolutionEvidenceReference evidence = request.evidenceReference();
-        record.setResolutionPending(true);
-        record.setResolutionControlMode("DUAL_CONTROL_REQUESTED");
-        record.setResolutionRequestedBy(actorId);
-        record.setResolutionRequestedAt(now);
-        record.setResolutionReason(request.reason());
-        record.setResolutionEvidenceType(evidence.type().name());
-        record.setResolutionEvidenceReference(evidence.reference());
-        record.setResolutionEvidenceVerifiedAt(evidence.verifiedAt());
-        record.setResolutionEvidenceVerifiedBy(evidence.verifiedBy());
-        record.setLastError("DUAL_CONTROL_APPROVAL_REQUIRED");
-        record.setUpdatedAt(now);
-        TransactionalOutboxRecordDocument saved = repository.save(record);
+        Instant updatedAt = nextUpdatedAt(record, now);
+        Update update = new Update()
+                .set("resolution_pending", true)
+                .set("resolution_control_mode", "DUAL_CONTROL_REQUESTED")
+                .set("resolution_requested_by", actorId)
+                .set("resolution_requested_at", now)
+                .set("resolution_request_reason", request.reason())
+                .unset("resolution_approval_reason")
+                .unset("resolution_reason")
+                .set("resolution_evidence_type", evidence.type().name())
+                .set("resolution_evidence_reference", evidence.reference())
+                .set("resolution_evidence_verified_at", evidence.verifiedAt())
+                .set("resolution_evidence_verified_by", evidence.verifiedBy())
+                .set("last_error", "DUAL_CONTROL_APPROVAL_REQUIRED")
+                .set("updated_at", updatedAt);
+        TransactionalOutboxRecordDocument saved = compareAndSet(record, false, update);
         projectSavedRecord(saved);
         return saved;
     }
@@ -96,47 +100,98 @@ public class OutboxConfirmationResolutionMutationHandler {
         if (actorId != null && actorId.equals(record.getResolutionRequestedBy())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "dual-control approval requires a distinct actor");
         }
-        record.setResolutionControlMode("DUAL_CONTROL_APPROVED");
-        record.setResolutionApprovedBy(actorId);
-        record.setResolutionApprovedAt(Instant.now());
-        record.setResolutionPending(false);
-        return applyResolution(record, request, actorId);
+        Instant now = Instant.now();
+        Update update = new Update()
+                .set("resolution_control_mode", "DUAL_CONTROL_APPROVED")
+                .set("resolution_approved_by", actorId)
+                .set("resolution_approved_at", now);
+        applyResolution(update, record, request, now);
+        TransactionalOutboxRecordDocument saved = compareAndSet(record, true, update);
+        projectSavedRecord(saved);
+        return saved;
     }
 
-    private TransactionalOutboxRecordDocument applyResolution(
+    private TransactionalOutboxRecordDocument applySingleControlResolution(
             TransactionalOutboxRecordDocument record,
             OutboxConfirmationResolutionRequest request,
             String actorId
     ) {
         Instant now = Instant.now();
+        Update update = new Update()
+                .set("resolution_control_mode", "SINGLE_CONTROL_OPERATOR_ATTESTED")
+                .set("resolution_approved_at", now)
+                .set("resolution_approved_by", actorId);
+        applyResolution(update, record, request, now);
+        TransactionalOutboxRecordDocument saved = compareAndSet(record, false, update);
+        projectSavedRecord(saved);
+        return saved;
+    }
+
+    private void applyResolution(
+            Update update,
+            TransactionalOutboxRecordDocument record,
+            OutboxConfirmationResolutionRequest request,
+            Instant now
+    ) {
         ResolutionEvidenceReference evidence = request.evidenceReference();
-        if (record.getResolutionControlMode() == null) {
-            record.setResolutionControlMode("SINGLE_CONTROL_OPERATOR_ATTESTED");
-        }
-        record.setResolutionReason(request.reason());
-        record.setResolutionEvidenceType(evidence.type().name());
-        record.setResolutionEvidenceReference(evidence.reference());
-        record.setResolutionEvidenceVerifiedAt(evidence.verifiedAt());
-        record.setResolutionEvidenceVerifiedBy(evidence.verifiedBy());
-        record.setResolutionPending(false);
-        if (record.getResolutionApprovedAt() == null) {
-            record.setResolutionApprovedAt(now);
-            record.setResolutionApprovedBy(actorId);
-        }
         TransactionalOutboxStatus status = request.resolution() == OutboxConfirmationResolution.PUBLISHED
                 ? TransactionalOutboxStatus.PUBLISHED
                 : TransactionalOutboxStatus.RECOVERY_REQUIRED;
-        record.setStatus(status);
-        record.setUpdatedAt(now);
-        record.setLeaseOwner(null);
-        record.setLeaseExpiresAt(null);
-        record.setLastError(status == TransactionalOutboxStatus.RECOVERY_REQUIRED ? "MANUAL_RECOVERY_REQUIRED" : null);
+        update.set("resolution_approval_reason", request.reason())
+                .unset("resolution_reason")
+                .set("resolution_evidence_type", evidence.type().name())
+                .set("resolution_evidence_reference", evidence.reference())
+                .set("resolution_evidence_verified_at", evidence.verifiedAt())
+                .set("resolution_evidence_verified_by", evidence.verifiedBy())
+                .set("resolution_pending", false)
+                .set("status", status)
+                .set("updated_at", nextUpdatedAt(record, now))
+                .unset("lease_owner")
+                .unset("lease_expires_at");
         if (status == TransactionalOutboxStatus.PUBLISHED) {
-            record.setPublishedAt(now);
+            update.set("published_at", now).unset("last_error");
+        } else {
+            update.unset("published_at").set("last_error", "MANUAL_RECOVERY_REQUIRED");
         }
-        TransactionalOutboxRecordDocument saved = repository.save(record);
-        projectSavedRecord(saved);
-        return saved;
+    }
+
+    private TransactionalOutboxRecordDocument compareAndSet(
+            TransactionalOutboxRecordDocument record,
+            boolean expectedResolutionPending,
+            Update update
+    ) {
+        Criteria pending = expectedResolutionPending
+                ? Criteria.where("resolution_pending").is(true)
+                : new Criteria().orOperator(
+                        Criteria.where("resolution_pending").is(false),
+                        Criteria.where("resolution_pending").exists(false)
+                );
+        Query query = Query.query(new Criteria().andOperator(
+                Criteria.where("_id").is(record.getEventId()),
+                Criteria.where("status").is(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN),
+                pending,
+                Criteria.where("updated_at").is(record.getUpdatedAt())
+        ));
+        TransactionalOutboxRecordDocument updated = mongoTemplate.findAndModify(
+                query,
+                update,
+                FindAndModifyOptions.options().returnNew(true),
+                TransactionalOutboxRecordDocument.class
+        );
+        if (updated != null) {
+            return updated;
+        }
+        TransactionalOutboxRecordDocument authoritative = repository.findById(record.getEventId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown outbox event"));
+        if (authoritative.getStatus() != TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "outbox event is not confirmation-unknown");
+        }
+        throw new ResponseStatusException(HttpStatus.CONFLICT, "outbox confirmation changed concurrently");
+    }
+
+    private Instant nextUpdatedAt(TransactionalOutboxRecordDocument record, Instant now) {
+        Instant previous = record.getUpdatedAt();
+        return previous != null && !now.isAfter(previous) ? previous.plusMillis(1) : now;
     }
 
     private void projectSavedRecord(TransactionalOutboxRecordDocument record) {

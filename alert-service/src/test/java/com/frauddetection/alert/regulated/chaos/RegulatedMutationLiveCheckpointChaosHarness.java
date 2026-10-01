@@ -466,8 +466,7 @@ public final class RegulatedMutationLiveCheckpointChaosHarness implements AutoCl
     }
 
     private boolean isFinalizedPublicStatus(SubmitDecisionOperationStatus publicStatus) {
-        return publicStatus == SubmitDecisionOperationStatus.FINALIZED_VISIBLE
-                || publicStatus == SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+        return publicStatus == SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
                 || publicStatus == SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED;
     }
 

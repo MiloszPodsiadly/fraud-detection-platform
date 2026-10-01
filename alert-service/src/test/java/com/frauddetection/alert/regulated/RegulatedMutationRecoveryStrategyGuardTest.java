@@ -3,7 +3,6 @@ package com.frauddetection.alert.regulated;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
-import com.frauddetection.alert.regulated.mutation.decisionoutbox.DecisionOutboxRecoveryStrategy;
 import com.frauddetection.alert.regulated.mutation.outbox.TransactionalOutboxRecoveryStrategy;
 import com.frauddetection.alert.regulated.mutation.trustincident.TrustIncidentRecoveryStrategy;
 import com.frauddetection.alert.trust.TrustIncidentRepository;
@@ -23,7 +22,6 @@ class RegulatedMutationRecoveryStrategyGuardTest {
         AlertRepository alertRepository = mock(AlertRepository.class);
         List<RegulatedMutationRecoveryStrategy> strategies = List.of(
                 new SubmitDecisionRecoveryStrategy(alertRepository),
-                new DecisionOutboxRecoveryStrategy(alertRepository),
                 new TransactionalOutboxRecoveryStrategy(mock(TransactionalOutboxRecordRepository.class)),
                 new FraudCaseUpdateRecoveryStrategy(mock(FraudCaseRepository.class)),
                 new TrustIncidentRecoveryStrategy(mock(TrustIncidentRepository.class))

@@ -66,11 +66,6 @@ class RegulatedMutationSafeCheckpointPolicyTest {
                 RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE,
                 RegulatedMutationLeaseRenewalReason.RECOVERY_STATE);
         assertRejected(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
-                RegulatedMutationState.FINALIZED_VISIBLE,
-                RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE,
-                RegulatedMutationLeaseRenewalReason.TERMINAL_STATE);
-        assertRejected(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                 RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE,

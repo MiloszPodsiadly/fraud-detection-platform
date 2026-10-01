@@ -581,67 +581,6 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-  /api/v1/decision-outbox/unknown-confirmations:
-    get:
-      summary: List decision outbox unknown confirmations
-      description: Requires audit:verify. Returns bounded PUBLISH_CONFIRMATION_UNKNOWN outbox rows for manual reconciliation. It never returns decision payloads, customer data, transaction payloads, or response bodies.
-      security:
-        - bearerAuth: []
-        - demoAuth: []
-      responses:
-        "200":
-          description: Unknown confirmations returned.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/UnknownConfirmationsResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-  /api/v1/decision-outbox/unknown-confirmations/{alertId}/resolve:
-    post:
-      summary: Resolve decision outbox unknown confirmation
-      description: Requires decision-outbox:reconcile. Resolves PUBLISH_CONFIRMATION_UNKNOWN as PUBLISHED or RETRY_REQUESTED with a mandatory reason. PUBLISHED requires BROKER_OFFSET evidence or equivalent broker confirmation. In bank fail-closed mode, structured evidence is mandatory and resolution is dual-control. RETRY_REQUESTED reuses the same eventId and dedupeKey; there is no blind automatic retry.
-      security:
-        - bearerAuth: []
-        - demoAuth: []
-      parameters:
-        - name: alertId
-          in: path
-          required: true
-          schema:
-            type: string
-            minLength: 1
-            maxLength: 160
-        - name: X-Idempotency-Key
-          in: header
-          required: true
-          schema:
-            type: string
-            minLength: 8
-            maxLength: 160
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ResolveOutboxConfirmationRequest"
-      responses:
-        "200":
-          description: Unknown confirmation resolved.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/UnknownConfirmation"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "409":
-          $ref: "#/components/responses/Conflict"
   /api/v1/outbox/recovery/backlog:
     get:
       summary: Inspect transactional outbox recovery backlog
@@ -723,42 +662,6 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
-  /api/v1/regulated-mutations/{idempotencyKey}:
-    get:
-      summary: Inspect one regulated mutation command by raw idempotency key
-      description: Legacy/debug compatibility endpoint. Requires regulated-mutation:recover or audit:verify. Rate-limited per actor/IP and fails closed with 503 when inspection access cannot be durably audited. Returns command state, execution status, lease metadata, evidence ids, degradation reason, last error, idempotency key hash, masked idempotency key, and snapshot presence for one idempotency key. Prefer /by-command/{commandId} or /by-idempotency-hash/{hash} for new tooling so raw idempotency keys are not placed in URLs. Operators must not paste raw idempotency keys in tickets, logs, runbooks, or dashboards. This endpoint is read-only and never exposes raw idempotency keys in the response, command payloads, response payloads, notes, customer/account/card identifiers, raw exception details, or unbounded exports.
-      security:
-        - bearerAuth: []
-        - demoAuth: []
-      parameters:
-        - name: idempotencyKey
-          in: path
-          required: true
-          schema:
-            type: string
-            minLength: 1
-            maxLength: 160
-      responses:
-        "200":
-          description: Command inspection returned.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RegulatedMutationCommandInspectionResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "429":
-          description: Inspection rate limit exceeded.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiErrorResponse"
-        "503":
-          $ref: "#/components/responses/ServiceUnavailable"
   /api/v1/regulated-mutations/by-command/{commandId}:
     get:
       summary: Inspect one regulated mutation command by command id
@@ -1906,7 +1809,7 @@ components:
       properties:
         status:
           type: string
-          enum: [AVAILABLE, PARTIAL, FAILED, IN_PROGRESS, RECOVERY_REQUIRED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED]
+          enum: [AVAILABLE, PARTIAL, FAILED, IN_PROGRESS, RECOVERY_REQUIRED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED]
         signal_count:
           type: integer
           minimum: 0
@@ -1941,7 +1844,7 @@ components:
         operation_status:
           type: string
           description: AVAILABLE for completed refresh, FAILED for failed materialization, or the current regulated command status for non-terminal replay/status responses.
-          enum: [AVAILABLE, FAILED, IN_PROGRESS, RECOVERY_REQUIRED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED]
+          enum: [AVAILABLE, FAILED, IN_PROGRESS, RECOVERY_REQUIRED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED]
         transaction_mode:
           type: string
           nullable: true
@@ -2299,101 +2202,6 @@ components:
           type: string
           minLength: 1
           maxLength: 120
-    UnknownConfirmationsResponse:
-      type: object
-      additionalProperties: false
-      required: [events]
-      properties:
-        events:
-          type: array
-          maxItems: 100
-          items:
-            $ref: "#/components/schemas/UnknownConfirmation"
-    UnknownConfirmation:
-      type: object
-      additionalProperties: false
-      required: [alert_id, event_id, dedupe_key, status, decided_at, attempts, last_attempt_at, published_at, failure_reason, resolution_pending, resolution_requested_at, resolution_requested_by, resolution_evidence_type, resolution_evidence_reference, resolution_evidence_verified_at, resolution_evidence_verified_by, resolution_approved_at, resolution_approved_by, resolution_approval_reason]
-      properties:
-        alert_id:
-          type: string
-        event_id:
-          type: string
-          nullable: true
-        dedupe_key:
-          type: string
-          nullable: true
-        status:
-          type: string
-          enum: [PUBLISH_CONFIRMATION_UNKNOWN, PUBLISHED, PENDING, IN_PROGRESS, RECOVERY_REQUIRED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED, FAILED]
-        decided_at:
-          type: string
-          format: date-time
-          nullable: true
-        attempts:
-          type: integer
-          minimum: 0
-        last_attempt_at:
-          type: string
-          format: date-time
-          nullable: true
-        published_at:
-          type: string
-          format: date-time
-          nullable: true
-        failure_reason:
-          type: string
-          nullable: true
-        resolution_pending:
-          type: boolean
-        resolution_requested_at:
-          type: string
-          format: date-time
-          nullable: true
-        resolution_requested_by:
-          type: string
-          nullable: true
-        resolution_evidence_type:
-          type: string
-          nullable: true
-          enum: [BROKER_OFFSET, EXTERNAL_ANCHOR_REFERENCE, TICKET, RUNBOOK_STEP, OTHER]
-        resolution_evidence_reference:
-          type: string
-          nullable: true
-          maxLength: 500
-        resolution_evidence_verified_at:
-          type: string
-          format: date-time
-          nullable: true
-        resolution_evidence_verified_by:
-          type: string
-          nullable: true
-        resolution_approved_at:
-          type: string
-          format: date-time
-          nullable: true
-        resolution_approved_by:
-          type: string
-          nullable: true
-        resolution_approval_reason:
-          type: string
-          nullable: true
-          maxLength: 500
-    ResolveOutboxConfirmationRequest:
-      type: object
-      additionalProperties: false
-      required: [resolution, reason]
-      properties:
-        resolution:
-          type: string
-          enum: [PUBLISHED, RETRY_REQUESTED]
-        reason:
-          type: string
-          minLength: 1
-          maxLength: 500
-        evidence_reference:
-          nullable: true
-          allOf:
-            - $ref: "#/components/schemas/ResolutionEvidenceReference"
     OutboxBacklogResponse:
       type: object
       additionalProperties: false
@@ -2537,7 +2345,7 @@ components:
           nullable: true
         operation_status:
           type: string
-          enum: [REQUESTED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED, FAILED]
+          enum: [REQUESTED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED, FAILED]
           description: Regulated mutation lifecycle status. This is distinct from the transactional outbox publication status.
     FraudCaseStatus:
       type: string
@@ -2794,7 +2602,7 @@ components:
       properties:
         operation_status:
           type: string
-          enum: [IN_PROGRESS, RECOVERY_REQUIRED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED]
+          enum: [IN_PROGRESS, RECOVERY_REQUIRED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED]
           description: Mandatory operation state. Processing, finalizing, and recovery states must not be interpreted as a committed fraud-case update.
         command_id:
           type: string
@@ -2864,7 +2672,7 @@ components:
           nullable: true
         operation_status:
           type: string
-          enum: [IN_PROGRESS, RECOVERY_REQUIRED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED]
+          enum: [IN_PROGRESS, RECOVERY_REQUIRED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED]
           description: Mandatory current-model operation state. Processing, preparation, finalizing, and recovery states are returned conservatively and must not be treated as completed success. FINALIZED_EVIDENCE_PENDING_EXTERNAL proves local finalize only; FINALIZED_EVIDENCE_CONFIRMED additionally requires configured evidence confirmation. Neither status claims external WORM storage, legal notarization, or distributed ACID.
     PagedGenericObject:
       type: object
@@ -5073,6 +4881,34 @@ components:
                 scoreBucket:
                   type: string
                   enum: [UNAVAILABLE]
+        - oneOf:
+            - type: object
+              required: [engineId, engineType, status, modelIdentity]
+              properties:
+                engineId:
+                  type: string
+                  enum: [ml.python.primary]
+                engineType:
+                  type: string
+                  enum: [ML_MODEL]
+                status:
+                  type: string
+                  enum: [AVAILABLE]
+            - allOf:
+                - type: object
+                  not:
+                    required: [modelIdentity]
+                - oneOf:
+                    - $ref: "#/components/schemas/RulesEngineIdentity"
+                    - $ref: "#/components/schemas/VelocityEngineIdentity"
+                    - allOf:
+                        - $ref: "#/components/schemas/MlEngineIdentity"
+                        - type: object
+                          required: [status]
+                          properties:
+                            status:
+                              type: string
+                              enum: [UNAVAILABLE, TIMEOUT, DEGRADED, NOT_APPLICABLE]
       properties:
         engineId:
           type: string
@@ -5102,7 +4938,7 @@ components:
             pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
         modelIdentity:
           $ref: "#/components/schemas/EngineIntelligenceMlModelIdentity"
-          description: Optional bounded ML runtime identity. Present only for AVAILABLE ml.python.primary ML_MODEL results when the producer emitted validated ML model lineage; Rules, Velocity, and non-AVAILABLE ML engines must omit it. The top-level scored transaction modelName/modelVersion fields are not the source for this nested identity.
+          description: Mandatory bounded ML runtime identity for AVAILABLE ml.python.primary ML_MODEL results. Rules, Velocity, and non-AVAILABLE ML engines must omit it. The top-level scored transaction modelName/modelVersion fields are not the source for this nested identity.
     CanonicalMlModelName:
       type: string
       minLength: 1

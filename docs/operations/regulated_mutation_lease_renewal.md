@@ -42,7 +42,7 @@ The explicit current state/checkpoint table is:
 | `EVIDENCE_PREPARED` | `AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE`, `BEFORE_EVIDENCE_GATED_FINALIZE` |
 | `FINALIZING` | `BEFORE_EVIDENCE_GATED_FINALIZE` |
 
-`REQUESTED`, `FINALIZED_VISIBLE`, finalized, rejected, failed, and `FINALIZE_RECOVERY_REQUIRED` states are not renewable. Recovery status wins over `responseSnapshot`; `execution_status` and recovery precedence remain authoritative.
+`REQUESTED`, finalized, rejected, failed, and `FINALIZE_RECOVERY_REQUIRED` states are not renewable. Recovery status wins over `responseSnapshot`; `execution_status` and recovery precedence remain authoritative.
 
 ## Budget Exhaustion
 

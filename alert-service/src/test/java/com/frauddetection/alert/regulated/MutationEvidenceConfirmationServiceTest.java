@@ -265,36 +265,6 @@ class MutationEvidenceConfirmationServiceTest {
     }
 
     @Test
-    void shouldRepairEvidenceGatedFinalizedVisibleToPendingExternalWhenEvidenceStillPending() {
-        RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
-        TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
-        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        MutationEvidenceConfirmationService service = new MutationEvidenceConfirmationService(
-                commandRepository,
-                outboxRepository,
-                metrics,
-                mock(RegulatedMutationFencedCommandWriter.class),
-                acceptedProof(),
-                false,
-                false
-        );
-        RegulatedMutationCommandDocument command = committedCommand();
-        command.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
-        command.setState(RegulatedMutationState.FINALIZED_VISIBLE);
-        when(commandRepository.findTop100ByStateInAndUpdatedAtBefore(any(), any())).thenReturn(List.of(command));
-        when(outboxRepository.findByMutationCommandId("command-1"))
-                .thenReturn(Optional.of(outbox(TransactionalOutboxStatus.PENDING)));
-
-        int promoted = service.confirmPendingEvidence(100);
-
-        assertThat(promoted).isZero();
-        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
-        assertThat(command.getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
-        verify(metrics).recordEvidenceGatedFinalizeStuckVisible();
-        verify(metrics).recordEvidenceConfirmationFailed("OUTBOX_NOT_YET_PUBLISHED");
-    }
-
-    @Test
     void shouldKeepNewerDurableStateWhenConfirmationCandidateLosesCompareAndSet() {
         RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
         TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);

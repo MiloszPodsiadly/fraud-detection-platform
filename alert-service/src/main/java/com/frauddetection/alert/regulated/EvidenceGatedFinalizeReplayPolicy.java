@@ -39,21 +39,6 @@ public class EvidenceGatedFinalizeReplayPolicy implements RegulatedMutationRepla
                     "FINALIZING_RETRY_REQUIRES_RECONCILIATION"
             );
         }
-        if (document.getState() == RegulatedMutationState.FINALIZED_VISIBLE) {
-            DurableLocalFinalizationProofResult proof = durableLocalFinalizationProof.verify(document);
-            if (document.getResponseSnapshot() != null && proof.valid()) {
-                return RegulatedMutationReplayDecision.of(
-                        RegulatedMutationReplayDecisionType.FINALIZED_VISIBLE_REPAIRABLE,
-                        RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
-                        null
-                );
-            }
-            return RegulatedMutationReplayDecision.of(
-                    RegulatedMutationReplayDecisionType.FINALIZED_VISIBLE_RECOVERY_REQUIRED,
-                    RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
-                    proof.valid() ? "RESPONSE_SNAPSHOT_MISSING" : proof.reasonCode()
-            );
-        }
         if (document.getExecutionStatus() == RegulatedMutationExecutionStatus.RECOVERY_REQUIRED
                 || document.getState() == RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
                 || document.getState() == RegulatedMutationState.FAILED) {
@@ -84,12 +69,8 @@ public class EvidenceGatedFinalizeReplayPolicy implements RegulatedMutationRepla
                 );
             }
             if (document.getResponseSnapshot() == null) {
-                RegulatedMutationReplayDecisionType decisionType =
-                        document.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED
-                                ? RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE
-                                : RegulatedMutationReplayDecisionType.FINALIZED_VISIBLE_RECOVERY_REQUIRED;
                 return RegulatedMutationReplayDecision.of(
-                        decisionType,
+                        RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE,
                         RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
                         "RESPONSE_SNAPSHOT_MISSING"
                 );

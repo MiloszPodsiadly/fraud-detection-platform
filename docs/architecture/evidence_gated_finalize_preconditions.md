@@ -43,8 +43,6 @@ transaction that applies the business aggregate mutation, writes the transaction
 snapshot, writes local success audit evidence through `RegulatedMutationLocalAuditPhaseWriter`, and stores the local
 finalize marker.
 
-`FINALIZED_VISIBLE` is retained only as a transitional repair state for interrupted current-model commands.
-
 ## Checked Preconditions
 
 `LOCAL_EVIDENCE_GATE_V1` currently checks:

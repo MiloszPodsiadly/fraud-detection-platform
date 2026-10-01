@@ -186,13 +186,13 @@ class RegulatedMutationRealAlertServiceChaosIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void shouldRecoverFinalizedVisibleAfterKillWithoutSecondBusinessMutation() {
+    void shouldRecoverPendingExternalAfterKillWithoutSecondBusinessMutation() {
         RegulatedMutationChaosScenario scenario = scenario(
-                "finalized-visible-local-commit",
-                RegulatedMutationChaosWindow.FINALIZED_VISIBLE_LOCAL_COMMIT,
-                RegulatedMutationState.FINALIZED_VISIBLE,
-                RegulatedMutationExecutionStatus.PROCESSING,
-                command -> seedFinalizedVisibleLocalCommit(command, true)
+                "finalized-evidence-pending-external-local-commit",
+                RegulatedMutationChaosWindow.FINALIZED_EVIDENCE_PENDING_EXTERNAL_LOCAL_COMMIT,
+                RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                RegulatedMutationExecutionStatus.COMPLETED,
+                command -> seedPendingExternalLocalCommit(command, true)
         );
 
         RegulatedMutationChaosResult beforeRecovery = chaosHarness.run(scenario);
@@ -294,13 +294,13 @@ class RegulatedMutationRealAlertServiceChaosIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void shouldRequireRecoveryForFinalizedVisibleBusinessStateWithoutCompleteLocalProof() {
+    void shouldRequireRecoveryForPendingExternalBusinessStateWithoutCompleteLocalProof() {
         RegulatedMutationChaosScenario scenario = scenario(
-                "finalized-visible-incomplete-proof",
-                RegulatedMutationChaosWindow.FINALIZED_VISIBLE_LOCAL_COMMIT,
-                RegulatedMutationState.FINALIZED_VISIBLE,
-                RegulatedMutationExecutionStatus.PROCESSING,
-                command -> seedFinalizedVisibleLocalCommit(command, false)
+                "finalized-evidence-pending-external-incomplete-proof",
+                RegulatedMutationChaosWindow.FINALIZED_EVIDENCE_PENDING_EXTERNAL_LOCAL_COMMIT,
+                RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                RegulatedMutationExecutionStatus.COMPLETED,
+                command -> seedPendingExternalLocalCommit(command, false)
         );
 
         RegulatedMutationChaosResult beforeRecovery = chaosHarness.run(scenario);
@@ -333,11 +333,11 @@ class RegulatedMutationRealAlertServiceChaosIT extends AbstractIntegrationTest {
     @Test
     void staleRecoveryWorkerCannotOverwriteWinnerAfterRealServiceRestart() {
         RegulatedMutationChaosScenario scenario = scenario(
-                "finalized-visible-concurrent-recovery",
-                RegulatedMutationChaosWindow.FINALIZED_VISIBLE_LOCAL_COMMIT,
-                RegulatedMutationState.FINALIZED_VISIBLE,
-                RegulatedMutationExecutionStatus.PROCESSING,
-                command -> seedFinalizedVisibleLocalCommit(command, true)
+                "finalized-evidence-pending-external-concurrent-recovery",
+                RegulatedMutationChaosWindow.FINALIZED_EVIDENCE_PENDING_EXTERNAL_LOCAL_COMMIT,
+                RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                RegulatedMutationExecutionStatus.COMPLETED,
+                command -> seedPendingExternalLocalCommit(command, true)
         );
 
         RegulatedMutationChaosResult beforeRecovery = chaosHarness.run(scenario);
@@ -509,7 +509,7 @@ class RegulatedMutationRealAlertServiceChaosIT extends AbstractIntegrationTest {
         alertRepository.save(alert);
     }
 
-    private void seedFinalizedVisibleLocalCommit(
+    private void seedPendingExternalLocalCommit(
             RegulatedMutationCommandDocument command,
             boolean includeSuccessAudit
     ) {
@@ -526,7 +526,7 @@ class RegulatedMutationRealAlertServiceChaosIT extends AbstractIntegrationTest {
             command.setSuccessAuditRecorded(true);
             command.setSuccessAuditId(insertAudit(command, AuditOutcome.SUCCESS, "success-" + command.getId()));
         }
-        command.setLeaseOwner("owner-finalized-visible-window");
+        command.setLeaseOwner("owner-pending-external-window");
         command.setLeaseExpiresAt(Instant.now().minusSeconds(5));
         command.setUpdatedAt(staleForRecovery());
         mongoTemplate.save(outboxRecord(command.getResourceId(), command.getId()));

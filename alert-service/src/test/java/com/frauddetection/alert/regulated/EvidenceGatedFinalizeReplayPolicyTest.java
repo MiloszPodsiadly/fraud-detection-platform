@@ -76,28 +76,6 @@ class EvidenceGatedFinalizeReplayPolicyTest {
     }
 
     @Test
-    void finalizedVisibleWithProofIsRepairable() {
-        RegulatedMutationCommandDocument document = document(RegulatedMutationState.FINALIZED_VISIBLE);
-        document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
-        document.setResponseSnapshot(snapshot());
-        document.setLocalCommitMarker("EVIDENCE_GATED_FINALIZED");
-        document.setSuccessAuditRecorded(true);
-        when(durableProof.verify(document)).thenReturn(DurableLocalFinalizationProofResult.accepted());
-
-        assertThat(policy.resolve(document, now).type())
-                .isEqualTo(RegulatedMutationReplayDecisionType.FINALIZED_VISIBLE_REPAIRABLE);
-    }
-
-    @Test
-    void finalizedVisibleWithoutProofRequiresRecovery() {
-        RegulatedMutationCommandDocument document = document(RegulatedMutationState.FINALIZED_VISIBLE);
-        document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
-
-        assertThat(policy.resolve(document, now).type())
-                .isEqualTo(RegulatedMutationReplayDecisionType.FINALIZED_VISIBLE_RECOVERY_REQUIRED);
-    }
-
-    @Test
     void finalizedEvidencePendingExternalWithSnapshotReplays() {
         RegulatedMutationCommandDocument document = document(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
@@ -132,7 +110,7 @@ class EvidenceGatedFinalizeReplayPolicyTest {
         RegulatedMutationReplayDecision decision = policy.resolve(document, now);
 
         assertThat(decision.type())
-                .isEqualTo(RegulatedMutationReplayDecisionType.FINALIZED_VISIBLE_RECOVERY_REQUIRED);
+                .isEqualTo(RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE);
         assertThat(decision.responseState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
         assertThat(decision.reason()).isEqualTo("RESPONSE_SNAPSHOT_MISSING");
     }

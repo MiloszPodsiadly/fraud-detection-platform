@@ -160,31 +160,6 @@ class EvidenceGatedFinalizeCoordinatorTest {
     }
 
     @Test
-    void shouldRepairFinalizedVisibleWithProofToPendingExternalWithoutRerunningMutation() {
-        Fixture fixture = new Fixture(true);
-        RegulatedMutationCommandDocument existing = evidenceGatedCommand(RegulatedMutationState.FINALIZED_VISIBLE);
-        existing.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
-        existing.setResponseSnapshot(new RegulatedMutationResponseSnapshot(
-                "alert-1",
-                AnalystDecision.CONFIRMED_FRAUD,
-                AlertStatus.RESOLVED,
-                "event-1",
-                Instant.parse("2026-05-01T00:00:00Z"),
-                SubmitDecisionOperationStatus.FINALIZED_VISIBLE
-        ));
-        existing.setLocalCommitMarker("EVIDENCE_GATED_FINALIZED");
-        existing.setSuccessAuditRecorded(true);
-        fixture.commandLookup(Optional.of(existing));
-        AtomicInteger businessWrites = new AtomicInteger();
-
-        RegulatedMutationResult<String> result = fixture.coordinator.commit(command(businessWrites));
-
-        assertThat(result.state()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
-        assertThat(businessWrites).hasValue(0);
-        assertThat(fixture.currentCommand.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
-    }
-
-    @Test
     void shouldReplayConfirmedCanonicalCommandRepeatedlyWithoutRerunningMutation() {
         Fixture fixture = new Fixture(true);
         RegulatedMutationCommandDocument existing = evidenceGatedCommand(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);

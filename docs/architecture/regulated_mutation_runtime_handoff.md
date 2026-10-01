@@ -18,6 +18,13 @@ Before deployment, run the persisted-model preflight. Missing, null, retired, un
 contracts block startup. This applies to unfinished and terminal documents in the active command collection. The
 preflight is read-only: it identifies unsupported records but does not purge, rewrite, or migrate them. Resolution
 requires an approved offline archive or migration procedure outside the application startup path.
+Commands created by the removed AlertDocument-owned decision-outbox reconciliation runtime use the historical
+`RESOLVE_DECISION_OUTBOX_CONFIRMATION` action. They are unsupported active commands and must be archived or migrated
+offline before deployment; startup never deletes, rewrites, or reinterprets them. The enum token remains readable only
+for immutable historical audit-event deserialization.
+Persisted commands in the retired `FINALIZED_VISIBLE` state are also unsupported. They require an approved offline
+archive or migration before deployment; the runtime does not deserialize, replay, or repair that state, and raw-BSON
+preflight blocks startup while any such record remains in the active collection.
 
 For recovery, inspect by command id or idempotency-key hash, preserve redaction, and use the authorized bounded recovery
 endpoint. Never edit command state, lease owner, snapshots, audit evidence, outbox records, or business aggregates by

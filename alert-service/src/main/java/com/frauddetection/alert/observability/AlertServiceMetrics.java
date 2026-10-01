@@ -330,10 +330,6 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         ).increment();
     }
 
-    public void recordEvidenceGatedFinalizeStuckVisible() {
-        counter("evidence_gated_finalize_stuck_visible_total").increment();
-    }
-
     public void recordEvidenceGatedFinalizeEnabled(AuditAction mutationType, boolean enabled) {
         AtomicInteger state = evidenceGatedFinalizeEnabled.get(mutationType);
         if (state == null) {
@@ -355,7 +351,6 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
                 AuditAction.SUBMIT_ANALYST_DECISION,
                 AuditAction.UPDATE_FRAUD_CASE,
                 AuditAction.RESOLVE_TRANSACTIONAL_OUTBOX_CONFIRMATION,
-                AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION,
                 AuditAction.ACK_TRUST_INCIDENT,
                 AuditAction.RESOLVE_TRUST_INCIDENT,
                 AuditAction.REFRESH_TRUST_INCIDENTS
@@ -1233,7 +1228,6 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     private String normalizePostCommitOperation(String operation) {
         if ("SUBMIT_ANALYST_DECISION".equals(operation)
                 || "UPDATE_FRAUD_CASE".equals(operation)
-                || "RESOLVE_DECISION_OUTBOX_CONFIRMATION".equals(operation)
                 || "ACK_TRUST_INCIDENT".equals(operation)
                 || "RESOLVE_TRUST_INCIDENT".equals(operation)) {
             return operation;
@@ -1356,7 +1350,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         }
         return switch (state.name()) {
             case "REQUESTED", "EVIDENCE_PREPARING", "EVIDENCE_PREPARED", "FINALIZING",
-                 "FINALIZED_VISIBLE", "FINALIZED_EVIDENCE_PENDING_EXTERNAL", "FINALIZED_EVIDENCE_CONFIRMED",
+                 "FINALIZED_EVIDENCE_PENDING_EXTERNAL", "FINALIZED_EVIDENCE_CONFIRMED",
                  "REJECTED_EVIDENCE_UNAVAILABLE", "FAILED_BUSINESS_VALIDATION", "FINALIZE_RECOVERY_REQUIRED" -> state.name();
             default -> "UNKNOWN";
         };
@@ -1373,7 +1367,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         return switch (reason) {
             case "ATTEMPTED_AUDIT_UNAVAILABLE", "EVIDENCE_GATED_TRANSACTION_REQUIRED",
                  "EVIDENCE_GATED_FINALIZE_FAILED", "FINALIZING_RETRY_REQUIRES_RECONCILIATION",
-                 "FINALIZED_VISIBLE_MISSING_PROOF", "SUCCESS_AUDIT_MISSING", "OUTBOX_FAILED_TERMINAL",
+                 "SUCCESS_AUDIT_MISSING", "OUTBOX_FAILED_TERMINAL",
                  "OUTBOX_RECORD_MISSING_AFTER_LOCAL_COMMIT", "OUTBOX_NOT_YET_PUBLISHED",
                  "SIGNATURE_INVALID", "BUSINESS_VALIDATION_FAILED", "TRANSACTION_CAPABILITY_UNAVAILABLE",
                  "OUTBOX_REPOSITORY_UNAVAILABLE", "OUTBOX_RECOVERY_DISABLED", "RECOVERY_STRATEGY_UNAVAILABLE",
@@ -1482,7 +1476,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         }
         return switch (state.name()) {
             case "REQUESTED", "EVIDENCE_PREPARING", "EVIDENCE_PREPARED", "FINALIZING",
-                 "FINALIZED_VISIBLE", "FINALIZED_EVIDENCE_PENDING_EXTERNAL", "FINALIZED_EVIDENCE_CONFIRMED",
+                 "FINALIZED_EVIDENCE_PENDING_EXTERNAL", "FINALIZED_EVIDENCE_CONFIRMED",
                  "REJECTED_EVIDENCE_UNAVAILABLE", "FAILED_BUSINESS_VALIDATION", "FINALIZE_RECOVERY_REQUIRED",
                  "FAILED" -> state.name();
             default -> "UNKNOWN";

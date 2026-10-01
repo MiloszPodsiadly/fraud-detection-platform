@@ -68,7 +68,6 @@ public class RegulatedMutationRecoveryService {
                                 RegulatedMutationState.EVIDENCE_PREPARED,
                                 RegulatedMutationState.FINALIZING,
                                 RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
-                                RegulatedMutationState.FINALIZED_VISIBLE,
                                 RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
                         ),
                         cutoff
@@ -138,15 +137,6 @@ public class RegulatedMutationRecoveryService {
         return commandRepository.countByExecutionStatus(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
     }
 
-    public RegulatedMutationCommandInspectionResponse inspect(String idempotencyKey) {
-        if (idempotencyKey == null || idempotencyKey.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "regulated mutation command not found");
-        }
-        return commandRepository.findByIdempotencyKey(idempotencyKey.trim())
-                .map(RegulatedMutationCommandInspectionResponse::from)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "regulated mutation command not found"));
-    }
-
     public RegulatedMutationCommandInspectionResponse inspectByCommandId(String commandId) {
         if (commandId == null || commandId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "regulated mutation command not found");
@@ -178,7 +168,6 @@ public class RegulatedMutationRecoveryService {
 
     public long evidenceConfirmationPendingCount() {
         return commandRepository.countByStateIn(List.of(
-                RegulatedMutationState.FINALIZED_VISIBLE,
                 RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
         ));
     }
@@ -202,7 +191,7 @@ public class RegulatedMutationRecoveryService {
         RegulatedMutationRecoveryOutcome outcome = switch (command.getState()) {
             case REQUESTED, EVIDENCE_PREPARING, EVIDENCE_PREPARED -> stillPending(command);
             case FINALIZING, FINALIZE_RECOVERY_REQUIRED -> recoveryRequired(command);
-            case FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL -> completeIfDurablyFinalized(command);
+            case FINALIZED_EVIDENCE_PENDING_EXTERNAL -> completeIfDurablyFinalized(command);
             case FINALIZED_EVIDENCE_CONFIRMED -> alreadyConfirmed(command);
             case FAILED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION -> failedTerminal(command);
         };
@@ -255,12 +244,9 @@ public class RegulatedMutationRecoveryService {
                 return recoveryRequired(command, command.getLastError());
             }
         }
-        RegulatedMutationState targetState = command.getState() == RegulatedMutationState.FINALIZED_VISIBLE
-                ? RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
-                : command.getState();
         transition(
                 command,
-                targetState,
+                command.getState(),
                 RegulatedMutationExecutionStatus.COMPLETED,
                 null,
                 update -> update

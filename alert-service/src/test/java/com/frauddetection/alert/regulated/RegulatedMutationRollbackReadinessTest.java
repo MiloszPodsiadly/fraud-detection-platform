@@ -134,7 +134,7 @@ class RegulatedMutationRollbackReadinessTest {
                 .thenReturn(List.of(recovery, finalizeRecovery));
         when(repository.findTop100ByExecutionStatusAndLeaseExpiresAtBeforeOrderByUpdatedAtAsc(eq(RegulatedMutationExecutionStatus.PROCESSING), any()))
                 .thenReturn(List.of());
-        when(repository.findByIdempotencyKey("idem-finalize-recovery")).thenReturn(Optional.of(finalizeRecovery));
+        when(repository.findById(finalizeRecovery.getId())).thenReturn(Optional.of(finalizeRecovery));
 
         RegulatedMutationRecoveryService service = new RegulatedMutationRecoveryService(
                 repository,
@@ -147,7 +147,7 @@ class RegulatedMutationRollbackReadinessTest {
         );
 
         RegulatedMutationRecoveryBacklogResponse backlog = service.backlog();
-        RegulatedMutationCommandInspectionResponse inspection = service.inspect("idem-finalize-recovery");
+        RegulatedMutationCommandInspectionResponse inspection = service.inspectByCommandId(finalizeRecovery.getId());
 
         assertThat(backlog.totalRecoveryRequired()).isEqualTo(2L);
         assertThat(backlog.byState()).containsEntry("FAILED", 1L)
@@ -174,7 +174,7 @@ class RegulatedMutationRollbackReadinessTest {
     @Test
     void rollbackApiSmoke_doesNotHideRecovery() throws Exception {
         RegulatedMutationRecoveryService service = mock(RegulatedMutationRecoveryService.class);
-        when(service.inspect("idem-recovery")).thenReturn(new RegulatedMutationCommandInspectionResponse(
+        when(service.inspectByCommandId("command-recovery")).thenReturn(new RegulatedMutationCommandInspectionResponse(
                 RegulatedMutationIntentHasher.hash("idem-recovery"),
                 "idem-r...very",
                 "SUBMIT_ANALYST_DECISION",
@@ -208,7 +208,7 @@ class RegulatedMutationRollbackReadinessTest {
                     return request;
                 }))
                 .build()
-                .perform(get("/api/v1/regulated-mutations/idem-recovery")
+                .perform(get("/api/v1/regulated-mutations/by-command/command-recovery")
                         .principal(new TestingAuthenticationToken("ops-admin", "n/a", "FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.execution_status").value("RECOVERY_REQUIRED"))

@@ -1,5 +1,7 @@
 package com.frauddetection.alert.outbox;
 
+import com.frauddetection.alert.audit.ResolutionEvidenceReference;
+import com.frauddetection.alert.audit.ResolutionEvidenceType;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
@@ -22,7 +24,14 @@ import org.springframework.data.mongodb.repository.support.MongoRepositoryFactor
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.AdditionalAnswers.delegatesTo;
@@ -58,6 +67,128 @@ class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
         if (databaseFactory != null) {
             databaseFactory.destroy();
         }
+    }
+
+    @Test
+    void competingSingleControlResolutionsAllowExactlyOneAuthoritativeTransition() throws Exception {
+        TransactionalOutboxRecordDocument original = confirmationUnknownRecord("event-single-race");
+        actualRepository.save(original);
+        saveAlertProjection();
+        TransactionalOutboxRecordRepository synchronizedReads = synchronizeFirstTwoReads(original.getEventId());
+        OutboxConfirmationResolutionMutationHandler handler = new OutboxConfirmationResolutionMutationHandler(
+                synchronizedReads,
+                mongoTemplate,
+                false,
+                false
+        );
+
+        List<Attempt> attempts = runConcurrently(
+                () -> attempt(() -> handler.resolve(
+                        original.getEventId(),
+                        resolution(OutboxConfirmationResolution.PUBLISHED, "publish confirmed"),
+                        "ops-1"
+                )),
+                () -> attempt(() -> handler.resolve(
+                        original.getEventId(),
+                        resolution(OutboxConfirmationResolution.RECOVERY_REQUIRED, "recovery required"),
+                        "ops-2"
+                ))
+        );
+
+        TransactionalOutboxRecordDocument persisted = actualRepository.findById(original.getEventId()).orElseThrow();
+        assertThat(attempts).filteredOn(Attempt::success).hasSize(1);
+        assertThat(attempts).filteredOn(attempt -> !attempt.success()).hasSize(1);
+        assertThat(persisted.getStatus()).isIn(
+                TransactionalOutboxStatus.PUBLISHED,
+                TransactionalOutboxStatus.RECOVERY_REQUIRED
+        );
+    }
+
+    @Test
+    void competingDualControlRequestsAllowExactlyOneRequester() throws Exception {
+        TransactionalOutboxRecordDocument original = confirmationUnknownRecord("event-request-race");
+        actualRepository.save(original);
+        saveAlertProjection();
+        TransactionalOutboxRecordRepository synchronizedReads = synchronizeFirstTwoReads(original.getEventId());
+        OutboxConfirmationResolutionMutationHandler handler = new OutboxConfirmationResolutionMutationHandler(
+                synchronizedReads,
+                mongoTemplate,
+                true,
+                true
+        );
+
+        List<Attempt> attempts = runConcurrently(
+                () -> attempt(() -> handler.resolve(
+                        original.getEventId(),
+                        resolution(OutboxConfirmationResolution.PUBLISHED, "request one"),
+                        "ops-1"
+                )),
+                () -> attempt(() -> handler.resolve(
+                        original.getEventId(),
+                        resolution(OutboxConfirmationResolution.PUBLISHED, "request two"),
+                        "ops-2"
+                ))
+        );
+
+        TransactionalOutboxRecordDocument persisted = actualRepository.findById(original.getEventId()).orElseThrow();
+        assertThat(attempts).filteredOn(Attempt::success).hasSize(1);
+        assertThat(persisted.isResolutionPending()).isTrue();
+        assertThat(persisted.getResolutionRequestedBy()).isIn("ops-1", "ops-2");
+    }
+
+    @Test
+    void competingDualControlApprovalsAllowExactlyOneApproval() throws Exception {
+        TransactionalOutboxRecordDocument original = confirmationUnknownRecord("event-approval-race");
+        actualRepository.save(original);
+        saveAlertProjection();
+        OutboxConfirmationResolutionMutationHandler requester = new OutboxConfirmationResolutionMutationHandler(
+                actualRepository,
+                mongoTemplate,
+                true,
+                true
+        );
+        requester.resolve(
+                original.getEventId(),
+                resolution(OutboxConfirmationResolution.PUBLISHED, "request reason"),
+                "requester"
+        );
+        TransactionalOutboxRecordRepository synchronizedReads = synchronizeFirstTwoReads(original.getEventId());
+        OutboxConfirmationResolutionMutationHandler approver = new OutboxConfirmationResolutionMutationHandler(
+                synchronizedReads,
+                mongoTemplate,
+                true,
+                true
+        );
+
+        List<Attempt> attempts = runConcurrently(
+                () -> attempt(() -> approver.resolve(
+                        original.getEventId(),
+                        resolution(OutboxConfirmationResolution.PUBLISHED, "approval one"),
+                        "approver-1"
+                )),
+                () -> attempt(() -> approver.resolve(
+                        original.getEventId(),
+                        resolution(OutboxConfirmationResolution.RECOVERY_REQUIRED, "approval two"),
+                        "approver-2"
+                ))
+        );
+
+        TransactionalOutboxRecordDocument persisted = actualRepository.findById(original.getEventId()).orElseThrow();
+        AlertDocument projection = mongoTemplate.findById("alert-1", AlertDocument.class);
+        assertThat(attempts).filteredOn(Attempt::success).hasSize(1);
+        assertThat(persisted.isResolutionPending()).isFalse();
+        assertThat(persisted.getResolutionApprovedBy()).isIn("approver-1", "approver-2");
+        assertThat(persisted.getResolutionRequestReason()).isEqualTo("request reason");
+        assertThat(persisted.getResolutionApprovalReason()).isIn("approval one", "approval two");
+        assertThat(projection).isNotNull();
+        assertThat(projection.getDecisionOutboxResolutionRequestReason()).isEqualTo("request reason");
+        assertThat(projection.getDecisionOutboxResolutionApprovalReason()).isIn("approval one", "approval two");
+        assertThat(projection.getDecisionOutboxResolutionRequestedAt()).isEqualTo(persisted.getResolutionRequestedAt());
+        assertThat(projection.getDecisionOutboxResolutionApprovedAt()).isEqualTo(persisted.getResolutionApprovedAt());
+        assertThat(persisted.getStatus()).isIn(
+                TransactionalOutboxStatus.PUBLISHED,
+                TransactionalOutboxStatus.RECOVERY_REQUIRED
+        );
     }
 
     @Test
@@ -190,6 +321,72 @@ class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
         return mock(TransactionalOutboxRecordRepository.class, delegatesTo(actualRepository));
     }
 
+    @SuppressWarnings("unchecked")
+    private TransactionalOutboxRecordRepository synchronizeFirstTwoReads(String eventId) {
+        TransactionalOutboxRecordRepository intercepted = interceptedRepository();
+        CyclicBarrier barrier = new CyclicBarrier(2);
+        AtomicInteger reads = new AtomicInteger();
+        doAnswer(invocation -> {
+            Optional<TransactionalOutboxRecordDocument> result = actualRepository.findById(eventId);
+            if (reads.incrementAndGet() <= 2) {
+                barrier.await();
+            }
+            return result;
+        }).when(intercepted).findById(eventId);
+        return intercepted;
+    }
+
+    private List<Attempt> runConcurrently(Callable<Attempt> first, Callable<Attempt> second) throws Exception {
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Attempt> firstResult = executor.submit(first);
+            Future<Attempt> secondResult = executor.submit(second);
+            return List.of(firstResult.get(), secondResult.get());
+        }
+    }
+
+    private Attempt attempt(Callable<TransactionalOutboxRecordDocument> operation) {
+        try {
+            return new Attempt(true, operation.call().getStatus());
+        } catch (Exception exception) {
+            return new Attempt(false, null);
+        }
+    }
+
+    private OutboxConfirmationResolutionRequest resolution(
+            OutboxConfirmationResolution resolution,
+            String reason
+    ) {
+        return new OutboxConfirmationResolutionRequest(
+                resolution,
+                reason,
+                new ResolutionEvidenceReference(
+                        ResolutionEvidenceType.BROKER_OFFSET,
+                        "topic=fraud-decisions,partition=0,offset=42",
+                        Instant.parse("2026-09-30T10:02:00Z"),
+                        "broker-verifier"
+                )
+        );
+    }
+
+    private void saveAlertProjection() {
+        AlertDocument alert = new AlertDocument();
+        alert.setAlertId("alert-1");
+        alert.setDecisionOutboxStatus("PUBLISH_CONFIRMATION_UNKNOWN");
+        alert.setDecisionOutboxAttempts(1);
+        mongoTemplate.save(alert);
+    }
+
+    private TransactionalOutboxRecordDocument confirmationUnknownRecord(String eventId) {
+        TransactionalOutboxRecordDocument record = record(
+                eventId,
+                TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN
+        );
+        record.setLeaseOwner(null);
+        record.setLeaseExpiresAt(null);
+        record.setLastError("OUTBOX_PUBLISH_CONFIRMATION_FAILED");
+        return record;
+    }
+
     private OutboxRecoveryService service(TransactionalOutboxRecordRepository repository) {
         OutboxPublisherCoordinator publisherCoordinator = mock(OutboxPublisherCoordinator.class);
         return new OutboxRecoveryService(
@@ -219,5 +416,8 @@ class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
         record.setCreatedAt(Instant.parse("2026-09-30T10:00:00Z"));
         record.setUpdatedAt(Instant.parse("2026-09-30T10:00:00Z"));
         return record;
+    }
+
+    private record Attempt(boolean success, TransactionalOutboxStatus status) {
     }
 }

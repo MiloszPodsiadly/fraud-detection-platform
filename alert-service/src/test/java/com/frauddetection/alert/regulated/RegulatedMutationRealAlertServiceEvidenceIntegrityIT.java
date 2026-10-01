@@ -87,7 +87,7 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
         );
 
         RegulatedMutationChaosResult result = chaosHarness.run(scenario);
-        chaosHarness.inspectByIdempotencyKey(scenario.idempotencyKey());
+        chaosHarness.inspectByCommandId(scenario.commandId());
 
         assertRealAlertServiceKill(result);
         assertThat(result.outboxRecords()).isOne();
@@ -103,7 +103,7 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
         );
 
         RegulatedMutationChaosResult result = chaosHarness.run(scenario);
-        chaosHarness.inspectByIdempotencyKey(scenario.idempotencyKey());
+        chaosHarness.inspectByCommandId(scenario.commandId());
 
         assertRealAlertServiceKill(result);
         assertThat(result.successAuditEvents()).isOne();
@@ -119,7 +119,7 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
         );
 
         RegulatedMutationChaosResult result = chaosHarness.run(scenario);
-        chaosHarness.inspectByIdempotencyKey(scenario.idempotencyKey());
+        chaosHarness.inspectByCommandId(scenario.commandId());
 
         assertRealAlertServiceKill(result);
         assertThat(countLocalAnchors(scenario.commandId(), RegulatedMutationAuditPhase.SUCCESS)).isOne();
@@ -161,7 +161,7 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
         );
 
         RegulatedMutationChaosResult result = chaosHarness.run(scenario);
-        chaosHarness.inspectByIdempotencyKey(scenario.idempotencyKey());
+        chaosHarness.inspectByCommandId(scenario.commandId());
 
         assertRealAlertServiceKill(result);
         assertThat(result.publicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);

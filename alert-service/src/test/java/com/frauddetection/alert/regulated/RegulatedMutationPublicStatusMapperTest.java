@@ -13,16 +13,6 @@ class RegulatedMutationPublicStatusMapperTest {
     private final RegulatedMutationPublicStatusMapper mapper = new RegulatedMutationPublicStatusMapper();
 
     @Test
-    void shouldMapEvidenceGatedFinalizedVisibleToPendingExternalPublicStatus() {
-        SubmitDecisionOperationStatus status = mapper.submitDecisionStatus(
-                RegulatedMutationState.FINALIZED_VISIBLE,
-                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
-        );
-
-        assertThat(status).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
-    }
-
-    @Test
     void shouldMapCurrentRecoveryStateToFinalizeRecoveryRequired() {
         SubmitDecisionOperationStatus status = mapper.submitDecisionStatus(
                 RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
@@ -44,7 +34,6 @@ class RegulatedMutationPublicStatusMapperTest {
             "EVIDENCE_PREPARING",
             "EVIDENCE_PREPARED",
             "FINALIZING",
-            "FINALIZED_VISIBLE",
             "FINALIZED_EVIDENCE_PENDING_EXTERNAL",
             "FINALIZED_EVIDENCE_CONFIRMED",
             "REJECTED_EVIDENCE_UNAVAILABLE",
@@ -59,10 +48,5 @@ class RegulatedMutationPublicStatusMapperTest {
         );
 
         assertThat(status).isNotNull();
-        if (state == RegulatedMutationState.FINALIZED_VISIBLE) {
-            assertThat(status).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
-        } else {
-            assertThat(status).isNotEqualTo(SubmitDecisionOperationStatus.FINALIZED_VISIBLE);
-        }
     }
 }

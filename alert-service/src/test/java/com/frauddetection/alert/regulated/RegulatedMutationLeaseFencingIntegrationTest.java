@@ -316,7 +316,7 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
     @Test
     void recoveryPersistsStateExecutionStatusAndPublicStatusInOneGuardedWrite() {
         RegulatedMutationCommandDocument command = committedCommand("idem-recovery-public-status");
-        command.setState(RegulatedMutationState.FINALIZED_VISIBLE);
+        command.setState(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         command.setPublicStatus(com.frauddetection.alert.api.SubmitDecisionOperationStatus.FINALIZING);
         mongoTemplate.save(command);
         RegulatedMutationCommandDocument recoverySnapshot = mongoTemplate.findById(
@@ -649,6 +649,8 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
                 rawCommand("command-missing-model", null, true),
                 rawCommand("command-invalid-state", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1.name(), true)
                         .append("state", "RETIRED_STATE"),
+                rawCommand("command-finalized-visible", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1.name(), true)
+                        .append("state", "FINALIZED_VISIBLE"),
                 rawCommand("command-invalid-status", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1.name(), true)
                         .append("execution_status", "RETIRED_STATUS"),
                 rawCommand("command-terminal-unsupported", "RETIRED_TERMINAL_MODEL", true)
@@ -658,7 +660,7 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
         RegulatedMutationPersistedModelPreflight.Report report =
                 new RegulatedMutationPersistedModelPreflight(mongoTemplate).inspect(10);
 
-        assertThat(report.unsupportedUnfinishedCount()).isEqualTo(6L);
+        assertThat(report.unsupportedUnfinishedCount()).isEqualTo(7L);
         assertThat(report.unsupportedTerminalCount()).isEqualTo(1L);
         assertThat(report.blocksStartup()).isTrue();
         assertThat(report.samples())
@@ -668,6 +670,7 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
                         "UNKNOWN",
                         "UNKNOWN",
                         "MISSING",
+                        "UNKNOWN_STATE",
                         "UNKNOWN_STATE",
                         "UNKNOWN_EXECUTION_STATUS",
                         "UNKNOWN"

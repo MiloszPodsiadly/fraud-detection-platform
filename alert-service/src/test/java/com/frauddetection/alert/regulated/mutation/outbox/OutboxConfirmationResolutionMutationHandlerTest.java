@@ -14,6 +14,7 @@ import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -21,6 +22,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -41,8 +44,7 @@ class OutboxConfirmationResolutionMutationHandlerTest {
     void shouldRequireDistinctSecondActorForBankModeDualControl() {
         Fixture fixture = fixture(true, true);
         TransactionalOutboxRecordDocument record = record();
-        when(fixture.repository.findById("event-1")).thenReturn(Optional.of(record));
-        when(fixture.repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        mockPersistence(fixture, record);
         when(fixture.mongoTemplate.updateFirst(any(), any(), any(Class.class))).thenReturn(UpdateResult.acknowledged(1, 1L, null));
 
         TransactionalOutboxRecordDocument requested = fixture.handler.resolve("event-1", request(), "ops-1");
@@ -67,8 +69,7 @@ class OutboxConfirmationResolutionMutationHandlerTest {
     void shouldUseExplicitSingleControlAttestationOutsideBankMode() {
         Fixture fixture = fixture(false, false);
         TransactionalOutboxRecordDocument record = record();
-        when(fixture.repository.findById("event-1")).thenReturn(Optional.of(record));
-        when(fixture.repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        mockPersistence(fixture, record);
         when(fixture.mongoTemplate.updateFirst(any(), any(), any(Class.class))).thenReturn(UpdateResult.acknowledged(1, 1L, null));
 
         TransactionalOutboxRecordDocument resolved = fixture.handler.resolve("event-1", request(), "ops-1");
@@ -89,34 +90,80 @@ class OutboxConfirmationResolutionMutationHandlerTest {
     }
 
     @Test
+    void shouldFenceSingleControlResolutionByIdentityStatusPendingStateAndFreshness() {
+        Fixture fixture = fixture(false, false);
+        TransactionalOutboxRecordDocument record = record();
+        mockPersistence(fixture, record);
+        when(fixture.mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(AlertDocument.class)))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+
+        fixture.handler.resolve("event-1", request(), "ops-1");
+
+        ArgumentCaptor<Query> queryCaptor = ArgumentCaptor.forClass(Query.class);
+        verify(fixture.mongoTemplate).findAndModify(
+                queryCaptor.capture(),
+                any(Update.class),
+                any(FindAndModifyOptions.class),
+                eq(TransactionalOutboxRecordDocument.class)
+        );
+        String query = queryCaptor.getValue().getQueryObject().toString();
+        assertThat(query)
+                .contains("event-1")
+                .contains("PUBLISH_CONFIRMATION_UNKNOWN")
+                .contains("resolution_pending")
+                .contains("updated_at");
+        verify(fixture.repository, never()).save(any());
+    }
+
+    @Test
+    void shouldFailClosedWhenConditionalTransitionLosesTheRace() {
+        Fixture fixture = fixture(false, false);
+        TransactionalOutboxRecordDocument record = record();
+        when(fixture.repository.findById("event-1")).thenReturn(Optional.of(record));
+
+        assertThatThrownBy(() -> fixture.handler.resolve("event-1", request(), "ops-1"))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("changed concurrently");
+
+        verify(fixture.repository, never()).save(any());
+        verify(fixture.mongoTemplate, never()).updateFirst(
+                any(Query.class),
+                any(Update.class),
+                eq(AlertDocument.class)
+        );
+    }
+
+    @Test
     void shouldProjectDualControlRequestFromPersistedOutboxRecord() {
         Fixture fixture = fixture(true, true);
         TransactionalOutboxRecordDocument record = record();
-        when(fixture.repository.findById("event-1")).thenReturn(Optional.of(record));
-        when(fixture.repository.save(any())).thenAnswer(invocation -> {
-            TransactionalOutboxRecordDocument saved = persistedCopy(invocation.getArgument(0));
+        mockPersistence(fixture, record, saved -> {
             saved.setAttempts(5);
             saved.setResolutionRequestedAt(REQUESTED_AT);
             saved.setResolutionRequestedBy("persisted-requester");
-            saved.setResolutionReason("persisted pending reason");
+            saved.setResolutionRequestReason("persisted pending reason");
             saved.setResolutionEvidenceType("PERSISTED_EVIDENCE");
             saved.setResolutionEvidenceReference("persisted-pending-reference");
             saved.setResolutionEvidenceVerifiedAt(APPROVED_AT);
             saved.setResolutionEvidenceVerifiedBy("persisted-verifier");
-            return saved;
         });
         when(fixture.mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(AlertDocument.class)))
                 .thenReturn(UpdateResult.acknowledged(1, 1L, null));
 
         TransactionalOutboxRecordDocument saved = fixture.handler.resolve("event-1", request(), "ops-1");
 
-        Document set = projectedAlertUpdate(fixture).getUpdateObject().get("$set", Document.class);
+        Update projected = projectedAlertUpdate(fixture);
+        Document set = projected.getUpdateObject().get("$set", Document.class);
         assertThat(set.getString("decisionOutboxStatus")).isEqualTo(DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
         assertThat(set.getInteger("decisionOutboxAttempts")).isEqualTo(saved.getAttempts());
         assertThat(set.get("decisionOutboxResolutionPending")).isEqualTo(true);
         assertThat(set.get("decisionOutboxResolutionRequestedAt")).isEqualTo(saved.getResolutionRequestedAt());
         assertThat(set.getString("decisionOutboxResolutionRequestedBy")).isEqualTo(saved.getResolutionRequestedBy());
-        assertResolutionMetadata(set, saved);
+        assertThat(set.getString("decisionOutboxResolutionRequestReason"))
+                .isEqualTo(saved.getResolutionRequestReason());
+        assertThat(projected.getUpdateObject().get("$unset", Document.class))
+                .containsKey("decisionOutboxResolutionApprovalReason");
+        assertResolutionEvidence(set, saved);
     }
 
     @Test
@@ -141,8 +188,7 @@ class OutboxConfirmationResolutionMutationHandlerTest {
     void shouldMarkPersistedOutboxRecordWhenAlertProjectionFails() {
         Fixture fixture = fixture(false, false);
         TransactionalOutboxRecordDocument record = record();
-        when(fixture.repository.findById("event-1")).thenReturn(Optional.of(record));
-        when(fixture.repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        mockPersistence(fixture, record);
         when(fixture.mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(AlertDocument.class)))
                 .thenThrow(new DataAccessResourceFailureException("projection unavailable"));
         when(fixture.mongoTemplate.updateFirst(
@@ -162,8 +208,7 @@ class OutboxConfirmationResolutionMutationHandlerTest {
         Fixture fixture = fixture(false, false);
         TransactionalOutboxRecordDocument record = record();
         record.setResourceId(null);
-        when(fixture.repository.findById("event-1")).thenReturn(Optional.of(record));
-        when(fixture.repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        mockPersistence(fixture, record);
         when(fixture.mongoTemplate.updateFirst(
                 any(Query.class),
                 any(Update.class),
@@ -209,13 +254,11 @@ class OutboxConfirmationResolutionMutationHandlerTest {
     ) {
         Fixture fixture = fixture(false, false);
         TransactionalOutboxRecordDocument record = record();
-        when(fixture.repository.findById("event-1")).thenReturn(Optional.of(record));
-        when(fixture.repository.save(any())).thenAnswer(invocation -> {
-            TransactionalOutboxRecordDocument saved = persistedCopy(invocation.getArgument(0));
+        mockPersistence(fixture, record, saved -> {
             saved.setAttempts(7);
             saved.setResolutionApprovedAt(APPROVED_AT);
             saved.setResolutionApprovedBy("persisted-approver");
-            saved.setResolutionReason("persisted resolution reason");
+            saved.setResolutionApprovalReason("persisted resolution reason");
             saved.setResolutionEvidenceType("PERSISTED_EVIDENCE");
             saved.setResolutionEvidenceReference("persisted-resolution-reference");
             saved.setResolutionEvidenceVerifiedAt(REQUESTED_AT);
@@ -223,7 +266,6 @@ class OutboxConfirmationResolutionMutationHandlerTest {
             if (saved.getStatus() == TransactionalOutboxStatus.PUBLISHED) {
                 saved.setPublishedAt(PUBLISHED_AT);
             }
-            return saved;
         });
         when(fixture.mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(AlertDocument.class)))
                 .thenReturn(UpdateResult.acknowledged(1, 1L, null));
@@ -242,7 +284,9 @@ class OutboxConfirmationResolutionMutationHandlerTest {
         assertThat(set.getInteger("decisionOutboxAttempts")).isEqualTo(saved.getAttempts());
         assertThat(set.get("decisionOutboxResolutionApprovedAt")).isEqualTo(saved.getResolutionApprovedAt());
         assertThat(set.getString("decisionOutboxResolutionApprovedBy")).isEqualTo(saved.getResolutionApprovedBy());
-        assertResolutionMetadata(set, saved);
+        assertThat(set.getString("decisionOutboxResolutionApprovalReason"))
+                .isEqualTo(saved.getResolutionApprovalReason());
+        assertResolutionEvidence(set, saved);
         assertThat(unset).containsKey("decisionOutboxResolutionPending");
         if (expectedSourceStatus == TransactionalOutboxStatus.PUBLISHED) {
             assertThat(set.get("decisionOutboxPublishedAt")).isEqualTo(saved.getPublishedAt());
@@ -251,6 +295,62 @@ class OutboxConfirmationResolutionMutationHandlerTest {
             assertThat(set)
                     .containsEntry("decisionOutboxLastError", "MANUAL_RECOVERY_REQUIRED")
                     .containsEntry("decisionOutboxFailureReason", "MANUAL_RECOVERY_REQUIRED");
+        }
+    }
+
+    private void mockPersistence(Fixture fixture, TransactionalOutboxRecordDocument initial) {
+        mockPersistence(fixture, initial, ignored -> { });
+    }
+
+    private void mockPersistence(
+            Fixture fixture,
+            TransactionalOutboxRecordDocument initial,
+            Consumer<TransactionalOutboxRecordDocument> persistedCustomizer
+    ) {
+        AtomicReference<TransactionalOutboxRecordDocument> state = new AtomicReference<>(persistedCopy(initial));
+        when(fixture.repository.findById("event-1")).thenAnswer(invocation -> Optional.of(persistedCopy(state.get())));
+        when(fixture.mongoTemplate.findAndModify(
+                any(Query.class),
+                any(Update.class),
+                any(FindAndModifyOptions.class),
+                eq(TransactionalOutboxRecordDocument.class)
+        )).thenAnswer(invocation -> {
+            TransactionalOutboxRecordDocument saved = persistedCopy(state.get());
+            applyUpdate(saved, invocation.getArgument(1));
+            persistedCustomizer.accept(saved);
+            state.set(persistedCopy(saved));
+            return saved;
+        });
+    }
+
+    private void applyUpdate(TransactionalOutboxRecordDocument target, Update update) {
+        Document updateObject = update.getUpdateObject();
+        Document set = updateObject.get("$set", Document.class);
+        Document unset = updateObject.get("$unset", Document.class);
+        if (set != null) {
+            if (set.containsKey("status")) target.setStatus((TransactionalOutboxStatus) set.get("status"));
+            if (set.containsKey("resolution_pending")) target.setResolutionPending(set.getBoolean("resolution_pending"));
+            if (set.containsKey("resolution_control_mode")) target.setResolutionControlMode(set.getString("resolution_control_mode"));
+            if (set.containsKey("resolution_requested_by")) target.setResolutionRequestedBy(set.getString("resolution_requested_by"));
+            if (set.containsKey("resolution_requested_at")) target.setResolutionRequestedAt((Instant) set.get("resolution_requested_at"));
+            if (set.containsKey("resolution_request_reason")) target.setResolutionRequestReason(set.getString("resolution_request_reason"));
+            if (set.containsKey("resolution_approval_reason")) target.setResolutionApprovalReason(set.getString("resolution_approval_reason"));
+            if (set.containsKey("resolution_evidence_type")) target.setResolutionEvidenceType(set.getString("resolution_evidence_type"));
+            if (set.containsKey("resolution_evidence_reference")) target.setResolutionEvidenceReference(set.getString("resolution_evidence_reference"));
+            if (set.containsKey("resolution_evidence_verified_at")) target.setResolutionEvidenceVerifiedAt((Instant) set.get("resolution_evidence_verified_at"));
+            if (set.containsKey("resolution_evidence_verified_by")) target.setResolutionEvidenceVerifiedBy(set.getString("resolution_evidence_verified_by"));
+            if (set.containsKey("resolution_approved_by")) target.setResolutionApprovedBy(set.getString("resolution_approved_by"));
+            if (set.containsKey("resolution_approved_at")) target.setResolutionApprovedAt((Instant) set.get("resolution_approved_at"));
+            if (set.containsKey("last_error")) target.setLastError(set.getString("last_error"));
+            if (set.containsKey("published_at")) target.setPublishedAt((Instant) set.get("published_at"));
+            if (set.containsKey("updated_at")) target.setUpdatedAt((Instant) set.get("updated_at"));
+        }
+        if (unset != null) {
+            if (unset.containsKey("lease_owner")) target.setLeaseOwner(null);
+            if (unset.containsKey("lease_expires_at")) target.setLeaseExpiresAt(null);
+            if (unset.containsKey("last_error")) target.setLastError(null);
+            if (unset.containsKey("published_at")) target.setPublishedAt(null);
+            if (unset.containsKey("resolution_approval_reason")) target.setResolutionApprovalReason(null);
         }
     }
 
@@ -269,7 +369,8 @@ class OutboxConfirmationResolutionMutationHandlerTest {
         saved.setResolutionControlMode(source.getResolutionControlMode());
         saved.setResolutionRequestedAt(source.getResolutionRequestedAt());
         saved.setResolutionRequestedBy(source.getResolutionRequestedBy());
-        saved.setResolutionReason(source.getResolutionReason());
+        saved.setResolutionRequestReason(source.getResolutionRequestReason());
+        saved.setResolutionApprovalReason(source.getResolutionApprovalReason());
         saved.setResolutionEvidenceType(source.getResolutionEvidenceType());
         saved.setResolutionEvidenceReference(source.getResolutionEvidenceReference());
         saved.setResolutionEvidenceVerifiedAt(source.getResolutionEvidenceVerifiedAt());
@@ -280,8 +381,7 @@ class OutboxConfirmationResolutionMutationHandlerTest {
         return saved;
     }
 
-    private void assertResolutionMetadata(Document set, TransactionalOutboxRecordDocument saved) {
-        assertThat(set.getString("decisionOutboxResolutionApprovalReason")).isEqualTo(saved.getResolutionReason());
+    private void assertResolutionEvidence(Document set, TransactionalOutboxRecordDocument saved) {
         assertThat(set.getString("decisionOutboxResolutionEvidenceType")).isEqualTo(saved.getResolutionEvidenceType());
         assertThat(set.getString("decisionOutboxResolutionEvidenceReference"))
                 .isEqualTo(saved.getResolutionEvidenceReference());
