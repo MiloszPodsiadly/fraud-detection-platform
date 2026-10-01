@@ -620,7 +620,7 @@ paths:
   /api/v1/outbox/{eventId}/resolve-confirmation:
     post:
       summary: Resolve transactional outbox confirmation-unknown state
-      description: Requires outbox:resolve and X-Idempotency-Key. Resolves a PUBLISH_CONFIRMATION_UNKNOWN transactional outbox record as PUBLISHED or RECOVERY_REQUIRED through the regulated mutation coordinator with mandatory reason and structured evidence. The response contains safe metadata only and does not expose the event payload. Resolution is an operational evidence action, not proof of exactly-once delivery or legal notarization.
+      description: Requires outbox:resolve and X-Idempotency-Key. Resolves a PUBLISH_CONFIRMATION_UNKNOWN transactional outbox record as PUBLISHED or RECOVERY_REQUIRED through the regulated mutation coordinator with mandatory reason and structured evidence. In bank dual-control mode the first call creates an immutable pending intent and returns its server-assigned resolution_request_id; approval must send that value as pending_request_id and must use the same resolution. Requester and approver evidence remain separately persisted. The response contains safe metadata only and does not expose the event payload. Resolution is an operational evidence action, not proof of exactly-once delivery or legal notarization.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1754,7 +1754,8 @@ components:
           description: Broker delivery posture. AT_LEAST_ONCE requires consumer dedupe and is not exactly-once delivery.
         evidence_confirmation_mode:
           type: string
-          enum: [ENABLED, DISABLED]
+          enum: [ENABLED_PROVENANCE_AWARE, DISABLED]
+          description: ENABLED_PROVENANCE_AWARE means broker acknowledgement and manual operator attestation remain distinct; it does not claim independent broker verification for manual resolution.
         open_critical_incident_count:
           type: integer
           format: int64
@@ -2205,7 +2206,7 @@ components:
     OutboxBacklogResponse:
       type: object
       additionalProperties: false
-      required: [pending_count, processing_count, publish_attempted_count, confirmation_unknown_count, failed_retryable_count, failed_terminal_count, recovery_required_count, projection_mismatch_count, oldest_pending_age_seconds]
+      required: [pending_count, processing_count, publish_attempted_count, confirmation_unknown_count, failed_retryable_count, failed_terminal_count, recovery_required_count, projection_mismatch_count, projection_reconciliation_pending_count, oldest_pending_age_seconds]
       properties:
         pending_count:
           type: integer
@@ -2239,6 +2240,11 @@ components:
           type: integer
           format: int64
           minimum: 0
+        projection_reconciliation_pending_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Durable source-to-projection reconciliation work, independent of diagnostic mismatch markers.
         oldest_pending_age_seconds:
           type: integer
           format: int64
@@ -2270,6 +2276,11 @@ components:
         resolution:
           type: string
           enum: [PUBLISHED, RECOVERY_REQUIRED]
+        pending_request_id:
+          type: string
+          maxLength: 100
+          nullable: true
+          description: Must be omitted when creating a dual-control request and must equal the server-assigned pending request identifier when approving it.
         reason:
           type: string
           minLength: 1
@@ -2279,7 +2290,7 @@ components:
     OutboxRecordResponse:
       type: object
       additionalProperties: false
-      required: [event_id, dedupe_key, mutation_command_id, resource_type, resource_id, event_type, payload_hash, status, attempts, last_error, published_at, confirmation_unknown_at, updated_at, resolution_pending, resolution_control_mode, resolution_requested_by, resolution_requested_at, resolution_approved_by, resolution_approved_at, operation_status]
+      required: [event_id, dedupe_key, mutation_command_id, resource_type, resource_id, event_type, payload_hash, status, attempts, last_error, published_at, publication_confirmation_provenance, confirmation_unknown_at, updated_at, resolution_pending, resolution_control_mode, resolution_request_id, resolution_proposed_outcome, resolution_requested_by, resolution_requested_at, resolution_approved_by, resolution_approved_at, operation_status]
       properties:
         event_id:
           type: string
@@ -2314,6 +2325,11 @@ components:
           type: string
           format: date-time
           nullable: true
+        publication_confirmation_provenance:
+          type: string
+          nullable: true
+          enum: [BROKER_ACKNOWLEDGED, MANUAL_DUAL_CONTROL_ATTESTED, MANUAL_SINGLE_CONTROL_ATTESTED]
+          description: Explains why PUBLISHED is authoritative. BROKER_ACKNOWLEDGED records completion of the configured producer send; manual values are operator attestations and are not independent Kafka verification. Only complete dual-control manual attestation can satisfy regulated evidence confirmation; single-control attestation remains pending.
         confirmation_unknown_at:
           type: string
           format: date-time
@@ -2329,6 +2345,15 @@ components:
           nullable: true
           enum: [SINGLE_CONTROL_OPERATOR_ATTESTED, DUAL_CONTROL_REQUESTED, DUAL_CONTROL_APPROVED]
           description: Outside bank mode this is single-control operator attestation. In bank mode request and approval require distinct authenticated operators.
+        resolution_request_id:
+          type: string
+          nullable: true
+          description: Server-assigned immutable identifier that an approving operator must reference.
+        resolution_proposed_outcome:
+          type: string
+          nullable: true
+          enum: [PUBLISHED, RECOVERY_REQUIRED]
+          description: Immutable outcome proposed by the requester; approval cannot replace it.
         resolution_requested_by:
           type: string
           nullable: true

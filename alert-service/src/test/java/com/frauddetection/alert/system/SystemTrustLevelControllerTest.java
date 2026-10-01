@@ -64,7 +64,7 @@ class SystemTrustLevelControllerTest {
         assertThat(response.transactionMode()).isEqualTo("REQUIRED");
         assertThat(response.transactionCapabilityStatus()).isEqualTo("LOCAL_MONGO_TRANSACTION_REQUIRED");
         assertThat(response.outboxDeliveryMode()).isEqualTo("TRANSACTIONAL_OUTBOX_AT_LEAST_ONCE");
-        assertThat(response.evidenceConfirmationMode()).isEqualTo("ENABLED");
+        assertThat(response.evidenceConfirmationMode()).isEqualTo("ENABLED_PROVENANCE_AWARE");
         assertThat(response.evidenceConfirmationPendingCount()).isZero();
     }
 

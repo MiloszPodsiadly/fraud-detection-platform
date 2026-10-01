@@ -116,7 +116,7 @@ class SensitiveReadEndpointFailClosedControllerTest {
     void shouldFailClosedWhenOutboxBacklogAuditFailsInBankMode() {
         failAudit();
         OutboxRecoveryService service = mock(OutboxRecoveryService.class);
-        when(service.backlog()).thenReturn(new OutboxBacklogResponse(1, 0, 0, 0, 0, 0, 0, 0, 60L));
+        when(service.backlog()).thenReturn(new OutboxBacklogResponse(1, 0, 0, 0, 0, 0, 0, 0, 0, 60L));
         OutboxRecoveryController controller = new OutboxRecoveryController(service, sensitiveReadAuditService);
 
         assertFailClosed(() -> controller.backlog(request));

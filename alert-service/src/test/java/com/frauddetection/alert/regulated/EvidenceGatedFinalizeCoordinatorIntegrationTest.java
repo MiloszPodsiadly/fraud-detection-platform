@@ -15,6 +15,8 @@ import com.frauddetection.alert.audit.AuditEventRepository;
 import com.frauddetection.alert.audit.AuditFailureCategory;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
+import com.frauddetection.alert.audit.ResolutionEvidenceReference;
+import com.frauddetection.alert.audit.ResolutionEvidenceType;
 import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.audit.PersistentAuditEventPublisher;
 import com.frauddetection.alert.audit.RegulatedMutationLocalAuditPhaseWriter;
@@ -22,13 +24,23 @@ import com.frauddetection.alert.audit.external.ExternalAuditAnchorPublisher;
 import com.frauddetection.alert.mapper.AlertDocumentMapper;
 import com.frauddetection.alert.mapper.FraudDecisionEventMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.outbox.OutboxConfirmationResolution;
+import com.frauddetection.alert.outbox.OutboxConfirmationResolutionRequest;
+import com.frauddetection.alert.outbox.OutboxPublicationConfirmationProvenance;
+import com.frauddetection.alert.outbox.OutboxPublisherCoordinator;
+import com.frauddetection.alert.outbox.OutboxRecordResponse;
+import com.frauddetection.alert.outbox.OutboxRecoveryService;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
+import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.regulated.mutation.submitdecision.SubmitDecisionMutationHandler;
+import com.frauddetection.alert.regulated.mutation.outbox.OutboxConfirmationResolutionMutationHandler;
+import com.frauddetection.alert.regulated.mutation.outbox.TransactionalOutboxRecoveryStrategy;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.AnalystDecisionStatusMapper;
+import com.frauddetection.alert.service.DecisionOutboxStatus;
 import com.frauddetection.alert.service.DecisionOutboxWriter;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
@@ -181,7 +193,10 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                 transactionRunner,
                 provider(outboxRepository),
                 provider(alertRepository),
-                List.of(new SubmitDecisionRecoveryStrategy(alertRepository)),
+                List.of(
+                        new SubmitDecisionRecoveryStrategy(alertRepository),
+                        new TransactionalOutboxRecoveryStrategy(outboxRepository)
+                ),
                 true
         );
         EvidenceGatedFinalizeExecutor evidenceGatedFinalizeExecutor = new EvidenceGatedFinalizeExecutor(
@@ -226,7 +241,10 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                 transactionRunner,
                 provider(outboxRepository),
                 provider(alertRepository),
-                List.of(new SubmitDecisionRecoveryStrategy(alertRepository)),
+                List.of(
+                        new SubmitDecisionRecoveryStrategy(alertRepository),
+                        new TransactionalOutboxRecoveryStrategy(outboxRepository)
+                ),
                 true
         );
         EvidenceGatedFinalizeExecutor evidenceGatedFinalizeExecutor = new EvidenceGatedFinalizeExecutor(
@@ -458,6 +476,130 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
     }
 
     @Test
+    void competingOutboxApprovalCommandsCommitExactlyOneDurableResolution() throws Exception {
+        String eventId = "outbox-coordinator-race-event";
+        String alertId = "outbox-coordinator-race-alert";
+        alertRepository.save(alertProjection(alertId, eventId));
+        outboxRepository.save(confirmationUnknownRecord(eventId, alertId));
+        coordinator = coordinatorWithPersistentAudit(
+                commandRepository,
+                new RegulatedMutationTransactionRunner(
+                        RegulatedMutationTransactionMode.REQUIRED,
+                        new TransactionTemplate(new MongoTransactionManager(databaseFactory))
+                ),
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                localAuditPhaseWriter
+        );
+        OutboxRecoveryService service = outboxRecoveryService(coordinator);
+
+        OutboxRecordResponse pending = service.resolveConfirmation(
+                eventId,
+                resolutionRequest(null, "request reason", "request-verifier", "offset=40"),
+                "requester",
+                "outbox-request-idempotency"
+        );
+        assertThat(pending.resolutionPending()).isTrue();
+        assertThat(pending.resolutionRequestId()).isNotBlank();
+
+        CountDownLatch start = new CountDownLatch(1);
+        List<ApprovalAttempt> attempts;
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Future<ApprovalAttempt> first = executor.submit(() -> approveOutbox(
+                    start,
+                    service,
+                    eventId,
+                    pending.resolutionRequestId(),
+                    "outbox-approval-a",
+                    "approver-a",
+                    "approval reason a",
+                    "offset=41"
+            ));
+            Future<ApprovalAttempt> second = executor.submit(() -> approveOutbox(
+                    start,
+                    service,
+                    eventId,
+                    pending.resolutionRequestId(),
+                    "outbox-approval-b",
+                    "approver-b",
+                    "approval reason b",
+                    "offset=42"
+            ));
+            start.countDown();
+            attempts = List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS));
+        }
+
+        ApprovalAttempt winner = attempts.stream().filter(ApprovalAttempt::succeeded).findFirst().orElseThrow();
+        ApprovalAttempt loser = attempts.stream().filter(attempt -> !attempt.succeeded()).findFirst().orElseThrow();
+        assertThat(attempts).filteredOn(ApprovalAttempt::succeeded).hasSize(1);
+        assertThat(loser.failure()).isNotNull();
+
+        TransactionalOutboxRecordDocument source = outboxRepository.findById(eventId).orElseThrow();
+        assertThat(source.getStatus()).isEqualTo(TransactionalOutboxStatus.PUBLISHED);
+        assertThat(source.getPublicationConfirmationProvenance())
+                .isEqualTo(OutboxPublicationConfirmationProvenance.MANUAL_DUAL_CONTROL_ATTESTED);
+        assertThat(source.getResolutionRequestId()).isEqualTo(pending.resolutionRequestId());
+        assertThat(source.getResolutionProposedOutcome()).isEqualTo(OutboxConfirmationResolution.PUBLISHED.name());
+        assertThat(source.getResolutionRequestedBy()).isEqualTo("requester");
+        assertThat(source.getResolutionRequestReason()).isEqualTo("request reason");
+        assertThat(source.getResolutionApprovedBy()).isEqualTo(winner.actorId());
+        assertThat(source.getResolutionApprovalReason()).isEqualTo(winner.reason());
+
+        RegulatedMutationCommandDocument winningCommand =
+                commandRepository.findByIdempotencyKey(winner.idempotencyKey()).orElseThrow();
+        RegulatedMutationCommandDocument losingCommand =
+                commandRepository.findByIdempotencyKey(loser.idempotencyKey()).orElseThrow();
+        assertThat(winningCommand.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        assertThat(winningCommand.isSuccessAuditRecorded()).isTrue();
+        assertThat(winningCommand.getResponseSnapshot()).isNotNull();
+        assertThat(countAudit(winningCommand.getId(), RegulatedMutationAuditPhase.SUCCESS)).isEqualTo(1);
+        assertThat(losingCommand.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(losingCommand.isSuccessAuditRecorded()).isFalse();
+        assertThat(losingCommand.getResponseSnapshot()).isNull();
+        assertThat(countAudit(losingCommand.getId(), RegulatedMutationAuditPhase.SUCCESS)).isZero();
+        assertThat(countAudit(losingCommand.getId(), RegulatedMutationAuditPhase.FAILED)).isEqualTo(1);
+
+        MongoRegulatedMutationCoordinator restartedCoordinator = coordinatorWithPersistentAudit(
+                commandRepository,
+                new RegulatedMutationTransactionRunner(
+                        RegulatedMutationTransactionMode.REQUIRED,
+                        new TransactionTemplate(new MongoTransactionManager(databaseFactory))
+                ),
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                localAuditPhaseWriter
+        );
+        OutboxRecordResponse replay = outboxRecoveryService(restartedCoordinator).resolveConfirmation(
+                eventId,
+                resolutionRequest(
+                        pending.resolutionRequestId(),
+                        winner.reason(),
+                        winner.actorId(),
+                        winner.evidenceReference()
+                ),
+                winner.actorId(),
+                winner.idempotencyKey()
+        );
+        assertThat(replay.status()).isEqualTo(TransactionalOutboxStatus.PUBLISHED.name());
+        assertThat(replay.resolutionRequestId()).isEqualTo(pending.resolutionRequestId());
+        assertThat(replay.resolutionProposedOutcome()).isEqualTo(OutboxConfirmationResolution.PUBLISHED.name());
+
+        TransactionalOutboxRecordDocument afterRestart = outboxRepository.findById(eventId).orElseThrow();
+        AlertDocument projection = alertRepository.findById(alertId).orElseThrow();
+        assertThat(afterRestart.getProjectionRevision()).isEqualTo(source.getProjectionRevision());
+        assertThat(afterRestart.getResolutionApprovedBy()).isEqualTo(winner.actorId());
+        assertThat(projection.getDecisionOutboxEventId()).isEqualTo(eventId);
+        assertThat(projection.getDecisionOutboxProjectionRevision()).isEqualTo(afterRestart.getProjectionRevision());
+        assertThat(projection.getDecisionOutboxResolutionRequestId()).isEqualTo(pending.resolutionRequestId());
+        assertThat(projection.getDecisionOutboxResolutionProposedOutcome())
+                .isEqualTo(OutboxConfirmationResolution.PUBLISHED.name());
+        assertThat(projection.getDecisionOutboxResolutionRequestedBy()).isEqualTo("requester");
+        assertThat(projection.getDecisionOutboxResolutionRequestReason()).isEqualTo("request reason");
+        assertThat(projection.getDecisionOutboxResolutionApprovedBy()).isEqualTo(winner.actorId());
+        assertThat(projection.getDecisionOutboxResolutionApprovalReason()).isEqualTo(winner.reason());
+        assertThat(projection.getDecisionOutboxPublicationConfirmationProvenance())
+                .isEqualTo(OutboxPublicationConfirmationProvenance.MANUAL_DUAL_CONTROL_ATTESTED.name());
+    }
+
+    @Test
     void shouldKeepAuditChainContinuousUnderConcurrentFinalizations() throws Exception {
         alertRepository.save(alert("alert-concurrent-a"));
         alertRepository.save(alert("alert-concurrent-b"));
@@ -662,6 +804,92 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         );
     }
 
+    private OutboxRecoveryService outboxRecoveryService(RegulatedMutationCoordinator mutationCoordinator) {
+        return new OutboxRecoveryService(
+                outboxRepository,
+                mongoTemplate,
+                mock(OutboxPublisherCoordinator.class),
+                mutationCoordinator,
+                new OutboxConfirmationResolutionMutationHandler(outboxRepository, mongoTemplate, true, true),
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                Duration.ofMinutes(2)
+        );
+    }
+
+    private ApprovalAttempt approveOutbox(
+            CountDownLatch start,
+            OutboxRecoveryService service,
+            String eventId,
+            String pendingRequestId,
+            String idempotencyKey,
+            String actorId,
+            String reason,
+            String evidenceReference
+    ) throws InterruptedException {
+        assertThat(start.await(5, TimeUnit.SECONDS)).isTrue();
+        try {
+            OutboxRecordResponse response = service.resolveConfirmation(
+                    eventId,
+                    resolutionRequest(pendingRequestId, reason, actorId, evidenceReference),
+                    actorId,
+                    idempotencyKey
+            );
+            return new ApprovalAttempt(idempotencyKey, actorId, reason, evidenceReference, response, null);
+        } catch (RuntimeException failure) {
+            return new ApprovalAttempt(idempotencyKey, actorId, reason, evidenceReference, null, failure);
+        }
+    }
+
+    private OutboxConfirmationResolutionRequest resolutionRequest(
+            String pendingRequestId,
+            String reason,
+            String verifiedBy,
+            String evidenceReference
+    ) {
+        Instant verifiedAt = pendingRequestId == null
+                ? Instant.parse("2026-10-01T08:00:00Z")
+                : Instant.parse("2026-10-01T09:00:00Z");
+        return new OutboxConfirmationResolutionRequest(
+                OutboxConfirmationResolution.PUBLISHED,
+                pendingRequestId,
+                reason,
+                new ResolutionEvidenceReference(
+                        ResolutionEvidenceType.BROKER_OFFSET,
+                        evidenceReference,
+                        verifiedAt,
+                        verifiedBy
+                )
+        );
+    }
+
+    private TransactionalOutboxRecordDocument confirmationUnknownRecord(String eventId, String alertId) {
+        Instant now = Instant.parse("2026-10-01T07:00:00Z");
+        TransactionalOutboxRecordDocument record = new TransactionalOutboxRecordDocument();
+        record.setEventId(eventId);
+        record.setDedupeKey("dedupe-" + eventId);
+        record.setMutationCommandId("source-command");
+        record.setResourceType(AuditResourceType.ALERT.name());
+        record.setResourceId(alertId);
+        record.setEventType("FRAUD_DECISION");
+        record.setPayloadHash("payload-hash");
+        record.setStatus(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
+        record.setAttempts(1);
+        record.setProjectionRevision(0L);
+        record.setConfirmationUnknownAt(now);
+        record.setCreatedAt(now);
+        record.setUpdatedAt(now);
+        return record;
+    }
+
+    private AlertDocument alertProjection(String alertId, String eventId) {
+        AlertDocument document = alert(alertId);
+        document.setDecisionOutboxEventId(eventId);
+        document.setDecisionOutboxProjectionRevision(0L);
+        document.setDecisionOutboxStatus(DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
+        document.setDecisionOutboxAttempts(1);
+        return document;
+    }
+
     private AlertDocument alert(String alertId) {
         AlertDocument document = new AlertDocument();
         document.setAlertId(alertId);
@@ -675,6 +903,19 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         document.setFraudScore(0.91d);
         document.setFeatureSnapshot(Map.of("velocity", 3));
         return document;
+    }
+
+    private record ApprovalAttempt(
+            String idempotencyKey,
+            String actorId,
+            String reason,
+            String evidenceReference,
+            OutboxRecordResponse response,
+            RuntimeException failure
+    ) {
+        boolean succeeded() {
+            return response != null;
+        }
     }
 
     private String failureDiagnostics(List<Throwable> failures) {

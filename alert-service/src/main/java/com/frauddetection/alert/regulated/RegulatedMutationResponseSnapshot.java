@@ -130,6 +130,8 @@ public record RegulatedMutationResponseSnapshot(
         Instant outboxUpdatedAt,
         @JsonProperty("outbox_resolution_control_mode")
         String outboxResolutionControlMode,
+        @JsonProperty("outbox_publication_evidence")
+        OutboxPublicationEvidence outboxPublicationEvidence,
         @JsonProperty("outbox_operation_status")
         String outboxOperationStatus
 ) {
@@ -148,7 +150,7 @@ public record RegulatedMutationResponseSnapshot(
                 null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
                 null,
-                null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null);
     }
 
     public RegulatedMutationResponseSnapshot(
@@ -187,7 +189,7 @@ public record RegulatedMutationResponseSnapshot(
                 null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
                 null,
-                null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null);
     }
 
     private RegulatedMutationResponseSnapshot(
@@ -223,6 +225,7 @@ public record RegulatedMutationResponseSnapshot(
             Instant outboxConfirmationUnknownAt,
             Instant outboxUpdatedAt,
             String outboxResolutionControlMode,
+            OutboxPublicationEvidence outboxPublicationEvidence,
             String outboxOperationStatus
     ) {
         this(alertId, decision, resultingStatus, decisionEventId, decidedAt, operationStatus,
@@ -235,7 +238,8 @@ public record RegulatedMutationResponseSnapshot(
                 null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
                 null,
                 outboxMutationCommandId, outboxResourceType, outboxEventType, outboxPayloadHash,
-                outboxConfirmationUnknownAt, outboxUpdatedAt, outboxResolutionControlMode, outboxOperationStatus);
+                outboxConfirmationUnknownAt, outboxUpdatedAt, outboxResolutionControlMode,
+                outboxPublicationEvidence, outboxOperationStatus);
     }
 
     public static RegulatedMutationResponseSnapshot from(SubmitAnalystDecisionResponse response) {
@@ -289,6 +293,11 @@ public record RegulatedMutationResponseSnapshot(
                 response.confirmationUnknownAt(),
                 response.updatedAt(),
                 response.resolutionControlMode(),
+                new OutboxPublicationEvidence(
+                        response.resolutionRequestId(),
+                        response.resolutionProposedOutcome(),
+                        response.publicationConfirmationProvenance()
+                ),
                 response.operationStatus()
         );
     }
@@ -306,16 +315,26 @@ public record RegulatedMutationResponseSnapshot(
                 outboxAttempts == null ? ZERO : outboxAttempts,
                 outboxFailureReason,
                 outboxPublishedAt,
+                outboxPublicationEvidence == null ? null : outboxPublicationEvidence.confirmationProvenance(),
                 outboxConfirmationUnknownAt,
                 outboxUpdatedAt,
                 outboxResolutionPending == null ? false : outboxResolutionPending,
                 outboxResolutionControlMode,
+                outboxPublicationEvidence == null ? null : outboxPublicationEvidence.requestId(),
+                outboxPublicationEvidence == null ? null : outboxPublicationEvidence.proposedOutcome(),
                 outboxResolutionRequestedBy,
                 outboxResolutionRequestedAt,
                 outboxResolutionApprovedBy,
                 outboxResolutionApprovedAt,
                 outboxOperationStatus
         );
+    }
+
+    public record OutboxPublicationEvidence(
+            @JsonProperty("request_id") String requestId,
+            @JsonProperty("proposed_outcome") String proposedOutcome,
+            @JsonProperty("confirmation_provenance") String confirmationProvenance
+    ) {
     }
 
     public static RegulatedMutationResponseSnapshot fromFraudCase(FraudCaseDocument document) {
@@ -331,7 +350,7 @@ public record RegulatedMutationResponseSnapshot(
                 document.getUpdatedAt(),
                 null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
                 null,
-                null, null, null, null, null, null, null, null
+                null, null, null, null, null, null, null, null, null
         );
     }
 
@@ -361,7 +380,7 @@ public record RegulatedMutationResponseSnapshot(
                     null,
                     null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
                     null,
-                    null, null, null, null, null, null, null, null
+                    null, null, null, null, null, null, null, null, null
             );
         }
         return new RegulatedMutationResponseSnapshot(
@@ -376,7 +395,7 @@ public record RegulatedMutationResponseSnapshot(
                 response.updatedCase().updatedAt(),
                 null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
                 null,
-                null, null, null, null, null, null, null, null
+                null, null, null, null, null, null, null, null, null
         );
     }
 
@@ -445,7 +464,7 @@ public record RegulatedMutationResponseSnapshot(
                 response.resolutionReason(),
                 response.resolutionEvidence(),
                 null,
-                null, null, null, null, null, null, null, null
+                null, null, null, null, null, null, null, null, null
         );
     }
 
@@ -458,7 +477,7 @@ public record RegulatedMutationResponseSnapshot(
                 null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
                 response,
-                null, null, null, null, null, null, null, null
+                null, null, null, null, null, null, null, null, null
         );
     }
 

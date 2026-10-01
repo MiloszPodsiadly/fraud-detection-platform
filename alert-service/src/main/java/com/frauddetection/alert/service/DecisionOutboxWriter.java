@@ -49,6 +49,8 @@ public class DecisionOutboxWriter {
             );
         }
         document.setDecisionOutboxEvent(event);
+        document.setDecisionOutboxEventId(event.eventId());
+        document.setDecisionOutboxProjectionRevision(0L);
         document.setDecisionOutboxStatus(DecisionOutboxStatus.PENDING);
         document.setDecisionOutboxAttempts(0);
         document.setDecisionOutboxLeaseOwner(null);
@@ -77,6 +79,7 @@ public class DecisionOutboxWriter {
         record.setPayload(event);
         record.setStatus(TransactionalOutboxStatus.PENDING);
         record.setAttempts(0);
+        record.setProjectionRevision(0L);
         record.setCreatedAt(now);
         record.setUpdatedAt(now);
         return record;

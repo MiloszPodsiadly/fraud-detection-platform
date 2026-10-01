@@ -15,6 +15,8 @@ public interface TransactionalOutboxRecordRepository extends MongoRepository<Tra
 
     long countByProjectionMismatchTrue();
 
+    long countByProjectionReconcileAfterIsNotNull();
+
     Optional<TransactionalOutboxRecordDocument> findByMutationCommandId(String mutationCommandId);
 
     Optional<TransactionalOutboxRecordDocument> findTopByStatusInOrderByCreatedAtAsc(Collection<TransactionalOutboxStatus> statuses);
@@ -24,6 +26,10 @@ public interface TransactionalOutboxRecordRepository extends MongoRepository<Tra
     List<TransactionalOutboxRecordDocument> findTop100ByStatusInOrderByCreatedAtAsc(Collection<TransactionalOutboxStatus> statuses);
 
     List<TransactionalOutboxRecordDocument> findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc();
+
+    List<TransactionalOutboxRecordDocument> findTop100ByProjectionReconcileAfterLessThanEqualOrderByProjectionReconcileAfterAsc(
+            Instant dueAt
+    );
 
     List<TransactionalOutboxRecordDocument> findTop100ByStatusAndLeaseExpiresAtBeforeOrderByCreatedAtAsc(
             TransactionalOutboxStatus status,

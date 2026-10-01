@@ -3,6 +3,7 @@ package com.frauddetection.alert.service;
 import com.frauddetection.alert.messaging.FraudDecisionEventPublisher;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
+import com.frauddetection.alert.outbox.OutboxPublicationConfirmationProvenance;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
@@ -57,9 +58,15 @@ class FraudDecisionOutboxPublisherTest {
         int published = outboxPublisher.publishPending(100);
 
         assertThat(published).isEqualTo(1);
+        assertThat(document.getPublicationConfirmationProvenance())
+                .isEqualTo(OutboxPublicationConfirmationProvenance.BROKER_ACKNOWLEDGED);
         verify(publisher).publish(document.getPayload());
-        verify(mongoTemplate, times(2)).updateFirst(any(Query.class), any(Update.class), eq(TransactionalOutboxRecordDocument.class));
-        verify(mongoTemplate).updateFirst(any(Query.class), any(Update.class), eq(AlertDocument.class));
+        verify(mongoTemplate, times(3)).updateFirst(any(Query.class), any(Update.class), eq(TransactionalOutboxRecordDocument.class));
+        org.mockito.ArgumentCaptor<Update> alertUpdate = org.mockito.ArgumentCaptor.forClass(Update.class);
+        verify(mongoTemplate).updateFirst(any(Query.class), alertUpdate.capture(), eq(AlertDocument.class));
+        org.bson.Document projectionSet = alertUpdate.getValue().getUpdateObject().get("$set", org.bson.Document.class);
+        assertThat(projectionSet.getString("decisionOutboxPublicationConfirmationProvenance"))
+                .isEqualTo("BROKER_ACKNOWLEDGED");
     }
 
     @Test
@@ -85,10 +92,10 @@ class FraudDecisionOutboxPublisherTest {
 
         assertThat(published).isZero();
         assertThat(document.getAttempts()).isEqualTo(1);
-        verify(mongoTemplate, times(2)).updateFirst(any(Query.class), any(Update.class), eq(TransactionalOutboxRecordDocument.class));
+        verify(mongoTemplate, times(3)).updateFirst(any(Query.class), any(Update.class), eq(TransactionalOutboxRecordDocument.class));
         verify(mongoTemplate).updateFirst(any(Query.class), any(Update.class), eq(AlertDocument.class));
         org.mockito.ArgumentCaptor<Update> updateCaptor = org.mockito.ArgumentCaptor.forClass(Update.class);
-        verify(mongoTemplate, times(2)).updateFirst(any(Query.class), updateCaptor.capture(), eq(TransactionalOutboxRecordDocument.class));
+        verify(mongoTemplate, times(3)).updateFirst(any(Query.class), updateCaptor.capture(), eq(TransactionalOutboxRecordDocument.class));
         org.bson.Document setDocument = (org.bson.Document) updateCaptor.getAllValues().get(1).getUpdateObject().get("$set");
         assertThat(setDocument.get("status")).isEqualTo(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
         assertThat(setDocument.get("status")).isNotEqualTo(TransactionalOutboxStatus.PUBLISHED);
@@ -120,7 +127,7 @@ class FraudDecisionOutboxPublisherTest {
         verify(publisher).publish(document.getPayload());
         verify(metrics).recordDecisionOutboxPublishConfirmationFailed();
         org.mockito.ArgumentCaptor<Update> updateCaptor = org.mockito.ArgumentCaptor.forClass(Update.class);
-        verify(mongoTemplate, times(3)).updateFirst(any(Query.class), updateCaptor.capture(), eq(TransactionalOutboxRecordDocument.class));
+        verify(mongoTemplate, times(4)).updateFirst(any(Query.class), updateCaptor.capture(), eq(TransactionalOutboxRecordDocument.class));
         org.bson.Document setDocument = (org.bson.Document) updateCaptor.getAllValues().get(2).getUpdateObject().get("$set");
         assertThat(setDocument.get("status")).isEqualTo(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
     }
@@ -177,8 +184,8 @@ class FraudDecisionOutboxPublisherTest {
         assertThat(published).isZero();
         verify(publisher, never()).publish(any(FraudDecisionEvent.class));
         org.mockito.ArgumentCaptor<Update> updateCaptor = org.mockito.ArgumentCaptor.forClass(Update.class);
-        verify(mongoTemplate).updateFirst(any(Query.class), updateCaptor.capture(), eq(TransactionalOutboxRecordDocument.class));
-        org.bson.Document setDocument = (org.bson.Document) updateCaptor.getValue().getUpdateObject().get("$set");
+        verify(mongoTemplate, times(2)).updateFirst(any(Query.class), updateCaptor.capture(), eq(TransactionalOutboxRecordDocument.class));
+        org.bson.Document setDocument = (org.bson.Document) updateCaptor.getAllValues().get(0).getUpdateObject().get("$set");
         assertThat(setDocument.get("status")).isEqualTo(TransactionalOutboxStatus.FAILED_TERMINAL);
         assertThat(setDocument.get("last_error")).isEqualTo("MISSING_PAYLOAD");
     }

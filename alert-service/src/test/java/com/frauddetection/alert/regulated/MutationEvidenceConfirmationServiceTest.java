@@ -8,10 +8,13 @@ import com.frauddetection.alert.audit.AuditExternalAnchorStatus;
 import com.frauddetection.alert.audit.AuditFailureCategory;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
+import com.frauddetection.alert.audit.ResolutionEvidenceReference;
+import com.frauddetection.alert.audit.ResolutionEvidenceType;
 import com.frauddetection.alert.audit.external.AuditEventExternalEvidenceStatus;
 import com.frauddetection.alert.audit.external.AuditEventPublicationStatusLookup;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
+import com.frauddetection.alert.outbox.OutboxPublicationConfirmationProvenance;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.mongodb.client.result.UpdateResult;
@@ -33,6 +36,71 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class MutationEvidenceConfirmationServiceTest {
+
+    @Test
+    void shouldConfirmValidDualControlManualPublicationWithoutCallingItBrokerVerified() {
+        Fixture fixture = new Fixture(false, false);
+        RegulatedMutationCommandDocument command = committedCommand();
+        fixture.pending(command);
+        when(fixture.outboxRepository.findByMutationCommandId("command-1"))
+                .thenReturn(Optional.of(manualDualControlOutbox()));
+
+        int promoted = fixture.service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isOne();
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
+    }
+
+    @Test
+    void shouldFailClosedWhenManualDualControlEvidenceIsIncomplete() {
+        Fixture fixture = new Fixture(false, false);
+        RegulatedMutationCommandDocument command = committedCommand();
+        TransactionalOutboxRecordDocument outbox = manualDualControlOutbox();
+        outbox.setResolutionApprovalEvidenceFingerprint(null);
+        fixture.pending(command);
+        when(fixture.outboxRepository.findByMutationCommandId("command-1")).thenReturn(Optional.of(outbox));
+
+        int promoted = fixture.service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isZero();
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        verify(fixture.metrics).recordEvidenceConfirmationFailed("MANUAL_PUBLICATION_EVIDENCE_INVALID");
+    }
+
+    @Test
+    void shouldKeepSingleControlManualPublicationPending() {
+        Fixture fixture = new Fixture(false, false);
+        RegulatedMutationCommandDocument command = committedCommand();
+        TransactionalOutboxRecordDocument outbox = outbox(TransactionalOutboxStatus.PUBLISHED);
+        outbox.setPublicationConfirmationProvenance(
+                OutboxPublicationConfirmationProvenance.MANUAL_SINGLE_CONTROL_ATTESTED
+        );
+        outbox.setResolutionControlMode("SINGLE_CONTROL_OPERATOR_ATTESTED");
+        fixture.pending(command);
+        when(fixture.outboxRepository.findByMutationCommandId("command-1")).thenReturn(Optional.of(outbox));
+
+        int promoted = fixture.service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isZero();
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        verify(fixture.metrics).recordEvidenceConfirmationFailed("MANUAL_PUBLICATION_REQUIRES_DUAL_CONTROL");
+    }
+
+    @Test
+    void shouldFailClosedWhenPublishedRecordHasNoConfirmationProvenance() {
+        Fixture fixture = new Fixture(false, false);
+        RegulatedMutationCommandDocument command = committedCommand();
+        TransactionalOutboxRecordDocument outbox = outbox(TransactionalOutboxStatus.PUBLISHED);
+        outbox.setPublicationConfirmationProvenance(null);
+        fixture.pending(command);
+        when(fixture.outboxRepository.findByMutationCommandId("command-1")).thenReturn(Optional.of(outbox));
+
+        int promoted = fixture.service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isZero();
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        verify(fixture.metrics).recordEvidenceConfirmationFailed("PUBLICATION_CONFIRMATION_PROVENANCE_MISSING");
+    }
 
     @Test
     void shouldTreatZeroAndNegativeLimitAsNoOp() {
@@ -432,7 +500,53 @@ class MutationEvidenceConfirmationServiceTest {
         document.setEventId("event-1");
         document.setMutationCommandId("command-1");
         document.setStatus(status);
+        if (status == TransactionalOutboxStatus.PUBLISHED) {
+            document.setPublicationConfirmationProvenance(
+                    OutboxPublicationConfirmationProvenance.BROKER_ACKNOWLEDGED
+            );
+        }
         document.setCreatedAt(Instant.parse("2026-05-02T10:00:00Z"));
+        return document;
+    }
+
+    private TransactionalOutboxRecordDocument manualDualControlOutbox() {
+        TransactionalOutboxRecordDocument document = outbox(TransactionalOutboxStatus.PUBLISHED);
+        Instant requestedAt = Instant.parse("2026-05-02T10:05:00Z");
+        Instant approvedAt = Instant.parse("2026-05-02T10:06:00Z");
+        ResolutionEvidenceReference requestEvidence = new ResolutionEvidenceReference(
+                ResolutionEvidenceType.BROKER_OFFSET,
+                "topic=fraud-decisions,partition=0,offset=42",
+                requestedAt,
+                "request-verifier"
+        );
+        ResolutionEvidenceReference approvalEvidence = new ResolutionEvidenceReference(
+                ResolutionEvidenceType.BROKER_OFFSET,
+                "topic=fraud-decisions,partition=0,offset=42",
+                approvedAt,
+                "approval-verifier"
+        );
+        document.setPublicationConfirmationProvenance(
+                OutboxPublicationConfirmationProvenance.MANUAL_DUAL_CONTROL_ATTESTED
+        );
+        document.setResolutionControlMode("DUAL_CONTROL_APPROVED");
+        document.setResolutionRequestId("request-1");
+        document.setResolutionProposedOutcome("PUBLISHED");
+        document.setResolutionRequestedBy("requester");
+        document.setResolutionRequestedAt(requestedAt);
+        document.setResolutionRequestReason("request reason");
+        document.setResolutionEvidenceType(requestEvidence.type().name());
+        document.setResolutionEvidenceReference(requestEvidence.reference());
+        document.setResolutionEvidenceVerifiedAt(requestEvidence.verifiedAt());
+        document.setResolutionEvidenceVerifiedBy(requestEvidence.verifiedBy());
+        document.setResolutionEvidenceFingerprint(RegulatedMutationIntentHasher.hash(requestEvidence));
+        document.setResolutionApprovedBy("approver");
+        document.setResolutionApprovedAt(approvedAt);
+        document.setResolutionApprovalReason("approval reason");
+        document.setResolutionApprovalEvidenceType(approvalEvidence.type().name());
+        document.setResolutionApprovalEvidenceReference(approvalEvidence.reference());
+        document.setResolutionApprovalEvidenceVerifiedAt(approvalEvidence.verifiedAt());
+        document.setResolutionApprovalEvidenceVerifiedBy(approvalEvidence.verifiedBy());
+        document.setResolutionApprovalEvidenceFingerprint(RegulatedMutationIntentHasher.hash(approvalEvidence));
         return document;
     }
 

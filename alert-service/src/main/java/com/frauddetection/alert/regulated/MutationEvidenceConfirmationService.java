@@ -5,10 +5,13 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditEventDocument;
 import com.frauddetection.alert.audit.AuditEventRepository;
 import com.frauddetection.alert.audit.AuditResourceType;
+import com.frauddetection.alert.audit.ResolutionEvidenceReference;
+import com.frauddetection.alert.audit.ResolutionEvidenceType;
 import com.frauddetection.alert.audit.external.AuditEventExternalEvidenceStatus;
 import com.frauddetection.alert.audit.external.AuditEventPublicationStatusLookup;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
+import com.frauddetection.alert.outbox.OutboxPublicationConfirmationProvenance;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.persistence.AlertDocument;
@@ -232,6 +235,10 @@ public class MutationEvidenceConfirmationService {
             if (outbox.getStatus() != TransactionalOutboxStatus.PUBLISHED) {
                 return new EvidenceDecision(EvidenceConfirmationOutcome.PENDING, "OUTBOX_NOT_YET_PUBLISHED");
             }
+            EvidenceDecision publicationDecision = publicationConfirmationDecision(outbox);
+            if (publicationDecision.outcome() != EvidenceConfirmationOutcome.CONFIRMED) {
+                return publicationDecision;
+            }
         }
         if (externalAnchorRequired) {
             AuditEventExternalEvidenceStatus status = externalEvidenceStatus(command);
@@ -249,6 +256,95 @@ public class MutationEvidenceConfirmationService {
             }
         }
         return new EvidenceDecision(EvidenceConfirmationOutcome.CONFIRMED, null);
+    }
+
+    private EvidenceDecision publicationConfirmationDecision(TransactionalOutboxRecordDocument outbox) {
+        OutboxPublicationConfirmationProvenance provenance = outbox.getPublicationConfirmationProvenance();
+        if (provenance == null) {
+            return new EvidenceDecision(
+                    EvidenceConfirmationOutcome.FAILED,
+                    "PUBLICATION_CONFIRMATION_PROVENANCE_MISSING"
+            );
+        }
+        return switch (provenance) {
+            case BROKER_ACKNOWLEDGED -> outbox.getResolutionControlMode() == null
+                    ? confirmedPublication()
+                    : invalidManualPublicationEvidence();
+            case MANUAL_DUAL_CONTROL_ATTESTED -> validDualControlPublicationEvidence(outbox)
+                    ? confirmedPublication()
+                    : invalidManualPublicationEvidence();
+            case MANUAL_SINGLE_CONTROL_ATTESTED -> new EvidenceDecision(
+                    EvidenceConfirmationOutcome.PENDING,
+                    "MANUAL_PUBLICATION_REQUIRES_DUAL_CONTROL"
+            );
+        };
+    }
+
+    private boolean validDualControlPublicationEvidence(TransactionalOutboxRecordDocument outbox) {
+        return "DUAL_CONTROL_APPROVED".equals(outbox.getResolutionControlMode())
+                && !outbox.isResolutionPending()
+                && hasText(outbox.getResolutionRequestId())
+                && "PUBLISHED".equals(outbox.getResolutionProposedOutcome())
+                && hasText(outbox.getResolutionRequestedBy())
+                && hasText(outbox.getResolutionApprovedBy())
+                && !outbox.getResolutionRequestedBy().equals(outbox.getResolutionApprovedBy())
+                && outbox.getResolutionRequestedAt() != null
+                && outbox.getResolutionApprovedAt() != null
+                && !outbox.getResolutionApprovedAt().isBefore(outbox.getResolutionRequestedAt())
+                && hasText(outbox.getResolutionRequestReason())
+                && hasText(outbox.getResolutionApprovalReason())
+                && evidenceFingerprintMatches(
+                        outbox.getResolutionEvidenceType(),
+                        outbox.getResolutionEvidenceReference(),
+                        outbox.getResolutionEvidenceVerifiedAt(),
+                        outbox.getResolutionEvidenceVerifiedBy(),
+                        outbox.getResolutionEvidenceFingerprint()
+                )
+                && evidenceFingerprintMatches(
+                        outbox.getResolutionApprovalEvidenceType(),
+                        outbox.getResolutionApprovalEvidenceReference(),
+                        outbox.getResolutionApprovalEvidenceVerifiedAt(),
+                        outbox.getResolutionApprovalEvidenceVerifiedBy(),
+                        outbox.getResolutionApprovalEvidenceFingerprint()
+                );
+    }
+
+    private boolean evidenceFingerprintMatches(
+            String type,
+            String reference,
+            java.time.Instant verifiedAt,
+            String verifiedBy,
+            String expectedFingerprint
+    ) {
+        if (!ResolutionEvidenceType.BROKER_OFFSET.name().equals(type)
+                || !hasText(reference)
+                || verifiedAt == null
+                || !hasText(verifiedBy)
+                || !hasText(expectedFingerprint)) {
+            return false;
+        }
+        ResolutionEvidenceReference evidence = new ResolutionEvidenceReference(
+                ResolutionEvidenceType.BROKER_OFFSET,
+                reference,
+                verifiedAt,
+                verifiedBy
+        );
+        return RegulatedMutationIntentHasher.hash(evidence).equals(expectedFingerprint);
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private EvidenceDecision confirmedPublication() {
+        return new EvidenceDecision(EvidenceConfirmationOutcome.CONFIRMED, null);
+    }
+
+    private EvidenceDecision invalidManualPublicationEvidence() {
+        return new EvidenceDecision(
+                EvidenceConfirmationOutcome.FAILED,
+                "MANUAL_PUBLICATION_EVIDENCE_INVALID"
+        );
     }
 
     private AuditEventExternalEvidenceStatus externalEvidenceStatus(RegulatedMutationCommandDocument command) {

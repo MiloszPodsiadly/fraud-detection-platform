@@ -62,15 +62,20 @@ public class AlertDocument {
     private String decisionOperationStatus;
     private Long decisionOperationRevision;
     private FraudDecisionEvent decisionOutboxEvent;
+    private String decisionOutboxEventId;
+    private long decisionOutboxProjectionRevision;
     private String decisionOutboxStatus;
     private String decisionOutboxLeaseOwner;
     private Instant decisionOutboxLeaseExpiresAt;
     private int decisionOutboxAttempts;
     private Instant decisionOutboxLastAttemptAt;
     private Instant decisionOutboxPublishedAt;
+    private String decisionOutboxPublicationConfirmationProvenance;
     private String decisionOutboxLastError;
     private String decisionOutboxFailureReason;
     private boolean decisionOutboxResolutionPending;
+    private String decisionOutboxResolutionRequestId;
+    private String decisionOutboxResolutionProposedOutcome;
     private Instant decisionOutboxResolutionRequestedAt;
     private String decisionOutboxResolutionRequestedBy;
     private String decisionOutboxResolutionRequestReason;
@@ -78,6 +83,12 @@ public class AlertDocument {
     private String decisionOutboxResolutionEvidenceReference;
     private Instant decisionOutboxResolutionEvidenceVerifiedAt;
     private String decisionOutboxResolutionEvidenceVerifiedBy;
+    private String decisionOutboxResolutionEvidenceFingerprint;
+    private String decisionOutboxResolutionApprovalEvidenceType;
+    private String decisionOutboxResolutionApprovalEvidenceReference;
+    private Instant decisionOutboxResolutionApprovalEvidenceVerifiedAt;
+    private String decisionOutboxResolutionApprovalEvidenceVerifiedBy;
+    private String decisionOutboxResolutionApprovalEvidenceFingerprint;
     private Instant decisionOutboxResolutionApprovedAt;
     private String decisionOutboxResolutionApprovedBy;
     private String decisionOutboxResolutionApprovalReason;
@@ -149,6 +160,10 @@ public class AlertDocument {
     public void setDecisionOperationRevision(Long decisionOperationRevision) { this.decisionOperationRevision = decisionOperationRevision; }
     public FraudDecisionEvent getDecisionOutboxEvent() { return decisionOutboxEvent; }
     public void setDecisionOutboxEvent(FraudDecisionEvent decisionOutboxEvent) { this.decisionOutboxEvent = decisionOutboxEvent; }
+    public String getDecisionOutboxEventId() { return decisionOutboxEventId; }
+    public void setDecisionOutboxEventId(String decisionOutboxEventId) { this.decisionOutboxEventId = decisionOutboxEventId; }
+    public long getDecisionOutboxProjectionRevision() { return decisionOutboxProjectionRevision; }
+    public void setDecisionOutboxProjectionRevision(long decisionOutboxProjectionRevision) { this.decisionOutboxProjectionRevision = decisionOutboxProjectionRevision; }
     public String getDecisionOutboxStatus() { return decisionOutboxStatus; }
     public void setDecisionOutboxStatus(String decisionOutboxStatus) { this.decisionOutboxStatus = decisionOutboxStatus; }
     public String getDecisionOutboxLeaseOwner() { return decisionOutboxLeaseOwner; }
@@ -161,12 +176,18 @@ public class AlertDocument {
     public void setDecisionOutboxLastAttemptAt(Instant decisionOutboxLastAttemptAt) { this.decisionOutboxLastAttemptAt = decisionOutboxLastAttemptAt; }
     public Instant getDecisionOutboxPublishedAt() { return decisionOutboxPublishedAt; }
     public void setDecisionOutboxPublishedAt(Instant decisionOutboxPublishedAt) { this.decisionOutboxPublishedAt = decisionOutboxPublishedAt; }
+    public String getDecisionOutboxPublicationConfirmationProvenance() { return decisionOutboxPublicationConfirmationProvenance; }
+    public void setDecisionOutboxPublicationConfirmationProvenance(String decisionOutboxPublicationConfirmationProvenance) { this.decisionOutboxPublicationConfirmationProvenance = decisionOutboxPublicationConfirmationProvenance; }
     public String getDecisionOutboxLastError() { return decisionOutboxLastError; }
     public void setDecisionOutboxLastError(String decisionOutboxLastError) { this.decisionOutboxLastError = decisionOutboxLastError; }
     public String getDecisionOutboxFailureReason() { return decisionOutboxFailureReason; }
     public void setDecisionOutboxFailureReason(String decisionOutboxFailureReason) { this.decisionOutboxFailureReason = decisionOutboxFailureReason; }
     public boolean isDecisionOutboxResolutionPending() { return decisionOutboxResolutionPending; }
     public void setDecisionOutboxResolutionPending(boolean decisionOutboxResolutionPending) { this.decisionOutboxResolutionPending = decisionOutboxResolutionPending; }
+    public String getDecisionOutboxResolutionRequestId() { return decisionOutboxResolutionRequestId; }
+    public void setDecisionOutboxResolutionRequestId(String decisionOutboxResolutionRequestId) { this.decisionOutboxResolutionRequestId = decisionOutboxResolutionRequestId; }
+    public String getDecisionOutboxResolutionProposedOutcome() { return decisionOutboxResolutionProposedOutcome; }
+    public void setDecisionOutboxResolutionProposedOutcome(String decisionOutboxResolutionProposedOutcome) { this.decisionOutboxResolutionProposedOutcome = decisionOutboxResolutionProposedOutcome; }
     public Instant getDecisionOutboxResolutionRequestedAt() { return decisionOutboxResolutionRequestedAt; }
     public void setDecisionOutboxResolutionRequestedAt(Instant decisionOutboxResolutionRequestedAt) { this.decisionOutboxResolutionRequestedAt = decisionOutboxResolutionRequestedAt; }
     public String getDecisionOutboxResolutionRequestedBy() { return decisionOutboxResolutionRequestedBy; }
@@ -181,6 +202,18 @@ public class AlertDocument {
     public void setDecisionOutboxResolutionEvidenceVerifiedAt(Instant decisionOutboxResolutionEvidenceVerifiedAt) { this.decisionOutboxResolutionEvidenceVerifiedAt = decisionOutboxResolutionEvidenceVerifiedAt; }
     public String getDecisionOutboxResolutionEvidenceVerifiedBy() { return decisionOutboxResolutionEvidenceVerifiedBy; }
     public void setDecisionOutboxResolutionEvidenceVerifiedBy(String decisionOutboxResolutionEvidenceVerifiedBy) { this.decisionOutboxResolutionEvidenceVerifiedBy = decisionOutboxResolutionEvidenceVerifiedBy; }
+    public String getDecisionOutboxResolutionEvidenceFingerprint() { return decisionOutboxResolutionEvidenceFingerprint; }
+    public void setDecisionOutboxResolutionEvidenceFingerprint(String decisionOutboxResolutionEvidenceFingerprint) { this.decisionOutboxResolutionEvidenceFingerprint = decisionOutboxResolutionEvidenceFingerprint; }
+    public String getDecisionOutboxResolutionApprovalEvidenceType() { return decisionOutboxResolutionApprovalEvidenceType; }
+    public void setDecisionOutboxResolutionApprovalEvidenceType(String decisionOutboxResolutionApprovalEvidenceType) { this.decisionOutboxResolutionApprovalEvidenceType = decisionOutboxResolutionApprovalEvidenceType; }
+    public String getDecisionOutboxResolutionApprovalEvidenceReference() { return decisionOutboxResolutionApprovalEvidenceReference; }
+    public void setDecisionOutboxResolutionApprovalEvidenceReference(String decisionOutboxResolutionApprovalEvidenceReference) { this.decisionOutboxResolutionApprovalEvidenceReference = decisionOutboxResolutionApprovalEvidenceReference; }
+    public Instant getDecisionOutboxResolutionApprovalEvidenceVerifiedAt() { return decisionOutboxResolutionApprovalEvidenceVerifiedAt; }
+    public void setDecisionOutboxResolutionApprovalEvidenceVerifiedAt(Instant decisionOutboxResolutionApprovalEvidenceVerifiedAt) { this.decisionOutboxResolutionApprovalEvidenceVerifiedAt = decisionOutboxResolutionApprovalEvidenceVerifiedAt; }
+    public String getDecisionOutboxResolutionApprovalEvidenceVerifiedBy() { return decisionOutboxResolutionApprovalEvidenceVerifiedBy; }
+    public void setDecisionOutboxResolutionApprovalEvidenceVerifiedBy(String decisionOutboxResolutionApprovalEvidenceVerifiedBy) { this.decisionOutboxResolutionApprovalEvidenceVerifiedBy = decisionOutboxResolutionApprovalEvidenceVerifiedBy; }
+    public String getDecisionOutboxResolutionApprovalEvidenceFingerprint() { return decisionOutboxResolutionApprovalEvidenceFingerprint; }
+    public void setDecisionOutboxResolutionApprovalEvidenceFingerprint(String decisionOutboxResolutionApprovalEvidenceFingerprint) { this.decisionOutboxResolutionApprovalEvidenceFingerprint = decisionOutboxResolutionApprovalEvidenceFingerprint; }
     public Instant getDecisionOutboxResolutionApprovedAt() { return decisionOutboxResolutionApprovedAt; }
     public void setDecisionOutboxResolutionApprovedAt(Instant decisionOutboxResolutionApprovedAt) { this.decisionOutboxResolutionApprovedAt = decisionOutboxResolutionApprovedAt; }
     public String getDecisionOutboxResolutionApprovedBy() { return decisionOutboxResolutionApprovedBy; }

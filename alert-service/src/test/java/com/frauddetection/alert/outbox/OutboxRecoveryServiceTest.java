@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -37,6 +38,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class OutboxRecoveryServiceTest {
@@ -52,6 +54,7 @@ class OutboxRecoveryServiceTest {
     void projectionMismatchIsClearedOnlyAfterSuccessfulProjectionWrite(TransactionalOutboxStatus status) {
         Fixture fixture = new Fixture();
         TransactionalOutboxRecordDocument record = mismatchedRecord(status);
+        stubOutdatedAlert(fixture, record);
         when(fixture.repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc())
                 .thenReturn(List.of(record));
         List<String> writeOrder = new ArrayList<>();
@@ -92,6 +95,7 @@ class OutboxRecoveryServiceTest {
     void projectionMismatchRemainsWhenProjectionWriteFails(TransactionalOutboxStatus status) {
         Fixture fixture = new Fixture();
         TransactionalOutboxRecordDocument record = mismatchedRecord(status);
+        stubOutdatedAlert(fixture, record);
         when(fixture.repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc())
                 .thenReturn(List.of(record));
         List<Update> outboxUpdates = new ArrayList<>();
@@ -150,6 +154,7 @@ class OutboxRecoveryServiceTest {
         TransactionalOutboxRecordDocument record = record("event-1", TransactionalOutboxStatus.PUBLISHED);
         record.setProjectionMismatch(true);
         record.setProjectionMismatchReason("ALERT_PROJECTION_UPDATE_FAILED");
+        stubOutdatedAlert(fixture, record);
         when(fixture.repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc()).thenReturn(List.of(record));
 
         OutboxRecoveryRunResponse response = fixture.service.recoverNow();
@@ -167,6 +172,56 @@ class OutboxRecoveryServiceTest {
         );
         Document clear = (Document) outboxUpdateCaptor.getAllValues().get(1).getUpdateObject().get("$unset");
         assertThat(clear).containsKeys("projection_mismatch", "projection_mismatch_reason");
+    }
+
+    @Test
+    void dueReconciliationRepairsOutdatedProjectionWithoutMismatchMarker() {
+        Fixture fixture = new Fixture();
+        TransactionalOutboxRecordDocument record = record("event-due", TransactionalOutboxStatus.PUBLISHED);
+        record.setProjectionRevision(4L);
+        record.setProjectionReconcileAfter(Instant.parse("2026-05-02T10:01:00Z"));
+        stubOutdatedAlert(fixture, record);
+        when(fixture.repository.findTop100ByProjectionReconcileAfterLessThanEqualOrderByProjectionReconcileAfterAsc(any()))
+                .thenReturn(List.of(record));
+
+        OutboxRecoveryRunResponse response = fixture.service.recoverNow();
+
+        assertThat(response.projectionRepaired()).isOne();
+        verify(fixture.mongoTemplate).updateFirst(
+                any(Query.class),
+                any(Update.class),
+                eq(com.frauddetection.alert.persistence.AlertDocument.class)
+        );
+    }
+
+    @Test
+    void missingResourceIdRemainsObservableAndIsRetriedWithoutFabricatingAlert() {
+        Fixture fixture = new Fixture();
+        TransactionalOutboxRecordDocument record = record("event-no-resource", TransactionalOutboxStatus.PUBLISHED);
+        record.setResourceId("   ");
+        record.setProjectionReconcileAfter(Instant.parse("2026-05-02T10:01:00Z"));
+        when(fixture.repository.findTop100ByProjectionReconcileAfterLessThanEqualOrderByProjectionReconcileAfterAsc(any()))
+                .thenReturn(List.of(record));
+        ArgumentCaptor<Update> outboxUpdates = ArgumentCaptor.forClass(Update.class);
+
+        OutboxRecoveryRunResponse response = fixture.service.recoverNow();
+
+        assertThat(response.projectionRepaired()).isZero();
+        verify(fixture.mongoTemplate, times(2)).updateFirst(
+                any(Query.class),
+                outboxUpdates.capture(),
+                eq(TransactionalOutboxRecordDocument.class)
+        );
+        Document retained = outboxUpdates.getAllValues().get(1).getUpdateObject().get("$set", Document.class);
+        assertThat(retained.getString("projection_mismatch_reason"))
+                .isEqualTo("ALERT_PROJECTION_RESOURCE_ID_MISSING");
+        assertThat(retained.get("projection_reconcile_after")).isNotNull();
+        verify(fixture.mongoTemplate, never()).findById(any(), eq(com.frauddetection.alert.persistence.AlertDocument.class));
+        verify(fixture.mongoTemplate, never()).updateFirst(
+                any(Query.class),
+                any(Update.class),
+                eq(com.frauddetection.alert.persistence.AlertDocument.class)
+        );
     }
 
     @Test
@@ -237,6 +292,8 @@ class OutboxRecoveryServiceTest {
         record.setUpdatedAt(Instant.parse("2026-05-02T10:45:00Z"));
         record.setResolutionPending(true);
         record.setResolutionControlMode("DUAL_CONTROL_REQUESTED");
+        record.setResolutionRequestId("pending-request-1");
+        record.setResolutionProposedOutcome("PUBLISHED");
         record.setResolutionRequestedBy("ops-requester");
         record.setResolutionRequestedAt(Instant.parse("2026-05-02T10:15:00Z"));
         record.setResolutionApprovedBy("ops-approver");
@@ -262,7 +319,24 @@ class OutboxRecoveryServiceTest {
                 "event-1", request(), "ops-admin", "outbox-confirm-event-1");
 
         assertThat(replayed).isEqualTo(first);
+        assertThat(replayed.resolutionRequestId()).isEqualTo("pending-request-1");
+        assertThat(replayed.resolutionProposedOutcome()).isEqualTo("PUBLISHED");
         assertThat(replayed.confirmationUnknownAt()).isNotEqualTo(replayed.resolutionRequestedAt());
+    }
+
+    @Test
+    void shouldRejectMissingAuthenticatedActorBeforeCreatingRegulatedCommand() {
+        Fixture fixture = new Fixture();
+
+        assertThatThrownBy(() -> fixture.service.resolveConfirmation(
+                "event-1",
+                request(),
+                "   ",
+                "outbox-confirm-event-1"
+        )).isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .hasMessageContaining("authenticated actor");
+
+        verifyNoInteractions(fixture.regulatedMutationCoordinator, fixture.resolutionMutationHandler);
     }
 
     @Test
@@ -298,6 +372,7 @@ class OutboxRecoveryServiceTest {
     private OutboxConfirmationResolutionRequest request() {
         return new OutboxConfirmationResolutionRequest(
                 OutboxConfirmationResolution.PUBLISHED,
+                null,
                 "broker offset verified",
                 new ResolutionEvidenceReference(
                         ResolutionEvidenceType.BROKER_OFFSET,
@@ -332,6 +407,19 @@ class OutboxRecoveryServiceTest {
         record.setLastError(status == TransactionalOutboxStatus.PUBLISHED ? null : "source-error");
         record.setPublishedAt(Instant.parse("2026-05-02T10:30:00Z"));
         return record;
+    }
+
+    private void stubOutdatedAlert(Fixture fixture, TransactionalOutboxRecordDocument record) {
+        com.frauddetection.alert.persistence.AlertDocument alert =
+                new com.frauddetection.alert.persistence.AlertDocument();
+        alert.setAlertId(record.getResourceId());
+        alert.setDecisionOutboxEventId(record.getEventId());
+        alert.setDecisionOutboxProjectionRevision(record.getProjectionRevision() - 1L);
+        alert.setDecisionOutboxStatus(DecisionOutboxStatus.PENDING);
+        when(fixture.mongoTemplate.findById(
+                record.getResourceId(),
+                com.frauddetection.alert.persistence.AlertDocument.class
+        )).thenReturn(alert);
     }
 
     private static final class Fixture {

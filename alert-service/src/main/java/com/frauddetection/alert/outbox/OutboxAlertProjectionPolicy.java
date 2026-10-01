@@ -68,6 +68,8 @@ public final class OutboxAlertProjectionPolicy {
                 ? MANUAL_RECOVERY_REQUIRED
                 : reason;
         Update update = new Update()
+                .set("decisionOutboxEventId", record.getEventId())
+                .set("decisionOutboxProjectionRevision", record.getProjectionRevision())
                 .set("decisionOutboxStatus", projectionStatus)
                 .set("decisionOutboxAttempts", record.getAttempts())
                 .unset("decisionOutboxLeaseOwner")
@@ -77,6 +79,15 @@ public final class OutboxAlertProjectionPolicy {
         } else {
             update.unset("decisionOutboxPublishedAt");
         }
+        String publicationConfirmationProvenance = sourceStatus == TransactionalOutboxStatus.PUBLISHED
+                && record.getPublicationConfirmationProvenance() != null
+                ? record.getPublicationConfirmationProvenance().name()
+                : null;
+        copyOrUnset(
+                update,
+                "decisionOutboxPublicationConfirmationProvenance",
+                publicationConfirmationProvenance
+        );
         if (effectiveReason == null) {
             update.unset("decisionOutboxLastError").unset("decisionOutboxFailureReason");
         } else {
@@ -86,12 +97,9 @@ public final class OutboxAlertProjectionPolicy {
         copyResolutionFields(update, record);
         return new Projection(
                 sourceStatus,
+                record.getEventId(),
+                record.getProjectionRevision(),
                 projectionStatus,
-                publishedAt,
-                record.getAttempts(),
-                record.isResolutionPending(),
-                record.getResolutionRequestedAt(),
-                record.getResolutionApprovedAt(),
                 update
         );
     }
@@ -102,6 +110,8 @@ public final class OutboxAlertProjectionPolicy {
         } else {
             update.unset("decisionOutboxResolutionPending");
         }
+        copyOrUnset(update, "decisionOutboxResolutionRequestId", record.getResolutionRequestId());
+        copyOrUnset(update, "decisionOutboxResolutionProposedOutcome", record.getResolutionProposedOutcome());
         copyOrUnset(update, "decisionOutboxResolutionRequestedAt", record.getResolutionRequestedAt());
         copyOrUnset(update, "decisionOutboxResolutionRequestedBy", record.getResolutionRequestedBy());
         copyOrUnset(update, "decisionOutboxResolutionRequestReason", record.getResolutionRequestReason());
@@ -110,6 +120,12 @@ public final class OutboxAlertProjectionPolicy {
         copyOrUnset(update, "decisionOutboxResolutionEvidenceReference", record.getResolutionEvidenceReference());
         copyOrUnset(update, "decisionOutboxResolutionEvidenceVerifiedAt", record.getResolutionEvidenceVerifiedAt());
         copyOrUnset(update, "decisionOutboxResolutionEvidenceVerifiedBy", record.getResolutionEvidenceVerifiedBy());
+        copyOrUnset(update, "decisionOutboxResolutionEvidenceFingerprint", record.getResolutionEvidenceFingerprint());
+        copyOrUnset(update, "decisionOutboxResolutionApprovalEvidenceType", record.getResolutionApprovalEvidenceType());
+        copyOrUnset(update, "decisionOutboxResolutionApprovalEvidenceReference", record.getResolutionApprovalEvidenceReference());
+        copyOrUnset(update, "decisionOutboxResolutionApprovalEvidenceVerifiedAt", record.getResolutionApprovalEvidenceVerifiedAt());
+        copyOrUnset(update, "decisionOutboxResolutionApprovalEvidenceVerifiedBy", record.getResolutionApprovalEvidenceVerifiedBy());
+        copyOrUnset(update, "decisionOutboxResolutionApprovalEvidenceFingerprint", record.getResolutionApprovalEvidenceFingerprint());
         copyOrUnset(update, "decisionOutboxResolutionApprovedAt", record.getResolutionApprovedAt());
         copyOrUnset(update, "decisionOutboxResolutionApprovedBy", record.getResolutionApprovedBy());
     }
@@ -124,68 +140,17 @@ public final class OutboxAlertProjectionPolicy {
 
     public record Projection(
             TransactionalOutboxStatus sourceStatus,
+            String eventId,
+            long revision,
             String projectionStatus,
-            Instant publishedAt,
-            int attempts,
-            boolean resolutionPending,
-            Instant resolutionRequestedAt,
-            Instant resolutionApprovedAt,
             Update update
     ) {
         public Query target(String resourceId) {
-            Criteria attemptsNotNewer = new Criteria().orOperator(
-                    Criteria.where("decisionOutboxAttempts").exists(false),
-                    Criteria.where("decisionOutboxAttempts").lte(attempts)
-            );
-            Criteria statusNotNewer = switch (sourceStatus) {
-                case FAILED_RETRYABLE -> Criteria.where("decisionOutboxStatus").nin(
-                        DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN,
-                        DecisionOutboxStatus.PUBLISHED,
-                        DecisionOutboxStatus.FAILED_TERMINAL
-                );
-                case PUBLISH_CONFIRMATION_UNKNOWN -> Criteria.where("decisionOutboxStatus").nin(
-                        DecisionOutboxStatus.PUBLISHED,
-                        DecisionOutboxStatus.FAILED_TERMINAL
-                );
-                case FAILED_TERMINAL, RECOVERY_REQUIRED ->
-                        Criteria.where("decisionOutboxStatus").ne(DecisionOutboxStatus.PUBLISHED);
-                case PUBLISHED -> Criteria.where("decisionOutboxStatus").ne(DecisionOutboxStatus.FAILED_TERMINAL);
-                default -> throw new IllegalStateException("Unsupported projection source status: " + sourceStatus);
-            };
-            Criteria freshness = sourceStatus == TransactionalOutboxStatus.PUBLISHED && publishedAt != null
-                    ? new Criteria().orOperator(
-                            Criteria.where("decisionOutboxPublishedAt").exists(false),
-                            Criteria.where("decisionOutboxPublishedAt").lte(publishedAt)
-                    )
-                    : new Criteria();
-            Criteria resolutionFreshness = resolutionFreshness();
             return Query.query(new Criteria().andOperator(
                     Criteria.where("_id").is(resourceId),
-                    attemptsNotNewer,
-                    statusNotNewer,
-                    freshness,
-                    resolutionFreshness
+                    Criteria.where("decisionOutboxEventId").is(eventId),
+                    Criteria.where("decisionOutboxProjectionRevision").lte(revision)
             ));
-        }
-
-        private Criteria resolutionFreshness() {
-            if (resolutionApprovedAt != null) {
-                return new Criteria().orOperator(
-                        Criteria.where("decisionOutboxResolutionApprovedAt").exists(false),
-                        Criteria.where("decisionOutboxResolutionApprovedAt").lte(resolutionApprovedAt)
-                );
-            }
-            if (resolutionPending && resolutionRequestedAt != null) {
-                return new Criteria().andOperator(
-                        Criteria.where("decisionOutboxResolutionApprovedAt").exists(false),
-                        new Criteria().orOperator(
-                                Criteria.where("decisionOutboxResolutionRequestedAt").exists(false),
-                                Criteria.where("decisionOutboxResolutionRequestedAt")
-                                        .lte(resolutionRequestedAt)
-                        )
-                );
-            }
-            return new Criteria();
         }
     }
 }

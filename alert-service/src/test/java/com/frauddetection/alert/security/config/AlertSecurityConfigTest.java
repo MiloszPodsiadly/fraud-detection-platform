@@ -806,7 +806,7 @@ class AlertSecurityConfigTest {
                         Instant.parse("2026-05-01T00:00:00Z")
                 ));
         when(externalAuditAnchorSink.capabilities()).thenReturn(providerCapabilities());
-        when(outboxRecoveryService.backlog()).thenReturn(new OutboxBacklogResponse(1, 0, 0, 0, 0, 0, 0, 0, 5L));
+        when(outboxRecoveryService.backlog()).thenReturn(new OutboxBacklogResponse(1, 0, 0, 0, 0, 0, 0, 0, 0, 5L));
         when(outboxRecoveryService.recoverNow()).thenReturn(new OutboxRecoveryRunResponse(1, 0, 0, 1));
         when(outboxRecoveryService.resolveConfirmation(eq("event-1"), any(), any(), any()))
                 .thenReturn(OutboxRecordResponse.from(outboxRecord("event-1", TransactionalOutboxStatus.PUBLISHED))

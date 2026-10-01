@@ -47,6 +47,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     private final AtomicLong outboxConfirmationUnknown = new AtomicLong(0);
     private final AtomicLong outboxFailedTerminal = new AtomicLong(0);
     private final AtomicLong outboxProjectionMismatch = new AtomicLong(0);
+    private final AtomicLong outboxProjectionReconciliationPending = new AtomicLong(0);
     private final AtomicLong outboxOldestPendingAgeSeconds = new AtomicLong(0);
     private final AtomicLong evidenceConfirmationPending = new AtomicLong(0);
     private final Map<AuditAction, AtomicInteger> evidenceGatedFinalizeEnabled = new EnumMap<>(AuditAction.class);
@@ -78,6 +79,11 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         Gauge.builder("outbox_confirmation_unknown_count", outboxConfirmationUnknown, AtomicLong::get).register(meterRegistry);
         Gauge.builder("outbox_failed_terminal_count", outboxFailedTerminal, AtomicLong::get).register(meterRegistry);
         Gauge.builder("outbox_projection_mismatch_count", outboxProjectionMismatch, AtomicLong::get).register(meterRegistry);
+        Gauge.builder(
+                "outbox_projection_reconciliation_pending_count",
+                outboxProjectionReconciliationPending,
+                AtomicLong::get
+        ).register(meterRegistry);
         Gauge.builder("outbox_oldest_pending_age_seconds", outboxOldestPendingAgeSeconds, AtomicLong::get).register(meterRegistry);
         Gauge.builder("evidence_confirmation_pending_count", evidenceConfirmationPending, AtomicLong::get).register(meterRegistry);
         registerEvidenceGatedFinalizeEnablementGauges();
@@ -268,6 +274,9 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         outboxConfirmationUnknown.set(Math.max(0L, response.confirmationUnknownCount()));
         outboxFailedTerminal.set(Math.max(0L, response.failedTerminalCount()));
         outboxProjectionMismatch.set(Math.max(0L, response.projectionMismatchCount()));
+        outboxProjectionReconciliationPending.set(
+                Math.max(0L, response.projectionReconciliationPendingCount())
+        );
         outboxOldestPendingAgeSeconds.set(response.oldestPendingAgeSeconds() == null ? 0L : Math.max(0L, response.oldestPendingAgeSeconds()));
     }
 

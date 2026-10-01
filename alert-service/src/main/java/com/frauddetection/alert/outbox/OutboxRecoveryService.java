@@ -23,11 +23,17 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
 public class OutboxRecoveryService {
+
+    private static final int PROJECTION_RECONCILIATION_LIMIT = 100;
+    private static final Duration PROJECTION_REPAIR_LEASE = Duration.ofMinutes(1);
+    private static final Duration PROJECTION_RETRY_DELAY = Duration.ofSeconds(30);
 
     private final TransactionalOutboxRecordRepository repository;
     private final MongoTemplate mongoTemplate;
@@ -73,6 +79,7 @@ public class OutboxRecoveryService {
                 repository.countByStatus(TransactionalOutboxStatus.FAILED_TERMINAL),
                 repository.countByStatus(TransactionalOutboxStatus.RECOVERY_REQUIRED),
                 repository.countByProjectionMismatchTrue(),
+                repository.countByProjectionReconcileAfterIsNotNull(),
                 oldestPendingAge
         );
         metrics.recordOutboxBacklog(response);
@@ -82,7 +89,7 @@ public class OutboxRecoveryService {
     public OutboxRecoveryRunResponse recoverNow() {
         int released = releaseStaleProcessing();
         int markedUnknown = markStalePublishAttemptedUnknown();
-        int repaired = repairProjectionMismatches();
+        int repaired = reconcileProjections();
         int attempted = publisherCoordinator.publishPending(100);
         return new OutboxRecoveryRunResponse(released, markedUnknown, repaired, attempted);
     }
@@ -93,24 +100,26 @@ public class OutboxRecoveryService {
             String actorId,
             String idempotencyKey
     ) {
+        String authenticatedActor = requireAuthenticatedActor(actorId);
         String requestHash = RegulatedMutationIntentHasher.hash("eventId=" + eventId
                 + "|resolution=" + request.resolution()
+                + "|pendingRequestId=" + RegulatedMutationIntentHasher.canonicalValue(request.pendingRequestId())
                 + "|reason=" + RegulatedMutationIntentHasher.canonicalValue(request.reason())
                 + "|evidence=" + RegulatedMutationIntentHasher.canonicalValue(request.evidenceReference()));
         RegulatedMutationCommand<TransactionalOutboxRecordDocument, OutboxRecordResponse> command = new RegulatedMutationCommand<>(
                 idempotencyKey,
-                actorId,
+                authenticatedActor,
                 eventId,
                 AuditResourceType.DECISION_OUTBOX,
                 AuditAction.RESOLVE_TRANSACTIONAL_OUTBOX_CONFIRMATION,
                 null,
                 requestHash,
-                context -> resolutionMutationHandler.resolve(eventId, request, actorId),
+                context -> resolutionMutationHandler.resolve(eventId, request, authenticatedActor),
                 (record, state) -> OutboxRecordResponse.from(record),
                 RegulatedMutationResponseSnapshot::from,
                 RegulatedMutationResponseSnapshot::toOutboxRecordResponse,
                 state -> statusResponse(eventId, state),
-                resolutionIntent(eventId, request, actorId, requestHash),
+                resolutionIntent(eventId, request, authenticatedActor, requestHash),
                 RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
         );
         RegulatedMutationResult<OutboxRecordResponse> result = regulatedMutationCoordinator.commit(command);
@@ -153,6 +162,8 @@ public class OutboxRecoveryService {
                     .set("last_error", "STALE_PUBLISH_ATTEMPT_CONFIRMATION_UNKNOWN")
                     .set("confirmation_unknown_at", now)
                     .set("updated_at", now)
+                    .set("projection_reconcile_after", now)
+                    .inc("projection_revision", 1L)
                     .unset("lease_owner")
                     .unset("lease_expires_at");
             if (mongoTemplate.updateFirst(
@@ -165,6 +176,8 @@ public class OutboxRecoveryService {
                 record.setLeaseExpiresAt(null);
                 record.setLastError("STALE_PUBLISH_ATTEMPT_CONFIRMATION_UNKNOWN");
                 record.setConfirmationUnknownAt(now);
+                record.setProjectionRevision(record.getProjectionRevision() + 1L);
+                record.setProjectionReconcileAfter(now);
                 record.setUpdatedAt(now);
                 publisherCoordinator.updateAlertProjection(
                         record,
@@ -178,9 +191,18 @@ public class OutboxRecoveryService {
         return marked;
     }
 
-    private int repairProjectionMismatches() {
+    private int reconcileProjections() {
         int repaired = 0;
-        for (TransactionalOutboxRecordDocument record : repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc()) {
+        Instant scanStartedAt = Instant.now();
+        Map<String, TransactionalOutboxRecordDocument> candidates = new LinkedHashMap<>();
+        addCandidates(
+                candidates,
+                repository.findTop100ByProjectionReconcileAfterLessThanEqualOrderByProjectionReconcileAfterAsc(
+                        scanStartedAt
+                )
+        );
+        addCandidates(candidates, repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc());
+        for (TransactionalOutboxRecordDocument record : candidates.values()) {
             if (!isRepairableProjectionStatus(record.getStatus())) {
                 continue;
             }
@@ -189,41 +211,93 @@ public class OutboxRecoveryService {
             Query claim = Query.query(new Criteria().andOperator(
                     Criteria.where("_id").is(record.getEventId()),
                     Criteria.where("status").is(record.getStatus()),
-                    Criteria.where("projection_mismatch").is(true),
-                    Criteria.where("updated_at").is(record.getUpdatedAt())
+                    Criteria.where("projection_revision").is(record.getProjectionRevision()),
+                    new Criteria().orOperator(
+                            Criteria.where("projection_mismatch").is(true),
+                            Criteria.where("projection_reconcile_after").lte(scanStartedAt)
+                    ),
+                    new Criteria().orOperator(
+                            Criteria.where("projection_repair_token").exists(false),
+                            Criteria.where("projection_repair_claimed_at").exists(false),
+                            Criteria.where("projection_repair_claimed_at")
+                                    .lte(scanStartedAt.minus(PROJECTION_REPAIR_LEASE))
+                    )
             ));
             Update claimRepair = new Update()
                     .set("projection_repair_token", repairToken)
-                    .set("updated_at", claimedAt);
+                    .set("projection_repair_claimed_at", claimedAt);
             if (mongoTemplate.updateFirst(claim, claimRepair, TransactionalOutboxRecordDocument.class)
                     .getModifiedCount() != 1) {
                 continue;
             }
-            record.setUpdatedAt(claimedAt);
+            if (record.getResourceId() == null || record.getResourceId().isBlank()) {
+                retainProjectionMismatch(record, repairToken, "ALERT_PROJECTION_RESOURCE_ID_MISSING");
+                continue;
+            }
             OutboxAlertProjectionPolicy.Projection projection = OutboxAlertProjectionPolicy.recovery(record);
+            AlertDocument alert = mongoTemplate.findById(record.getResourceId(), AlertDocument.class);
+            if (alert == null) {
+                retainProjectionMismatch(record, repairToken, "ALERT_PROJECTION_NOT_FOUND");
+                continue;
+            }
+            if (!record.getEventId().equals(alert.getDecisionOutboxEventId())) {
+                retainProjectionMismatch(record, repairToken, "ALERT_PROJECTION_EVENT_MISMATCH");
+                continue;
+            }
+            if (alert.getDecisionOutboxProjectionRevision() > record.getProjectionRevision()) {
+                retainProjectionMismatch(record, repairToken, "ALERT_PROJECTION_NEWER_THAN_SOURCE");
+                continue;
+            }
+            if (alert.getDecisionOutboxProjectionRevision() == record.getProjectionRevision()
+                    && projection.projectionStatus().equals(alert.getDecisionOutboxStatus())) {
+                completeProjectionRepair(record, repairToken);
+                continue;
+            }
             if (!writeAlertProjection(record, projection)) {
                 retainProjectionMismatch(record, repairToken, "ALERT_PROJECTION_REPAIR_FAILED");
                 continue;
             }
-            Query complete = Query.query(new Criteria().andOperator(
-                    Criteria.where("_id").is(record.getEventId()),
-                    Criteria.where("status").is(record.getStatus()),
-                    Criteria.where("projection_mismatch").is(true),
-                    Criteria.where("projection_repair_token").is(repairToken),
-                    Criteria.where("updated_at").is(claimedAt)
-            ));
-            Update clearMismatch = new Update()
-                    .unset("projection_mismatch")
-                    .unset("projection_mismatch_reason")
-                    .unset("projection_repair_token")
-                    .set("updated_at", Instant.now());
-            if (mongoTemplate.updateFirst(complete, clearMismatch, TransactionalOutboxRecordDocument.class)
-                    .getModifiedCount() == 1) {
+            if (completeProjectionRepair(record, repairToken)) {
                 repaired++;
             }
         }
         metrics.recordOutboxProjectionMismatch(repository.countByProjectionMismatchTrue());
         return repaired;
+    }
+
+    private void addCandidates(
+            Map<String, TransactionalOutboxRecordDocument> candidates,
+            List<TransactionalOutboxRecordDocument> records
+    ) {
+        if (records == null) {
+            return;
+        }
+        for (TransactionalOutboxRecordDocument record : records) {
+            if (candidates.size() >= PROJECTION_RECONCILIATION_LIMIT) {
+                return;
+            }
+            candidates.putIfAbsent(record.getEventId(), record);
+        }
+    }
+
+    private boolean completeProjectionRepair(
+            TransactionalOutboxRecordDocument record,
+            String repairToken
+    ) {
+        Query complete = Query.query(new Criteria().andOperator(
+                Criteria.where("_id").is(record.getEventId()),
+                Criteria.where("status").is(record.getStatus()),
+                Criteria.where("projection_revision").is(record.getProjectionRevision()),
+                Criteria.where("projection_repair_token").is(repairToken)
+        ));
+        Update clearMismatch = new Update()
+                .unset("projection_mismatch")
+                .unset("projection_mismatch_reason")
+                .unset("projection_reconcile_after")
+                .unset("projection_repair_token")
+                .unset("projection_repair_claimed_at");
+        return mongoTemplate.updateFirst(complete, clearMismatch, TransactionalOutboxRecordDocument.class)
+                .getModifiedCount() == 1;
     }
 
     private OutboxRecordResponse statusResponse(String eventId, RegulatedMutationState state) {
@@ -241,7 +315,10 @@ public class OutboxRecoveryService {
                 null,
                 null,
                 null,
+                null,
                 false,
+                null,
+                null,
                 null,
                 null,
                 null,
@@ -263,6 +340,7 @@ public class OutboxRecoveryService {
                         + "|action=" + AuditAction.RESOLVE_TRANSACTIONAL_OUTBOX_CONFIRMATION.name()
                         + "|actorId=" + RegulatedMutationIntentHasher.canonicalValue(actorId)
                         + "|resolution=" + RegulatedMutationIntentHasher.canonicalValue(request.resolution())
+                        + "|pendingRequestId=" + RegulatedMutationIntentHasher.canonicalValue(request.pendingRequestId())
                         + "|reasonHash=" + reasonHash
                         + "|payloadHash=" + payloadHash
         );
@@ -279,6 +357,16 @@ public class OutboxRecoveryService {
                 reasonHash,
                 payloadHash
         );
+    }
+
+    private String requireAuthenticatedActor(String actorId) {
+        if (actorId == null || actorId.isBlank()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.UNAUTHORIZED,
+                    "authenticated actor is required"
+            );
+        }
+        return actorId.trim();
     }
 
     private boolean writeAlertProjection(
@@ -321,15 +409,15 @@ public class OutboxRecoveryService {
         Query query = Query.query(new Criteria().andOperator(
                 Criteria.where("_id").is(record.getEventId()),
                 Criteria.where("status").is(record.getStatus()),
-                Criteria.where("projection_mismatch").is(true),
-                Criteria.where("projection_repair_token").is(repairToken),
-                Criteria.where("updated_at").is(record.getUpdatedAt())
+                Criteria.where("projection_revision").is(record.getProjectionRevision()),
+                Criteria.where("projection_repair_token").is(repairToken)
         ));
         Update update = new Update()
                 .set("projection_mismatch", true)
                 .set("projection_mismatch_reason", reason)
+                .set("projection_reconcile_after", Instant.now().plus(PROJECTION_RETRY_DELAY))
                 .unset("projection_repair_token")
-                .set("updated_at", Instant.now());
+                .unset("projection_repair_claimed_at");
         mongoTemplate.updateFirst(query, update, TransactionalOutboxRecordDocument.class);
     }
 

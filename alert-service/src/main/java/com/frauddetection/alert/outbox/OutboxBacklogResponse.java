@@ -19,6 +19,8 @@ public record OutboxBacklogResponse(
         long recoveryRequiredCount,
         @JsonProperty("projection_mismatch_count")
         long projectionMismatchCount,
+        @JsonProperty("projection_reconciliation_pending_count")
+        long projectionReconciliationPendingCount,
         @JsonProperty("oldest_pending_age_seconds")
         Long oldestPendingAgeSeconds
 ) {

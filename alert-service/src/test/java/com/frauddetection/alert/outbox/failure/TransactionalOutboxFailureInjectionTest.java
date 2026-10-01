@@ -65,6 +65,16 @@ class TransactionalOutboxFailureInjectionTest {
         published.setProjectionMismatch(true);
         published.setProjectionMismatchReason("ALERT_PROJECTION_UPDATE_FAILED");
         published.setPublishedAt(Instant.parse("2026-05-03T00:05:00Z"));
+        com.frauddetection.alert.persistence.AlertDocument outdated =
+                new com.frauddetection.alert.persistence.AlertDocument();
+        outdated.setAlertId(published.getResourceId());
+        outdated.setDecisionOutboxEventId(published.getEventId());
+        outdated.setDecisionOutboxProjectionRevision(published.getProjectionRevision() - 1L);
+        outdated.setDecisionOutboxStatus(DecisionOutboxStatus.PENDING);
+        when(fixture.mongoTemplate.findById(
+                published.getResourceId(),
+                com.frauddetection.alert.persistence.AlertDocument.class
+        )).thenReturn(outdated);
         when(fixture.repository.findTop100ByStatusAndLeaseExpiresAtBeforeOrderByCreatedAtAsc(any(), any()))
                 .thenReturn(List.of());
         when(fixture.repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc()).thenReturn(List.of(published));
@@ -109,15 +119,17 @@ class TransactionalOutboxFailureInjectionTest {
         assertThat(clearUnset).containsKeys(
                 "projection_mismatch",
                 "projection_mismatch_reason",
-                "projection_repair_token"
+                "projection_reconcile_after",
+                "projection_repair_token",
+                "projection_repair_claimed_at"
         );
         List<Document> clearConditions = outboxQueries.get(1).getQueryObject().getList("$and", Document.class);
         assertThat(clearConditions)
                 .anySatisfy(condition -> assertThat(condition).containsEntry("_id", published.getEventId()))
                 .anySatisfy(condition -> assertThat(condition).containsEntry("status", published.getStatus()))
-                .anySatisfy(condition -> assertThat(condition).containsEntry("projection_mismatch", true))
-                .anySatisfy(condition -> assertThat(condition).containsEntry("projection_repair_token", repairToken))
-                .anySatisfy(condition -> assertThat(condition).containsEntry("updated_at", claimSet.get("updated_at")));
+                .anySatisfy(condition -> assertThat(condition)
+                        .containsEntry("projection_revision", published.getProjectionRevision()))
+                .anySatisfy(condition -> assertThat(condition).containsEntry("projection_repair_token", repairToken));
     }
 
     private TransactionalOutboxRecordDocument record(String eventId, TransactionalOutboxStatus status) {

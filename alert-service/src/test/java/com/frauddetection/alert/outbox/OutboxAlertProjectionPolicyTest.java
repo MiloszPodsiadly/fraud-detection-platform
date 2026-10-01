@@ -6,7 +6,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
 import java.util.stream.Stream;
@@ -32,6 +31,8 @@ class OutboxAlertProjectionPolicyTest {
         assertThat(set.getInteger("decisionOutboxAttempts")).isEqualTo(4);
         assertThat(unset).containsKeys("decisionOutboxLeaseOwner", "decisionOutboxLeaseExpiresAt");
         assertThat(unset).containsKey("decisionOutboxResolutionPending");
+        assertThat(set.getString("decisionOutboxResolutionRequestId")).isEqualTo("request-1");
+        assertThat(set.getString("decisionOutboxResolutionProposedOutcome")).isEqualTo("PUBLISHED");
         assertThat(set.get("decisionOutboxResolutionRequestedAt")).isEqualTo(record.getResolutionRequestedAt());
         assertThat(set.getString("decisionOutboxResolutionRequestedBy")).isEqualTo("requester");
         assertThat(set.getString("decisionOutboxResolutionRequestReason"))
@@ -45,13 +46,29 @@ class OutboxAlertProjectionPolicyTest {
                 .isEqualTo(record.getResolutionEvidenceVerifiedAt());
         assertThat(set.getString("decisionOutboxResolutionEvidenceVerifiedBy"))
                 .isEqualTo(record.getResolutionEvidenceVerifiedBy());
+        assertThat(set.getString("decisionOutboxResolutionEvidenceFingerprint"))
+                .isEqualTo("request-evidence-fingerprint");
+        assertThat(set.getString("decisionOutboxResolutionApprovalEvidenceType")).isEqualTo("BROKER_OFFSET");
+        assertThat(set.getString("decisionOutboxResolutionApprovalEvidenceReference"))
+                .isEqualTo("partition=1,offset=43");
+        assertThat(set.get("decisionOutboxResolutionApprovalEvidenceVerifiedAt"))
+                .isEqualTo(record.getResolutionApprovalEvidenceVerifiedAt());
+        assertThat(set.getString("decisionOutboxResolutionApprovalEvidenceVerifiedBy"))
+                .isEqualTo("approval-verifier");
+        assertThat(set.getString("decisionOutboxResolutionApprovalEvidenceFingerprint"))
+                .isEqualTo("approval-evidence-fingerprint");
         assertThat(set.get("decisionOutboxResolutionApprovedAt")).isEqualTo(record.getResolutionApprovedAt());
         assertThat(set.getString("decisionOutboxResolutionApprovedBy")).isEqualTo("approver");
         if (sourceStatus == TransactionalOutboxStatus.PUBLISHED) {
             assertThat(set.get("decisionOutboxPublishedAt")).isEqualTo(record.getPublishedAt());
+            assertThat(set.getString("decisionOutboxPublicationConfirmationProvenance"))
+                    .isEqualTo("MANUAL_DUAL_CONTROL_ATTESTED");
         } else {
             assertThat(set).doesNotContainKey("decisionOutboxPublishedAt");
-            assertThat(unset).containsKey("decisionOutboxPublishedAt");
+            assertThat(unset).containsKeys(
+                    "decisionOutboxPublishedAt",
+                    "decisionOutboxPublicationConfirmationProvenance"
+            );
         }
         if (expectedReason == null) {
             assertThat(unset).containsKeys("decisionOutboxLastError", "decisionOutboxFailureReason");
@@ -101,9 +118,10 @@ class OutboxAlertProjectionPolicyTest {
     }
 
     @Test
-    void pendingProjectionCannotTargetAnAlreadyApprovedProjection() {
+    void projectionTargetIsFencedByEventIdentityAndMonotonicRevision() {
         TransactionalOutboxRecordDocument record = record(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
         record.setResolutionPending(true);
+        record.setProjectionRevision(7L);
         record.setResolutionApprovedAt(null);
         record.setResolutionApprovedBy(null);
         record.setResolutionApprovalReason(null);
@@ -114,23 +132,11 @@ class OutboxAlertProjectionPolicyTest {
                 .toString();
 
         assertThat(target)
-                .contains("decisionOutboxResolutionApprovedAt")
-                .contains("$exists=false")
-                .contains("decisionOutboxResolutionRequestedAt");
-    }
-
-    @Test
-    void existingPersistedReasonMapsAccordingToTheStoredResolutionPhase() {
-        TransactionalOutboxRecordDocument record = new TransactionalOutboxRecordDocument();
-        ReflectionTestUtils.setField(record, "persistedResolutionReason", "stored reason");
-
-        record.setResolutionPending(true);
-        assertThat(record.getResolutionRequestReason()).isEqualTo("stored reason");
-        assertThat(record.getResolutionApprovalReason()).isNull();
-
-        record.setResolutionPending(false);
-        assertThat(record.getResolutionRequestReason()).isNull();
-        assertThat(record.getResolutionApprovalReason()).isEqualTo("stored reason");
+                .contains("decisionOutboxEventId=event-1")
+                .contains("decisionOutboxProjectionRevision=Document{{$lte=7}}")
+                .doesNotContain("decisionOutboxResolutionApprovedAt")
+                .doesNotContain("decisionOutboxAttempts")
+                .doesNotContain("decisionOutboxStatus");
     }
 
     private static Stream<Arguments> projectionStates() {
@@ -169,11 +175,17 @@ class OutboxAlertProjectionPolicyTest {
 
     private TransactionalOutboxRecordDocument record(TransactionalOutboxStatus status) {
         TransactionalOutboxRecordDocument record = new TransactionalOutboxRecordDocument();
+        record.setEventId("event-1");
         record.setStatus(status);
         record.setAttempts(4);
         record.setLastError(status == TransactionalOutboxStatus.PUBLISHED ? null : "source-error");
         record.setPublishedAt(Instant.parse("2026-09-30T10:30:00Z"));
+        record.setPublicationConfirmationProvenance(
+                OutboxPublicationConfirmationProvenance.MANUAL_DUAL_CONTROL_ATTESTED
+        );
         record.setResolutionPending(false);
+        record.setResolutionRequestId("request-1");
+        record.setResolutionProposedOutcome("PUBLISHED");
         record.setResolutionRequestedAt(Instant.parse("2026-09-30T10:15:00Z"));
         record.setResolutionRequestedBy("requester");
         record.setResolutionRequestReason("request reason");
@@ -182,6 +194,12 @@ class OutboxAlertProjectionPolicyTest {
         record.setResolutionEvidenceReference("partition=1,offset=42");
         record.setResolutionEvidenceVerifiedAt(Instant.parse("2026-09-30T10:20:00Z"));
         record.setResolutionEvidenceVerifiedBy("verifier");
+        record.setResolutionEvidenceFingerprint("request-evidence-fingerprint");
+        record.setResolutionApprovalEvidenceType("BROKER_OFFSET");
+        record.setResolutionApprovalEvidenceReference("partition=1,offset=43");
+        record.setResolutionApprovalEvidenceVerifiedAt(Instant.parse("2026-09-30T10:21:00Z"));
+        record.setResolutionApprovalEvidenceVerifiedBy("approval-verifier");
+        record.setResolutionApprovalEvidenceFingerprint("approval-evidence-fingerprint");
         record.setResolutionApprovedAt(Instant.parse("2026-09-30T10:25:00Z"));
         record.setResolutionApprovedBy("approver");
         return record;

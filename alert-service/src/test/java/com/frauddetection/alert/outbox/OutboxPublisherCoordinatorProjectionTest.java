@@ -87,6 +87,30 @@ class OutboxPublisherCoordinatorProjectionTest {
         assertThat(unset).isNull();
     }
 
+    @Test
+    void failedMismatchPersistenceDoesNotRemoveIndependentlyScheduledReconciliation() {
+        MongoTemplate mongoTemplate = mock(MongoTemplate.class);
+        when(mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(AlertDocument.class)))
+                .thenThrow(new DataAccessResourceFailureException("projection unavailable"));
+        when(mongoTemplate.updateFirst(
+                any(Query.class),
+                any(Update.class),
+                eq(TransactionalOutboxRecordDocument.class)
+        )).thenThrow(new DataAccessResourceFailureException("mismatch marker unavailable"));
+        OutboxPublisherCoordinator coordinator = coordinator(mongoTemplate);
+        TransactionalOutboxRecordDocument record = mismatchedRecord();
+
+        coordinator.updateAlertProjection(
+                record,
+                DecisionOutboxStatus.PUBLISHED,
+                null,
+                Instant.parse("2026-09-30T10:30:00Z")
+        );
+
+        assertThat(record.getProjectionReconcileAfter())
+                .isEqualTo(Instant.parse("2026-09-30T10:30:00Z"));
+    }
+
     private OutboxPublisherCoordinator coordinator(MongoTemplate mongoTemplate) {
         return new OutboxPublisherCoordinator(
                 mock(FraudDecisionEventPublisher.class),
@@ -105,6 +129,7 @@ class OutboxPublisherCoordinatorProjectionTest {
         record.setAttempts(2);
         record.setProjectionMismatch(true);
         record.setProjectionMismatchReason("ALERT_PROJECTION_UPDATE_FAILED");
+        record.setProjectionReconcileAfter(Instant.parse("2026-09-30T10:30:00Z"));
         record.setUpdatedAt(Instant.parse("2026-09-30T10:30:00Z"));
         return record;
     }

@@ -4,6 +4,7 @@ import com.frauddetection.alert.audit.ResolutionEvidenceReference;
 import com.frauddetection.alert.audit.ResolutionEvidenceType;
 import com.frauddetection.alert.outbox.OutboxConfirmationResolution;
 import com.frauddetection.alert.outbox.OutboxConfirmationResolutionRequest;
+import com.frauddetection.alert.outbox.OutboxPublicationConfirmationProvenance;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
@@ -32,6 +33,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class OutboxConfirmationResolutionMutationHandlerTest {
@@ -53,16 +55,111 @@ class OutboxConfirmationResolutionMutationHandlerTest {
         assertThat(requested.isResolutionPending()).isTrue();
         assertThat(requested.getResolutionControlMode()).isEqualTo("DUAL_CONTROL_REQUESTED");
 
-        assertThatThrownBy(() -> fixture.handler.resolve("event-1", request(), "ops-1"))
+        assertThat(requested.getResolutionRequestId()).isNotBlank();
+        assertThat(requested.getResolutionProposedOutcome()).isEqualTo("PUBLISHED");
+
+        assertThatThrownBy(() -> fixture.handler.resolve(
+                "event-1",
+                request(OutboxConfirmationResolution.PUBLISHED, requested.getResolutionRequestId()),
+                "ops-1"
+        ))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("distinct actor");
 
-        TransactionalOutboxRecordDocument approved = fixture.handler.resolve("event-1", request(), "ops-2");
+        TransactionalOutboxRecordDocument approved = fixture.handler.resolve(
+                "event-1",
+                request(OutboxConfirmationResolution.PUBLISHED, requested.getResolutionRequestId()),
+                "ops-2"
+        );
 
         assertThat(approved.getStatus()).isEqualTo(TransactionalOutboxStatus.PUBLISHED);
         assertThat(approved.isResolutionPending()).isFalse();
         assertThat(approved.getResolutionControlMode()).isEqualTo("DUAL_CONTROL_APPROVED");
         assertThat(approved.getResolutionApprovedBy()).isEqualTo("ops-2");
+        assertThat(approved.getPublicationConfirmationProvenance())
+                .isEqualTo(OutboxPublicationConfirmationProvenance.MANUAL_DUAL_CONTROL_ATTESTED);
+    }
+
+    @Test
+    void shouldRejectApprovalThatChangesPublishedProposalToRecoveryRequired() {
+        assertChangedProposalRejected(
+                OutboxConfirmationResolution.PUBLISHED,
+                OutboxConfirmationResolution.RECOVERY_REQUIRED
+        );
+    }
+
+    @Test
+    void shouldRejectApprovalThatChangesRecoveryRequiredProposalToPublished() {
+        assertChangedProposalRejected(
+                OutboxConfirmationResolution.RECOVERY_REQUIRED,
+                OutboxConfirmationResolution.PUBLISHED
+        );
+    }
+
+    @Test
+    void shouldRejectApprovalForDifferentPendingRequest() {
+        Fixture fixture = fixture(true, true);
+        mockPersistence(fixture, record());
+        when(fixture.mongoTemplate.updateFirst(any(), any(), any(Class.class)))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+
+        fixture.handler.resolve("event-1", request(), "requester");
+
+        assertThatThrownBy(() -> fixture.handler.resolve(
+                "event-1",
+                request(OutboxConfirmationResolution.PUBLISHED, "different-request-id"),
+                "approver"
+        ))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("different pending request");
+    }
+
+    @Test
+    void shouldRejectMissingOrBlankAuthenticatedActor() {
+        Fixture fixture = fixture(true, true);
+
+        assertThatThrownBy(() -> fixture.handler.resolve("event-1", request(), null))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("authenticated actor");
+        assertThatThrownBy(() -> fixture.handler.resolve("event-1", request(), "   "))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("authenticated actor");
+        verifyNoInteractions(fixture.repository, fixture.mongoTemplate);
+    }
+
+    @Test
+    void shouldPreserveRequesterEvidenceAndPersistSeparateApprovalEvidence() {
+        Fixture fixture = fixture(true, true);
+        mockPersistence(fixture, record());
+        when(fixture.mongoTemplate.updateFirst(any(), any(), any(Class.class)))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+        ResolutionEvidenceReference requestEvidence = evidence("request-evidence", "request-verifier");
+        ResolutionEvidenceReference approvalEvidence = evidence("approval-evidence", "approval-verifier");
+
+        TransactionalOutboxRecordDocument requested = fixture.handler.resolve(
+                "event-1",
+                request(OutboxConfirmationResolution.PUBLISHED, null, "request reason", requestEvidence),
+                "requester"
+        );
+        TransactionalOutboxRecordDocument approved = fixture.handler.resolve(
+                "event-1",
+                request(
+                        OutboxConfirmationResolution.PUBLISHED,
+                        requested.getResolutionRequestId(),
+                        "approval reason",
+                        approvalEvidence
+                ),
+                "approver"
+        );
+
+        assertThat(approved.getResolutionEvidenceReference()).isEqualTo("request-evidence");
+        assertThat(approved.getResolutionEvidenceVerifiedBy()).isEqualTo("request-verifier");
+        assertThat(approved.getResolutionEvidenceFingerprint()).isEqualTo(requested.getResolutionEvidenceFingerprint());
+        assertThat(approved.getResolutionApprovalEvidenceReference()).isEqualTo("approval-evidence");
+        assertThat(approved.getResolutionApprovalEvidenceVerifiedBy()).isEqualTo("approval-verifier");
+        assertThat(approved.getResolutionApprovalEvidenceFingerprint()).isNotBlank();
+        assertThat(approved.getResolutionRequestReason()).isEqualTo("request reason");
+        assertThat(approved.getResolutionApprovalReason()).isEqualTo("approval reason");
     }
 
     @Test
@@ -76,6 +173,8 @@ class OutboxConfirmationResolutionMutationHandlerTest {
 
         assertThat(resolved.getStatus()).isEqualTo(TransactionalOutboxStatus.PUBLISHED);
         assertThat(resolved.getResolutionControlMode()).isEqualTo("SINGLE_CONTROL_OPERATOR_ATTESTED");
+        assertThat(resolved.getPublicationConfirmationProvenance())
+                .isEqualTo(OutboxPublicationConfirmationProvenance.MANUAL_SINGLE_CONTROL_ATTESTED);
     }
 
     @Test
@@ -331,6 +430,8 @@ class OutboxConfirmationResolutionMutationHandlerTest {
             if (set.containsKey("status")) target.setStatus((TransactionalOutboxStatus) set.get("status"));
             if (set.containsKey("resolution_pending")) target.setResolutionPending(set.getBoolean("resolution_pending"));
             if (set.containsKey("resolution_control_mode")) target.setResolutionControlMode(set.getString("resolution_control_mode"));
+            if (set.containsKey("resolution_request_id")) target.setResolutionRequestId(set.getString("resolution_request_id"));
+            if (set.containsKey("resolution_proposed_outcome")) target.setResolutionProposedOutcome(set.getString("resolution_proposed_outcome"));
             if (set.containsKey("resolution_requested_by")) target.setResolutionRequestedBy(set.getString("resolution_requested_by"));
             if (set.containsKey("resolution_requested_at")) target.setResolutionRequestedAt((Instant) set.get("resolution_requested_at"));
             if (set.containsKey("resolution_request_reason")) target.setResolutionRequestReason(set.getString("resolution_request_reason"));
@@ -339,10 +440,19 @@ class OutboxConfirmationResolutionMutationHandlerTest {
             if (set.containsKey("resolution_evidence_reference")) target.setResolutionEvidenceReference(set.getString("resolution_evidence_reference"));
             if (set.containsKey("resolution_evidence_verified_at")) target.setResolutionEvidenceVerifiedAt((Instant) set.get("resolution_evidence_verified_at"));
             if (set.containsKey("resolution_evidence_verified_by")) target.setResolutionEvidenceVerifiedBy(set.getString("resolution_evidence_verified_by"));
+            if (set.containsKey("resolution_evidence_fingerprint")) target.setResolutionEvidenceFingerprint(set.getString("resolution_evidence_fingerprint"));
+            if (set.containsKey("resolution_approval_evidence_type")) target.setResolutionApprovalEvidenceType(set.getString("resolution_approval_evidence_type"));
+            if (set.containsKey("resolution_approval_evidence_reference")) target.setResolutionApprovalEvidenceReference(set.getString("resolution_approval_evidence_reference"));
+            if (set.containsKey("resolution_approval_evidence_verified_at")) target.setResolutionApprovalEvidenceVerifiedAt((Instant) set.get("resolution_approval_evidence_verified_at"));
+            if (set.containsKey("resolution_approval_evidence_verified_by")) target.setResolutionApprovalEvidenceVerifiedBy(set.getString("resolution_approval_evidence_verified_by"));
+            if (set.containsKey("resolution_approval_evidence_fingerprint")) target.setResolutionApprovalEvidenceFingerprint(set.getString("resolution_approval_evidence_fingerprint"));
             if (set.containsKey("resolution_approved_by")) target.setResolutionApprovedBy(set.getString("resolution_approved_by"));
             if (set.containsKey("resolution_approved_at")) target.setResolutionApprovedAt((Instant) set.get("resolution_approved_at"));
             if (set.containsKey("last_error")) target.setLastError(set.getString("last_error"));
             if (set.containsKey("published_at")) target.setPublishedAt((Instant) set.get("published_at"));
+            if (set.containsKey("publication_confirmation_provenance")) target.setPublicationConfirmationProvenance(
+                    (OutboxPublicationConfirmationProvenance) set.get("publication_confirmation_provenance")
+            );
             if (set.containsKey("updated_at")) target.setUpdatedAt((Instant) set.get("updated_at"));
         }
         if (unset != null) {
@@ -350,6 +460,7 @@ class OutboxConfirmationResolutionMutationHandlerTest {
             if (unset.containsKey("lease_expires_at")) target.setLeaseExpiresAt(null);
             if (unset.containsKey("last_error")) target.setLastError(null);
             if (unset.containsKey("published_at")) target.setPublishedAt(null);
+            if (unset.containsKey("publication_confirmation_provenance")) target.setPublicationConfirmationProvenance(null);
             if (unset.containsKey("resolution_approval_reason")) target.setResolutionApprovalReason(null);
         }
     }
@@ -364,9 +475,12 @@ class OutboxConfirmationResolutionMutationHandlerTest {
         saved.setLeaseExpiresAt(source.getLeaseExpiresAt());
         saved.setLastError(source.getLastError());
         saved.setPublishedAt(source.getPublishedAt());
+        saved.setPublicationConfirmationProvenance(source.getPublicationConfirmationProvenance());
         saved.setConfirmationUnknownAt(source.getConfirmationUnknownAt());
         saved.setResolutionPending(source.isResolutionPending());
         saved.setResolutionControlMode(source.getResolutionControlMode());
+        saved.setResolutionRequestId(source.getResolutionRequestId());
+        saved.setResolutionProposedOutcome(source.getResolutionProposedOutcome());
         saved.setResolutionRequestedAt(source.getResolutionRequestedAt());
         saved.setResolutionRequestedBy(source.getResolutionRequestedBy());
         saved.setResolutionRequestReason(source.getResolutionRequestReason());
@@ -375,6 +489,12 @@ class OutboxConfirmationResolutionMutationHandlerTest {
         saved.setResolutionEvidenceReference(source.getResolutionEvidenceReference());
         saved.setResolutionEvidenceVerifiedAt(source.getResolutionEvidenceVerifiedAt());
         saved.setResolutionEvidenceVerifiedBy(source.getResolutionEvidenceVerifiedBy());
+        saved.setResolutionEvidenceFingerprint(source.getResolutionEvidenceFingerprint());
+        saved.setResolutionApprovalEvidenceType(source.getResolutionApprovalEvidenceType());
+        saved.setResolutionApprovalEvidenceReference(source.getResolutionApprovalEvidenceReference());
+        saved.setResolutionApprovalEvidenceVerifiedAt(source.getResolutionApprovalEvidenceVerifiedAt());
+        saved.setResolutionApprovalEvidenceVerifiedBy(source.getResolutionApprovalEvidenceVerifiedBy());
+        saved.setResolutionApprovalEvidenceFingerprint(source.getResolutionApprovalEvidenceFingerprint());
         saved.setResolutionApprovedAt(source.getResolutionApprovedAt());
         saved.setResolutionApprovedBy(source.getResolutionApprovedBy());
         saved.setUpdatedAt(source.getUpdatedAt());
@@ -424,16 +544,63 @@ class OutboxConfirmationResolutionMutationHandlerTest {
     }
 
     private OutboxConfirmationResolutionRequest request(OutboxConfirmationResolution resolution) {
+        return request(resolution, null);
+    }
+
+    private OutboxConfirmationResolutionRequest request(
+            OutboxConfirmationResolution resolution,
+            String pendingRequestId
+    ) {
+        return request(resolution, pendingRequestId, "broker offset verified", evidence(
+                "topic=fraud-decisions,partition=0,offset=42",
+                "ops"
+        ));
+    }
+
+    private OutboxConfirmationResolutionRequest request(
+            OutboxConfirmationResolution resolution,
+            String pendingRequestId,
+            String reason,
+            ResolutionEvidenceReference evidence
+    ) {
         return new OutboxConfirmationResolutionRequest(
                 resolution,
-                "broker offset verified",
-                new ResolutionEvidenceReference(
-                        ResolutionEvidenceType.BROKER_OFFSET,
-                        "topic=fraud-decisions,partition=0,offset=42",
-                        Instant.parse("2026-05-02T10:00:00Z"),
-                        "ops"
-                )
+                pendingRequestId,
+                reason,
+                evidence
         );
+    }
+
+    private ResolutionEvidenceReference evidence(String reference, String verifiedBy) {
+        return new ResolutionEvidenceReference(
+                ResolutionEvidenceType.BROKER_OFFSET,
+                reference,
+                Instant.parse("2026-05-02T10:00:00Z"),
+                verifiedBy
+        );
+    }
+
+    private void assertChangedProposalRejected(
+            OutboxConfirmationResolution proposed,
+            OutboxConfirmationResolution attemptedApproval
+    ) {
+        Fixture fixture = fixture(true, true);
+        mockPersistence(fixture, record());
+        when(fixture.mongoTemplate.updateFirst(any(), any(), any(Class.class)))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+        TransactionalOutboxRecordDocument requested = fixture.handler.resolve(
+                "event-1",
+                request(proposed),
+                "requester"
+        );
+
+        assertThatThrownBy(() -> fixture.handler.resolve(
+                "event-1",
+                request(attemptedApproval, requested.getResolutionRequestId()),
+                "approver"
+        ))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("cannot change the proposed resolution");
     }
 
     private record Fixture(

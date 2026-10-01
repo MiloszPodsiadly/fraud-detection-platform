@@ -37,8 +37,8 @@ public class OutboxPublisherCoordinator {
             FraudDecisionEventPublisher publisher,
             MongoTemplate mongoTemplate,
             AlertServiceMetrics metrics,
-            @Value("${app.outbox.lease-duration:${app.alert.decision-outbox.lease-duration:PT1M}}") Duration leaseDuration,
-            @Value("${app.outbox.max-attempts:${app.alert.decision-outbox.max-attempts:5}}") int maxAttempts
+            @Value("${app.outbox.lease-duration:PT1M}") Duration leaseDuration,
+            @Value("${app.outbox.max-attempts:5}") int maxAttempts
     ) {
         this.publisher = publisher;
         this.mongoTemplate = mongoTemplate;
@@ -137,7 +137,10 @@ public class OutboxPublisherCoordinator {
         Update update = new Update()
                 .set("status", TransactionalOutboxStatus.PUBLISHED)
                 .set("published_at", now)
+                .set("publication_confirmation_provenance", OutboxPublicationConfirmationProvenance.BROKER_ACKNOWLEDGED)
                 .set("updated_at", now)
+                .set("projection_reconcile_after", now)
+                .inc("projection_revision", 1L)
                 .unset("lease_owner")
                 .unset("lease_expires_at")
                 .unset("last_error");
@@ -150,6 +153,11 @@ public class OutboxPublisherCoordinator {
             if (published) {
                 record.setStatus(TransactionalOutboxStatus.PUBLISHED);
                 record.setPublishedAt(now);
+                record.setPublicationConfirmationProvenance(
+                        OutboxPublicationConfirmationProvenance.BROKER_ACKNOWLEDGED
+                );
+                record.setProjectionRevision(record.getProjectionRevision() + 1L);
+                record.setProjectionReconcileAfter(now);
                 record.setUpdatedAt(now);
                 record.setLeaseOwner(null);
                 record.setLeaseExpiresAt(null);
@@ -167,7 +175,10 @@ public class OutboxPublisherCoordinator {
                 .set("status", TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN)
                 .set("confirmation_unknown_at", now)
                 .set("last_error", "OUTBOX_PUBLISH_CONFIRMATION_FAILED")
+                .unset("publication_confirmation_provenance")
                 .set("updated_at", now)
+                .set("projection_reconcile_after", now)
+                .inc("projection_revision", 1L)
                 .unset("lease_owner")
                 .unset("lease_expires_at");
         try {
@@ -179,6 +190,9 @@ public class OutboxPublisherCoordinator {
             if (result.getModifiedCount() == 1) {
                 record.setStatus(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
                 record.setConfirmationUnknownAt(now);
+                record.setPublicationConfirmationProvenance(null);
+                record.setProjectionRevision(record.getProjectionRevision() + 1L);
+                record.setProjectionReconcileAfter(now);
                 record.setLastError("OUTBOX_PUBLISH_CONFIRMATION_FAILED");
                 record.setUpdatedAt(now);
                 record.setLeaseOwner(null);
@@ -200,7 +214,10 @@ public class OutboxPublisherCoordinator {
         Update update = new Update()
                 .set("status", status)
                 .set("last_error", reason)
+                .unset("publication_confirmation_provenance")
                 .set("updated_at", now)
+                .set("projection_reconcile_after", now)
+                .inc("projection_revision", 1L)
                 .unset("lease_owner")
                 .unset("lease_expires_at");
         try {
@@ -211,6 +228,9 @@ public class OutboxPublisherCoordinator {
             );
             if (result.getModifiedCount() == 1) {
                 record.setStatus(status);
+                record.setPublicationConfirmationProvenance(null);
+                record.setProjectionRevision(record.getProjectionRevision() + 1L);
+                record.setProjectionReconcileAfter(now);
                 record.setLastError(reason);
                 record.setUpdatedAt(now);
                 record.setLeaseOwner(null);
@@ -258,7 +278,7 @@ public class OutboxPublisherCoordinator {
             if (result.getMatchedCount() == 0) {
                 markProjectionMismatch(record, sourceStatus, "ALERT_PROJECTION_NOT_FOUND");
             } else {
-                clearProjectionMismatch(record, sourceStatus);
+                markProjectionSynchronized(record, sourceStatus);
             }
         } catch (DataAccessException exception) {
             markProjectionMismatch(record, sourceStatus, "ALERT_PROJECTION_UPDATE_FAILED");
@@ -277,7 +297,8 @@ public class OutboxPublisherCoordinator {
                     .set("updated_at", Instant.now());
             mongoTemplate.updateFirst(Query.query(new Criteria().andOperator(
                     Criteria.where("_id").is(record.getEventId()),
-                    Criteria.where("status").is(expectedStatus)
+                    Criteria.where("status").is(expectedStatus),
+                    Criteria.where("projection_revision").is(record.getProjectionRevision())
             )), update, TransactionalOutboxRecordDocument.class);
             metrics.recordOutboxProjectionMismatch(1);
             log.warn("Transactional outbox projection mismatch: reason={}", reason);
@@ -286,25 +307,24 @@ public class OutboxPublisherCoordinator {
         }
     }
 
-    private void clearProjectionMismatch(
+    private void markProjectionSynchronized(
             TransactionalOutboxRecordDocument record,
             TransactionalOutboxStatus expectedStatus
     ) {
-        if (!record.isProjectionMismatch()) {
-            return;
-        }
         try {
             mongoTemplate.updateFirst(Query.query(new Criteria().andOperator(
                     Criteria.where("_id").is(record.getEventId()),
                     Criteria.where("status").is(expectedStatus),
-                    Criteria.where("updated_at").is(record.getUpdatedAt()),
-                    Criteria.where("projection_mismatch").is(true)
+                    Criteria.where("projection_revision").is(record.getProjectionRevision()),
+                    Criteria.where("updated_at").is(record.getUpdatedAt())
             )), new Update()
                     .unset("projection_mismatch")
                     .unset("projection_mismatch_reason")
-                    .set("updated_at", Instant.now()), TransactionalOutboxRecordDocument.class);
+                    .unset("projection_reconcile_after")
+                    .unset("projection_repair_token")
+                    .unset("projection_repair_claimed_at"), TransactionalOutboxRecordDocument.class);
         } catch (DataAccessException exception) {
-            log.warn("Transactional outbox projection mismatch cleanup failed: reason=OUTBOX_PROJECTION_MISMATCH_CLEAR_FAILED");
+            log.warn("Transactional outbox projection synchronization persistence failed: reason=OUTBOX_PROJECTION_SYNC_CLEAR_FAILED");
         }
     }
 
