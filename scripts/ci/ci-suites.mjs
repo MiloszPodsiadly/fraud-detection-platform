@@ -76,7 +76,7 @@ export const ciSuites = {
       "FraudCaseWorkQueueAuditPrecedenceTest",
       "SensitiveReadAuditUnavailableRunbookTest",
       "FraudCaseReadPolicyNamingBoundaryTest",
-      "FraudCaseLegacyExactCountCompatibilityDocsTest",
+      "FraudCaseRemovedListExactCountGuardTest",
       "FraudCaseReadQueryPolicyContractTest",
       "FraudCaseWorkQueueCursorArchitectureTest",
       "FraudCaseWorkQueueCursorCodecTest",
