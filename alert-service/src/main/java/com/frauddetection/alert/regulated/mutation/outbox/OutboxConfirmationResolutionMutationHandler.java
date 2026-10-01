@@ -1,13 +1,13 @@
 package com.frauddetection.alert.regulated.mutation.outbox;
 
 import com.frauddetection.alert.audit.ResolutionEvidenceReference;
+import com.frauddetection.alert.outbox.OutboxAlertProjectionPolicy;
 import com.frauddetection.alert.outbox.OutboxConfirmationResolution;
 import com.frauddetection.alert.outbox.OutboxConfirmationResolutionRequest;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.persistence.AlertDocument;
-import com.frauddetection.alert.service.DecisionOutboxStatus;
 import com.mongodb.client.result.UpdateResult;
 import org.springframework.dao.DataAccessException;
 import org.springframework.beans.factory.annotation.Value;
@@ -84,7 +84,7 @@ public class OutboxConfirmationResolutionMutationHandler {
         record.setLastError("DUAL_CONTROL_APPROVAL_REQUIRED");
         record.setUpdatedAt(now);
         TransactionalOutboxRecordDocument saved = repository.save(record);
-        markAlertResolutionPending(saved, request.reason(), actorId, evidence);
+        projectSavedRecord(saved);
         return saved;
     }
 
@@ -135,80 +135,22 @@ public class OutboxConfirmationResolutionMutationHandler {
             record.setPublishedAt(now);
         }
         TransactionalOutboxRecordDocument saved = repository.save(record);
-        updateAlertProjection(saved, status, request.reason(), actorId, request.evidenceReference());
+        projectSavedRecord(saved);
         return saved;
     }
 
-    private void markAlertResolutionPending(
-            TransactionalOutboxRecordDocument record,
-            String reason,
-            String actorId,
-            ResolutionEvidenceReference evidence
-    ) {
+    private void projectSavedRecord(TransactionalOutboxRecordDocument record) {
         if (record.getResourceId() == null || record.getResourceId().isBlank()) {
+            markProjectionMismatch(record, "ALERT_PROJECTION_RESOURCE_ID_MISSING");
             return;
         }
-        Update update = new Update()
-                .set("decisionOutboxResolutionPending", true)
-                .set("decisionOutboxResolutionRequestedAt", record.getResolutionRequestedAt())
-                .set("decisionOutboxResolutionRequestedBy", actorId)
-                .set("decisionOutboxResolutionApprovalReason", reason)
-                .set("decisionOutboxResolutionEvidenceType", evidence.type().name())
-                .set("decisionOutboxResolutionEvidenceReference", evidence.reference())
-                .set("decisionOutboxResolutionEvidenceVerifiedAt", evidence.verifiedAt())
-                .set("decisionOutboxResolutionEvidenceVerifiedBy", evidence.verifiedBy());
+        OutboxAlertProjectionPolicy.Projection projection = OutboxAlertProjectionPolicy.manualResolution(record);
         try {
-            Query query = Query.query(new Criteria().andOperator(
-                    Criteria.where("_id").is(record.getResourceId()),
-                    Criteria.where("decisionOutboxStatus").nin(
-                            DecisionOutboxStatus.PUBLISHED,
-                            DecisionOutboxStatus.FAILED_TERMINAL
-                    )
-            ));
-            UpdateResult result = mongoTemplate.updateFirst(query, update, AlertDocument.class);
-            if (result.getMatchedCount() == 0) {
-                markProjectionMismatch(record, "ALERT_PROJECTION_NOT_FOUND");
-            }
-        } catch (DataAccessException exception) {
-            markProjectionMismatch(record, "ALERT_PROJECTION_UPDATE_FAILED");
-        }
-    }
-
-    private void updateAlertProjection(
-            TransactionalOutboxRecordDocument record,
-            TransactionalOutboxStatus status,
-            String reason,
-            String actorId,
-            ResolutionEvidenceReference evidence
-    ) {
-        if (record.getResourceId() == null || record.getResourceId().isBlank()) {
-            return;
-        }
-        String alertStatus = status == TransactionalOutboxStatus.PUBLISHED
-                ? DecisionOutboxStatus.PUBLISHED
-                : DecisionOutboxStatus.FAILED_TERMINAL;
-        Update update = new Update()
-                .set("decisionOutboxStatus", alertStatus)
-                .set("decisionOutboxResolutionApprovedAt", Instant.now())
-                .set("decisionOutboxResolutionApprovedBy", actorId)
-                .set("decisionOutboxResolutionApprovalReason", reason)
-                .set("decisionOutboxResolutionEvidenceType", evidence.type().name())
-                .set("decisionOutboxResolutionEvidenceReference", evidence.reference())
-                .set("decisionOutboxResolutionEvidenceVerifiedAt", evidence.verifiedAt())
-                .set("decisionOutboxResolutionEvidenceVerifiedBy", evidence.verifiedBy())
-                .unset("decisionOutboxLeaseOwner")
-                .unset("decisionOutboxLeaseExpiresAt")
-                .unset("decisionOutboxResolutionPending");
-        if (status == TransactionalOutboxStatus.PUBLISHED) {
-            update.set("decisionOutboxPublishedAt", record.getPublishedAt())
-                    .unset("decisionOutboxLastError")
-                    .unset("decisionOutboxFailureReason");
-        } else {
-            update.set("decisionOutboxLastError", "MANUAL_RECOVERY_REQUIRED")
-                    .set("decisionOutboxFailureReason", "MANUAL_RECOVERY_REQUIRED");
-        }
-        try {
-            UpdateResult result = mongoTemplate.updateFirst(Query.query(Criteria.where("_id").is(record.getResourceId())), update, AlertDocument.class);
+            UpdateResult result = mongoTemplate.updateFirst(
+                    projection.target(record.getResourceId()),
+                    projection.update(),
+                    AlertDocument.class
+            );
             if (result.getMatchedCount() == 0) {
                 markProjectionMismatch(record, "ALERT_PROJECTION_NOT_FOUND");
             }

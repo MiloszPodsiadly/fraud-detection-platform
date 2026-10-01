@@ -30,7 +30,17 @@ class OutboxAlertProjectionPolicyTest {
         assertThat(set.getInteger("decisionOutboxAttempts")).isEqualTo(4);
         assertThat(unset).containsKeys("decisionOutboxLeaseOwner", "decisionOutboxLeaseExpiresAt");
         assertThat(set.get("decisionOutboxResolutionPending")).isEqualTo(true);
+        assertThat(set.get("decisionOutboxResolutionRequestedAt")).isEqualTo(record.getResolutionRequestedAt());
         assertThat(set.getString("decisionOutboxResolutionRequestedBy")).isEqualTo("requester");
+        assertThat(set.getString("decisionOutboxResolutionApprovalReason")).isEqualTo(record.getResolutionReason());
+        assertThat(set.getString("decisionOutboxResolutionEvidenceType")).isEqualTo(record.getResolutionEvidenceType());
+        assertThat(set.getString("decisionOutboxResolutionEvidenceReference"))
+                .isEqualTo(record.getResolutionEvidenceReference());
+        assertThat(set.get("decisionOutboxResolutionEvidenceVerifiedAt"))
+                .isEqualTo(record.getResolutionEvidenceVerifiedAt());
+        assertThat(set.getString("decisionOutboxResolutionEvidenceVerifiedBy"))
+                .isEqualTo(record.getResolutionEvidenceVerifiedBy());
+        assertThat(set.get("decisionOutboxResolutionApprovedAt")).isEqualTo(record.getResolutionApprovedAt());
         assertThat(set.getString("decisionOutboxResolutionApprovedBy")).isEqualTo("approver");
         if (sourceStatus == TransactionalOutboxStatus.PUBLISHED) {
             assertThat(set.get("decisionOutboxPublishedAt")).isEqualTo(record.getPublishedAt());
@@ -44,6 +54,20 @@ class OutboxAlertProjectionPolicyTest {
             assertThat(set.getString("decisionOutboxLastError")).isEqualTo(expectedReason);
             assertThat(set.getString("decisionOutboxFailureReason")).isEqualTo(expectedReason);
         }
+    }
+
+    @ParameterizedTest
+    @MethodSource("manualResolutionStates")
+    void manualResolutionUsesTheSameAuthoritativeProjection(
+            TransactionalOutboxStatus sourceStatus,
+            boolean resolutionPending
+    ) {
+        TransactionalOutboxRecordDocument record = record(sourceStatus);
+        record.setResolutionPending(resolutionPending);
+
+        Document manual = OutboxAlertProjectionPolicy.manualResolution(record).update().getUpdateObject();
+
+        assertThat(manual).isEqualTo(OutboxAlertProjectionPolicy.recovery(record).update().getUpdateObject());
     }
 
     private static Stream<Arguments> projectionStates() {
@@ -69,6 +93,14 @@ class OutboxAlertProjectionPolicyTest {
                         DecisionOutboxStatus.FAILED_TERMINAL,
                         "MANUAL_RECOVERY_REQUIRED"
                 )
+        );
+    }
+
+    private static Stream<Arguments> manualResolutionStates() {
+        return Stream.of(
+                Arguments.of(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN, true),
+                Arguments.of(TransactionalOutboxStatus.PUBLISHED, false),
+                Arguments.of(TransactionalOutboxStatus.RECOVERY_REQUIRED, false)
         );
     }
 

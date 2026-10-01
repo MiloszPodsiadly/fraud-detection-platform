@@ -7,7 +7,7 @@ import org.springframework.data.mongodb.core.query.Update;
 
 import java.time.Instant;
 
-final class OutboxAlertProjectionPolicy {
+public final class OutboxAlertProjectionPolicy {
 
     private static final String MANUAL_RECOVERY_REQUIRED = "MANUAL_RECOVERY_REQUIRED";
 
@@ -24,6 +24,14 @@ final class OutboxAlertProjectionPolicy {
     }
 
     static Projection recovery(TransactionalOutboxRecordDocument record) {
+        return authoritative(record);
+    }
+
+    public static Projection manualResolution(TransactionalOutboxRecordDocument record) {
+        return authoritative(record);
+    }
+
+    private static Projection authoritative(TransactionalOutboxRecordDocument record) {
         String reason = record.getStatus() == TransactionalOutboxStatus.RECOVERY_REQUIRED
                 ? MANUAL_RECOVERY_REQUIRED
                 : record.getLastError();
@@ -104,14 +112,14 @@ final class OutboxAlertProjectionPolicy {
         }
     }
 
-    record Projection(
+    public record Projection(
             TransactionalOutboxStatus sourceStatus,
             String projectionStatus,
             Instant publishedAt,
             int attempts,
             Update update
     ) {
-        Query target(String resourceId) {
+        public Query target(String resourceId) {
             Criteria attemptsNotNewer = new Criteria().orOperator(
                     Criteria.where("decisionOutboxAttempts").exists(false),
                     Criteria.where("decisionOutboxAttempts").lte(attempts)
