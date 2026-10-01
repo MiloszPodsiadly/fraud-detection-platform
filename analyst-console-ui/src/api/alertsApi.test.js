@@ -2396,7 +2396,7 @@ function engineResult(overrides = {}) {
 }
 
 function mlEngineResult(overrides = {}) {
-  return engineResult({
+  const result = engineResult({
     engineId: "ml.python.primary",
     engineType: "ML_MODEL",
     riskLevel: "LOW",
@@ -2404,6 +2404,17 @@ function mlEngineResult(overrides = {}) {
     reasonCodes: ["LOW_MODEL_RISK"],
     ...overrides
   });
+  if (result.status !== "AVAILABLE" || result.modelIdentity !== undefined) {
+    return result;
+  }
+  return {
+    ...result,
+    modelIdentity: {
+      modelName: "python-logistic-fraud-model",
+      modelVersion: "2026-06-18.v1",
+      featureContractVersion: "feature-contract-v2"
+    }
+  };
 }
 
 function diagnosticSignal(overrides = {}) {

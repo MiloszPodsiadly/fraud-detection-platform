@@ -340,13 +340,14 @@ function isEngineResultOperationallyConsistent(status, scoreBucket, riskLevel) {
 }
 
 function isEngineModelIdentityConsistent(engine) {
-  if (!Object.prototype.hasOwnProperty.call(engine, "modelIdentity")) {
-    return true;
-  }
-  return engine.engineId === "ml.python.primary"
+  const availableMlEngine = engine.engineId === "ml.python.primary"
     && engine.engineType === "ML_MODEL"
-    && engine.status === "AVAILABLE"
-    && isModelIdentityShape(engine.modelIdentity);
+    && engine.status === "AVAILABLE";
+  if (availableMlEngine) {
+    return Object.prototype.hasOwnProperty.call(engine, "modelIdentity")
+      && isModelIdentityShape(engine.modelIdentity);
+  }
+  return !Object.prototype.hasOwnProperty.call(engine, "modelIdentity");
 }
 
 function isDiagnosticSignalOperationallyConsistent(signalCategory, engineStatus, scoreBucket, riskLevel) {

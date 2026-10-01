@@ -69,8 +69,8 @@ describe("engineIntelligenceContractValidation", () => {
     })).toBe(true);
   });
 
-  it("preserves historical available ML engines without model identity", () => {
-    expect(isEngineShape(availableEngine("ml.python.primary", "ML_MODEL"))).toBe(true);
+  it("rejects a current available ML engine without model identity", () => {
+    expect(isEngineShape(availableEngine("ml.python.primary", "ML_MODEL"))).toBe(false);
   });
 
   it("accepts a timeout ML engine when model identity is absent", () => {

@@ -13,6 +13,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDelt
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningSummary;
+import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationConfidence;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationSource;
@@ -246,7 +247,8 @@ class AnalystRecommendationServiceTest {
                 FraudEngineStatus.AVAILABLE,
                 riskLevel,
                 scoreBucket(riskLevel),
-                List.of(reasonCode)
+                List.of(reasonCode),
+                new MlModelIdentity("python-logistic-fraud-model", "model-X", "feature-contract-v2")
         );
     }
 

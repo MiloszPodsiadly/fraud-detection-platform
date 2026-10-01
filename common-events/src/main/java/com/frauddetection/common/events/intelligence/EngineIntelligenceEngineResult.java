@@ -61,6 +61,11 @@ public record EngineIntelligenceEngineResult(
             FraudEngineStatus status,
             MlModelIdentity modelIdentity
     ) {
+        if (engineType == FraudEngineType.ML_MODEL
+                && status == FraudEngineStatus.AVAILABLE
+                && modelIdentity == null) {
+            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_AVAILABLE_ML_MODEL_IDENTITY_REQUIRED");
+        }
         if (modelIdentity == null) {
             return;
         }

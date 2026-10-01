@@ -60,11 +60,12 @@ The public shape contains only contract version, timestamp, bounded engine summa
 metadata, diagnostic signals, and warning code counts. Engine identities and reason codes use
 allowlists.
 
-`ml.python.primary` may include a bounded `modelIdentity` object with `modelName`, `modelVersion`, and
-`featureContractVersion`. This identity belongs to the ML engine-intelligence result, not to the top-level final
-scoring fields on `TransactionScoredEvent`. Rules and Velocity engine results must omit it. The field is additive and
-optional so the valid current absent-lineage state remains readable; new producer publication must use the validated
-ML engine result as its source. The reader does not invent missing model identity.
+An `AVAILABLE` `ml.python.primary` result must include a bounded `modelIdentity` object with `modelName`, `modelVersion`,
+and `featureContractVersion`. This identity belongs to the ML engine-intelligence result, not to the top-level final
+scoring fields on `TransactionScoredEvent`. Rules, Velocity, and non-AVAILABLE ML engine results must omit it. A current
+identity-free AVAILABLE ML result is malformed and fails closed; readers do not invent lineage or rewrite the engine
+to another operational status. Previously stored feedback rows with missing lineage remain historical data and are
+classified as `MODEL_LINEAGE_UNAVAILABLE` and excluded from model-specific evaluation.
 
 ## Field Omission Rules
 

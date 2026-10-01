@@ -14,6 +14,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMisma
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.EngineIntelligenceEmissionProperties;
 import com.frauddetection.scoring.config.ScoringMode;
@@ -133,7 +134,12 @@ final class TransactionFraudScoringServiceEngineIntelligenceJoinedTestSupport {
                                 FraudEngineStatus.AVAILABLE,
                                 RiskLevel.LOW,
                                 EngineIntelligenceScoreBucket.LOW,
-                                List.of("LOW_MODEL_RISK")
+                                List.of("LOW_MODEL_RISK"),
+                                new MlModelIdentity(
+                                        "python-logistic-fraud-model",
+                                        "model-X",
+                                        "feature-contract-v2"
+                                )
                         )
                 ),
                 new EngineIntelligenceComparison(

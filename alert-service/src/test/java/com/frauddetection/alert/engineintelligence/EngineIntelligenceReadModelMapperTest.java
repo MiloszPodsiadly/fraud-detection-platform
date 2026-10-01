@@ -104,6 +104,41 @@ class EngineIntelligenceReadModelMapperTest {
     }
 
     @Test
+    void availableMlProjectionWithoutModelIdentityFailsClosed() {
+        EngineIntelligenceProjection source = fullProjection();
+        EngineIntelligenceEngineProjection ml = source.getEngines().get(1);
+        EngineIntelligenceProjection identityFree = new EngineIntelligenceProjection(
+                source.getTransactionId(),
+                source.getContractVersion(),
+                source.getGeneratedAt(),
+                source.getComparisonType(),
+                source.getComparedEngineIds(),
+                source.getComparisonStatus(),
+                source.getRiskMismatchStatus(),
+                source.getScoreDeltaBucket(),
+                List.of(
+                        source.getEngines().getFirst(),
+                        new EngineIntelligenceEngineProjection(
+                                ml.engineId(),
+                                ml.engineType(),
+                                FraudEngineStatus.AVAILABLE,
+                                com.frauddetection.common.events.enums.RiskLevel.HIGH,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("MODEL_HIGH_RISK")
+                        )
+                ),
+                source.getDiagnosticSignals(),
+                source.getWarnings(),
+                source.getCreatedAt(),
+                source.getUpdatedAt()
+        );
+
+        assertThatThrownBy(() -> mapper.map(identityFree))
+                .isInstanceOf(EngineIntelligenceProjectionReadUnavailableException.class)
+                .hasMessage("Engine intelligence projection is temporarily unavailable.");
+    }
+
+    @Test
     void unavailableEngineHasRiskLevelNull() {
         var unavailableEngine = mapper.map(projectionWithStatus(FraudEngineStatus.UNAVAILABLE)).engines().get(1);
 

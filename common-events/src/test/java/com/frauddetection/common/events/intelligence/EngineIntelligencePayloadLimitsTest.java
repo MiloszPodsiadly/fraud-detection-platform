@@ -101,7 +101,8 @@ class EngineIntelligencePayloadLimitsTest {
                                 com.frauddetection.common.events.engine.FraudEngineStatus.AVAILABLE,
                                 com.frauddetection.common.events.enums.RiskLevel.HIGH,
                                 EngineIntelligenceScoreBucket.HIGH,
-                                Collections.nCopies(5, "MODEL_HIGH_RISK")
+                                Collections.nCopies(5, "MODEL_HIGH_RISK"),
+                                EngineIntelligenceTestSupport.mlIdentity()
                         )
                 ),
                 Collections.nCopies(5, EngineIntelligenceTestSupport.signal()),
