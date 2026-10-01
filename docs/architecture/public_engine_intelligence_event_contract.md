@@ -67,6 +67,16 @@ identity-free AVAILABLE ML result is malformed and fails closed; readers do not 
 to another operational status. Previously stored feedback rows with missing lineage remain historical data and are
 classified as `MODEL_LINEAGE_UNAVAILABLE` and excluded from model-specific evaluation.
 
+### Deployment Treatment For Historical Projections
+
+Before deploying the strict reader, inventory Mongo `engine_intelligence_projections` documents containing an
+`AVAILABLE` `ml.python.primary` engine without complete `modelIdentity`. Such documents do not satisfy the current read
+contract: archive them under the approved retention policy or rebuild the projection only from an authoritative event
+that already contains complete lineage. Do not synthesize identity from the currently loaded model, registry state, or
+deployment configuration. Existing feedback records keep their original missing-lineage evidence, remain classified as
+`MODEL_LINEAGE_UNAVAILABLE`, and stay excluded from exact-model evaluation; the runtime does not normalize them merely
+to make a historical projection displayable.
+
 ## Field Omission Rules
 
 The public DTOs omit raw payloads, identifiers, endpoints, tokens, secrets, stack traces, exception

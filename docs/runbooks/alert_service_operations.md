@@ -25,13 +25,30 @@ Out of scope:
 - bypassing security, audit, or regulated mutation startup guards
 - declaring production enablement, bank certification, external finality, or legal evidence
 
+## Transactional Outbox Persisted Contract Migration
+
+The active `transactional_outbox_records` contract stores request and approval intent separately. Request evidence uses
+`resolution_request_reason`, `resolution_requested_by`, `resolution_requested_at`, and the
+`resolution_evidence_*` fields. Approval evidence uses `resolution_approval_reason`, `resolution_approved_by`,
+`resolution_approved_at`, and the `resolution_approval_evidence_*` fields. `resolution_control_mode`,
+`resolution_proposed_outcome`, and `publication_confirmation_provenance` retain the control and publication provenance.
+
+Before deploying this contract, inspect the active collection as raw BSON for every document where
+`resolution_reason` exists, including `PUBLISHED`, `FAILED_TERMINAL`, and `RECOVERY_REQUIRED` records. The startup
+preflight is read-only and blocks while any such document remains; it never migrates or deletes evidence. Export those
+documents to the approved immutable archive, then migrate a record only when independently verified audit evidence can
+populate the complete canonical request or approval fields. `resolution_pending` alone is not evidence of who supplied
+the reason and must not be used to fabricate approval provenance. Records that cannot be migrated without inference
+must remain in the historical archive and be removed from the active collection through the approved offline data
+change procedure. Verify the archive and canonical records before removing the retired field, then rerun the preflight.
+
 ## Operator Matrix
 
 | Condition | Symptom | Impact | Safe action | Endpoint or control | Authority | Evidence | Retry or rollback guidance | Escalation |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `REGULATED_MUTATION_RECOVERY_REQUIRED` | Trust level reason code or recovery backlog | Mutation needs reconciliation | Inspect command and run bounded recovery | `POST /api/v1/regulated-mutations/recover` | `regulated-mutation:recover` | command id or idempotency hash | No manual business rollback claim | engineering |
 | `FINALIZE_RECOVERY_REQUIRED` | finalize recovery required count > 0 | Finalize outcome requires recovery | Inspect command and local evidence | inspection plus regulated recovery endpoints | ops admin | command snapshot and evidence ids | No finalized or externally confirmed claim | security |
-| `PUBLISH_CONFIRMATION_UNKNOWN` | outbox unknown count > 0 | Delivery confirmation ambiguous | Inspect outbox and resolve with evidence | `/api/v1/outbox/.../resolve-confirmation` | ops admin | broker evidence | Manual resolution requires idempotency and evidence | platform |
+| `PUBLISH_CONFIRMATION_UNKNOWN` | outbox unknown count > 0 | Delivery confirmation ambiguous | Inspect outbox and resolve with evidence | `/api/v1/outbox/.../resolve-confirmation` | ops admin | broker evidence | Manual resolution requires idempotency and immutable dual-control evidence; its `MANUAL_*_ATTESTED` provenance is not independent broker verification | platform |
 | `OUTBOX_FAILED_TERMINAL` | terminal delivery count > 0 | Outbox delivery stopped | Repair cause and resolve | outbox recovery | ops admin | event id | Do not silently republish with a new key | platform |
 | `OUTBOX_PROJECTION_MISMATCH` | projection mismatch count > 0 | Alert cache disagrees with outbox source | Run bounded recovery | `POST /api/v1/outbox/recovery/run` | ops admin | outbox record | Outbox record remains source of truth | engineering |
 | `TRUST_INCIDENT_CRITICAL_OPEN` | critical incident open | Control-plane risk | Acknowledge or resolve with evidence | trust incident endpoints | ops admin | incident id | No workflow automation claim | security |
@@ -64,6 +81,14 @@ Out of scope:
 - Do not resolve broker confirmation without broker evidence.
 - Do not claim production enablement, bank certification, legal evidence, WORM storage, distributed ACID, or exactly-once
   Kafka delivery.
+
+## Runtime Configuration
+
+Transactional outbox runtime tuning uses only `OUTBOX_LEASE_DURATION`, `OUTBOX_MAX_ATTEMPTS`,
+`OUTBOX_STALE_THRESHOLD`, `OUTBOX_PUBLISHER_DELAY_MS`, and
+`OUTBOX_RECOVERY_STALE_PROCESSING_THRESHOLD`, mapped to the canonical `app.outbox.*` namespace. Object-store audit
+anchor startup validation is controlled by `AUDIT_EXTERNAL_ANCHORING_OBJECT_STORE_STARTUP_CHECK_ENABLED` and defaults
+to enabled; disabling it does not disable the separate fail-closed publication policy.
 
 ## Escalation
 
