@@ -59,7 +59,7 @@ public class BankModeStartupGuard implements ApplicationRunner {
             @Value("${app.audit.trust-authority.signing-required:false}") boolean trustAuthoritySigningRequired,
             @Value("${app.audit.external-anchoring.sink:disabled}") String externalAnchoringSink,
             @Value("${app.trust-incidents.refresh-mode:ATOMIC}") String trustIncidentRefreshMode,
-            @Value("${app.outbox.max-attempts:${app.alert.decision-outbox.max-attempts:5}}") int maxAttempts
+            @Value("${app.outbox.max-attempts:5}") int maxAttempts
     ) {
         this.transactionRunner = transactionRunner;
         this.transactionManager = transactionManager.getIfAvailable();

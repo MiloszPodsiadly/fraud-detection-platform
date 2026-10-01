@@ -43,7 +43,7 @@ class ExternalAuditAnchorSinkConfiguration {
             @Value("${app.audit.external-anchoring.object-store.endpoint:}") String objectStoreEndpoint,
             @Value("${app.audit.external-anchoring.object-store.access-key-id:}") String objectStoreAccessKeyId,
             @Value("${app.audit.external-anchoring.object-store.secret-access-key:}") String objectStoreSecretAccessKey,
-            @Value("${app.audit.external-store.startup-validation:${app.audit.external-anchoring.object-store.startup-check-enabled:true}}") boolean objectStoreStartupCheckEnabled,
+            @Value("${app.audit.external-anchoring.object-store.startup-check-enabled:true}") boolean objectStoreStartupCheckEnabled,
             @Value("${app.audit.external-anchoring.object-store.startup-test-write-enabled:false}") boolean objectStoreStartupTestWriteEnabled,
             @Value("${app.audit.external-anchoring.object-store.operation-timeout:2s}") Duration objectStoreOperationTimeout,
             @Value("${app.audit.external-anchoring.object-store.retry-backoff:100ms}") Duration objectStoreRetryBackoff,

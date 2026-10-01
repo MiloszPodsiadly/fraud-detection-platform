@@ -32,7 +32,7 @@ public class FraudDecisionOutboxPublisher {
         this(new OutboxPublisherCoordinator(publisher, mongoTemplate, metrics, leaseDuration, maxAttempts));
     }
 
-    @Scheduled(fixedDelayString = "${app.alert.decision-outbox.publish-delay-ms:5000}")
+    @Scheduled(fixedDelayString = "${app.outbox.publisher.delay-ms:5000}")
     public void publishPending() {
         publishPending(100);
     }
