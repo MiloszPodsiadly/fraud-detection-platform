@@ -1604,7 +1604,7 @@ components:
     SystemTrustLevelResponse:
       type: object
       additionalProperties: false
-      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, unresolved_degradation_count, pending_degradation_resolution_count, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, outbox_pending_count, outbox_processing_count, outbox_publish_attempted_count, outbox_confirmation_unknown_count, outbox_projection_mismatch_count, terminal_outbox_failure_count, outbox_publish_confirmation_unknown_count, unknown_outbox_confirmation_count, pending_outbox_resolution_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds, regulated_mutation_recovery_required_count, stale_processing_lease_count, finalize_recovery_required_count, evidence_confirmation_pending_count, repeated_recovery_failure_count, oldest_recovery_required_age_seconds, transaction_mode, transaction_capability_status, outbox_delivery_mode, evidence_confirmation_mode, open_critical_incident_count, open_high_incident_count, unacknowledged_critical_incident_count, oldest_open_incident_age_seconds, top_incident_types, incident_health_status]
+      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, unresolved_degradation_count, pending_degradation_resolution_count, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, outbox_pending_count, outbox_processing_count, outbox_publish_attempted_count, outbox_confirmation_unknown_count, outbox_projection_mismatch_count, outbox_projection_reconciliation_pending_count, outbox_recovery_required_count, terminal_outbox_failure_count, outbox_publish_confirmation_unknown_count, unknown_outbox_confirmation_count, pending_outbox_resolution_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds, regulated_mutation_recovery_required_count, stale_processing_lease_count, finalize_recovery_required_count, evidence_confirmation_pending_count, repeated_recovery_failure_count, oldest_recovery_required_age_seconds, transaction_mode, transaction_capability_status, outbox_delivery_mode, evidence_confirmation_mode, open_critical_incident_count, open_high_incident_count, unacknowledged_critical_incident_count, oldest_open_incident_age_seconds, top_incident_types, incident_health_status]
       properties:
         guarantee_level:
           type: string
@@ -1680,6 +1680,16 @@ components:
           format: int64
           minimum: 0
           description: Projection/cache mismatch count; transactional_outbox_records remain authoritative.
+        outbox_projection_reconciliation_pending_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Authoritative outbox records with scheduled projection work, including work without a persisted mismatch marker.
+        outbox_recovery_required_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Authoritative outbox records in RECOVERY_REQUIRED state.
         terminal_outbox_failure_count:
           type: integer
           format: int64
@@ -1696,6 +1706,7 @@ components:
           type: integer
           format: int64
           minimum: 0
+          description: Authoritative outbox records awaiting completion of manual dual-control resolution.
         outbox_oldest_pending_age_seconds:
           type: integer
           format: int64

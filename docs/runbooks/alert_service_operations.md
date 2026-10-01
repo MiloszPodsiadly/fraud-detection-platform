@@ -33,14 +33,31 @@ The active `transactional_outbox_records` contract stores request and approval i
 `resolution_approved_at`, and the `resolution_approval_evidence_*` fields. `resolution_control_mode`,
 `resolution_proposed_outcome`, and `publication_confirmation_provenance` retain the control and publication provenance.
 
-Before deploying this contract, inspect the active collection as raw BSON for every document where
-`resolution_reason` exists, including `PUBLISHED`, `FAILED_TERMINAL`, and `RECOVERY_REQUIRED` records. The startup
-preflight is read-only and blocks while any such document remains; it never migrates or deletes evidence. Export those
-documents to the approved immutable archive, then migrate a record only when independently verified audit evidence can
-populate the complete canonical request or approval fields. `resolution_pending` alone is not evidence of who supplied
-the reason and must not be used to fabricate approval provenance. Records that cannot be migrated without inference
-must remain in the historical archive and be removed from the active collection through the approved offline data
-change procedure. Verify the archive and canonical records before removing the retired field, then rerun the preflight.
+Before deploying this contract, inspect both active collections as raw BSON. Every transactional outbox record must
+have a non-negative `projection_revision`; every `PUBLISHED` record must have independently established
+`publication_confirmation_provenance`; and every Alert outbox projection must have `decisionOutboxEventId` and
+`decisionOutboxProjectionRevision` consistent with its authoritative outbox record. The scan includes unfinished and
+terminal records and rejects retired `resolution_reason`, incomplete pending intent, incomplete approval/evidence, an
+orphan Alert projection, a projection newer than its source, and stale projection state without reconciliation
+eligibility. Active `PROCESSING` and `PUBLISH_ATTEMPTED` records must carry `lease_owner`, `lease_expires_at`, and a
+unique `lease_claim_token`; the owner identifies a coordinator instance while the token fences one claim generation.
+A legitimate record that never entered manual resolution does not require approval metadata.
+
+The startup preflight is read-only and keeps publisher and recovery mutation entry points closed until validation
+succeeds. It never assigns broker provenance, invents request IDs or operators, migrates data, or deletes evidence.
+For projection recovery, `projection_reconcile_after` is the authoritative next-eligibility time. A mismatch without
+that timestamp enters the bounded unscheduled queue and receives a schedule when claimed; a failed repair receives a
+future retry time and cannot be reclaimed early through its mismatch marker. Each recovery run fairly merges due
+scheduled work with unscheduled mismatches, up to the documented batch limit, so repeated failures do not hot-loop or
+starve later eligible records.
+Before an offline change, export the affected records and their Alert projections to the approved immutable archive,
+record hashes and collection counts, verify the archive can be read independently, and take a rollback-capable database
+snapshot. Populate canonical fields only from durable audit or broker evidence. A historical `PUBLISHED` record may use
+`BROKER_ACKNOWLEDGED` only when independent durable broker acknowledgement proves it; otherwise archive it and remove it
+from the active collections through the approved change procedure. After migration, verify event/resource identity,
+revision ordering, status, provenance, pending intent and approval evidence against the archive, rerun the preflight,
+and start publisher/recovery only after it passes. If verification differs, stop deployment and restore the snapshot;
+do not partially roll forward or synthesize missing facts.
 
 ## Operator Matrix
 
@@ -51,6 +68,9 @@ change procedure. Verify the archive and canonical records before removing the r
 | `PUBLISH_CONFIRMATION_UNKNOWN` | outbox unknown count > 0 | Delivery confirmation ambiguous | Inspect outbox and resolve with evidence | `/api/v1/outbox/.../resolve-confirmation` | ops admin | broker evidence | Manual resolution requires idempotency and immutable dual-control evidence; its `MANUAL_*_ATTESTED` provenance is not independent broker verification | platform |
 | `OUTBOX_FAILED_TERMINAL` | terminal delivery count > 0 | Outbox delivery stopped | Repair cause and resolve | outbox recovery | ops admin | event id | Do not silently republish with a new key | platform |
 | `OUTBOX_PROJECTION_MISMATCH` | projection mismatch count > 0 | Alert cache disagrees with outbox source | Run bounded recovery | `POST /api/v1/outbox/recovery/run` | ops admin | outbox record | Outbox record remains source of truth | engineering |
+| `OUTBOX_PROJECTION_RECONCILIATION_PENDING` | reconciliation pending count > 0, possibly with mismatch count 0 | Authoritative projection work remains scheduled | Run bounded recovery and inspect repeated projection failures | `POST /api/v1/outbox/recovery/run` | ops admin | outbox record and projection revision | A missing mismatch marker does not prove synchronization | engineering |
+| `OUTBOX_RECOVERY_REQUIRED` | outbox recovery-required count > 0 | Publication state requires operator recovery | Inspect authoritative outbox state and evidence | outbox recovery controls | ops admin | outbox record | Do not infer recovery from the Alert projection | platform |
+| `OUTBOX_RESOLUTION_PENDING_APPROVAL` | pending outbox resolution count > 0 | Dual-control publication resolution is incomplete | Complete approval with a distinct authenticated operator | `/api/v1/outbox/.../resolve-confirmation` | ops admin | immutable request and approval evidence | Pending resolution keeps FDP-24 degraded | security |
 | `TRUST_INCIDENT_CRITICAL_OPEN` | critical incident open | Control-plane risk | Acknowledge or resolve with evidence | trust incident endpoints | ops admin | incident id | No workflow automation claim | security |
 | `TRUST_INCIDENT_UNACKNOWLEDGED_CRITICAL` | unacknowledged critical count | Unowned risk | Acknowledge | `/api/v1/trust/incidents/{id}/ack` | ops admin | incident id | Read endpoints remain read-only | security |
 | `TRUST_INCIDENT_REFRESH_PARTIAL` | refresh partial | Local/dev semantics attempted | Switch config to `ATOMIC` | config/startup | operator | config diff | Bank/prod must fail closed | engineering |

@@ -20,6 +20,8 @@ subjects, idempotency keys, lease owners, or command ids as metric labels.
 | `outbox_failed_terminal_count` | `> 0` | Trust level degraded. | Follow outbox ambiguity handling. |
 | `outbox_projection_mismatch_count` | `> 0` | Trust level degraded. | Compare authoritative outbox record with projection. |
 | `outbox_projection_reconciliation_pending_count` | `> 0` beyond one recovery interval | Authoritative projection work remains due, including cases where a mismatch marker could not be persisted. | Run bounded outbox recovery and investigate repeated projection failures. |
+| `outbox_recovery_required_count` | `> 0` | Authoritative outbox state requires operator recovery. | Inspect the outbox record and follow bounded recovery guidance. |
+| `pending_outbox_resolution_count` | `> 0` | Manual dual-control resolution remains incomplete. | Complete or reject the pending approval with durable evidence. |
 | `open_critical_incident_count` | `> 0` | Trust level degraded. | Assign incident owner and keep audit trail. |
 | `fraud_platform_read_access_audit_persistence_failures_total` | `> 0` in bank/prod posture | Sensitive reads fail closed. | Verify audit persistence before allowing sensitive read inspection. |
 

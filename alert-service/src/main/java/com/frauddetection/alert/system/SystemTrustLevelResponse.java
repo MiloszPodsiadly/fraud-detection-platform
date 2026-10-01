@@ -69,6 +69,12 @@ public record SystemTrustLevelResponse(
         @JsonProperty("outbox_projection_mismatch_count")
         long outboxProjectionMismatchCount,
 
+        @JsonProperty("outbox_projection_reconciliation_pending_count")
+        long outboxProjectionReconciliationPendingCount,
+
+        @JsonProperty("outbox_recovery_required_count")
+        long outboxRecoveryRequiredCount,
+
         @JsonProperty("terminal_outbox_failure_count")
         long terminalOutboxFailureCount,
 
