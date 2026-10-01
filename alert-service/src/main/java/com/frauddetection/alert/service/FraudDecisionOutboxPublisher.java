@@ -1,6 +1,7 @@
 package com.frauddetection.alert.service;
 
 import com.frauddetection.alert.outbox.OutboxPublisherCoordinator;
+import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
 import com.frauddetection.alert.messaging.FraudDecisionEventPublisher;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.AlertRepository;
@@ -15,10 +16,15 @@ import java.time.Duration;
 public class FraudDecisionOutboxPublisher {
 
     private final OutboxPublisherCoordinator coordinator;
+    private final TransactionalOutboxRuntimeReadiness runtimeReadiness;
 
     @Autowired
-    public FraudDecisionOutboxPublisher(OutboxPublisherCoordinator coordinator) {
+    public FraudDecisionOutboxPublisher(
+            OutboxPublisherCoordinator coordinator,
+            TransactionalOutboxRuntimeReadiness runtimeReadiness
+    ) {
         this.coordinator = coordinator;
+        this.runtimeReadiness = runtimeReadiness;
     }
 
     public FraudDecisionOutboxPublisher(
@@ -27,9 +33,10 @@ public class FraudDecisionOutboxPublisher {
             MongoTemplate mongoTemplate,
             AlertServiceMetrics metrics,
             Duration leaseDuration,
-            int maxAttempts
+            int maxAttempts,
+            TransactionalOutboxRuntimeReadiness runtimeReadiness
     ) {
-        this(new OutboxPublisherCoordinator(publisher, mongoTemplate, metrics, leaseDuration, maxAttempts));
+        this(new OutboxPublisherCoordinator(publisher, mongoTemplate, metrics, leaseDuration, maxAttempts), runtimeReadiness);
     }
 
     @Scheduled(fixedDelayString = "${app.outbox.publisher.delay-ms:5000}")
@@ -38,6 +45,7 @@ public class FraudDecisionOutboxPublisher {
     }
 
     public int publishPending(int limit) {
+        runtimeReadiness.requireReady();
         return coordinator.publishPending(limit);
     }
 }

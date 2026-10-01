@@ -13,24 +13,34 @@ public class TransactionalOutboxPersistedContractStartupGuard implements Applica
     private static final int DIAGNOSTIC_SAMPLE_LIMIT = 25;
 
     private final TransactionalOutboxPersistedContractPreflight preflight;
+    private final TransactionalOutboxRuntimeReadiness runtimeReadiness;
 
     public TransactionalOutboxPersistedContractStartupGuard(
-            TransactionalOutboxPersistedContractPreflight preflight
+            TransactionalOutboxPersistedContractPreflight preflight,
+            TransactionalOutboxRuntimeReadiness runtimeReadiness
     ) {
         this.preflight = preflight;
+        this.runtimeReadiness = runtimeReadiness;
     }
 
     @Override
     public void run(ApplicationArguments args) {
-        TransactionalOutboxPersistedContractPreflight.Report report =
-                preflight.inspect(DIAGNOSTIC_SAMPLE_LIMIT);
-        if (report.blocksStartup()) {
-            throw new IllegalStateException(
-                    "Canonical transactional outbox startup blocked by records containing retired resolution_reason: unfinishedCount="
-                            + report.unsupportedUnfinishedCount()
-                            + "; terminalCount=" + report.unsupportedTerminalCount()
-                            + "; samples=" + report.samples()
-            );
+        try {
+            TransactionalOutboxPersistedContractPreflight.Report report =
+                    preflight.inspect(DIAGNOSTIC_SAMPLE_LIMIT);
+            if (report.blocksStartup()) {
+                throw new IllegalStateException(
+                        "Canonical transactional outbox startup blocked by unsupported persisted records: unfinishedCount="
+                                + report.unsupportedUnfinishedCount()
+                                + "; terminalCount=" + report.unsupportedTerminalCount()
+                                + "; alertProjectionCount=" + report.unsupportedAlertProjectionCount()
+                                + "; samples=" + report.samples()
+                );
+            }
+            runtimeReadiness.markReady();
+        } catch (RuntimeException exception) {
+            runtimeReadiness.markFailed();
+            throw exception;
         }
     }
 }

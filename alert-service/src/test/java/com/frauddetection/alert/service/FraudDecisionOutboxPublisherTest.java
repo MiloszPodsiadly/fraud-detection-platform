@@ -5,6 +5,7 @@ import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.OutboxPublicationConfirmationProvenance;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
+import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.common.events.contract.FraudDecisionEvent;
@@ -43,7 +44,7 @@ class FraudDecisionOutboxPublisherTest {
         FraudDecisionEventPublisher publisher = mock(FraudDecisionEventPublisher.class);
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5);
+        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5, readyReadiness());
         TransactionalOutboxRecordDocument document = pendingOutboxRecord();
         document.setStatus(TransactionalOutboxStatus.PROCESSING);
         document.setAttempts(1);
@@ -75,7 +76,7 @@ class FraudDecisionOutboxPublisherTest {
         FraudDecisionEventPublisher publisher = mock(FraudDecisionEventPublisher.class);
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5);
+        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5, readyReadiness());
         TransactionalOutboxRecordDocument document = pendingOutboxRecord();
         document.setStatus(TransactionalOutboxStatus.PROCESSING);
         document.setAttempts(1);
@@ -107,7 +108,7 @@ class FraudDecisionOutboxPublisherTest {
         FraudDecisionEventPublisher publisher = mock(FraudDecisionEventPublisher.class);
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5);
+        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5, readyReadiness());
         TransactionalOutboxRecordDocument document = pendingOutboxRecord();
         document.setStatus(TransactionalOutboxStatus.PROCESSING);
         document.setAttempts(1);
@@ -138,7 +139,7 @@ class FraudDecisionOutboxPublisherTest {
         FraudDecisionEventPublisher publisher = mock(FraudDecisionEventPublisher.class);
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5);
+        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5, readyReadiness());
         TransactionalOutboxRecordDocument document = pendingOutboxRecord();
         document.setStatus(TransactionalOutboxStatus.PROCESSING);
         document.setAttempts(1);
@@ -166,7 +167,7 @@ class FraudDecisionOutboxPublisherTest {
         FraudDecisionEventPublisher publisher = mock(FraudDecisionEventPublisher.class);
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5);
+        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5, readyReadiness());
         TransactionalOutboxRecordDocument document = pendingOutboxRecord();
         document.setPayload(null);
         document.setStatus(TransactionalOutboxStatus.PROCESSING);
@@ -196,7 +197,7 @@ class FraudDecisionOutboxPublisherTest {
         FraudDecisionEventPublisher publisher = mock(FraudDecisionEventPublisher.class);
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5);
+        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5, readyReadiness());
         when(mongoTemplate.findAndModify(any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(TransactionalOutboxRecordDocument.class)))
                 .thenReturn(null);
 
@@ -206,6 +207,12 @@ class FraudDecisionOutboxPublisherTest {
         verify(publisher, never()).publish(any(FraudDecisionEvent.class));
         verify(mongoTemplate, never()).updateFirst(any(Query.class), any(Update.class), eq(TransactionalOutboxRecordDocument.class));
         verify(mongoTemplate, never()).updateFirst(any(Query.class), any(Update.class), eq(AlertDocument.class));
+    }
+
+    private TransactionalOutboxRuntimeReadiness readyReadiness() {
+        TransactionalOutboxRuntimeReadiness readiness = new TransactionalOutboxRuntimeReadiness();
+        readiness.markReady();
+        return readiness;
     }
 
     private TransactionalOutboxRecordDocument pendingOutboxRecord() {

@@ -26,7 +26,11 @@ class DecisionOutboxRemovedRouteRuntimeTest {
     void setUp() {
         service = mock(OutboxRecoveryService.class);
         mockMvc = MockMvcBuilders.standaloneSetup(
-                new OutboxRecoveryController(service, mock(SensitiveReadAuditService.class))
+                new OutboxRecoveryController(
+                        service,
+                        mock(SensitiveReadAuditService.class),
+                        mock(TransactionalOutboxRuntimeReadiness.class)
+                )
         ).build();
     }
 
