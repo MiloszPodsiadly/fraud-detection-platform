@@ -16,6 +16,14 @@ import java.time.Instant;
         def = "{'projection_reconcile_after': 1, 'created_at': 1}",
         sparse = true
 )
+@CompoundIndex(
+        name = "projection_reconcile_status_due_idx",
+        def = "{'status': 1, 'projection_reconcile_after': 1, 'created_at': 1}"
+)
+@CompoundIndex(
+        name = "projection_mismatch_unscheduled_idx",
+        def = "{'status': 1, 'projection_mismatch': 1, 'projection_reconcile_after': 1, 'created_at': 1}"
+)
 public class TransactionalOutboxRecordDocument {
 
     @Id
@@ -42,6 +50,8 @@ public class TransactionalOutboxRecordDocument {
     private long projectionRevision;
     @Field("lease_owner")
     private String leaseOwner;
+    @Field("lease_claim_token")
+    private String leaseClaimToken;
     @Field("lease_expires_at")
     private Instant leaseExpiresAt;
     @Field("last_error")
@@ -129,6 +139,8 @@ public class TransactionalOutboxRecordDocument {
     public void setProjectionRevision(long projectionRevision) { this.projectionRevision = projectionRevision; }
     public String getLeaseOwner() { return leaseOwner; }
     public void setLeaseOwner(String leaseOwner) { this.leaseOwner = leaseOwner; }
+    public String getLeaseClaimToken() { return leaseClaimToken; }
+    public void setLeaseClaimToken(String leaseClaimToken) { this.leaseClaimToken = leaseClaimToken; }
     public Instant getLeaseExpiresAt() { return leaseExpiresAt; }
     public void setLeaseExpiresAt(Instant leaseExpiresAt) { this.leaseExpiresAt = leaseExpiresAt; }
     public String getLastError() { return lastError; }

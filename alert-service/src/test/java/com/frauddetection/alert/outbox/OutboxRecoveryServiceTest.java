@@ -55,7 +55,7 @@ class OutboxRecoveryServiceTest {
         Fixture fixture = new Fixture();
         TransactionalOutboxRecordDocument record = mismatchedRecord(status);
         stubOutdatedAlert(fixture, record);
-        when(fixture.repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc())
+        when(fixture.repository.findTop100ByStatusInAndProjectionMismatchTrueAndProjectionReconcileAfterIsNullOrderByCreatedAtAsc(any()))
                 .thenReturn(List.of(record));
         List<String> writeOrder = new ArrayList<>();
         when(fixture.mongoTemplate.updateFirst(
@@ -96,7 +96,7 @@ class OutboxRecoveryServiceTest {
         Fixture fixture = new Fixture();
         TransactionalOutboxRecordDocument record = mismatchedRecord(status);
         stubOutdatedAlert(fixture, record);
-        when(fixture.repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc())
+        when(fixture.repository.findTop100ByStatusInAndProjectionMismatchTrueAndProjectionReconcileAfterIsNullOrderByCreatedAtAsc(any()))
                 .thenReturn(List.of(record));
         List<Update> outboxUpdates = new ArrayList<>();
         when(fixture.mongoTemplate.updateFirst(
@@ -137,7 +137,10 @@ class OutboxRecoveryServiceTest {
                 .thenReturn(List.of(processing));
         when(fixture.repository.findTop100ByStatusAndLeaseExpiresAtBeforeOrderByCreatedAtAsc(eq(TransactionalOutboxStatus.PUBLISH_ATTEMPTED), any()))
                 .thenReturn(List.of(attempted));
-        when(fixture.repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc()).thenReturn(List.of());
+        when(fixture.repository
+                .findTop100ByStatusInAndProjectionMismatchTrueAndProjectionReconcileAfterIsNullOrderByCreatedAtAsc(
+                        any()
+                )).thenReturn(List.of());
 
         OutboxRecoveryRunResponse response = fixture.service.recoverNow();
 
@@ -155,7 +158,10 @@ class OutboxRecoveryServiceTest {
         record.setProjectionMismatch(true);
         record.setProjectionMismatchReason("ALERT_PROJECTION_UPDATE_FAILED");
         stubOutdatedAlert(fixture, record);
-        when(fixture.repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc()).thenReturn(List.of(record));
+        when(fixture.repository
+                .findTop100ByStatusInAndProjectionMismatchTrueAndProjectionReconcileAfterIsNullOrderByCreatedAtAsc(
+                        any()
+                )).thenReturn(List.of(record));
 
         OutboxRecoveryRunResponse response = fixture.service.recoverNow();
 
@@ -181,7 +187,11 @@ class OutboxRecoveryServiceTest {
         record.setProjectionRevision(4L);
         record.setProjectionReconcileAfter(Instant.parse("2026-05-02T10:01:00Z"));
         stubOutdatedAlert(fixture, record);
-        when(fixture.repository.findTop100ByProjectionReconcileAfterLessThanEqualOrderByProjectionReconcileAfterAsc(any()))
+        when(fixture.repository
+                .findTop100ByStatusInAndProjectionReconcileAfterLessThanEqualOrderByProjectionReconcileAfterAscCreatedAtAsc(
+                        any(),
+                        any()
+                ))
                 .thenReturn(List.of(record));
 
         OutboxRecoveryRunResponse response = fixture.service.recoverNow();
@@ -200,7 +210,11 @@ class OutboxRecoveryServiceTest {
         TransactionalOutboxRecordDocument record = record("event-no-resource", TransactionalOutboxStatus.PUBLISHED);
         record.setResourceId("   ");
         record.setProjectionReconcileAfter(Instant.parse("2026-05-02T10:01:00Z"));
-        when(fixture.repository.findTop100ByProjectionReconcileAfterLessThanEqualOrderByProjectionReconcileAfterAsc(any()))
+        when(fixture.repository
+                .findTop100ByStatusInAndProjectionReconcileAfterLessThanEqualOrderByProjectionReconcileAfterAscCreatedAtAsc(
+                        any(),
+                        any()
+                ))
                 .thenReturn(List.of(record));
         ArgumentCaptor<Update> outboxUpdates = ArgumentCaptor.forClass(Update.class);
 
@@ -237,7 +251,7 @@ class OutboxRecoveryServiceTest {
                 eq(TransactionalOutboxStatus.PUBLISH_ATTEMPTED),
                 any()
         )).thenReturn(List.of(attempted));
-        when(fixture.repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc()).thenReturn(List.of());
+        when(fixture.repository.findTop100ByStatusInAndProjectionMismatchTrueAndProjectionReconcileAfterIsNullOrderByCreatedAtAsc(any())).thenReturn(List.of());
         when(fixture.mongoTemplate.updateFirst(
                 any(Query.class),
                 any(Update.class),

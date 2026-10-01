@@ -9,6 +9,7 @@ import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
 import com.frauddetection.alert.regulated.mutation.outbox.OutboxConfirmationResolutionMutationHandler;
 import com.frauddetection.common.testsupport.base.AbstractIntegrationTest;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
+import org.bson.Document;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -22,8 +23,11 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.data.mongodb.repository.support.MongoRepositoryFactory;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -139,6 +143,7 @@ class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void competingDualControlApprovalsAllowExactlyOneApproval() throws Exception {
+        Instant requesterTime = Instant.parse("2026-10-02T10:10:00Z");
         TransactionalOutboxRecordDocument original = confirmationUnknownRecord("event-approval-race");
         actualRepository.save(original);
         saveAlertProjection(original);
@@ -146,7 +151,8 @@ class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
                 actualRepository,
                 mongoTemplate,
                 true,
-                true
+                true,
+                Clock.fixed(requesterTime, ZoneOffset.UTC)
         );
         TransactionalOutboxRecordDocument requested = requester.resolve(
                 original.getEventId(),
@@ -154,15 +160,23 @@ class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
                 "requester"
         );
         TransactionalOutboxRecordRepository synchronizedReads = synchronizeFirstTwoReads(original.getEventId());
-        OutboxConfirmationResolutionMutationHandler approver = new OutboxConfirmationResolutionMutationHandler(
+        OutboxConfirmationResolutionMutationHandler firstApprover = new OutboxConfirmationResolutionMutationHandler(
                 synchronizedReads,
                 mongoTemplate,
                 true,
-                true
+                true,
+                Clock.fixed(Instant.parse("2026-10-02T10:00:00Z"), ZoneOffset.UTC)
+        );
+        OutboxConfirmationResolutionMutationHandler secondApprover = new OutboxConfirmationResolutionMutationHandler(
+                synchronizedReads,
+                mongoTemplate,
+                true,
+                true,
+                Clock.fixed(Instant.parse("2026-10-02T09:55:00Z"), ZoneOffset.UTC)
         );
 
         List<Attempt> attempts = runConcurrently(
-                () -> attempt(() -> approver.resolve(
+                () -> attempt(() -> firstApprover.resolve(
                         original.getEventId(),
                         resolution(
                                 OutboxConfirmationResolution.PUBLISHED,
@@ -171,7 +185,7 @@ class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
                         ),
                         "approver-1"
                 )),
-                () -> attempt(() -> approver.resolve(
+                () -> attempt(() -> secondApprover.resolve(
                         original.getEventId(),
                         resolution(
                                 OutboxConfirmationResolution.PUBLISHED,
@@ -194,6 +208,8 @@ class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
         assertThat(projection.getDecisionOutboxResolutionApprovalReason()).isIn("approval one", "approval two");
         assertThat(projection.getDecisionOutboxResolutionRequestedAt()).isEqualTo(persisted.getResolutionRequestedAt());
         assertThat(projection.getDecisionOutboxResolutionApprovedAt()).isEqualTo(persisted.getResolutionApprovedAt());
+        assertThat(persisted.getResolutionRequestedAt()).isEqualTo(requesterTime);
+        assertThat(persisted.getResolutionApprovedAt()).isAfter(persisted.getResolutionRequestedAt());
         assertThat(persisted.getStatus()).isEqualTo(TransactionalOutboxStatus.PUBLISHED);
     }
 
@@ -355,6 +371,136 @@ class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void equalRevisionAndStatusStillRepairsCompletePendingIntentProjection() {
+        TransactionalOutboxRecordDocument source = confirmationUnknownRecord("event-equal-revision-pending");
+        source.setProjectionRevision(5L);
+        source.setProjectionReconcileAfter(Instant.now().minusSeconds(1));
+        source.setResolutionPending(true);
+        source.setResolutionControlMode("DUAL_CONTROL_REQUESTED");
+        source.setResolutionRequestId("request-authoritative");
+        source.setResolutionProposedOutcome("PUBLISHED");
+        source.setResolutionRequestedBy("requester");
+        source.setResolutionRequestedAt(Instant.parse("2026-09-30T10:05:00Z"));
+        source.setResolutionRequestReason("A");
+        source.setResolutionEvidenceType("BROKER_OFFSET");
+        source.setResolutionEvidenceReference("partition=0,offset=42");
+        source.setResolutionEvidenceVerifiedAt(Instant.parse("2026-09-30T10:05:01Z"));
+        source.setResolutionEvidenceVerifiedBy("request-verifier");
+        source.setResolutionEvidenceFingerprint("request-fingerprint-authoritative");
+        actualRepository.save(source);
+
+        AlertDocument alert = new AlertDocument();
+        alert.setAlertId("alert-1");
+        alert.setDecisionOutboxEventId(source.getEventId());
+        alert.setDecisionOutboxProjectionRevision(5L);
+        alert.setDecisionOutboxStatus("PUBLISH_CONFIRMATION_UNKNOWN");
+        alert.setDecisionOutboxResolutionPending(false);
+        alert.setDecisionOutboxResolutionRequestId("request-corrupted");
+        alert.setDecisionOutboxResolutionRequestReason("B");
+        alert.setDecisionOutboxResolutionEvidenceFingerprint("request-fingerprint-stale");
+        mongoTemplate.save(alert);
+
+        OutboxRecoveryRunResponse response = service(actualRepository).recoverNow();
+        AlertDocument repaired = mongoTemplate.findById("alert-1", AlertDocument.class);
+
+        assertThat(response.projectionRepaired()).isOne();
+        assertThat(repaired).isNotNull();
+        assertThat(repaired.getDecisionOutboxProjectionRevision()).isEqualTo(5L);
+        assertThat(repaired.getDecisionOutboxStatus()).isEqualTo("PUBLISH_CONFIRMATION_UNKNOWN");
+        assertThat(repaired.isDecisionOutboxResolutionPending()).isTrue();
+        assertThat(repaired.getDecisionOutboxResolutionRequestId()).isEqualTo("request-authoritative");
+        assertThat(repaired.getDecisionOutboxResolutionRequestReason()).isEqualTo("A");
+        assertThat(repaired.getDecisionOutboxResolutionEvidenceFingerprint())
+                .isEqualTo("request-fingerprint-authoritative");
+    }
+
+    @Test
+    void equalRevisionAndPublishedStatusRepairsMissingPublicationProvenance() {
+        TransactionalOutboxRecordDocument source = record(
+                "event-equal-revision-provenance",
+                TransactionalOutboxStatus.PUBLISHED
+        );
+        source.setProjectionRevision(5L);
+        source.setProjectionReconcileAfter(Instant.now().minusSeconds(1));
+        source.setPublishedAt(Instant.parse("2026-09-30T10:06:00Z"));
+        source.setPublicationConfirmationProvenance(OutboxPublicationConfirmationProvenance.BROKER_ACKNOWLEDGED);
+        actualRepository.save(source);
+
+        AlertDocument alert = new AlertDocument();
+        alert.setAlertId("alert-1");
+        alert.setDecisionOutboxEventId(source.getEventId());
+        alert.setDecisionOutboxProjectionRevision(5L);
+        alert.setDecisionOutboxStatus("PUBLISHED");
+        alert.setDecisionOutboxPublishedAt(source.getPublishedAt());
+        mongoTemplate.save(alert);
+
+        OutboxRecoveryRunResponse response = service(actualRepository).recoverNow();
+        AlertDocument repaired = mongoTemplate.findById("alert-1", AlertDocument.class);
+
+        assertThat(response.projectionRepaired()).isOne();
+        assertThat(repaired).isNotNull();
+        assertThat(repaired.getDecisionOutboxPublicationConfirmationProvenance())
+                .isEqualTo("BROKER_ACKNOWLEDGED");
+    }
+
+    @Test
+    void equalRevisionAndStatusRepairsIncompleteDualApprovalEvidence() {
+        TransactionalOutboxRecordDocument source = record(
+                "event-equal-revision-approval",
+                TransactionalOutboxStatus.PUBLISHED
+        );
+        source.setProjectionRevision(5L);
+        source.setProjectionReconcileAfter(Instant.now().minusSeconds(1));
+        source.setPublishedAt(Instant.parse("2026-09-30T10:07:00Z"));
+        source.setPublicationConfirmationProvenance(
+                OutboxPublicationConfirmationProvenance.MANUAL_DUAL_CONTROL_ATTESTED
+        );
+        source.setResolutionControlMode("DUAL_CONTROL_APPROVED");
+        source.setResolutionRequestId("request-approved");
+        source.setResolutionProposedOutcome("PUBLISHED");
+        source.setResolutionRequestedBy("requester");
+        source.setResolutionRequestedAt(Instant.parse("2026-09-30T10:05:00Z"));
+        source.setResolutionRequestReason("request reason");
+        source.setResolutionEvidenceType("BROKER_OFFSET");
+        source.setResolutionEvidenceReference("partition=0,offset=42");
+        source.setResolutionEvidenceVerifiedAt(Instant.parse("2026-09-30T10:05:01Z"));
+        source.setResolutionEvidenceVerifiedBy("request-verifier");
+        source.setResolutionEvidenceFingerprint("request-fingerprint");
+        source.setResolutionApprovalReason("approval reason");
+        source.setResolutionApprovedBy("approver");
+        source.setResolutionApprovedAt(Instant.parse("2026-09-30T10:06:00Z"));
+        source.setResolutionApprovalEvidenceType("BROKER_OFFSET");
+        source.setResolutionApprovalEvidenceReference("partition=0,offset=43");
+        source.setResolutionApprovalEvidenceVerifiedAt(Instant.parse("2026-09-30T10:06:01Z"));
+        source.setResolutionApprovalEvidenceVerifiedBy("approval-verifier");
+        source.setResolutionApprovalEvidenceFingerprint("approval-fingerprint");
+        actualRepository.save(source);
+
+        AlertDocument alert = new AlertDocument();
+        alert.setAlertId("alert-1");
+        alert.setDecisionOutboxEventId(source.getEventId());
+        alert.setDecisionOutboxProjectionRevision(5L);
+        alert.setDecisionOutboxStatus("PUBLISHED");
+        alert.setDecisionOutboxResolutionRequestId("request-corrupted");
+        alert.setDecisionOutboxResolutionEvidenceFingerprint("request-fingerprint-stale");
+        alert.setDecisionOutboxResolutionApprovalEvidenceType(null);
+        alert.setDecisionOutboxResolutionApprovalEvidenceFingerprint(null);
+        mongoTemplate.save(alert);
+
+        OutboxRecoveryRunResponse response = service(actualRepository).recoverNow();
+        AlertDocument repaired = mongoTemplate.findById("alert-1", AlertDocument.class);
+
+        assertThat(response.projectionRepaired()).isOne();
+        assertThat(repaired).isNotNull();
+        assertThat(repaired.getDecisionOutboxResolutionRequestId()).isEqualTo("request-approved");
+        assertThat(repaired.getDecisionOutboxResolutionEvidenceFingerprint()).isEqualTo("request-fingerprint");
+        assertThat(repaired.getDecisionOutboxResolutionApprovalEvidenceType()).isEqualTo("BROKER_OFFSET");
+        assertThat(repaired.getDecisionOutboxResolutionApprovalEvidenceFingerprint())
+                .isEqualTo("approval-fingerprint");
+        assertThat(repaired.getDecisionOutboxResolutionApprovedBy()).isEqualTo("approver");
+    }
+
+    @Test
     void delayedRecoveryAndOlderPublishedProjectionCannotOverwriteManualApproval() {
         TransactionalOutboxRecordDocument original = confirmationUnknownRecord("event-delayed-recovery");
         actualRepository.save(original);
@@ -440,6 +586,119 @@ class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void boundedReconciliationMakesProgressWithoutHotLoopingPermanentFailures() {
+        Instant createdAt = Instant.now().minusSeconds(1_000);
+        TransactionalOutboxRecordDocument activeClaim = mismatchedProjectionRecord(
+                "event-active-repair",
+                "alert-active-repair",
+                createdAt
+        );
+        actualRepository.save(activeClaim);
+        setRepairClaim(activeClaim.getEventId(), "active-worker", Instant.now());
+        saveOutdatedProjection(activeClaim);
+
+        TransactionalOutboxRecordDocument expiredClaim = mismatchedProjectionRecord(
+                "event-expired-repair",
+                "alert-expired-repair",
+                createdAt.plusSeconds(1)
+        );
+        actualRepository.save(expiredClaim);
+        setRepairClaim(expiredClaim.getEventId(), "expired-worker", Instant.now().minusSeconds(120));
+        saveOutdatedProjection(expiredClaim);
+
+        for (int index = 0; index < 105; index++) {
+            TransactionalOutboxRecordDocument permanentFailure = mismatchedProjectionRecord(
+                    "event-permanent-" + index,
+                    "missing-alert-" + index,
+                    createdAt.plusSeconds(index + 2L)
+            );
+            actualRepository.save(permanentFailure);
+        }
+
+        for (int index = 0; index < 5; index++) {
+            TransactionalOutboxRecordDocument valid = mismatchedProjectionRecord(
+                    "event-valid-" + index,
+                    "alert-valid-" + index,
+                    createdAt.plusSeconds(index + 200L)
+            );
+            actualRepository.save(valid);
+            saveOutdatedProjection(valid);
+        }
+
+        Instant futureEligibility = Instant.now().plusSeconds(3_600).truncatedTo(ChronoUnit.MILLIS);
+        TransactionalOutboxRecordDocument futureScheduled = mismatchedProjectionRecord(
+                "event-future-scheduled",
+                "alert-future-scheduled",
+                createdAt.minusSeconds(1)
+        );
+        futureScheduled.setProjectionReconcileAfter(futureEligibility);
+        actualRepository.save(futureScheduled);
+        saveOutdatedProjection(futureScheduled);
+
+        OutboxRecoveryRunResponse first = service(actualRepository).recoverNow();
+
+        assertThat(first.projectionRepaired()).isOne();
+        assertThat(countScheduledPermanentFailures()).isEqualTo(98L);
+        assertThat(repairToken(activeClaim.getEventId())).isEqualTo("active-worker");
+        assertThat(actualRepository.findById(futureScheduled.getEventId()).orElseThrow().getProjectionReconcileAfter())
+                .isEqualTo(futureEligibility);
+
+        OutboxRecoveryRunResponse second = service(actualRepository).recoverNow();
+
+        assertThat(second.projectionRepaired()).isEqualTo(5);
+        assertThat(countScheduledPermanentFailures()).isEqualTo(105L);
+        for (int index = 0; index < 5; index++) {
+            TransactionalOutboxRecordDocument repaired = actualRepository
+                    .findById("event-valid-" + index)
+                    .orElseThrow();
+            assertThat(repaired.isProjectionMismatch()).isFalse();
+            assertThat(repaired.getProjectionReconcileAfter()).isNull();
+        }
+
+        Instant retryAt = actualRepository.findById("event-permanent-0").orElseThrow()
+                .getProjectionReconcileAfter();
+        OutboxRecoveryRunResponse immediateRepeat = service(actualRepository).recoverNow();
+
+        assertThat(immediateRepeat.projectionRepaired()).isZero();
+        assertThat(actualRepository.findById("event-permanent-0").orElseThrow().getProjectionReconcileAfter())
+                .isEqualTo(retryAt);
+        assertThat(actualRepository.findById(futureScheduled.getEventId()).orElseThrow().getProjectionReconcileAfter())
+                .isEqualTo(futureEligibility);
+
+        mongoTemplate.updateFirst(
+                Query.query(Criteria.where("_id").is(activeClaim.getEventId())),
+                new Update().set("projection_repair_claimed_at", Instant.now().minusSeconds(120)),
+                TransactionalOutboxRecordDocument.class
+        );
+        OutboxRecoveryRunResponse afterLeaseExpiry = service(actualRepository).recoverNow();
+
+        assertThat(afterLeaseExpiry.projectionRepaired()).isOne();
+        TransactionalOutboxRecordDocument reclaimed = actualRepository
+                .findById(activeClaim.getEventId())
+                .orElseThrow();
+        assertThat(repairToken(reclaimed.getEventId())).isNull();
+        assertThat(repairClaimedAt(reclaimed.getEventId())).isNull();
+    }
+
+    @Test
+    void staleProjectionWorkerCannotClearCurrentRepairClaim() {
+        TransactionalOutboxRecordDocument source = mismatchedProjectionRecord(
+                "event-current-repair-claim",
+                "alert-current-repair-claim",
+                Instant.now()
+        );
+        actualRepository.save(source);
+        setRepairClaim(source.getEventId(), "current-worker", Instant.now());
+
+        boolean cleared = service(actualRepository).completeProjectionRepair(source, "stale-worker");
+        TransactionalOutboxRecordDocument persisted = actualRepository.findById(source.getEventId()).orElseThrow();
+
+        assertThat(cleared).isFalse();
+        assertThat(repairToken(persisted.getEventId())).isEqualTo("current-worker");
+        assertThat(persisted.isProjectionMismatch()).isTrue();
+    }
+
+    @Test
     void reconciliationReclaimsCrashedWorkerAndIsIdempotentWithoutMismatchMarker() {
         TransactionalOutboxRecordDocument source = record(
                 "event-crashed-reconciler",
@@ -503,7 +762,9 @@ class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
         TransactionalOutboxRecordRepository intercepted = interceptedRepository();
         doAnswer(invocation -> {
             List<TransactionalOutboxRecordDocument> stale = actualRepository
-                    .findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc();
+                    .findTop100ByStatusInAndProjectionMismatchTrueAndProjectionReconcileAfterIsNullOrderByCreatedAtAsc(
+                            List.of(status)
+                    );
             mongoTemplate.updateFirst(
                     Query.query(Criteria.where("_id").is("alert-1")),
                     new Update()
@@ -514,7 +775,10 @@ class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
                     AlertDocument.class
             );
             return stale;
-        }).when(intercepted).findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc();
+        }).when(intercepted)
+                .findTop100ByStatusInAndProjectionMismatchTrueAndProjectionReconcileAfterIsNullOrderByCreatedAtAsc(
+                        any()
+                );
 
         OutboxRecoveryRunResponse response = service(intercepted).recoverNow();
         AlertDocument persisted = mongoTemplate.findById("alert-1", AlertDocument.class);
@@ -607,6 +871,66 @@ class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
         alert.setDecisionOutboxStatus("PUBLISH_CONFIRMATION_UNKNOWN");
         alert.setDecisionOutboxAttempts(1);
         mongoTemplate.save(alert);
+    }
+
+    private TransactionalOutboxRecordDocument mismatchedProjectionRecord(
+            String eventId,
+            String alertId,
+            Instant createdAt
+    ) {
+        TransactionalOutboxRecordDocument record = record(eventId, TransactionalOutboxStatus.PUBLISHED);
+        record.setResourceId(alertId);
+        record.setProjectionMismatch(true);
+        record.setProjectionMismatchReason("ALERT_PROJECTION_UPDATE_FAILED");
+        record.setCreatedAt(createdAt);
+        record.setUpdatedAt(createdAt);
+        return record;
+    }
+
+    private void saveOutdatedProjection(TransactionalOutboxRecordDocument source) {
+        AlertDocument alert = new AlertDocument();
+        alert.setAlertId(source.getResourceId());
+        alert.setDecisionOutboxEventId(source.getEventId());
+        alert.setDecisionOutboxProjectionRevision(source.getProjectionRevision() - 1L);
+        alert.setDecisionOutboxStatus("PENDING");
+        mongoTemplate.save(alert);
+    }
+
+    private long countScheduledPermanentFailures() {
+        long scheduled = 0;
+        for (int index = 0; index < 105; index++) {
+            if (actualRepository.findById("event-permanent-" + index).orElseThrow()
+                    .getProjectionReconcileAfter() != null) {
+                scheduled++;
+            }
+        }
+        return scheduled;
+    }
+
+    private void setRepairClaim(String eventId, String token, Instant claimedAt) {
+        mongoTemplate.updateFirst(
+                Query.query(Criteria.where("_id").is(eventId)),
+                new Update()
+                        .set("projection_repair_token", token)
+                        .set("projection_repair_claimed_at", claimedAt),
+                TransactionalOutboxRecordDocument.class
+        );
+    }
+
+    private String repairToken(String eventId) {
+        Document document = rawOutbox(eventId);
+        return document == null ? null : document.getString("projection_repair_token");
+    }
+
+    private Object repairClaimedAt(String eventId) {
+        Document document = rawOutbox(eventId);
+        return document == null ? null : document.get("projection_repair_claimed_at");
+    }
+
+    private Document rawOutbox(String eventId) {
+        return mongoTemplate.getCollection("transactional_outbox_records")
+                .find(new Document("_id", eventId))
+                .first();
     }
 
     private TransactionalOutboxRecordDocument confirmationUnknownRecord(String eventId) {

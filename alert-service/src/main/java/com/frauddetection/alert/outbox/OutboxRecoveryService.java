@@ -34,6 +34,13 @@ public class OutboxRecoveryService {
     private static final int PROJECTION_RECONCILIATION_LIMIT = 100;
     private static final Duration PROJECTION_REPAIR_LEASE = Duration.ofMinutes(1);
     private static final Duration PROJECTION_RETRY_DELAY = Duration.ofSeconds(30);
+    private static final List<TransactionalOutboxStatus> REPAIRABLE_PROJECTION_STATUSES = List.of(
+            TransactionalOutboxStatus.PUBLISHED,
+            TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN,
+            TransactionalOutboxStatus.FAILED_RETRYABLE,
+            TransactionalOutboxStatus.FAILED_TERMINAL,
+            TransactionalOutboxStatus.RECOVERY_REQUIRED
+    );
 
     private final TransactionalOutboxRecordRepository repository;
     private final MongoTemplate mongoTemplate;
@@ -138,6 +145,7 @@ public class OutboxRecoveryService {
                     .set("last_error", "STALE_PROCESSING_LEASE_RELEASED")
                     .set("updated_at", now)
                     .unset("lease_owner")
+                    .unset("lease_claim_token")
                     .unset("lease_expires_at");
             if (mongoTemplate.updateFirst(
                     staleLeaseQuery(record, TransactionalOutboxStatus.PROCESSING, cutoff),
@@ -165,6 +173,7 @@ public class OutboxRecoveryService {
                     .set("projection_reconcile_after", now)
                     .inc("projection_revision", 1L)
                     .unset("lease_owner")
+                    .unset("lease_claim_token")
                     .unset("lease_expires_at");
             if (mongoTemplate.updateFirst(
                     staleLeaseQuery(record, TransactionalOutboxStatus.PUBLISH_ATTEMPTED, cutoff),
@@ -173,6 +182,7 @@ public class OutboxRecoveryService {
             ).getModifiedCount() == 1) {
                 record.setStatus(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
                 record.setLeaseOwner(null);
+                record.setLeaseClaimToken(null);
                 record.setLeaseExpiresAt(null);
                 record.setLastError("STALE_PUBLISH_ATTEMPT_CONFIRMATION_UNKNOWN");
                 record.setConfirmationUnknownAt(now);
@@ -195,17 +205,21 @@ public class OutboxRecoveryService {
         int repaired = 0;
         Instant scanStartedAt = Instant.now();
         Map<String, TransactionalOutboxRecordDocument> candidates = new LinkedHashMap<>();
-        addCandidates(
-                candidates,
-                repository.findTop100ByProjectionReconcileAfterLessThanEqualOrderByProjectionReconcileAfterAsc(
+        List<TransactionalOutboxRecordDocument> scheduled =
+                repository.findTop100ByStatusInAndProjectionReconcileAfterLessThanEqualOrderByProjectionReconcileAfterAscCreatedAtAsc(
+                        REPAIRABLE_PROJECTION_STATUSES,
                         scanStartedAt
-                )
+                );
+        List<TransactionalOutboxRecordDocument> unscheduled =
+                repository.findTop100ByStatusInAndProjectionMismatchTrueAndProjectionReconcileAfterIsNullOrderByCreatedAtAsc(
+                        REPAIRABLE_PROJECTION_STATUSES
+                );
+        addFairCandidates(
+                candidates,
+                scheduled,
+                unscheduled
         );
-        addCandidates(candidates, repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc());
         for (TransactionalOutboxRecordDocument record : candidates.values()) {
-            if (!isRepairableProjectionStatus(record.getStatus())) {
-                continue;
-            }
             String repairToken = UUID.randomUUID().toString();
             Instant claimedAt = Instant.now();
             Query claim = Query.query(new Criteria().andOperator(
@@ -213,8 +227,11 @@ public class OutboxRecoveryService {
                     Criteria.where("status").is(record.getStatus()),
                     Criteria.where("projection_revision").is(record.getProjectionRevision()),
                     new Criteria().orOperator(
-                            Criteria.where("projection_mismatch").is(true),
-                            Criteria.where("projection_reconcile_after").lte(scanStartedAt)
+                            Criteria.where("projection_reconcile_after").lte(scanStartedAt),
+                            new Criteria().andOperator(
+                                    Criteria.where("projection_mismatch").is(true),
+                                    Criteria.where("projection_reconcile_after").is(null)
+                            )
                     ),
                     new Criteria().orOperator(
                             Criteria.where("projection_repair_token").exists(false),
@@ -225,7 +242,8 @@ public class OutboxRecoveryService {
             ));
             Update claimRepair = new Update()
                     .set("projection_repair_token", repairToken)
-                    .set("projection_repair_claimed_at", claimedAt);
+                    .set("projection_repair_claimed_at", claimedAt)
+                    .set("projection_reconcile_after", scanStartedAt);
             if (mongoTemplate.updateFirst(claim, claimRepair, TransactionalOutboxRecordDocument.class)
                     .getModifiedCount() != 1) {
                 continue;
@@ -248,11 +266,6 @@ public class OutboxRecoveryService {
                 retainProjectionMismatch(record, repairToken, "ALERT_PROJECTION_NEWER_THAN_SOURCE");
                 continue;
             }
-            if (alert.getDecisionOutboxProjectionRevision() == record.getProjectionRevision()
-                    && projection.projectionStatus().equals(alert.getDecisionOutboxStatus())) {
-                completeProjectionRepair(record, repairToken);
-                continue;
-            }
             if (!writeAlertProjection(record, projection)) {
                 retainProjectionMismatch(record, repairToken, "ALERT_PROJECTION_REPAIR_FAILED");
                 continue;
@@ -265,22 +278,29 @@ public class OutboxRecoveryService {
         return repaired;
     }
 
-    private void addCandidates(
+    private void addFairCandidates(
             Map<String, TransactionalOutboxRecordDocument> candidates,
-            List<TransactionalOutboxRecordDocument> records
+            List<TransactionalOutboxRecordDocument> scheduled,
+            List<TransactionalOutboxRecordDocument> unscheduled
     ) {
-        if (records == null) {
-            return;
-        }
-        for (TransactionalOutboxRecordDocument record : records) {
-            if (candidates.size() >= PROJECTION_RECONCILIATION_LIMIT) {
-                return;
+        List<TransactionalOutboxRecordDocument> safeScheduled = scheduled == null ? List.of() : scheduled;
+        List<TransactionalOutboxRecordDocument> safeUnscheduled = unscheduled == null ? List.of() : unscheduled;
+        int index = 0;
+        while (candidates.size() < PROJECTION_RECONCILIATION_LIMIT
+                && (index < safeScheduled.size() || index < safeUnscheduled.size())) {
+            if (index < safeScheduled.size()) {
+                TransactionalOutboxRecordDocument record = safeScheduled.get(index);
+                candidates.putIfAbsent(record.getEventId(), record);
             }
-            candidates.putIfAbsent(record.getEventId(), record);
+            if (candidates.size() < PROJECTION_RECONCILIATION_LIMIT && index < safeUnscheduled.size()) {
+                TransactionalOutboxRecordDocument record = safeUnscheduled.get(index);
+                candidates.putIfAbsent(record.getEventId(), record);
+            }
+            index++;
         }
     }
 
-    private boolean completeProjectionRepair(
+    boolean completeProjectionRepair(
             TransactionalOutboxRecordDocument record,
             String repairToken
     ) {
@@ -396,6 +416,7 @@ public class OutboxRecoveryService {
                 Criteria.where("_id").is(record.getEventId()),
                 Criteria.where("status").is(expectedStatus),
                 Criteria.where("lease_owner").is(record.getLeaseOwner()),
+                Criteria.where("lease_claim_token").is(record.getLeaseClaimToken()),
                 Criteria.where("lease_expires_at").is(record.getLeaseExpiresAt()).lte(cutoff),
                 Criteria.where("attempts").is(record.getAttempts())
         ));
@@ -419,14 +440,6 @@ public class OutboxRecoveryService {
                 .unset("projection_repair_token")
                 .unset("projection_repair_claimed_at");
         mongoTemplate.updateFirst(query, update, TransactionalOutboxRecordDocument.class);
-    }
-
-    private boolean isRepairableProjectionStatus(TransactionalOutboxStatus status) {
-        return status == TransactionalOutboxStatus.PUBLISHED
-                || status == TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN
-                || status == TransactionalOutboxStatus.FAILED_RETRYABLE
-                || status == TransactionalOutboxStatus.FAILED_TERMINAL
-                || status == TransactionalOutboxStatus.RECOVERY_REQUIRED;
     }
 
     private long ageSeconds(TransactionalOutboxRecordDocument record) {

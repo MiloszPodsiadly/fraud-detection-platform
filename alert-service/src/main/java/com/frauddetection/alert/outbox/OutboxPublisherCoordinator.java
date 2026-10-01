@@ -88,8 +88,9 @@ public class OutboxPublisherCoordinator {
         return published;
     }
 
-    private TransactionalOutboxRecordDocument claimNext() {
+    TransactionalOutboxRecordDocument claimNext() {
         Instant now = Instant.now();
+        String claimToken = UUID.randomUUID().toString();
         Query query = new Query(new Criteria().andOperator(
                 Criteria.where("attempts").lt(maxAttempts),
                 new Criteria().orOperator(
@@ -106,6 +107,7 @@ public class OutboxPublisherCoordinator {
         Update update = new Update()
                 .set("status", TransactionalOutboxStatus.PROCESSING)
                 .set("lease_owner", leaseOwner)
+                .set("lease_claim_token", claimToken)
                 .set("lease_expires_at", now.plus(leaseDuration))
                 .set("updated_at", now)
                 .unset("last_error")
@@ -118,7 +120,7 @@ public class OutboxPublisherCoordinator {
         );
     }
 
-    private boolean markPublishAttempted(TransactionalOutboxRecordDocument record) {
+    boolean markPublishAttempted(TransactionalOutboxRecordDocument record) {
         Instant now = Instant.now();
         Update update = new Update()
                 .set("status", TransactionalOutboxStatus.PUBLISH_ATTEMPTED)
@@ -132,7 +134,7 @@ public class OutboxPublisherCoordinator {
         }
     }
 
-    private boolean markOutboxRecordPublished(TransactionalOutboxRecordDocument record) {
+    boolean markOutboxRecordPublished(TransactionalOutboxRecordDocument record) {
         Instant now = Instant.now();
         Update update = new Update()
                 .set("status", TransactionalOutboxStatus.PUBLISHED)
@@ -142,6 +144,7 @@ public class OutboxPublisherCoordinator {
                 .set("projection_reconcile_after", now)
                 .inc("projection_revision", 1L)
                 .unset("lease_owner")
+                .unset("lease_claim_token")
                 .unset("lease_expires_at")
                 .unset("last_error");
         try {
@@ -160,6 +163,7 @@ public class OutboxPublisherCoordinator {
                 record.setProjectionReconcileAfter(now);
                 record.setUpdatedAt(now);
                 record.setLeaseOwner(null);
+                record.setLeaseClaimToken(null);
                 record.setLeaseExpiresAt(null);
                 record.setLastError(null);
             }
@@ -169,7 +173,7 @@ public class OutboxPublisherCoordinator {
         }
     }
 
-    private void markPublishConfirmationUnknown(TransactionalOutboxRecordDocument record) {
+    boolean markPublishConfirmationUnknown(TransactionalOutboxRecordDocument record) {
         Instant now = Instant.now();
         Update update = new Update()
                 .set("status", TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN)
@@ -180,6 +184,7 @@ public class OutboxPublisherCoordinator {
                 .set("projection_reconcile_after", now)
                 .inc("projection_revision", 1L)
                 .unset("lease_owner")
+                .unset("lease_claim_token")
                 .unset("lease_expires_at");
         try {
             UpdateResult result = mongoTemplate.updateFirst(
@@ -196,6 +201,7 @@ public class OutboxPublisherCoordinator {
                 record.setLastError("OUTBOX_PUBLISH_CONFIRMATION_FAILED");
                 record.setUpdatedAt(now);
                 record.setLeaseOwner(null);
+                record.setLeaseClaimToken(null);
                 record.setLeaseExpiresAt(null);
                 updateAlertProjection(
                         record,
@@ -203,13 +209,15 @@ public class OutboxPublisherCoordinator {
                         "OUTBOX_PUBLISH_CONFIRMATION_FAILED",
                         null
                 );
+                return true;
             }
         } catch (DataAccessException exception) {
             log.warn("Transactional outbox confirmation-unknown update failed: reason=OUTBOX_CONFIRMATION_UNKNOWN_UPDATE_FAILED");
         }
+        return false;
     }
 
-    private void markFailed(TransactionalOutboxRecordDocument record, TransactionalOutboxStatus status, String reason) {
+    boolean markFailed(TransactionalOutboxRecordDocument record, TransactionalOutboxStatus status, String reason) {
         Instant now = Instant.now();
         Update update = new Update()
                 .set("status", status)
@@ -219,6 +227,7 @@ public class OutboxPublisherCoordinator {
                 .set("projection_reconcile_after", now)
                 .inc("projection_revision", 1L)
                 .unset("lease_owner")
+                .unset("lease_claim_token")
                 .unset("lease_expires_at");
         try {
             UpdateResult result = mongoTemplate.updateFirst(
@@ -234,22 +243,27 @@ public class OutboxPublisherCoordinator {
                 record.setLastError(reason);
                 record.setUpdatedAt(now);
                 record.setLeaseOwner(null);
+                record.setLeaseClaimToken(null);
                 record.setLeaseExpiresAt(null);
                 String alertStatus = status == TransactionalOutboxStatus.FAILED_TERMINAL
                         ? DecisionOutboxStatus.FAILED_TERMINAL
                         : DecisionOutboxStatus.FAILED_RETRYABLE;
                 updateAlertProjection(record, alertStatus, reason, null);
+                return true;
             }
         } catch (DataAccessException exception) {
             log.warn("Transactional outbox status update failed: reason=OUTBOX_STATUS_UPDATE_FAILED");
         }
+        return false;
     }
 
     private Query leasedRecordQuery(TransactionalOutboxRecordDocument record, TransactionalOutboxStatus status) {
         return new Query(new Criteria().andOperator(
                 Criteria.where("_id").is(record.getEventId()),
                 Criteria.where("status").is(status),
-                Criteria.where("lease_owner").is(leaseOwner)
+                Criteria.where("lease_owner").is(leaseOwner),
+                Criteria.where("lease_claim_token").is(record.getLeaseClaimToken()),
+                Criteria.where("lease_expires_at").gt(Instant.now())
         ));
     }
 

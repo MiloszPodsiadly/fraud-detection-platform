@@ -47,7 +47,10 @@ class TransactionalOutboxFailureInjectionTest {
                 eq(TransactionalOutboxStatus.PUBLISH_ATTEMPTED),
                 any()
         )).thenReturn(List.of(attempted));
-        when(fixture.repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc()).thenReturn(List.of());
+        when(fixture.repository
+                .findTop100ByStatusInAndProjectionMismatchTrueAndProjectionReconcileAfterIsNullOrderByCreatedAtAsc(
+                        any()
+                )).thenReturn(List.of());
 
         OutboxRecoveryRunResponse response = fixture.service.recoverNow();
 
@@ -77,7 +80,10 @@ class TransactionalOutboxFailureInjectionTest {
         )).thenReturn(outdated);
         when(fixture.repository.findTop100ByStatusAndLeaseExpiresAtBeforeOrderByCreatedAtAsc(any(), any()))
                 .thenReturn(List.of());
-        when(fixture.repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc()).thenReturn(List.of(published));
+        when(fixture.repository
+                .findTop100ByStatusInAndProjectionMismatchTrueAndProjectionReconcileAfterIsNullOrderByCreatedAtAsc(
+                        any()
+                )).thenReturn(List.of(published));
         List<String> writeOrder = new ArrayList<>();
         List<Query> outboxQueries = new ArrayList<>();
         List<Update> outboxUpdates = new ArrayList<>();

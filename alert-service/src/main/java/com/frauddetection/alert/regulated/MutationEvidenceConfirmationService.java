@@ -291,6 +291,10 @@ public class MutationEvidenceConfirmationService {
                 && outbox.getResolutionRequestedAt() != null
                 && outbox.getResolutionApprovedAt() != null
                 && !outbox.getResolutionApprovedAt().isBefore(outbox.getResolutionRequestedAt())
+                && outbox.getResolutionEvidenceVerifiedAt() != null
+                && !outbox.getResolutionEvidenceVerifiedAt().isAfter(outbox.getResolutionRequestedAt())
+                && outbox.getResolutionApprovalEvidenceVerifiedAt() != null
+                && !outbox.getResolutionApprovalEvidenceVerifiedAt().isAfter(outbox.getResolutionApprovedAt())
                 && hasText(outbox.getResolutionRequestReason())
                 && hasText(outbox.getResolutionApprovalReason())
                 && evidenceFingerprintMatches(

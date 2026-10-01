@@ -68,6 +68,38 @@ class MutationEvidenceConfirmationServiceTest {
     }
 
     @Test
+    void shouldFailClosedWhenRequestEvidenceWasVerifiedAfterTheRequestTransition() {
+        TransactionalOutboxRecordDocument outbox = manualDualControlOutbox();
+        Instant impossibleVerifiedAt = outbox.getResolutionRequestedAt().plusMillis(1);
+        ResolutionEvidenceReference evidence = new ResolutionEvidenceReference(
+                ResolutionEvidenceType.BROKER_OFFSET,
+                outbox.getResolutionEvidenceReference(),
+                impossibleVerifiedAt,
+                outbox.getResolutionEvidenceVerifiedBy()
+        );
+        outbox.setResolutionEvidenceVerifiedAt(impossibleVerifiedAt);
+        outbox.setResolutionEvidenceFingerprint(RegulatedMutationIntentHasher.hash(evidence));
+
+        assertInvalidManualPublicationEvidence(outbox);
+    }
+
+    @Test
+    void shouldFailClosedWhenApprovalEvidenceWasVerifiedAfterTheApprovalTransition() {
+        TransactionalOutboxRecordDocument outbox = manualDualControlOutbox();
+        Instant impossibleVerifiedAt = outbox.getResolutionApprovedAt().plusMillis(1);
+        ResolutionEvidenceReference evidence = new ResolutionEvidenceReference(
+                ResolutionEvidenceType.BROKER_OFFSET,
+                outbox.getResolutionApprovalEvidenceReference(),
+                impossibleVerifiedAt,
+                outbox.getResolutionApprovalEvidenceVerifiedBy()
+        );
+        outbox.setResolutionApprovalEvidenceVerifiedAt(impossibleVerifiedAt);
+        outbox.setResolutionApprovalEvidenceFingerprint(RegulatedMutationIntentHasher.hash(evidence));
+
+        assertInvalidManualPublicationEvidence(outbox);
+    }
+
+    @Test
     void shouldKeepSingleControlManualPublicationPending() {
         Fixture fixture = new Fixture(false, false);
         RegulatedMutationCommandDocument command = committedCommand();
@@ -493,6 +525,19 @@ class MutationEvidenceConfirmationServiceTest {
         command.setSuccessAuditId("audit-success-1");
         command.setUpdatedAt(Instant.parse("2026-05-02T10:00:00Z"));
         return command;
+    }
+
+    private void assertInvalidManualPublicationEvidence(TransactionalOutboxRecordDocument outbox) {
+        Fixture fixture = new Fixture(false, false);
+        RegulatedMutationCommandDocument command = committedCommand();
+        fixture.pending(command);
+        when(fixture.outboxRepository.findByMutationCommandId("command-1")).thenReturn(Optional.of(outbox));
+
+        int promoted = fixture.service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isZero();
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        verify(fixture.metrics).recordEvidenceConfirmationFailed("MANUAL_PUBLICATION_EVIDENCE_INVALID");
     }
 
     private TransactionalOutboxRecordDocument outbox(TransactionalOutboxStatus status) {

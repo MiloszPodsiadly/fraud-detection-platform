@@ -7,6 +7,7 @@ import com.frauddetection.alert.audit.AuditFailureCategory;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.outbox.OutboxPublicationConfirmationProvenance;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
@@ -367,6 +368,9 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
         TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
         TransactionalOutboxRecordDocument outbox = new TransactionalOutboxRecordDocument();
         outbox.setStatus(TransactionalOutboxStatus.PUBLISHED);
+        outbox.setPublicationConfirmationProvenance(
+                OutboxPublicationConfirmationProvenance.BROKER_ACKNOWLEDGED
+        );
         when(commandRepository.findTop100ByStateInAndUpdatedAtBefore(any(), any()))
                 .thenReturn(List.of(confirmationSnapshot));
         when(outboxRepository.findByMutationCommandId(command.getId())).thenReturn(Optional.of(outbox));
@@ -465,6 +469,9 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
         TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
         TransactionalOutboxRecordDocument outbox = new TransactionalOutboxRecordDocument();
         outbox.setStatus(TransactionalOutboxStatus.PUBLISHED);
+        outbox.setPublicationConfirmationProvenance(
+                OutboxPublicationConfirmationProvenance.BROKER_ACKNOWLEDGED
+        );
         when(outboxRepository.findByMutationCommandId(command.getId())).thenReturn(Optional.of(outbox));
         RegulatedMutationDurableLocalFinalizationProof durableProof =
                 mock(RegulatedMutationDurableLocalFinalizationProof.class);

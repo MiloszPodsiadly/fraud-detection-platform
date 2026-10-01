@@ -11,6 +11,7 @@ import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
 import com.mongodb.client.result.UpdateResult;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -22,6 +23,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -32,17 +34,30 @@ public class OutboxConfirmationResolutionMutationHandler {
     private final MongoTemplate mongoTemplate;
     private final boolean bankModeFailClosed;
     private final boolean dualControlEnabled;
+    private final Clock clock;
 
+    @Autowired
     public OutboxConfirmationResolutionMutationHandler(
             TransactionalOutboxRecordRepository repository,
             MongoTemplate mongoTemplate,
             @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed,
             @Value("${app.outbox.confirmation.dual-control.enabled:false}") boolean dualControlEnabled
     ) {
+        this(repository, mongoTemplate, bankModeFailClosed, dualControlEnabled, Clock.systemUTC());
+    }
+
+    public OutboxConfirmationResolutionMutationHandler(
+            TransactionalOutboxRecordRepository repository,
+            MongoTemplate mongoTemplate,
+            boolean bankModeFailClosed,
+            boolean dualControlEnabled,
+            Clock clock
+    ) {
         this.repository = repository;
         this.mongoTemplate = mongoTemplate;
         this.bankModeFailClosed = bankModeFailClosed;
         this.dualControlEnabled = dualControlEnabled;
+        this.clock = clock == null ? Clock.systemUTC() : clock;
     }
 
     public TransactionalOutboxRecordDocument resolve(String eventId, OutboxConfirmationResolutionRequest request, String actorId) {
@@ -80,17 +95,17 @@ public class OutboxConfirmationResolutionMutationHandler {
             OutboxConfirmationResolutionRequest request,
             String actorId
     ) {
-        Instant now = Instant.now();
+        Instant transitionAt = nextUpdatedAt(record, clock.instant());
         ResolutionEvidenceReference evidence = request.evidenceReference();
+        requireEvidenceVerifiedByTransition(evidence, transitionAt);
         String pendingRequestId = UUID.randomUUID().toString();
-        Instant updatedAt = nextUpdatedAt(record, now);
         Update update = new Update()
                 .set("resolution_pending", true)
                 .set("resolution_control_mode", "DUAL_CONTROL_REQUESTED")
                 .set("resolution_request_id", pendingRequestId)
                 .set("resolution_proposed_outcome", request.resolution().name())
                 .set("resolution_requested_by", actorId)
-                .set("resolution_requested_at", now)
+                .set("resolution_requested_at", transitionAt)
                 .set("resolution_request_reason", request.reason())
                 .unset("resolution_approval_reason")
                 .set("resolution_evidence_type", evidence.type().name())
@@ -106,8 +121,8 @@ public class OutboxConfirmationResolutionMutationHandler {
                 .unset("resolution_approval_evidence_verified_by")
                 .unset("resolution_approval_evidence_fingerprint")
                 .set("last_error", "DUAL_CONTROL_APPROVAL_REQUIRED")
-                .set("updated_at", updatedAt)
-                .set("projection_reconcile_after", updatedAt)
+                .set("updated_at", transitionAt)
+                .set("projection_reconcile_after", transitionAt)
                 .inc("projection_revision", 1L);
         TransactionalOutboxRecordDocument saved = compareAndSet(record, false, update, null);
         projectSavedRecord(saved);
@@ -132,18 +147,19 @@ public class OutboxConfirmationResolutionMutationHandler {
         if (actorId.equals(record.getResolutionRequestedBy())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "dual-control approval requires a distinct actor");
         }
-        Instant now = Instant.now();
+        Instant transitionAt = nextUpdatedAt(record, clock.instant());
         ResolutionEvidenceReference approvalEvidence = request.evidenceReference();
+        requireEvidenceVerifiedByTransition(approvalEvidence, transitionAt);
         Update update = new Update()
                 .set("resolution_control_mode", "DUAL_CONTROL_APPROVED")
                 .set("resolution_approved_by", actorId)
-                .set("resolution_approved_at", now)
+                .set("resolution_approved_at", transitionAt)
                 .set("resolution_approval_evidence_type", approvalEvidence.type().name())
                 .set("resolution_approval_evidence_reference", approvalEvidence.reference())
                 .set("resolution_approval_evidence_verified_at", approvalEvidence.verifiedAt())
                 .set("resolution_approval_evidence_verified_by", approvalEvidence.verifiedBy())
                 .set("resolution_approval_evidence_fingerprint", evidenceFingerprint(approvalEvidence));
-        applyResolution(update, record, request, now, false);
+        applyResolution(update, request, transitionAt, false);
         TransactionalOutboxRecordDocument saved = compareAndSet(
                 record,
                 true,
@@ -159,12 +175,13 @@ public class OutboxConfirmationResolutionMutationHandler {
             OutboxConfirmationResolutionRequest request,
             String actorId
     ) {
-        Instant now = Instant.now();
+        Instant transitionAt = nextUpdatedAt(record, clock.instant());
+        requireEvidenceVerifiedByTransition(request.evidenceReference(), transitionAt);
         Update update = new Update()
                 .set("resolution_control_mode", "SINGLE_CONTROL_OPERATOR_ATTESTED")
-                .set("resolution_approved_at", now)
+                .set("resolution_approved_at", transitionAt)
                 .set("resolution_approved_by", actorId);
-        applyResolution(update, record, request, now, true);
+        applyResolution(update, request, transitionAt, true);
         TransactionalOutboxRecordDocument saved = compareAndSet(record, false, update, null);
         projectSavedRecord(saved);
         return saved;
@@ -172,9 +189,8 @@ public class OutboxConfirmationResolutionMutationHandler {
 
     private void applyResolution(
             Update update,
-            TransactionalOutboxRecordDocument record,
             OutboxConfirmationResolutionRequest request,
-            Instant now,
+            Instant transitionAt,
             boolean persistPrimaryEvidence
     ) {
         ResolutionEvidenceReference evidence = request.evidenceReference();
@@ -184,10 +200,11 @@ public class OutboxConfirmationResolutionMutationHandler {
         update.set("resolution_approval_reason", request.reason())
                 .set("resolution_pending", false)
                 .set("status", status)
-                .set("updated_at", nextUpdatedAt(record, now))
-                .set("projection_reconcile_after", now)
+                .set("updated_at", transitionAt)
+                .set("projection_reconcile_after", transitionAt)
                 .inc("projection_revision", 1L)
                 .unset("lease_owner")
+                .unset("lease_claim_token")
                 .unset("lease_expires_at");
         if (persistPrimaryEvidence) {
             update.set("resolution_evidence_type", evidence.type().name())
@@ -200,7 +217,7 @@ public class OutboxConfirmationResolutionMutationHandler {
             OutboxPublicationConfirmationProvenance provenance = persistPrimaryEvidence
                     ? OutboxPublicationConfirmationProvenance.MANUAL_SINGLE_CONTROL_ATTESTED
                     : OutboxPublicationConfirmationProvenance.MANUAL_DUAL_CONTROL_ATTESTED;
-            update.set("published_at", now)
+            update.set("published_at", transitionAt)
                     .set("publication_confirmation_provenance", provenance)
                     .unset("last_error");
         } else {
@@ -267,6 +284,15 @@ public class OutboxConfirmationResolutionMutationHandler {
         return previous != null && !now.isAfter(previous) ? previous.plusMillis(1) : now;
     }
 
+    private void requireEvidenceVerifiedByTransition(ResolutionEvidenceReference evidence, Instant transitionAt) {
+        if (evidence.verifiedAt().isAfter(transitionAt)) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "resolution evidence verification cannot occur after the resolution transition"
+            );
+        }
+    }
+
     private String requireAuthenticatedActor(String actorId) {
         if (actorId == null || actorId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "authenticated actor is required");
@@ -325,7 +351,7 @@ public class OutboxConfirmationResolutionMutationHandler {
         Update update = new Update()
                 .set("projection_mismatch", true)
                 .set("projection_mismatch_reason", reason)
-                .set("updated_at", Instant.now());
+                .set("updated_at", nextUpdatedAt(record, clock.instant()));
         mongoTemplate.updateFirst(query, update, TransactionalOutboxRecordDocument.class);
     }
 

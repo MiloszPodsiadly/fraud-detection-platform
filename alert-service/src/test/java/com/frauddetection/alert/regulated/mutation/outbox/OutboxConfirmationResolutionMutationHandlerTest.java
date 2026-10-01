@@ -21,7 +21,9 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -160,6 +162,122 @@ class OutboxConfirmationResolutionMutationHandlerTest {
         assertThat(approved.getResolutionApprovalEvidenceFingerprint()).isNotBlank();
         assertThat(approved.getResolutionRequestReason()).isEqualTo("request reason");
         assertThat(approved.getResolutionApprovalReason()).isEqualTo("approval reason");
+    }
+
+    @Test
+    void shouldKeepApprovalChronologyMonotonicWhenApproverClockIsBehind() {
+        Instant requesterTime = Instant.parse("2026-10-02T10:10:00Z");
+        Instant approverTime = Instant.parse("2026-10-02T10:00:00Z");
+        Fixture fixture = fixture(true, true, fixedClock(requesterTime));
+        mockPersistence(fixture, record());
+        when(fixture.mongoTemplate.updateFirst(any(), any(), any(Class.class)))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+        TransactionalOutboxRecordDocument requested = fixture.handler.resolve(
+                "event-1",
+                request(),
+                "requester"
+        );
+        OutboxConfirmationResolutionMutationHandler behindClockApprover = new OutboxConfirmationResolutionMutationHandler(
+                fixture.repository,
+                fixture.mongoTemplate,
+                true,
+                true,
+                fixedClock(approverTime)
+        );
+        ResolutionEvidenceReference approvalEvidence = evidence("approval-evidence", "approval-verifier");
+
+        TransactionalOutboxRecordDocument approved = behindClockApprover.resolve(
+                "event-1",
+                request(
+                        OutboxConfirmationResolution.PUBLISHED,
+                        requested.getResolutionRequestId(),
+                        "approval reason",
+                        approvalEvidence
+                ),
+                "approver"
+        );
+
+        assertThat(approved.getResolutionRequestedAt()).isEqualTo(requesterTime);
+        assertThat(approved.getResolutionApprovedAt()).isAfter(approved.getResolutionRequestedAt());
+        assertThat(approved.getResolutionApprovedAt()).isEqualTo(requesterTime.plusMillis(1));
+        assertThat(approved.getUpdatedAt()).isEqualTo(approved.getResolutionApprovedAt());
+        assertThat(approved.getPublishedAt()).isEqualTo(approved.getResolutionApprovedAt());
+        assertThat(approved.getResolutionApprovalEvidenceVerifiedAt()).isEqualTo(approvalEvidence.verifiedAt());
+    }
+
+    @Test
+    void shouldOrderRequestAndApprovalWhenWallClockInstantsAreIdentical() {
+        Instant sameWallClockTime = Instant.parse("2026-10-02T10:00:00Z");
+        Fixture fixture = fixture(true, true, fixedClock(sameWallClockTime));
+        mockPersistence(fixture, record());
+        when(fixture.mongoTemplate.updateFirst(any(), any(), any(Class.class)))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+
+        TransactionalOutboxRecordDocument requested = fixture.handler.resolve("event-1", request(), "requester");
+        TransactionalOutboxRecordDocument approved = fixture.handler.resolve(
+                "event-1",
+                request(OutboxConfirmationResolution.PUBLISHED, requested.getResolutionRequestId()),
+                "approver"
+        );
+
+        assertThat(requested.getResolutionRequestedAt()).isEqualTo(sameWallClockTime);
+        assertThat(approved.getResolutionApprovedAt()).isEqualTo(sameWallClockTime.plusMillis(1));
+    }
+
+    @Test
+    void shouldUseObservedApprovalTimeDuringNormalChronologicalOperation() {
+        Instant requesterTime = Instant.parse("2026-10-02T10:00:00Z");
+        Instant approverTime = Instant.parse("2026-10-02T10:05:00Z");
+        Fixture fixture = fixture(true, true, fixedClock(requesterTime));
+        mockPersistence(fixture, record());
+        when(fixture.mongoTemplate.updateFirst(any(), any(), any(Class.class)))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+        TransactionalOutboxRecordDocument requested = fixture.handler.resolve("event-1", request(), "requester");
+        OutboxConfirmationResolutionMutationHandler approver = new OutboxConfirmationResolutionMutationHandler(
+                fixture.repository,
+                fixture.mongoTemplate,
+                true,
+                true,
+                fixedClock(approverTime)
+        );
+
+        TransactionalOutboxRecordDocument approved = approver.resolve(
+                "event-1",
+                request(OutboxConfirmationResolution.PUBLISHED, requested.getResolutionRequestId()),
+                "approver"
+        );
+
+        assertThat(approved.getResolutionRequestedAt()).isEqualTo(requesterTime);
+        assertThat(approved.getResolutionApprovedAt()).isEqualTo(approverTime);
+    }
+
+    @Test
+    void shouldRejectEvidenceVerifiedAfterTheResolutionTransitionWithoutRewritingIt() {
+        Instant transitionAt = Instant.parse("2026-10-02T10:00:00Z");
+        Fixture fixture = fixture(true, true, fixedClock(transitionAt));
+        when(fixture.repository.findById("event-1")).thenReturn(Optional.of(record()));
+        ResolutionEvidenceReference futureEvidence = new ResolutionEvidenceReference(
+                ResolutionEvidenceType.BROKER_OFFSET,
+                "topic=fraud-decisions,partition=0,offset=42",
+                transitionAt.plusSeconds(1),
+                "broker-verifier"
+        );
+
+        assertThatThrownBy(() -> fixture.handler.resolve(
+                "event-1",
+                request(OutboxConfirmationResolution.PUBLISHED, null, "future evidence", futureEvidence),
+                "requester"
+        ))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("verification cannot occur after");
+
+        assertThat(futureEvidence.verifiedAt()).isEqualTo(transitionAt.plusSeconds(1));
+        verify(fixture.mongoTemplate, never()).findAndModify(
+                any(Query.class),
+                any(Update.class),
+                any(FindAndModifyOptions.class),
+                eq(TransactionalOutboxRecordDocument.class)
+        );
     }
 
     @Test
@@ -522,13 +640,21 @@ class OutboxConfirmationResolutionMutationHandlerTest {
     }
 
     private Fixture fixture(boolean bankMode, boolean dualControl) {
+        return fixture(bankMode, dualControl, Clock.systemUTC());
+    }
+
+    private Fixture fixture(boolean bankMode, boolean dualControl, Clock clock) {
         TransactionalOutboxRecordRepository repository = mock(TransactionalOutboxRecordRepository.class);
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         return new Fixture(
                 repository,
                 mongoTemplate,
-                new OutboxConfirmationResolutionMutationHandler(repository, mongoTemplate, bankMode, dualControl)
+                new OutboxConfirmationResolutionMutationHandler(repository, mongoTemplate, bankMode, dualControl, clock)
         );
+    }
+
+    private Clock fixedClock(Instant instant) {
+        return Clock.fixed(instant, ZoneOffset.UTC);
     }
 
     private TransactionalOutboxRecordDocument record() {
