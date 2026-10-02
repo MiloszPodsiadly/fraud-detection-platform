@@ -25,6 +25,36 @@ public final class OutboxAlertProjectionPolicy {
             TransactionalOutboxStatus.FAILED_TERMINAL,
             TransactionalOutboxStatus.RECOVERY_REQUIRED
     );
+    private static final Set<TransactionalOutboxStatus> PRE_CONFIRMATION_STATUSES = Set.of(
+            TransactionalOutboxStatus.PROCESSING,
+            TransactionalOutboxStatus.PUBLISH_ATTEMPTED
+    );
+    private static final List<String> INITIAL_PENDING_FORBIDDEN_PROJECTION_FIELDS = List.of(
+            "decisionOutboxLeaseOwner",
+            "decisionOutboxLeaseExpiresAt",
+            "decisionOutboxPublishedAt",
+            "decisionOutboxPublicationConfirmationProvenance",
+            "decisionOutboxLastError",
+            "decisionOutboxFailureReason",
+            "decisionOutboxResolutionRequestId",
+            "decisionOutboxResolutionProposedOutcome",
+            "decisionOutboxResolutionRequestedAt",
+            "decisionOutboxResolutionRequestedBy",
+            "decisionOutboxResolutionRequestReason",
+            "decisionOutboxResolutionApprovalReason",
+            "decisionOutboxResolutionEvidenceType",
+            "decisionOutboxResolutionEvidenceReference",
+            "decisionOutboxResolutionEvidenceVerifiedAt",
+            "decisionOutboxResolutionEvidenceVerifiedBy",
+            "decisionOutboxResolutionEvidenceFingerprint",
+            "decisionOutboxResolutionApprovalEvidenceType",
+            "decisionOutboxResolutionApprovalEvidenceReference",
+            "decisionOutboxResolutionApprovalEvidenceVerifiedAt",
+            "decisionOutboxResolutionApprovalEvidenceVerifiedBy",
+            "decisionOutboxResolutionApprovalEvidenceFingerprint",
+            "decisionOutboxResolutionApprovedAt",
+            "decisionOutboxResolutionApprovedBy"
+    );
 
     private OutboxAlertProjectionPolicy() {
     }
@@ -48,10 +78,80 @@ public final class OutboxAlertProjectionPolicy {
 
     static List<String> persistedProjectionViolations(Document source, Document alert) {
         TransactionalOutboxRecordDocument record = persistedRecord(source);
-        if (record == null || !STABLE_PROJECTED_STATUSES.contains(record.getStatus())) {
+        if (record == null) {
             return List.of();
         }
-        Document update = recovery(record).update().getUpdateObject();
+        if (record.getStatus() == TransactionalOutboxStatus.PENDING) {
+            return initialPendingProjectionViolations(source, alert, record);
+        }
+        if (PRE_CONFIRMATION_STATUSES.contains(record.getStatus())) {
+            return preConfirmationProjectionViolations(alert);
+        }
+        if (!STABLE_PROJECTED_STATUSES.contains(record.getStatus())
+                || !persistedValueEquals(
+                        record.getProjectionRevision(),
+                        alert.get("decisionOutboxProjectionRevision")
+                )
+                || Boolean.TRUE.equals(source.get("projection_mismatch"))
+                || instant(source.get("projection_reconcile_after")) != null) {
+            return List.of();
+        }
+        return expectedProjectionViolations(recovery(record).update(), alert);
+    }
+
+    private static List<String> initialPendingProjectionViolations(
+            Document source,
+            Document alert,
+            TransactionalOutboxRecordDocument record
+    ) {
+        List<String> violations = new ArrayList<>();
+        if (!persistedValueEquals(0, source.get("attempts"))
+                || !persistedValueEquals(0L, source.get("projection_revision"))
+                || source.get("last_error") != null) {
+            violations.add("PENDING_SOURCE_NOT_CANONICAL_INITIAL_STATE");
+        }
+        addExpectedProjectionValue(violations, alert, "decisionOutboxEventId", record.getEventId());
+        addExpectedProjectionValue(violations, alert, "decisionOutboxProjectionRevision", 0L);
+        addExpectedProjectionValue(violations, alert, "decisionOutboxStatus", "PENDING");
+        addExpectedProjectionValue(violations, alert, "decisionOutboxAttempts", 0);
+        INITIAL_PENDING_FORBIDDEN_PROJECTION_FIELDS.stream()
+                .filter(field -> alert.get(field) != null)
+                .map(OutboxAlertProjectionPolicy::projectionMismatch)
+                .forEach(violations::add);
+        Object resolutionPending = alert.get("decisionOutboxResolutionPending");
+        if (resolutionPending != null && !Boolean.FALSE.equals(resolutionPending)) {
+            violations.add(projectionMismatch("decisionOutboxResolutionPending"));
+        }
+        return violations;
+    }
+
+    private static List<String> preConfirmationProjectionViolations(Document alert) {
+        List<String> violations = new ArrayList<>();
+        if ("PUBLISHED".equals(string(alert, "decisionOutboxStatus"))) {
+            violations.add(projectionMismatch("decisionOutboxStatus"));
+        }
+        if (alert.get("decisionOutboxPublishedAt") != null) {
+            violations.add(projectionMismatch("decisionOutboxPublishedAt"));
+        }
+        if (alert.get("decisionOutboxPublicationConfirmationProvenance") != null) {
+            violations.add(projectionMismatch("decisionOutboxPublicationConfirmationProvenance"));
+        }
+        return violations;
+    }
+
+    private static void addExpectedProjectionValue(
+            List<String> violations,
+            Document alert,
+            String field,
+            Object expected
+    ) {
+        if (!persistedValueEquals(expected, alert.get(field))) {
+            violations.add(projectionMismatch(field));
+        }
+    }
+
+    private static List<String> expectedProjectionViolations(Update expectedUpdate, Document alert) {
+        Document update = expectedUpdate.getUpdateObject();
         Document expectedSet = update.get("$set", Document.class);
         Document expectedUnset = update.get("$unset", Document.class);
         List<String> violations = new ArrayList<>();

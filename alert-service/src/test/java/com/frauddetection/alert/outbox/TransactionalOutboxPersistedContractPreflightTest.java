@@ -207,6 +207,116 @@ class TransactionalOutboxPersistedContractPreflightTest {
     }
 
     @Test
+    void rejectsPendingSourceWithPublishedProjection() {
+        Document source = canonicalOutbox("event-false-published", "alert-false-published", "PENDING", 0L);
+        Document alert = canonicalAlert("alert-false-published", "event-false-published", "PUBLISHED", 0L);
+        alert.remove("decisionOutboxPublishedAt");
+        alert.remove("decisionOutboxPublicationConfirmationProvenance");
+
+        assertThat(violations(inspect(source, alert))).contains("ALERT_STATUS_DOES_NOT_MATCH_SOURCE");
+    }
+
+    @Test
+    void rejectsPendingSourceWithBrokerAcknowledgedPublishedProjection() {
+        Document source = canonicalOutbox("event-false-broker", "alert-false-broker", "PENDING", 0L);
+        Document alert = canonicalAlert("alert-false-broker", "event-false-broker", "PUBLISHED", 0L);
+        alert.remove("decisionOutboxPublishedAt");
+
+        assertThat(violations(inspect(source, alert))).contains(
+                "ALERT_STATUS_DOES_NOT_MATCH_SOURCE",
+                "ALERT_PUBLICATION_PROVENANCE_DOES_NOT_MATCH_SOURCE"
+        );
+    }
+
+    @Test
+    void rejectsPendingSourceWithFabricatedPublishedTimestamp() {
+        Document source = canonicalOutbox("event-false-time", "alert-false-time", "PENDING", 0L);
+        Document alert = canonicalAlert("alert-false-time", "event-false-time", "PUBLISHED", 0L);
+        alert.remove("decisionOutboxPublicationConfirmationProvenance");
+
+        assertThat(violations(inspect(source, alert))).contains(
+                "ALERT_STATUS_DOES_NOT_MATCH_SOURCE",
+                "ALERT_PUBLISHED_AT_DOES_NOT_MATCH_SOURCE"
+        );
+    }
+
+    @Test
+    void rejectsPendingPublishedProjectionDespiteReconciliationMarker() {
+        Document source = canonicalOutbox("event-false-marked", "alert-false-marked", "PENDING", 0L)
+                .append("projection_mismatch", true)
+                .append("projection_reconcile_after", Instant.parse("2026-10-01T10:10:00Z"));
+        Document alert = canonicalAlert("alert-false-marked", "event-false-marked", "PUBLISHED", 0L)
+                .append("decisionOutboxPublicationConfirmationProvenance", "BROKER_ACKNOWLEDGED")
+                .append("decisionOutboxPublishedAt", Instant.parse("2026-10-01T10:00:00Z"));
+
+        TransactionalOutboxPersistedContractPreflight.Report report = inspect(source, alert);
+
+        assertThat(report.blocksStartup()).isTrue();
+        assertThat(violations(report)).contains("ALERT_STATUS_DOES_NOT_MATCH_SOURCE");
+    }
+
+    @Test
+    void rejectsNonCanonicalPendingAttemptsAndProjectionMetadata() {
+        Document source = canonicalOutbox("event-pending-corrupt", "alert-pending-corrupt", "PENDING", 0L)
+                .append("attempts", 1);
+        Document alert = canonicalAlert("alert-pending-corrupt", "event-pending-corrupt", "PENDING", 0L)
+                .append("decisionOutboxAttempts", 1)
+                .append("decisionOutboxPublishedAt", Instant.parse("2026-10-01T10:00:00Z"))
+                .append("decisionOutboxResolutionApprovedBy", "fabricated-approver");
+
+        assertThat(violations(inspect(source, alert))).contains(
+                "PENDING_SOURCE_NOT_CANONICAL_INITIAL_STATE",
+                "ALERT_PROJECTION_SEMANTIC_MISMATCH_decisionOutboxAttempts",
+                "ALERT_PUBLISHED_AT_DOES_NOT_MATCH_SOURCE",
+                "ALERT_PROJECTION_SEMANTIC_MISMATCH_decisionOutboxResolutionApprovedBy"
+        );
+    }
+
+    @Test
+    void acceptsProcessingWithInitialPendingProjection() {
+        Document source = activeOutbox("event-processing-initial", "alert-processing-initial", "PROCESSING", 1, 0L);
+        Document alert = canonicalAlert("alert-processing-initial", "event-processing-initial", "PENDING", 0L);
+
+        assertThat(inspect(source, alert).blocksStartup()).isFalse();
+    }
+
+    @Test
+    void acceptsProcessingWithLaggingFailedRetryableProjection() {
+        Document source = activeOutbox("event-processing-retry", "alert-processing-retry", "PROCESSING", 2, 1L);
+        Document alert = canonicalAlert(
+                "alert-processing-retry",
+                "event-processing-retry",
+                "FAILED_RETRYABLE",
+                1L
+        ).append("decisionOutboxAttempts", 1)
+                .append("decisionOutboxLastError", "BROKER_UNAVAILABLE")
+                .append("decisionOutboxFailureReason", "BROKER_UNAVAILABLE");
+
+        assertThat(inspect(source, alert).blocksStartup()).isFalse();
+    }
+
+    @Test
+    void acceptsPublishAttemptedWithLaggingFailedRetryableProjection() {
+        Document source = activeOutbox(
+                "event-attempted-retry",
+                "alert-attempted-retry",
+                "PUBLISH_ATTEMPTED",
+                2,
+                1L
+        );
+        Document alert = canonicalAlert(
+                "alert-attempted-retry",
+                "event-attempted-retry",
+                "FAILED_RETRYABLE",
+                1L
+        ).append("decisionOutboxAttempts", 1)
+                .append("decisionOutboxLastError", "BROKER_UNAVAILABLE")
+                .append("decisionOutboxFailureReason", "BROKER_UNAVAILABLE");
+
+        assertThat(inspect(source, alert).blocksStartup()).isFalse();
+    }
+
+    @Test
     void rejectsEqualRevisionWithDifferentStableStatus() {
         Document source = canonicalOutbox("event-status", "alert-status", "PUBLISHED", 5L);
         Document alert = canonicalAlert("alert-status", "event-status", "FAILED_TERMINAL", 5L);
@@ -650,6 +760,20 @@ class TransactionalOutboxPersistedContractPreflightTest {
                     .append("published_at", Instant.parse("2026-10-01T10:00:00Z"));
         }
         return source;
+    }
+
+    private Document activeOutbox(
+            String eventId,
+            String alertId,
+            String status,
+            int attempts,
+            long revision
+    ) {
+        return canonicalOutbox(eventId, alertId, status, revision)
+                .append("attempts", attempts)
+                .append("lease_owner", "publisher-1")
+                .append("lease_claim_token", "claim-1")
+                .append("lease_expires_at", Instant.parse("2026-10-01T10:05:00Z"));
     }
 
     private Document canonicalAlert(String alertId, String eventId, String status, long revision) {

@@ -447,11 +447,7 @@ public class TransactionalOutboxPersistedContractPreflight {
         if (!safeEquals(source.get("resource_id"), alert.get("_id"))) {
             violations.add("ALERT_RESOURCE_ID_DOES_NOT_MATCH_SOURCE");
         }
-        boolean reconciliationOutstanding = Boolean.TRUE.equals(source.get("projection_mismatch"))
-                || validInstant(source.get("projection_reconcile_after"));
-        if (sourceRevision >= 0 && sourceRevision == alertRevision && !reconciliationOutstanding) {
-            violations.addAll(OutboxAlertProjectionPolicy.persistedProjectionViolations(source, alert));
-        }
+        violations.addAll(OutboxAlertProjectionPolicy.persistedProjectionViolations(source, alert));
         return violations;
     }
 

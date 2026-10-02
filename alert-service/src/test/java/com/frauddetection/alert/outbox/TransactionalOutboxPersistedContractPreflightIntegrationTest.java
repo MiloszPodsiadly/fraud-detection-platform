@@ -62,6 +62,30 @@ class TransactionalOutboxPersistedContractPreflightIntegrationTest extends Abstr
     }
 
     @Test
+    void aggregationBackedInspectRejectsPendingSourceWithPublishedProjection() {
+        Document source = new Document("_id", "event-false-published")
+                .append("resource_type", "ALERT")
+                .append("resource_id", "alert-false-published")
+                .append("status", "PENDING")
+                .append("attempts", 0)
+                .append("projection_revision", 0L)
+                .append("resolution_pending", false);
+        Document alert = new Document("_id", "alert-false-published")
+                .append("decisionOutboxEventId", "event-false-published")
+                .append("decisionOutboxProjectionRevision", 0L)
+                .append("decisionOutboxStatus", "PUBLISHED")
+                .append("decisionOutboxAttempts", 0)
+                .append("decisionOutboxPublishedAt", Date.from(Instant.parse("2026-10-01T10:00:00Z")))
+                .append("decisionOutboxPublicationConfirmationProvenance", "BROKER_ACKNOWLEDGED");
+        insert(source, alert);
+
+        TransactionalOutboxPersistedContractPreflight.Report report = preflight.inspect(10);
+
+        assertThat(report.blocksStartup()).isTrue();
+        assertThat(report.samples().getFirst().violations()).contains("ALERT_STATUS_DOES_NOT_MATCH_SOURCE");
+    }
+
+    @Test
     void aggregationBackedInspectAcceptsScheduledProjectionDivergence() {
         Document source = publishedSource()
                 .append("projection_mismatch", true)
