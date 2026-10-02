@@ -119,6 +119,50 @@ class RegulatedMutationDecisionIndexIntegrationTest extends AbstractIntegrationT
     }
 
     @Test
+    void releasedPreCommitCommandWithArraySuccessAuditIdFailsClosed() {
+        createCanonicalIndex();
+
+        mongoTemplate.getCollection(
+                RegulatedMutationDecisionIndexStartupGuard.COLLECTION
+        ).insertOne(
+                releasedPreCommitCommand(
+                        "command-array-audit",
+                        "alert-array-audit"
+                ).append(
+                        "success_audit_id",
+                        java.util.Arrays.asList(null, "audit-success-1")
+                )
+        );
+
+        assertThatThrownBy(guard::verify)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("OWNERSHIP_DATA_INVALID");
+    }
+
+    @Test
+    void activeDecisionSlotWithArrayOwnershipFailsClosed() {
+        createCanonicalIndex();
+
+        mongoTemplate.getCollection(
+                RegulatedMutationDecisionIndexStartupGuard.COLLECTION
+        ).insertOne(
+                new Document("_id", "command-array-owner")
+                        .append("resource_id", "alert-array-owner")
+                        .append("resource_type", "ALERT")
+                        .append("action", "SUBMIT_ANALYST_DECISION")
+                        .append(
+                                "state",
+                                RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL.name()
+                        )
+                        .append("decision_slot_claimed", java.util.List.of(true))
+        );
+
+        assertThatThrownBy(guard::verify)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("OWNERSHIP_DATA_INVALID");
+    }
+
+    @Test
     void canonicalReleasedAndCommittedOwnershipRecordsAreAccepted() {
         createCanonicalIndex();
         mongoTemplate.getCollection(RegulatedMutationDecisionIndexStartupGuard.COLLECTION).insertOne(

@@ -471,17 +471,43 @@ public class RegulatedMutationFencedCommandWriter {
                 Criteria.where("local_committed_at").is(null),
                 Criteria.where("success_audit_id").is(null),
                 Criteria.where("$expr").is(
-                        new org.bson.Document("$eq", List.of(
-                                new org.bson.Document("$ifNull", List.of(
-                                        "$success_audit_recorded",
-                                        false
+                        new org.bson.Document("$and", List.of(
+                                missingOrNullFieldType("response_snapshot"),
+                                missingOrNullFieldType("outbox_event_id"),
+                                missingOrNullFieldType("local_commit_marker"),
+                                missingOrNullFieldType("local_committed_at"),
+                                missingOrNullFieldType("success_audit_id"),
+
+                                new org.bson.Document("$eq", List.of(
+                                        new org.bson.Document("$type", "$decision_slot_claimed"),
+                                        "bool"
                                 )),
-                                false
+
+                                new org.bson.Document("$eq", List.of(
+                                        "$decision_slot_claimed",
+                                        true
+                                )),
+
+                                new org.bson.Document("$eq", List.of(
+                                        new org.bson.Document("$ifNull", List.of(
+                                                "$success_audit_recorded",
+                                                false
+                                        )),
+                                        false
+                                ))
                         ))
                 )
 
         ));
     }
+
+    private static org.bson.Document missingOrNullFieldType(String field) {
+        return new org.bson.Document("$in", List.of(
+                new org.bson.Document("$type", "$" + field),
+                List.of("missing", "null")
+        ));
+    }
+
 
     private Query recoveryQuery(RegulatedMutationCommandDocument document, Instant now) {
         Criteria nonClaimedRecoveryCondition = new Criteria().orOperator(

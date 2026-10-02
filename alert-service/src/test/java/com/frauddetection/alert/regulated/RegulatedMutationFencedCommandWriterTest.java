@@ -63,6 +63,7 @@ class RegulatedMutationFencedCommandWriterTest {
     }
 
 
+
     @Test
     void preCommitRejectionReleasesDecisionSlotOnlyWithPersistedNoCommitProof() {
         when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
@@ -92,22 +93,53 @@ class RegulatedMutationFencedCommandWriterTest {
                 .contains("local_committed_at=null")
                 .contains("success_audit_id=null");
 
-        Document expectedExpression = new Document("$eq", List.of(
-                new Document("$ifNull", List.of(
-                        "$success_audit_recorded",
-                        false
-                )),
-                false
-        ));
+        Document expression = queryDocument.getList("$and", Document.class)
+                .stream()
+                .filter(condition -> condition.containsKey("$expr"))
+                .findFirst()
+                .orElseThrow()
+                .get("$expr", Document.class);
 
-        assertThat(queryDocument.getList("$and", Document.class))
-                .anySatisfy(condition ->
-                        assertThat(condition.get("$expr"))
-                                .isEqualTo(expectedExpression)
-                );
+        List<Document> predicates = expression.getList("$and", Document.class);
+        for (String field : List.of(
+                "response_snapshot",
+                "outbox_event_id",
+                "local_commit_marker",
+                "local_committed_at",
+                "success_audit_id"
+        )) {
+            assertThat(predicates).contains(
+                    new Document("$in", List.of(
+                            new Document("$type", "$" + field),
+                            List.of("missing", "null")
+                    ))
+            );
+        }
+
+        assertThat(predicates).contains(
+                new Document("$eq", List.of(
+                        new Document("$type", "$decision_slot_claimed"),
+                        "bool"
+                )),
+                new Document("$eq", List.of(
+                        "$decision_slot_claimed",
+                        true
+                ))
+        );
+
+        assertThat(predicates).contains(
+                new Document("$eq", List.of(
+                        new Document("$ifNull", List.of(
+                                "$success_audit_recorded",
+                                false
+                        )),
+                        false
+                ))
+        );
 
         assertThat(setDocument().get("decision_slot_claimed")).isEqualTo(false);
     }
+
 
     @Test
     void preCommitReleaseCallbackCannotAddCommitProof() {

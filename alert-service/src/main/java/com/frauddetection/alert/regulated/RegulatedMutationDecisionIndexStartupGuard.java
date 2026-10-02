@@ -4,7 +4,6 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.Accumulators;
 import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
-import org.bson.BsonType;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.springframework.boot.ApplicationArguments;
@@ -35,6 +34,7 @@ public class RegulatedMutationDecisionIndexStartupGuard implements ApplicationRu
             Filters.eq("action", "SUBMIT_ANALYST_DECISION")
     );
 
+
     private static final Bson NO_COMMIT_PROOF = Filters.and(
             Filters.eq("response_snapshot", null),
             Filters.eq("outbox_event_id", null),
@@ -42,15 +42,29 @@ public class RegulatedMutationDecisionIndexStartupGuard implements ApplicationRu
             Filters.eq("local_committed_at", null),
             Filters.eq("success_audit_id", null),
             Filters.expr(
-                    new Document("$eq", List.of(
-                            new Document("$ifNull", List.of(
-                                    "$success_audit_recorded",
+                    new Document("$and", List.of(
+                            missingOrNullFieldType("response_snapshot"),
+                            missingOrNullFieldType("outbox_event_id"),
+                            missingOrNullFieldType("local_commit_marker"),
+                            missingOrNullFieldType("local_committed_at"),
+                            missingOrNullFieldType("success_audit_id"),
+                            new Document("$eq", List.of(
+                                    new Document("$ifNull", List.of(
+                                            "$success_audit_recorded",
+                                            false
+                                    )),
                                     false
-                            )),
-                            false
+                            ))
                     ))
             )
     );
+
+    private static Document missingOrNullFieldType(String field) {
+        return new Document("$in", List.of(
+                new Document("$type", "$" + field),
+                List.of("missing", "null")
+        ));
+    }
 
     private static final Bson SAFE_RELEASED_COMMAND = Filters.and(
             Filters.in(
@@ -113,7 +127,13 @@ public class RegulatedMutationDecisionIndexStartupGuard implements ApplicationRu
         Bson invalidOwnership = Filters.and(
                 SUBMIT_DECISION,
                 Filters.or(
-                        Filters.not(Filters.type("decision_slot_claimed", BsonType.BOOLEAN)),
+
+                        Filters.expr(
+                                new Document("$ne", List.of(
+                                        new Document("$type", "$decision_slot_claimed"),
+                                        "bool"
+                                ))
+                        ),
                         Filters.and(SAFE_RELEASED_COMMAND, Filters.ne("decision_slot_claimed", false)),
                         Filters.and(Filters.nor(SAFE_RELEASED_COMMAND), Filters.ne("decision_slot_claimed", true))
                 )
