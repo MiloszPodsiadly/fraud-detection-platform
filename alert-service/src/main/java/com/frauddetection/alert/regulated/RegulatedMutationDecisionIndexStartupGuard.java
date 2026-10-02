@@ -39,6 +39,7 @@ public class RegulatedMutationDecisionIndexStartupGuard implements ApplicationRu
             Filters.eq("outbox_event_id", null),
             Filters.eq("local_commit_marker", null),
             Filters.eq("local_committed_at", null),
+            Filters.eq("success_audit_id", null),
             Filters.ne("success_audit_recorded", true)
     );
     private static final Bson SAFE_RELEASED_COMMAND = Filters.and(

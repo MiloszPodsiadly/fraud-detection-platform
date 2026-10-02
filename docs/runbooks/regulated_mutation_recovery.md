@@ -118,7 +118,8 @@ Metrics are operational signals only. They are not compliance evidence by themse
 Before deploying a build that uses `decision_slot_claimed`, suspend regulated-mutation ingress and inspect the
 `regulated_mutation_commands` collection offline. Preserve every command and its idempotency/audit history. Classify
 `REJECTED_EVIDENCE_UNAVAILABLE` and `FAILED_BUSINESS_VALIDATION` as released only when `response_snapshot`,
-`outbox_event_id`, `local_commit_marker`, and `local_committed_at` are absent and `success_audit_recorded` is not true.
+`outbox_event_id`, `local_commit_marker`, `local_committed_at`, and `success_audit_id` are absent and
+`success_audit_recorded` is not true.
 All finalized, active, recovery-required, or otherwise ambiguous commands retain ownership. Detect duplicate claimed
 owners per `(resource_id, resource_type, action)` and stop the rollout if any exist.
 

@@ -48,6 +48,7 @@ public class RegulatedMutationFencedCommandWriter {
             "outbox_event_id",
             "local_commit_marker",
             "local_committed_at",
+            "success_audit_id",
             "success_audit_recorded"
     );
 
@@ -366,32 +367,65 @@ public class RegulatedMutationFencedCommandWriter {
                 continue;
             }
             Map<String, Object> baselineFields = baseline.getOrDefault(operation.getKey(), Map.of());
-            for (String field : PROTECTED_UPDATE_FIELDS) {
-                if (document.containsKey(field)
-                        && (!baselineFields.containsKey(field)
-                        || !Objects.equals(baselineFields.get(field), document.get(field)))) {
+            for (Map.Entry<String, Object> fieldUpdate : document.entrySet()) {
+                String field = protectedRoot(fieldUpdate.getKey(), PROTECTED_UPDATE_FIELDS);
+                if (field != null
+                        && (!baselineFields.containsKey(fieldUpdate.getKey())
+                        || !Objects.equals(baselineFields.get(fieldUpdate.getKey()), fieldUpdate.getValue()))) {
                     throw new IllegalArgumentException(
                             "Regulated mutation fenced transition update cannot modify protected field: " + field
                     );
                 }
             }
+            validateRenameTargets(operation.getKey(), document, PROTECTED_UPDATE_FIELDS, "protected field: ");
         }
     }
 
     private void validateNoCommitProofUpdates(Update update) {
-        for (Object operation : update.getUpdateObject().values()) {
-            if (!(operation instanceof org.bson.Document document)) {
+        for (Map.Entry<String, Object> operation : update.getUpdateObject().entrySet()) {
+            if (!(operation.getValue() instanceof org.bson.Document document)) {
                 continue;
             }
-            PRE_COMMIT_PROOF_FIELDS.stream()
-                    .filter(document::containsKey)
+            document.keySet().stream()
+                    .map(field -> protectedRoot(field, PRE_COMMIT_PROOF_FIELDS))
+                    .filter(Objects::nonNull)
                     .findFirst()
                     .ifPresent(field -> {
                         throw new IllegalArgumentException(
                                 "Decision slot release update cannot modify commit proof field: " + field
                         );
                     });
+            validateRenameTargets(operation.getKey(), document, PRE_COMMIT_PROOF_FIELDS, "commit proof field: ");
         }
+    }
+
+    private void validateRenameTargets(
+            String operation,
+            org.bson.Document document,
+            Set<String> protectedFields,
+            String messagePrefix
+    ) {
+        if (!"$rename".equals(operation)) {
+            return;
+        }
+        document.values().stream()
+                .filter(String.class::isInstance)
+                .map(String.class::cast)
+                .map(field -> protectedRoot(field, protectedFields))
+                .filter(Objects::nonNull)
+                .findFirst()
+                .ifPresent(field -> {
+                    throw new IllegalArgumentException(
+                            "Regulated mutation fenced transition update cannot modify " + messagePrefix + field
+                    );
+                });
+    }
+
+    private String protectedRoot(String fieldPath, Set<String> protectedFields) {
+        return protectedFields.stream()
+                .filter(field -> fieldPath.equals(field) || fieldPath.startsWith(field + "."))
+                .findFirst()
+                .orElse(null);
     }
 
     private Query activeLeaseQuery(
@@ -434,6 +468,7 @@ public class RegulatedMutationFencedCommandWriter {
                 Criteria.where("outbox_event_id").is(null),
                 Criteria.where("local_commit_marker").is(null),
                 Criteria.where("local_committed_at").is(null),
+                Criteria.where("success_audit_id").is(null),
                 Criteria.where("success_audit_recorded").ne(true)
         ));
     }

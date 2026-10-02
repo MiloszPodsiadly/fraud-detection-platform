@@ -257,13 +257,25 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                     rejectedState,
                     targetStatus,
                     precondition.reasonCode(),
-                    update -> update.set("degradation_reason", precondition.reasonCode())
+                    update -> update
+                            .set("degradation_reason", precondition.reasonCode())
+                            .set("attempted_audit_id", document.getAttemptedAuditId())
+                            .set("attempted_audit_recorded", true)
             );
             metrics.recordEvidenceGatedFinalizeRejected(precondition.reasonCode());
             throw new IllegalStateException("Regulated mutation evidence precondition failed: " + precondition.reasonCode());
         }
         if (document.getState() == RegulatedMutationState.EVIDENCE_PREPARING) {
-            transition(document, claimToken, RegulatedMutationState.EVIDENCE_PREPARED, document.getExecutionStatus(), null);
+            transition(
+                    document,
+                    claimToken,
+                    RegulatedMutationState.EVIDENCE_PREPARED,
+                    document.getExecutionStatus(),
+                    null,
+                    update -> update
+                            .set("attempted_audit_id", document.getAttemptedAuditId())
+                            .set("attempted_audit_recorded", true)
+            );
         }
         if (document.getState() == RegulatedMutationState.EVIDENCE_PREPARED) {
             checkpointRenewalService.afterEvidencePreparedBeforeFinalize(claimToken, document);
