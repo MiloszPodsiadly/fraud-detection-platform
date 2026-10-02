@@ -7,6 +7,7 @@ import com.frauddetection.alert.regulated.RegulatedMutationCommand;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
 import com.frauddetection.alert.regulated.RegulatedMutationIntent;
 import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
+import com.frauddetection.alert.regulated.RegulatedMutationModelVersion;
 import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.trustincident.TrustIncidentAcknowledgeMutationHandler;
@@ -81,7 +82,8 @@ public class TrustIncidentService {
                 RegulatedMutationResponseSnapshot::fromTrustIncident,
                 RegulatedMutationResponseSnapshot::toTrustIncidentResponse,
                 state -> statusResponse(incidentId, state),
-                intent(incidentId, AuditAction.ACK_TRUST_INCIDENT, actorId, TrustIncidentStatus.ACKNOWLEDGED, normalized.reason())
+                intent(incidentId, AuditAction.ACK_TRUST_INCIDENT, actorId, TrustIncidentStatus.ACKNOWLEDGED, normalized.reason()),
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
         );
         return regulatedMutationCoordinator.commit(command).response();
     }
@@ -112,7 +114,8 @@ public class TrustIncidentService {
                 RegulatedMutationResponseSnapshot::fromTrustIncident,
                 RegulatedMutationResponseSnapshot::toTrustIncidentResponse,
                 state -> statusResponse(incidentId, state),
-                intent(incidentId, AuditAction.RESOLVE_TRUST_INCIDENT, actorId, targetStatus, request.reason())
+                intent(incidentId, AuditAction.RESOLVE_TRUST_INCIDENT, actorId, targetStatus, request.reason()),
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
         );
         return regulatedMutationCoordinator.commit(command).response();
     }
@@ -135,7 +138,8 @@ public class TrustIncidentService {
                 RegulatedMutationResponseSnapshot::fromTrustIncidentMaterialization,
                 RegulatedMutationResponseSnapshot::toTrustIncidentMaterializationResponse,
                 state -> materializationStatusResponse(safeSignals.size(), state),
-                refreshIntent(actorId, signalHash)
+                refreshIntent(actorId, signalHash),
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
         );
         return regulatedMutationCoordinator.commit(command).response();
     }
@@ -248,17 +252,19 @@ public class TrustIncidentService {
                 0,
                 0,
                 false,
-                state == RegulatedMutationState.COMMITTED_DEGRADED || state == RegulatedMutationState.FAILED ? state.name() : null,
+                state == RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED || state == RegulatedMutationState.FAILED
+                        ? state.name() : null,
                 List.of(),
                 state.name(),
                 null,
                 false,
-                state == RegulatedMutationState.COMMITTED_DEGRADED || state == RegulatedMutationState.FAILED ? state.name() : null
+                state == RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED || state == RegulatedMutationState.FAILED
+                        ? state.name() : null
         );
     }
 
     private TrustIncidentResponse statusResponse(String incidentId, RegulatedMutationState state) {
-        if (state == RegulatedMutationState.REJECTED) {
+        if (state == RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "trust incident mutation rejected before state change");
         }
         return new TrustIncidentResponse(

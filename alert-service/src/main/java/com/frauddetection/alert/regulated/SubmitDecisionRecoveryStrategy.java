@@ -3,6 +3,8 @@ package com.frauddetection.alert.regulated;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditResourceType;
+import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
+import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.common.events.enums.AlertStatus;
@@ -18,9 +20,14 @@ public class SubmitDecisionRecoveryStrategy implements RegulatedMutationRecovery
     private static final String BUSINESS_STATE_INTENT_MISMATCH = "BUSINESS_STATE_INTENT_MISMATCH";
 
     private final AlertRepository alertRepository;
+    private final TransactionalOutboxRecordRepository outboxRepository;
 
-    public SubmitDecisionRecoveryStrategy(AlertRepository alertRepository) {
+    public SubmitDecisionRecoveryStrategy(
+            AlertRepository alertRepository,
+            TransactionalOutboxRecordRepository outboxRepository
+    ) {
         this.alertRepository = alertRepository;
+        this.outboxRepository = outboxRepository;
     }
 
     @Override
@@ -30,22 +37,31 @@ public class SubmitDecisionRecoveryStrategy implements RegulatedMutationRecovery
 
     @Override
     public Optional<RegulatedMutationResponseSnapshot> reconstructSnapshot(RegulatedMutationCommandDocument command) {
+        Optional<TransactionalOutboxRecordDocument> outbox = authoritativeOutbox(command);
+        if (outbox.isEmpty()) {
+            return Optional.empty();
+        }
         return alertRepository.findById(command.getResourceId())
                 .filter(this::hasCommittedDecision)
+                .filter(alert -> Objects.equals(alert.getDecisionOutboxEventId(), outbox.get().getEventId()))
                 .map(alert -> new RegulatedMutationResponseSnapshot(
                         alert.getAlertId(),
                         alert.getAnalystDecision(),
                         alert.getAlertStatus() == null ? AlertStatus.RESOLVED : alert.getAlertStatus(),
-                        alert.getDecisionOutboxEvent().eventId(),
+                        outbox.get().getEventId(),
                         alert.getDecidedAt(),
-                        SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
+                        SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
                 ));
     }
 
     @Override
     public RecoveryValidationResult validateBusinessState(RegulatedMutationCommandDocument command) {
+        if (authoritativeOutbox(command).isEmpty()) {
+            return RecoveryValidationResult.recoveryRequired(BUSINESS_STATE_NOT_RECONSTRUCTABLE);
+        }
         Optional<AlertDocument> alert = alertRepository.findById(command.getResourceId())
-                .filter(this::hasCommittedDecision);
+                .filter(this::hasCommittedDecision)
+                .filter(document -> Objects.equals(document.getDecisionOutboxEventId(), command.getOutboxEventId()));
         if (alert.isEmpty()) {
             return RecoveryValidationResult.recoveryRequired(BUSINESS_STATE_NOT_RECONSTRUCTABLE);
         }
@@ -57,8 +73,15 @@ public class SubmitDecisionRecoveryStrategy implements RegulatedMutationRecovery
     private boolean hasCommittedDecision(AlertDocument alert) {
         return alert.getAnalystDecision() != null
                 && alert.getDecidedAt() != null
-                && alert.getDecisionOutboxEvent() != null
+                && alert.getDecisionOutboxEventId() != null
                 && alert.getDecisionOutboxStatus() != null;
+    }
+
+    private Optional<TransactionalOutboxRecordDocument> authoritativeOutbox(RegulatedMutationCommandDocument command) {
+        return outboxRepository.findByMutationCommandId(command.getId())
+                .filter(outbox -> Objects.equals(outbox.getMutationCommandId(), command.getId()))
+                .filter(outbox -> Objects.equals(outbox.getResourceId(), command.getResourceId()))
+                .filter(outbox -> Objects.equals(outbox.getEventId(), command.getOutboxEventId()));
     }
 
     private boolean matchesIntent(RegulatedMutationCommandDocument command, AlertDocument alert) {

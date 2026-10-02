@@ -19,17 +19,10 @@ public class RegulatedMutationLeaseRenewalPolicy {
             RegulatedMutationState.FAILED
     );
     private static final Set<RegulatedMutationState> TERMINAL_STATES = Set.of(
-            RegulatedMutationState.FINALIZED_VISIBLE,
             RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
             RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED,
             RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE,
-            RegulatedMutationState.FAILED_BUSINESS_VALIDATION,
-            RegulatedMutationState.SUCCESS_AUDIT_RECORDED,
-            RegulatedMutationState.EVIDENCE_PENDING,
-            RegulatedMutationState.EVIDENCE_CONFIRMED,
-            RegulatedMutationState.COMMITTED,
-            RegulatedMutationState.COMMITTED_DEGRADED,
-            RegulatedMutationState.REJECTED
+            RegulatedMutationState.FAILED_BUSINESS_VALIDATION
     );
 
     private final Duration maxSingleExtension;
@@ -62,7 +55,6 @@ public class RegulatedMutationLeaseRenewalPolicy {
             int maxRenewalCount
     ) {
         this(maxSingleExtension, maxTotalLeaseDuration, maxRenewalCount, List.of(
-                new LegacyLeaseRenewalModelPolicy(),
                 new EvidenceGatedLeaseRenewalModelPolicy()
         ));
     }
@@ -86,7 +78,7 @@ public class RegulatedMutationLeaseRenewalPolicy {
             throw new IllegalArgumentException("Regulated mutation lease renewal policy requires now.");
         }
         Instant effectiveNow = now;
-        RegulatedMutationModelVersion modelVersion = document.mutationModelVersionOrLegacy();
+        RegulatedMutationModelVersion modelVersion = document.getMutationModelVersion();
         if (claimToken.mutationModelVersion() != modelVersion) {
             return RegulatedMutationLeaseRenewalDecision.rejected(RegulatedMutationLeaseRenewalReason.MODEL_VERSION_MISMATCH);
         }
@@ -145,9 +137,10 @@ public class RegulatedMutationLeaseRenewalPolicy {
         if (executionStatus != RegulatedMutationExecutionStatus.PROCESSING || state == null) {
             return false;
         }
-        RegulatedMutationModelVersion effectiveModel =
-                modelVersion == null ? RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION : modelVersion;
-        RegulatedMutationLeaseRenewalModelPolicy modelPolicy = modelPolicies.get(effectiveModel);
+        if (modelVersion != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
+            return false;
+        }
+        RegulatedMutationLeaseRenewalModelPolicy modelPolicy = modelPolicies.get(modelVersion);
         return modelPolicy != null && modelPolicy.isRenewableState(state);
     }
 
@@ -155,12 +148,13 @@ public class RegulatedMutationLeaseRenewalPolicy {
             RegulatedMutationModelVersion modelVersion,
             RegulatedMutationState currentState
     ) {
-        RegulatedMutationModelVersion effectiveModel =
-                modelVersion == null ? RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION : modelVersion;
-        RegulatedMutationLeaseRenewalModelPolicy modelPolicy = modelPolicies.get(effectiveModel);
+        if (modelVersion != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
+            throw new IllegalArgumentException("Unsupported regulated mutation model version.");
+        }
+        RegulatedMutationLeaseRenewalModelPolicy modelPolicy = modelPolicies.get(modelVersion);
         if (modelPolicy == null) {
             throw new IllegalArgumentException("No regulated mutation lease renewal model policy registered for "
-                    + effectiveModel);
+                    + modelVersion);
         }
         return modelPolicy.recoveryStateForBudgetExceeded(currentState);
     }

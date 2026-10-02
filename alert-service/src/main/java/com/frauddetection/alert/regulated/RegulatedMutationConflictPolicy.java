@@ -5,6 +5,8 @@ import com.frauddetection.alert.idempotency.SharedIdempotencyConflictPolicy;
 import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
 import org.springframework.stereotype.Service;
 
+import java.util.Objects;
+
 @Service
 public class RegulatedMutationConflictPolicy {
 
@@ -27,6 +29,16 @@ public class RegulatedMutationConflictPolicy {
         }
         if (command == null) {
             throw new IllegalArgumentException("regulated mutation command is required");
+        }
+        if (existing.getMutationModelVersion() != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
+                || command.mutationModelVersion() != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
+            throw new IllegalStateException("Unsupported persisted regulated mutation model version.");
+        }
+        existing.requireRevision();
+        if (!Objects.equals(existing.getAction(), command.action().name())
+                || !Objects.equals(existing.getResourceType(), command.resourceType().name())
+                || !Objects.equals(existing.getResourceId(), command.resourceId())) {
+            throw new ConflictingIdempotencyKeyException();
         }
         String existingActor = existing.getIntentActorId() == null ? command.actorId() : existing.getIntentActorId();
         SharedIdempotencyClaim existingClaim = new SharedIdempotencyClaim(

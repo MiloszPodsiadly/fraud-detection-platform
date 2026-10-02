@@ -10,7 +10,8 @@ public record RegulatedMutationLeaseRenewalDecision(
         Duration grantedLeaseDuration,
         Duration budgetRemainingAfterRenewal,
         boolean cappedBySingleExtension,
-        boolean cappedByTotalBudget
+        boolean cappedByTotalBudget,
+        Long resultingRevision
 ) {
 
     public static RegulatedMutationLeaseRenewalDecision renew(
@@ -27,7 +28,8 @@ public record RegulatedMutationLeaseRenewalDecision(
                 grantedLeaseDuration,
                 budgetRemainingAfterRenewal,
                 cappedBySingleExtension,
-                cappedByTotalBudget
+                cappedByTotalBudget,
+                null
         );
     }
 
@@ -39,7 +41,8 @@ public record RegulatedMutationLeaseRenewalDecision(
                 Duration.ZERO,
                 Duration.ZERO,
                 false,
-                false
+                false,
+                null
         );
     }
 
@@ -51,7 +54,24 @@ public record RegulatedMutationLeaseRenewalDecision(
                 Duration.ZERO,
                 Duration.ZERO,
                 false,
-                false
+                false,
+                null
+        );
+    }
+
+    public RegulatedMutationLeaseRenewalDecision withResultingRevision(long revision) {
+        if (type != RegulatedMutationLeaseRenewalDecisionType.RENEW || revision < 0) {
+            throw new IllegalStateException("Only a successful lease renewal can expose a resulting revision.");
+        }
+        return new RegulatedMutationLeaseRenewalDecision(
+                type,
+                reason,
+                newLeaseExpiresAt,
+                grantedLeaseDuration,
+                budgetRemainingAfterRenewal,
+                cappedBySingleExtension,
+                cappedByTotalBudget,
+                revision
         );
     }
 }

@@ -4,7 +4,9 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
+import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModelMapper;
+import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +19,7 @@ import org.springframework.data.mongodb.repository.support.MongoRepositoryFactor
 import org.testcontainers.containers.MongoDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.bson.Document;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -25,6 +28,8 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 @Testcontainers
 class EngineIntelligenceProjectionMongoIntegrationTest {
@@ -74,6 +79,11 @@ class EngineIntelligenceProjectionMongoIntegrationTest {
         assertThat(projection.getWarnings()).hasSize(2);
         assertThat(projection.getComparisonType().name()).isEqualTo("RULES_VS_ML");
         assertThat(projection.getComparedEngineIds()).containsExactly("rules.primary", "ml.python.primary");
+
+        var readModel = new EngineIntelligenceReadModelMapper().map(projection);
+        assertThat(readModel.comparison().comparisonType().name()).isEqualTo("RULES_VS_ML");
+        assertThat(readModel.comparison().comparedEngineIds())
+                .containsExactly("rules.primary", "ml.python.primary");
     }
 
     @Test
@@ -85,13 +95,26 @@ class EngineIntelligenceProjectionMongoIntegrationTest {
     }
 
     @Test
-    void legacyMongoDocumentWithoutComparisonIdentityNormalizesOnRead() {
+    void mongoDocumentWithoutComparisonIdentityFailsClosedOnRead() {
         projectAndCorruptIdentity(update().unset("comparisonType").unset("comparedEngineIds"));
 
-        var readModel = new EngineIntelligenceReadModelMapper().map(repository.findById("txn-fdp95-001").orElseThrow());
+        Document beforeRead = storedProjection();
+        assertThat(beforeRead).doesNotContainKeys("comparisonType", "comparedEngineIds");
 
-        assertThat(readModel.comparison().comparisonType().name()).isEqualTo("RULES_VS_ML");
-        assertThat(readModel.comparison().comparedEngineIds()).containsExactly("rules.primary", "ml.python.primary");
+        assertProjectionReadUnavailable();
+
+        Document afterRead = storedProjection();
+        assertThat(afterRead).doesNotContainKeys("comparisonType", "comparedEngineIds");
+        EngineIntelligenceProjection persisted = repository.findById("txn-fdp95-001").orElseThrow();
+        assertThat(persisted.getComparisonType()).isNull();
+        assertThat(persisted.getComparedEngineIds()).isNull();
+    }
+
+    @Test
+    void mongoDocumentMissingOnlyComparisonTypeFailsClosedOnRead() {
+        projectAndCorruptIdentity(update().unset("comparisonType"));
+
+        assertProjectionReadUnavailable();
     }
 
     @Test
@@ -106,6 +129,29 @@ class EngineIntelligenceProjectionMongoIntegrationTest {
         projectAndCorruptIdentity(update().set("comparedEngineIds", List.of("ml.python.primary", "rules.primary")));
 
         assertProjectionReadUnavailable();
+    }
+
+    @Test
+    void mongoDocumentWithUnsupportedComparedEngineIdsFailsClosedOnRead() {
+        projectAndCorruptIdentity(update().set("comparedEngineIds", List.of("rules.primary", "unknown.primary")));
+
+        assertProjectionReadUnavailable();
+    }
+
+    @Test
+    void mongoDocumentWithUnsupportedComparisonTypeFailsClosedOnRead() {
+        projectAndCorruptIdentity(update().set("comparisonType", "RULES_VS_RULES"));
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        when(scoredTransactionRepository.existsById("txn-fdp95-001")).thenReturn(true);
+        EngineIntelligenceReadService readService = new EngineIntelligenceReadService(
+                scoredTransactionRepository,
+                repository,
+                new EngineIntelligenceReadModelMapper()
+        );
+
+        assertThatThrownBy(() -> readService.read("txn-fdp95-001"))
+                .isInstanceOf(EngineIntelligenceProjectionReadUnavailableException.class);
+        assertThat(storedProjection().getString("comparisonType")).isEqualTo("RULES_VS_RULES");
     }
 
     @Test
@@ -149,6 +195,12 @@ class EngineIntelligenceProjectionMongoIntegrationTest {
 
     private Query transactionQuery() {
         return Query.query(Criteria.where("_id").is("txn-fdp95-001"));
+    }
+
+    private Document storedProjection() {
+        return mongoTemplate.getCollection("engine_intelligence_projections")
+                .find(new Document("_id", "txn-fdp95-001"))
+                .first();
     }
 
     private Update update() {

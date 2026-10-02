@@ -26,7 +26,7 @@
     "evaluationCardVersion": "platform-recommendation-evaluation-card-v1",
     "evaluationPurpose": "OFFLINE_DIAGNOSTIC",
     "evaluationReportType": "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-    "evaluationReportVersion": "FDP-124",
+    "evaluationReportVersion": "feedback-dataset-evaluation-v1",
     "evaluationReportGeneratedAt": "2026-06-10T00:00:00Z",
     "evaluationCardGeneratedAt": "2026-06-12T00:00:00Z",
     "evaluationArtifactSetVersion": "feedback-dataset-evaluation-report-artifact-set-v1",

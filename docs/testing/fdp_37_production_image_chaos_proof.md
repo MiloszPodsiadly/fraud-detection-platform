@@ -23,16 +23,16 @@ Live in-flight production-image chaos is optional/future scope unless a separate
 
 | Invariant | Test class | Method | Required job | Proof levels |
 | --- | --- | --- | --- | --- |
-| claimed state does not falsely commit | `RegulatedMutationProductionImageChaosIT` | `productionImageKillAfterClaimBeforeAttemptedAuditDoesNotCommit` | `fdp37-production-image-chaos` | production-image durable proof |
-| attempted audit state does not publish | `RegulatedMutationProductionImageChaosIT` | `productionImageKillAfterAttemptedAuditBeforeBusinessMutationDoesNotPublish` | `fdp37-production-image-chaos` | production-image durable proof |
-| legacy business committing requires recovery | `RegulatedMutationProductionImageChaosIT` | `productionImageKillDuringLegacyBusinessCommittingRequiresRecoveryWithoutFalseSuccess` | `fdp37-production-image-chaos` | production-image durable proof |
-| success audit pending does not duplicate business mutation | `RegulatedMutationProductionImageChaosIT` | `productionImageKillInLegacySuccessAuditPendingDoesNotRepeatBusinessMutation` | `fdp37-production-image-chaos` | production-image durable proof |
-| FDP-29 finalizing does not fake external confirmation | `RegulatedMutationProductionImageChaosIT` | `productionImageKillInFdp29FinalizingDoesNotFakeExternalConfirmation` | `fdp37-production-image-chaos` | production-image durable proof |
-| FDP-29 pending external remains pending | `RegulatedMutationProductionImageChaosIT` | `productionImageKillInFdp29PendingExternalRemainsPendingWithoutEvidence` | `fdp37-production-image-chaos` | production-image durable proof |
-| duplicate outbox is not created after restart | `RegulatedMutationProductionImageEvidenceIntegrityIT` | `legacyReplayAfterProductionImageRestartDoesNotCreateSecondOutboxRecord` | `fdp37-production-image-chaos` | production-image durable proof |
-| duplicate SUCCESS audit is not created after restart | `RegulatedMutationProductionImageEvidenceIntegrityIT` | `legacyReplayAfterProductionImageRestartDoesNotCreateSecondSuccessAudit` | `fdp37-production-image-chaos` | production-image durable proof |
-| REQUIRED transaction mode has at least one production-image chaos row | `RegulatedMutationProductionImageRequiredTransactionChaosIT` | `requiredTransactionModeBusinessCommittingRestartRequiresRecoveryWithoutFalseSuccess` | `fdp37-production-image-chaos` | production-image durable proof |
-| rollback artifact records no new success claims | `RegulatedMutationProductionImageRollbackIT` | `rollbackRestartKeepsFdp32FencingAndDoesNotCreateNewSuccessClaims` | `fdp37-production-image-chaos` | production-image durable proof |
+| claimed state does not falsely commit | `RegulatedMutationProductionImageChaosIT` | `productionImageKillAfterClaimBeforeEvidencePreparationDoesNotCommit` | `fdp37-production-image-chaos` | production-image durable proof |
+| attempted audit state does not publish | `RegulatedMutationProductionImageChaosIT` | `productionImageKillAfterAttemptedAuditBeforeEvidencePreparationDoesNotPublish` | `fdp37-production-image-chaos` | production-image durable proof |
+| finalizing requires recovery | `RegulatedMutationProductionImageChaosIT` | `productionImageKillDuringFinalizingRequiresRecoveryWithoutFalseSuccess` | `fdp37-production-image-chaos` | production-image durable proof |
+| finalize recovery does not duplicate business mutation | `RegulatedMutationProductionImageChaosIT` | `productionImageKillInFinalizeRecoveryDoesNotRepeatBusinessMutation` | `fdp37-production-image-chaos` | production-image durable proof |
+| finalizing does not fake external confirmation | `RegulatedMutationProductionImageChaosIT` | `productionImageKillInFinalizingDoesNotFakeExternalConfirmation` | `fdp37-production-image-chaos` | production-image durable proof |
+| pending external remains pending | `RegulatedMutationProductionImageChaosIT` | `productionImageKillInPendingExternalRemainsPendingWithoutEvidence` | `fdp37-production-image-chaos` | production-image durable proof |
+| duplicate outbox is not created after restart | `RegulatedMutationProductionImageEvidenceIntegrityIT` | `finalizedReplayAfterProductionImageRestartDoesNotCreateSecondOutboxRecord` | `fdp37-production-image-chaos` | production-image durable proof |
+| duplicate SUCCESS audit is not created after restart | `RegulatedMutationProductionImageEvidenceIntegrityIT` | `finalizedReplayAfterProductionImageRestartDoesNotCreateSecondSuccessAudit` | `fdp37-production-image-chaos` | production-image durable proof |
+| REQUIRED transaction mode has at least one production-image chaos row | `RegulatedMutationProductionImageRequiredTransactionChaosIT` | `requiredTransactionModeFinalizingRestartRequiresRecoveryWithoutFalseSuccess` | `fdp37-production-image-chaos` | production-image durable proof |
+| rollback artifact records no new success claims | `RegulatedMutationProductionImageRollbackIT` | `rollbackRestartKeepsLeaseFencingAndDoesNotCreateNewSuccessClaims` | `fdp37-production-image-chaos` | production-image durable proof |
 
 ## Scenario Matrix
 
@@ -42,12 +42,12 @@ The required test evidence above is the authoritative scenario matrix for FDP-37
 production-image chaos proof matrix and keeps required scenarios, proof levels, artifact requirements, rollback
 evidence, and non-claims in one review document.
 
-Required method aliases include `RegulatedMutationProductionImageChaosIT.productionImageKillAfterClaimBeforeAttemptedAuditDoesNotCommit`
-and `RegulatedMutationProductionImageChaosIT.productionImageKillInFdp29PendingExternalRemainsPendingWithoutEvidence`.
-Also required: `RegulatedMutationProductionImageEvidenceIntegrityIT.legacyReplayAfterProductionImageRestartDoesNotCreateSecondOutboxRecord`.
-Also required: `RegulatedMutationProductionImageEvidenceIntegrityIT.legacyReplayAfterProductionImageRestartDoesNotCreateSecondSuccessAudit`.
-Also required: `RegulatedMutationProductionImageRequiredTransactionChaosIT.requiredTransactionModeBusinessCommittingRestartRequiresRecoveryWithoutFalseSuccess`.
-Also required: `RegulatedMutationProductionImageRollbackIT.rollbackRestartKeepsFdp32FencingAndDoesNotCreateNewSuccessClaims`.
+Required method aliases include `RegulatedMutationProductionImageChaosIT.productionImageKillAfterClaimBeforeEvidencePreparationDoesNotCommit`
+and `RegulatedMutationProductionImageChaosIT.productionImageKillInPendingExternalRemainsPendingWithoutEvidence`.
+Also required: `RegulatedMutationProductionImageEvidenceIntegrityIT.finalizedReplayAfterProductionImageRestartDoesNotCreateSecondOutboxRecord`.
+Also required: `RegulatedMutationProductionImageEvidenceIntegrityIT.finalizedReplayAfterProductionImageRestartDoesNotCreateSecondSuccessAudit`.
+Also required: `RegulatedMutationProductionImageRequiredTransactionChaosIT.requiredTransactionModeFinalizingRestartRequiresRecoveryWithoutFalseSuccess`.
+Also required: `RegulatedMutationProductionImageRollbackIT.rollbackRestartKeepsLeaseFencingAndDoesNotCreateNewSuccessClaims`.
 
 ## Required CI Artifact Fields
 

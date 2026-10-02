@@ -164,7 +164,7 @@ class FraudCaseControllerTest {
     void shouldPatchFraudCaseThroughCurrentUpdateSurface() throws Exception {
         when(fraudCaseManagementService.updateCase(any(), any(), any()))
                 .thenReturn(new UpdateFraudCaseResponse(
-                        SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED,
+                        SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED,
                         "command-1",
                         "hash-1",
                         "case-1",
@@ -181,7 +181,7 @@ class FraudCaseControllerTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.case_id").value("case-1"))
-                .andExpect(jsonPath("$.operation_status").value("COMMITTED_EVIDENCE_CONFIRMED"));
+                .andExpect(jsonPath("$.operation_status").value("FINALIZED_EVIDENCE_CONFIRMED"));
     }
 
     @Test

@@ -19,9 +19,9 @@ source-of-truth document says otherwise.
 
 | Document | Scope |
 | --- | --- |
-| [FDP-33 lease renewal dashboard](fdp_33_lease_renewal_dashboard.md) | Lease renewal observability contract for FDP-33 branch evidence. |
-| [FDP-35 regulated mutation dashboard spec](fdp_35_regulated_mutation_dashboard_spec.md) | Dashboard contract for modeled restart/recovery proof. |
-| [FDP-35 regulated mutation alert thresholds](fdp_35_regulated_mutation_alert_thresholds.md) | Threshold contract for modeled restart/recovery proof. |
+| [Regulated mutation lease renewal dashboard](regulated_mutation_lease_renewal_dashboard.md) | Lease renewal observability contract. |
+| [Regulated mutation dashboard](regulated_mutation_dashboard.md) | Dashboard contract for modeled restart/recovery proof. |
+| [Regulated mutation alert thresholds](regulated_mutation_alert_thresholds.md) | Threshold contract for modeled restart/recovery proof. |
 | [Fraud-case lifecycle idempotency dashboard](fraud_case_lifecycle_idempotency_dashboard.md) | Historical FDP-44 artifact; its emitter was removed by FDP-81. |
 
 ## Interpretation Rules

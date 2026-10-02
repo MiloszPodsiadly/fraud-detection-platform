@@ -154,7 +154,7 @@ class SuspiciousTransactionInternalUiDocsContractTest {
     }
 
     @Test
-    void docsMentionFdp70LinkedAlertResolverMigration() throws IOException {
+    void docsMentionLinkedAlertResolverMigration() throws IOException {
         String docs = Files.readString(DOCS);
 
         assertThat(docs)

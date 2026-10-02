@@ -251,8 +251,8 @@ class FraudCaseManagementServiceTest {
         when(coordinator.commit(any())).thenAnswer(invocation -> {
             RegulatedMutationCommand<FraudCaseDocument, UpdateFraudCaseResponse> command = invocation.getArgument(0);
             FraudCaseDocument result = command.mutation().execute(new RegulatedMutationExecutionContext("command-1"));
-            return new RegulatedMutationResult<>(RegulatedMutationState.EVIDENCE_PENDING,
-                    command.responseMapper().response(result, RegulatedMutationState.EVIDENCE_PENDING));
+            return new RegulatedMutationResult<>(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                    command.responseMapper().response(result, RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL));
         });
 
         UpdateFraudCaseResponse updated = service.updateCase("case-1", new UpdateFraudCaseRequest(
@@ -262,7 +262,7 @@ class FraudCaseManagementServiceTest {
                 List.of("manual-review")
         ), "fraud-case-update-1");
 
-        assertThat(updated.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING);
+        assertThat(updated.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         assertThat(updated.updatedCase()).isNotNull();
         assertThat(updated.updatedCase().status()).isEqualTo(FraudCaseStatus.CONFIRMED_FRAUD);
         assertThat(updated.updatedCase().analystId()).isEqualTo("principal-9");
@@ -273,6 +273,8 @@ class FraudCaseManagementServiceTest {
         RegulatedMutationCommand<FraudCaseDocument, UpdateFraudCaseResponse> command = commandCaptor.getValue();
         assertThat(command.idempotencyKey()).isEqualTo("fraud-case-update-1");
         assertThat(command.action()).isEqualTo(AuditAction.UPDATE_FRAUD_CASE);
+        assertThat(command.mutationModelVersion())
+                .isEqualTo(com.frauddetection.alert.regulated.RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
         assertThat(command.resourceType()).isEqualTo(AuditResourceType.FRAUD_CASE);
         assertThat(command.intent().intentHash()).isNotBlank();
         assertThat(command.requestHash()).isEqualTo(command.intent().payloadHash());

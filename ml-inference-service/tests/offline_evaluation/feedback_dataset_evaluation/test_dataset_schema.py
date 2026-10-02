@@ -31,7 +31,7 @@ class FeedbackDatasetSchemaTest(unittest.TestCase):
     def test_rejectsNeedsMoreInfoFeedbackLabel(self):
         self._assert_rejected(record(feedbackLabel="NEEDS_MORE_INFO", evaluationLabel="NEGATIVE_LEGITIMATE"))
 
-    def test_rejectsFdp102Labels(self):
+    def test_rejects_legacy_feedback_labels(self):
         self._assert_rejected(record(evaluationLabel="ANALYST_CONFIRMED_FRAUD"))
 
     def test_rejectsRawIds(self):

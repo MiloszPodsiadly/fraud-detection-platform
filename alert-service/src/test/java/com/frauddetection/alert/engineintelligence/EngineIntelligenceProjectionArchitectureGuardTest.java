@@ -82,6 +82,23 @@ class EngineIntelligenceProjectionArchitectureGuardTest {
         );
     }
 
+    @Test
+    void projectionReadersCannotSynthesizeMissingComparisonIdentity() throws Exception {
+        String readerSources = sources(
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/EngineIntelligenceProjection.java",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceComparisonReadModel.java",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceReadModelMapper.java",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceReadModelPolicy.java"
+        );
+
+        assertThat(readerSources).doesNotContain(
+                "FraudEngineIdentityContract",
+                "rulesVsMlComparisonEngineIds",
+                "normalizeComparisonIdentity",
+                "historicalComparisonIdentity"
+        );
+    }
+
     private String sources(String... relativePaths) throws IOException {
         StringBuilder sources = new StringBuilder();
         for (String relativePath : relativePaths) {

@@ -16,157 +16,87 @@ import static org.mockito.Mockito.when;
 class RegulatedMutationExecutorRegistryTest {
 
     @Test
-    void legacyModelResolvesLegacyExecutor() {
-        RegulatedMutationExecutor legacy = executor(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
-        RegulatedMutationExecutor evidence = executor(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
-        RegulatedMutationExecutorRegistry registry = new RegulatedMutationExecutorRegistry(List.of(legacy, evidence), true);
+    void currentModelResolvesCanonicalExecutor() {
+        RegulatedMutationExecutor current = executor(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        RegulatedMutationExecutorRegistry registry = new RegulatedMutationExecutorRegistry(List.of(current));
 
-        assertThat(registry.executorFor(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION)).isSameAs(legacy);
+        assertThat(registry.executorFor(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1)).isSameAs(current);
     }
 
     @Test
-    void nullModelVersionResolvesLegacyExecutor() {
-        RegulatedMutationExecutor legacy = executor(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
-        RegulatedMutationExecutorRegistry registry = new RegulatedMutationExecutorRegistry(List.of(legacy), false);
+    void nullModelFailsClosed() {
+        RegulatedMutationExecutor current = executor(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        RegulatedMutationExecutorRegistry registry = new RegulatedMutationExecutorRegistry(List.of(current));
 
-        assertThat(registry.executorFor((RegulatedMutationModelVersion) null)).isSameAs(legacy);
+        assertThatThrownBy(() -> registry.executorFor((RegulatedMutationModelVersion) null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Unsupported persisted");
     }
 
     @Test
-    void evidenceGatedModelResolvesEvidenceGatedExecutor() {
-        RegulatedMutationExecutor legacy = executor(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
-        RegulatedMutationExecutor evidence = executor(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
-        RegulatedMutationExecutorRegistry registry = new RegulatedMutationExecutorRegistry(List.of(legacy, evidence), true);
+    void nullModelExecutorRegistrationFailsClosed() {
+        RegulatedMutationExecutor invalid = executor(null);
 
-        assertThat(registry.executorFor(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1)).isSameAs(evidence);
+        assertThatThrownBy(() -> new RegulatedMutationExecutorRegistry(List.of(invalid)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("null model version");
     }
 
     @Test
     void duplicateExecutorRegistrationFailsStartup() {
-        RegulatedMutationExecutor first = executor(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
-        RegulatedMutationExecutor second = executor(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
+        RegulatedMutationExecutor first = executor(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        RegulatedMutationExecutor second = executor(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
 
-        assertThatThrownBy(() -> new RegulatedMutationExecutorRegistry(List.of(first, second), false))
+        assertThatThrownBy(() -> new RegulatedMutationExecutorRegistry(List.of(first, second)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Duplicate regulated mutation executor");
     }
 
     @Test
-    void missingLegacyExecutorFailsStartup() {
-        RegulatedMutationExecutor evidence = executor(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
-
-        assertThatThrownBy(() -> new RegulatedMutationExecutorRegistry(List.of(evidence), false))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("LEGACY_REGULATED_MUTATION");
-    }
-
-    @Test
-    void evidenceGatedEnabledWithoutEvidenceExecutorFailsStartup() {
-        RegulatedMutationExecutor legacy = executor(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
-
-        assertThatThrownBy(() -> new RegulatedMutationExecutorRegistry(List.of(legacy), true))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("EVIDENCE_GATED_FINALIZE_V1");
-    }
-
-    @Test
-    void unsupportedModelVersionFailsClosed() {
-        RegulatedMutationExecutor legacy = executor(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
-        RegulatedMutationExecutorRegistry registry = new RegulatedMutationExecutorRegistry(List.of(legacy), false);
-
-        assertThatThrownBy(() -> registry.executorFor(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("EVIDENCE_GATED_FINALIZE_V1");
-    }
-
-    @Test
-    void evidenceGatedDisabledAllowsLegacyOnlyRegistry() {
-        RegulatedMutationExecutor legacy = executor(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
-
-        RegulatedMutationExecutorRegistry registry = new RegulatedMutationExecutorRegistry(List.of(legacy), false);
-
-        assertThat(registry.executorFor(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION)).isSameAs(legacy);
-    }
-
-    @Test
-    void evidenceGatedEnabledAllowsCompleteRegistry() {
-        RegulatedMutationExecutor legacy = executor(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
-        RegulatedMutationExecutor evidence = executor(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
-
-        RegulatedMutationExecutorRegistry registry = new RegulatedMutationExecutorRegistry(List.of(legacy, evidence), true);
-
-        assertThat(registry.executorFor(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION)).isSameAs(legacy);
-        assertThat(registry.executorFor(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1)).isSameAs(evidence);
-    }
-
-    @Test
-    void documentRoutingValidatesExecutorActionAndResourceSupport() {
-        RegulatedMutationExecutor legacy = executor(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
-        when(legacy.supports(AuditAction.SUBMIT_ANALYST_DECISION, AuditResourceType.ALERT)).thenReturn(false);
-        RegulatedMutationExecutorRegistry registry = new RegulatedMutationExecutorRegistry(List.of(legacy), false);
-
-        assertThatThrownBy(() -> registry.executorFor(document(
-                        RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                        AuditAction.SUBMIT_ANALYST_DECISION,
-                        AuditResourceType.ALERT
-                )))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("does not support action/resource")
-                .hasMessageContaining("SUBMIT_ANALYST_DECISION/ALERT");
-    }
-
-    @Test
-    void documentRoutingRejectsMissingActionBeforeExecutorUse() {
-        RegulatedMutationExecutor legacy = executor(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
-        RegulatedMutationExecutorRegistry registry = new RegulatedMutationExecutorRegistry(List.of(legacy), false);
-        RegulatedMutationCommandDocument document = document(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+    void documentRoutingRejectsMissingOrUnknownContractFields() {
+        RegulatedMutationExecutor current = executor(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        RegulatedMutationExecutorRegistry registry = new RegulatedMutationExecutorRegistry(List.of(current));
+        RegulatedMutationCommandDocument missingAction = document(
                 AuditAction.SUBMIT_ANALYST_DECISION,
                 AuditResourceType.ALERT
         );
-        document.setAction(null);
+        missingAction.setAction(null);
+        RegulatedMutationCommandDocument unknownResource = document(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT
+        );
+        unknownResource.setResourceType("UNBOUNDED_RESOURCE");
 
-        assertThatThrownBy(() -> registry.executorFor(document))
+        assertThatThrownBy(() -> registry.executorFor(missingAction))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("action is required");
-    }
-
-    @Test
-    void documentRoutingRejectsUnknownResourceTypeBeforeExecutorUse() {
-        RegulatedMutationExecutor legacy = executor(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
-        RegulatedMutationExecutorRegistry registry = new RegulatedMutationExecutorRegistry(List.of(legacy), false);
-        RegulatedMutationCommandDocument document = document(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                AuditAction.SUBMIT_ANALYST_DECISION,
-                AuditResourceType.ALERT
-        );
-        document.setResourceType("UNBOUNDED_RESOURCE");
-
-        assertThatThrownBy(() -> registry.executorFor(document))
+        assertThatThrownBy(() -> registry.executorFor(unknownResource))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Unsupported regulated mutation command resource type");
     }
 
     @Test
-    void legacyExecutorBroadSupportIsCompatibilityOnly() {
-        LegacyRegulatedMutationExecutor legacy = legacyExecutor();
+    void documentRoutingRejectsUnsupportedActionResourcePair() {
+        RegulatedMutationExecutor current = executor(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        RegulatedMutationExecutorRegistry registry = new RegulatedMutationExecutorRegistry(List.of(current));
 
-        assertThat(legacy.supports(AuditAction.SUBMIT_ANALYST_DECISION, AuditResourceType.ALERT)).isTrue();
-        assertThat(legacy.supports(AuditAction.UPDATE_FRAUD_CASE, AuditResourceType.FRAUD_CASE)).isTrue();
-        assertThat(legacy.supports(AuditAction.REFRESH_TRUST_INCIDENTS, AuditResourceType.TRUST_INCIDENT)).isTrue();
-        assertThat(legacy.supports(null, AuditResourceType.ALERT)).isFalse();
-        assertThat(legacy.supports(AuditAction.SUBMIT_ANALYST_DECISION, null)).isFalse();
+        assertThatThrownBy(() -> registry.executorFor(document(
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.FRAUD_CASE
+        )))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Unsupported regulated mutation action/resource");
     }
 
     @Test
-    void evidenceGatedFinalizeExecutorStrictlySupportsSubmitDecisionAlertOnly() {
-        EvidenceGatedFinalizeExecutor evidence = evidenceGatedExecutor();
+    void canonicalExecutorSupportsExactlyTheRegisteredOperations() {
+        EvidenceGatedFinalizeExecutor current = evidenceGatedExecutor();
 
-        assertThat(evidence.supports(AuditAction.SUBMIT_ANALYST_DECISION, AuditResourceType.ALERT)).isTrue();
-        assertThat(evidence.supports(AuditAction.UPDATE_FRAUD_CASE, AuditResourceType.FRAUD_CASE)).isFalse();
-        assertThat(evidence.supports(AuditAction.REFRESH_TRUST_INCIDENTS, AuditResourceType.TRUST_INCIDENT)).isFalse();
-        assertThat(evidence.supports(AuditAction.RESOLVE_DECISION_OUTBOX_CONFIRMATION, AuditResourceType.DECISION_OUTBOX)).isFalse();
-        assertThat(evidence.supports(AuditAction.SUBMIT_ANALYST_DECISION, AuditResourceType.FRAUD_CASE)).isFalse();
+        RegulatedMutationDefinitions.all().forEach(definition ->
+                assertThat(current.supports(definition.action(), definition.resourceType())).isTrue());
+        assertThat(current.supports(AuditAction.SUBMIT_ANALYST_DECISION, AuditResourceType.FRAUD_CASE)).isFalse();
+        assertThat(current.supports(AuditAction.READ_AUDIT_EVENTS, AuditResourceType.AUDIT_EVENT)).isFalse();
+        assertThat(current.supports(null, AuditResourceType.ALERT)).isFalse();
     }
 
     private RegulatedMutationExecutor executor(RegulatedMutationModelVersion modelVersion) {
@@ -176,30 +106,13 @@ class RegulatedMutationExecutorRegistryTest {
         return executor;
     }
 
-    private RegulatedMutationCommandDocument document(
-            RegulatedMutationModelVersion modelVersion,
-            AuditAction action,
-            AuditResourceType resourceType
-    ) {
+    private RegulatedMutationCommandDocument document(AuditAction action, AuditResourceType resourceType) {
         RegulatedMutationCommandDocument document = new RegulatedMutationCommandDocument();
-        document.setMutationModelVersion(modelVersion);
+        document.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        document.setRevision(0L);
         document.setAction(action.name());
         document.setResourceType(resourceType.name());
         return document;
-    }
-
-    private LegacyRegulatedMutationExecutor legacyExecutor() {
-        return new LegacyRegulatedMutationExecutor(
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                false,
-                Duration.ofSeconds(30)
-        );
     }
 
     private EvidenceGatedFinalizeExecutor evidenceGatedExecutor() {
@@ -212,6 +125,7 @@ class RegulatedMutationExecutorRegistryTest {
                 null,
                 null,
                 null,
+                RegulatedMutationProofTestFixtures.accepted(),
                 Duration.ofSeconds(30)
         );
     }

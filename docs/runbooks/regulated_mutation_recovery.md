@@ -34,7 +34,7 @@ This runbook does not provide WORM storage, legal notarization, distributed ACID
 - Recovery state wins over progress-looking fields.
 - Operators must inspect durable command state before acting.
 - Use command id or idempotency hash. Do not paste raw idempotency keys in tickets, logs, runbooks, or dashboards.
-- Manual state repair, rollback approval, feature flag disablement, and renewal budget changes require dual control.
+- Manual state repair, rollback approval, command-ingress suspension, and renewal budget changes require dual control.
 
 ## Required Authority
 
@@ -54,7 +54,7 @@ This runbook does not provide WORM storage, legal notarization, distributed ACID
 | `NON_RENEWABLE_STATE` | State must not renew. | Respect current terminal or recovery state. | Do not renew manually. |
 | `TERMINAL_STATE` | Command is already terminal. | Use replay result only and verify aggregate consistency. | Do not mutate terminal command fields. |
 | `RECOVERY_STATE` | Command already requires recovery. | Follow recovery endpoint or recovery owner path. | Do not replay stale snapshot as success. |
-| `MODEL_VERSION_MISMATCH` | Worker model version differs from stored command. | Inspect deployment and route to matching executor/recovery owner. | Do not downgrade `mutation_model_version`. |
+| `MODEL_VERSION_MISMATCH` | Active collection contains a command outside the current persisted contract. | Stop startup/recovery and route the record through the approved offline archive or migration process. | Do not execute it, restore a retired executor, or rewrite `mutation_model_version` in place. |
 | `EXECUTION_STATUS_MISMATCH` | Expected execution status no longer matches. | Re-read command and retry only through normal coordinator path. | Do not force status to `COMPLETED`. |
 | `UNKNOWN` | Guard returned an unclassified reason. | Treat as platform incident and inspect logs without raw payloads. | Do not add ad hoc recovery behavior. |
 
@@ -62,9 +62,6 @@ This runbook does not provide WORM storage, legal notarization, distributed ACID
 
 Approved checkpoints covered by this runbook:
 
-- `BEFORE_ATTEMPTED_AUDIT`
-- `BEFORE_LEGACY_BUSINESS_COMMIT`
-- `BEFORE_SUCCESS_AUDIT_RETRY`
 - `BEFORE_EVIDENCE_PREPARATION`
 - `AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE`
 - `BEFORE_EVIDENCE_GATED_FINALIZE`
@@ -73,9 +70,6 @@ Checkpoint-specific rules:
 
 | Checkpoint failure | Safe action | Forbidden action |
 | --- | --- | --- |
-| before attempted audit | Stop worker and inspect command ownership. | Do not write attempted audit manually. |
-| before legacy business commit | Stop worker and confirm no business mutation was committed. | Do not run business mutation by hand. |
-| before success audit retry | Stop retry path and preserve post-commit degradation visibility. | Do not hide audit degradation. |
 | before evidence preparation | Stop worker and inspect evidence preconditions. | Do not fabricate evidence. |
 | after evidence prepared before finalize | Inspect local evidence, outbox, and audit phases. | Do not mark evidence confirmed. |
 | before evidence-gated finalize | Treat as finalize recovery risk. | Do not expose stale success. |
@@ -113,10 +107,29 @@ Safe response:
 
 1. Check Mongo health, lock contention, unique-index errors, and write concern failures.
 2. Check `app.audit.local-phase-writer.max-append-attempts`, `backoff-ms`, and `max-total-wait-ms`.
-3. Keep evidence-gated finalize flags disabled or roll them back if contention prevents safe local evidence append.
-4. Do not disable the local `SUCCESS` audit writer while evidence-gated finalize is enabled.
+3. Suspend regulated mutation ingress and roll back only to a compatible current-model build if contention prevents a
+   safe local evidence append.
+4. Do not bypass or disable the local `SUCCESS` audit writer.
 
 Metrics are operational signals only. They are not compliance evidence by themselves.
+
+## Decision-Slot Index Hard Cut
+
+Before deploying a build that uses `decision_slot_claimed`, suspend regulated-mutation ingress and inspect the
+`regulated_mutation_commands` collection offline. Preserve every command and its idempotency/audit history. Classify
+`REJECTED_EVIDENCE_UNAVAILABLE` and `FAILED_BUSINESS_VALIDATION` as released only when `response_snapshot`,
+`outbox_event_id`, `local_commit_marker`, `local_committed_at`, and `success_audit_id` are absent and
+`success_audit_recorded` is not true.
+All finalized, active, recovery-required, or otherwise ambiguous commands retain ownership. Detect duplicate claimed
+owners per `(resource_id, resource_type, action)` and stop the rollout if any exist.
+
+With the runtime stopped, use an approved evidence-preserving migration to populate the ownership field. Intentionally
+remove the obsolete `single_submit_decision_per_alert_idx` definition and create the canonical unique ordered key
+`resource_id, resource_type, action` with exact partial filter `resource_type=ALERT`,
+`action=SUBMIT_ANALYST_DECISION`, and `decision_slot_claimed=true`. Do not delete historical commands and do not perform
+index replacement or document repair from application startup. Verify the resulting index through MongoDB
+`listIndexes()`, rerun persisted-command preflight, and start the runtime only after both checks pass. A missing field,
+conflicting active claim, missing index, or metadata mismatch is a failed hard-cut deployment, not a fallback signal.
 
 ## Escalation Clock
 

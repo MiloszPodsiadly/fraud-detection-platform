@@ -7,7 +7,9 @@ from pathlib import Path
 
 from offline_evaluation.feedback_dataset_evaluation.dataset_reader import read_feedback_dataset_jsonl
 from offline_evaluation.feedback_dataset_evaluation.evaluation_runner import build_feedback_dataset_evaluation_reports
-from offline_evaluation.feedback_dataset_evaluation.evaluation_card.generator import generate_evaluation_card_from_fdp124_artifacts
+from offline_evaluation.feedback_dataset_evaluation.evaluation_card.generator import (
+    generate_platform_evaluation_card_from_artifacts,
+)
 from offline_evaluation.feedback_dataset_evaluation.evaluation_card.schema import (
     EVALUATION_SUBJECT,
     METRIC_BASIS,
@@ -30,16 +32,10 @@ except ModuleNotFoundError:
 
 
 PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT = "2026-06-12T00:00:00Z"
-HISTORICAL_PLATFORM_EVALUATION_FIXTURE = (
-    Path(__file__).resolve().parents[5]
-    / "contract-fixtures"
-    / "governance"
-    / "platform-evaluation-fdp123"
-)
 
 
 class FeedbackDatasetEvaluationCardGeneratorTest(unittest.TestCase):
-    def test_generatesEvaluationCardFromValidFdp124Artifacts(self):
+    def test_generatesCardFromValidPlatformEvaluationArtifacts(self):
         with self.artifacts() as paths:
             card = self.generate(paths)
 
@@ -111,7 +107,7 @@ class FeedbackDatasetEvaluationCardGeneratorTest(unittest.TestCase):
             paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
 
             with self.assertRaises(FeedbackDatasetEvaluationCardValidationError):
-                generate_evaluation_card_from_fdp124_artifacts(
+                generate_platform_evaluation_card_from_artifacts(
                     renamed,
                     paths["manifest"],
                     model_metadata(),
@@ -124,7 +120,7 @@ class FeedbackDatasetEvaluationCardGeneratorTest(unittest.TestCase):
             renamed.write_bytes(paths["manifest"].read_bytes())
 
             with self.assertRaises(FeedbackDatasetEvaluationCardValidationError):
-                generate_evaluation_card_from_fdp124_artifacts(
+                generate_platform_evaluation_card_from_artifacts(
                     paths["evaluationSummary"],
                     renamed,
                     model_metadata(),
@@ -183,76 +179,23 @@ class FeedbackDatasetEvaluationCardGeneratorTest(unittest.TestCase):
             with self.assertRaises(FeedbackDatasetEvaluationCardValidationError):
                 self.generate(paths)
 
-    def test_acceptsLegacyReadOnlyPlatformEvaluationIdentityPair(self):
-        with self.artifacts() as paths:
-            self._mutate_summary(paths, reportType="FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1")
-            self._mutate_summary_identity_completeness(
-                paths,
-                "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
-            )
-            self._mutate_manifest(
-                paths,
-                reportType="FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-                artifactSetVersion="fdp123-report-artifact-set-v1",
-            )
-
-            card = self.generate(paths)
-
-        self.assertEqual("FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1", card["evaluationEvidence"]["evaluationReportType"])
-        self.assertEqual("fdp123-report-artifact-set-v1", card["evaluationEvidence"]["evaluationArtifactSetVersion"])
-        self.assertEqual(
-            "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
-            card["evaluationSubject"]["identityCompleteness"],
-        )
-
-    def test_readsHistoricalPlatformEvaluationArtifactSetWithoutRewritingIt(self):
-        fixture_bytes = {
-            path.name: path.read_bytes()
-            for path in HISTORICAL_PLATFORM_EVALUATION_FIXTURE.iterdir()
-            if path.is_file()
-        }
-
-        card = generate_evaluation_card_from_fdp124_artifacts(
-            HISTORICAL_PLATFORM_EVALUATION_FIXTURE / "evaluation_summary.json",
-            HISTORICAL_PLATFORM_EVALUATION_FIXTURE / "manifest.json",
-            model_metadata(),
-            PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT,
-        )
-
-        self.assertEqual(
-            "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-            card["evaluationEvidence"]["evaluationReportType"],
-        )
-        self.assertEqual(
-            "fdp123-report-artifact-set-v1",
-            card["evaluationEvidence"]["evaluationArtifactSetVersion"],
-        )
-        self.assertEqual(
-            fixture_bytes,
-            {
-                path.name: path.read_bytes()
-                for path in HISTORICAL_PLATFORM_EVALUATION_FIXTURE.iterdir()
-                if path.is_file()
-            },
-        )
-
     def test_rejectsMixedPlatformEvaluationIdentityPairs(self):
         cases = (
             (
-                "current_legacy",
+                "unsupported_artifact_set",
                 "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
                 "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-                "fdp123-report-artifact-set-v1",
+                "unsupported-artifact-set-v1",
             ),
             (
-                "legacy_current",
-                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "unsupported_report_type",
+                "UNSUPPORTED_PLATFORM_EVALUATION",
+                "UNSUPPORTED_PLATFORM_EVALUATION",
                 "feedback-dataset-evaluation-report-artifact-set-v1",
             ),
             (
                 "manifest_summary_mismatch",
-                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "UNSUPPORTED_PLATFORM_EVALUATION",
                 "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
                 "feedback-dataset-evaluation-report-artifact-set-v1",
             ),
@@ -271,20 +214,12 @@ class FeedbackDatasetEvaluationCardGeneratorTest(unittest.TestCase):
                         self.generate(paths)
 
     def test_rejectsMixedPlatformEvaluationIdentityMarkers(self):
-        cases = (
-            (
-                "current_with_legacy_marker",
-                "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-                "feedback-dataset-evaluation-report-artifact-set-v1",
-                "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
-            ),
-            (
-                "legacy_with_current_marker",
-                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-                "fdp123-report-artifact-set-v1",
-                "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
-            ),
-        )
+        cases = ((
+            "unsupported_marker",
+            "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+            "feedback-dataset-evaluation-report-artifact-set-v1",
+            "UNSUPPORTED_IDENTITY_COMPLETENESS",
+        ),)
         for name, report_type, artifact_set_version, identity_completeness in cases:
             with self.subTest(name=name):
                 with self.artifacts() as paths:
@@ -511,7 +446,7 @@ class FeedbackDatasetEvaluationCardGeneratorTest(unittest.TestCase):
                 self.skipTest(f"symlink creation unavailable: {exception}")
 
             with self.assertRaises(FeedbackDatasetEvaluationCardValidationError):
-                generate_evaluation_card_from_fdp124_artifacts(
+                generate_platform_evaluation_card_from_artifacts(
                     link / "evaluation_summary.json",
                     link / "manifest.json",
                     model_metadata(),
@@ -555,7 +490,7 @@ class FeedbackDatasetEvaluationCardGeneratorTest(unittest.TestCase):
         self.assertEqual("NO_PREDICTED_POSITIVES", precision["reason"])
 
     def generate(self, paths, metadata=None, generated_at=PLATFORM_RECOMMENDATION_EVALUATION_CARD_GENERATED_AT):
-        return generate_evaluation_card_from_fdp124_artifacts(
+        return generate_platform_evaluation_card_from_artifacts(
             paths["evaluationSummary"],
             paths["manifest"],
             metadata or model_metadata(),
@@ -612,7 +547,7 @@ class FeedbackDatasetEvaluationCardGeneratorTest(unittest.TestCase):
         self._write_summary(paths, summary)
 
     def artifacts(self, *records):
-        return fdp124_artifacts(*records)
+        return platform_evaluation_artifacts(*records)
 
 
 def model_metadata(**overrides):
@@ -627,7 +562,7 @@ def model_metadata(**overrides):
     return metadata
 
 
-class fdp124_artifacts:
+class platform_evaluation_artifacts:
     def __init__(self, *records):
         self.records = records or (record(), record(
             evaluationRecordId="eval_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",

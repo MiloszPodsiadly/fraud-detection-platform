@@ -19,18 +19,15 @@ public final class EvidenceGatedFinalizeStateMachine {
                     RegulatedMutationState.FAILED_BUSINESS_VALIDATION
             ),
             RegulatedMutationState.FINALIZING, Set.of(
-                    RegulatedMutationState.FINALIZED_VISIBLE,
                     RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                     RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
             ),
-            RegulatedMutationState.FINALIZED_VISIBLE, Set.of(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL, RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED),
             RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL, Set.of(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED)
     );
 
     public boolean isTerminal(RegulatedMutationState state) {
         return state == RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED
                 || state == RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
-                || state == RegulatedMutationState.FINALIZED_VISIBLE
                 || state == RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE
                 || state == RegulatedMutationState.FAILED_BUSINESS_VALIDATION
                 || state == RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED;

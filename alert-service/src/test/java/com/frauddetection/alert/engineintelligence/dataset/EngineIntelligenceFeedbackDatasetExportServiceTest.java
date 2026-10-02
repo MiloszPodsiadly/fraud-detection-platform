@@ -15,6 +15,7 @@ import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
@@ -489,6 +490,8 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
                 null,
                 null,
                 null,
+                null,
+                null,
                 List.of(),
                 List.of(),
                 List.of(),
@@ -830,6 +833,8 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
                 transactionId,
                 contractVersion,
                 FROM,
+                EngineIntelligenceComparisonType.RULES_VS_ML,
+                List.of("rules.primary", "ml.python.primary"),
                 EngineIntelligenceAgreementStatus.AGREEMENT,
                 EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
                 EngineIntelligenceScoreDeltaBucket.NONE,

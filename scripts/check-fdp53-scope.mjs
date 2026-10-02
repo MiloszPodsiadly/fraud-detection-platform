@@ -38,9 +38,9 @@ const newAuthModePattern = /\b(new auth mode|auth mode|oidc mode|bearer mode|ses
 const defaultWrapperPattern = /from\s+["'][^"']*\/api\/alertsApi\.js["']/;
 const fdp54GovernanceFiles = new Set([
   "scripts/check-doc-overclaims.mjs",
-  "scripts/check-fdp-scope-helpers-smoke.mjs",
+  "scripts/check-scope-guard-helpers-smoke.mjs",
   "scripts/compare-ci-jobs.mjs",
-  "scripts/fdp-scope/scopeGuardHelpers.mjs"
+  "scripts/scope-guards/scopeGuardHelpers.mjs"
 ]);
 
 for (const file of changedFiles) {

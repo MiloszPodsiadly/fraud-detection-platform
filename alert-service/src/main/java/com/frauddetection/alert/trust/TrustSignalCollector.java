@@ -63,11 +63,9 @@ public class TrustSignalCollector {
         if (recoveryService.recoveryRequiredCount() > 0) {
             signals.add(signal("REGULATED_MUTATION_RECOVERY_REQUIRED", "regulated_mutation", "execution_status=RECOVERY_REQUIRED"));
         }
-        if (recoveryService.committedDegradedCount() > 0) {
-            signals.add(signal("REGULATED_MUTATION_COMMITTED_DEGRADED", "regulated_mutation", "state=COMMITTED_DEGRADED"));
-        }
-        if (recoveryService.evidenceConfirmationFailedCount() > 0) {
-            signals.add(signal("EVIDENCE_CONFIRMATION_FAILED", "regulated_mutation", "evidence_confirmation=FAILED"));
+        if (recoveryService.finalizeRecoveryRequiredCount() > 0) {
+            signals.add(signal("REGULATED_MUTATION_FINALIZE_RECOVERY_REQUIRED", "regulated_mutation",
+                    "state=FINALIZE_RECOVERY_REQUIRED"));
         }
     }
 

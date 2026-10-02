@@ -21,7 +21,9 @@ inside document text, but filenames use lowercase underscores.
 | `docs/service_identity_fdp17.md` | `docs/security/internal_service_identity.md` | JWT service identity is folded into the current service identity contract. |
 | `docs/service_identity_fdp18.md` | `docs/security/internal_service_identity.md` | mTLS service identity is folded into the current service identity contract. |
 | `docs/ml_governance_drift_v1.md` | `docs/ml/ml_governance_drift_v1.md` | ML governance belongs under `docs/ml/`. |
-| `docs/fdp/fdp_25_regulated_mutation_commit.md` | `docs/fdp/fdp_25_regulated_mutation_commit.md` | FDP branch filename casing normalized. |
+| `docs/adr/fdp_29_evidence_gated_finalize.md` | `docs/adr/evidence_gated_regulated_mutation_finalize.md` | Current ADR uses a domain name instead of a retired branch identifier. |
+| `docs/fdp/fdp_29_evidence_gated_finalize_handoff.md` | `docs/architecture/regulated_mutation_runtime_handoff.md` | Current runtime handoff belongs with architecture documentation. |
+| `docs/fdp/fdp_29_implementation_merge_gate.md` | `docs/architecture/regulated_mutation_implementation_gate.md` | Current implementation gate is no longer branch-specific. |
 | `docs/architecture/alert_service_failure_windows.md` | `docs/architecture/alert_service_failure_windows.md` | Already followed the current convention. |
 | `docs/architecture/alert_service_source_of_truth.md` | `docs/architecture/alert_service_source_of_truth.md` | Already followed the current convention. |
 | `docs/architecture/alert_service_write_path_inventory.md` | `docs/architecture/alert_service_write_path_inventory.md` | Already followed the current convention. |

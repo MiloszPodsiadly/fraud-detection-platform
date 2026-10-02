@@ -2,18 +2,22 @@ package com.frauddetection.alert.consumer;
 
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AlertServiceTransactionScoredEventDeserializationCompatibilityTest {
+    private final ObjectMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
 
     @Test
-    void alertServiceDeserializesOldEventWithoutEngineIntelligence() {
-        TransactionScoredEvent event = AlertServiceTransactionScoredEventFixtureLoader.oldWithoutEngineIntelligence();
+    void alertServiceDeserializesCurrentEventWithoutEngineIntelligence() {
+        TransactionScoredEvent event = AlertServiceTransactionScoredEventFixtureLoader.withoutEngineIntelligence();
 
         assertExistingFields(event);
-        assertThat(event.modelVersion()).isEqualTo("v1");
+        assertThat(event.modelVersion()).isEqualTo("v2");
         assertThat(event.engineIntelligence()).isNull();
     }
 
@@ -27,14 +31,18 @@ class AlertServiceTransactionScoredEventDeserializationCompatibilityTest {
     }
 
     @Test
-    void alertServiceDeserializesLegacyV1EngineIntelligenceComparison() {
-        TransactionScoredEvent event = AlertServiceTransactionScoredEventFixtureLoader.legacyV1EngineIntelligence();
+    void alertServiceRejectsHistoricalComparisonNormalization() throws Exception {
+        ObjectNode eventJson = (ObjectNode) objectMapper.readTree(
+                AlertServiceTransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson()
+        );
+        eventJson.put("modelVersion", "v1");
+        ObjectNode comparison = (ObjectNode) eventJson.path("engineIntelligence").path("comparison");
+        comparison.remove("comparisonType");
+        comparison.remove("comparedEngineIds");
 
-        assertThat(event.transactionId()).isEqualTo("txn-fdp129-stage2-001");
-        assertThat(event.modelVersion()).isEqualTo("v1");
-        assertThat(event.engineIntelligence().comparison().comparisonType().name()).isEqualTo("RULES_VS_ML");
-        assertThat(event.engineIntelligence().comparison().comparedEngineIds())
-                .containsExactly("rules.primary", "ml.python.primary");
+        assertThatThrownBy(() -> AlertServiceTransactionScoredEventFixtureLoader.deserializeJson(eventJson.toString()))
+                .isInstanceOf(org.apache.kafka.common.errors.SerializationException.class)
+                .hasMessageContaining("Unable to deserialize Kafka payload");
     }
 
     @Test
@@ -63,8 +71,13 @@ class AlertServiceTransactionScoredEventDeserializationCompatibilityTest {
     }
 
     @Test
-    void alertServiceRejectsPartialComparisonIdentity() {
-        assertThatThrownBy(AlertServiceTransactionScoredEventFixtureLoader::partialComparisonTypeOnly)
+    void alertServiceRejectsPartialComparisonIdentity() throws Exception {
+        ObjectNode eventJson = (ObjectNode) objectMapper.readTree(
+                AlertServiceTransactionScoredEventFixtureLoader.minimalEngineIntelligenceJson()
+        );
+        ((ObjectNode) eventJson.path("engineIntelligence").path("comparison")).remove("comparedEngineIds");
+
+        assertThatThrownBy(() -> AlertServiceTransactionScoredEventFixtureLoader.deserializeJson(eventJson.toString()))
                 .isInstanceOf(org.apache.kafka.common.errors.SerializationException.class)
                 .hasMessageContaining("Unable to deserialize Kafka payload");
     }

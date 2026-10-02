@@ -6,25 +6,16 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RegulatedMutationPublicStatusMapperTest {
 
     private final RegulatedMutationPublicStatusMapper mapper = new RegulatedMutationPublicStatusMapper();
 
     @Test
-    void shouldMapEvidenceGatedFinalizedVisibleToPendingExternalPublicStatus() {
+    void shouldMapCurrentRecoveryStateToFinalizeRecoveryRequired() {
         SubmitDecisionOperationStatus status = mapper.submitDecisionStatus(
-                RegulatedMutationState.FINALIZED_VISIBLE,
-                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
-        );
-
-        assertThat(status).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
-    }
-
-    @Test
-    void shouldMapEvidenceGatedDegradedLegacyStatesToFinalizeRecoveryRequired() {
-        SubmitDecisionOperationStatus status = mapper.submitDecisionStatus(
-                RegulatedMutationState.COMMITTED_DEGRADED,
+                RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
                 RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
         );
 
@@ -32,13 +23,10 @@ class RegulatedMutationPublicStatusMapperTest {
     }
 
     @Test
-    void shouldKeepLegacyStatusMappingForLegacyCommands() {
-        SubmitDecisionOperationStatus status = mapper.submitDecisionStatus(
-                RegulatedMutationState.COMMITTED_DEGRADED,
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION
-        );
-
-        assertThat(status).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
+    void shouldRejectMissingModelVersion() {
+        assertThatThrownBy(() -> mapper.submitDecisionStatus(RegulatedMutationState.EVIDENCE_PREPARING, null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("requires EVIDENCE_GATED_FINALIZE_V1");
     }
 
     @ParameterizedTest
@@ -46,13 +34,11 @@ class RegulatedMutationPublicStatusMapperTest {
             "EVIDENCE_PREPARING",
             "EVIDENCE_PREPARED",
             "FINALIZING",
-            "FINALIZED_VISIBLE",
             "FINALIZED_EVIDENCE_PENDING_EXTERNAL",
             "FINALIZED_EVIDENCE_CONFIRMED",
             "REJECTED_EVIDENCE_UNAVAILABLE",
             "FAILED_BUSINESS_VALIDATION",
             "FINALIZE_RECOVERY_REQUIRED",
-            "COMMITTED_DEGRADED",
             "FAILED"
     })
     void shouldUseMapperForEveryEvidenceGatedPublicStatus(RegulatedMutationState state) {
@@ -62,10 +48,5 @@ class RegulatedMutationPublicStatusMapperTest {
         );
 
         assertThat(status).isNotNull();
-        if (state == RegulatedMutationState.FINALIZED_VISIBLE) {
-            assertThat(status).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
-        } else {
-            assertThat(status).isNotEqualTo(SubmitDecisionOperationStatus.FINALIZED_VISIBLE);
-        }
     }
 }

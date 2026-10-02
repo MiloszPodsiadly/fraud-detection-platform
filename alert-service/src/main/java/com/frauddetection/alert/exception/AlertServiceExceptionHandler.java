@@ -21,6 +21,7 @@ import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditRequestEx
 import com.frauddetection.alert.governance.audit.InvalidGovernanceAuditDecisionException;
 import com.frauddetection.alert.idempotency.SharedInvalidIdempotencyKeyException;
 import com.frauddetection.alert.idempotency.SharedMissingIdempotencyKeyException;
+import com.frauddetection.alert.regulated.ConflictingResourceMutationException;
 import com.frauddetection.alert.regulated.MissingIdempotencyKeyException;
 import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
 import com.frauddetection.alert.service.ScoredTransactionNotFoundException;
@@ -115,7 +116,7 @@ public class AlertServiceExceptionHandler {
                         503,
                         "Service Unavailable",
                         "Audit persistence is unavailable; mutation was not executed.",
-                        List.of("reason:REJECTED_BEFORE_MUTATION")
+                        List.of("reason:REJECTED_EVIDENCE_UNAVAILABLE")
                 )
         );
     }
@@ -128,7 +129,7 @@ public class AlertServiceExceptionHandler {
                         202,
                         "Accepted",
                         exception.getMessage(),
-                        List.of("operation_status:COMMITTED_EVIDENCE_INCOMPLETE")
+                        List.of("operation_status:FINALIZE_RECOVERY_REQUIRED")
                 )
         );
     }
@@ -195,6 +196,21 @@ public class AlertServiceExceptionHandler {
                         "Conflict",
                         exception.getMessage(),
                         List.of("reason:IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD")
+                )
+        );
+    }
+
+    @ExceptionHandler(ConflictingResourceMutationException.class)
+    public ResponseEntity<ApiErrorResponse> handleConflictingResourceMutation(
+            ConflictingResourceMutationException exception
+    ) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(
+                new ApiErrorResponse(
+                        Instant.now(),
+                        409,
+                        "Conflict",
+                        exception.getMessage(),
+                        List.of("reason:RESOURCE_ACTION_ALREADY_CLAIMED")
                 )
         );
     }

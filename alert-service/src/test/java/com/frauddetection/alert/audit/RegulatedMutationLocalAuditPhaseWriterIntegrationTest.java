@@ -32,6 +32,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -54,7 +55,7 @@ class RegulatedMutationLocalAuditPhaseWriterIntegrationTest extends AbstractInte
 
     @BeforeEach
     void setUp() {
-        String databaseName = "fdp29_local_audit_writer_" + UUID.randomUUID().toString().replace("-", "");
+        String databaseName = "rm_audit_" + UUID.randomUUID().toString().replace("-", "");
         databaseFactory = new SimpleMongoClientDatabaseFactory(
                 FraudPlatformContainers.mongodb().getReplicaSetUrl(databaseName)
         );
@@ -91,9 +92,9 @@ class RegulatedMutationLocalAuditPhaseWriterIntegrationTest extends AbstractInte
         AuditEventDocument event = auditEventRepository.findByRequestId(command.getId() + ":SUCCESS").orElseThrow();
         assertThat(countAnchors(event.eventHash())).isEqualTo(1);
         assertContinuousChain(auditEventRepository.findFullChain(AuditEventDocument.PARTITION_KEY, 10));
-        assertCounter("fdp29_local_audit_chain_append_total", "outcome", "SUCCESS", 1.0d);
-        assertCounter("fdp29_local_audit_chain_append_total", "outcome", "DUPLICATE_PHASE", 1.0d);
-        assertThat(meterRegistry.get("fdp29_local_audit_chain_append_duration_ms").timer().count()).isEqualTo(2L);
+        assertCounter("regulated_mutation_local_audit_chain_append_total", "outcome", "SUCCESS", 1.0d);
+        assertCounter("regulated_mutation_local_audit_chain_append_total", "outcome", "DUPLICATE_PHASE", 1.0d);
+        assertThat(meterRegistry.get("regulated_mutation_local_audit_chain_append_duration_ms").timer().count()).isEqualTo(2L);
     }
 
     @Test
@@ -122,7 +123,7 @@ class RegulatedMutationLocalAuditPhaseWriterIntegrationTest extends AbstractInte
                     .containsExactly(1L);
             AuditEventDocument event = auditEventRepository.findByRequestId(command.getId() + ":SUCCESS").orElseThrow();
             assertThat(countAnchors(event.eventHash())).isEqualTo(1);
-            assertCounter("fdp29_local_audit_chain_append_total", "outcome", "DUPLICATE_PHASE", 1.0d);
+            assertCounter("regulated_mutation_local_audit_chain_append_total", "outcome", "DUPLICATE_PHASE", 1.0d);
         }
     }
 
@@ -144,7 +145,7 @@ class RegulatedMutationLocalAuditPhaseWriterIntegrationTest extends AbstractInte
 
         assertThat(mongoTemplate.count(new Query(), AuditEventDocument.class)).isZero();
         assertThat(mongoTemplate.count(new Query(), AuditAnchorDocument.class)).isZero();
-        assertCounter("fdp29_local_audit_chain_append_total", "outcome", "AUDIT_INSERT_FAILED", 1.0d);
+        assertCounter("regulated_mutation_local_audit_chain_append_total", "outcome", "AUDIT_INSERT_FAILED", 1.0d);
     }
 
     @Test
@@ -166,7 +167,7 @@ class RegulatedMutationLocalAuditPhaseWriterIntegrationTest extends AbstractInte
 
         assertThat(mongoTemplate.count(new Query(), AuditEventDocument.class)).isZero();
         assertThat(mongoTemplate.count(new Query(), AuditAnchorDocument.class)).isZero();
-        assertCounter("fdp29_local_audit_chain_append_total", "outcome", "ANCHOR_INSERT_FAILED", 1.0d);
+        assertCounter("regulated_mutation_local_audit_chain_append_total", "outcome", "ANCHOR_INSERT_FAILED", 1.0d);
 
         String recoveredAuditId = writer.recordSuccessPhase(
                 command("command-after-anchor-rollback", "idem-after-anchor-rollback", "alert-after-anchor-rollback"),
@@ -198,8 +199,8 @@ class RegulatedMutationLocalAuditPhaseWriterIntegrationTest extends AbstractInte
         assertThat(countEvents(command.getId() + ":SUCCESS")).isEqualTo(1);
         AuditEventDocument event = auditEventRepository.findByRequestId(command.getId() + ":SUCCESS").orElseThrow();
         assertThat(countAnchors(event.eventHash())).isEqualTo(1);
-        assertCounter("fdp29_local_audit_chain_append_total", "outcome", "LOCK_RELEASE_FAILED", 1.0d);
-        assertCounter("fdp29_local_audit_chain_lock_release_failure_total", 1.0d);
+        assertCounter("regulated_mutation_local_audit_chain_append_total", "outcome", "LOCK_RELEASE_FAILED", 1.0d);
+        assertCounter("regulated_mutation_local_audit_chain_lock_release_failure_total", 1.0d);
     }
 
     @Test
@@ -232,7 +233,7 @@ class RegulatedMutationLocalAuditPhaseWriterIntegrationTest extends AbstractInte
                 .hasSize(1)
                 .extracting(AuditEventDocument::chainPosition)
                 .containsExactly(1L);
-        assertCounter("fdp29_local_audit_chain_append_total", "outcome", "CHAIN_CONFLICT_EXHAUSTED", 1.0d);
+        assertCounter("regulated_mutation_local_audit_chain_append_total", "outcome", "CHAIN_CONFLICT_EXHAUSTED", 1.0d);
     }
 
     @Test
@@ -252,9 +253,31 @@ class RegulatedMutationLocalAuditPhaseWriterIntegrationTest extends AbstractInte
 
         assertThat(mongoTemplate.count(new Query(), AuditEventDocument.class)).isZero();
         assertThat(mongoTemplate.count(new Query(), AuditAnchorDocument.class)).isZero();
-        assertCounter("fdp29_local_audit_chain_append_total", "outcome", "CHAIN_CONFLICT_RETRY", 1.0d);
-        assertCounter("fdp29_local_audit_chain_append_total", "outcome", "CHAIN_CONFLICT_EXHAUSTED", 1.0d);
-        assertCounter("fdp29_local_audit_chain_retry_total", "reason", "LOCK_CONFLICT", 1.0d);
+        assertCounter("regulated_mutation_local_audit_chain_append_total", "outcome", "CHAIN_CONFLICT_RETRY", 1.0d);
+        assertCounter("regulated_mutation_local_audit_chain_append_total", "outcome", "CHAIN_CONFLICT_EXHAUSTED", 1.0d);
+        assertCounter("regulated_mutation_local_audit_chain_retry_total", "reason", "LOCK_CONFLICT", 1.0d);
+    }
+
+    @Test
+    void chainLockAcquisitionRetryDoesNotRetryProtectedCommit() {
+        ConflictOnceAuditChainLockRepository conflictOnceLockRepository =
+                new ConflictOnceAuditChainLockRepository(mongoTemplate);
+        RegulatedMutationLocalAuditPhaseWriter retryingWriter = writer(
+                auditEventRepository,
+                auditAnchorRepository,
+                conflictOnceLockRepository,
+                twoAttemptProperties()
+        );
+        AtomicInteger protectedCommitCalls = new AtomicInteger();
+
+        String result = retryingWriter.withChainLock(() -> {
+            protectedCommitCalls.incrementAndGet();
+            return "committed";
+        });
+
+        assertThat(result).isEqualTo("committed");
+        assertThat(conflictOnceLockRepository.acquireAttempts()).isEqualTo(2);
+        assertThat(protectedCommitCalls).hasValue(1);
     }
 
     private RegulatedMutationCommandDocument command(String commandId, String idempotencyKey, String alertId) {
@@ -387,6 +410,26 @@ class RegulatedMutationLocalAuditPhaseWriterIntegrationTest extends AbstractInte
         @Override
         public AuditChainLockDocument acquire(String partitionKey, String ownerToken) throws DataAccessException {
             throw new AuditChainConflictException("always locked");
+        }
+    }
+
+    private static final class ConflictOnceAuditChainLockRepository extends AuditChainLockRepository {
+        private final AtomicInteger acquireAttempts = new AtomicInteger();
+
+        private ConflictOnceAuditChainLockRepository(MongoTemplate mongoTemplate) {
+            super(mongoTemplate);
+        }
+
+        @Override
+        public AuditChainLockDocument acquire(String partitionKey, String ownerToken) throws DataAccessException {
+            if (acquireAttempts.incrementAndGet() == 1) {
+                throw new AuditChainConflictException("first acquisition conflicts");
+            }
+            return super.acquire(partitionKey, ownerToken);
+        }
+
+        private int acquireAttempts() {
+            return acquireAttempts.get();
         }
     }
 

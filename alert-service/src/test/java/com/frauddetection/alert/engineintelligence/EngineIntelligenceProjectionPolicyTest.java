@@ -236,6 +236,27 @@ class EngineIntelligenceProjectionPolicyTest {
     }
 
     @Test
+    void rejectsAvailableMlEngineWithoutModelIdentity() {
+        EngineIntelligenceSummary source = summaryMock();
+        EngineIntelligenceEngineResult ml = mock(EngineIntelligenceEngineResult.class);
+        when(ml.engineId()).thenReturn("ml.python.primary");
+        when(ml.engineType()).thenReturn(FraudEngineType.ML_MODEL);
+        when(ml.status()).thenReturn(FraudEngineStatus.AVAILABLE);
+        when(ml.riskLevel()).thenReturn(RiskLevel.HIGH);
+        when(ml.scoreBucket()).thenReturn(EngineIntelligenceScoreBucket.HIGH);
+        when(ml.reasonCodes()).thenReturn(List.of("MODEL_HIGH_RISK"));
+        when(source.engines()).thenReturn(List.of(
+                EngineIntelligenceProjectionTestFixtures.availableRules(
+                        RiskLevel.HIGH,
+                        EngineIntelligenceScoreBucket.HIGH
+                ),
+                ml
+        ));
+
+        assertValidation(source, EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
+    }
+
+    @Test
     void acceptsOperationalSignalWithoutRiskLevel() {
         EngineIntelligenceSummary source = summaryMock();
         when(source.diagnosticSignals()).thenReturn(List.of(EngineIntelligenceProjectionTestFixtures.operationalMlSignal()));

@@ -12,6 +12,8 @@ public enum AuditAction {
     READ_AUDIT_TRUST_ATTESTATION,
     EXTERNAL_ANCHOR_REQUIRED_FAILED,
     RESOLVE_AUDIT_DEGRADATION,
+    RESOLVE_TRANSACTIONAL_OUTBOX_CONFIRMATION,
+    // Retained only to deserialize immutable historical audit events; not an executable mutation.
     RESOLVE_DECISION_OUTBOX_CONFIRMATION,
     INSPECT_REGULATED_MUTATION_COMMAND,
     ACK_TRUST_INCIDENT,

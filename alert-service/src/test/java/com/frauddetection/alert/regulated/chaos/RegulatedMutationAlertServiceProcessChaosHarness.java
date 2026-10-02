@@ -88,16 +88,6 @@ public final class RegulatedMutationAlertServiceProcessChaosHarness implements A
         );
     }
 
-    public JsonNode inspectByIdempotencyKey(String idempotencyKey) {
-        return requestJson(
-                HttpRequest.newBuilder(uri("/api/v1/regulated-mutations/" + idempotencyKey))
-                        .timeout(Duration.ofSeconds(20))
-                        .GET()
-                        .headers(demoHeaders())
-                        .build()
-        );
-    }
-
     public RegulatedMutationChaosResult collectEvidence(RegulatedMutationChaosScenario scenario) {
         return collectEvidence(scenario, inspectByCommandId(scenario.commandId()), null);
     }
@@ -227,6 +217,18 @@ public final class RegulatedMutationAlertServiceProcessChaosHarness implements A
                         .headers(demoHeaders())
                         .build(),
                 HttpResponse.BodyHandlers.ofString()
+        );
+    }
+
+    public JsonNode submitDecision(String alertId, String idempotencyKey, String requestBody) {
+        return requestJson(
+                HttpRequest.newBuilder(uri("/api/v1/alerts/" + alertId + "/decision"))
+                        .timeout(Duration.ofSeconds(20))
+                        .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                        .header("Content-Type", "application/json")
+                        .header("X-Idempotency-Key", idempotencyKey)
+                        .headers(demoHeaders())
+                        .build()
         );
     }
 

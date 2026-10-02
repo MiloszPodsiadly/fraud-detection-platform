@@ -33,4 +33,4 @@ Template-only placeholders are allowed here and must not appear in generated CI 
 
 ## Non-Claims
 
-FDP-39 does not claim production enablement, bank enablement, bank certification, external finality, distributed ACID, Kafka exactly-once delivery, legal notarization, WORM guarantee, or automatic FDP-29 production enablement.
+FDP-39 does not claim production enablement, bank enablement, bank certification, external finality, distributed ACID, Kafka exactly-once delivery, legal notarization, WORM guarantee, or alternate runtime model enablement.

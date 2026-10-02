@@ -122,7 +122,7 @@ same Compose overlay combination as `make app-up`. From Git Bash on Windows with
 OpenSSL is used only to generate local identity fixture material. Private PEM keys are not committed to this
 repository.
 
-FDP-110 local startup runs the FDP-109 Python generator before Docker Compose starts, so `python` must be available on the host.
+Local startup runs the Python generator before Docker Compose starts, so `python` must be available on the host.
 
 ### Most Complete Local Security Demonstration Stack
 
@@ -154,13 +154,13 @@ docker compose --env-file deployment/.env \
   up --build -d
 ```
 
-The Shadow Performance dashboard uses the FDP-108 artifact-backed current provider. The base runtime is fail-closed by default, and the official full local launchers include
-`deployment/docker-compose.shadow-performance-generated.yml` so the dashboard uses the FDP-109 generated artifact.
+The Shadow Performance dashboard uses the artifact-backed current provider. The base runtime is fail-closed by default, and the official full local launchers include
+`deployment/docker-compose.shadow-performance-generated.yml` so the dashboard uses the generated artifact.
 If the generated artifact is still missing after local generation, startup fails with `Generated Shadow Performance Summary not found. Run: make shadow-performance-summary`.
 The provider must not display fake, sample, fallback, stale, demo, or zero metrics when no valid configured artifact
 is available.
 
-FDP-110 intentionally combines local generation before Compose, generated runtime mount, and shared global workspace counters as UI context. Global counters in the Shadow Performance workspace are shell-level context only; they are not part of `ShadowPerformanceSummary`, not model evaluation metrics, not promotion readiness, not threshold recommendation, not production decisioning, not payment authorization, and not analyst recommendation logic.
+The local launcher intentionally combines local generation before Compose, generated runtime mount, and shared global workspace counters as UI context. Global counters in the Shadow Performance workspace are shell-level context only; they are not part of `ShadowPerformanceSummary`, not model evaluation metrics, not promotion readiness, not threshold recommendation, not production decisioning, not payment authorization, and not analyst recommendation logic.
 
 To run the explicit generated-artifact path directly:
 
@@ -239,15 +239,6 @@ not production PKI, production provenance, or independent external trust anchori
 CI includes repository filesystem scanning for critical known vulnerabilities as review visibility only. It is
 not production image provenance; follow-up controls include digest pinning, SBOM generation, SLSA/provenance
 evidence, signed images and automated dependency updates.
-
-| Stack or overlay | Purpose | Uses demo secrets? | Production suitable? |
-| --- | --- | --- | --- |
-| Base | Full internal-only application stack and durable local dependencies, without host port publication. | Yes; the local trust authority has an HMAC fixture default. | No |
-| Dev | Local ports, demo auth and local service fixture wiring. | Yes | No |
-| OIDC local demo | Keycloak dev-mode browser login/BFF exercise. | Yes | No |
-| mTLS service identity local demo | Certificate-backed ML calls using generated local certificates. | Yes | No |
-| Trust-authority JWT local demo | JWT-authenticated calls to the local signing authority. | Yes | No |
-| Application container hardening overlay | Read-only Java, ML and UI containers with reduced application-container privileges for local verification. | Inherits selected stack. | No |
 
 #### What This Does Not Protect Against
 
@@ -424,7 +415,7 @@ Documentation and CI governance checks:
 ```bash
 node scripts/check-doc-overclaims.mjs
 node scripts/compare-ci-jobs.mjs
-node scripts/check-fdp-scope-helpers-smoke.mjs
+node scripts/check-scope-guard-helpers-smoke.mjs
 ```
 
 Integration tests use Docker/Testcontainers where applicable and are skipped automatically when Docker is not

@@ -21,7 +21,7 @@
 - verify no false success appears
 - verify recovery commands remain visible
 - verify alert, outbox, and audit counters are stable
-- verify FDP-29 flags can be disabled
+- verify rollback preserves current-only model routing and fail-closed preflight
 
 Rollback validation is governance evidence, not production rollback approval.
 

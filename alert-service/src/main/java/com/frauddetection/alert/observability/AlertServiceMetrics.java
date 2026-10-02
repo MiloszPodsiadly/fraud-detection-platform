@@ -22,7 +22,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.time.Duration;
+import java.util.EnumMap;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -45,9 +47,10 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     private final AtomicLong outboxConfirmationUnknown = new AtomicLong(0);
     private final AtomicLong outboxFailedTerminal = new AtomicLong(0);
     private final AtomicLong outboxProjectionMismatch = new AtomicLong(0);
+    private final AtomicLong outboxProjectionReconciliationPending = new AtomicLong(0);
     private final AtomicLong outboxOldestPendingAgeSeconds = new AtomicLong(0);
     private final AtomicLong evidenceConfirmationPending = new AtomicLong(0);
-    private final AtomicInteger evidenceGatedFinalizeSubmitDecisionEnabled = new AtomicInteger(0);
+    private final Map<AuditAction, AtomicInteger> evidenceGatedFinalizeEnabled = new EnumMap<>(AuditAction.class);
 
     public AlertServiceMetrics(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
@@ -63,32 +66,27 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         Gauge.builder("fraud_audit_integrity_status", auditIntegrityInvalid, AtomicInteger::get)
                 .tag("status", "INVALID")
                 .register(meterRegistry);
-        Gauge.builder("regulated_mutation_recovery_required_total", regulatedMutationRecoveryRequired, AtomicLong::get)
-                .register(meterRegistry);
         Gauge.builder("regulated_mutation_recovery_required_count", regulatedMutationRecoveryRequired, AtomicLong::get)
                 .register(meterRegistry);
         Gauge.builder("regulated_mutation_recovery_oldest_age_seconds", regulatedMutationRecoveryOldestAgeSeconds, AtomicLong::get)
                 .register(meterRegistry);
-        Gauge.builder("oldest_recovery_required_age_seconds", regulatedMutationRecoveryOldestAgeSeconds, AtomicLong::get)
-                .register(meterRegistry);
         Gauge.builder("regulated_mutation_recovery_failed_terminal_count", regulatedMutationRecoveryFailedTerminal, AtomicLong::get)
                 .register(meterRegistry);
-        Gauge.builder("recovery_failed_terminal_count", regulatedMutationRecoveryFailedTerminal, AtomicLong::get)
-                .register(meterRegistry);
-        Gauge.builder("regulated_mutation_recovery_repeated_failures_total", regulatedMutationRecoveryRepeatedFailures, AtomicLong::get)
-                .register(meterRegistry);
-        Gauge.builder("repeated_recovery_failures_count", regulatedMutationRecoveryRepeatedFailures, AtomicLong::get)
+        Gauge.builder("regulated_mutation_recovery_repeated_failures_count", regulatedMutationRecoveryRepeatedFailures, AtomicLong::get)
                 .register(meterRegistry);
         Gauge.builder("outbox_pending_count", outboxPending, AtomicLong::get).register(meterRegistry);
         Gauge.builder("outbox_processing_count", outboxProcessing, AtomicLong::get).register(meterRegistry);
         Gauge.builder("outbox_confirmation_unknown_count", outboxConfirmationUnknown, AtomicLong::get).register(meterRegistry);
         Gauge.builder("outbox_failed_terminal_count", outboxFailedTerminal, AtomicLong::get).register(meterRegistry);
         Gauge.builder("outbox_projection_mismatch_count", outboxProjectionMismatch, AtomicLong::get).register(meterRegistry);
+        Gauge.builder(
+                "outbox_projection_reconciliation_pending_count",
+                outboxProjectionReconciliationPending,
+                AtomicLong::get
+        ).register(meterRegistry);
         Gauge.builder("outbox_oldest_pending_age_seconds", outboxOldestPendingAgeSeconds, AtomicLong::get).register(meterRegistry);
         Gauge.builder("evidence_confirmation_pending_count", evidenceConfirmationPending, AtomicLong::get).register(meterRegistry);
-        Gauge.builder("evidence_gated_finalize_enabled", evidenceGatedFinalizeSubmitDecisionEnabled, AtomicInteger::get)
-                .tag("mutation_type", "SUBMIT_ANALYST_DECISION")
-                .register(meterRegistry);
+        registerEvidenceGatedFinalizeEnablementGauges();
     }
 
     public void recordAnalystDecisionSubmitted() {
@@ -276,6 +274,9 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         outboxConfirmationUnknown.set(Math.max(0L, response.confirmationUnknownCount()));
         outboxFailedTerminal.set(Math.max(0L, response.failedTerminalCount()));
         outboxProjectionMismatch.set(Math.max(0L, response.projectionMismatchCount()));
+        outboxProjectionReconciliationPending.set(
+                Math.max(0L, response.projectionReconciliationPendingCount())
+        );
         outboxOldestPendingAgeSeconds.set(response.oldestPendingAgeSeconds() == null ? 0L : Math.max(0L, response.oldestPendingAgeSeconds()));
     }
 
@@ -338,13 +339,36 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         ).increment();
     }
 
-    public void recordEvidenceGatedFinalizeStuckVisible() {
-        counter("evidence_gated_finalize_stuck_visible_total").increment();
+    public void recordEvidenceGatedFinalizeEnabled(AuditAction mutationType, boolean enabled) {
+        AtomicInteger state = evidenceGatedFinalizeEnabled.get(mutationType);
+        if (state == null) {
+            throw new IllegalArgumentException("Unsupported evidence-gated mutation type: " + mutationType);
+        }
+        state.set(enabled ? 1 : 0);
     }
 
-    public void recordEvidenceGatedFinalizeEnabled(String mutationType, boolean enabled) {
-        if ("SUBMIT_ANALYST_DECISION".equals(mutationType)) {
-            evidenceGatedFinalizeSubmitDecisionEnabled.set(enabled ? 1 : 0);
+    public void recordRegulatedMutationAlertStatusProjection(String outcome, String reason) {
+        counter(
+                "regulated_mutation_alert_status_projection_total",
+                "outcome", normalizeAlertStatusProjectionOutcome(outcome),
+                "reason", normalizeAlertStatusProjectionReason(reason)
+        ).increment();
+    }
+
+    private void registerEvidenceGatedFinalizeEnablementGauges() {
+        for (AuditAction action : new AuditAction[]{
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditAction.UPDATE_FRAUD_CASE,
+                AuditAction.RESOLVE_TRANSACTIONAL_OUTBOX_CONFIRMATION,
+                AuditAction.ACK_TRUST_INCIDENT,
+                AuditAction.RESOLVE_TRUST_INCIDENT,
+                AuditAction.REFRESH_TRUST_INCIDENTS
+        }) {
+            AtomicInteger state = new AtomicInteger(0);
+            evidenceGatedFinalizeEnabled.put(action, state);
+            Gauge.builder("evidence_gated_finalize_enabled", state, AtomicInteger::get)
+                    .tag("mutation_type", action.name())
+                    .register(meterRegistry);
         }
     }
 
@@ -554,28 +578,28 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         ).increment();
     }
 
-    public void recordFdp29LocalAuditChainAppend(String outcome) {
+    public void recordRegulatedMutationLocalAuditChainAppend(String outcome) {
         counter(
-                "fdp29_local_audit_chain_append_total",
-                "outcome", normalizeFdp29LocalAuditChainAppendOutcome(outcome)
+                "regulated_mutation_local_audit_chain_append_total",
+                "outcome", normalizeRegulatedMutationLocalAuditChainAppendOutcome(outcome)
         ).increment();
     }
 
-    public void recordFdp29LocalAuditChainRetry(String reason) {
+    public void recordRegulatedMutationLocalAuditChainRetry(String reason) {
         counter(
-                "fdp29_local_audit_chain_retry_total",
-                "reason", normalizeFdp29LocalAuditChainRetryReason(reason)
+                "regulated_mutation_local_audit_chain_retry_total",
+                "reason", normalizeRegulatedMutationLocalAuditChainRetryReason(reason)
         ).increment();
     }
 
-    public void recordFdp29LocalAuditChainAppendDuration(Duration duration) {
-        Timer.builder("fdp29_local_audit_chain_append_duration_ms")
+    public void recordRegulatedMutationLocalAuditChainAppendDuration(Duration duration) {
+        Timer.builder("regulated_mutation_local_audit_chain_append_duration_ms")
                 .register(meterRegistry)
                 .record(duration == null || duration.isNegative() ? Duration.ZERO : duration);
     }
 
-    public void recordFdp29LocalAuditChainLockReleaseFailure() {
-        counter("fdp29_local_audit_chain_lock_release_failure_total").increment();
+    public void recordRegulatedMutationLocalAuditChainLockReleaseFailure() {
+        counter("regulated_mutation_local_audit_chain_lock_release_failure_total").increment();
     }
 
     public void recordExternalCoverageRequestCost(String status, int cost) {
@@ -1213,7 +1237,6 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     private String normalizePostCommitOperation(String operation) {
         if ("SUBMIT_ANALYST_DECISION".equals(operation)
                 || "UPDATE_FRAUD_CASE".equals(operation)
-                || "RESOLVE_DECISION_OUTBOX_CONFIRMATION".equals(operation)
                 || "ACK_TRUST_INCIDENT".equals(operation)
                 || "RESOLVE_TRUST_INCIDENT".equals(operation)) {
             return operation;
@@ -1227,8 +1250,8 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
                  "OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN",
                  "OUTBOX_PROJECTION_MISMATCH",
                  "REGULATED_MUTATION_RECOVERY_REQUIRED",
-                 "REGULATED_MUTATION_COMMITTED_DEGRADED",
-                 "EVIDENCE_CONFIRMATION_FAILED",
+                 "REGULATED_MUTATION_FINALIZE_RECOVERY_REQUIRED",
+                 "EVIDENCE_CONFIRMATION_RECOVERY_REQUIRED",
                  "AUDIT_DEGRADATION_UNRESOLVED",
                  "COVERAGE_UNAVAILABLE",
                  "EXTERNAL_ANCHOR_GAP",
@@ -1336,7 +1359,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         }
         return switch (state.name()) {
             case "REQUESTED", "EVIDENCE_PREPARING", "EVIDENCE_PREPARED", "FINALIZING",
-                 "FINALIZED_VISIBLE", "FINALIZED_EVIDENCE_PENDING_EXTERNAL", "FINALIZED_EVIDENCE_CONFIRMED",
+                 "FINALIZED_EVIDENCE_PENDING_EXTERNAL", "FINALIZED_EVIDENCE_CONFIRMED",
                  "REJECTED_EVIDENCE_UNAVAILABLE", "FAILED_BUSINESS_VALIDATION", "FINALIZE_RECOVERY_REQUIRED" -> state.name();
             default -> "UNKNOWN";
         };
@@ -1353,7 +1376,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         return switch (reason) {
             case "ATTEMPTED_AUDIT_UNAVAILABLE", "EVIDENCE_GATED_TRANSACTION_REQUIRED",
                  "EVIDENCE_GATED_FINALIZE_FAILED", "FINALIZING_RETRY_REQUIRES_RECONCILIATION",
-                 "FINALIZED_VISIBLE_MISSING_PROOF", "SUCCESS_AUDIT_MISSING", "OUTBOX_FAILED_TERMINAL",
+                 "SUCCESS_AUDIT_MISSING", "OUTBOX_FAILED_TERMINAL",
                  "OUTBOX_RECORD_MISSING_AFTER_LOCAL_COMMIT", "OUTBOX_NOT_YET_PUBLISHED",
                  "SIGNATURE_INVALID", "BUSINESS_VALIDATION_FAILED", "TRANSACTION_CAPABILITY_UNAVAILABLE",
                  "OUTBOX_REPOSITORY_UNAVAILABLE", "OUTBOX_RECOVERY_DISABLED", "RECOVERY_STRATEGY_UNAVAILABLE",
@@ -1451,7 +1474,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
             return "UNKNOWN";
         }
         return switch (modelVersion.name()) {
-            case "LEGACY_REGULATED_MUTATION", "EVIDENCE_GATED_FINALIZE_V1" -> modelVersion.name();
+            case "EVIDENCE_GATED_FINALIZE_V1" -> modelVersion.name();
             default -> "UNKNOWN";
         };
     }
@@ -1462,11 +1485,9 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         }
         return switch (state.name()) {
             case "REQUESTED", "EVIDENCE_PREPARING", "EVIDENCE_PREPARED", "FINALIZING",
-                 "FINALIZED_VISIBLE", "FINALIZED_EVIDENCE_PENDING_EXTERNAL", "FINALIZED_EVIDENCE_CONFIRMED",
+                 "FINALIZED_EVIDENCE_PENDING_EXTERNAL", "FINALIZED_EVIDENCE_CONFIRMED",
                  "REJECTED_EVIDENCE_UNAVAILABLE", "FAILED_BUSINESS_VALIDATION", "FINALIZE_RECOVERY_REQUIRED",
-                 "AUDIT_ATTEMPTED", "BUSINESS_COMMITTING", "BUSINESS_COMMITTED", "SUCCESS_AUDIT_PENDING",
-                 "SUCCESS_AUDIT_RECORDED", "EVIDENCE_PENDING", "EVIDENCE_CONFIRMED", "COMMITTED",
-                 "COMMITTED_DEGRADED", "REJECTED", "FAILED" -> state.name();
+                 "FAILED" -> state.name();
             default -> "UNKNOWN";
         };
     }
@@ -1515,8 +1536,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
             return "UNKNOWN";
         }
         return switch (checkpoint.name()) {
-            case "BEFORE_ATTEMPTED_AUDIT", "BEFORE_LEGACY_BUSINESS_COMMIT",
-                 "BEFORE_SUCCESS_AUDIT_RETRY", "BEFORE_EVIDENCE_PREPARATION",
+            case "BEFORE_EVIDENCE_PREPARATION",
                  "BEFORE_EVIDENCE_GATED_FINALIZE", "AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE" -> checkpoint.name();
             default -> "UNKNOWN";
         };
@@ -1529,7 +1549,21 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         };
     }
 
-    private String normalizeFdp29LocalAuditChainAppendOutcome(String outcome) {
+    private String normalizeAlertStatusProjectionOutcome(String outcome) {
+        return switch (outcome) {
+            case "SUCCESS", "FAILED" -> outcome;
+            default -> "FAILED";
+        };
+    }
+
+    private String normalizeAlertStatusProjectionReason(String reason) {
+        return switch (reason) {
+            case "UPDATED", "ALREADY_CURRENT", "TARGET_NOT_FOUND_OR_MISMATCH", "DATA_ACCESS_ERROR" -> reason;
+            default -> "DATA_ACCESS_ERROR";
+        };
+    }
+
+    private String normalizeRegulatedMutationLocalAuditChainAppendOutcome(String outcome) {
         return switch (outcome) {
             case "SUCCESS", "DUPLICATE_PHASE", "CHAIN_CONFLICT_RETRY", "CHAIN_CONFLICT_EXHAUSTED",
                  "AUDIT_INSERT_FAILED", "ANCHOR_INSERT_FAILED", "LOCK_RELEASE_FAILED" -> outcome;
@@ -1537,7 +1571,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         };
     }
 
-    private String normalizeFdp29LocalAuditChainRetryReason(String reason) {
+    private String normalizeRegulatedMutationLocalAuditChainRetryReason(String reason) {
         return switch (reason) {
             case "CHAIN_CONFLICT", "DUPLICATE_KEY", "LOCK_CONFLICT" -> reason;
             default -> "CHAIN_CONFLICT";

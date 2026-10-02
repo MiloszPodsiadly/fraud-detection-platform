@@ -31,7 +31,7 @@ MAX_PROMOTION_READINESS_INPUT_BYTES = 262_144
 
 
 class PromotionReviewReadinessGenerationError(RuntimeError):
-    """Raised when FDP-111 cannot safely publish the local diagnostic report."""
+    """Raised when Promotion Review Readiness cannot safely publish the local diagnostic report."""
 
 
 def generate_promotion_review_readiness_report(
@@ -112,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate a non-decisioning PromotionReviewReadinessReport v1 artifact for FDP-111."
+        description="Generate a non-decisioning Promotion Review Readiness v1 report artifact."
     )
     parser.add_argument("--shadow-summary", default=str(DEFAULT_SHADOW_SUMMARY))
     parser.add_argument("--shadow-summary-manifest", default=str(DEFAULT_SHADOW_SUMMARY_MANIFEST))

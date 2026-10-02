@@ -8,12 +8,10 @@ import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorCoverageResponse;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorSink;
 import com.frauddetection.alert.audit.external.ExternalWitnessCapabilities;
-import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.regulated.RegulatedMutationRecoveryService;
-import com.frauddetection.alert.service.DecisionOutboxStatus;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.trust.TrustIncidentService;
 import com.frauddetection.alert.trust.TrustIncidentSummary;
@@ -47,7 +45,6 @@ public class SystemTrustLevelController implements ApplicationRunner {
     private final com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService;
     private final ExternalAuditAnchorSink externalAuditAnchorSink;
     private final AuditDegradationService auditDegradationService;
-    private final AlertRepository alertRepository;
     private final TransactionalOutboxRecordRepository outboxRepository;
     private final RegulatedMutationRecoveryService regulatedMutationRecoveryService;
     private final Duration staleOutboxThreshold;
@@ -88,20 +85,20 @@ public class SystemTrustLevelController implements ApplicationRunner {
 
     @Autowired
     public SystemTrustLevelController(
-            @Value("${app.audit.external-anchoring.publication.enabled:${app.audit.external-anchoring.enabled:false}}") boolean publicationEnabled,
-            @Value("${app.audit.external-anchoring.publication.required:${app.audit.external-anchoring.enabled:false}}") boolean publicationRequired,
-            @Value("${app.audit.external-anchoring.publication.fail-closed:${app.audit.external-anchoring.publication.required:${app.audit.external-anchoring.enabled:false}}}") boolean failClosed,
+            @Value("${app.audit.external-anchoring.publication.enabled:false}") boolean publicationEnabled,
+            @Value("${app.audit.external-anchoring.publication.required:false}") boolean publicationRequired,
+            @Value("${app.audit.external-anchoring.publication.fail-closed:false}") boolean failClosed,
             @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed,
             @Value("${app.audit.trust-authority.enabled:false}") boolean trustAuthorityEnabled,
             @Value("${app.audit.trust-authority.signing-required:false}") boolean signingRequired,
-            @Value("${app.alert.decision-outbox.stale-threshold:PT10M}") Duration staleOutboxThreshold,
+            @Value("${app.outbox.stale-threshold:PT10M}") Duration staleOutboxThreshold,
             @Value("${app.regulated-mutations.transaction-mode:OFF}") String transactionMode,
             @Value("${app.outbox.publisher.enabled:true}") boolean outboxPublisherEnabled,
             @Value("${app.evidence-confirmation.enabled:true}") boolean evidenceConfirmationEnabled,
             com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService,
             ExternalAuditAnchorSink externalAuditAnchorSink,
             AuditDegradationService auditDegradationService,
-            AlertRepository alertRepository,
+            AlertRepository ignoredAlertRepository,
             ObjectProvider<TransactionalOutboxRecordRepository> outboxRepository,
             RegulatedMutationRecoveryService regulatedMutationRecoveryService,
             ObjectProvider<TrustIncidentService> trustIncidentService,
@@ -117,7 +114,6 @@ public class SystemTrustLevelController implements ApplicationRunner {
         this.externalAuditIntegrityService = externalAuditIntegrityService;
         this.externalAuditAnchorSink = externalAuditAnchorSink;
         this.auditDegradationService = auditDegradationService;
-        this.alertRepository = alertRepository;
         this.outboxRepository = outboxRepository == null ? null : outboxRepository.getIfAvailable();
         this.regulatedMutationRecoveryService = regulatedMutationRecoveryService;
         this.staleOutboxThreshold = staleOutboxThreshold == null ? Duration.ofMinutes(10) : staleOutboxThreshold;
@@ -221,6 +217,8 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 live.outboxPublishAttemptedCount(),
                 live.outboxPublishConfirmationUnknownCount(),
                 live.outboxProjectionMismatchCount(),
+                live.outboxProjectionReconciliationPendingCount(),
+                live.outboxRecoveryRequiredCount(),
                 live.outboxFailedTerminalCount(),
                 live.outboxPublishConfirmationUnknownCount(),
                 live.outboxPublishConfirmationUnknownCount(),
@@ -229,16 +227,15 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 live.outboxOldestAmbiguousAgeSeconds(),
                 live.regulatedMutationRecoveryRequiredCount(),
                 live.staleProcessingLeaseCount(),
-                live.committedDegradedCount(),
+                live.finalizeRecoveryRequiredCount(),
                 live.evidenceConfirmationPendingCount(),
-                live.evidenceConfirmationFailedCount(),
                 live.repeatedRecoveryFailureCount(),
                 live.oldestRecoveryRequiredAgeSeconds(),
                 live.reasonCode(),
                 transactionMode,
                 transactionCapabilityStatus(),
                 outboxDeliveryMode(),
-                evidenceConfirmationEnabled ? "ENABLED" : "DISABLED",
+                evidenceConfirmationEnabled ? "ENABLED_PROVENANCE_AWARE" : "DISABLED",
                 live.openCriticalIncidentCount(),
                 live.openHighIncidentCount(),
                 live.unacknowledgedCriticalIncidentCount(),
@@ -268,7 +265,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
             if (!bankModeFailClosed) {
                 throw new IllegalStateException("app.audit.bank-mode.fail-closed=true is required when external publication is required and fail-closed.");
             }
-            log.info("FDP-24 FAIL-CLOSED MODE ACTIVE");
+            log.info("External audit publication fail-closed mode active.");
         }
     }
 
@@ -311,9 +308,10 @@ public class SystemTrustLevelController implements ApplicationRunner {
         long postCommitDegradedResolved = auditDegradationService == null ? 0L : auditDegradationService.resolvedCount();
         long regulatedRecoveryRequired = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.recoveryRequiredCount();
         long staleProcessingLeaseCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.staleProcessingLeaseCount();
-        long committedDegradedCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.committedDegradedCount();
+        long finalizeRecoveryRequiredCount = regulatedMutationRecoveryService == null
+                ? 0L
+                : regulatedMutationRecoveryService.finalizeRecoveryRequiredCount();
         long evidenceConfirmationPendingCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.evidenceConfirmationPendingCount();
-        long evidenceConfirmationFailedCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.evidenceConfirmationFailedCount();
         long repeatedRecoveryFailureCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.repeatedRecoveryFailureCount();
         Long oldestRecoveryRequiredAgeSeconds = regulatedMutationRecoveryService == null ? null : regulatedMutationRecoveryService.oldestRecoveryRequiredAgeSeconds();
         OutboxState outboxState = outboxState();
@@ -347,15 +345,17 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 && (!bankModeFailClosed || (trustAuthorityEnabled && signingRequired))
                 && (!bankModeFailClosed || "REQUIRED".equals(transactionMode))
                 && outboxState.failedTerminalCount() == 0
+                && outboxState.recoveryRequiredCount() == 0
                 && outboxState.projectionMismatchCount() == 0
+                && outboxState.projectionReconciliationPendingCount() == 0
                 && outboxState.publishConfirmationUnknownCount() == 0
                 && outboxState.publishAttemptedCount() == 0
                 && outboxState.pendingResolutionCount() == 0
                 && !outboxState.stalePending()
+                && outboxState.available()
                 && regulatedRecoveryRequired == 0
                 && staleProcessingLeaseCount == 0
-                && committedDegradedCount == 0
-                && evidenceConfirmationFailedCount == 0
+                && finalizeRecoveryRequiredCount == 0
                 && repeatedRecoveryFailureCount == 0
                 && oldestRecoveryRequiredAgeSeconds == null
                 && incidentSummary.openCriticalIncidentCount() == 0
@@ -393,11 +393,8 @@ public class SystemTrustLevelController implements ApplicationRunner {
         if (reasonCode == null && staleProcessingLeaseCount > 0) {
             reasonCode = "REGULATED_MUTATION_STALE_PROCESSING_LEASE";
         }
-        if (reasonCode == null && committedDegradedCount > 0) {
-            reasonCode = "REGULATED_MUTATION_COMMITTED_DEGRADED";
-        }
-        if (reasonCode == null && evidenceConfirmationFailedCount > 0) {
-            reasonCode = "EVIDENCE_CONFIRMATION_FAILED";
+        if (reasonCode == null && finalizeRecoveryRequiredCount > 0) {
+            reasonCode = "REGULATED_MUTATION_FINALIZE_RECOVERY_REQUIRED";
         }
         if (reasonCode == null && repeatedRecoveryFailureCount > 0) {
             reasonCode = "REGULATED_MUTATION_REPEATED_RECOVERY_FAILURE";
@@ -424,14 +421,15 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 outboxState.publishAttemptedCount(),
                 outboxState.publishConfirmationUnknownCount(),
                 outboxState.projectionMismatchCount(),
+                outboxState.projectionReconciliationPendingCount(),
+                outboxState.recoveryRequiredCount(),
                 outboxState.pendingResolutionCount(),
                 outboxState.oldestPendingAgeSeconds(),
                 outboxState.oldestAmbiguousAgeSeconds(),
                 regulatedRecoveryRequired,
                 staleProcessingLeaseCount,
-                committedDegradedCount,
+                finalizeRecoveryRequiredCount,
                 evidenceConfirmationPendingCount,
-                evidenceConfirmationFailedCount,
                 repeatedRecoveryFailureCount,
                 oldestRecoveryRequiredAgeSeconds,
                 reasonCode,
@@ -473,41 +471,13 @@ public class SystemTrustLevelController implements ApplicationRunner {
     }
 
     private OutboxState outboxState() {
+        if (outboxRepository == null) {
+            return OutboxState.unavailable();
+        }
         try {
-            if (alertRepository == null) {
-                return new OutboxState(0L, 0L, 0L, 0L, 0L, 0L, 0L, null, null, false, null);
-            }
-            if (outboxRepository != null) {
-                return transactionalOutboxState();
-            }
-            List<String> pendingStatuses = List.of(
-                    DecisionOutboxStatus.PENDING,
-                    DecisionOutboxStatus.PROCESSING,
-                    DecisionOutboxStatus.FAILED_RETRYABLE
-            );
-            long failedTerminalCount = alertRepository.countByDecisionOutboxStatus(DecisionOutboxStatus.FAILED_TERMINAL);
-            long unknownCount = alertRepository.countByDecisionOutboxStatus(DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
-            long pendingResolutionCount = alertRepository.countByDecisionOutboxResolutionPending(true);
-            Long oldestPendingAge = alertRepository.findTopByDecisionOutboxStatusInOrderByDecidedAtAsc(pendingStatuses)
-                    .map(this::pendingAgeSeconds)
-                    .orElse(null);
-            Long oldestUnknownAge = alertRepository.findTopByDecisionOutboxStatusOrderByDecidedAtAsc(DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN)
-                    .map(this::pendingAgeSeconds)
-                    .orElse(null);
-            boolean stalePending = oldestPendingAge != null && oldestPendingAge > staleOutboxThreshold.toSeconds();
-            String reason = null;
-            if (failedTerminalCount > 0) {
-                reason = "OUTBOX_TERMINAL_FAILURE";
-            } else if (unknownCount > 0) {
-                reason = "OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN";
-            } else if (pendingResolutionCount > 0) {
-                reason = "OUTBOX_RESOLUTION_PENDING_APPROVAL";
-            } else if (stalePending) {
-                reason = "OUTBOX_STALE_PENDING";
-            }
-            return new OutboxState(0L, 0L, 0L, failedTerminalCount, unknownCount, 0L, pendingResolutionCount, oldestPendingAge, oldestUnknownAge, stalePending, reason);
+            return transactionalOutboxState();
         } catch (DataAccessException exception) {
-            return new OutboxState(0L, 0L, 0L, 1L, 1L, 1L, 1L, null, null, true, "OUTBOX_STATUS_UNAVAILABLE");
+            return OutboxState.unavailable();
         }
     }
 
@@ -522,7 +492,10 @@ public class SystemTrustLevelController implements ApplicationRunner {
         long processingCount = outboxRepository.countByStatus(TransactionalOutboxStatus.PROCESSING);
         long publishAttemptedCount = outboxRepository.countByStatus(TransactionalOutboxStatus.PUBLISH_ATTEMPTED);
         long unknownCount = outboxRepository.countByStatus(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
+        long recoveryRequiredCount = outboxRepository.countByStatus(TransactionalOutboxStatus.RECOVERY_REQUIRED);
         long projectionMismatchCount = outboxRepository.countByProjectionMismatchTrue();
+        long projectionReconciliationPendingCount = outboxRepository.countByProjectionReconcileAfterIsNotNull();
+        long pendingResolutionCount = outboxRepository.countByResolutionPendingTrue();
         Long oldestPendingAge = outboxRepository.findTopByStatusInOrderByCreatedAtAsc(pendingStatuses)
                 .map(document -> {
                     Instant created = document.getCreatedAt();
@@ -533,16 +506,37 @@ public class SystemTrustLevelController implements ApplicationRunner {
         String reason = null;
         if (failedTerminalCount > 0) {
             reason = "OUTBOX_TERMINAL_FAILURE";
+        } else if (recoveryRequiredCount > 0) {
+            reason = "OUTBOX_RECOVERY_REQUIRED";
         } else if (projectionMismatchCount > 0) {
             reason = "OUTBOX_PROJECTION_MISMATCH";
+        } else if (projectionReconciliationPendingCount > 0) {
+            reason = "OUTBOX_PROJECTION_RECONCILIATION_PENDING";
         } else if (publishAttemptedCount > 0) {
             reason = "OUTBOX_PUBLISH_ATTEMPT_CONFIRMATION_PENDING";
         } else if (unknownCount > 0) {
             reason = "OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN";
+        } else if (pendingResolutionCount > 0) {
+            reason = "OUTBOX_RESOLUTION_PENDING_APPROVAL";
         } else if (stalePending) {
             reason = "OUTBOX_STALE_PENDING";
         }
-        return new OutboxState(pendingCount, processingCount, publishAttemptedCount, failedTerminalCount, unknownCount, projectionMismatchCount, 0L, oldestPendingAge, null, stalePending, reason);
+        return new OutboxState(
+                true,
+                pendingCount,
+                processingCount,
+                publishAttemptedCount,
+                failedTerminalCount,
+                recoveryRequiredCount,
+                unknownCount,
+                projectionMismatchCount,
+                projectionReconciliationPendingCount,
+                pendingResolutionCount,
+                oldestPendingAge,
+                null,
+                stalePending,
+                reason
+        );
     }
 
     private String outboxDeliveryMode() {
@@ -554,14 +548,6 @@ public class SystemTrustLevelController implements ApplicationRunner {
             return "LOCAL_MONGO_TRANSACTION_REQUIRED";
         }
         return "NON_TRANSACTIONAL_RECOVERABLE_SAGA";
-    }
-
-    private long pendingAgeSeconds(AlertDocument document) {
-        Instant decidedAt = document.getDecidedAt();
-        if (decidedAt == null) {
-            return 0L;
-        }
-        return Math.max(0L, Duration.between(decidedAt, Instant.now()).toSeconds());
     }
 
     private record LiveTrustState(
@@ -580,14 +566,15 @@ public class SystemTrustLevelController implements ApplicationRunner {
             long outboxPublishAttemptedCount,
             long outboxPublishConfirmationUnknownCount,
             long outboxProjectionMismatchCount,
+            long outboxProjectionReconciliationPendingCount,
+            long outboxRecoveryRequiredCount,
             long outboxPendingResolutionCount,
             Long outboxOldestPendingAgeSeconds,
             Long outboxOldestAmbiguousAgeSeconds,
             long regulatedMutationRecoveryRequiredCount,
             long staleProcessingLeaseCount,
-            long committedDegradedCount,
+            long finalizeRecoveryRequiredCount,
             long evidenceConfirmationPendingCount,
-            long evidenceConfirmationFailedCount,
             long repeatedRecoveryFailureCount,
             Long oldestRecoveryRequiredAgeSeconds,
             String reasonCode,
@@ -601,17 +588,38 @@ public class SystemTrustLevelController implements ApplicationRunner {
     }
 
     private record OutboxState(
+            boolean available,
             long pendingCount,
             long processingCount,
             long publishAttemptedCount,
             long failedTerminalCount,
+            long recoveryRequiredCount,
             long publishConfirmationUnknownCount,
             long projectionMismatchCount,
+            long projectionReconciliationPendingCount,
             long pendingResolutionCount,
             Long oldestPendingAgeSeconds,
             Long oldestAmbiguousAgeSeconds,
             boolean stalePending,
             String reasonCode
     ) {
+        private static OutboxState unavailable() {
+            return new OutboxState(
+                    false,
+                    0L,
+                    0L,
+                    0L,
+                    0L,
+                    0L,
+                    0L,
+                    0L,
+                    0L,
+                    0L,
+                    null,
+                    null,
+                    false,
+                    "OUTBOX_STATUS_UNAVAILABLE"
+            );
+        }
     }
 }

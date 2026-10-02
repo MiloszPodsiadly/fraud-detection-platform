@@ -42,7 +42,7 @@ class PythonMlSignalEngineDescriptorTest {
     }
 
     @Test
-    void reasonCodeEnumContainsOnlyFdp88EmittedAdapterCodes() {
+    void reasonCodeEnumContainsOnlyMlAdapterEmittedCodes() {
         assertThat(Arrays.stream(PythonMlSignalReasonCode.values()).map(PythonMlSignalReasonCode::wireValue))
                 .containsExactly(
                         "ML_MODEL_SIGNAL",

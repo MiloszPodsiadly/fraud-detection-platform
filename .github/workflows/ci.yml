@@ -109,7 +109,7 @@ jobs:
         run: docker version
 
       - name: Run FDP-43 retired lifecycle cleanup guard suite
-        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=IdempotencyCanonicalHasherTest,SharedIdempotencyKeyPolicyTest,FraudCasePatchRegulatedMutationProofTest,FraudCaseRemovedRouteRuntimeTest,FraudCaseRemovedApiSurfaceTest,FraudCaseCurrentApiSurfaceTest,FraudCaseMutationInvariantTest,FraudCaseControllerTest,FraudCaseSecurityIntegrationTest,RegulatedMutationIdempotencyPrimitiveCompatibilityTest" test
+        run: mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am "-Dtest=IdempotencyCanonicalHasherTest,SharedIdempotencyKeyPolicyTest,FraudCasePatchRegulatedMutationProofTest,FraudCaseRemovedRouteRuntimeTest,FraudCaseRemovedApiSurfaceTest,FraudCaseCurrentApiSurfaceTest,FraudCaseMutationInvariantTest,FraudCaseControllerTest,FraudCaseSecurityIntegrationTest,RegulatedMutationIdempotencyPrimitiveStabilityTest" test
 
       - name: Verify FDP-43 proof suite reports
         run: node scripts/ci/verify-junit-reports.mjs --suite fdp43
@@ -202,7 +202,7 @@ jobs:
       - name: Run FDP-45 fraud case work queue read model suite
         run: >-
           mvn -B "-Dsurefire.failIfNoSpecifiedTests=false" -pl alert-service -am
-          "-Dtest=Fdp45FraudCaseReadModelSingleSourceOfTruthTest,Fdp45FraudCaseWorkQueuePaginationTest,Fdp45FraudCaseWorkQueueSortingTest,Fdp45FraudCaseWorkQueueFilterTest,Fdp45FraudCaseWorkQueueDuplicateParamTest,Fdp45FraudCaseWorkQueueSlaConfigTest,Fdp45FraudCaseProdSlaConfigTest,Fdp45FraudCaseWorkQueueSlaAgeTest,Fdp45FraudCaseWorkQueueReadOnlySafetyTest,Fdp45FraudCaseWorkQueueSecurityTest,Fdp45FraudCaseWorkQueueObservabilityTest,Fdp45FraudCaseWorkQueueFailureMetricsTest,Fdp45FraudCaseWorkQueueReadAccessAuditTest,Fdp45FraudCaseWorkQueueMongoIntegrationTest,Fdp45FraudCaseWorkQueueDocsNoOverclaimTest,Fdp45FraudCaseWorkQueueDeepPaginationTest,Fdp45FraudCaseWorkQueueIndexReadinessTest,Fdp45FraudCaseCompoundIndexReadinessDocsTest,Fdp45FraudCaseWorkQueueOpenApiContractTest,Fdp45FraudCaseWorkQueueFailedReadAuditTest,Fdp45FraudCaseWorkQueueFilterLengthTest,Fdp45FraudCaseWorkQueueNoDuplicateAuditAdviceTest,Fdp45ReadAccessAuditResponseAdviceMarkerTest,Fdp45FraudCaseWorkQueueAuditPrecedenceTest,Fdp45SensitiveReadAuditUnavailableRunbookTest,Fdp45FraudCaseReadPolicyNamingBoundaryTest,Fdp45FraudCaseLegacyExactCountCompatibilityDocsTest,Fdp45FraudCaseReadQueryPolicyContractTest,Fdp45FraudCaseWorkQueueCursorArchitectureTest,Fdp45FraudCaseWorkQueueCursorCodecTest,Fdp45FraudCaseWorkQueueCursorPaginationTest,Fdp45FraudCaseWorkQueueCursorQueryFingerprintTest,Fdp45FraudCaseWorkQueueCursorFilterBindingTest,Fdp45FraudCaseWorkQueueCursorPageCombinationTest,Fdp45FraudCaseWorkQueueCursorSecretProfileTest,Fdp45FraudCaseWorkQueueCursorObservabilityTest,Fdp45FraudCaseWorkQueueCursorDocsContractTest,Fdp45FraudCaseWorkQueueSortFieldCoverageTest,Fdp45FraudCaseWorkQueueCursorSizeChangeTest,SensitiveReadAuditServiceTest"
+          "-Dtest=FraudCaseReadModelSingleSourceOfTruthTest,FraudCaseWorkQueuePaginationTest,FraudCaseWorkQueueSortingTest,FraudCaseWorkQueueFilterTest,FraudCaseWorkQueueDuplicateParamTest,FraudCaseWorkQueueSlaConfigTest,FraudCaseProdSlaConfigTest,FraudCaseWorkQueueSlaAgeTest,FraudCaseWorkQueueReadOnlySafetyTest,FraudCaseWorkQueueSecurityTest,FraudCaseWorkQueueObservabilityTest,FraudCaseWorkQueueFailureMetricsTest,FraudCaseWorkQueueReadAccessAuditTest,FraudCaseWorkQueueMongoIntegrationTest,FraudCaseWorkQueueDocsNoOverclaimTest,FraudCaseWorkQueueDeepPaginationTest,FraudCaseWorkQueueIndexReadinessTest,FraudCaseCompoundIndexReadinessDocsTest,FraudCaseWorkQueueOpenApiContractTest,FraudCaseWorkQueueFailedReadAuditTest,FraudCaseWorkQueueFilterLengthTest,FraudCaseWorkQueueNoDuplicateAuditAdviceTest,ReadAccessAuditResponseAdviceMarkerTest,FraudCaseWorkQueueAuditPrecedenceTest,SensitiveReadAuditUnavailableRunbookTest,FraudCaseReadPolicyNamingBoundaryTest,FraudCaseRemovedListExactCountGuardTest,FraudCaseReadQueryPolicyContractTest,FraudCaseWorkQueueCursorArchitectureTest,FraudCaseWorkQueueCursorCodecTest,FraudCaseWorkQueueCursorPaginationTest,FraudCaseWorkQueueCursorQueryFingerprintTest,FraudCaseWorkQueueCursorFilterBindingTest,FraudCaseWorkQueueCursorPageCombinationTest,FraudCaseWorkQueueCursorSecretProfileTest,FraudCaseWorkQueueCursorObservabilityTest,FraudCaseWorkQueueCursorDocsContractTest,FraudCaseWorkQueueSortFieldCoverageTest,FraudCaseWorkQueueCursorSizeChangeTest,SensitiveReadAuditServiceTest"
           test
 
       - name: Verify FDP-45 proof suite reports
@@ -366,13 +366,13 @@ jobs:
         run: node scripts/ci/guard-test-activation.mjs --suite fdp47
 
       - name: Run FDP-46 backend search and audit tests
-        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=ScoredTransactionControllerValidationTest,ScoredTransactionSearchPolicyTest,TransactionMonitoringServiceSearchTest,ScoredTransactionDocumentMapperTest,ScoredTransactionSearchIndexReadinessTest,ReadAccessAuditClassifierTest,ReadAccessAuditEndpointTest,ReadAccessAuditServiceTest,ReadAccessAuditResponseAdviceTest,Fdp45ReadAccessAuditResponseAdviceMarkerTest,AlertServiceMetricsTest,AlertSecurityConfigTest" test
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=ScoredTransactionControllerValidationTest,ScoredTransactionSearchPolicyTest,TransactionMonitoringServiceSearchTest,ScoredTransactionDocumentMapperTest,ScoredTransactionSearchIndexReadinessTest,ReadAccessAuditClassifierTest,ReadAccessAuditEndpointTest,ReadAccessAuditServiceTest,ReadAccessAuditResponseAdviceTest,ReadAccessAuditResponseAdviceMarkerTest,AlertServiceMetricsTest,AlertSecurityConfigTest" test
 
       - name: Verify FDP-46 backend test reports
         run: node scripts/ci/verify-junit-reports.mjs --suite fdp46
 
       - name: Run FDP-47 backend summary tests
-        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=FraudCaseWorkQueueSummaryControllerTest,ReadAccessAuditClassifierTest,ReadAccessResultCountExtractorTest,Fdp45FraudCaseReadModelSingleSourceOfTruthTest,Fdp45FraudCaseWorkQueueReadOnlySafetyTest,Fdp45FraudCaseWorkQueueOpenApiContractTest,Fdp47FraudCaseWorkQueueSummaryContractTest,Fdp45FraudCaseWorkQueueObservabilityTest,FraudCaseSecurityIntegrationTest" test
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=FraudCaseWorkQueueSummaryControllerTest,ReadAccessAuditClassifierTest,ReadAccessResultCountExtractorTest,FraudCaseReadModelSingleSourceOfTruthTest,FraudCaseWorkQueueReadOnlySafetyTest,FraudCaseWorkQueueOpenApiContractTest,FraudCaseWorkQueueSummaryContractTest,FraudCaseWorkQueueObservabilityTest,FraudCaseSecurityIntegrationTest" test
 
       - name: Verify FDP-47 backend test reports
         run: node scripts/ci/verify-junit-reports.mjs --suite fdp47
@@ -480,7 +480,7 @@ jobs:
         run: node scripts/ci/guard-test-activation.mjs --suite fdp49
 
       - name: Run FDP-49 backend security route tests
-        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=AuthorizationRulesCoverageTest,AuthorizationRuleGroupRegistrationTest,RouteCoverageAgainstMvcMappingsTest,SecurityMatcherOrderRegressionTest,DenyByDefaultSecurityTest,SpaFallbackSecurityTest,BffCsrfBoundaryRegressionTest,BearerVsSessionCsrfRegressionTest,BffSessionSecurityIntegrationTest,SecurityRouteRegistryDocumentationTest,SecurityRouteOwnershipRegistryTest,SingleSecurityFilterChainGuardTest,Fdp49NoNewBusinessSemanticsTest,AlertServiceMetricsTest" test
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=AuthorizationRulesCoverageTest,AuthorizationRuleGroupRegistrationTest,RouteCoverageAgainstMvcMappingsTest,SecurityMatcherOrderRegressionTest,DenyByDefaultSecurityTest,SpaFallbackSecurityTest,BffCsrfBoundaryRegressionTest,BearerVsSessionCsrfRegressionTest,BffSessionSecurityIntegrationTest,SecurityRouteRegistryDocumentationTest,SecurityRouteOwnershipRegistryTest,SingleSecurityFilterChainGuardTest,AlertServiceMetricsTest" test
 
       - name: Verify FDP-49 backend reports
         run: node scripts/ci/verify-junit-reports.mjs --suite fdp49
@@ -550,7 +550,7 @@ jobs:
           node-version: "22"
 
       - name: Verify FDP-54 shared scope helpers
-        run: node scripts/check-fdp-scope-helpers-smoke.mjs
+        run: node scripts/check-scope-guard-helpers-smoke.mjs
 
       - name: Guard documentation overclaims
         run: node scripts/check-doc-overclaims.mjs
@@ -865,7 +865,7 @@ jobs:
           esac
 
       - name: Run FDP-38 live runtime checkpoint suite
-        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp38.live-runtime-checkpoint.enabled=true" "-Dfdp38.alert-service.fixture-image=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE}" "-Dfdp38.alert-service.fixture-image-id=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE_ID}" "-Dfdp38.alert-service.fixture-image-digest=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE_DIGEST}" "-Dgroups=fdp38,live-runtime-checkpoint-chaos,docker-chaos,integration" "-Dtest=RegulatedMutationLiveCheckpointBeforeBusinessMutationIT,RegulatedMutationLiveCheckpointAfterAttemptedAuditIT,RegulatedMutationLiveCheckpointBeforeFdp29FinalizeIT,RegulatedMutationLiveCheckpointBeforeSuccessAuditRetryIT" test
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp38.live-runtime-checkpoint.enabled=true" "-Dfdp38.alert-service.fixture-image=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE}" "-Dfdp38.alert-service.fixture-image-id=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE_ID}" "-Dfdp38.alert-service.fixture-image-digest=${FDP38_ALERT_SERVICE_FIXTURE_IMAGE_DIGEST}" "-Dgroups=fdp38,live-runtime-checkpoint-chaos,docker-chaos,integration" "-Dtest=RegulatedMutationLiveCheckpointBeforeEvidencePreparationIT,RegulatedMutationLiveCheckpointAfterEvidencePreparedBeforeFinalizeIT,RegulatedMutationLiveCheckpointBeforeEvidenceGatedFinalizeIT" test
 
       - name: Verify FDP-38 proof artifacts
         if: always()
@@ -936,7 +936,7 @@ jobs:
             echo "FDP-39 release image contains test classes"
             exit 1
           fi
-          if grep -R -a -E 'Fdp38LiveRuntimeCheckpointBarrierConfiguration|fdp38-live-runtime-checkpoint|Fdp38LiveRuntimeCheckpoint|LIVE_IN_FLIGHT_REQUEST_KILL|RUNTIME_REACHED_TEST_FIXTURE|Dockerfile.alert-service-fdp38-fixture' alert-service/target/fdp39-governance/release-image-root; then
+          if grep -R -a -E 'LiveRuntimeCheckpointBarrierConfiguration|fdp38-live-runtime-checkpoint|LiveRuntimeCheckpoint|LIVE_IN_FLIGHT_REQUEST_KILL|RUNTIME_REACHED_TEST_FIXTURE|Dockerfile.alert-service-fdp38-fixture' alert-service/target/fdp39-governance/release-image-root; then
             echo "FDP-39 release image contains FDP-38 fixture/test code"
             exit 1
           fi
@@ -972,7 +972,7 @@ jobs:
           GITHUB_REF_NAME: ${{ github.ref_name }}
 
       - name: Run FDP-39 governance tests
-        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp39.ci-mode=true" "-Dfdp39.event-name=${FDP39_EVENT_NAME}" "-Dfdp39.base-sha=${FDP39_DIFF_BASE_SHA}" "-Dfdp39.head-sha=${FDP39_DIFF_HEAD_SHA}" "-Dfdp39.release-image.scan-root=target/fdp39-governance/release-image-root" "-Dfdp39.commit-sha=${GITHUB_SHA}" "-Dfdp39.branch-name=${GITHUB_REF_NAME}" "-Dfdp39.github-run-id=${GITHUB_RUN_ID}" "-Dfdp39.github-workflow=${GITHUB_WORKFLOW}" "-Dfdp39.release-image.name=${FDP39_RELEASE_IMAGE}" "-Dfdp39.release-image.id=${FDP39_RELEASE_IMAGE_ID}" "-Dfdp39.release-image.digest=${FDP39_RELEASE_IMAGE_DIGEST}" "-Dfdp39.fixture-image.name=${FDP39_FIXTURE_IMAGE}" "-Dfdp39.fixture-image.id=${FDP39_FIXTURE_IMAGE_ID}" "-Dfdp39.fixture-image.digest=${FDP39_FIXTURE_IMAGE_DIGEST}" "-Dtest=RegulatedMutationReleaseImageSeparationTest,FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest,Fdp39GovernanceArtifactsTest,Fdp39NoOverclaimDocumentationTest,Fdp39MustNotChangeRuntimeMutationSemanticsTest,RegulatedMutationRecoveryInspectionGovernanceTest" test
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp39.ci-mode=true" "-Dfdp39.event-name=${FDP39_EVENT_NAME}" "-Dfdp39.base-sha=${FDP39_DIFF_BASE_SHA}" "-Dfdp39.head-sha=${FDP39_DIFF_HEAD_SHA}" "-Dfdp39.release-image.scan-root=target/fdp39-governance/release-image-root" "-Dfdp39.commit-sha=${GITHUB_SHA}" "-Dfdp39.branch-name=${GITHUB_REF_NAME}" "-Dfdp39.github-run-id=${GITHUB_RUN_ID}" "-Dfdp39.github-workflow=${GITHUB_WORKFLOW}" "-Dfdp39.release-image.name=${FDP39_RELEASE_IMAGE}" "-Dfdp39.release-image.id=${FDP39_RELEASE_IMAGE_ID}" "-Dfdp39.release-image.digest=${FDP39_RELEASE_IMAGE_DIGEST}" "-Dfdp39.fixture-image.name=${FDP39_FIXTURE_IMAGE}" "-Dfdp39.fixture-image.id=${FDP39_FIXTURE_IMAGE_ID}" "-Dfdp39.fixture-image.digest=${FDP39_FIXTURE_IMAGE_DIGEST}" "-Dtest=RegulatedMutationReleaseImageSeparationTest,FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest,ReleaseGovernanceArtifactsTest,ReleaseGovernanceNoOverclaimDocumentationTest,ReleaseGovernanceRuntimeIsolationTest,RegulatedMutationRecoveryInspectionGovernanceTest" test
 
       - name: Verify FDP-39 governance artifacts
         if: always()
@@ -1027,7 +1027,7 @@ jobs:
           node-version: "22"
 
       - name: Run FDP-40 release controls tests
-        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp40.ci-mode=true" "-Dfdp40.event-name=${FDP40_EVENT_NAME}" "-Dfdp40.base-sha=${FDP40_DIFF_BASE_SHA}" "-Dfdp40.head-sha=${FDP40_DIFF_HEAD_SHA}" "-Dfdp40.base-ref=${FDP40_BASE_REF}" "-Dfdp40.release-manifest=../docs/release/fdp_40_release_manifest_template.yaml" "-Dfdp40.attestation=../docs/release/fdp_40_attestation_readiness_template.json" "-Dfdp40.fdp39-provenance=../docs/release/fdp_40_fdp39_provenance_reference.json" "-Dfdp40.required-checks-matrix=../docs/release/fdp_40_required_checks_matrix.json" "-Dtest=Fdp40ReleaseManifestValidationTest,Fdp40SignedProvenanceReadinessTest,Fdp40ReleaseEvidenceVerificationTest,Fdp40ReleaseEvidenceVerificationNegativeTest,Fdp40RegistryPromotionPolicyTest,Fdp40RegistryImmutabilityReadinessTest,Fdp40RequiredChecksMatrixTest,Fdp40EnvironmentProtectionGateTest,Fdp40DeploymentEnvironmentReadinessTest,Fdp40BranchProtectionReadinessTest,Fdp40ExternalPlatformControlsMatrixTest,Fdp40EnablementPrTemplateTest,Fdp40SingleReleaseOwnerGovernanceTest,Fdp40UnsupportedClaimsMatrixTest,Fdp40NoOverclaimDocumentationTest,Fdp40MustNotChangeRuntimeMutationSemanticsTest,Fdp40FinalProofPackTest,Fdp40SbomReadinessTest,Fdp40CosignVerificationReadinessTest,Fdp40ResidualPlatformGapsTest,Fdp40ScriptExecutionReadinessTest,Fdp40DocumentationFormattingTest,Fdp40LocalPathHygieneTest" test
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dfdp40.ci-mode=true" "-Dfdp40.event-name=${FDP40_EVENT_NAME}" "-Dfdp40.base-sha=${FDP40_DIFF_BASE_SHA}" "-Dfdp40.head-sha=${FDP40_DIFF_HEAD_SHA}" "-Dfdp40.base-ref=${FDP40_BASE_REF}" "-Dfdp40.release-manifest=../docs/release/fdp_40_release_manifest_template.yaml" "-Dfdp40.attestation=../docs/release/fdp_40_attestation_readiness_template.json" "-Dfdp40.fdp39-provenance=../docs/release/fdp_40_fdp39_provenance_reference.json" "-Dfdp40.required-checks-matrix=../docs/release/fdp_40_required_checks_matrix.json" "-Dtest=ReleaseManifestValidationTest,SignedProvenanceReadinessTest,ReleaseEvidenceVerificationTest,ReleaseEvidenceVerificationNegativeTest,RegistryPromotionPolicyTest,RegistryImmutabilityReadinessTest,RequiredChecksMatrixTest,EnvironmentProtectionGateTest,DeploymentEnvironmentReadinessTest,BranchProtectionReadinessTest,ExternalPlatformControlsMatrixTest,EnablementPrTemplateTest,SingleReleaseOwnerGovernanceTest,UnsupportedClaimsMatrixTest,ReleaseControlNoOverclaimDocumentationTest,ReleaseControlRuntimeIsolationTest,ReleaseControlFinalProofPackTest,SbomReadinessTest,CosignVerificationReadinessTest,ResidualPlatformGapsTest,ReleaseControlScriptExecutionReadinessTest,ReleaseControlDocumentationFormattingTest,ReleaseControlLocalPathHygieneTest" test
 
       - name: Validate FDP-40 release manifest
         run: bash scripts/fdp40-validate-release-manifest.sh docs/release/fdp_40_release_manifest_template.yaml

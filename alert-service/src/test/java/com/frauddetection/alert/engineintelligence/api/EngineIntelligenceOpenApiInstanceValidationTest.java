@@ -24,6 +24,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBuck
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
+import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationConfidence;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationNonDecisioning;
@@ -63,11 +64,13 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
     }
 
     @Test
-    void instanceValidationAcceptsLegacyIncompleteResponseAsUnavailableAfterMapping() {
-        EngineIntelligenceProjection legacyProjection = new EngineIntelligenceProjection(
-                "txn-legacy-normalized",
+    void instanceValidationAcceptsIncompleteProjectionAsUnavailableAfterMapping() {
+        EngineIntelligenceProjection incompleteProjection = new EngineIntelligenceProjection(
+                "txn-incomplete",
                 1,
                 Instant.parse("2026-06-18T10:00:02Z"),
+                null,
+                null,
                 EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
                 EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                 EngineIntelligenceScoreDeltaBucket.UNAVAILABLE,
@@ -88,7 +91,7 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
         EngineIntelligenceResponse response;
         try {
             response = new EngineIntelligenceResponseMapper()
-                    .toResponse(new EngineIntelligenceReadModelMapper().map(legacyProjection));
+                    .toResponse(new EngineIntelligenceReadModelMapper().map(incompleteProjection));
         } catch (EngineIntelligenceProjectionReadUnavailableException exception) {
             response = new EngineIntelligenceResponseMapper().unavailable();
         }
@@ -135,6 +138,7 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
         assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> engine(instance, 0).put("riskLevel", null)));
         assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> engine(instance, 0).put("status", null)));
         assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> instance.put("engines", List.of(engine(instance, 0)))));
+        assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> engine(instance, 1).remove("modelIdentity")));
         assertInvalid("EngineIntelligenceResponse", mutate(EngineIntelligenceResponse.unavailable(), instance -> instance.put("generatedAt", "2026-06-18T10:00:02Z")));
         assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> engine(instance, 0).put("engineId", "unknown.primary")));
         assertInvalid("EngineIntelligenceResponse", mutate(canonicalResponse(), instance -> comparison(instance).put("scoreDeltaBucket", "SMALL")));
@@ -363,7 +367,19 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
             EngineIntelligenceScoreBucket scoreBucket,
             List<String> reasonCodes
     ) {
-        return new EngineIntelligenceEngineResponse(engineId, engineType, status, riskLevel, scoreBucket, reasonCodes);
+        MlModelIdentity modelIdentity = engineType == FraudEngineType.ML_MODEL
+                && status == EngineIntelligenceEngineStatusResponse.AVAILABLE
+                ? new MlModelIdentity("python-logistic-fraud-model", "2026-06-18.v1", "feature-contract-v2")
+                : null;
+        return new EngineIntelligenceEngineResponse(
+                engineId,
+                engineType,
+                status,
+                riskLevel,
+                scoreBucket,
+                reasonCodes,
+                modelIdentity
+        );
     }
 
     private EngineIntelligenceDiagnosticSignalResponse signalResponse(

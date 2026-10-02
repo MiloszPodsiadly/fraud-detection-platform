@@ -48,6 +48,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
             RegulatedMutationPublicStatusMapper publicStatusMapper,
             EvidencePreconditionEvaluator evidencePreconditionEvaluator,
             RegulatedMutationLocalAuditPhaseWriter localAuditPhaseWriter,
+            RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof,
             @Value("${app.regulated-mutation.lease-duration:PT30S}") Duration leaseDuration
     ) {
         this(
@@ -61,13 +62,13 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                 localAuditPhaseWriter,
                 new RegulatedMutationClaimService(mongoTemplate, leaseDuration),
                 new RegulatedMutationConflictPolicy(),
-                new RegulatedMutationReplayResolver(compatibilityReplayPolicyRegistry()),
+                new RegulatedMutationReplayResolver(canonicalReplayPolicyRegistry(durableLocalFinalizationProof)),
                 new RegulatedMutationFencedCommandWriter(mongoTemplate, metrics),
-                RegulatedMutationCheckpointRenewalService.disabled()
+                RegulatedMutationCheckpointRenewalService.disabledForTesting()
         );
     }
 
-    // Compatibility/unit-test constructor only. Production wiring must use Spring-managed checkpoint renewal service.
+    // Test-support constructor only. Production wiring must use Spring-managed checkpoint renewal service.
     public EvidenceGatedFinalizeExecutor(
             RegulatedMutationCommandRepository commandRepository,
             MongoTemplate mongoTemplate,
@@ -95,12 +96,11 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                 conflictPolicy,
                 replayResolver,
                 fencedCommandWriter,
-                RegulatedMutationCheckpointRenewalService.disabled()
+                RegulatedMutationCheckpointRenewalService.disabledForTesting()
         );
     }
 
     @Autowired
-    // Compatibility/unit-test constructor only. Production wiring must use Spring-managed checkpoint renewal service.
     public EvidenceGatedFinalizeExecutor(
             RegulatedMutationCommandRepository commandRepository,
             MongoTemplate mongoTemplate,
@@ -129,7 +129,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
         this.fencedCommandWriter = fencedCommandWriter;
         this.checkpointRenewalService = Objects.requireNonNull(
                 checkpointRenewalService,
-                "FDP-34 production wiring requires checkpoint renewal service."
+                "Production regulated mutation wiring requires checkpoint renewal service."
         );
     }
 
@@ -140,8 +140,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
 
     @Override
     public boolean supports(AuditAction action, AuditResourceType resourceType) {
-        return action == AuditAction.SUBMIT_ANALYST_DECISION
-                && resourceType == AuditResourceType.ALERT;
+        return RegulatedMutationDefinitions.find(action, resourceType).isPresent();
     }
 
     @Override
@@ -201,25 +200,8 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                     document.getState(),
                     command.statusResponseFactory().response(decision.responseState())
             );
-            case FINALIZING_REQUIRES_RECOVERY, FINALIZED_VISIBLE_RECOVERY_REQUIRED ->
+            case FINALIZING_REQUIRES_RECOVERY ->
                     markRecoveryRequired(command, document, decision.reason());
-            case FINALIZED_VISIBLE_REPAIRABLE -> {
-                metrics.recordEvidenceGatedFinalizeStuckVisible();
-                recoveryTransition(
-                        document,
-                        RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
-                        RegulatedMutationExecutionStatus.COMPLETED,
-                        null,
-                        update -> update.set(
-                                "public_status",
-                                publicStatusMapper.submitDecisionStatus(
-                                        RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
-                                        document.mutationModelVersionOrLegacy()
-                                )
-                        )
-                );
-                yield replay(command, document);
-            }
             case RECOVERY_REQUIRED_RESPONSE -> new RegulatedMutationResult<>(
                     document.getState(),
                     command.statusResponseFactory().response(decision.responseState())
@@ -275,13 +257,25 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                     rejectedState,
                     targetStatus,
                     precondition.reasonCode(),
-                    update -> update.set("degradation_reason", precondition.reasonCode())
+                    update -> update
+                            .set("degradation_reason", precondition.reasonCode())
+                            .set("attempted_audit_id", document.getAttemptedAuditId())
+                            .set("attempted_audit_recorded", true)
             );
             metrics.recordEvidenceGatedFinalizeRejected(precondition.reasonCode());
-            throw new IllegalStateException("FDP-29 evidence precondition failed: " + precondition.reasonCode());
+            throw new IllegalStateException("Regulated mutation evidence precondition failed: " + precondition.reasonCode());
         }
         if (document.getState() == RegulatedMutationState.EVIDENCE_PREPARING) {
-            transition(document, claimToken, RegulatedMutationState.EVIDENCE_PREPARED, document.getExecutionStatus(), null);
+            transition(
+                    document,
+                    claimToken,
+                    RegulatedMutationState.EVIDENCE_PREPARED,
+                    document.getExecutionStatus(),
+                    null,
+                    update -> update
+                            .set("attempted_audit_id", document.getAttemptedAuditId())
+                            .set("attempted_audit_recorded", true)
+            );
         }
         if (document.getState() == RegulatedMutationState.EVIDENCE_PREPARED) {
             checkpointRenewalService.afterEvidencePreparedBeforeFinalize(claimToken, document);
@@ -309,11 +303,12 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
         transition(document, claimToken, RegulatedMutationState.FINALIZING, document.getExecutionStatus(), null);
         checkpointRenewalService.beforeEvidenceGatedFinalize(claimToken, document);
         try {
-            LocalCommit<R, S> localCommit = transactionRunner.runLocalCommit(() -> {
+            LocalCommit<R, S> localCommit = localAuditPhaseWriter.withChainLock(() -> transactionRunner.runLocalCommit(() -> {
                 fencedCommandWriter.validateActiveLease(
                         claimToken,
                         RegulatedMutationState.FINALIZING,
-                        document.getExecutionStatus()
+                        document.getExecutionStatus(),
+                        document.requireRevision()
                 );
                 R result = command.mutation().execute(new RegulatedMutationExecutionContext(document.getId()));
                 S response = command.responseMapper().response(result, RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
@@ -322,8 +317,12 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                 document.setSuccessAuditId(auditId);
                 document.setSuccessAuditRecorded(true);
                 document.setResponseSnapshot(snapshot);
-                document.setOutboxEventId(snapshot.decisionEventId());
-                document.setLocalCommitMarker("EVIDENCE_GATED_FINALIZED");
+                RegulatedMutationDefinition definition = RegulatedMutationDefinitions.requireSupported(
+                        command.action(),
+                        command.resourceType()
+                );
+                document.setOutboxEventId(definition.requiresTransactionalOutbox() ? snapshot.decisionEventId() : null);
+                document.setLocalCommitMarker(RegulatedMutationDurableLocalFinalizationProof.LOCAL_COMMIT_MARKER);
                 document.setLocalCommittedAt(Instant.now());
                 transition(
                         document,
@@ -340,12 +339,24 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                                 .set("local_committed_at", document.getLocalCommittedAt())
                 );
                 return new LocalCommit<>(result, response, snapshot);
-            });
+            }));
             return new RegulatedMutationResult<>(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL, localCommit.pendingResponse());
         } catch (StaleRegulatedMutationLeaseException exception) {
             throw exception;
         } catch (RuntimeException exception) {
             RegulatedMutationCommandDocument persisted = reloadForRecovery(document);
+            try {
+                String failedAuditId = auditPhaseService.recordPhase(
+                        persisted,
+                        command.action(),
+                        command.resourceType(),
+                        AuditOutcome.FAILED,
+                        EVIDENCE_GATED_FINALIZE_FAILED
+                );
+                persisted.setFailedAuditId(failedAuditId);
+            } catch (RuntimeException auditFailure) {
+                exception.addSuppressed(auditFailure);
+            }
             persisted.setDegradationReason(EVIDENCE_GATED_FINALIZE_FAILED);
             transition(
                     persisted,
@@ -353,7 +364,12 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                     RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
                     RegulatedMutationExecutionStatus.RECOVERY_REQUIRED,
                     EVIDENCE_GATED_FINALIZE_FAILED,
-                    update -> update.set("degradation_reason", EVIDENCE_GATED_FINALIZE_FAILED)
+                    update -> {
+                        update.set("degradation_reason", EVIDENCE_GATED_FINALIZE_FAILED);
+                        if (persisted.getFailedAuditId() != null) {
+                            update.set("failed_audit_id", persisted.getFailedAuditId());
+                        }
+                    }
             );
             metrics.recordEvidenceGatedFinalizeTransactionRollback(EVIDENCE_GATED_FINALIZE_FAILED);
             throw exception;
@@ -375,10 +391,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
                     update.set("degradation_reason", reason);
                     update.set(
                             "public_status",
-                            publicStatusMapper.submitDecisionStatus(
-                                    RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
-                                    document.mutationModelVersionOrLegacy()
-                            )
+                            publicStatusMapper.currentStatus(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED)
                     );
                 }
         );
@@ -428,7 +441,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
             RegulatedMutationCommandDocument document
     ) {
         if (localAuditPhaseWriter == null) {
-            throw new IllegalStateException("FDP-29 evidence-gated finalize requires a local audit phase writer.");
+            throw new IllegalStateException("Regulated mutation evidence-gated finalize requires a local audit phase writer.");
         }
         return localAuditPhaseWriter.recordSuccessPhase(document, command.action(), command.resourceType());
     }
@@ -455,22 +468,51 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
         RegulatedMutationState previous = document.getState();
         RegulatedMutationExecutionStatus previousExecutionStatus = document.getExecutionStatus();
         stateMachine.requireTransition(document.getState(), state);
-        var publicStatus = publicStatusMapper.submitDecisionStatus(state, document.mutationModelVersionOrLegacy());
-        fencedCommandWriter.transition(
-                claimToken,
-                previous,
-                previousExecutionStatus,
-                state,
-                executionStatus,
-                lastError,
-                update -> {
-                    update.set("public_status", publicStatus);
-                    allowedFieldUpdates.accept(update);
-                }
-        );
+        var publicStatus = publicStatusMapper.currentStatus(state);
+        Consumer<Update> transitionUpdates = update -> {
+            update.set("public_status", publicStatus);
+            allowedFieldUpdates.accept(update);
+        };
+        boolean releaseDecisionSlot = shouldReleaseDecisionSlot(document, state);
+        long resultingRevision = releaseDecisionSlot
+                ? fencedCommandWriter.rejectPreCommitAndReleaseDecisionSlot(
+                        claimToken,
+                        previous,
+                        previousExecutionStatus,
+                        document.requireRevision(),
+                        state,
+                        executionStatus,
+                        lastError,
+                        transitionUpdates
+                )
+                : fencedCommandWriter.transition(
+                        claimToken,
+                        previous,
+                        previousExecutionStatus,
+                        document.requireRevision(),
+                        state,
+                        executionStatus,
+                        lastError,
+                        transitionUpdates
+                );
         applyTransition(document, state, executionStatus, lastError);
+        if (releaseDecisionSlot) {
+            document.setDecisionSlotClaimed(false);
+        }
+        document.setRevision(resultingRevision);
         document.setPublicStatus(publicStatus);
         metrics.recordEvidenceGatedFinalizeStateTransition(previous, state, lastError == null ? "SUCCESS" : "FAILED");
+    }
+
+    private boolean shouldReleaseDecisionSlot(
+            RegulatedMutationCommandDocument document,
+            RegulatedMutationState targetState
+    ) {
+        return document.isDecisionSlotClaimed()
+                && AuditResourceType.ALERT.name().equals(document.getResourceType())
+                && AuditAction.SUBMIT_ANALYST_DECISION.name().equals(document.getAction())
+                && (targetState == RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE
+                        || targetState == RegulatedMutationState.FAILED_BUSINESS_VALIDATION);
     }
 
     private void recoveryTransition(
@@ -482,9 +524,16 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
     ) {
         RegulatedMutationState previous = document.getState();
         stateMachine.requireTransition(document.getState(), state);
-        fencedCommandWriter.recoveryTransition(document, state, executionStatus, lastError, allowedFieldUpdates);
-        document.setPublicStatus(publicStatusMapper.submitDecisionStatus(state, document.mutationModelVersionOrLegacy()));
+        long resultingRevision = fencedCommandWriter.recoveryTransition(
+                document,
+                state,
+                executionStatus,
+                lastError,
+                allowedFieldUpdates
+        );
+        document.setPublicStatus(publicStatusMapper.currentStatus(state));
         applyTransition(document, state, executionStatus, lastError);
+        document.setRevision(resultingRevision);
         metrics.recordEvidenceGatedFinalizeStateTransition(previous, state, lastError == null ? "SUCCESS" : "FAILED");
     }
 
@@ -513,7 +562,7 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
     @SuppressWarnings("unchecked")
     private <S> S authoritativePublicStatus(S restored, RegulatedMutationCommandDocument document) {
         if (restored instanceof RegulatedMutationPublicStatusProjection<?> response) {
-            return (S) response.withPublicStatus(publicStatusMapper.submitDecisionStatus(document));
+            return (S) response.withPublicStatus(publicStatusMapper.currentStatus(document));
         }
         return restored;
     }
@@ -525,14 +574,12 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
     ) {
     }
 
-    private static RegulatedMutationReplayPolicyRegistry compatibilityReplayPolicyRegistry() {
+    private static RegulatedMutationReplayPolicyRegistry canonicalReplayPolicyRegistry(
+            RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof
+    ) {
         RegulatedMutationLeasePolicy leasePolicy = new RegulatedMutationLeasePolicy();
         return new RegulatedMutationReplayPolicyRegistry(
-                List.of(
-                        new LegacyRegulatedMutationReplayPolicy(leasePolicy),
-                        new EvidenceGatedFinalizeReplayPolicy(leasePolicy)
-                ),
-                true
+                List.of(new EvidenceGatedFinalizeReplayPolicy(leasePolicy, durableLocalFinalizationProof))
         );
     }
 }

@@ -58,9 +58,9 @@ Artifacts must contain:
 
 The CI job must fail if any required class XML is missing or skipped:
 
-- `RegulatedMutationLiveCheckpointBeforeBusinessMutationIT`
+- `RegulatedMutationLiveCheckpointBeforeEvidencePreparationIT`
 - `RegulatedMutationLiveCheckpointAfterAttemptedAuditIT`
-- `RegulatedMutationLiveCheckpointBeforeFdp29FinalizeIT`
+- `RegulatedMutationLiveCheckpointBeforeEvidenceGatedFinalizeIT`
 - `RegulatedMutationLiveCheckpointBeforeSuccessAuditRetryIT`
 
 ## GO Criteria

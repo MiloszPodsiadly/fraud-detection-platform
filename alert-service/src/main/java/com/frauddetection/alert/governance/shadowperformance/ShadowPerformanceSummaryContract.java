@@ -2,6 +2,7 @@ package com.frauddetection.alert.governance.shadowperformance;
 
 final class ShadowPerformanceSummaryContract {
 
+    static final String EVALUATION_REPORT_VERSION = "feedback-dataset-evaluation-v1";
     static final String REQUIRED_BANNER = "Shadow performance metrics are offline diagnostics only. "
             + "They are not model promotion approval, threshold recommendation, "
             + "production decisioning approval, payment authorization, "

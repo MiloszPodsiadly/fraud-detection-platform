@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("EngineIntelligenceAnalystUiDisplayDocsTest", () => {
-  it("documentsFdp97ReadOnlyDiagnosticUiScope", () => {
+  it("documents the read-only diagnostic UI scope", () => {
     const docs = readFileSync(resolve(process.cwd(), "../docs/architecture/engine_intelligence_analyst_ui_display.md"), "utf8");
 
     expect(docs).toContain("## Purpose");

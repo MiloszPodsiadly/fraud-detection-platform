@@ -3,6 +3,7 @@ package com.frauddetection.alert.service;
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.domain.AlertCase;
 import com.frauddetection.alert.mapper.FraudDecisionEventMapper;
+import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
@@ -20,18 +21,17 @@ public class DecisionOutboxWriter {
 
     private final FraudDecisionEventMapper fraudDecisionEventMapper;
     private final TransactionalOutboxRecordRepository outboxRepository;
+    private final TransactionalOutboxRuntimeReadiness runtimeReadiness;
 
     @Autowired
     public DecisionOutboxWriter(
             FraudDecisionEventMapper fraudDecisionEventMapper,
-            TransactionalOutboxRecordRepository outboxRepository
+            TransactionalOutboxRecordRepository outboxRepository,
+            TransactionalOutboxRuntimeReadiness runtimeReadiness
     ) {
         this.fraudDecisionEventMapper = fraudDecisionEventMapper;
         this.outboxRepository = outboxRepository;
-    }
-
-    public DecisionOutboxWriter(FraudDecisionEventMapper fraudDecisionEventMapper) {
-        this(fraudDecisionEventMapper, null);
+        this.runtimeReadiness = runtimeReadiness;
     }
 
     public FraudDecisionEvent attachPendingOutbox(
@@ -42,11 +42,16 @@ public class DecisionOutboxWriter {
             String actorId,
             String mutationCommandId
     ) {
+        runtimeReadiness.requireReady();
         FraudDecisionEvent event = fraudDecisionEventMapper.toEvent(alertCase, request, resultingStatus, actorId);
         if (outboxRepository == null) {
-            throw new IllegalStateException("TransactionalOutboxRecordRepository is required for FDP-26 decision outbox writes.");
+            throw new IllegalStateException(
+                    "Transactional outbox repository is required for regulated mutation decision outbox writes."
+            );
         }
         document.setDecisionOutboxEvent(event);
+        document.setDecisionOutboxEventId(event.eventId());
+        document.setDecisionOutboxProjectionRevision(0L);
         document.setDecisionOutboxStatus(DecisionOutboxStatus.PENDING);
         document.setDecisionOutboxAttempts(0);
         document.setDecisionOutboxLeaseOwner(null);
@@ -75,6 +80,7 @@ public class DecisionOutboxWriter {
         record.setPayload(event);
         record.setStatus(TransactionalOutboxStatus.PENDING);
         record.setAttempts(0);
+        record.setProjectionRevision(0L);
         record.setCreatedAt(now);
         record.setUpdatedAt(now);
         return record;

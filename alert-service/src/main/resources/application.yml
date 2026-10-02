@@ -3,7 +3,7 @@ spring:
     name: alert-service
   data:
     mongodb:
-      uri: ${MONGODB_URI:mongodb://localhost:27017/fraud_alerts}
+      uri: ${MONGODB_URI:mongodb://localhost:27017/fraud_alerts?replicaSet=rs0}
       auto-index-creation: true
     redis:
       host: ${REDIS_HOST:localhost}
@@ -59,30 +59,24 @@ app:
       sla: ${FRAUD_CASE_WORK_QUEUE_SLA:PT24H}
       cursor-signing-secret: ${FRAUD_CASE_WORK_QUEUE_CURSOR_SIGNING_SECRET:local-dev-work-queue-cursor-secret-change-me}
   regulated-mutations:
-    transaction-mode: ${REGULATED_MUTATIONS_TRANSACTION_MODE:OFF}
-    evidence-gated-finalize:
-      enabled: ${REGULATED_MUTATIONS_EVIDENCE_GATED_FINALIZE_ENABLED:false}
-      submit-decision:
-        enabled: ${REGULATED_MUTATIONS_EVIDENCE_GATED_FINALIZE_SUBMIT_DECISION_ENABLED:false}
-      fraud-case-update:
-        enabled: ${REGULATED_MUTATIONS_EVIDENCE_GATED_FINALIZE_FRAUD_CASE_UPDATE_ENABLED:false}
-      trust-incident:
-        enabled: ${REGULATED_MUTATIONS_EVIDENCE_GATED_FINALIZE_TRUST_INCIDENT_ENABLED:false}
-      outbox-resolution:
-        enabled: ${REGULATED_MUTATIONS_EVIDENCE_GATED_FINALIZE_OUTBOX_RESOLUTION_ENABLED:false}
+    transaction-mode: ${REGULATED_MUTATIONS_TRANSACTION_MODE:REQUIRED}
     transaction-capability-probe:
       enabled: ${REGULATED_MUTATIONS_TRANSACTION_CAPABILITY_PROBE_ENABLED:true}
   outbox:
+    preflight:
+      startup-validation-budget: ${OUTBOX_PREFLIGHT_STARTUP_VALIDATION_BUDGET:PT30S}
     publisher:
       enabled: ${OUTBOX_PUBLISHER_ENABLED:true}
+      delay-ms: ${OUTBOX_PUBLISHER_DELAY_MS:5000}
     recovery:
       enabled: ${OUTBOX_RECOVERY_ENABLED:true}
       stale-processing-threshold: ${OUTBOX_RECOVERY_STALE_PROCESSING_THRESHOLD:PT2M}
     confirmation:
       dual-control:
         enabled: ${OUTBOX_CONFIRMATION_DUAL_CONTROL_ENABLED:false}
-    lease-duration: ${OUTBOX_LEASE_DURATION:${APP_ALERT_DECISION_OUTBOX_LEASE_DURATION:PT1M}}
-    max-attempts: ${OUTBOX_MAX_ATTEMPTS:${APP_ALERT_DECISION_OUTBOX_MAX_ATTEMPTS:5}}
+    lease-duration: ${OUTBOX_LEASE_DURATION:PT1M}
+    max-attempts: ${OUTBOX_MAX_ATTEMPTS:5}
+    stale-threshold: ${OUTBOX_STALE_THRESHOLD:PT10M}
   evidence-confirmation:
     enabled: ${EVIDENCE_CONFIRMATION_ENABLED:true}
     delay-ms: ${EVIDENCE_CONFIRMATION_DELAY_MS:10000}
@@ -99,11 +93,10 @@ app:
       max-total-wait-ms: ${AUDIT_LOCAL_PHASE_WRITER_MAX_TOTAL_WAIT_MS:1000}
       allow-long-total-wait: ${AUDIT_LOCAL_PHASE_WRITER_ALLOW_LONG_TOTAL_WAIT:false}
     external-anchoring:
-      enabled: ${AUDIT_EXTERNAL_ANCHORING_ENABLED:false}
       publication:
-        enabled: ${AUDIT_EXTERNAL_ANCHORING_PUBLICATION_ENABLED:${AUDIT_EXTERNAL_ANCHORING_ENABLED:false}}
-        required: ${AUDIT_EXTERNAL_ANCHORING_PUBLICATION_REQUIRED:${AUDIT_EXTERNAL_ANCHORING_ENABLED:false}}
-        fail-closed: ${AUDIT_EXTERNAL_ANCHORING_PUBLICATION_FAIL_CLOSED:${AUDIT_EXTERNAL_ANCHORING_PUBLICATION_REQUIRED:${AUDIT_EXTERNAL_ANCHORING_ENABLED:false}}}
+        enabled: ${AUDIT_EXTERNAL_ANCHORING_PUBLICATION_ENABLED:false}
+        required: ${AUDIT_EXTERNAL_ANCHORING_PUBLICATION_REQUIRED:false}
+        fail-closed: ${AUDIT_EXTERNAL_ANCHORING_PUBLICATION_FAIL_CLOSED:false}
       sink: ${AUDIT_EXTERNAL_ANCHORING_SINK:disabled}
       publish-limit: ${AUDIT_EXTERNAL_ANCHORING_PUBLISH_LIMIT:100}
       local-file:

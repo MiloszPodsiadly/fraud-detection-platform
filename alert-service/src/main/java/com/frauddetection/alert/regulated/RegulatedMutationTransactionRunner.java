@@ -36,7 +36,9 @@ public class RegulatedMutationTransactionRunner {
             return callback.get();
         }
         if (transactionTemplate == null) {
-            throw new IllegalStateException("FDP-26 transaction-mode=REQUIRED requires a Mongo transaction manager.");
+            throw new IllegalStateException(
+                    "Regulated mutation local commit requires a configured Mongo transaction manager when transaction-mode=REQUIRED."
+            );
         }
         return transactionTemplate.execute(status -> callback.get());
     }

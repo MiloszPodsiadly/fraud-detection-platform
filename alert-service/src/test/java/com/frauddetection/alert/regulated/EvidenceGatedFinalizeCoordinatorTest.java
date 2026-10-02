@@ -55,7 +55,7 @@ class EvidenceGatedFinalizeCoordinatorTest {
         assertThat(result.state()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         assertThat(result.response()).isEqualTo("FINALIZED_EVIDENCE_PENDING_EXTERNAL");
         assertThat(businessWrites).hasValue(1);
-        assertThat(fixture.currentCommand.mutationModelVersionOrLegacy())
+        assertThat(fixture.currentCommand.getMutationModelVersion())
                 .isEqualTo(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
         assertThat(fixture.states).containsSubsequence(
                 RegulatedMutationState.REQUESTED,
@@ -160,9 +160,9 @@ class EvidenceGatedFinalizeCoordinatorTest {
     }
 
     @Test
-    void shouldRepairFinalizedVisibleWithProofToPendingExternalWithoutRerunningMutation() {
+    void shouldReplayConfirmedCanonicalCommandRepeatedlyWithoutRerunningMutation() {
         Fixture fixture = new Fixture(true);
-        RegulatedMutationCommandDocument existing = evidenceGatedCommand(RegulatedMutationState.FINALIZED_VISIBLE);
+        RegulatedMutationCommandDocument existing = evidenceGatedCommand(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
         existing.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
         existing.setResponseSnapshot(new RegulatedMutationResponseSnapshot(
                 "alert-1",
@@ -170,18 +170,20 @@ class EvidenceGatedFinalizeCoordinatorTest {
                 AlertStatus.RESOLVED,
                 "event-1",
                 Instant.parse("2026-05-01T00:00:00Z"),
-                SubmitDecisionOperationStatus.FINALIZED_VISIBLE
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED
         ));
-        existing.setLocalCommitMarker("EVIDENCE_GATED_FINALIZED");
-        existing.setSuccessAuditRecorded(true);
         fixture.commandLookup(Optional.of(existing));
         AtomicInteger businessWrites = new AtomicInteger();
 
-        RegulatedMutationResult<String> result = fixture.coordinator.commit(command(businessWrites));
+        RegulatedMutationResult<String> first = fixture.coordinator.commit(command(businessWrites));
+        RegulatedMutationResult<String> second = fixture.coordinator.commit(command(businessWrites));
 
-        assertThat(result.state()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        assertThat(first.state()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
+        assertThat(second.state()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
+        assertThat(first.response()).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED.name());
+        assertThat(second.response()).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED.name());
         assertThat(businessWrites).hasValue(0);
-        assertThat(fixture.currentCommand.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        assertThat(fixture.currentCommand.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
     }
 
     @Test
@@ -284,6 +286,7 @@ class EvidenceGatedFinalizeCoordinatorTest {
         document.setIntentAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
         document.setIntentActorId("principal-7");
         document.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        document.setRevision(0L);
         document.setState(state);
         document.setCreatedAt(Instant.parse("2026-05-01T00:00:00Z"));
         document.setUpdatedAt(Instant.parse("2026-05-01T00:00:00Z"));
@@ -318,22 +321,18 @@ class EvidenceGatedFinalizeCoordinatorTest {
                     new RegulatedMutationPublicStatusMapper(),
                     new EvidencePreconditionEvaluator(),
                     localAuditPhaseWriter,
+                    RegulatedMutationProofTestFixtures.accepted(),
                     Duration.ofSeconds(30)
             );
             coordinator = new MongoRegulatedMutationCoordinator(
                     commandRepository,
-                    mongoTemplate,
-                    new RegulatedMutationAuditPhaseService(auditEventRepository, auditService),
-                    degradationService,
-                    metrics,
-                    runner,
-                    new RegulatedMutationPublicStatusMapper(),
-                    evidenceGatedFinalizeExecutor,
-                    false,
-                    Duration.ofSeconds(30)
+                    new RegulatedMutationExecutorRegistry(List.of(evidenceGatedFinalizeExecutor)),
+                    new RegulatedMutationConflictPolicy()
             );
             when(auditEventRepository.findByRequestId(any())).thenReturn(Optional.empty());
             when(localAuditPhaseWriter.recordSuccessPhase(any(), any(), any())).thenReturn("success-audit-1");
+            when(localAuditPhaseWriter.withChainLock(any())).thenAnswer(invocation ->
+                    ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
         }
 
         private void commandLookup(Optional<RegulatedMutationCommandDocument> existing) {

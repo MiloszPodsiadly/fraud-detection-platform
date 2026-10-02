@@ -19,6 +19,7 @@ import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
@@ -309,6 +310,8 @@ class ScoredTransactionControllerDetailTest {
                 1,
                 Instant.parse("2026-06-18T10:00:02Z"),
                 new EngineIntelligenceComparisonReadModel(
+                        EngineIntelligenceComparisonType.RULES_VS_ML,
+                        List.of("rules.primary", "ml.python.primary"),
                         EngineIntelligenceAgreementStatus.PARTIAL,
                         EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                         EngineIntelligenceScoreDeltaBucket.UNAVAILABLE

@@ -37,14 +37,14 @@ class RegulatedMutationConflictPolicyTest {
     }
 
     @Test
-    void nullIntentActorPreservesLegacyCompatibility() {
+    void nullIntentActorFallsBackToCurrentCommandActor() {
         RegulatedMutationCommandDocument existing = document("request-hash-1", null);
 
         assertThat(policy.existingOrConflict(existing, command("request-hash-1", "principal-7"))).isSameAs(existing);
     }
 
     @Test
-    void sameRequestHashDoesNotAddNewSemanticFieldComparisonInFdp31() {
+    void sameRequestHashDoesNotCompareFieldsOutsideTheCanonicalClaim() {
         RegulatedMutationCommandDocument existing = document("request-hash-1", "principal-7");
         existing.setIntentDecision("legacy-decision-value");
 
@@ -63,6 +63,11 @@ class RegulatedMutationConflictPolicyTest {
         RegulatedMutationCommandDocument document = new RegulatedMutationCommandDocument();
         document.setRequestHash(requestHash);
         document.setIntentActorId(intentActorId);
+        document.setResourceId("alert-1");
+        document.setResourceType(AuditResourceType.ALERT.name());
+        document.setAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
+        document.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        document.setRevision(0L);
         return document;
     }
 
@@ -79,7 +84,9 @@ class RegulatedMutationConflictPolicyTest {
                 (result, state) -> state.name(),
                 response -> null,
                 snapshot -> "ok",
-                state -> state.name()
+                state -> state.name(),
+                null,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
         );
     }
 }

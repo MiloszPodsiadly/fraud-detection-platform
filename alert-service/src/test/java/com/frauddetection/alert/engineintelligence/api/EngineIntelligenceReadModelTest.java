@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -55,6 +56,13 @@ class EngineIntelligenceReadModelTest {
                 EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                 EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
         )).hasMessage("comparedEngineIds is required");
+    }
+
+    @Test
+    void comparisonReadModelHasNoConstructorThatSynthesizesIdentity() {
+        assertThat(Arrays.stream(EngineIntelligenceComparisonReadModel.class.getDeclaredConstructors())
+                .mapToInt(constructor -> constructor.getParameterTypes().length))
+                .containsExactly(5);
     }
 
     @Test

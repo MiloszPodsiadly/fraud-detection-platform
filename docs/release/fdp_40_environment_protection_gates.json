@@ -4,7 +4,7 @@
   "deployment_references_rollback_plan": true,
   "deployment_uses_fixture_image": false,
   "dual_control_required": false,
-  "fdp29_enablement_requires_separate_config_pr": true,
+  "regulated_mutation_current_model_required": true,
   "fraud_ops_review_required": true,
   "operator_drill_evidence_required": true,
   "platform_review_required": true,

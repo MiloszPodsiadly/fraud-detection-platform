@@ -47,7 +47,7 @@ class FeedbackDatasetEvaluationCardScopeGuardTest(unittest.TestCase):
             with self.subTest(term=term):
                 self.assertNotIn(term, text)
 
-    def test_newPackageDoesNotImportOldFdp103EvaluationCardModules(self):
+    def test_currentPackageDoesNotImportRetiredEvaluationCardModules(self):
         text = self._package_text()
 
         for import_path in FORBIDDEN_IMPORTS:
@@ -62,7 +62,7 @@ class FeedbackDatasetEvaluationCardScopeGuardTest(unittest.TestCase):
         self.assertIn("not threshold recommendation", text)
         self.assertIn("not payment authorization", text)
 
-    def test_docsDescribeFailClosedFdp126SourceBoundary(self):
+    def test_docsDescribeFailClosedEvaluationCardSourceBoundary(self):
         text = "\n".join(path.read_text(encoding="utf-8") for path in DOC_PATHS if path.exists())
         compact_text = " ".join(text.split())
 
@@ -71,7 +71,7 @@ class FeedbackDatasetEvaluationCardScopeGuardTest(unittest.TestCase):
         self.assertIn("positiveClassCount + negativeClassCount == recordsEvaluated", text)
         self.assertIn("real RFC3339 UTC", text)
         self.assertIn("`Z` date-times", text)
-        self.assertIn("does not copy FDP-124 `disagreementSummary` into Platform Recommendation Evaluation Card v1", compact_text)
+        self.assertIn("does not copy the Platform Evaluation `disagreementSummary` into Platform Recommendation Evaluation Card v1", compact_text)
         self.assertIn("not a signature, notarization, external attestation", text)
 
     def test_safetyPolicyHasSingleExecutableOwner(self):

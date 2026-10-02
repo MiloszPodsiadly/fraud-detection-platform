@@ -52,7 +52,7 @@ describe("ShadowPerformanceDashboard", () => {
 
     expect(screen.getByText("PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1")).toBeInTheDocument();
     expect(screen.getByText("FEEDBACK_DATASET_OFFLINE_EVALUATION_V1")).toBeInTheDocument();
-    expect(screen.getByText("FDP-124")).toBeInTheDocument();
+    expect(screen.getByText("feedback-dataset-evaluation-v1")).toBeInTheDocument();
   });
 
   it("rendersEvaluationPopulation", () => {
@@ -176,7 +176,7 @@ describe("ShadowPerformanceDashboard", () => {
     expect(screen.getByText(/This is not a model quality result/)).toBeInTheDocument();
   });
 
-  it("showsFdp106DataSourceOn404", () => {
+  it("showsAuthorizedReadApiDataSourceOn404", () => {
     renderDashboard404();
 
     expect(screen.getByText("Authorized Shadow Performance Summary v2 read API")).toBeInTheDocument();
@@ -314,6 +314,7 @@ describe("ShadowPerformanceDashboard", () => {
   it.each([
     ["rejectsWrongEvaluationCardType", "evaluationCardType", "UNSUPPORTED_CARD_TYPE"],
     ["rejectsWrongEvaluationReportType", "evaluationReportType", "PLATFORM_RECOMMENDATION_EVALUATION_CARD"],
+    ["rejectsRetiredEvaluationReportVersion", "evaluationReportVersion", "FDP-124"],
     ["rejectsWrongEvaluationReportVersion", "evaluationReportVersion", "UNSUPPORTED_VERSION"],
     ["rejectsWrongEvaluationArtifactSetVersion", "evaluationArtifactSetVersion", "other-artifact-format-v99"],
     ["rejectsWrongDatasetVersion", "datasetVersion", "unknown-dataset-v77"],
@@ -325,32 +326,21 @@ describe("ShadowPerformanceDashboard", () => {
     });
   });
 
-  it("acceptsLegacyReadOnlyPlatformEvaluationProvenance", () => {
-    renderDashboard({ summary: shadowSummary({
-      evaluationSubject: {
-        ...shadowSummary().evaluationSubject,
-        identityCompleteness: "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
-      },
-      evaluation: {
-        ...shadowSummary().evaluation,
-        evaluationReportType: "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-        evaluationArtifactSetVersion: "fdp123-report-artifact-set-v1"
-      }
-    }) });
-
-    expect(screen.queryByText(MALFORMED_MESSAGE)).not.toBeInTheDocument();
-    expect(screen.getByText("FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1")).toBeInTheDocument();
+  it("rejectsMissingEvaluationReportVersion", () => {
+    expectMalformedSummary((summary) => {
+      delete summary.evaluation.evaluationReportVersion;
+    });
   });
 
   it.each([
     [
-      "currentReportLegacyArtifact",
+      "unsupportedArtifactSet",
       "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-      "fdp123-report-artifact-set-v1"
+      "unsupported-artifact-set-v1"
     ],
     [
-      "legacyReportCurrentArtifact",
-      "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+      "unsupportedReportType",
+      "UNSUPPORTED_PLATFORM_EVALUATION",
       "feedback-dataset-evaluation-report-artifact-set-v1"
     ]
   ])("rejectsMixedPlatformEvaluationIdentityPair: %s", (_name, evaluationReportType, evaluationArtifactSetVersion) => {
@@ -362,16 +352,10 @@ describe("ShadowPerformanceDashboard", () => {
 
   it.each([
     [
-      "currentIdentityLegacyMarker",
+      "unsupportedIdentityMarker",
       "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
       "feedback-dataset-evaluation-report-artifact-set-v1",
-      "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
-    ],
-    [
-      "legacyIdentityCurrentMarker",
-      "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-      "fdp123-report-artifact-set-v1",
-      "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
+      "UNSUPPORTED_IDENTITY_COMPLETENESS"
     ]
   ])("rejectsMixedPlatformEvaluationMarker: %s", (
     _name,
@@ -470,21 +454,6 @@ describe("ShadowPerformanceDashboard", () => {
 
     expect(screen.queryByText(MALFORMED_MESSAGE)).not.toBeInTheDocument();
     expect(screen.getByText("Alert-recommended precision")).toBeInTheDocument();
-  });
-
-  it("acceptsHistoricalMasterFixtureWithExactLegacyProvenance", () => {
-    const fixture = JSON.parse(readFileSync(resolve(
-      "..",
-      "contract-fixtures",
-      "governance",
-      "shadow-performance-fdp123",
-      "current-summary.json"
-    ), "utf8"));
-    renderDashboard({ summary: fixture });
-
-    expect(screen.queryByText(MALFORMED_MESSAGE)).not.toBeInTheDocument();
-    expect(screen.getByText("NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE")).toBeInTheDocument();
-    expect(screen.getByText("FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1")).toBeInTheDocument();
   });
 
   it("rejectsTwentyOneLimitations", () => {
@@ -819,7 +788,7 @@ function shadowSummary(overrides = {}) {
       evaluationCardVersion: "platform-recommendation-evaluation-card-v1",
       evaluationPurpose: "OFFLINE_DIAGNOSTIC",
       evaluationReportType: "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-      evaluationReportVersion: "FDP-124",
+      evaluationReportVersion: "feedback-dataset-evaluation-v1",
       evaluationReportGeneratedAt: "2026-06-10T00:00:00Z",
       evaluationCardGeneratedAt: "2026-06-12T00:00:00Z",
       evaluationArtifactSetVersion: "feedback-dataset-evaluation-report-artifact-set-v1",

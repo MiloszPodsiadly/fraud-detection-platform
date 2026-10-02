@@ -11,6 +11,7 @@ import com.frauddetection.common.events.enums.AlertStatus;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 
 @Component
 public class SubmitDecisionMutationHandler {
@@ -46,7 +47,7 @@ public class SubmitDecisionMutationHandler {
                 idempotencyKey,
                 requestHash,
                 mutationCommandId,
-                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
         );
     }
 
@@ -66,7 +67,7 @@ public class SubmitDecisionMutationHandler {
         document.setAnalystId(actorId);
         document.setDecisionReason(request.decisionReason());
         document.setDecisionTags(request.tags());
-        document.setDecidedAt(Instant.now());
+        document.setDecidedAt(Instant.now().truncatedTo(ChronoUnit.MILLIS));
         document.setDecisionIdempotencyKey(normalizeIdempotencyKey(idempotencyKey));
         document.setDecisionIdempotencyRequestHash(requestHash);
         document.setDecisionOperationStatus(operationStatus.name());

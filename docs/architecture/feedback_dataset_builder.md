@@ -12,7 +12,7 @@ export, Kafka publication, ML evaluation, model training, model promotion, thres
 authorization, approve/decline/block behavior, workflow automation, or case creation.
 
 The output is an evaluation artifact only. It is not training data, not certified legal ground truth, not a final bank
-decision, and not a payment decision. Python ML evaluation remains future FDP-124.
+decision, and not a payment decision. Python ML evaluation is a separate offline consumer.
 
 ## Bounded Context
 
@@ -23,7 +23,7 @@ The source of truth is:
 
 The builder reads `fraud_feedback_records` only. It does not read `engine_intelligence_feedback`.
 
-This is separate from the Engine Intelligence Feedback Dataset Export bounded context. feedback dataset does not replace FDP-102,
+This is separate from the Engine Intelligence Feedback Dataset Export bounded context. The feedback dataset does not replace that export contract,
 does not use `alert-service/src/main/java/com/frauddetection/alert/engineintelligence/dataset` as source of truth, and
 does not use `ml-inference-service/app/feedback/feedback_dataset.py` as source of truth.
 
@@ -86,7 +86,7 @@ Optional nullable fields are limited to bounded feedback diagnostics already pre
 agreement/mismatch/score-delta buckets, Analyst Recommendation status/value/version/generated-at/reason codes,
 `scoredAt`, and `transactionTimestamp`.
 
-FDP-139 adds optional ML diagnostic lineage snapshot fields to the same `feedback-dataset-v1` record shape:
+The record shape includes optional ML diagnostic lineage snapshot fields:
 `mlModelName`, `mlModelVersion`, and `mlFeatureContractVersion`. They are copied from `FraudFeedbackRecord`, which
 captures them at feedback creation from the persisted Engine Intelligence projection for the reviewed transaction. Old
 feedback rows and old JSONL records can omit these fields or carry nulls; consumers must not backfill missing lineage
@@ -140,6 +140,6 @@ Failed builds emit metadata with a bounded `failureReason` and no fake successfu
 
 ## Schema
 
-`docs/schemas/feedback_dataset_record.schema.json` is the machine-readable JSONL envelope contract for FDP-124
+`docs/schemas/feedback_dataset_record.schema.json` is the machine-readable JSONL envelope contract for current Python evaluation
 consumers. It covers both `DATASET_METADATA` and `DATASET_RECORD` line shapes. It does not add a public API or runtime
 export path in feedback dataset.

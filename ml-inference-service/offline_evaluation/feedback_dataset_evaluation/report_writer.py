@@ -9,8 +9,6 @@ from offline_evaluation.json_contract import dumps_strict_json
 from offline_evaluation.feedback_dataset_evaluation.model_evaluation import validate_model_evaluation_summary
 from offline_evaluation.feedback_dataset_evaluation.report_contract import (
     ARTIFACT_SET_VERSION,
-    LEGACY_READ_ONLY_ARTIFACT_SET_VERSION,
-    LEGACY_READ_ONLY_REPORT_TYPE,
     MODEL_EVALUATION_ARTIFACT_SET_VERSION,
     MODEL_EVALUATION_REPORT_TYPE,
     REPORT_TYPE,
@@ -18,7 +16,21 @@ from offline_evaluation.feedback_dataset_evaluation.report_contract import (
 from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import normalize_rfc3339_timestamp
 
 MAX_WARNINGS = 10
-REPORT_TYPES = {REPORT_TYPE, MODEL_EVALUATION_REPORT_TYPE}
+REPORT_TYPES = frozenset({REPORT_TYPE, MODEL_EVALUATION_REPORT_TYPE})
+PLATFORM_ARTIFACT_IDENTITY = (REPORT_TYPE, ARTIFACT_SET_VERSION)
+MODEL_ARTIFACT_IDENTITY = (MODEL_EVALUATION_REPORT_TYPE, MODEL_EVALUATION_ARTIFACT_SET_VERSION)
+SUPPORTED_ARTIFACT_IDENTITIES = frozenset({
+    PLATFORM_ARTIFACT_IDENTITY,
+    MODEL_ARTIFACT_IDENTITY,
+})
+PLATFORM_ARTIFACT_FILENAMES = frozenset({
+    "evaluation_summary.json",
+    "score_bucket_report.json",
+    "risk_level_report.json",
+    "disagreement_report.jsonl",
+    "evaluation_run.md",
+})
+MODEL_ARTIFACT_FILENAMES = frozenset({"model_evaluation_summary.json"})
 FORBIDDEN_REPORT_COMPACT_TERMS = {
     "rawfeedbackid",
     "feedbackid",
@@ -161,8 +173,7 @@ def build_artifact_manifest(
         artifact_set_version: str = ARTIFACT_SET_VERSION,
         report_type: str = REPORT_TYPE,
 ) -> str:
-    if report_type == LEGACY_READ_ONLY_REPORT_TYPE or artifact_set_version == LEGACY_READ_ONLY_ARTIFACT_SET_VERSION:
-        raise ValueError("legacy platform evaluation artifact identity is read-only")
+    _validate_artifact_identity(payloads, report_type, artifact_set_version)
     generated_at = normalize_rfc3339_timestamp(generated_at, "generatedAt")
     files = []
     for path, payload in sorted(payloads.items(), key=lambda item: item[0].name):
@@ -182,6 +193,27 @@ def build_artifact_manifest(
     payload = dumps_strict_json(manifest, sort_keys=True, separators=(",", ":"))
     _reject_forbidden_report_payload(payload)
     return payload + "\n"
+
+
+def _validate_artifact_identity(
+        payloads: dict[Path, str],
+        report_type: str,
+        artifact_set_version: str,
+) -> None:
+    identity = (report_type, artifact_set_version)
+    if identity not in SUPPORTED_ARTIFACT_IDENTITIES:
+        raise ValueError("feedback dataset evaluation artifact identity is unsupported")
+    filenames = frozenset(path.name for path in payloads)
+    if len(filenames) != len(payloads):
+        raise ValueError("feedback dataset evaluation artifact filenames must be unique")
+    if filenames == PLATFORM_ARTIFACT_FILENAMES:
+        expected_identity = PLATFORM_ARTIFACT_IDENTITY
+    elif filenames == MODEL_ARTIFACT_FILENAMES:
+        expected_identity = MODEL_ARTIFACT_IDENTITY
+    else:
+        raise ValueError("feedback dataset evaluation artifact files do not match a supported artifact family")
+    if identity != expected_identity:
+        raise ValueError("feedback dataset evaluation artifact identity does not match artifact family")
 
 
 def evaluation_run_markdown(summary: dict[str, Any]) -> str:

@@ -81,7 +81,7 @@ Paste final Docker E2E and governance output here during branch review.
 - keep recovery inspection visible
 - verify no false success appears
 - verify recovery commands remain visible
-- verify FDP-29 flags can be disabled
+- verify rollback preserves current-only model routing and fail-closed preflight
 
 ## Final Allowed Claim
 

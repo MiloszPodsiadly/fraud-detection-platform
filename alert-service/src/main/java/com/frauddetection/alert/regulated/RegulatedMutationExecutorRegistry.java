@@ -2,7 +2,6 @@ package com.frauddetection.alert.regulated;
 
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditResourceType;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -17,27 +16,7 @@ public class RegulatedMutationExecutorRegistry {
 
     @Autowired
     public RegulatedMutationExecutorRegistry(
-            List<RegulatedMutationExecutor> executors,
-            @Value("${app.regulated-mutations.evidence-gated-finalize.enabled:false}") boolean evidenceGatedFinalizeEnabled,
-            @Value("${app.regulated-mutations.evidence-gated-finalize.submit-decision.enabled:false}") boolean submitDecisionEnabled,
-            @Value("${app.regulated-mutations.evidence-gated-finalize.fraud-case-update.enabled:false}") boolean fraudCaseUpdateEnabled,
-            @Value("${app.regulated-mutations.evidence-gated-finalize.trust-incident.enabled:false}") boolean trustIncidentEnabled,
-            @Value("${app.regulated-mutations.evidence-gated-finalize.outbox-resolution.enabled:false}") boolean outboxResolutionEnabled
-    ) {
-        this(
-                executors,
-                evidenceGatedFinalizeEnabled && (
-                        submitDecisionEnabled
-                                || fraudCaseUpdateEnabled
-                                || trustIncidentEnabled
-                                || outboxResolutionEnabled
-                )
-        );
-    }
-
-    public RegulatedMutationExecutorRegistry(
-            List<RegulatedMutationExecutor> executors,
-            boolean evidenceGatedFinalizeActive
+            List<RegulatedMutationExecutor> executors
     ) {
         if (executors == null || executors.isEmpty()) {
             throw new IllegalStateException("Regulated mutation executor registry requires at least one executor.");
@@ -54,10 +33,7 @@ public class RegulatedMutationExecutorRegistry {
                         + executor.modelVersion() + ".");
             }
         }
-        requirePresent(byVersion, RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
-        if (evidenceGatedFinalizeActive) {
-            requirePresent(byVersion, RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
-        }
+        requirePresent(byVersion, RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
         this.executors = Map.copyOf(byVersion);
     }
 
@@ -65,9 +41,11 @@ public class RegulatedMutationExecutorRegistry {
         if (document == null) {
             throw new IllegalArgumentException("Regulated mutation command document is required.");
         }
-        RegulatedMutationExecutor executor = executorFor(document.mutationModelVersionOrLegacy());
+        document.requireRevision();
+        RegulatedMutationExecutor executor = executorFor(document.getMutationModelVersion());
         AuditAction action = parseAction(document.getAction());
         AuditResourceType resourceType = parseResourceType(document.getResourceType());
+        RegulatedMutationDefinitions.requireSupported(action, resourceType);
         if (!executor.supports(action, resourceType)) {
             throw new IllegalStateException("Executor " + executor.modelVersion()
                     + " does not support action/resource " + action + "/" + resourceType + ".");
@@ -76,12 +54,12 @@ public class RegulatedMutationExecutorRegistry {
     }
 
     public RegulatedMutationExecutor executorFor(RegulatedMutationModelVersion modelVersion) {
-        RegulatedMutationModelVersion resolved = modelVersion == null
-                ? RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION
-                : modelVersion;
-        RegulatedMutationExecutor executor = executors.get(resolved);
+        if (modelVersion != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
+            throw new IllegalStateException("Unsupported persisted regulated mutation model version.");
+        }
+        RegulatedMutationExecutor executor = executors.get(modelVersion);
         if (executor == null) {
-            throw new IllegalStateException("No regulated mutation executor registered for model version " + resolved + ".");
+            throw new IllegalStateException("No regulated mutation executor registered for model version " + modelVersion + ".");
         }
         return executor;
     }

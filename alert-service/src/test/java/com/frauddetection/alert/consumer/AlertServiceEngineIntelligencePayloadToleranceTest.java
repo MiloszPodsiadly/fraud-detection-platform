@@ -24,7 +24,7 @@ class AlertServiceEngineIntelligencePayloadToleranceTest {
         assertThat(full.engineIntelligence()).isNotNull();
         assertThat(mapper.toDocument(full))
                 .usingRecursiveComparison()
-                .isEqualTo(mapper.toDocument(AlertServiceTransactionScoredEventFixtureLoader.oldWithoutEngineIntelligence()));
+                .isEqualTo(mapper.toDocument(AlertServiceTransactionScoredEventFixtureLoader.withoutEngineIntelligence()));
         assertThat(full.engineIntelligence().toString())
                 .doesNotContainIgnoringCase("rawPayload", "rawEvidence", "finalDecision", "recommendedAction");
     }

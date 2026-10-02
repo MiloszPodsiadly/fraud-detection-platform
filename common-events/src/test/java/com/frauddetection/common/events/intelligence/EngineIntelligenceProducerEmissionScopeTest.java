@@ -10,7 +10,7 @@ class EngineIntelligenceProducerEmissionScopeTest {
 
     @Test
     void mapperCapabilityUsesOptionalPublicSummaryOnly() throws Exception {
-        String mapper = EngineIntelligenceFdp93SourceScanSupport.read(
+        String mapper = EngineIntelligenceSourceScanSupport.read(
                 "fraud-scoring-service/src/main/java/com/frauddetection/scoring/mapper/TransactionScoredEventMapper.java"
         );
 
@@ -26,10 +26,10 @@ class EngineIntelligenceProducerEmissionScopeTest {
 
     @Test
     void liveProducerPathUsesOptionalEmissionBoundaryWithoutDirectOrchestratorAccess() throws Exception {
-        String publisher = EngineIntelligenceFdp93SourceScanSupport.read(
+        String publisher = EngineIntelligenceSourceScanSupport.read(
                 "fraud-scoring-service/src/main/java/com/frauddetection/scoring/messaging/KafkaTransactionScoredEventPublisher.java"
         );
-        String scoringService = EngineIntelligenceFdp93SourceScanSupport.read(
+        String scoringService = EngineIntelligenceSourceScanSupport.read(
                 "fraud-scoring-service/src/main/java/com/frauddetection/scoring/service/TransactionFraudScoringService.java"
         );
 
@@ -55,7 +55,7 @@ class EngineIntelligenceProducerEmissionScopeTest {
 
     @Test
     void compositeScoringEngineDoesNotReferenceEngineIntelligence() throws Exception {
-        assertThat(EngineIntelligenceFdp93SourceScanSupport.read(
+        assertThat(EngineIntelligenceSourceScanSupport.read(
                 "fraud-scoring-service/src/main/java/com/frauddetection/scoring/service/CompositeFraudScoringEngine.java"
         )).withFailMessage(MESSAGE)
                 .doesNotContain(
@@ -69,7 +69,7 @@ class EngineIntelligenceProducerEmissionScopeTest {
 
     @Test
     void productionConfigDefinesOnlySpecificDisabledByDefaultEmissionFlag() throws Exception {
-        String configuration = EngineIntelligenceFdp93SourceScanSupport.productionConfigurationSources();
+        String configuration = EngineIntelligenceSourceScanSupport.productionConfigurationSources();
 
         assertThat(configuration)
                 .withFailMessage(MESSAGE)

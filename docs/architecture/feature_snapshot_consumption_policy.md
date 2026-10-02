@@ -169,20 +169,18 @@ The diagnostic `RuleBasedSignalEngine` reports bounded `DEGRADED` with null scor
 continue eligible diagnostic engines. Raw invalid values must not appear in public output, logs, metrics, or
 diagnostic evidence.
 
-## Retained Compatibility
+## Current Event Boundaries
 
-This branch deliberately retains compatibility that is still needed for durability, replay, and rolling deployments:
+A valid current `TransactionScoredEvent` may omit `engineIntelligence` or carry explicit null. A present summary must
+contain the complete current comparison identity and pass all engine ordering, supported-ID, bounds, and semantic
+validation. The event reader does not select a historical parser from the outer `modelVersion` and does not normalize
+identity-free comparison objects during Kafka replay.
 
-- `EngineIntelligenceComparisonV1Compatibility` for historical comparison objects read through a
-  `TransactionScoredEvent` whose outer event proves `modelVersion=v1` and whose comparison contains the complete
-  legacy semantic triplet.
-- Old-event `engineIntelligence == null` handling so historical Kafka events remain readable as explicit absence.
-- Retained Kafka and Mongo replay support for existing stored events and projections.
-- Old enriched-event JSON with duplicate top-level fraud facts can still be deserialized because unknown JSON
-  properties are ignored, but those duplicates are not part of the current Java record contract.
-
-Compatibility is narrow and fail-closed. It is not a SOLID violation merely because it exists; ACID durability,
-historical replay, and rolling deployment safety take precedence over cosmetic removal.
+`TransactionScoredEvent` Kafka replay uses the same strict current event contract and does not repair an invalid Engine
+Intelligence summary. Persistence-specific migration or read policies for already materialized Mongo documents are a
+separate boundary and do not authorize event-parser normalization. Old enriched-event JSON with duplicate top-level
+fraud facts can still be deserialized because unknown JSON properties are ignored, but those duplicates are not part of
+the current Java record contract. Compatibility remains narrow and fail-closed.
 
 ## Retired Rules Inputs
 

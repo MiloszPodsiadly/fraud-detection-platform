@@ -36,8 +36,8 @@ class RegulatedMutationPostRestartApiBehaviorTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.execution_status").value("RECOVERY_REQUIRED"))
                 .andExpect(jsonPath("$.response_snapshot_present").value(true))
-                .andExpect(content().string(not(containsString("COMMITTED_EVIDENCE_PENDING"))))
-                .andExpect(content().string(not(containsString("COMMITTED_EVIDENCE_CONFIRMED"))));
+                .andExpect(content().string(not(containsString("FINALIZED_EVIDENCE_PENDING_EXTERNAL"))))
+                .andExpect(content().string(not(containsString("FINALIZED_EVIDENCE_CONFIRMED"))));
     }
 
     @Test
@@ -61,7 +61,7 @@ class RegulatedMutationPostRestartApiBehaviorTest {
     @Test
     void processingExpiredAfterRestartReturnsObservableStateNotSuccess() throws Exception {
         RegulatedMutationRecoveryService service = service("idem-expired", response(
-                "AUDIT_ATTEMPTED",
+                "EVIDENCE_PREPARING",
                 "PROCESSING",
                 false,
                 "EXPIRED_PROCESSING_AFTER_RESTART",
@@ -70,18 +70,18 @@ class RegulatedMutationPostRestartApiBehaviorTest {
 
         mockMvc(service).perform(inspect("idem-expired"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.state").value("AUDIT_ATTEMPTED"))
+                .andExpect(jsonPath("$.state").value("EVIDENCE_PREPARING"))
                 .andExpect(jsonPath("$.execution_status").value("PROCESSING"))
                 .andExpect(jsonPath("$.lease_owner").doesNotExist())
                 .andExpect(jsonPath("$.lease_owner_present").value(true))
                 .andExpect(jsonPath("$.response_snapshot_present").value(false))
-                .andExpect(content().string(not(containsString("COMMITTED_EVIDENCE_CONFIRMED"))));
+                .andExpect(content().string(not(containsString("FINALIZED_EVIDENCE_CONFIRMED"))));
     }
 
     @Test
     void successAuditPendingAfterRestartReportsAuditRetryOnly() throws Exception {
         RegulatedMutationRecoveryService service = service("idem-success-audit", response(
-                "SUCCESS_AUDIT_PENDING",
+                "FINALIZE_RECOVERY_REQUIRED",
                 "PROCESSING",
                 true,
                 "SUCCESS_AUDIT_RETRY_ONLY",
@@ -90,7 +90,7 @@ class RegulatedMutationPostRestartApiBehaviorTest {
 
         mockMvc(service).perform(inspect("idem-success-audit"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.state").value("SUCCESS_AUDIT_PENDING"))
+                .andExpect(jsonPath("$.state").value("FINALIZE_RECOVERY_REQUIRED"))
                 .andExpect(jsonPath("$.response_snapshot_present").value(true))
                 .andExpect(jsonPath("$.success_audit_id").doesNotExist())
                 .andExpect(jsonPath("$.degradation_reason").value("SUCCESS_AUDIT_RETRY_ONLY"));
@@ -116,7 +116,7 @@ class RegulatedMutationPostRestartApiBehaviorTest {
     @Test
     void outboxConfirmationUnknownAfterRestartReturnsExplicitAmbiguity() throws Exception {
         RegulatedMutationRecoveryService service = service("idem-outbox-unknown", response(
-                "BUSINESS_COMMITTING",
+                "FINALIZING",
                 "RECOVERY_REQUIRED",
                 true,
                 "OUTBOX_CONFIRMATION_UNKNOWN",
@@ -151,7 +151,7 @@ class RegulatedMutationPostRestartApiBehaviorTest {
     @Test
     void inspectionAfterRestartDoesNotExposeRawSensitiveFields() throws Exception {
         RegulatedMutationRecoveryService service = service("idem-sensitive-after-restart", responseWithLastErrorCode(
-                "BUSINESS_COMMITTING",
+                "FINALIZING",
                 "RECOVERY_REQUIRED",
                 true,
                 "RECOVERY_REQUIRED",
@@ -177,9 +177,9 @@ class RegulatedMutationPostRestartApiBehaviorTest {
                 .andExpect(content().string(not(containsString("/api/v1"))));
     }
 
-    private RegulatedMutationRecoveryService service(String idempotencyKey, RegulatedMutationCommandInspectionResponse response) {
+    private RegulatedMutationRecoveryService service(String commandId, RegulatedMutationCommandInspectionResponse response) {
         RegulatedMutationRecoveryService service = mock(RegulatedMutationRecoveryService.class);
-        when(service.inspect(idempotencyKey)).thenReturn(response);
+        when(service.inspectByCommandId(commandId)).thenReturn(response);
         return service;
     }
 
@@ -206,7 +206,7 @@ class RegulatedMutationPostRestartApiBehaviorTest {
                 RegulatedMutationIntentHasher.hash("idem"),
                 "idem-a...tart",
                 "SUBMIT_ANALYST_DECISION",
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION.name(),
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1.name(),
                 "ALERT",
                 true,
                 RegulatedMutationIntentHasher.hash("resourceId=alert-sensitive"),
@@ -217,7 +217,7 @@ class RegulatedMutationPostRestartApiBehaviorTest {
                 Instant.parse("2026-05-06T08:00:00Z"),
                 1,
                 responseSnapshotPresent,
-                state.equals("AUDIT_ATTEMPTED") ? "attempted-audit" : null,
+                state.equals("EVIDENCE_PREPARING") ? "attempted-audit" : null,
                 null,
                 null,
                 degradationReason,
@@ -233,8 +233,8 @@ class RegulatedMutationPostRestartApiBehaviorTest {
         return "UNSAFE_ERROR_REDACTED";
     }
 
-    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder inspect(String idempotencyKey) {
-        return get("/api/v1/regulated-mutations/" + idempotencyKey)
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder inspect(String commandId) {
+        return get("/api/v1/regulated-mutations/by-command/" + commandId)
                 .principal(new TestingAuthenticationToken("ops-admin", "n/a", "FRAUD_OPS_ADMIN"));
     }
 

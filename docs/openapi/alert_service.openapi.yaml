@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: Alert Service API
-  version: FDP-26
-  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, public trust key export, governance advisory lifecycle projection, and human-review audit. This portfolio API specification does not represent bank certification, production certification, external finality, distributed ACID, or exactly-once broker delivery. FDP-20 extends tamper evidence outside the primary database boundary. FDP-22 adds a pluggable object-store external anchor sink boundary, verified external anchor references, and explicit external_immutability_level=NONE|CONFIGURED|ENFORCED; no WORM or full immutability claim is valid unless the adapter verifies infrastructure controls and reports ENFORCED. FDP-23 adds a separate local-first audit trust authority for Ed25519 external anchor hash signatures and public verification key export; the alert-service does not hold the trust authority private key. FDP-24 adds fail-closed posture reporting, durable analyst-decision outbox/idempotency semantics, and publication-status source-of-truth semantics. FDP-25 adds a recoverable regulated mutation state machine for submit-decision writes with canonical intent, idempotent audit phase keys, bounded operational recovery, and rate-limited audited inspection endpoints. FDP-26 adds a REQUIRED local Mongo transaction boundary option for supported regulated mutations, regulated fraud-case update, a separate authoritative transactional outbox record, bounded outbox recovery APIs, asynchronous evidence confirmation, bank-mode dual-control for manual outbox confirmation, and a minimal trust incident control plane. Audit integrity, trust authority signatures, trust attestation, and FDP-26 transaction mode do not imply certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, distributed ACID across MongoDB/Kafka/external witnesses, exactly-once broker delivery, pre-commit/finalize commit, or final compliance archive.
+  version: "1.0.0"
+  description: Authenticated alert-service contracts for analyst workflows, durable platform Audit Read API, bounded audit integrity verification, selected sensitive read-access audit persistence, external anchor verification, bounded evidence export, derived audit trust attestation, public trust key export, governance advisory lifecycle projection, and human-review audit. The service supports tamper-evident audit chains, pluggable external anchor publication with explicit external_immutability_level=NONE|CONFIGURED|ENFORCED, a separate local trust authority for Ed25519 anchor signatures, fail-closed posture reporting, durable analyst-decision outbox and idempotency semantics, recoverable regulated mutations, an optional required local Mongo transaction boundary, asynchronous evidence confirmation, dual-control outbox confirmation, and bounded trust incident operations. This portfolio API specification does not represent bank certification, production certification, external finality, distributed ACID across MongoDB, Kafka, or external witnesses, exactly-once broker delivery, certified WORM archive storage, legal notarization, SIEM integration, unbounded export, KMS/HSM signing unless explicitly integrated, or final compliance archive.
 servers:
   - url: http://localhost:8085
 paths:
@@ -283,7 +283,7 @@ paths:
   /api/v1/audit/trust/attestation:
     get:
       summary: Get derived audit trust attestation
-      description: Returns a bounded derived trust assessment over FDP-19 internal integrity and FDP-20 external anchor verification signals. Requires audit:verify and records READ_AUDIT_TRUST_ATTESTATION with bounded metadata. The attestation fingerprint includes source_service, limit, mode, signer_mode, signature_key_id when present, trust status fields, external_immutability_level, anchor coverage, latest chain fields, external anchor reference, and limitations so it can be reproduced externally. Clients must interpret trust_level together with attestation_signature_strength, external anchor signature_status, external integrity signature_verification_status, and external_immutability_level. SIGNED_BY_LOCAL_AUTHORITY requires signature_verification_status=VALID for external-anchor signature metadata from a separate local authority; stored signature fields alone never upgrade trust. SIGNED_ATTESTATION represents stronger trust only when attestation_signature_strength=PRODUCTION_READY, signer_mode is backed by externally managed KMS/HSM signing material, and external_immutability_level=ENFORCED. This endpoint does not implement a second external verification stack, a second evidence export, an external anchor sink, legal notarization, legal non-repudiation, regulator-certified archive, WORM storage, SIEM integration, or KMS/HSM signing unless explicitly integrated. Local-dev signing provides integrity metadata only and never upgrades trust level.
+      description: Returns a bounded derived trust assessment over internal audit-chain integrity and external anchor verification signals. Requires audit:verify and records READ_AUDIT_TRUST_ATTESTATION with bounded metadata. The attestation fingerprint includes source_service, limit, mode, signer_mode, signature_key_id when present, trust status fields, external_immutability_level, anchor coverage, latest chain fields, external anchor reference, and limitations so it can be reproduced externally. Clients must interpret trust_level together with attestation_signature_strength, external anchor signature_status, external integrity signature_verification_status, and external_immutability_level. SIGNED_BY_LOCAL_AUTHORITY requires signature_verification_status=VALID for external-anchor signature metadata from a separate local authority; stored signature fields alone never upgrade trust. SIGNED_ATTESTATION represents stronger trust only when attestation_signature_strength=PRODUCTION_READY, signer_mode is backed by externally managed KMS/HSM signing material, and external_immutability_level=ENFORCED. This endpoint does not implement a second external verification stack, a second evidence export, an external anchor sink, legal notarization, legal non-repudiation, regulator-certified archive, WORM storage, SIEM integration, or KMS/HSM signing unless explicitly integrated. Local-dev signing provides integrity metadata only and never upgrades trust level.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -349,7 +349,7 @@ paths:
   /system/trust-level:
     get:
       summary: Get deployment trust posture
-      description: Requires audit:verify. Returns bounded live deployment posture for external audit anchoring and FDP-26 local transaction/outbox/trust-incident modes. BEST_EFFORT and FDP24_DEGRADED must not be marketed as FDP-24 healthy fail-closed mode. SIGNED_EXTERNAL means trust-authority signing is enabled and required; it is not WORM, notarization, SIEM, mTLS, or legal trust. FDP24_HEALTHY requires zero unresolved degradations, zero pending degradation resolutions, zero unknown outbox confirmations, zero publish-attempted ambiguity, zero projection mismatches, zero pending outbox resolutions, zero terminal outbox failures, no regulated mutation recovery/evidence degradation, and no open/unacknowledged critical trust incidents. transaction_mode and transaction_capability_status describe the local Mongo transaction posture only; they are not distributed ACID or exactly-once delivery.
+      description: Requires audit:verify. Returns bounded live deployment posture for external audit anchoring and local transaction, outbox, and trust-incident modes. BEST_EFFORT and FDP24_DEGRADED must not be marketed as healthy fail-closed mode. SIGNED_EXTERNAL means trust-authority signing is enabled and required; it is not WORM, notarization, SIEM, mTLS, or legal trust. FDP24_HEALTHY requires zero unresolved degradations, zero pending degradation resolutions, zero unknown outbox confirmations, zero publish-attempted ambiguity, zero projection mismatches, zero pending outbox resolutions, zero terminal outbox failures, no regulated mutation recovery or evidence degradation, and no open or unacknowledged critical trust incidents. transaction_mode and transaction_capability_status describe the local Mongo transaction posture only; they are not distributed ACID or exactly-once delivery.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -581,71 +581,10 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-  /api/v1/decision-outbox/unknown-confirmations:
-    get:
-      summary: List decision outbox unknown confirmations
-      description: Requires audit:verify. Returns bounded PUBLISH_CONFIRMATION_UNKNOWN outbox rows for manual reconciliation. It never returns decision payloads, customer data, transaction payloads, or response bodies.
-      security:
-        - bearerAuth: []
-        - demoAuth: []
-      responses:
-        "200":
-          description: Unknown confirmations returned.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/UnknownConfirmationsResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-  /api/v1/decision-outbox/unknown-confirmations/{alertId}/resolve:
-    post:
-      summary: Resolve decision outbox unknown confirmation
-      description: Requires decision-outbox:reconcile. Resolves PUBLISH_CONFIRMATION_UNKNOWN as PUBLISHED or RETRY_REQUESTED with a mandatory reason. PUBLISHED requires BROKER_OFFSET evidence or equivalent broker confirmation. In bank fail-closed mode, structured evidence is mandatory and resolution is dual-control. RETRY_REQUESTED reuses the same eventId and dedupeKey; there is no blind automatic retry.
-      security:
-        - bearerAuth: []
-        - demoAuth: []
-      parameters:
-        - name: alertId
-          in: path
-          required: true
-          schema:
-            type: string
-            minLength: 1
-            maxLength: 160
-        - name: X-Idempotency-Key
-          in: header
-          required: true
-          schema:
-            type: string
-            minLength: 8
-            maxLength: 160
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ResolveOutboxConfirmationRequest"
-      responses:
-        "200":
-          description: Unknown confirmation resolved.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/UnknownConfirmation"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "409":
-          $ref: "#/components/responses/Conflict"
   /api/v1/outbox/recovery/backlog:
     get:
       summary: Inspect transactional outbox recovery backlog
-      description: Requires outbox:inspect. Returns bounded counts for FDP-26 transactional outbox records. Transactional outbox records are authoritative; alert embedded outbox fields are projection/cache. This endpoint is operational metadata only and never returns event payloads, transaction data, customer/account/card identifiers, decision notes, response bodies, raw exception details, or unbounded exports.
+      description: Requires outbox:inspect. Returns bounded counts for transactional outbox records. Transactional outbox records are authoritative; alert embedded outbox fields are projection/cache. This endpoint is operational metadata only and never returns event payloads, transaction data, customer/account/card identifiers, decision notes, response bodies, raw exception details, or unbounded exports.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -681,7 +620,7 @@ paths:
   /api/v1/outbox/{eventId}/resolve-confirmation:
     post:
       summary: Resolve transactional outbox confirmation-unknown state
-      description: Requires outbox:resolve and X-Idempotency-Key. Resolves a PUBLISH_CONFIRMATION_UNKNOWN transactional outbox record as PUBLISHED or RECOVERY_REQUIRED through the regulated mutation coordinator with mandatory reason and structured evidence. The response contains safe metadata only and does not expose the event payload. Resolution is an operational evidence action, not proof of exactly-once delivery or legal notarization.
+      description: Requires outbox:resolve and X-Idempotency-Key. Resolves a PUBLISH_CONFIRMATION_UNKNOWN transactional outbox record as PUBLISHED or RECOVERY_REQUIRED through the regulated mutation coordinator with mandatory reason and structured evidence. In bank dual-control mode the first call creates an immutable pending intent and returns its server-assigned resolution_request_id; approval must send that value as pending_request_id and must use the same resolution. Requester and approver evidence remain separately persisted. The response contains safe metadata only and does not expose the event payload. Resolution is an operational evidence action, not proof of exactly-once delivery or legal notarization.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -723,42 +662,6 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
-  /api/v1/regulated-mutations/{idempotencyKey}:
-    get:
-      summary: Inspect one regulated mutation command by raw idempotency key
-      description: Legacy/debug compatibility endpoint. Requires regulated-mutation:recover or audit:verify. Rate-limited per actor/IP and fails closed with 503 when inspection access cannot be durably audited. Returns command state, execution status, lease metadata, evidence ids, degradation reason, last error, idempotency key hash, masked idempotency key, and snapshot presence for one idempotency key. Prefer /by-command/{commandId} or /by-idempotency-hash/{hash} for new tooling so raw idempotency keys are not placed in URLs. Operators must not paste raw idempotency keys in tickets, logs, runbooks, or dashboards. This endpoint is read-only and never exposes raw idempotency keys in the response, command payloads, response payloads, notes, customer/account/card identifiers, raw exception details, or unbounded exports.
-      security:
-        - bearerAuth: []
-        - demoAuth: []
-      parameters:
-        - name: idempotencyKey
-          in: path
-          required: true
-          schema:
-            type: string
-            minLength: 1
-            maxLength: 160
-      responses:
-        "200":
-          description: Command inspection returned.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RegulatedMutationCommandInspectionResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "429":
-          description: Inspection rate limit exceeded.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiErrorResponse"
-        "503":
-          $ref: "#/components/responses/ServiceUnavailable"
   /api/v1/regulated-mutations/by-command/{commandId}:
     get:
       summary: Inspect one regulated mutation command by command id
@@ -835,7 +738,7 @@ paths:
   /api/v1/regulated-mutations/recover:
     post:
       summary: Run bounded regulated mutation recovery
-      description: Requires regulated-mutation:recover. Runs bounded recovery for stale or recovery-required FDP-25 command records. Recovery releases only safe pre-mutation commands, validates reconstructed business state against stored canonical intent, binds existing idempotent phase audits, retries only missing success evidence where safe, and never re-runs business mutation after BUSINESS_COMMITTING. This endpoint does not claim rollback safety, workflow automation, scoring changes, Kafka contract changes, or full evidence anchoring.
+      description: Requires regulated-mutation:recover. Runs bounded recovery for stale or recovery-required current-model commands. Recovery validates reconstructed business state against canonical intent, preserves owner fencing, binds idempotent evidence, and never blindly re-runs business mutation. Unsupported persisted model versions are handled by the read-only startup preflight, not this endpoint. Recovery does not claim external finality, workflow automation, scoring changes, or exactly-once Kafka delivery.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -899,7 +802,7 @@ paths:
   /api/v1/alerts/{alertId}/decision:
     post:
       summary: Submit analyst decision
-      description: Records an analyst decision through the regulated mutation coordinator. X-Idempotency-Key is required. The command stores canonical intent fields, an idempotency-key hash, and mutation_model_version; null or missing model version is LEGACY_REGULATED_MUTATION. By default the legacy FDP-26 path is unchanged. FDP-29 can enable EVIDENCE_GATED_FINALIZE_V1 only for submit-decision with app.regulated-mutations.evidence-gated-finalize.enabled=true and app.regulated-mutations.evidence-gated-finalize.submit-decision.enabled=true. That path is a local evidence-precondition-gated finalize model and requires app.regulated-mutations.transaction-mode=REQUIRED, Mongo transaction capability, transactional outbox repository, outbox recovery, submit-decision recovery strategy, bounded local audit writer retry config, and required local audit-chain unique indexes at startup; otherwise it fails closed. The same idempotency key and request body replay the stored response snapshot; the same key with a different body or different backend-resolved actor returns 409; a missing key returns 400. Kafka publication is asynchronous from authoritative transactional_outbox_records and at-least-once unless consumers dedupe by event id. FraudDecisionEvent carries delivery=AT_LEAST_ONCE and dedupeKey=eventId. operation_status is mandatory. Legacy statuses include REJECTED_BEFORE_MUTATION, IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN, COMMITTED_EVIDENCE_PENDING, COMMITTED_EVIDENCE_CONFIRMED, and COMMITTED_EVIDENCE_INCOMPLETE. FDP-29 statuses include EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, and FINALIZE_RECOVERY_REQUIRED. New FDP-29 submit-decision commands durably persist FINALIZED_EVIDENCE_PENDING_EXTERNAL as the local-visible state; FINALIZED_VISIBLE is compatibility/repair only. The local finalize transaction writes local SUCCESS audit evidence through RegulatedMutationLocalAuditPhaseWriter and does not use generic AuditService publisher fanout. FDP-29 execution is isolated in EvidenceGatedFinalizeExecutor; the shared coordinator only routes by mutation model version. External anchor readiness and Trust Authority signing readiness are not part of the current local finalize transaction. Pending/finalizing responses must not be interpreted as committed requested decision state. FDP-29 is not distributed ACID across MongoDB, external witnesses, trust-authority signing, and Kafka, and it does not provide exactly-once broker delivery, WORM storage, legal notarization, SIEM integration, or certified archive evidence.
+      description: Records one analyst decision per Alert through the current evidence-gated regulated mutation coordinator. X-Idempotency-Key is required. Every executable command declares EVIDENCE_GATED_FINALIZE_V1; missing, null, retired, and unknown persisted mutation_model_version values fail closed and are never reinterpreted as current. The local Mongo transaction persists the business state, command transition, local success audit, transactional outbox record, response snapshot, and local finalize marker. Matching canonical intent replays the stored result; conflicting key reuse or a second independent decision for the same Alert returns 409. Kafka delivery and external evidence confirmation remain asynchronous. Preparation, finalizing, and recovery statuses are not completed success. This contract does not claim distributed ACID, exactly-once broker delivery, WORM storage, legal notarization, SIEM integration, or certified archive evidence.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -946,7 +849,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: Idempotency key was reused with a different payload.
+          description: Idempotency key was reused with a different payload, or an independent analyst decision already exists for the Alert.
           content:
             application/json:
               schema:
@@ -1311,7 +1214,7 @@ paths:
           description: Feedback could not be safely completed because durable write-action audit outbox intent could not be persisted. Reason code FRAUD_FEEDBACK_AUDIT_OUTBOX_UNAVAILABLE.
     get:
       summary: Read active bounded analyst fraud feedback for one scored transaction
-      description: Returns the active feedback record for an existing scored transaction. Requires fraud-feedback:read. Existing transactions without feedback return 404 in FDP-121 v1. This endpoint is read-only and does not export datasets, invoke scoring, update recommendations, trigger workflows, create cases, authorize payments, train models, promote models, or change thresholds.
+      description: Returns the active feedback record for an existing scored transaction. Requires fraud-feedback:read. Existing transactions without feedback return 404 under the current v1 contract. This endpoint is read-only and does not export datasets, invoke scoring, update recommendations, trigger workflows, create cases, authorize payments, train models, promote models, or change thresholds.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1373,7 +1276,7 @@ paths:
   /api/v1/transactions/scored/{transactionId}/engine-intelligence/feedback:
     get:
       summary: Read captured engine intelligence feedback for one scored transaction
-      description: Returns captured feedback through a bounded, authorized, transaction-scoped read model. FDP-99 returns the first bounded page of latest feedback. Cursor-based continuation is future scope. page.hasMore indicates additional feedback exists, not that FDP-99 provides navigation. Feedback can be reviewed, not executed. The read path requires engine-intelligence:feedback:read, validates the scored transaction before feedback lookup, returns an empty bounded page when no feedback exists, uses platform sensitive-read audit, and does not invoke scoring, ML, rules, orchestration, Kafka, payment authorization, model training, decisioning, analytics, global search, export, or case-level aggregation.
+      description: Returns captured feedback through a bounded, authorized, transaction-scoped read model. The endpoint returns the first bounded page of latest feedback. Cursor-based continuation is future scope. page.hasMore indicates additional feedback exists, not that navigation is currently available. Feedback can be reviewed, not executed. The read path requires engine-intelligence:feedback:read, validates the scored transaction before feedback lookup, returns an empty bounded page when no feedback exists, uses platform sensitive-read audit, and does not invoke scoring, ML, rules, orchestration, Kafka, payment authorization, model training, decisioning, analytics, global search, export, or case-level aggregation.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1650,7 +1553,7 @@ paths:
   /api/v1/governance/promotion-review-readiness/current:
     get:
       summary: Read current Promotion Review Readiness Report
-      description: Returns the current validated FDP-111 Promotion Review Readiness Report as a bounded read-only DTO. Requires promotion-readiness:read. The response is diagnostic-only and is not model promotion approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic approve/decline/block logic, and not analyst recommendation logic. This endpoint does not generate reports, mutate state, change scoring, trigger workflows, run schedulers, emit Kafka events, expose raw FDP-102 records, raw evaluation cards, raw evaluation reports, transaction references, customer identifiers, model registry data, secrets, paths, promotion fields, threshold recommendation fields, or decisioning fields.
+      description: Returns the current validated Promotion Review Readiness Report as a bounded read-only DTO. Requires promotion-readiness:read. The response is diagnostic-only and is not model promotion approval, not threshold recommendation, not production decisioning approval, not payment authorization, not automatic approve/decline/block logic, and not analyst recommendation logic. This endpoint does not generate reports, mutate state, change scoring, trigger workflows, run schedulers, emit Kafka events, expose raw source performance records, raw evaluation cards, raw evaluation reports, transaction references, customer identifiers, model registry data, secrets, paths, promotion fields, threshold recommendation fields, or decisioning fields.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -1701,7 +1604,7 @@ components:
     SystemTrustLevelResponse:
       type: object
       additionalProperties: false
-      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, unresolved_degradation_count, pending_degradation_resolution_count, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, outbox_pending_count, outbox_processing_count, outbox_publish_attempted_count, outbox_confirmation_unknown_count, outbox_projection_mismatch_count, terminal_outbox_failure_count, outbox_publish_confirmation_unknown_count, unknown_outbox_confirmation_count, pending_outbox_resolution_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds, regulated_mutation_recovery_required_count, stale_processing_lease_count, committed_degraded_count, evidence_confirmation_pending_count, evidence_confirmation_failed_count, repeated_recovery_failure_count, oldest_recovery_required_age_seconds, transaction_mode, transaction_capability_status, outbox_delivery_mode, evidence_confirmation_mode, open_critical_incident_count, open_high_incident_count, unacknowledged_critical_incident_count, oldest_open_incident_age_seconds, top_incident_types, incident_health_status]
+      required: [guarantee_level, publication_enabled, publication_required, fail_closed, external_anchor_strength, coverage_status, witness_status, signature_policy, required_publication_failures, local_status_unverified, missing_ranges, post_commit_audit_degraded, unresolved_degradation_count, pending_degradation_resolution_count, post_commit_audit_degraded_resolved, outbox_failed_terminal_count, outbox_pending_count, outbox_processing_count, outbox_publish_attempted_count, outbox_confirmation_unknown_count, outbox_projection_mismatch_count, outbox_projection_reconciliation_pending_count, outbox_recovery_required_count, terminal_outbox_failure_count, outbox_publish_confirmation_unknown_count, unknown_outbox_confirmation_count, pending_outbox_resolution_count, outbox_oldest_pending_age_seconds, outbox_oldest_ambiguous_age_seconds, regulated_mutation_recovery_required_count, stale_processing_lease_count, finalize_recovery_required_count, evidence_confirmation_pending_count, repeated_recovery_failure_count, oldest_recovery_required_age_seconds, transaction_mode, transaction_capability_status, outbox_delivery_mode, evidence_confirmation_mode, open_critical_incident_count, open_high_incident_count, unacknowledged_critical_incident_count, oldest_open_incident_age_seconds, top_incident_types, incident_health_status]
       properties:
         guarantee_level:
           type: string
@@ -1777,6 +1680,16 @@ components:
           format: int64
           minimum: 0
           description: Projection/cache mismatch count; transactional_outbox_records remain authoritative.
+        outbox_projection_reconciliation_pending_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Authoritative outbox records with scheduled projection work, including work without a persisted mismatch marker.
+        outbox_recovery_required_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Authoritative outbox records in RECOVERY_REQUIRED state.
         terminal_outbox_failure_count:
           type: integer
           format: int64
@@ -1793,6 +1706,7 @@ components:
           type: integer
           format: int64
           minimum: 0
+          description: Authoritative outbox records awaiting completion of manual dual-control resolution.
         outbox_oldest_pending_age_seconds:
           type: integer
           format: int64
@@ -1813,21 +1727,16 @@ components:
           format: int64
           minimum: 0
           description: Number of regulated mutation commands with expired processing leases. Any value greater than zero degrades deployment trust posture.
-        committed_degraded_count:
+        finalize_recovery_required_count:
           type: integer
           format: int64
           minimum: 0
-          description: Number of regulated mutation commands committed with degraded evidence. Any value greater than zero degrades deployment trust posture.
+          description: Number of regulated mutation commands requiring finalize recovery. Any value greater than zero degrades deployment trust posture.
         evidence_confirmation_pending_count:
           type: integer
           format: int64
           minimum: 0
           description: Number of locally committed regulated mutation commands still awaiting asynchronous evidence confirmation.
-        evidence_confirmation_failed_count:
-          type: integer
-          format: int64
-          minimum: 0
-          description: Number of regulated mutation commands whose evidence confirmation failed into a degraded committed state. Any value greater than zero degrades deployment trust posture.
         repeated_recovery_failure_count:
           type: integer
           format: int64
@@ -1849,14 +1758,15 @@ components:
         transaction_capability_status:
           type: string
           enum: [LOCAL_MONGO_TRANSACTION_REQUIRED, NON_TRANSACTIONAL_RECOVERABLE_SAGA]
-          description: Interprets transaction_mode for FDP-26. OFF is a recoverable saga posture, not a regulated local ACID commit boundary.
+          description: Interprets transaction_mode. OFF is a recoverable saga posture, not a regulated local ACID commit boundary.
         outbox_delivery_mode:
           type: string
           enum: [TRANSACTIONAL_OUTBOX_AT_LEAST_ONCE, DISABLED]
           description: Broker delivery posture. AT_LEAST_ONCE requires consumer dedupe and is not exactly-once delivery.
         evidence_confirmation_mode:
           type: string
-          enum: [ENABLED, DISABLED]
+          enum: [ENABLED_PROVENANCE_AWARE, DISABLED]
+          description: ENABLED_PROVENANCE_AWARE means broker acknowledgement and manual operator attestation remain distinct; it does not claim independent broker verification for manual resolution.
         open_critical_incident_count:
           type: integer
           format: int64
@@ -1911,7 +1821,7 @@ components:
       properties:
         status:
           type: string
-          enum: [AVAILABLE, PARTIAL, FAILED, REQUESTED, AUDIT_ATTEMPTED, BUSINESS_COMMITTING, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING, SUCCESS_AUDIT_RECORDED, EVIDENCE_PENDING, EVIDENCE_CONFIRMED, COMMITTED, COMMITTED_DEGRADED, REJECTED]
+          enum: [AVAILABLE, PARTIAL, FAILED, IN_PROGRESS, RECOVERY_REQUIRED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED]
         signal_count:
           type: integer
           minimum: 0
@@ -1937,7 +1847,7 @@ components:
         failure_reason:
           type: string
           nullable: true
-          enum: [PERSISTENCE_UNAVAILABLE, COMMITTED_DEGRADED, FAILED]
+          enum: [PERSISTENCE_UNAVAILABLE, FAILED]
         incidents:
           type: array
           maxItems: 100
@@ -1945,8 +1855,8 @@ components:
             $ref: "#/components/schemas/TrustIncidentResponse"
         operation_status:
           type: string
-          description: AVAILABLE for completed refresh, COMMITTED_DEGRADED only for verified non-transactional partial refresh, or the regulated command state for non-terminal replay/status responses.
-          enum: [AVAILABLE, FAILED, REQUESTED, AUDIT_ATTEMPTED, BUSINESS_COMMITTING, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING, SUCCESS_AUDIT_RECORDED, EVIDENCE_PENDING, EVIDENCE_CONFIRMED, COMMITTED, COMMITTED_DEGRADED, REJECTED]
+          description: AVAILABLE for completed refresh, FAILED for failed materialization, or the current regulated command status for non-terminal replay/status responses.
+          enum: [AVAILABLE, FAILED, IN_PROGRESS, RECOVERY_REQUIRED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED]
         transaction_mode:
           type: string
           nullable: true
@@ -1958,7 +1868,7 @@ components:
         recovery_required_reason:
           type: string
           nullable: true
-          enum: [PERSISTENCE_UNAVAILABLE, COMMITTED_DEGRADED, FAILED, TRUST_INCIDENT_REFRESH_PARTIAL_OFF_MODE, TRUST_INCIDENT_REFRESH_ROLLED_BACK]
+          enum: [PERSISTENCE_UNAVAILABLE, FAILED, TRUST_INCIDENT_REFRESH_PARTIAL_OFF_MODE, TRUST_INCIDENT_REFRESH_ROLLED_BACK]
           description: Stable non-sensitive reason code for degraded or failed refresh responses.
     TrustSignalPreviewResponse:
       type: object
@@ -1984,7 +1894,7 @@ components:
       properties:
         type:
           type: string
-          enum: [OUTBOX_TERMINAL_FAILURE, OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN, OUTBOX_PROJECTION_MISMATCH, REGULATED_MUTATION_RECOVERY_REQUIRED, REGULATED_MUTATION_COMMITTED_DEGRADED, EVIDENCE_CONFIRMATION_FAILED, AUDIT_DEGRADATION_UNRESOLVED, EXTERNAL_ANCHOR_GAP, COVERAGE_UNAVAILABLE, TRUST_AUTHORITY_UNAVAILABLE]
+          enum: [OUTBOX_TERMINAL_FAILURE, OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN, OUTBOX_PROJECTION_MISMATCH, REGULATED_MUTATION_RECOVERY_REQUIRED, REGULATED_MUTATION_FINALIZE_RECOVERY_REQUIRED, EVIDENCE_CONFIRMATION_RECOVERY_REQUIRED, AUDIT_DEGRADATION_UNRESOLVED, EXTERNAL_ANCHOR_GAP, COVERAGE_UNAVAILABLE, TRUST_AUTHORITY_UNAVAILABLE]
         severity:
           type: string
           nullable: true
@@ -2011,7 +1921,7 @@ components:
           type: string
         type:
           type: string
-          enum: [OUTBOX_TERMINAL_FAILURE, OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN, OUTBOX_PROJECTION_MISMATCH, REGULATED_MUTATION_RECOVERY_REQUIRED, REGULATED_MUTATION_COMMITTED_DEGRADED, EVIDENCE_CONFIRMATION_FAILED, AUDIT_DEGRADATION_UNRESOLVED, EXTERNAL_ANCHOR_GAP, COVERAGE_UNAVAILABLE, TRUST_AUTHORITY_UNAVAILABLE]
+          enum: [OUTBOX_TERMINAL_FAILURE, OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN, OUTBOX_PROJECTION_MISMATCH, REGULATED_MUTATION_RECOVERY_REQUIRED, REGULATED_MUTATION_FINALIZE_RECOVERY_REQUIRED, EVIDENCE_CONFIRMATION_RECOVERY_REQUIRED, AUDIT_DEGRADATION_UNRESOLVED, EXTERNAL_ANCHOR_GAP, COVERAGE_UNAVAILABLE, TRUST_AUTHORITY_UNAVAILABLE]
         severity:
           type: string
           enum: [CRITICAL, HIGH, MEDIUM]
@@ -2304,105 +2214,10 @@ components:
           type: string
           minLength: 1
           maxLength: 120
-    UnknownConfirmationsResponse:
-      type: object
-      additionalProperties: false
-      required: [events]
-      properties:
-        events:
-          type: array
-          maxItems: 100
-          items:
-            $ref: "#/components/schemas/UnknownConfirmation"
-    UnknownConfirmation:
-      type: object
-      additionalProperties: false
-      required: [alert_id, event_id, dedupe_key, status, decided_at, attempts, last_attempt_at, published_at, failure_reason, resolution_pending, resolution_requested_at, resolution_requested_by, resolution_evidence_type, resolution_evidence_reference, resolution_evidence_verified_at, resolution_evidence_verified_by, resolution_approved_at, resolution_approved_by, resolution_approval_reason]
-      properties:
-        alert_id:
-          type: string
-        event_id:
-          type: string
-          nullable: true
-        dedupe_key:
-          type: string
-          nullable: true
-        status:
-          type: string
-          enum: [PUBLISH_CONFIRMATION_UNKNOWN, PUBLISHED, PENDING, REQUESTED, AUDIT_ATTEMPTED, BUSINESS_COMMITTING, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING, SUCCESS_AUDIT_RECORDED, EVIDENCE_PENDING, EVIDENCE_CONFIRMED, COMMITTED, COMMITTED_DEGRADED, REJECTED, FAILED]
-        decided_at:
-          type: string
-          format: date-time
-          nullable: true
-        attempts:
-          type: integer
-          minimum: 0
-        last_attempt_at:
-          type: string
-          format: date-time
-          nullable: true
-        published_at:
-          type: string
-          format: date-time
-          nullable: true
-        failure_reason:
-          type: string
-          nullable: true
-        resolution_pending:
-          type: boolean
-        resolution_requested_at:
-          type: string
-          format: date-time
-          nullable: true
-        resolution_requested_by:
-          type: string
-          nullable: true
-        resolution_evidence_type:
-          type: string
-          nullable: true
-          enum: [BROKER_OFFSET, EXTERNAL_ANCHOR_REFERENCE, TICKET, RUNBOOK_STEP, OTHER]
-        resolution_evidence_reference:
-          type: string
-          nullable: true
-          maxLength: 500
-        resolution_evidence_verified_at:
-          type: string
-          format: date-time
-          nullable: true
-        resolution_evidence_verified_by:
-          type: string
-          nullable: true
-        resolution_approved_at:
-          type: string
-          format: date-time
-          nullable: true
-        resolution_approved_by:
-          type: string
-          nullable: true
-        resolution_approval_reason:
-          type: string
-          nullable: true
-          maxLength: 500
-    ResolveOutboxConfirmationRequest:
-      type: object
-      additionalProperties: false
-      required: [resolution, reason]
-      properties:
-        resolution:
-          type: string
-          enum: [PUBLISHED, RETRY_REQUESTED]
-        reason:
-          type: string
-          minLength: 1
-          maxLength: 500
-        evidence_reference:
-          nullable: true
-          allOf:
-            - $ref: "#/components/schemas/ResolutionEvidenceReference"
     OutboxBacklogResponse:
       type: object
       additionalProperties: false
-      required: [pending_count, processing_count, publish_attempted_count, confirmation_unknown_count, failed_retryable_count, failed_terminal_count, recovery_required_count, projection_mismatch_count, oldest_pending_age_seconds]
+      required: [pending_count, processing_count, publish_attempted_count, confirmation_unknown_count, failed_retryable_count, failed_terminal_count, recovery_required_count, projection_mismatch_count, projection_reconciliation_pending_count, oldest_pending_age_seconds]
       properties:
         pending_count:
           type: integer
@@ -2436,6 +2251,11 @@ components:
           type: integer
           format: int64
           minimum: 0
+        projection_reconciliation_pending_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Durable source-to-projection reconciliation work, independent of diagnostic mismatch markers.
         oldest_pending_age_seconds:
           type: integer
           format: int64
@@ -2467,6 +2287,11 @@ components:
         resolution:
           type: string
           enum: [PUBLISHED, RECOVERY_REQUIRED]
+        pending_request_id:
+          type: string
+          maxLength: 100
+          nullable: true
+          description: Must be omitted when creating a dual-control request and must equal the server-assigned pending request identifier when approving it.
         reason:
           type: string
           minLength: 1
@@ -2476,7 +2301,7 @@ components:
     OutboxRecordResponse:
       type: object
       additionalProperties: false
-      required: [event_id, dedupe_key, mutation_command_id, resource_type, resource_id, event_type, payload_hash, status, attempts, last_error, published_at, confirmation_unknown_at, updated_at, resolution_pending, resolution_control_mode, resolution_requested_by, resolution_requested_at, resolution_approved_by, resolution_approved_at]
+      required: [event_id, dedupe_key, mutation_command_id, resource_type, resource_id, event_type, payload_hash, status, attempts, last_error, published_at, publication_confirmation_provenance, confirmation_unknown_at, updated_at, resolution_pending, resolution_control_mode, resolution_request_id, resolution_proposed_outcome, resolution_requested_by, resolution_requested_at, resolution_approved_by, resolution_approved_at, operation_status]
       properties:
         event_id:
           type: string
@@ -2498,7 +2323,9 @@ components:
           description: Stable hash of the stored event payload; the raw payload is not returned by recovery APIs.
         status:
           type: string
-          enum: [PENDING, PROCESSING, PUBLISHED, PUBLISH_CONFIRMATION_UNKNOWN, FAILED_RETRYABLE, FAILED_TERMINAL, RECOVERY_REQUIRED]
+          nullable: true
+          enum: [PENDING, PROCESSING, PUBLISH_ATTEMPTED, PUBLISHED, PUBLISH_CONFIRMATION_UNKNOWN, FAILED_RETRYABLE, FAILED_TERMINAL, RECOVERY_REQUIRED]
+          description: Transactional outbox publication status. Null while the regulated mutation has not produced a committed outbox result.
         attempts:
           type: integer
           minimum: 0
@@ -2509,6 +2336,11 @@ components:
           type: string
           format: date-time
           nullable: true
+        publication_confirmation_provenance:
+          type: string
+          nullable: true
+          enum: [BROKER_ACKNOWLEDGED, MANUAL_DUAL_CONTROL_ATTESTED, MANUAL_SINGLE_CONTROL_ATTESTED]
+          description: Explains why PUBLISHED is authoritative. BROKER_ACKNOWLEDGED records completion of the configured producer send; manual values are operator attestations and are not independent Kafka verification. Only complete dual-control manual attestation can satisfy regulated evidence confirmation; single-control attestation remains pending.
         confirmation_unknown_at:
           type: string
           format: date-time
@@ -2524,6 +2356,15 @@ components:
           nullable: true
           enum: [SINGLE_CONTROL_OPERATOR_ATTESTED, DUAL_CONTROL_REQUESTED, DUAL_CONTROL_APPROVED]
           description: Outside bank mode this is single-control operator attestation. In bank mode request and approval require distinct authenticated operators.
+        resolution_request_id:
+          type: string
+          nullable: true
+          description: Server-assigned immutable identifier that an approving operator must reference.
+        resolution_proposed_outcome:
+          type: string
+          nullable: true
+          enum: [PUBLISHED, RECOVERY_REQUIRED]
+          description: Immutable outcome proposed by the requester; approval cannot replace it.
         resolution_requested_by:
           type: string
           nullable: true
@@ -2538,6 +2379,10 @@ components:
           type: string
           format: date-time
           nullable: true
+        operation_status:
+          type: string
+          enum: [REQUESTED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED, FAILED]
+          description: Regulated mutation lifecycle status. This is distinct from the transactional outbox publication status.
     FraudCaseStatus:
       type: string
       enum: [OPEN, IN_REVIEW, ESCALATED, RESOLVED, REOPENED, CONFIRMED_FRAUD, FALSE_POSITIVE, CLOSED]
@@ -2793,8 +2638,8 @@ components:
       properties:
         operation_status:
           type: string
-          enum: [REJECTED_BEFORE_MUTATION, IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED, COMMITTED_EVIDENCE_PENDING, COMMITTED_EVIDENCE_CONFIRMED, COMMITTED_EVIDENCE_INCOMPLETE]
-          description: Mandatory operation state. IN_PROGRESS, RECOVERY_REQUIRED, and COMMIT_UNKNOWN must not be interpreted as a committed fraud-case update.
+          enum: [IN_PROGRESS, RECOVERY_REQUIRED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED]
+          description: Mandatory operation state. Processing, finalizing, and recovery states must not be interpreted as a committed fraud-case update.
         command_id:
           type: string
           nullable: true
@@ -2811,7 +2656,7 @@ components:
           nullable: true
           allOf:
             - $ref: "#/components/schemas/GenericObject"
-          description: Present only for committed/evidence-pending committed states. Absent for IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN, and rejected states.
+          description: Present only when current-model durable state proves local finalize. Absent for processing, recovery, and rejected states.
         recovery_required_reason:
           type: string
           nullable: true
@@ -2863,8 +2708,8 @@ components:
           nullable: true
         operation_status:
           type: string
-          enum: [REJECTED_BEFORE_MUTATION, IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_VISIBLE, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED, COMMITTED_EVIDENCE_PENDING, COMMITTED_EVIDENCE_CONFIRMED, COMMITTED_EVIDENCE_INCOMPLETE]
-          description: Mandatory operation state. REJECTED_BEFORE_MUTATION and REJECTED_EVIDENCE_UNAVAILABLE mean mutation was not executed. IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN, evidence preparation, finalizing, and recovery-required states are returned as HTTP 202 and must not be treated as completed success. COMMITTED_EVIDENCE_PENDING and FINALIZED_EVIDENCE_PENDING_EXTERNAL are conservative states before full evidence completion is persisted. COMMITTED_EVIDENCE_CONFIRMED and FINALIZED_EVIDENCE_CONFIRMED mean local commit marker, success audit, authoritative PUBLISHED transactional outbox evidence, and any configured external/signature evidence are present; they are not external WORM/notarization proof. COMMITTED_EVIDENCE_INCOMPLETE means the business decision and durable outbox committed while post-commit evidence completion degraded. This is not a rollback claim. COMMITTED_FULLY_ANCHORED is intentionally not exposed.
+          enum: [IN_PROGRESS, RECOVERY_REQUIRED, EVIDENCE_PREPARING, EVIDENCE_PREPARED, FINALIZING, FINALIZED_EVIDENCE_PENDING_EXTERNAL, FINALIZED_EVIDENCE_CONFIRMED, REJECTED_EVIDENCE_UNAVAILABLE, FAILED_BUSINESS_VALIDATION, FINALIZE_RECOVERY_REQUIRED]
+          description: Mandatory current-model operation state. Processing, preparation, finalizing, and recovery states are returned conservatively and must not be treated as completed success. FINALIZED_EVIDENCE_PENDING_EXTERNAL proves local finalize only; FINALIZED_EVIDENCE_CONFIRMED additionally requires configured evidence confirmation. Neither status claims external WORM storage, legal notarization, or distributed ACID.
     PagedGenericObject:
       type: object
       required:
@@ -3079,7 +2924,7 @@ components:
         - ANALYST_CONFIRMED_LEGITIMATE
         - ANALYST_INCONCLUSIVE
         - ANALYST_NEEDS_MORE_INFO
-      description: Bounded reason code allowlist for FDP-121 analyst feedback. Unknown uppercase strings are rejected.
+      description: Bounded reason code allowlist for analyst feedback. Unknown uppercase strings are rejected.
     CreateFraudFeedbackRequest:
       type: object
       additionalProperties: false
@@ -3115,7 +2960,7 @@ components:
           type: string
           nullable: true
           maxLength: 500
-          description: Optional bounded analyst-readable note. FDP-121 does not use notes for ML training or dataset export and rejects unsafe raw/internal terms.
+          description: Optional bounded analyst-readable note. Notes are not used for ML training or dataset export, and unsafe raw or internal terms are rejected.
     FraudFeedbackResponse:
       type: object
       additionalProperties: false
@@ -3165,7 +3010,7 @@ components:
             $ref: "#/components/schemas/FraudFeedbackReasonCode"
         notesPresent:
           type: boolean
-          description: FDP-121 stores bounded notes internally for analyst context only, but does not expose raw notes in feedback responses.
+          description: Bounded notes are stored internally for analyst context only, but raw notes are not exposed in feedback responses.
         fraudScore:
           type: number
           nullable: true
@@ -3440,7 +3285,7 @@ components:
           format: int64
           nullable: true
           minimum: 1
-          description: Unique per-partition chain position for FDP-19 audit records; null only for immutable legacy local records created before chain positions existed.
+          description: Unique per-partition chain position for audit records; null only for immutable legacy local records created before chain positions existed.
         request_id:
           type: string
           nullable: true
@@ -4283,7 +4128,7 @@ components:
         external_trust_dependency:
           type: string
           enum: [REQUIRED, OPTIONAL]
-          description: REQUIRED when the derived trust level depends on valid FDP-20 external anchors.
+          description: REQUIRED when the derived trust level depends on valid external audit anchors.
         source_service:
           type: string
           enum: [alert-service]
@@ -4295,7 +4140,7 @@ components:
           type: array
           items:
             type: string
-          description: Explicit limitations such as not_legal_notarization, not_worm_storage, not_siem_integration, not_kms_hsm_signing_unless_explicitly_integrated, local_signature_not_external_trust, external_immutability_not_enforced, no_worm_claim_without_infrastructure_enforcement, external_trust_incomplete, and derived_from_fdp19_fdp20_source_of_truth.
+          description: Explicit limitations such as not_legal_notarization, not_worm_storage, not_siem_integration, not_kms_hsm_signing_unless_explicitly_integrated, local_signature_not_external_trust, external_immutability_not_enforced, no_worm_claim_without_infrastructure_enforcement, external_trust_incomplete, and derived_from_audit_integrity_and_external_anchor_state.
     AuditTrustAttestationAnchorCoverage:
       type: object
       additionalProperties: false
@@ -5014,7 +4859,7 @@ components:
         comparisonType:
           type: string
           enum: [RULES_VS_ML]
-          description: Explicit comparison identity. FDP-129 compares only Rules against ML; Velocity is not included in score delta semantics.
+          description: Explicit comparison identity. The comparison includes only Rules and ML; Velocity is not included in score delta semantics.
         comparedEngineIds:
           type: array
           minItems: 2
@@ -5072,6 +4917,34 @@ components:
                 scoreBucket:
                   type: string
                   enum: [UNAVAILABLE]
+        - oneOf:
+            - type: object
+              required: [engineId, engineType, status, modelIdentity]
+              properties:
+                engineId:
+                  type: string
+                  enum: [ml.python.primary]
+                engineType:
+                  type: string
+                  enum: [ML_MODEL]
+                status:
+                  type: string
+                  enum: [AVAILABLE]
+            - allOf:
+                - type: object
+                  not:
+                    required: [modelIdentity]
+                - oneOf:
+                    - $ref: "#/components/schemas/RulesEngineIdentity"
+                    - $ref: "#/components/schemas/VelocityEngineIdentity"
+                    - allOf:
+                        - $ref: "#/components/schemas/MlEngineIdentity"
+                        - type: object
+                          required: [status]
+                          properties:
+                            status:
+                              type: string
+                              enum: [UNAVAILABLE, TIMEOUT, DEGRADED, NOT_APPLICABLE]
       properties:
         engineId:
           type: string
@@ -5101,7 +4974,7 @@ components:
             pattern: '^(?!.*[\x00-\x1F\x7F])\S(?:.*\S)?$'
         modelIdentity:
           $ref: "#/components/schemas/EngineIntelligenceMlModelIdentity"
-          description: Optional bounded ML runtime identity. Present only for AVAILABLE ml.python.primary ML_MODEL results when the producer emitted validated ML model lineage; Rules, Velocity, and non-AVAILABLE ML engines must omit it. The top-level scored transaction modelName/modelVersion fields are not the source for this nested identity.
+          description: Mandatory bounded ML runtime identity for AVAILABLE ml.python.primary ML_MODEL results. Rules, Velocity, and non-AVAILABLE ML engines must omit it. The top-level scored transaction modelName/modelVersion fields are not the source for this nested identity.
     CanonicalMlModelName:
       type: string
       minLength: 1
@@ -5272,7 +5145,7 @@ components:
         comparisonType:
           type: string
           enum: [RULES_VS_ML]
-          description: Explicit comparison identity. FDP-129 compares only Rules against ML; Velocity is not included in score delta semantics.
+          description: Explicit comparison identity. The comparison includes only Rules and ML; Velocity is not included in score delta semantics.
         comparedEngineIds:
           type: array
           minItems: 2
@@ -5701,7 +5574,7 @@ components:
           maxLength: 128
         identityCompleteness:
           type: string
-          enum: [NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE, NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE]
+          enum: [NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE]
     ShadowPerformanceGovernanceResponse:
       type: object
       additionalProperties: false
@@ -5738,16 +5611,16 @@ components:
           enum: [OFFLINE_DIAGNOSTIC]
         evaluationReportType:
           type: string
-          enum: [FEEDBACK_DATASET_OFFLINE_EVALUATION_V1, FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1]
-          description: Current Platform Evaluation report type, or the exact legacy read-only report type when reading historical persisted artifacts. Legacy values are not emitted by current writers.
+          enum: [FEEDBACK_DATASET_OFFLINE_EVALUATION_V1]
+          description: Canonical Platform Evaluation report type.
         evaluationReportVersion:
           type: string
-          enum: [FDP-124]
+          enum: [feedback-dataset-evaluation-v1]
         evaluationReportGeneratedAt:
           type: string
           format: date-time
           pattern: '^(?:(?:(?!0000)(?:(?:[02468][048]|[13579][26])00|[0-9]{2}(?:0[48]|[2468][048]|[13579][26])))-02-29|(?:[0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,9})?Z$'
-          description: UTC-normalized timestamp from the source feedback dataset/FDP-124 evaluation report. Must be less than or equal to evaluationCardGeneratedAt.
+          description: UTC-normalized timestamp from the source feedback dataset evaluation report. Must be less than or equal to evaluationCardGeneratedAt.
         evaluationCardGeneratedAt:
           type: string
           format: date-time
@@ -5755,8 +5628,8 @@ components:
           description: UTC-normalized timestamp from the Platform Recommendation Evaluation Card. Must be greater than or equal to evaluationReportGeneratedAt and less than or equal to the summary generatedAt.
         evaluationArtifactSetVersion:
           type: string
-          enum: [feedback-dataset-evaluation-report-artifact-set-v1, fdp123-report-artifact-set-v1]
-          description: Must match evaluationReportType as an exact current/current or legacy/legacy pair; mixed pairs are invalid.
+          enum: [feedback-dataset-evaluation-report-artifact-set-v1]
+          description: Canonical Platform Evaluation artifact-set version.
         datasetVersion:
           type: string
           enum: [feedback-dataset-v1]

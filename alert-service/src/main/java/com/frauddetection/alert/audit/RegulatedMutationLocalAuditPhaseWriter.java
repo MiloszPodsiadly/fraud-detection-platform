@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 @Service
 public class RegulatedMutationLocalAuditPhaseWriter {
@@ -21,6 +22,7 @@ public class RegulatedMutationLocalAuditPhaseWriter {
     private final AuditChainLockRepository lockRepository;
     private final AlertServiceMetrics metrics;
     private final LocalAuditPhaseWriterProperties properties;
+    private final ThreadLocal<String> activeChainLockOwner = new ThreadLocal<>();
 
     @Autowired
     public RegulatedMutationLocalAuditPhaseWriter(
@@ -52,33 +54,61 @@ public class RegulatedMutationLocalAuditPhaseWriter {
     ) {
         long startedAt = System.nanoTime();
         String phaseKey = phaseKey(command, "SUCCESS");
+        AuditEventDocument existingPhase = auditEventRepository.findByRequestId(phaseKey).orElse(null);
+        if (existingPhase != null) {
+            recordAppend("DUPLICATE_PHASE", startedAt);
+            return existingPhase.auditId();
+        }
+        if (activeChainLockOwner.get() != null) {
+            return appendLocalSuccess(command, action, resourceType, phaseKey, startedAt);
+        }
+        return withChainLock(() -> appendLocalSuccess(command, action, resourceType, phaseKey, startedAt));
+    }
+
+    public <T> T withChainLock(Supplier<T> callback) {
+        if (activeChainLockOwner.get() != null) {
+            return callback.get();
+        }
+        String lockOwner = acquireChainLock();
+        activeChainLockOwner.set(lockOwner);
+        try {
+            return callback.get();
+        } finally {
+            activeChainLockOwner.remove();
+            try {
+                lockRepository.release(AuditEventDocument.PARTITION_KEY, lockOwner);
+            } catch (DataAccessException ignored) {
+                recordAppendAttempt("LOCK_RELEASE_FAILED");
+                recordLockReleaseFailure();
+            }
+        }
+    }
+
+    private String acquireChainLock() {
+        long startedAt = System.nanoTime();
+        String lockOwner = UUID.randomUUID().toString();
         for (int attempt = 1; attempt <= properties.getMaxAppendAttempts(); attempt++) {
             try {
-                return auditEventRepository.findByRequestId(phaseKey)
-                        .map(document -> {
-                            recordAppend("DUPLICATE_PHASE", startedAt);
-                            return document.auditId();
-                        })
-                        .orElseGet(() -> appendLocalSuccess(command, action, resourceType, phaseKey, startedAt));
-            } catch (DuplicateKeyException duplicate) {
-                return auditEventRepository.findByRequestId(phaseKey)
-                        .map(document -> {
-                            recordAppend("DUPLICATE_PHASE", startedAt);
-                            return document.auditId();
-                        })
-                        .orElseThrow(() -> duplicate);
+                lockRepository.acquire(AuditEventDocument.PARTITION_KEY, lockOwner);
+                return lockOwner;
             } catch (AuditChainConflictException conflict) {
                 if (attempt == properties.getMaxAppendAttempts() || retryBudgetExhausted(startedAt)) {
                     recordAppend("CHAIN_CONFLICT_EXHAUSTED", startedAt);
-                    throw new AuditPersistenceUnavailableException();
+                    throw new AuditPersistenceUnavailableException(
+                            "Audit chain lock acquisition retry budget exhausted.",
+                            conflict
+                    );
                 }
                 recordAppendAttempt("CHAIN_CONFLICT_RETRY");
                 recordRetry("LOCK_CONFLICT");
                 backoffBeforeRetry();
+            } catch (DataAccessException exception) {
+                recordAppend("LOCK_ACQUIRE_FAILED", startedAt);
+                throw new AuditPersistenceUnavailableException("Audit chain lock acquisition failed.", exception);
             }
         }
         recordAppend("CHAIN_CONFLICT_EXHAUSTED", startedAt);
-        throw new AuditPersistenceUnavailableException();
+        throw new AuditPersistenceUnavailableException("Audit chain lock acquisition retry budget exhausted.", null);
     }
 
     private String appendLocalSuccess(
@@ -88,12 +118,8 @@ public class RegulatedMutationLocalAuditPhaseWriter {
             String phaseKey,
             long startedAt
     ) {
-        String lockOwner = UUID.randomUUID().toString();
-        boolean lockAcquired = false;
         boolean auditEventInserted = false;
         try {
-            lockRepository.acquire(AuditEventDocument.PARTITION_KEY, lockOwner);
-            lockAcquired = true;
             AuditEventDocument existingPhaseEvent = auditEventRepository.findByRequestId(phaseKey).orElse(null);
             if (existingPhaseEvent != null) {
                 recordAppend("DUPLICATE_PHASE", startedAt);
@@ -149,17 +175,7 @@ public class RegulatedMutationLocalAuditPhaseWriter {
                     });
         } catch (DataAccessException exception) {
             recordAppend(auditEventInserted ? "ANCHOR_INSERT_FAILED" : "AUDIT_INSERT_FAILED", startedAt);
-            throw new AuditPersistenceUnavailableException();
-        } finally {
-            if (lockAcquired) {
-                try {
-                    lockRepository.release(AuditEventDocument.PARTITION_KEY, lockOwner);
-                } catch (DataAccessException ignored) {
-                    recordAppendAttempt("LOCK_RELEASE_FAILED");
-                    recordLockReleaseFailure();
-                    // The surrounding Mongo transaction determines whether the local audit write commits.
-                }
-            }
+            throw new AuditPersistenceUnavailableException("Local success audit persistence failed.", exception);
         }
     }
 
@@ -168,7 +184,7 @@ public class RegulatedMutationLocalAuditPhaseWriter {
             Thread.sleep(properties.getBackoffMs());
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw new AuditPersistenceUnavailableException();
+            throw new AuditPersistenceUnavailableException("Audit chain lock retry interrupted.", exception);
         }
     }
 
@@ -179,26 +195,26 @@ public class RegulatedMutationLocalAuditPhaseWriter {
 
     private void recordAppend(String outcome, long startedAt) {
         if (metrics != null) {
-            metrics.recordFdp29LocalAuditChainAppend(outcome);
-            metrics.recordFdp29LocalAuditChainAppendDuration(Duration.ofNanos(System.nanoTime() - startedAt));
+            metrics.recordRegulatedMutationLocalAuditChainAppend(outcome);
+            metrics.recordRegulatedMutationLocalAuditChainAppendDuration(Duration.ofNanos(System.nanoTime() - startedAt));
         }
     }
 
     private void recordAppendAttempt(String outcome) {
         if (metrics != null) {
-            metrics.recordFdp29LocalAuditChainAppend(outcome);
+            metrics.recordRegulatedMutationLocalAuditChainAppend(outcome);
         }
     }
 
     private void recordRetry(String reason) {
         if (metrics != null) {
-            metrics.recordFdp29LocalAuditChainRetry(reason);
+            metrics.recordRegulatedMutationLocalAuditChainRetry(reason);
         }
     }
 
     private void recordLockReleaseFailure() {
         if (metrics != null) {
-            metrics.recordFdp29LocalAuditChainLockReleaseFailure();
+            metrics.recordRegulatedMutationLocalAuditChainLockReleaseFailure();
         }
     }
 

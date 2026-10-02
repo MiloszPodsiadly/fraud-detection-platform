@@ -1,9 +1,9 @@
 apiVersion: 1
 
 providers:
-  - name: FDP-5 Dashboards
+  - name: ML Observability Dashboards
     orgId: 1
-    folder: FDP-5
+    folder: ML Observability
     type: file
     disableDeletion: true
     editable: false

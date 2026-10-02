@@ -25,7 +25,7 @@ const REQUIRED_EVALUATION = {
   evaluationCardType: "PLATFORM_RECOMMENDATION_EVALUATION_CARD_V1",
   evaluationCardVersion: "platform-recommendation-evaluation-card-v1",
   evaluationPurpose: "OFFLINE_DIAGNOSTIC",
-  evaluationReportVersion: "FDP-124",
+  evaluationReportVersion: "feedback-dataset-evaluation-v1",
   datasetVersion: "feedback-dataset-v1",
   datasetTimeBasis: "FEEDBACK_CREATED_AT"
 };
@@ -33,11 +33,6 @@ const CURRENT_PLATFORM_EVALUATION_IDENTITY = {
   evaluationReportType: "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
   evaluationArtifactSetVersion: "feedback-dataset-evaluation-report-artifact-set-v1",
   identityCompleteness: "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
-};
-const LEGACY_READ_ONLY_PLATFORM_EVALUATION_IDENTITY = {
-  evaluationReportType: "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-  evaluationArtifactSetVersion: "fdp123-report-artifact-set-v1",
-  identityCompleteness: "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
 };
 const REQUIRED_LIMITATIONS = new Set([
   "ANALYST_FEEDBACK_LABELS_ARE_NOT_LEGAL_GROUND_TRUTH",
@@ -333,7 +328,7 @@ function ShadowPerformanceNoCurrentSummary({ onRetry }) {
         </p>
         <ol className="shadowPerformanceChain">
           <li>bounded feedback dataset</li>
-          <li>FDP-124 evaluation artifact set</li>
+          <li>feedback dataset evaluation artifact set</li>
           <li>Platform Recommendation Evaluation Card v1 artifact set</li>
           <li>Shadow Performance Summary v2</li>
           <li>Authorized v2 read API</li>
@@ -400,7 +395,7 @@ function isValidSummary(summary) {
       || !isValidEvaluationSubject(summary.evaluationSubject)
       || !isValidGovernance(summary.governance)
       || !isValidEvaluation(summary.evaluation)
-      || !isSupportedPlatformEvaluationProvenance(summary.evaluationSubject, summary.evaluation)
+      || !isCanonicalPlatformEvaluationProvenance(summary.evaluationSubject, summary.evaluation)
       || !isObject(summary.evaluationPopulation)
       || !hasExactKeys(summary.evaluationPopulation, ["recordsEvaluated", "positiveClassCount", "negativeClassCount"])
       || !isObject(summary.metrics)
@@ -472,9 +467,8 @@ function isValidEvaluation(evaluation) {
     && /^[a-f0-9]{64}$/.test(evaluation.sourceEvaluationCardManifestSha256);
 }
 
-function isSupportedPlatformEvaluationProvenance(subject, evaluation) {
-  return matchesProvenance(subject, evaluation, CURRENT_PLATFORM_EVALUATION_IDENTITY)
-    || matchesProvenance(subject, evaluation, LEGACY_READ_ONLY_PLATFORM_EVALUATION_IDENTITY);
+function isCanonicalPlatformEvaluationProvenance(subject, evaluation) {
+  return matchesProvenance(subject, evaluation, CURRENT_PLATFORM_EVALUATION_IDENTITY);
 }
 
 function matchesProvenance(subject, evaluation, identity) {

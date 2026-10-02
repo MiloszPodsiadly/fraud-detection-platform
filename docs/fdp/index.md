@@ -2,13 +2,12 @@
 
 Status: current FDP documentation entry point.
 
-Use this directory for branch-level FDP records: merge gates, branch summaries, handoff notes, readiness proof,
-and enablement checklists. These files are evidence for the branch that produced them. Current repository behavior
-is interpreted through the source-of-truth documents linked from `../index.md`.
+Use this directory for retained branch-level chaos and release evidence. Current repository behavior is interpreted
+through the source-of-truth documents linked from `../index.md`.
 
 ## Start Here
 
-1. [Branch index](branch_index.md) maps every retained FDP branch to its claim, key evidence, CI gate, and non-goals.
+1. [Branch index](branch_index.md) maps every retained proof family to its claim, key evidence, CI gate, and non-goals.
 2. [Evidence status](evidence_status.md) explains how to interpret branch records against the current repository state.
 3. [CI evidence map](../ci_evidence_map.md) maps current CI job names to the evidence they protect.
 4. [Reviewer checklist](../reviewer_checklist.md) gives the review order for future FDP branches.
@@ -17,10 +16,7 @@ is interpreted through the source-of-truth documents linked from `../index.md`.
 
 | Group | Files | Use for |
 | --- | --- | --- |
-| Regulated mutation foundation | `fdp_25_*` through `fdp_34_*` | Local mutation, replay, lease, and checkpoint evidence. |
-| Chaos and release readiness | `fdp_35_*` through `fdp_40_*` | Recovery, chaos, release-governance, and readiness evidence. |
-| Fraud case product work | `fdp_42_*` through `fdp_47_*` | Fraud-case lifecycle, read model, and analyst console product evidence. |
-| Frontend runtime architecture | `fdp_48_*` through `fdp_53_*` | BFF, route boundary, workspace runtime, and UI architecture evidence. |
+| Chaos and release readiness | `fdp_36_*` through `fdp_40_*` | Externally coupled chaos, release-governance, and readiness evidence. |
 
 ## Branch Evidence Contract
 

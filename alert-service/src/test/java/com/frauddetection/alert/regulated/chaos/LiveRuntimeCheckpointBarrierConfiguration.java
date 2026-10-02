@@ -1,0 +1,160 @@
+package com.frauddetection.alert.regulated.chaos;
+
+import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.regulated.RegulatedMutationCheckpointRenewalDecision;
+import com.frauddetection.alert.regulated.RegulatedMutationCheckpointRenewalService;
+import com.frauddetection.alert.regulated.RegulatedMutationClaimToken;
+import com.frauddetection.alert.regulated.RegulatedMutationCommandDocument;
+import com.frauddetection.alert.regulated.RegulatedMutationLeaseRenewalService;
+import com.frauddetection.alert.regulated.RegulatedMutationSafeCheckpointPolicy;
+import com.mongodb.ConnectionString;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import org.bson.Document;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.context.annotation.Profile;
+
+import java.time.Duration;
+import java.time.Instant;
+
+@Configuration
+@Profile("fdp38-live-runtime-checkpoint")
+class LiveRuntimeCheckpointBarrierConfiguration {
+
+    @Bean
+    @Primary
+    RegulatedMutationCheckpointRenewalService liveRuntimeCheckpointBarrier(
+            RegulatedMutationSafeCheckpointPolicy checkpointPolicy,
+            RegulatedMutationLeaseRenewalService leaseRenewalService,
+            AlertServiceMetrics metrics,
+            @Value("${app.regulated-mutations.checkpoint-renewal.extension:PT30S}") Duration requestedExtension,
+            @Value("${spring.mongodb.uri:${spring.data.mongodb.uri}}") String mongoUri,
+            @Value("${app.fdp38.live-runtime-checkpoint.name}") LiveRuntimeCheckpoint checkpoint,
+            @Value("${app.fdp38.live-runtime-checkpoint.idempotency-key}") String idempotencyKey
+    ) {
+        return new BlockingCheckpointRenewalService(
+                checkpointPolicy,
+                leaseRenewalService,
+                metrics,
+                requestedExtension,
+                mongoUri,
+                checkpoint,
+                idempotencyKey
+        );
+    }
+
+    private static final class BlockingCheckpointRenewalService extends RegulatedMutationCheckpointRenewalService
+            implements AutoCloseable {
+
+        private final MongoClient mongoClient;
+        private final String databaseName;
+        private final LiveRuntimeCheckpoint checkpoint;
+        private final String idempotencyKey;
+
+        private BlockingCheckpointRenewalService(
+                RegulatedMutationSafeCheckpointPolicy checkpointPolicy,
+                RegulatedMutationLeaseRenewalService leaseRenewalService,
+                AlertServiceMetrics metrics,
+                Duration requestedExtension,
+                String mongoUri,
+                LiveRuntimeCheckpoint checkpoint,
+                String idempotencyKey
+        ) {
+            super(checkpointPolicy, leaseRenewalService, metrics, requestedExtension);
+            ConnectionString connectionString = new ConnectionString(mongoUri);
+            this.mongoClient = MongoClients.create(connectionString);
+            this.databaseName = connectionString.getDatabase();
+            this.checkpoint = checkpoint;
+            this.idempotencyKey = idempotencyKey;
+        }
+
+        @Override
+        public RegulatedMutationCheckpointRenewalDecision beforeEvidencePreparation(
+                RegulatedMutationClaimToken claimToken,
+                RegulatedMutationCommandDocument document
+        ) {
+            RegulatedMutationCheckpointRenewalDecision decision = super.beforeEvidencePreparation(claimToken, document);
+            blockIfTarget(document, LiveRuntimeCheckpoint.BEFORE_EVIDENCE_PREPARATION);
+            return decision;
+        }
+
+        @Override
+        public RegulatedMutationCheckpointRenewalDecision afterEvidencePreparedBeforeFinalize(
+                RegulatedMutationClaimToken claimToken,
+                RegulatedMutationCommandDocument document
+        ) {
+            RegulatedMutationCheckpointRenewalDecision decision = super.afterEvidencePreparedBeforeFinalize(claimToken, document);
+            blockIfTarget(document, LiveRuntimeCheckpoint.AFTER_EVIDENCE_PREPARED_BEFORE_FINALIZE);
+            return decision;
+        }
+
+        @Override
+        public RegulatedMutationCheckpointRenewalDecision beforeEvidenceGatedFinalize(
+                RegulatedMutationClaimToken claimToken,
+                RegulatedMutationCommandDocument document
+        ) {
+            RegulatedMutationCheckpointRenewalDecision decision = super.beforeEvidenceGatedFinalize(claimToken, document);
+            blockIfTarget(document, LiveRuntimeCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE);
+            return decision;
+        }
+
+        private void blockIfTarget(
+                RegulatedMutationCommandDocument document,
+                LiveRuntimeCheckpoint candidate
+        ) {
+            if (checkpoint != candidate || document == null || !idempotencyKey.equals(document.getIdempotencyKey())) {
+                return;
+            }
+            recordBarrier(document);
+            waitUntilKilledOrReleased();
+        }
+
+        private void recordBarrier(RegulatedMutationCommandDocument document) {
+            mongoClient.getDatabase(databaseName)
+                    .getCollection("fdp38_live_checkpoint_barriers")
+                    .replaceOne(
+                            new Document("_id", idempotencyKey),
+                            new Document("_id", idempotencyKey)
+                                    .append("checkpoint", checkpoint.name())
+                                    .append("checkpoint_reached", true)
+                                    .append("state", "BLOCKED")
+                                    .append("idempotency_key_hash_only_note", "present")
+                                    .append("mutation_command_id", document.getId())
+                                    .append("command_state", document.getState() == null ? null : document.getState().name())
+                                    .append("execution_status", document.getExecutionStatus() == null
+                                            ? null
+                                            : document.getExecutionStatus().name())
+                                    .append("reached_at", Instant.now()),
+                            new com.mongodb.client.model.ReplaceOptions().upsert(true)
+                    );
+        }
+
+        private void waitUntilKilledOrReleased() {
+            long deadline = System.nanoTime() + Duration.ofSeconds(60).toNanos();
+            while (System.nanoTime() < deadline) {
+                Document barrier = mongoClient.getDatabase(databaseName)
+                        .getCollection("fdp38_live_checkpoint_barriers")
+                        .find(new Document("_id", idempotencyKey))
+                        .first();
+                if (barrier != null && Boolean.TRUE.equals(barrier.getBoolean("release"))) {
+                    return;
+                }
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Interrupted at FDP-38 live runtime checkpoint barrier.", exception);
+                }
+            }
+            throw new IllegalStateException("FDP-38 live runtime checkpoint barrier timed out before kill or release.");
+        }
+
+        @Override
+        public void close() {
+            mongoClient.close();
+        }
+    }
+}

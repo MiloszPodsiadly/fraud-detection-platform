@@ -8,9 +8,14 @@ import java.time.Instant;
 public class EvidenceGatedFinalizeReplayPolicy implements RegulatedMutationReplayPolicy {
 
     private final RegulatedMutationLeasePolicy leasePolicy;
+    private final RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof;
 
-    public EvidenceGatedFinalizeReplayPolicy(RegulatedMutationLeasePolicy leasePolicy) {
+    public EvidenceGatedFinalizeReplayPolicy(
+            RegulatedMutationLeasePolicy leasePolicy,
+            RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof
+    ) {
         this.leasePolicy = leasePolicy;
+        this.durableLocalFinalizationProof = durableLocalFinalizationProof;
     }
 
     @Override
@@ -34,28 +39,15 @@ public class EvidenceGatedFinalizeReplayPolicy implements RegulatedMutationRepla
                     "FINALIZING_RETRY_REQUIRES_RECONCILIATION"
             );
         }
-        if (document.getState() == RegulatedMutationState.FINALIZED_VISIBLE) {
-            if (document.getResponseSnapshot() != null
-                    && document.getLocalCommitMarker() != null
-                    && document.isSuccessAuditRecorded()) {
-                return RegulatedMutationReplayDecision.of(
-                        RegulatedMutationReplayDecisionType.FINALIZED_VISIBLE_REPAIRABLE,
-                        RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
-                        null
-                );
-            }
-            return RegulatedMutationReplayDecision.of(
-                    RegulatedMutationReplayDecisionType.FINALIZED_VISIBLE_RECOVERY_REQUIRED,
-                    RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
-                    "FINALIZED_VISIBLE_MISSING_PROOF"
-            );
-        }
         if (document.getExecutionStatus() == RegulatedMutationExecutionStatus.RECOVERY_REQUIRED
-                || document.getState() == RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED) {
+                || document.getState() == RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
+                || document.getState() == RegulatedMutationState.FAILED) {
             return RegulatedMutationReplayDecision.of(
                     RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE,
                     RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
-                    "FINALIZE_RECOVERY_REQUIRED"
+                    document.getState() == RegulatedMutationState.FAILED
+                            ? "FAILED_TERMINAL"
+                            : "FINALIZE_RECOVERY_REQUIRED"
             );
         }
         if (document.getState() == RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE
@@ -66,7 +58,23 @@ public class EvidenceGatedFinalizeReplayPolicy implements RegulatedMutationRepla
                     null
             );
         }
-        if (document.getResponseSnapshot() != null) {
+        if (document.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+                || document.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED) {
+            DurableLocalFinalizationProofResult proof = durableLocalFinalizationProof.verify(document);
+            if (!proof.valid()) {
+                return RegulatedMutationReplayDecision.of(
+                        RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE,
+                        RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
+                        proof.reasonCode()
+                );
+            }
+            if (document.getResponseSnapshot() == null) {
+                return RegulatedMutationReplayDecision.of(
+                        RegulatedMutationReplayDecisionType.RECOVERY_REQUIRED_RESPONSE,
+                        RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED,
+                        "RESPONSE_SNAPSHOT_MISSING"
+                );
+            }
             return RegulatedMutationReplayDecision.of(
                     RegulatedMutationReplayDecisionType.REPLAY_SNAPSHOT,
                     document.getState(),

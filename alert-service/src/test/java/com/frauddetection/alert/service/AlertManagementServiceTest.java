@@ -358,7 +358,7 @@ class AlertManagementServiceTest {
                 AlertStatus.RESOLVED,
                 "event-1",
                 Instant.parse("2026-05-01T00:00:00Z"),
-                SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
         );
 
         when(submitDecisionService.submit("alert-1", request, "idem-1")).thenReturn(expected);

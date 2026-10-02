@@ -51,6 +51,7 @@ import com.frauddetection.alert.mapper.ScoredTransactionResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.outbox.OutboxRecoveryController;
 import com.frauddetection.alert.outbox.OutboxRecoveryService;
+import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationInspectionRateLimiter;
 import com.frauddetection.alert.regulated.RegulatedMutationRecoveryController;
@@ -58,8 +59,6 @@ import com.frauddetection.alert.regulated.RegulatedMutationRecoveryService;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.security.session.AnalystSessionController;
 import com.frauddetection.alert.service.AlertManagementUseCase;
-import com.frauddetection.alert.service.DecisionOutboxReconciliationController;
-import com.frauddetection.alert.service.DecisionOutboxReconciliationService;
 import com.frauddetection.alert.service.FraudCaseEvidenceSummaryService;
 import com.frauddetection.alert.service.FraudCaseEvidenceTimelineService;
 import com.frauddetection.alert.service.FraudCaseManagementService;
@@ -117,7 +116,6 @@ import static org.assertj.core.api.Assertions.assertThat;
         AuditTrustAttestationController.class,
         AuditTrustKeysController.class,
         AuditDegradationController.class,
-        DecisionOutboxReconciliationController.class,
         RegulatedMutationRecoveryController.class,
         OutboxRecoveryController.class,
         TrustIncidentController.class,
@@ -208,13 +206,13 @@ class RouteCoverageAgainstMvcMappingsTest {
     private AuditDegradationService auditDegradationService;
 
     @MockitoBean
-    private DecisionOutboxReconciliationService decisionOutboxReconciliationService;
-
-    @MockitoBean
     private RegulatedMutationRecoveryService regulatedMutationRecoveryService;
 
     @MockitoBean
     private OutboxRecoveryService outboxRecoveryService;
+
+    @MockitoBean
+    private TransactionalOutboxRuntimeReadiness transactionalOutboxRuntimeReadiness;
 
     @MockitoBean
     private TrustIncidentService trustIncidentService;
@@ -271,7 +269,7 @@ class RouteCoverageAgainstMvcMappingsTest {
     private SuspiciousTransactionQueryTelemetrySink suspiciousTransactionQueryTelemetrySink;
 
     @Test
-    void everyApplicationControllerMappingHasExplicitFdp49SecurityOwnership() {
+    void everyApplicationControllerMappingHasExplicitSecurityOwnership() {
         var applicationMappings = handlerMapping.getHandlerMethods().entrySet().stream()
                 .filter(entry -> entry.getValue().getBeanType().getName().startsWith("com.frauddetection.alert"))
                 .toList();
@@ -280,7 +278,7 @@ class RouteCoverageAgainstMvcMappingsTest {
                 .flatMap(this::routeDescriptors)
                 .filter(route -> !SecurityRouteOwnershipRegistry.hasMvcOwnership(route.method(), route.pattern()))
                 .map(route -> "Controller mapping " + route.method() + " " + route.pattern()
-                        + " has no explicit FDP-49 security ownership.")
+                        + " has no explicit security route ownership.")
                 .sorted()
                 .toList();
 
@@ -336,7 +334,7 @@ class RouteCoverageAgainstMvcMappingsTest {
     }
 
     @Test
-    void everyApplicationControllerIsIncludedInFdp49MvcCoverage() throws IOException {
+    void everyApplicationControllerIsIncludedInMvcCoverage() throws IOException {
         Set<String> coveredControllers = Arrays.stream(RouteCoverageAgainstMvcMappingsTest.class
                         .getAnnotation(WebMvcTest.class)
                         .value())
@@ -346,7 +344,7 @@ class RouteCoverageAgainstMvcMappingsTest {
         List<String> missingControllers = discoverApplicationControllers().stream()
                 .filter(controller -> !coveredControllers.contains(controller))
                 .map(controller -> "Controller " + controller
-                        + " is not included in FDP-49 MVC route ownership coverage.")
+                        + " is not included in MVC route ownership coverage.")
                 .sorted()
                 .toList();
 
@@ -354,13 +352,13 @@ class RouteCoverageAgainstMvcMappingsTest {
     }
 
     @Test
-    void methodlessMappingsAreRejectedByFdp49Guard() throws NoSuchMethodException {
+    void methodlessMappingsAreRejectedBySecurityOwnershipGuard() throws NoSuchMethodException {
         Method method = MethodlessController.class.getDeclaredMethod("methodless");
         RequestMappingInfo mapping = RequestMappingInfo.paths("/methodless").build();
         HandlerMethod handlerMethod = new HandlerMethod(new MethodlessController(), method);
 
         assertThat(methodlessMappingViolations(List.of(Map.entry(mapping, handlerMethod))))
-                .containsExactly("FDP-49 requires explicit HTTP methods for security-owned controller mapping: "
+                .containsExactly("Security route ownership requires explicit HTTP methods for controller mapping: "
                         + "/methodless handled by MethodlessController#methodless.");
     }
 
@@ -389,7 +387,7 @@ class RouteCoverageAgainstMvcMappingsTest {
         return mappings.stream()
                 .filter(entry -> entry.getKey().getMethodsCondition().getMethods().isEmpty())
                 .flatMap(entry -> patterns(entry.getKey())
-                        .map(pattern -> "FDP-49 requires explicit HTTP methods for security-owned controller mapping: "
+                        .map(pattern -> "Security route ownership requires explicit HTTP methods for controller mapping: "
                                 + pattern + " handled by " + entry.getValue().getBeanType().getSimpleName()
                                 + "#" + entry.getValue().getMethod().getName() + "."))
                 .sorted()

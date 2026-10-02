@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { repoRoot } from "../fdp-scope/scopeGuardHelpers.mjs";
+import { repoRoot } from "../scope-guards/scopeGuardHelpers.mjs";
 
 export function repoPath(path) {
   return join(repoRoot, path);

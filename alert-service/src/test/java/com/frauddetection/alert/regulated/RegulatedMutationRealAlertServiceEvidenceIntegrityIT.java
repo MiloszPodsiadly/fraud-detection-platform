@@ -12,6 +12,8 @@ import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosScenario;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosWindow;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationAlertServiceProcessChaosHarness;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationProofLevel;
+import com.frauddetection.alert.service.DecisionOutboxStatus;
+import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -29,6 +31,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.repository.support.MongoRepositoryFactory;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -39,6 +42,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Tag("service-chaos")
 @Tag("integration")
 class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractIntegrationTest {
+
+    private static final String ACTOR_ID = "principal-7";
+    private static final String DECISION_REASON = "Real alert-service evidence integrity proof";
+    private static final List<String> DECISION_TAGS = List.of("real-chaos", "evidence-integrity");
+    private static final Map<String, Object> DECISION_METADATA = Map.of("proof", "regulated-mutation-evidence-integrity");
 
     private SimpleMongoClientDatabaseFactory databaseFactory;
     private MongoTemplate mongoTemplate;
@@ -74,12 +82,12 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
     void replayAfterRestartMustNotCreateSecondOutboxRecord() {
         RegulatedMutationChaosScenario scenario = committedScenario(
                 "outbox-dedupe",
-                RegulatedMutationChaosWindow.FDP29_FINALIZED_EVIDENCE_PENDING_EXTERNAL,
-                command -> mongoTemplate.save(outboxRecord(command.getResourceId(), command.getId()))
+                RegulatedMutationChaosWindow.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                command -> { }
         );
 
         RegulatedMutationChaosResult result = chaosHarness.run(scenario);
-        chaosHarness.inspectByIdempotencyKey(scenario.idempotencyKey());
+        chaosHarness.inspectByCommandId(scenario.commandId());
 
         assertRealAlertServiceKill(result);
         assertThat(result.outboxRecords()).isOne();
@@ -90,12 +98,12 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
     void replayAfterRestartMustNotCreateSecondSuccessAudit() {
         RegulatedMutationChaosScenario scenario = committedScenario(
                 "success-audit-dedupe",
-                RegulatedMutationChaosWindow.FDP29_FINALIZED_EVIDENCE_PENDING_EXTERNAL,
-                command -> insertAudit(command.getResourceId(), AuditOutcome.SUCCESS, "success-" + command.getId())
+                RegulatedMutationChaosWindow.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                command -> insertAudit(command, AuditOutcome.SUCCESS, "success-" + command.getId())
         );
 
         RegulatedMutationChaosResult result = chaosHarness.run(scenario);
-        chaosHarness.inspectByIdempotencyKey(scenario.idempotencyKey());
+        chaosHarness.inspectByCommandId(scenario.commandId());
 
         assertRealAlertServiceKill(result);
         assertThat(result.successAuditEvents()).isOne();
@@ -106,27 +114,26 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
     void replayAfterRestartMustNotCreateSecondLocalAuditAnchorForSameCommandPhase() {
         RegulatedMutationChaosScenario scenario = committedScenario(
                 "local-anchor-dedupe",
-                RegulatedMutationChaosWindow.FDP29_FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                RegulatedMutationChaosWindow.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 command -> insertLocalAnchor(command.getId(), RegulatedMutationAuditPhase.SUCCESS)
         );
 
         RegulatedMutationChaosResult result = chaosHarness.run(scenario);
-        chaosHarness.inspectByIdempotencyKey(scenario.idempotencyKey());
+        chaosHarness.inspectByCommandId(scenario.commandId());
 
         assertRealAlertServiceKill(result);
         assertThat(countLocalAnchors(scenario.commandId(), RegulatedMutationAuditPhase.SUCCESS)).isOne();
     }
 
     @Test
-    void retryAfterSuccessAuditPendingMustNotRerunBusinessMutation() {
+    void finalizeRecoveryMustNotRerunBusinessMutation() {
         RegulatedMutationChaosScenario scenario = committedScenario(
-                "success-audit-pending-no-business-rerun",
-                RegulatedMutationChaosWindow.LEGACY_SUCCESS_AUDIT_PENDING,
+                "finalize-recovery-no-business-rerun",
+                RegulatedMutationChaosWindow.FINALIZE_RECOVERY_REQUIRED,
                 command -> {
-                    command.setState(RegulatedMutationState.SUCCESS_AUDIT_PENDING);
+                    command.setState(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
                     command.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
                     command.setPublicStatus(SubmitDecisionOperationStatus.RECOVERY_REQUIRED);
-                    mongoTemplate.save(outboxRecord(command.getResourceId(), command.getId()));
                 }
         );
 
@@ -137,23 +144,22 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
         assertRealAlertServiceKill(result);
         assertThat(result.businessMutationCount()).isOne();
         assertThat(countOutbox(scenario.commandId())).isOne();
-        assertThat(countBusinessMutation("alert-success-audit-pending-no-business-rerun")).isOne();
+        assertThat(countBusinessMutation("alert-finalize-recovery-no-business-rerun")).isOne();
     }
 
     @Test
-    void fdp29PendingExternalReplayMustNotCreateDuplicateOutboxOrLocalSuccessAudit() {
+    void pendingExternalReplayMustNotCreateDuplicateOutboxOrLocalSuccessAudit() {
         RegulatedMutationChaosScenario scenario = committedScenario(
-                "fdp29-pending-external-dedupe",
-                RegulatedMutationChaosWindow.FDP29_FINALIZED_EVIDENCE_PENDING_EXTERNAL,
+                "pending-external-dedupe",
+                RegulatedMutationChaosWindow.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 command -> {
-                    mongoTemplate.save(outboxRecord(command.getResourceId(), command.getId()));
-                    insertAudit(command.getResourceId(), AuditOutcome.SUCCESS, "success-" + command.getId());
+                    insertAudit(command, AuditOutcome.SUCCESS, "success-" + command.getId());
                     insertLocalAnchor(command.getId(), RegulatedMutationAuditPhase.SUCCESS);
                 }
         );
 
         RegulatedMutationChaosResult result = chaosHarness.run(scenario);
-        chaosHarness.inspectByIdempotencyKey(scenario.idempotencyKey());
+        chaosHarness.inspectByCommandId(scenario.commandId());
 
         assertRealAlertServiceKill(result);
         assertThat(result.publicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
@@ -178,6 +184,7 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
                 template -> {
                     mongoTemplate.save(committedAlert(alertId));
                     RegulatedMutationCommandDocument command = command(commandId, idempotencyKey, alertId);
+                    mongoTemplate.save(outboxRecord(alertId, commandId));
                     customizer.accept(command);
                     commandRepository.save(command);
                 }
@@ -189,18 +196,20 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
         command.setId(commandId);
         command.setIdempotencyKey(idempotencyKey);
         command.setIdempotencyKeyHash(RegulatedMutationIntentHasher.hash(idempotencyKey));
-        command.setActorId("principal-7");
+        command.setActorId(ACTOR_ID);
         command.setResourceId(alertId);
         command.setResourceType(AuditResourceType.ALERT.name());
         command.setAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
+        command.setDecisionSlotClaimed(true);
         command.setCorrelationId("corr-" + alertId);
         command.setRequestHash("request-" + idempotencyKey);
         command.setIntentHash("intent-" + idempotencyKey);
         command.setIntentResourceId(alertId);
         command.setIntentAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
-        command.setIntentActorId("principal-7");
+        command.setIntentActorId(ACTOR_ID);
         command.setIntentDecision(AnalystDecision.CONFIRMED_FRAUD.name());
         command.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        command.setRevision(0L);
         command.setState(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         command.setExecutionStatus(RegulatedMutationExecutionStatus.COMPLETED);
         command.setPublicStatus(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
@@ -217,6 +226,7 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
 
     private AlertDocument committedAlert(String alertId) {
         AlertDocument alert = new AlertDocument();
+        FraudDecisionEvent event = fraudDecisionEvent(alertId);
         alert.setAlertId(alertId);
         alert.setTransactionId(alertId + "-txn");
         alert.setCustomerId(alertId + "-customer");
@@ -225,6 +235,16 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
         alert.setAlertTimestamp(Instant.parse("2026-05-06T00:00:00Z"));
         alert.setAlertStatus(AlertStatus.RESOLVED);
         alert.setAnalystDecision(AnalystDecision.CONFIRMED_FRAUD);
+        alert.setAnalystId(ACTOR_ID);
+        alert.setDecisionReason(DECISION_REASON);
+        alert.setDecisionTags(DECISION_TAGS);
+        alert.setDecidedAt(Instant.parse("2026-05-06T00:01:00Z"));
+        alert.setDecisionOutboxEvent(event);
+        alert.setDecisionOutboxEventId(event.eventId());
+        alert.setDecisionOutboxProjectionRevision(0L);
+        alert.setDecisionOutboxStatus(DecisionOutboxStatus.PENDING);
+        alert.setDecisionOutboxAttempts(0);
+        alert.setDecisionOperationStatus(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL.name());
         alert.setRiskLevel(RiskLevel.HIGH);
         alert.setFraudScore(0.91d);
         alert.setFeatureSnapshot(Map.of("velocity", 3));
@@ -243,26 +263,55 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
     }
 
     private TransactionalOutboxRecordDocument outboxRecord(String alertId, String commandId) {
+        FraudDecisionEvent event = fraudDecisionEvent(alertId);
         TransactionalOutboxRecordDocument record = new TransactionalOutboxRecordDocument();
-        record.setEventId("event-" + alertId);
-        record.setDedupeKey("dedupe-" + alertId);
+        record.setEventId(event.eventId());
+        record.setDedupeKey(event.dedupeKey());
         record.setMutationCommandId(commandId);
         record.setResourceType("ALERT");
         record.setResourceId(alertId);
         record.setEventType("FRAUD_DECISION");
-        record.setPayloadHash(RegulatedMutationIntentHasher.hash("payload-" + alertId));
+        record.setPayloadHash(RegulatedMutationIntentHasher.hash(event));
+        record.setPayload(event);
         record.setStatus(TransactionalOutboxStatus.PENDING);
-        record.setAttempts(1);
+        record.setAttempts(0);
         record.setCreatedAt(Instant.now());
         record.setUpdatedAt(Instant.now());
         return record;
     }
 
-    private String insertAudit(String alertId, AuditOutcome outcome, String auditId) {
+    private FraudDecisionEvent fraudDecisionEvent(String alertId) {
+        Instant decidedAt = Instant.parse("2026-05-06T00:01:00Z");
+        return new FraudDecisionEvent(
+                "event-" + alertId,
+                "decision-" + alertId,
+                alertId,
+                alertId + "-txn",
+                alertId + "-customer",
+                "corr-" + alertId,
+                ACTOR_ID,
+                AnalystDecision.CONFIRMED_FRAUD,
+                AlertStatus.RESOLVED,
+                DECISION_REASON,
+                DECISION_TAGS,
+                DECISION_METADATA,
+                decidedAt,
+                decidedAt
+        );
+    }
+
+    private String insertAudit(
+            RegulatedMutationCommandDocument command,
+            AuditOutcome outcome,
+            String auditId
+    ) {
         mongoTemplate.getCollection("audit_events").insertOne(new Document("_id", auditId)
-                .append("resource_id", alertId)
-                .append("resource_type", AuditResourceType.ALERT.name())
-                .append("action", AuditAction.SUBMIT_ANALYST_DECISION.name())
+                .append("resource_id", command.getResourceId())
+                .append("resource_type", command.getResourceType())
+                .append("action", command.getAction())
+                .append("actor_id", command.getActorId())
+                .append("correlation_id", command.getCorrelationId())
+                .append("request_id", command.getId() + ":" + outcome.name())
                 .append("outcome", outcome.name())
                 .append("created_at", Instant.now()));
         return auditId;

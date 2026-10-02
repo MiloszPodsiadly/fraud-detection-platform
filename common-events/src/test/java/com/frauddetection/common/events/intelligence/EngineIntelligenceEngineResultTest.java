@@ -54,6 +54,18 @@ class EngineIntelligenceEngineResultTest {
     }
 
     @Test
+    void rejectsAvailableMlEngineResultWithoutModelIdentity() {
+        assertThatThrownBy(() -> new EngineIntelligenceEngineResult(
+                "ml.python.primary",
+                FraudEngineType.ML_MODEL,
+                FraudEngineStatus.AVAILABLE,
+                RiskLevel.HIGH,
+                EngineIntelligenceScoreBucket.HIGH,
+                List.of("MODEL_HIGH_RISK")
+        )).hasMessage("ENGINE_INTELLIGENCE_AVAILABLE_ML_MODEL_IDENTITY_REQUIRED");
+    }
+
+    @Test
     void rejectsModelIdentityForRulesAndVelocityEngines() {
         assertThatThrownBy(() -> new EngineIntelligenceEngineResult(
                 "rules.primary",

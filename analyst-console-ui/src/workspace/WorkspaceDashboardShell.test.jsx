@@ -12,7 +12,7 @@ const shadowRuntimeSource = readFileSync(resolve(dirname(fileURLToPath(import.me
 const shadowContainerSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "ShadowPerformanceWorkspaceContainer.jsx"), "utf8");
 const shadowPageSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../pages/ShadowPerformanceDashboardPage.jsx"), "utf8");
 
-describe("WorkspaceDashboardShell FDP-53 composition", () => {
+describe("WorkspaceDashboardShell composition", () => {
   it("renders the active workspace through WorkspaceRouteRegistry", () => {
     expect(shellSource).toContain("resolveWorkspaceRouteResult(workspacePage)");
     expect(shellSource).toContain("const ActiveWorkspaceRuntime = activeRoute.Runtime");
@@ -175,7 +175,7 @@ function shadowSummary() {
       evaluationCardVersion: "platform-recommendation-evaluation-card-v1",
       evaluationPurpose: "OFFLINE_DIAGNOSTIC",
       evaluationReportType: "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-      evaluationReportVersion: "FDP-124",
+      evaluationReportVersion: "feedback-dataset-evaluation-v1",
       evaluationReportGeneratedAt: "2026-06-10T00:00:00Z",
       evaluationCardGeneratedAt: "2026-06-12T00:00:00Z",
       evaluationArtifactSetVersion: "feedback-dataset-evaluation-report-artifact-set-v1",

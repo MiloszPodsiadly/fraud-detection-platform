@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * FDP-49 test contract only. Runtime security source of truth remains the *AuthorizationRules classes composed by
+ * Test contract only. Runtime security source of truth remains the *AuthorizationRules classes composed by
  * AlertEndpointAuthorizationRules.
  */
 final class SecurityRouteOwnershipRegistry {
@@ -79,12 +79,8 @@ final class SecurityRouteOwnershipRegistry {
         route(routes, "POST", "/api/v1/trust/incidents/refresh", "TrustAuthorizationRules");
         route(routes, "POST", "/api/v1/trust/incidents/{incidentId}/ack", "TrustAuthorizationRules");
         route(routes, "POST", "/api/v1/trust/incidents/{incidentId}/resolve", "TrustAuthorizationRules");
-        route(routes, "GET", "/api/v1/decision-outbox/unknown-confirmations", "RecoveryAuthorizationRules");
-        route(routes, "POST", "/api/v1/decision-outbox/unknown-confirmations/{alertId}/resolve",
-                "RecoveryAuthorizationRules");
         route(routes, "POST", "/api/v1/regulated-mutations/recover", "RecoveryAuthorizationRules");
         route(routes, "GET", "/api/v1/regulated-mutations/recovery/backlog", "RecoveryAuthorizationRules");
-        route(routes, "GET", "/api/v1/regulated-mutations/{idempotencyKey}", "RecoveryAuthorizationRules");
         route(routes, "GET", "/api/v1/regulated-mutations/by-command/{commandId}", "RecoveryAuthorizationRules");
         route(routes, "GET", "/api/v1/regulated-mutations/by-idempotency-hash/{hash}",
                 "RecoveryAuthorizationRules");

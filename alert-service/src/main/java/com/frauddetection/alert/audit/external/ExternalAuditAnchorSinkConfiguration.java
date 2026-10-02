@@ -31,9 +31,9 @@ class ExternalAuditAnchorSinkConfiguration {
             ObjectProvider<ObjectStoreAuditAnchorClient> objectStoreClient,
             AlertServiceMetrics metrics,
             Environment environment,
-            @Value("${app.audit.external-anchoring.publication.enabled:${app.audit.external-anchoring.enabled:false}}") boolean publicationEnabled,
-            @Value("${app.audit.external-anchoring.publication.required:${app.audit.external-anchoring.enabled:false}}") boolean publicationRequired,
-            @Value("${app.audit.external-anchoring.publication.fail-closed:${app.audit.external-anchoring.publication.required:${app.audit.external-anchoring.enabled:false}}}") boolean publicationFailClosed,
+            @Value("${app.audit.external-anchoring.publication.enabled:false}") boolean publicationEnabled,
+            @Value("${app.audit.external-anchoring.publication.required:false}") boolean publicationRequired,
+            @Value("${app.audit.external-anchoring.publication.fail-closed:false}") boolean publicationFailClosed,
             @Value("${app.audit.external-anchoring.sink:disabled}") String sink,
             @Value("${app.audit.external-anchoring.local-file.path:./target/audit-external-anchors.jsonl}") String localFilePath,
             @Value("${app.audit.external-anchoring.allow-local-file-in-prod:false}") boolean allowLocalFileInProd,
@@ -43,7 +43,7 @@ class ExternalAuditAnchorSinkConfiguration {
             @Value("${app.audit.external-anchoring.object-store.endpoint:}") String objectStoreEndpoint,
             @Value("${app.audit.external-anchoring.object-store.access-key-id:}") String objectStoreAccessKeyId,
             @Value("${app.audit.external-anchoring.object-store.secret-access-key:}") String objectStoreSecretAccessKey,
-            @Value("${app.audit.external-store.startup-validation:${app.audit.external-anchoring.object-store.startup-check-enabled:true}}") boolean objectStoreStartupCheckEnabled,
+            @Value("${app.audit.external-anchoring.object-store.startup-check-enabled:true}") boolean objectStoreStartupCheckEnabled,
             @Value("${app.audit.external-anchoring.object-store.startup-test-write-enabled:false}") boolean objectStoreStartupTestWriteEnabled,
             @Value("${app.audit.external-anchoring.object-store.operation-timeout:2s}") Duration objectStoreOperationTimeout,
             @Value("${app.audit.external-anchoring.object-store.retry-backoff:100ms}") Duration objectStoreRetryBackoff,
@@ -57,7 +57,6 @@ class ExternalAuditAnchorSinkConfiguration {
             @Value("${app.audit.external-anchoring.policy.allow-separate-account-in-prod:false}") boolean allowSeparateAccountInProd,
             @Value("${HOSTNAME:alert-service}") String instanceId
     ) {
-        warnIfLegacyExternalAnchoringEnabled(environment);
         validatePublicationPolicy(publicationRequired, publicationFailClosed);
         boolean strictPublication = publicationRequired || publicationFailClosed;
         validateForbiddenPublisher(sink, publicationEnabled || strictPublication);
@@ -125,7 +124,9 @@ class ExternalAuditAnchorSinkConfiguration {
             );
         }
         if ("external-object-store".equals(sink)) {
-            throw new IllegalStateException("Use app.audit.external-anchoring.sink=object-store for FDP-22 object-store anchoring.");
+            throw new IllegalStateException(
+                    "Use app.audit.external-anchoring.sink=object-store for object-store audit anchoring."
+            );
         }
         if (strictPublication) {
             throw new IllegalStateException("External anchoring is enabled but no verified external witness publisher is configured.");
@@ -249,17 +250,6 @@ class ExternalAuditAnchorSinkConfiguration {
     private void validatePublicationPolicy(boolean publicationRequired, boolean publicationFailClosed) {
         if (publicationFailClosed && !publicationRequired) {
             throw new IllegalStateException("app.audit.external-anchoring.publication.fail-closed=true requires publication.required=true.");
-        }
-    }
-
-    private void warnIfLegacyExternalAnchoringEnabled(Environment environment) {
-        if (environment == null) {
-            return;
-        }
-        boolean legacyEnabled = "true".equalsIgnoreCase(environment.getProperty("AUDIT_EXTERNAL_ANCHORING_ENABLED"))
-                || "true".equalsIgnoreCase(environment.getProperty("app.audit.external-anchoring.enabled"));
-        if (legacyEnabled) {
-            log.warn("app.audit.external-anchoring.enabled is deprecated; use app.audit.external-anchoring.publication.enabled, publication.required, and publication.fail-closed.");
         }
     }
 

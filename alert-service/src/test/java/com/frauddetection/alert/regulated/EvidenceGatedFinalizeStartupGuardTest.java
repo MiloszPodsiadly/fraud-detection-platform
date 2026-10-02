@@ -1,6 +1,8 @@
 package com.frauddetection.alert.regulated;
 
 import com.frauddetection.alert.audit.AuditChainIndexInitializer;
+import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.LocalAuditPhaseWriterProperties;
 import com.frauddetection.alert.audit.RegulatedMutationLocalAuditPhaseWriter;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
@@ -33,7 +35,7 @@ class EvidenceGatedFinalizeStartupGuardTest {
                 mock(PlatformTransactionManager.class),
                 mock(RegulatedMutationTransactionCapabilityProbe.class),
                 mock(TransactionalOutboxRecordRepository.class),
-                List.of(mockSubmitDecisionRecovery())
+                mockAllRecoveries()
         );
 
         assertThatThrownBy(() -> guard.run(null))
@@ -42,7 +44,7 @@ class EvidenceGatedFinalizeStartupGuardTest {
     }
 
     @Test
-    void shouldIgnoreSubmitDecisionFlagWhenGlobalFlagIsDisabled() {
+    void removedModelFlagsCannotDisableTheCanonicalRuntimeGuard() {
         EvidenceGatedFinalizeStartupGuard guard = guard(
                 RegulatedMutationTransactionMode.OFF,
                 false,
@@ -55,24 +57,9 @@ class EvidenceGatedFinalizeStartupGuardTest {
                 List.of()
         );
 
-        assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
-    }
-
-    @Test
-    void shouldIgnoreGlobalFlagWhenSubmitDecisionFlagIsDisabled() {
-        EvidenceGatedFinalizeStartupGuard guard = guard(
-                RegulatedMutationTransactionMode.OFF,
-                true,
-                false,
-                true,
-                true,
-                null,
-                null,
-                null,
-                List.of()
-        );
-
-        assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("app.regulated-mutations.transaction-mode");
     }
 
     @Test
@@ -87,7 +74,7 @@ class EvidenceGatedFinalizeStartupGuardTest {
                 mock(PlatformTransactionManager.class),
                 probe,
                 mock(TransactionalOutboxRecordRepository.class),
-                List.of(mockSubmitDecisionRecovery())
+                mockAllRecoveries()
         );
 
         assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
@@ -108,7 +95,7 @@ class EvidenceGatedFinalizeStartupGuardTest {
                 null,
                 validLocalAuditPhaseWriterProperties(),
                 mockAuditChainIndexInitializer(true),
-                List.of(mockSubmitDecisionRecovery())
+                mockAllRecoveries()
         );
 
         assertThatThrownBy(() -> guard.run(null))
@@ -132,7 +119,7 @@ class EvidenceGatedFinalizeStartupGuardTest {
                 mock(RegulatedMutationLocalAuditPhaseWriter.class),
                 properties,
                 mockAuditChainIndexInitializer(true),
-                List.of(mockSubmitDecisionRecovery())
+                mockAllRecoveries()
         );
 
         assertThatThrownBy(() -> guard.run(null))
@@ -154,7 +141,7 @@ class EvidenceGatedFinalizeStartupGuardTest {
                 mock(RegulatedMutationLocalAuditPhaseWriter.class),
                 validLocalAuditPhaseWriterProperties(),
                 null,
-                List.of(mockSubmitDecisionRecovery())
+                mockAllRecoveries()
         );
 
         assertThatThrownBy(() -> guard.run(null))
@@ -176,7 +163,7 @@ class EvidenceGatedFinalizeStartupGuardTest {
                 mock(RegulatedMutationLocalAuditPhaseWriter.class),
                 validLocalAuditPhaseWriterProperties(),
                 mockAuditChainIndexInitializer(false),
-                List.of(mockSubmitDecisionRecovery())
+                mockAllRecoveries()
         );
 
         assertThatThrownBy(() -> guard.run(null))
@@ -185,7 +172,7 @@ class EvidenceGatedFinalizeStartupGuardTest {
     }
 
     @Test
-    void shouldIgnoreLocalAuditWriterGuardWhenEvidenceGatedFinalizeIsInactive() {
+    void shouldEnforceLocalAuditWriterGuardRegardlessOfRemovedModelFlags() {
         LocalAuditPhaseWriterProperties properties = validLocalAuditPhaseWriterProperties();
         properties.setMaxTotalWaitMs(10_000);
         EvidenceGatedFinalizeStartupGuard guard = guardWithAuditWriterConfig(
@@ -203,7 +190,9 @@ class EvidenceGatedFinalizeStartupGuardTest {
                 List.of()
         );
 
-        assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("app.regulated-mutations.transaction-mode");
     }
 
     @Test
@@ -217,7 +206,7 @@ class EvidenceGatedFinalizeStartupGuardTest {
                 mock(PlatformTransactionManager.class),
                 mock(RegulatedMutationTransactionCapabilityProbe.class),
                 mock(TransactionalOutboxRecordRepository.class),
-                List.of(mockSubmitDecisionRecovery())
+                mockAllRecoveries()
         );
 
         assertThatThrownBy(() -> guard.run(null))
@@ -236,7 +225,7 @@ class EvidenceGatedFinalizeStartupGuardTest {
                 null,
                 mock(RegulatedMutationTransactionCapabilityProbe.class),
                 mock(TransactionalOutboxRecordRepository.class),
-                List.of(mockSubmitDecisionRecovery())
+                mockAllRecoveries()
         );
 
         assertThatThrownBy(() -> guard.run(null))
@@ -255,7 +244,7 @@ class EvidenceGatedFinalizeStartupGuardTest {
                 mock(PlatformTransactionManager.class),
                 mock(RegulatedMutationTransactionCapabilityProbe.class),
                 mock(TransactionalOutboxRecordRepository.class),
-                List.of(mockSubmitDecisionRecovery())
+                mockAllRecoveries()
         );
 
         assertThatThrownBy(() -> guard.run(null))
@@ -274,7 +263,7 @@ class EvidenceGatedFinalizeStartupGuardTest {
                 mock(PlatformTransactionManager.class),
                 null,
                 mock(TransactionalOutboxRecordRepository.class),
-                List.of(mockSubmitDecisionRecovery())
+                mockAllRecoveries()
         );
 
         assertThatThrownBy(() -> guard.run(null))
@@ -295,7 +284,7 @@ class EvidenceGatedFinalizeStartupGuardTest {
                 mock(PlatformTransactionManager.class),
                 probe,
                 mock(TransactionalOutboxRecordRepository.class),
-                List.of(mockSubmitDecisionRecovery())
+                mockAllRecoveries()
         );
 
         assertThatThrownBy(() -> guard.run(null))
@@ -314,7 +303,7 @@ class EvidenceGatedFinalizeStartupGuardTest {
                 mock(PlatformTransactionManager.class),
                 mock(RegulatedMutationTransactionCapabilityProbe.class),
                 null,
-                List.of(mockSubmitDecisionRecovery())
+                mockAllRecoveries()
         );
 
         assertThatThrownBy(() -> guard.run(null))
@@ -338,34 +327,7 @@ class EvidenceGatedFinalizeStartupGuardTest {
 
         assertThatThrownBy(() -> guard.run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("submit-decision recovery strategy");
-    }
-
-    @Test
-    void shouldRejectUnsupportedFraudCaseEvidenceGatedFinalizeFlag() {
-        EvidenceGatedFinalizeStartupGuard guard = guardWithUnsupportedMutation(true, false, false);
-
-        assertThatThrownBy(() -> guard.run(null))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("unsupported-mutation");
-    }
-
-    @Test
-    void shouldRejectUnsupportedTrustIncidentEvidenceGatedFinalizeFlag() {
-        EvidenceGatedFinalizeStartupGuard guard = guardWithUnsupportedMutation(false, true, false);
-
-        assertThatThrownBy(() -> guard.run(null))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("unsupported-mutation");
-    }
-
-    @Test
-    void shouldRejectUnsupportedOutboxResolutionEvidenceGatedFinalizeFlag() {
-        EvidenceGatedFinalizeStartupGuard guard = guardWithUnsupportedMutation(false, false, true);
-
-        assertThatThrownBy(() -> guard.run(null))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("unsupported-mutation");
+                .hasMessageContaining("SUBMIT_ANALYST_DECISION recovery strategy");
     }
 
     @SuppressWarnings("unchecked")
@@ -406,53 +368,8 @@ class EvidenceGatedFinalizeStartupGuardTest {
                 validLocalAuditPhaseWriterProperties(),
                 recoveryStrategies,
                 new AlertServiceMetrics(new SimpleMeterRegistry()),
-                globalEnabled,
-                submitDecisionEnabled,
-                false,
-                false,
-                false,
                 probeEnabled,
                 outboxRecoveryEnabled
-        );
-    }
-
-    @SuppressWarnings("unchecked")
-    private EvidenceGatedFinalizeStartupGuard guardWithUnsupportedMutation(
-            boolean fraudCaseUpdateEnabled,
-            boolean trustIncidentEnabled,
-            boolean outboxResolutionEnabled
-    ) {
-        ObjectProvider<PlatformTransactionManager> transactionManagerProvider = mock(ObjectProvider.class);
-        when(transactionManagerProvider.getIfAvailable()).thenReturn(mock(PlatformTransactionManager.class));
-        ObjectProvider<RegulatedMutationTransactionCapabilityProbe> probeProvider = mock(ObjectProvider.class);
-        when(probeProvider.getIfAvailable()).thenReturn(mock(RegulatedMutationTransactionCapabilityProbe.class));
-        ObjectProvider<TransactionalOutboxRecordRepository> outboxRepositoryProvider = mock(ObjectProvider.class);
-        when(outboxRepositoryProvider.getIfAvailable()).thenReturn(mock(TransactionalOutboxRecordRepository.class));
-        ObjectProvider<RegulatedMutationLocalAuditPhaseWriter> localAuditPhaseWriterProvider = mock(ObjectProvider.class);
-        when(localAuditPhaseWriterProvider.getIfAvailable()).thenReturn(mock(RegulatedMutationLocalAuditPhaseWriter.class));
-        AuditChainIndexInitializer auditChainIndexInitializer = mockAuditChainIndexInitializer(true);
-        ObjectProvider<AuditChainIndexInitializer> auditChainIndexInitializerProvider = mock(ObjectProvider.class);
-        when(auditChainIndexInitializerProvider.getIfAvailable()).thenReturn(auditChainIndexInitializer);
-        return new EvidenceGatedFinalizeStartupGuard(
-                new RegulatedMutationTransactionRunner(
-                        RegulatedMutationTransactionMode.REQUIRED,
-                        new TransactionTemplate(mock(PlatformTransactionManager.class))
-                ),
-                transactionManagerProvider,
-                probeProvider,
-                outboxRepositoryProvider,
-                localAuditPhaseWriterProvider,
-                auditChainIndexInitializerProvider,
-                validLocalAuditPhaseWriterProperties(),
-                List.of(mockSubmitDecisionRecovery()),
-                new AlertServiceMetrics(new SimpleMeterRegistry()),
-                true,
-                true,
-                fraudCaseUpdateEnabled,
-                trustIncidentEnabled,
-                outboxResolutionEnabled,
-                true,
-                true
         );
     }
 
@@ -494,11 +411,6 @@ class EvidenceGatedFinalizeStartupGuardTest {
                 localAuditPhaseWriterProperties,
                 recoveryStrategies,
                 new AlertServiceMetrics(new SimpleMeterRegistry()),
-                globalEnabled,
-                submitDecisionEnabled,
-                false,
-                false,
-                false,
                 probeEnabled,
                 outboxRecoveryEnabled
         );
@@ -518,12 +430,15 @@ class EvidenceGatedFinalizeStartupGuardTest {
         return initializer;
     }
 
-    private RegulatedMutationRecoveryStrategy mockSubmitDecisionRecovery() {
+    private List<RegulatedMutationRecoveryStrategy> mockAllRecoveries() {
+        return RegulatedMutationDefinitions.all().stream()
+                .map(definition -> mockRecovery(definition.action(), definition.resourceType()))
+                .toList();
+    }
+
+    private RegulatedMutationRecoveryStrategy mockRecovery(AuditAction action, AuditResourceType resourceType) {
         RegulatedMutationRecoveryStrategy strategy = mock(RegulatedMutationRecoveryStrategy.class);
-        when(strategy.supports(
-                com.frauddetection.alert.audit.AuditAction.SUBMIT_ANALYST_DECISION,
-                com.frauddetection.alert.audit.AuditResourceType.ALERT
-        )).thenReturn(true);
+        when(strategy.supports(action, resourceType)).thenReturn(true);
         return strategy;
     }
 }

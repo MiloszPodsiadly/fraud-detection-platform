@@ -33,9 +33,8 @@ class FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest {
         assertThat(Files.readString(Path.of("../README.md"))).doesNotContain(FIXTURE_DOCKERFILE);
 
         String ci = Files.readString(Path.of("../.github/workflows/ci.yml"));
-        String fdp38Job = jobSection(ci, "fdp38-live-runtime-checkpoint-chaos");
-        String fdp39Job = jobSection(ci, "fdp39-release-governance");
-        assertThat(fdp38Job).contains("docker build -f deployment/" + FIXTURE_DOCKERFILE);
+        String liveCheckpointJob = jobSection(ci, "fdp38-live-runtime-checkpoint-chaos");
+        assertThat(liveCheckpointJob).contains("docker build -f deployment/" + FIXTURE_DOCKERFILE);
         assertThat(ci).contains("deployment/Dockerfile.backend");
 
         writeUsageArtifact(findOccurrences());

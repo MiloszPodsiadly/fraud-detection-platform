@@ -17,7 +17,7 @@ class PublicEngineIntelligenceEventContractDocsTest {
                 .replaceAll("\\s+", " ");
 
         assertThat(docs).contains(
-                "safe, bounded, backward-compatible optional `transactionscoredevent.engineintelligence` summary",
+                "safe, bounded, optional `transactionscoredevent.engineintelligence` summary",
                 "historical fdp-92 defined the contract-only foundation",
                 "does not publish the internal aggregation model 1:1",
                 "allowlisted projection",
@@ -54,7 +54,13 @@ class PublicEngineIntelligenceEventContractDocsTest {
                 "producer mapping must preserve timeout does not mean low risk",
                 "operational statuses do not carry `risklevel`",
                 "operational diagnostic signals do not carry fraud score buckets",
-                "diagnostic signals are not recommendations"
+                "diagnostic signals are not recommendations",
+                "inventory mongo `engine_intelligence_projections` documents",
+                "archive them under the approved retention policy",
+                "do not synthesize identity",
+                "`model_lineage_unavailable`",
+                "excluded from exact-model evaluation",
+                "runtime does not normalize them"
         ).doesNotContain(
                 "production decisioning",
                 "automatic decline",

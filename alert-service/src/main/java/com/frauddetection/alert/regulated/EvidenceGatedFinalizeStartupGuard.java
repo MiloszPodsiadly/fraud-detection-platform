@@ -1,8 +1,6 @@
 package com.frauddetection.alert.regulated;
 
-import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditChainIndexInitializer;
-import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.LocalAuditPhaseWriterProperties;
 import com.frauddetection.alert.audit.RegulatedMutationLocalAuditPhaseWriter;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
@@ -28,11 +26,6 @@ public class EvidenceGatedFinalizeStartupGuard implements ApplicationRunner {
     private final LocalAuditPhaseWriterProperties localAuditPhaseWriterProperties;
     private final List<RegulatedMutationRecoveryStrategy> recoveryStrategies;
     private final AlertServiceMetrics metrics;
-    private final boolean globalEnabled;
-    private final boolean submitDecisionEnabled;
-    private final boolean fraudCaseUpdateEnabled;
-    private final boolean trustIncidentEnabled;
-    private final boolean outboxResolutionEnabled;
     private final boolean transactionCapabilityProbeEnabled;
     private final boolean outboxRecoveryEnabled;
 
@@ -46,11 +39,6 @@ public class EvidenceGatedFinalizeStartupGuard implements ApplicationRunner {
             LocalAuditPhaseWriterProperties localAuditPhaseWriterProperties,
             List<RegulatedMutationRecoveryStrategy> recoveryStrategies,
             AlertServiceMetrics metrics,
-            @Value("${app.regulated-mutations.evidence-gated-finalize.enabled:false}") boolean globalEnabled,
-            @Value("${app.regulated-mutations.evidence-gated-finalize.submit-decision.enabled:false}") boolean submitDecisionEnabled,
-            @Value("${app.regulated-mutations.evidence-gated-finalize.fraud-case-update.enabled:false}") boolean fraudCaseUpdateEnabled,
-            @Value("${app.regulated-mutations.evidence-gated-finalize.trust-incident.enabled:false}") boolean trustIncidentEnabled,
-            @Value("${app.regulated-mutations.evidence-gated-finalize.outbox-resolution.enabled:false}") boolean outboxResolutionEnabled,
             @Value("${app.regulated-mutations.transaction-capability-probe.enabled:true}") boolean transactionCapabilityProbeEnabled,
             @Value("${app.outbox.recovery.enabled:true}") boolean outboxRecoveryEnabled
     ) {
@@ -65,95 +53,80 @@ public class EvidenceGatedFinalizeStartupGuard implements ApplicationRunner {
                 : localAuditPhaseWriterProperties;
         this.recoveryStrategies = recoveryStrategies == null ? List.of() : List.copyOf(recoveryStrategies);
         this.metrics = metrics;
-        this.globalEnabled = globalEnabled;
-        this.submitDecisionEnabled = submitDecisionEnabled;
-        this.fraudCaseUpdateEnabled = fraudCaseUpdateEnabled;
-        this.trustIncidentEnabled = trustIncidentEnabled;
-        this.outboxResolutionEnabled = outboxResolutionEnabled;
         this.transactionCapabilityProbeEnabled = transactionCapabilityProbeEnabled;
         this.outboxRecoveryEnabled = outboxRecoveryEnabled;
     }
 
     @Override
     public void run(ApplicationArguments args) {
-        boolean active = globalEnabled && anyMutationEnabled();
-        metrics.recordEvidenceGatedFinalizeEnabled("SUBMIT_ANALYST_DECISION", globalEnabled && submitDecisionEnabled);
-        if (!active) {
-            return;
-        }
-        require(
-                !fraudCaseUpdateEnabled && !trustIncidentEnabled && !outboxResolutionEnabled,
-                "unsupported-mutation",
-                "FDP-29 evidence-gated finalize is implemented only for submit-decision."
-        );
+        RegulatedMutationDefinitions.all().forEach(definition ->
+                metrics.recordEvidenceGatedFinalizeEnabled(definition.action(), true));
         require(
                 transactionRunner.mode() == RegulatedMutationTransactionMode.REQUIRED,
                 "app.regulated-mutations.transaction-mode",
-                "FDP-29 evidence-gated finalize requires transaction-mode=REQUIRED."
+                "Regulated mutation evidence-gated finalize requires transaction-mode=REQUIRED."
         );
         require(
                 transactionManager != null,
                 "mongo transaction manager",
-                "FDP-29 evidence-gated finalize requires a Mongo transaction manager."
+                "Regulated mutation evidence-gated finalize requires a Mongo transaction manager."
         );
         require(
                 transactionCapabilityProbeEnabled,
                 "app.regulated-mutations.transaction-capability-probe.enabled",
-                "FDP-29 evidence-gated finalize requires transaction capability probe."
+                "Regulated mutation evidence-gated finalize requires transaction capability probe."
         );
         require(
                 transactionCapabilityProbe != null,
                 "transaction capability probe",
-                "FDP-29 evidence-gated finalize requires a transaction capability probe bean."
+                "Regulated mutation evidence-gated finalize requires a transaction capability probe bean."
         );
         transactionCapabilityProbe.verify();
         require(
                 outboxRepository != null,
                 "TransactionalOutboxRecordRepository",
-                "FDP-29 evidence-gated finalize requires transactional outbox repository."
+                "Regulated mutation evidence-gated finalize requires transactional outbox repository."
         );
         require(
                 outboxRecoveryEnabled,
                 "app.outbox.recovery.enabled",
-                "FDP-29 evidence-gated finalize requires outbox recovery."
+                "Regulated mutation evidence-gated finalize requires outbox recovery."
         );
         require(
                 localAuditPhaseWriter != null,
                 "RegulatedMutationLocalAuditPhaseWriter",
-                "FDP-29 evidence-gated finalize requires a local audit phase writer."
+                "Regulated mutation evidence-gated finalize requires a local audit phase writer."
         );
         require(
                 localAuditPhaseWriterProperties.validForEvidenceGatedFinalize(),
                 "app.audit.local-phase-writer",
-                "FDP-29 evidence-gated finalize requires finite local audit writer retry config."
+                "Regulated mutation evidence-gated finalize requires finite local audit writer retry config."
         );
         require(
                 auditChainIndexInitializer != null,
                 "AuditChainIndexInitializer",
-                "FDP-29 evidence-gated finalize requires audit chain index initializer."
+                "Regulated mutation evidence-gated finalize requires audit chain index initializer."
         );
         require(
                 auditChainIndexInitializer.hasRequiredUniqueIndexes(),
                 "audit chain unique indexes",
-                "FDP-29 evidence-gated finalize requires unique audit chain indexes."
+                "Regulated mutation evidence-gated finalize requires unique audit chain indexes."
         );
-        if (submitDecisionEnabled) {
+        for (RegulatedMutationDefinition definition : RegulatedMutationDefinitions.all()) {
+            long matchingStrategies = recoveryStrategies.stream()
+                    .filter(strategy -> strategy.supports(definition.action(), definition.resourceType()))
+                    .count();
             require(
-                    recoveryStrategies.stream().anyMatch(strategy ->
-                            strategy.supports(AuditAction.SUBMIT_ANALYST_DECISION, AuditResourceType.ALERT)),
-                    "submit-decision recovery strategy",
-                    "FDP-29 evidence-gated finalize requires submit-decision recovery strategy."
+                    matchingStrategies == 1,
+                    definition.action().name() + " recovery strategy",
+                    "Canonical regulated mutation runtime requires exactly one recovery strategy per operation."
             );
         }
     }
 
-    private boolean anyMutationEnabled() {
-        return submitDecisionEnabled || fraudCaseUpdateEnabled || trustIncidentEnabled || outboxResolutionEnabled;
-    }
-
     private void require(boolean valid, String setting, String reason) {
         if (!valid) {
-            throw new IllegalStateException("FDP-29 evidence-gated finalize startup guard failed: setting="
+            throw new IllegalStateException("Regulated mutation evidence-gated finalize startup guard failed: setting="
                     + setting + "; reason=" + reason);
         }
     }

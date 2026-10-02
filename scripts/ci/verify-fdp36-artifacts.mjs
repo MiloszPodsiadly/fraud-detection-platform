@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { repoRoot } from "../fdp-scope/scopeGuardHelpers.mjs";
+import { repoRoot } from "../scope-guards/scopeGuardHelpers.mjs";
 import { assertFile, readText } from "./artifact-verification-helpers.mjs";
 
 const chaosDir = "alert-service/target/fdp36-chaos";

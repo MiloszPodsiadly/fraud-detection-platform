@@ -46,7 +46,7 @@ Docker/Testcontainers are infrastructure dependencies, not the killed alert-serv
 - no transaction-boundary change
 - no Kafka/outbox semantics change
 - no production runtime chaos hook
-- no FDP-29 production default change
+- no current runtime model or persisted-version policy change
 
 FDP-36 proof code is test-only. No runtime hooks are introduced.
 

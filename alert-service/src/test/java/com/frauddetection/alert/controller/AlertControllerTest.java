@@ -107,7 +107,7 @@ class AlertControllerTest {
                         AlertStatus.RESOLVED,
                         "event-1",
                         Instant.parse("2026-04-20T10:00:00Z"),
-                        SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING
+                        SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
                 ));
 
         SubmitAnalystDecisionRequest request = new SubmitAnalystDecisionRequest(
@@ -124,7 +124,7 @@ class AlertControllerTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultingStatus").value("RESOLVED"))
-                .andExpect(jsonPath("$.operation_status").value("COMMITTED_EVIDENCE_PENDING"));
+                .andExpect(jsonPath("$.operation_status").value("FINALIZED_EVIDENCE_PENDING_EXTERNAL"));
     }
 
     @Test
@@ -175,8 +175,8 @@ class AlertControllerTest {
                 .andExpect(jsonPath("$.operation_status").value("RECOVERY_REQUIRED"))
                 .andExpect(jsonPath("$.resultingStatus").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.decisionEventId").value(org.hamcrest.Matchers.nullValue()))
-                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("COMMITTED_EVIDENCE_PENDING")))
-                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("COMMITTED_EVIDENCE_CONFIRMED")));
+                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("FINALIZED_EVIDENCE_PENDING_EXTERNAL")))
+                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("FINALIZED_EVIDENCE_CONFIRMED")));
     }
 
     @Test
@@ -195,7 +195,7 @@ class AlertControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .header("X-Idempotency-Key", "idem-1")
                         .content(objectMapper.writeValueAsString(decisionRequest())))
-                .andExpect(status().isOk())
+                .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.operation_status").value("FINALIZE_RECOVERY_REQUIRED"))
                 .andExpect(jsonPath("$.resultingStatus").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.decisionEventId").value(org.hamcrest.Matchers.nullValue()))
@@ -222,7 +222,7 @@ class AlertControllerTest {
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.operation_status").value("RECOVERY_REQUIRED"))
                 .andExpect(jsonPath("$.decisionEventId").value(org.hamcrest.Matchers.nullValue()))
-                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("COMMITTED_EVIDENCE_PENDING")));
+                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("FINALIZED_EVIDENCE_PENDING_EXTERNAL")));
     }
 
     @Test
@@ -234,7 +234,7 @@ class AlertControllerTest {
                         null,
                         null,
                         null,
-                        SubmitDecisionOperationStatus.COMMIT_UNKNOWN
+                        SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED
                 ));
 
         mockMvc.perform(post("/api/v1/alerts/alert-1/decision")
@@ -242,9 +242,9 @@ class AlertControllerTest {
                         .header("X-Idempotency-Key", "idem-stale")
                         .content(objectMapper.writeValueAsString(decisionRequest())))
                 .andExpect(status().isAccepted())
-                .andExpect(jsonPath("$.operation_status").value("COMMIT_UNKNOWN"))
+                .andExpect(jsonPath("$.operation_status").value("FINALIZE_RECOVERY_REQUIRED"))
                 .andExpect(jsonPath("$.resultingStatus").value(org.hamcrest.Matchers.nullValue()))
-                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("COMMITTED_EVIDENCE_CONFIRMED")));
+                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("FINALIZED_EVIDENCE_CONFIRMED")));
     }
 
     @Test
@@ -266,7 +266,7 @@ class AlertControllerTest {
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.operation_status").value("IN_PROGRESS"))
                 .andExpect(jsonPath("$.decisionEventId").value(org.hamcrest.Matchers.nullValue()))
-                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("COMMITTED_EVIDENCE_PENDING")));
+                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("FINALIZED_EVIDENCE_PENDING_EXTERNAL")));
     }
 
     @Test
@@ -278,7 +278,7 @@ class AlertControllerTest {
                         null,
                         null,
                         null,
-                        SubmitDecisionOperationStatus.COMMIT_UNKNOWN
+                        SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED
                 ));
 
         mockMvc.perform(post("/api/v1/alerts/alert-1/decision")
@@ -286,11 +286,11 @@ class AlertControllerTest {
                         .header("X-Idempotency-Key", "idem-expired-processing")
                         .content(objectMapper.writeValueAsString(decisionRequest())))
                 .andExpect(status().isAccepted())
-                .andExpect(jsonPath("$.operation_status").value("COMMIT_UNKNOWN"))
+                .andExpect(jsonPath("$.operation_status").value("FINALIZE_RECOVERY_REQUIRED"))
                 .andExpect(jsonPath("$.resultingStatus").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.decisionEventId").value(org.hamcrest.Matchers.nullValue()))
-                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("COMMITTED_EVIDENCE_PENDING")))
-                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("COMMITTED_EVIDENCE_CONFIRMED")));
+                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("FINALIZED_EVIDENCE_PENDING_EXTERNAL")))
+                .andExpect(jsonPath("$.operation_status").value(org.hamcrest.Matchers.not("FINALIZED_EVIDENCE_CONFIRMED")));
     }
 
     @Test
@@ -312,7 +312,7 @@ class AlertControllerTest {
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.message").value("Audit persistence is unavailable; mutation was not executed."))
-                .andExpect(jsonPath("$.details[0]").value("reason:REJECTED_BEFORE_MUTATION"))
+                .andExpect(jsonPath("$.details[0]").value("reason:REJECTED_EVIDENCE_UNAVAILABLE"))
                 .andExpect(jsonPath("$.operation_status").doesNotExist());
     }
 

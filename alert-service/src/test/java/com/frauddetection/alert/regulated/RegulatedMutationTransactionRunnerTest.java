@@ -38,7 +38,8 @@ class RegulatedMutationTransactionRunnerTest {
 
         assertThatThrownBy(() -> runner.runLocalCommit(() -> "committed"))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("transaction-mode=REQUIRED requires a Mongo transaction manager");
+                .hasMessageContaining("Regulated mutation local commit requires a configured Mongo transaction manager")
+                .hasMessageContaining("transaction-mode=REQUIRED");
     }
 
     @Test

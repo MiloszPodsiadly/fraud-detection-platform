@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { repoRoot } from "./fdp-scope/scopeGuardHelpers.mjs";
+import { repoRoot } from "./scope-guards/scopeGuardHelpers.mjs";
 
 const workflowPath = ".github/workflows/ci.yml";
 const evidencePath = "docs/ci_evidence_map.md";

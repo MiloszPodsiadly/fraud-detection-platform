@@ -65,7 +65,7 @@ public class EngineIntelligenceProjectionPolicy {
         }
         // Alert-service projection revalidates engine intelligence through the shared bounded public event
         // contract. This avoids maintaining a divergent second source of truth for public reason codes and
-        // enum semantics while FDP-95 adds storage-specific size and omission safeguards.
+        // enum semantics while the projection adds storage-specific size and omission safeguards.
         return publicContract(() -> new EngineIntelligenceSummary(
                 source.contractVersion(),
                 source.generatedAt(),

@@ -61,8 +61,7 @@ public class AuditEventRepository {
     }
 
     public Optional<AuditEventDocument> findByAuditId(String auditId) throws DataAccessException {
-        Query query = new Query(Criteria.where("audit_id").is(auditId)).limit(1);
-        return Optional.ofNullable(mongoTemplate.findOne(query, AuditEventDocument.class));
+        return Optional.ofNullable(mongoTemplate.findById(auditId, AuditEventDocument.class));
     }
 
     public List<AuditEventDocument> findHeadWindow(String partitionKey, int limit) throws DataAccessException {

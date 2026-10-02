@@ -27,7 +27,7 @@ The source chain remains:
 
 ```text
 bounded feedback dataset
--> FDP-124 evaluation artifact set
+-> Platform Evaluation artifact set
 -> Platform Recommendation Evaluation Card v1 artifact set
 -> Shadow Performance Summary v2
 -> v2 read API DTO

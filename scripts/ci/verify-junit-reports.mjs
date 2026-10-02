@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { repoRoot } from "../fdp-scope/scopeGuardHelpers.mjs";
+import { repoRoot } from "../scope-guards/scopeGuardHelpers.mjs";
 import { getCiSuite } from "./ci-suites.mjs";
 
 const options = parseArgs(process.argv.slice(2));

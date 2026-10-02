@@ -19,7 +19,7 @@ class ShadowPerformanceSummaryValidatorTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
-    void acceptsValidatedFdp105Summary() {
+    void acceptsValidatedCurrentShadowPerformanceSummary() {
         assertThatCode(() -> validator.validate(validSummary())).doesNotThrowAnyException();
     }
 
@@ -143,7 +143,7 @@ class ShadowPerformanceSummaryValidatorTest {
     }
 
     @Test
-    void acceptsExactCurrentAndLegacyReadOnlyPlatformEvaluationProvenance() {
+    void acceptsExactCanonicalPlatformEvaluationProvenance() {
         ShadowPerformanceSummary base = validSummary();
         assertThatCode(() -> validator.validate(withEvaluationProvenance(
                 base.evaluation(),
@@ -151,53 +151,37 @@ class ShadowPerformanceSummaryValidatorTest {
                 "feedback-dataset-evaluation-report-artifact-set-v1",
                 "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
         ))).doesNotThrowAnyException();
-        assertThatCode(() -> validator.validate(withEvaluationProvenance(
-                base.evaluation(),
-                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-                "fdp123-report-artifact-set-v1",
-                "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
-        ))).doesNotThrowAnyException();
     }
 
     @Test
-    void rejectsMixedOrUnknownPlatformEvaluationProvenance() {
+    void rejectsRetiredUnknownOrMissingEvaluationReportVersion() {
+        for (String version : java.util.Arrays.asList("FDP-124", "unknown-evaluation-version", null)) {
+            assertThatThrownBy(() -> validator.validate(withEvaluationReportVersion(version)))
+                    .isInstanceOf(ShadowPerformanceSummaryValidationException.class);
+        }
+    }
+
+    @Test
+    void rejectsUnsupportedPlatformEvaluationProvenance() {
         ShadowPerformanceSummary base = validSummary();
         for (ShadowPerformanceSummary summary : List.of(
                 withEvaluationProvenance(
                         base.evaluation(),
                         "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-                        "fdp123-report-artifact-set-v1",
+                        "unsupported-artifact-set-v1",
                         "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
                 ),
                 withEvaluationProvenance(
                         base.evaluation(),
-                        "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-                        "feedback-dataset-evaluation-report-artifact-set-v1",
-                        "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
-                ),
-                withEvaluationProvenance(
-                        base.evaluation(),
-                        "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-                        "feedback-dataset-evaluation-report-artifact-set-v1",
-                        "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
-                ),
-                withEvaluationProvenance(
-                        base.evaluation(),
-                        "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-                        "fdp123-report-artifact-set-v1",
-                        "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
-                ),
-                withEvaluationProvenance(
-                        base.evaluation(),
-                        "UNKNOWN_PLATFORM_EVALUATION",
+                        "UNSUPPORTED_PLATFORM_EVALUATION",
                         "feedback-dataset-evaluation-report-artifact-set-v1",
                         "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
                 ),
                 withEvaluationProvenance(
                         base.evaluation(),
                         "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-                        "unknown-artifact-set-v1",
-                        "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
+                        "feedback-dataset-evaluation-report-artifact-set-v1",
+                        "UNSUPPORTED_IDENTITY_COMPLETENESS"
                 )
         )) {
             assertThatThrownBy(() -> validator.validate(summary))
@@ -406,6 +390,38 @@ class ShadowPerformanceSummaryValidatorTest {
                 datasetTimeBasis,
                 base.sourceManifestSha256(),
                 base.sourceEvaluationCardManifestSha256()
+        );
+    }
+
+    private ShadowPerformanceSummary withEvaluationReportVersion(String evaluationReportVersion) {
+        ShadowPerformanceSummary base = validSummary();
+        ShadowPerformanceSummary.ShadowPerformanceEvaluation evaluation = base.evaluation();
+        return new ShadowPerformanceSummary(
+                base.reportType(),
+                base.summaryVersion(),
+                base.generatedAt(),
+                base.evaluationSubject(),
+                base.metricBasis(),
+                base.governance(),
+                new ShadowPerformanceSummary.ShadowPerformanceEvaluation(
+                        evaluation.evaluationCardType(),
+                        evaluation.evaluationCardVersion(),
+                        evaluation.evaluationPurpose(),
+                        evaluation.evaluationReportType(),
+                        evaluationReportVersion,
+                        evaluation.evaluationReportGeneratedAt(),
+                        evaluation.evaluationCardGeneratedAt(),
+                        evaluation.evaluationArtifactSetVersion(),
+                        evaluation.datasetVersion(),
+                        evaluation.datasetTimeBasis(),
+                        evaluation.sourceManifestSha256(),
+                        evaluation.sourceEvaluationCardManifestSha256()
+                ),
+                base.evaluationPopulation(),
+                base.metrics(),
+                base.warnings(),
+                base.limitations(),
+                base.banner()
         );
     }
 

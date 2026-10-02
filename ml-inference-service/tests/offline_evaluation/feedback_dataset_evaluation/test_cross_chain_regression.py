@@ -9,7 +9,10 @@ from pathlib import Path
 
 from offline_evaluation.feedback_dataset_evaluation.dataset_schema import MAX_DATASET_RECORDS
 from offline_evaluation.feedback_dataset_evaluation.evaluation_card.generator import (
-    generate_evaluation_card_from_fdp124_artifacts,
+    generate_platform_evaluation_card_from_artifacts,
+)
+from offline_evaluation.feedback_dataset_evaluation.evaluation_card.artifact_reader import (
+    read_validated_evaluation_card_artifact_set,
 )
 from offline_evaluation.feedback_dataset_evaluation.evaluation_card.schema import (
     REQUIRED_GOVERNANCE_BOUNDARY,
@@ -17,6 +20,7 @@ from offline_evaluation.feedback_dataset_evaluation.evaluation_card.schema impor
     REQUIRED_NOT_INTENDED_USE,
     FeedbackDatasetEvaluationCardValidationError,
 )
+from offline_evaluation.feedback_dataset_evaluation.evaluation_card.writer import write_evaluation_card_artifacts
 from offline_evaluation.feedback_dataset_evaluation.evaluation_runner import run_feedback_dataset_evaluation
 from offline_evaluation.feedback_dataset_evaluation.model_evaluation import (
     MODEL_PREDICTION_SIGNAL_UNAVAILABLE,
@@ -27,6 +31,14 @@ from offline_evaluation.feedback_dataset_evaluation.model_evaluation_artifact_se
     read_validated_model_evaluation_artifact_set,
 )
 from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import compare_rfc3339_timestamps
+from offline_evaluation.generate_current_shadow_summary import generate_current_shadow_summary
+from offline_evaluation.generate_promotion_review_readiness_report import (
+    generate_promotion_review_readiness_report,
+)
+from offline_evaluation.promotion_review_readiness_artifact_set import (
+    read_validated_promotion_review_readiness_artifact_set,
+)
+from offline_evaluation.shadow_performance_artifact_set import read_validated_shadow_performance_artifact_set
 
 try:
     from feedback_dataset_evaluation.feedback_dataset_fixtures import GENERATED_AT, jsonl, record
@@ -44,10 +56,124 @@ MODEL_Y = ModelEvaluationIdentity(
     "model-Y",
     "feature-contract-v2",
 )
-CARD_GENERATED_AT = "2026-06-11T00:00:00Z"
+CARD_GENERATED_AT = "2026-06-11T00:00:00.123456789Z"
+SHADOW_GENERATED_AT = "2026-06-12T00:00:00.234567891Z"
+PROMOTION_READINESS_GENERATED_AT = "2026-06-13T00:00:00.345678912Z"
 
 
 class FeedbackEvaluationCrossChainRegressionTest(unittest.TestCase):
+    def test_current_pipeline_reaches_promotion_review_readiness_with_verified_provenance(self):
+        with completed_cross_chain_run() as run:
+            platform_manifest_path = run.platform_dir / "manifest.json"
+            platform_manifest = self._json(platform_manifest_path)
+            platform_summary = self._json(run.platform_dir / "evaluation_summary.json")
+            self.assertEqual("FEEDBACK_DATASET_OFFLINE_EVALUATION_V1", platform_manifest["reportType"])
+            self.assertEqual(
+                "feedback-dataset-evaluation-report-artifact-set-v1",
+                platform_manifest["artifactSetVersion"],
+            )
+            self.assertEqual(GENERATED_AT, platform_manifest["generatedAt"])
+            self.assertEqual(GENERATED_AT, platform_summary["generatedAt"])
+            self.assertEqual(platform_manifest["reportType"], platform_summary["reportType"])
+            self.assertEqual(
+                "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
+                platform_summary["evaluationSubject"]["identityCompleteness"],
+            )
+            self._assert_named_manifest_integrity(run.platform_dir, platform_manifest)
+
+            card = self._generate_card(run)
+            card_dir = run.root / "platform-recommendation-evaluation-card"
+            card_paths = write_evaluation_card_artifacts(card, card_dir, allow_output_root=run.root)
+            validated_card, card_manifest_sha256 = read_validated_evaluation_card_artifact_set(
+                card_paths["evaluationCardJson"],
+                card_paths["manifest"],
+            )
+            platform_manifest_sha256 = hashlib.sha256(platform_manifest_path.read_bytes()).hexdigest()
+            self.assertEqual(platform_manifest_sha256, validated_card["evaluationEvidence"]["sourceManifestSha256"])
+            self.assertLessEqual(
+                compare_rfc3339_timestamps(
+                    validated_card["evaluationEvidence"]["evaluationGeneratedAt"],
+                    validated_card["generatedAt"],
+                ),
+                0,
+            )
+            card_manifest = self._json(card_paths["manifest"])
+            self.assertEqual(validated_card["generatedAt"], card_manifest["generatedAt"])
+            self._assert_named_manifest_integrity(card_dir, card_manifest)
+
+            shadow_path = (
+                run.root
+                / "deployment"
+                / "local-generated"
+                / "shadow-performance"
+                / "current-summary.json"
+            )
+            generate_current_shadow_summary(
+                card_paths["evaluationCardJson"],
+                card_paths["manifest"],
+                shadow_path,
+                generated_at=SHADOW_GENERATED_AT,
+                allowed_output_root=shadow_path.parent,
+            )
+            shadow_summary, shadow_manifest_sha256 = read_validated_shadow_performance_artifact_set(
+                shadow_path,
+                shadow_path.with_name("manifest.json"),
+            )
+            self.assertEqual("feedback-dataset-evaluation-v1", shadow_summary["evaluation"]["evaluationReportVersion"])
+            self.assertEqual(platform_manifest_sha256, shadow_summary["evaluation"]["sourceManifestSha256"])
+            self.assertEqual(
+                card_manifest_sha256,
+                shadow_summary["evaluation"]["sourceEvaluationCardManifestSha256"],
+            )
+            self.assertLessEqual(
+                compare_rfc3339_timestamps(validated_card["generatedAt"], shadow_summary["generatedAt"]),
+                0,
+            )
+            self.assertTrue(shadow_summary["governance"]["notProductionApproval"])
+            self.assertTrue(shadow_summary["governance"]["notPromotionApproval"])
+
+            readiness_path = (
+                run.root
+                / "deployment"
+                / "local-generated"
+                / "promotion-readiness"
+                / "promotion-review-readiness-report.json"
+            )
+            generate_promotion_review_readiness_report(
+                shadow_path,
+                shadow_path.with_name("manifest.json"),
+                readiness_path,
+                generated_at=PROMOTION_READINESS_GENERATED_AT,
+                allowed_output_root=readiness_path.parent,
+            )
+            readiness = read_validated_promotion_review_readiness_artifact_set(
+                readiness_path,
+                readiness_path.with_name("manifest.json"),
+            )
+            self.assertEqual(
+                shadow_manifest_sha256,
+                readiness["checkInputs"]["sourceShadowSummaryManifestSha256"],
+            )
+            self.assertEqual(
+                card_manifest_sha256,
+                readiness["checkInputs"]["shadowPerformanceSummary"]["sourceEvaluationCardManifestSha256"],
+            )
+            self.assertLessEqual(
+                compare_rfc3339_timestamps(shadow_summary["generatedAt"], readiness["generatedAt"]),
+                0,
+            )
+            for field in (
+                    "diagnosticOnly",
+                    "notPromotionApproval",
+                    "notThresholdRecommendation",
+                    "notProductionDecisioning",
+                    "notPaymentAuthorization",
+                    "notAutomaticDecisioning",
+                    "notAnalystRecommendation",
+            ):
+                self.assertTrue(readiness[field])
+            self.assertEqual([], list(run.root.rglob("*.tmp")))
+
     def test_real_run_produces_independent_trusted_platform_and_model_artifact_sets(self):
         with completed_cross_chain_run() as run:
             platform_manifest = self._json(run.platform_dir / "manifest.json")
@@ -158,7 +284,7 @@ class FeedbackEvaluationCrossChainRegressionTest(unittest.TestCase):
             read_validated_model_evaluation_artifact_set(run.model_dir)
 
     def _generate_card(self, run):
-        return generate_evaluation_card_from_fdp124_artifacts(
+        return generate_platform_evaluation_card_from_artifacts(
             run.platform_dir / "evaluation_summary.json",
             run.platform_dir / "manifest.json",
             governance_metadata(),
@@ -184,6 +310,12 @@ class FeedbackEvaluationCrossChainRegressionTest(unittest.TestCase):
             encoding="utf-8",
             newline="\n",
         )
+
+    def _assert_named_manifest_integrity(self, artifact_dir, manifest):
+        for item in manifest["files"]:
+            payload = (artifact_dir / item["name"]).read_bytes()
+            self.assertEqual(len(payload), item["sizeBytes"])
+            self.assertEqual(hashlib.sha256(payload).hexdigest(), item["sha256"])
 
     def _reseal_model_manifest(self, model_dir):
         summary_path = model_dir / "model_evaluation_summary.json"

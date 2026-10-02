@@ -15,7 +15,6 @@ import com.frauddetection.common.events.model.LocationInfo;
 import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.model.Money;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
-import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.annotation.JsonDeserialize;
 
 import java.time.Instant;
@@ -78,7 +77,7 @@ public record TransactionScoredEvent(
             Map<String, Object> featureSnapshot,
             @JsonProperty("alertRecommended") Boolean alertRecommended,
             @JsonProperty("scoringEvidence") List<ScoringEvidenceItem> scoringEvidence,
-            @JsonProperty("engineIntelligence") JsonNode engineIntelligence,
+            @JsonProperty("engineIntelligence") EngineIntelligenceSummary engineIntelligence,
             @JsonProperty("analystRecommendation") AnalystRecommendationResult analystRecommendation
     ) {
         return new TransactionScoredEvent(
@@ -105,7 +104,7 @@ public record TransactionScoredEvent(
                 featureSnapshot,
                 alertRecommended,
                 scoringEvidence,
-                engineIntelligence(modelVersion, engineIntelligence),
+                engineIntelligence,
                 analystRecommendation
         );
     }
@@ -115,24 +114,6 @@ public record TransactionScoredEvent(
         if (featureSnapshot != null) {
             featureSnapshot = FeatureSnapshotWireValueNormalizer.normalize(featureSnapshot);
         }
-    }
-
-    private static EngineIntelligenceSummary engineIntelligence(String modelVersion, JsonNode engineIntelligence) {
-        if (engineIntelligence == null || engineIntelligence.isNull()) {
-            return null;
-        }
-        if (historicalV1EngineIntelligence(modelVersion, engineIntelligence)) {
-            return EngineIntelligenceSummary.fromHistoricalV1JsonNode(engineIntelligence);
-        }
-        return EngineIntelligenceSummary.fromCurrentJsonNode(engineIntelligence);
-    }
-
-    private static boolean historicalV1EngineIntelligence(String modelVersion, JsonNode engineIntelligence) {
-        JsonNode contractVersion = engineIntelligence.get("contractVersion");
-        return "v1".equals(modelVersion)
-                && contractVersion != null
-                && !contractVersion.isNull()
-                && contractVersion.asInt() == EngineIntelligenceSummary.CONTRACT_VERSION;
     }
 
     public TransactionScoredEvent(

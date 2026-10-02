@@ -282,7 +282,7 @@ describe("transactionRiskIntelligenceValidation", () => {
         ...engineIntelligence(),
         engines: [
           engine(),
-          engine({ engineId: "ml.python.primary", engineType: "ML_MODEL", riskLevel: "MEDIUM", scoreBucket: "MEDIUM", reasonCodes: ["MODEL_HIGH_RISK"] }),
+          mlEngine({ riskLevel: "MEDIUM", scoreBucket: "MEDIUM", reasonCodes: ["MODEL_HIGH_RISK"] }),
           engine({ engineId: "velocity.primary", engineType: "VELOCITY", riskLevel: "HIGH", scoreBucket: "HIGH", reasonCodes: ["RAPID_PLN_20K_BURST"] })
         ],
         diagnosticSignals: [
@@ -524,8 +524,8 @@ describe("transactionRiskIntelligenceValidation", () => {
     ["duplicate rules", [engine(), engine()], "INVALID_ENGINE_INTELLIGENCE_ENGINE_ORDER"],
     ["duplicate ml", [
       engine(),
-      engine({ engineId: "ml.python.primary", engineType: "ML_MODEL", riskLevel: "LOW", scoreBucket: "LOW", reasonCodes: ["LOW_MODEL_RISK"] }),
-      engine({ engineId: "ml.python.primary", engineType: "ML_MODEL", riskLevel: "MEDIUM", scoreBucket: "MEDIUM", reasonCodes: ["MODEL_HIGH_RISK"] })
+      mlEngine(),
+      mlEngine({ riskLevel: "MEDIUM", scoreBucket: "MEDIUM", reasonCodes: ["MODEL_HIGH_RISK"] })
     ], "INVALID_ENGINE_INTELLIGENCE_ENGINE_ORDER"],
     ["duplicate velocity", [
       engine(),
@@ -538,7 +538,7 @@ describe("transactionRiskIntelligenceValidation", () => {
       engine({ engineId: "velocity.primary", engineType: "VELOCITY", riskLevel: "HIGH", scoreBucket: "HIGH", reasonCodes: ["RAPID_PLN_20K_BURST"] })
     ], "INVALID_ENGINE_INTELLIGENCE_ENGINE_ORDER"],
     ["invalid order", [
-      engine({ engineId: "ml.python.primary", engineType: "ML_MODEL", riskLevel: "LOW", scoreBucket: "LOW", reasonCodes: ["LOW_MODEL_RISK"] }),
+      mlEngine(),
       engine()
     ], "INVALID_ENGINE_INTELLIGENCE_ENGINE_ORDER"],
     ["wrong type pair", [
@@ -646,6 +646,11 @@ function mlEngine(overrides = {}) {
     riskLevel: "LOW",
     scoreBucket: "LOW",
     reasonCodes: ["LOW_MODEL_RISK"],
+    modelIdentity: {
+      modelName: "python-logistic-fraud-model",
+      modelVersion: "2026-06-18.v1",
+      featureContractVersion: "feature-contract-v2"
+    },
     ...overrides
   });
 }

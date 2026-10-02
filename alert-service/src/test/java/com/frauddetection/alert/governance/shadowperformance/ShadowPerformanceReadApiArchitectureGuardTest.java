@@ -200,7 +200,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
     }
 
     @Test
-    void fdp108ProviderReadsOnlyConfiguredCurrentSummaryArtifact() throws Exception {
+    void providerReadsOnlyConfiguredCurrentSummaryArtifact() throws Exception {
         String source = Files.readString(PRODUCTION_ROOT.resolve(
                 "governance/shadowperformance/ArtifactBackedShadowPerformanceSummaryProvider.java"
         ));
@@ -258,7 +258,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
     }
 
     @Test
-    void fdp108ProviderDoesNotWriteOrMutateOperationalState() throws Exception {
+    void providerDoesNotWriteOrMutateOperationalState() throws Exception {
         String source = Files.readString(PRODUCTION_ROOT.resolve(
                 "governance/shadowperformance/ArtifactBackedShadowPerformanceSummaryProvider.java"
         ));
@@ -308,7 +308,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
     }
 
     @Test
-    void fdp107DashboardUiUsesOnlyCurrentReadEndpoint() throws Exception {
+    void dashboardUiUsesOnlyCurrentReadEndpoint() throws Exception {
         String uiSource = uiSource();
 
         assertThat(uiSource).contains(
@@ -370,7 +370,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
     }
 
     @Test
-    void docsDescribeFdp108CurrentProviderBoundaries() throws Exception {
+    void docsDescribeCurrentProviderBoundaries() throws Exception {
         String doc = Files.readString(ROOT.resolve("docs/architecture/shadow_performance_summary_current_provider.md"));
 
         assertThat(doc).contains(
@@ -504,7 +504,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "base runtime is fail-closed by default",
                 "official full local launchers include",
                 "Python 3.12+ available as `python`",
-                "FDP-110 local startup runs the FDP-109 Python generator before Docker Compose starts",
+                "Local startup runs the Python generator before Docker Compose starts",
                 "generate the local Shadow Performance Summary artifact before starting",
                 "docker-compose.shadow-performance-generated.yml",
                 "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary",
@@ -661,18 +661,18 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
         String doc = Files.readString(GENERATED_RUNTIME_DOC);
 
         assertThat(doc).contains(
-                "FDP-110 completes the local generated Shadow Performance runtime loop. It invokes the FDP-109 local generator before Docker Compose starts, mounts the generated Shadow Performance artifact set into alert-service, lets FDP-108 read it, FDP-106 expose it, and FDP-107 display it.",
-                "FDP-110 intentionally combines local generation before Compose, generated runtime mount, and shared global workspace counters as UI context.",
-                "FDP-109 owns generation logic.",
-                "FDP-110 owns local launcher wiring and runtime mounting.",
-                "FDP-108 owns artifact reading.",
-                "FDP-106 owns the authorized read API.",
-                "FDP-107 owns dashboard display.",
+                "The local generated Shadow Performance runtime loop invokes the Python generator before Docker Compose starts, mounts the generated Shadow Performance artifact set into alert-service, lets the artifact provider read it, the authorized API expose it, and the dashboard display it.",
+                "The local runtime intentionally combines local generation before Compose, generated runtime mount, and shared global workspace counters as UI context.",
+                "The Python offline-evaluation module owns generation logic.",
+                "The local launcher owns invocation and runtime mounting.",
+                "The alert-service artifact provider owns artifact reading.",
+                "The authorized read API owns exposure.",
+                "The dashboard owns display.",
                 "Generation before Compose in a local developer launcher is allowed.",
                 "Generation inside Docker Compose is forbidden.",
                 "Generation inside alert-service runtime is forbidden.",
-                "FDP-110 does not generate a Shadow Performance Summary inside Docker Compose or inside the application runtime.",
-                "The local developer launcher invokes the FDP-109 generator before `docker compose up`",
+                "The local launcher does not generate a Shadow Performance Summary inside Docker Compose or inside the application runtime.",
+                "It invokes the Python generator before `docker compose up`",
                 "current-summary.json` plus sibling `manifest.json`",
                 "Base runtime is fail-closed",
                 "no configured summary -> 404",
@@ -680,23 +680,22 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "deployment/local-fixtures/shadow-performance/manifest.json",
                 "Demo artifact is separate from generated artifact",
                 "Demo artifact is for UI smoke/demo only",
-                "Demo artifact is not FDP-109 generated output",
+                "Demo artifact is not generated current output",
                 "Demo artifact is not production current summary",
-                "Official local launcher runs FDP-109 generation before Compose.",
+                "The official local launcher runs Python summary generation before Compose.",
                 "Generated runtime uses `docker-compose.shadow-performance-generated.yml`",
                 "deployment/local-generated/shadow-performance/current-summary.json",
                 "deployment/local-generated/shadow-performance/manifest.json",
-                "Generated runtime exposes the manifest-validated summary through FDP-108/FDP-106/FDP-107.",
+                "Generated runtime exposes the manifest-validated summary through the artifact provider, authorized read API, and dashboard.",
                 "generated runtime does not use a non-canonical demo summary filename",
                 "generated runtime does not generate summary inside Docker Compose",
                 "Generated Shadow Performance Summary not found. Run: make shadow-performance-summary",
                 "Generation happens before Docker Compose starts.",
                 "Generation does not happen inside Docker Compose.",
                 "Generation does not happen inside alert-service runtime.",
-                "FDP-110 does not run the generator inside Docker Compose",
-                "FDP-110 does not add a scheduler",
-                "FDP-110 does not add cron",
-                "FDP-110 does not add a Kafka-triggered job",
+                "The local launcher does not run the generator inside Docker Compose",
+                "It does not add a scheduler or cron",
+                "It does not add a Kafka-triggered job",
                 "not promotion readiness",
                 "not threshold recommendation",
                 "not production decisioning",
@@ -715,9 +714,9 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "Shadow Performance workspace may render shared global workspace counters as shell-level UI context.",
                 "These counters are not part of ShadowPerformanceSummary.",
                 "They are not model evaluation metrics.",
-                "They are not used by FDP-109 generation.",
-                "They are not read by FDP-108 provider.",
-                "They are not returned by FDP-106 current summary endpoint.",
+                "They are not used by the Python generator.",
+                "They are not read by the artifact provider.",
+                "They are not returned by the current summary endpoint.",
                 "They are not promotion readiness.",
                 "They are not threshold recommendation.",
                 "They are not production decisioning.",
@@ -725,7 +724,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
                 "They are not analyst recommendation logic."
         );
         assertThat(readme).contains(
-                "FDP-110 intentionally combines local generation before Compose, generated runtime mount, and shared global workspace counters as UI context.",
+                "The local launcher intentionally combines local generation before Compose, generated runtime mount, and shared global workspace counters as UI context.",
                 "Global counters in the Shadow Performance workspace are shell-level context only",
                 "not part of `ShadowPerformanceSummary`",
                 "not model evaluation metrics",
@@ -738,7 +737,7 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
     }
 
     @Test
-    void fdp110UiCountersRemainShellContextAndDoNotEnterSummaryContract() throws Exception {
+    void uiCountersRemainShellContextAndDoNotEnterSummaryContract() throws Exception {
         String shell = Files.readString(UI_ROOT.resolve("workspace/WorkspaceDashboardShell.jsx"));
         String dashboard = Files.readString(UI_ROOT.resolve("components/ShadowPerformanceDashboard.jsx"));
         String runtime = Files.readString(UI_ROOT.resolve("workspace/ShadowPerformanceWorkspaceRuntime.jsx"));
@@ -772,13 +771,13 @@ class ShadowPerformanceReadApiArchitectureGuardTest {
 
     @Test
     void generatedRuntimeBridgeDoesNotIntroduceScopeCreepTerms() throws Exception {
-        String fdp110Sources = String.join("\n",
+        String generatedRuntimeSources = String.join("\n",
                 Files.readString(GENERATED_COMPOSE),
                 Files.readString(GENERATED_RUNTIME_DOC),
                 makeTarget(Files.readString(MAKEFILE), "app-up-shadow-performance-generated")
         );
 
-        assertThat(fdp110Sources).doesNotContain(
+        assertThat(generatedRuntimeSources).doesNotContain(
                 "promotionReadiness",
                 "promotion readiness score",
                 "recommendedThreshold",

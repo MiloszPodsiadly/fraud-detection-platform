@@ -1,15 +1,12 @@
 package com.frauddetection.alert.regulated;
 
-import com.frauddetection.alert.audit.AuditDegradationService;
-import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -18,124 +15,40 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
     private final RegulatedMutationCommandRepository commandRepository;
     private final RegulatedMutationExecutorRegistry executorRegistry;
     private final RegulatedMutationConflictPolicy conflictPolicy;
+    private final TransactionalOutboxRuntimeReadiness runtimeReadiness;
 
-    /**
-     * Compatibility constructor for unit tests and older focused tests.
-     * Production Spring wiring uses the constructor that accepts RegulatedMutationExecutorRegistry.
-     */
-    public MongoRegulatedMutationCoordinator(
-            RegulatedMutationCommandRepository commandRepository,
-            MongoTemplate mongoTemplate,
-            RegulatedMutationAuditPhaseService auditPhaseService,
-            AuditDegradationService auditDegradationService,
-            AlertServiceMetrics metrics,
-            boolean bankModeFailClosed,
-            Duration leaseDuration
-    ) {
-        this(
-                commandRepository,
-                legacyOnlyRegistryForCompatibility(
-                        commandRepository,
-                        mongoTemplate,
-                        auditPhaseService,
-                        auditDegradationService,
-                        metrics,
-                        new RegulatedMutationTransactionRunner(RegulatedMutationTransactionMode.OFF, null),
-                        new RegulatedMutationPublicStatusMapper(),
-                        bankModeFailClosed,
-                        leaseDuration
-                )
-        );
-    }
-
-    /**
-     * Compatibility constructor for unit tests that need a custom transaction runner.
-     * Production Spring wiring uses the fail-closed RegulatedMutationExecutorRegistry bean.
-     */
-    public MongoRegulatedMutationCoordinator(
-            RegulatedMutationCommandRepository commandRepository,
-            MongoTemplate mongoTemplate,
-            RegulatedMutationAuditPhaseService auditPhaseService,
-            AuditDegradationService auditDegradationService,
-            AlertServiceMetrics metrics,
-            RegulatedMutationTransactionRunner transactionRunner,
-            boolean bankModeFailClosed,
-            Duration leaseDuration
-    ) {
-        this(
-                commandRepository,
-                legacyOnlyRegistryForCompatibility(
-                        commandRepository,
-                        mongoTemplate,
-                        auditPhaseService,
-                        auditDegradationService,
-                        metrics,
-                        transactionRunner,
-                        new RegulatedMutationPublicStatusMapper(),
-                        bankModeFailClosed,
-                        leaseDuration
-                )
-        );
-    }
-
-    /**
-     * Production wiring path. Registry is Spring-managed and startup-validated.
-     */
     public MongoRegulatedMutationCoordinator(
             RegulatedMutationCommandRepository commandRepository,
             RegulatedMutationExecutorRegistry executorRegistry
     ) {
-        this(commandRepository, executorRegistry, new RegulatedMutationConflictPolicy());
+        this(commandRepository, executorRegistry, new RegulatedMutationConflictPolicy(), readyReadiness());
     }
 
     @Autowired
     public MongoRegulatedMutationCoordinator(
             RegulatedMutationCommandRepository commandRepository,
             RegulatedMutationExecutorRegistry executorRegistry,
-            RegulatedMutationConflictPolicy conflictPolicy
+            RegulatedMutationConflictPolicy conflictPolicy,
+            TransactionalOutboxRuntimeReadiness runtimeReadiness
     ) {
         this.commandRepository = commandRepository;
         this.executorRegistry = executorRegistry;
         this.conflictPolicy = conflictPolicy;
+        this.runtimeReadiness = runtimeReadiness;
     }
 
-    /**
-     * Compatibility constructor for tests that provide an explicit FDP-29 executor.
-     * This constructor is not a production startup guard and must not replace registry bean validation.
-     */
     public MongoRegulatedMutationCoordinator(
             RegulatedMutationCommandRepository commandRepository,
-            MongoTemplate mongoTemplate,
-            RegulatedMutationAuditPhaseService auditPhaseService,
-            AuditDegradationService auditDegradationService,
-            AlertServiceMetrics metrics,
-            RegulatedMutationTransactionRunner transactionRunner,
-            RegulatedMutationPublicStatusMapper publicStatusMapper,
-            EvidenceGatedFinalizeExecutor evidenceGatedFinalizeExecutor,
-            boolean bankModeFailClosed,
-            Duration leaseDuration
+            RegulatedMutationExecutorRegistry executorRegistry,
+            RegulatedMutationConflictPolicy conflictPolicy
     ) {
-        this(
-                commandRepository,
-                registryForCompatibility(
-                        new LegacyRegulatedMutationExecutor(
-                                commandRepository,
-                                mongoTemplate,
-                                auditPhaseService,
-                                auditDegradationService,
-                                metrics,
-                                transactionRunner,
-                                publicStatusMapper,
-                                bankModeFailClosed,
-                                leaseDuration
-                        ),
-                        evidenceGatedFinalizeExecutor
-                )
-        );
+        this(commandRepository, executorRegistry, conflictPolicy, readyReadiness());
     }
 
     @Override
     public <R, S> RegulatedMutationResult<S> commit(RegulatedMutationCommand<R, S> command) {
+        runtimeReadiness.requireReady();
+        requireCurrentCommand(command);
         String idempotencyKey = normalize(command.idempotencyKey());
         if (idempotencyKey == null) {
             throw new MissingIdempotencyKeyException();
@@ -143,6 +56,16 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
 
         RegulatedMutationCommandDocument document = createOrLoad(command, idempotencyKey);
         return executorRegistry.executorFor(document).execute(command, idempotencyKey, document);
+    }
+
+    private <R, S> void requireCurrentCommand(RegulatedMutationCommand<R, S> command) {
+        if (command == null) {
+            throw new IllegalArgumentException("Regulated mutation command is required.");
+        }
+        if (command.mutationModelVersion() != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
+            throw new IllegalStateException("New regulated mutation commands require explicit model version EVIDENCE_GATED_FINALIZE_V1.");
+        }
+        RegulatedMutationDefinitions.requireSupported(command.action(), command.resourceType());
     }
 
     private <R, S> RegulatedMutationCommandDocument createOrLoad(
@@ -166,6 +89,11 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         document.setRequestHash(command.requestHash());
         document.setIdempotencyKeyHash(RegulatedMutationIntentHasher.hash(idempotencyKey));
         document.setMutationModelVersion(command.mutationModelVersion());
+        if (command.resourceType() == com.frauddetection.alert.audit.AuditResourceType.ALERT
+                && command.action() == com.frauddetection.alert.audit.AuditAction.SUBMIT_ANALYST_DECISION) {
+            document.setDecisionSlotClaimed(true);
+        }
+        document.setRevision(0L);
         applyIntent(command, document);
         document.setState(RegulatedMutationState.REQUESTED);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.NEW);
@@ -175,9 +103,19 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         try {
             return commandRepository.save(document);
         } catch (DuplicateKeyException duplicate) {
-            return commandRepository.findByIdempotencyKey(idempotencyKey)
-                    .map(existing -> conflictPolicy.existingOrConflict(existing, command))
-                    .orElseThrow(() -> duplicate);
+            Optional<RegulatedMutationCommandDocument> idempotentReplay =
+                    commandRepository.findByIdempotencyKey(idempotencyKey);
+            if (idempotentReplay.isPresent()) {
+                return conflictPolicy.existingOrConflict(idempotentReplay.get(), command);
+            }
+            if (commandRepository.findByResourceIdAndResourceTypeAndActionAndDecisionSlotClaimedTrue(
+                    command.resourceId(),
+                    command.resourceType().name(),
+                    command.action().name()
+            ).isPresent()) {
+                throw new ConflictingResourceMutationException();
+            }
+            throw duplicate;
         }
     }
 
@@ -210,37 +148,11 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         return value.trim();
     }
 
-    private static RegulatedMutationExecutorRegistry legacyOnlyRegistryForCompatibility(
-            RegulatedMutationCommandRepository commandRepository,
-            MongoTemplate mongoTemplate,
-            RegulatedMutationAuditPhaseService auditPhaseService,
-            AuditDegradationService auditDegradationService,
-            AlertServiceMetrics metrics,
-            RegulatedMutationTransactionRunner transactionRunner,
-            RegulatedMutationPublicStatusMapper publicStatusMapper,
-            boolean bankModeFailClosed,
-            Duration leaseDuration
-    ) {
-        return new RegulatedMutationExecutorRegistry(
-                List.of(new LegacyRegulatedMutationExecutor(
-                        commandRepository,
-                        mongoTemplate,
-                        auditPhaseService,
-                        auditDegradationService,
-                        metrics,
-                        transactionRunner,
-                        publicStatusMapper,
-                        bankModeFailClosed,
-                        leaseDuration
-                )),
-                false
-        );
+    private static TransactionalOutboxRuntimeReadiness readyReadiness() {
+        TransactionalOutboxRuntimeReadiness readiness = new TransactionalOutboxRuntimeReadiness();
+        readiness.markPreflightPassed();
+        readiness.onApplicationEvent(null);
+        return readiness;
     }
 
-    private static RegulatedMutationExecutorRegistry registryForCompatibility(
-            LegacyRegulatedMutationExecutor legacyExecutor,
-            EvidenceGatedFinalizeExecutor evidenceGatedFinalizeExecutor
-    ) {
-        return new RegulatedMutationExecutorRegistry(List.of(legacyExecutor, evidenceGatedFinalizeExecutor), false);
-    }
 }

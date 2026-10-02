@@ -60,11 +60,10 @@ class RegulatedMutationCheckpointRenewalWiringTest {
             .withBean(RegulatedMutationConflictPolicy.class)
             .withBean(RegulatedMutationLeasePolicy.class)
             .withBean(RegulatedMutationReplayPolicyRegistry.class, () -> new RegulatedMutationReplayPolicyRegistry(
-                    List.of(
-                            new LegacyRegulatedMutationReplayPolicy(new RegulatedMutationLeasePolicy()),
-                            new EvidenceGatedFinalizeReplayPolicy(new RegulatedMutationLeasePolicy())
-                    ),
-                    true
+                    List.of(new EvidenceGatedFinalizeReplayPolicy(
+                            new RegulatedMutationLeasePolicy(),
+                            mock(RegulatedMutationDurableLocalFinalizationProof.class)
+                    ))
             ))
             .withBean(RegulatedMutationReplayResolver.class)
             .withBean(RegulatedMutationFencedCommandWriter.class)
@@ -78,31 +77,26 @@ class RegulatedMutationCheckpointRenewalWiringTest {
             .withBean(RegulatedMutationSafeCheckpointPolicy.class)
             .withBean(RegulatedMutationCheckpointRenewalService.class, () -> checkpointRenewalService)
             .withBean(EvidencePreconditionEvaluator.class)
-            .withBean(LegacyRegulatedMutationExecutor.class)
             .withBean(EvidenceGatedFinalizeExecutor.class);
 
     @Test
-    void productionExecutorsUseEnabledSpringManagedCheckpointRenewalService() {
+    void productionExecutorUsesEnabledSpringManagedCheckpointRenewalService() {
         contextRunner.run(context -> {
             assertThat(context).hasSingleBean(RegulatedMutationCheckpointRenewalService.class);
             RegulatedMutationCheckpointRenewalService service =
                     context.getBean(RegulatedMutationCheckpointRenewalService.class);
             assertThat(service.isEnabledForTesting()).isTrue();
 
-            RegulatedMutationCheckpointRenewalService legacyService =
-                    checkpointServiceFrom(context.getBean(LegacyRegulatedMutationExecutor.class));
             RegulatedMutationCheckpointRenewalService evidenceService =
                     checkpointServiceFrom(context.getBean(EvidenceGatedFinalizeExecutor.class));
-            assertThat(legacyService).isSameAs(service);
             assertThat(evidenceService).isSameAs(service);
-            assertThat(legacyService.isEnabledForTesting()).isTrue();
             assertThat(evidenceService.isEnabledForTesting()).isTrue();
         });
     }
 
     @Test
     void disabledCheckpointRenewalServiceIsExplicitlyMarkedDisabled() {
-        assertThat(RegulatedMutationCheckpointRenewalService.disabled().isEnabledForTesting()).isFalse();
+        assertThat(RegulatedMutationCheckpointRenewalService.disabledForTesting().isEnabledForTesting()).isFalse();
     }
 
     private RegulatedMutationCheckpointRenewalService checkpointServiceFrom(Object executor) throws Exception {

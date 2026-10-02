@@ -85,9 +85,9 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
 
     @Test
     void currentOwnerRenewsActiveProcessingCommandWithoutBusinessFieldChanges() {
-        mongoTemplate.save(commandDocument("idem-renew-current", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION));
+        mongoTemplate.save(commandDocument("idem-renew-current", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1));
         RegulatedMutationClaimToken token = claimService.claim(
-                command("idem-renew-current", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
+                command("idem-renew-current", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
                 "idem-renew-current"
         ).orElseThrow();
         Instant originalExpiry = token.leaseExpiresAt();
@@ -100,10 +100,12 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
                 RegulatedMutationCommandDocument.class
         );
         assertThat(decision.type()).isEqualTo(RegulatedMutationLeaseRenewalDecisionType.RENEW);
+        assertThat(decision.resultingRevision()).isEqualTo(2L);
+        assertThat(persisted.getRevision()).isEqualTo(2L);
         assertThat(persisted.getLeaseExpiresAt()).isAfter(originalExpiry);
         assertThat(persisted.getLeaseOwner()).isEqualTo(token.leaseOwner());
         assertThat(persisted.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
-        assertThat(persisted.getState()).isEqualTo(RegulatedMutationState.REQUESTED);
+        assertThat(persisted.getState()).isEqualTo(RegulatedMutationState.EVIDENCE_PREPARING);
         assertThat(persisted.leaseRenewalCountOrZero()).isEqualTo(1);
         assertThat(persisted.getLastLeaseRenewedAt()).isEqualTo(clock.instant());
         assertThat(persisted.getResponseSnapshot()).isNull();
@@ -115,9 +117,9 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
 
     @Test
     void staleOwnerCannotRenewAfterTakeover() {
-        mongoTemplate.save(commandDocument("idem-renew-stale", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION));
+        mongoTemplate.save(commandDocument("idem-renew-stale", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1));
         RegulatedMutationCommand<String, String> command =
-                command("idem-renew-stale", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
+                command("idem-renew-stale", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
         RegulatedMutationClaimToken workerA = claimService.claim(command, "idem-renew-stale").orElseThrow();
         clock.advance(Duration.ofMillis(151));
         RegulatedMutationClaimToken workerB = claimService.claim(command, "idem-renew-stale").orElseThrow();
@@ -133,13 +135,14 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
         );
         assertThat(persisted.getLeaseOwner()).isEqualTo(workerB.leaseOwner());
         assertThat(persisted.getLeaseOwner()).isNotEqualTo(workerA.leaseOwner());
+        assertThat(persisted.getRevision()).isEqualTo(2L);
     }
 
     @Test
     void expiredOwnerCannotRenew() {
-        mongoTemplate.save(commandDocument("idem-renew-expired", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION));
+        mongoTemplate.save(commandDocument("idem-renew-expired", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1));
         RegulatedMutationClaimToken token = claimService.claim(
-                command("idem-renew-expired", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
+                command("idem-renew-expired", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
                 "idem-renew-expired"
         ).orElseThrow();
         clock.advance(Duration.ofMillis(151));
@@ -155,20 +158,21 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
         );
         assertThat(persisted.getLeaseExpiresAt()).isEqualTo(token.leaseExpiresAt());
         assertThat(persisted.leaseRenewalCountOrZero()).isZero();
+        assertThat(persisted.getRevision()).isEqualTo(1L);
     }
 
     @Test
     void terminalStateCannotRenew() {
-        mongoTemplate.save(commandDocument("idem-renew-terminal", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION));
+        mongoTemplate.save(commandDocument("idem-renew-terminal", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1));
         RegulatedMutationClaimToken token = claimService.claim(
-                command("idem-renew-terminal", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
+                command("idem-renew-terminal", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
                 "idem-renew-terminal"
         ).orElseThrow();
         RegulatedMutationCommandDocument persisted = mongoTemplate.findById(
                 "command-idem-renew-terminal",
                 RegulatedMutationCommandDocument.class
         );
-        persisted.setState(RegulatedMutationState.COMMITTED);
+        persisted.setState(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         mongoTemplate.save(persisted);
         clock.advance(Duration.ofMillis(50));
 
@@ -180,9 +184,9 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
 
     @Test
     void budgetExhaustionRejectsRenewal() {
-        mongoTemplate.save(commandDocument("idem-renew-budget", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION));
+        mongoTemplate.save(commandDocument("idem-renew-budget", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1));
         RegulatedMutationClaimToken token = claimService.claim(
-                command("idem-renew-budget", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
+                command("idem-renew-budget", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
                 "idem-renew-budget"
         ).orElseThrow();
         RegulatedMutationCommandDocument persisted = mongoTemplate.findById(
@@ -202,10 +206,11 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
         );
         assertThat(after.getLeaseExpiresAt()).isEqualTo(token.leaseExpiresAt());
         assertThat(after.leaseRenewalCountOrZero()).isEqualTo(3);
-        assertThat(after.getState()).isEqualTo(RegulatedMutationState.REQUESTED);
+        assertThat(after.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
         assertThat(after.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
         assertThat(after.getDegradationReason()).isEqualTo(RegulatedMutationLeaseRenewalFailureHandler.BUDGET_EXCEEDED_REASON);
         assertThat(after.getLastError()).isEqualTo(RegulatedMutationLeaseRenewalFailureHandler.BUDGET_EXCEEDED_REASON);
+        assertThat(after.getRevision()).isEqualTo(2L);
         assertNoBusinessEvidenceFields(after);
     }
 
@@ -216,7 +221,7 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
                 RegulatedMutationState.EVIDENCE_PREPARED,
                 RegulatedMutationState.FINALIZING
         )) {
-            String idempotencyKey = "idem-renew-fdp29-" + state.name().toLowerCase();
+            String idempotencyKey = "idem-renew-current-" + state.name().toLowerCase();
             RegulatedMutationClaimToken token = claimedEvidenceGatedCommand(idempotencyKey, state);
             clock.advance(Duration.ofMillis(50));
 
@@ -241,7 +246,7 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
                 RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED,
                 RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
         )) {
-            String idempotencyKey = "idem-renew-fdp29-blocked-" + state.name().toLowerCase();
+            String idempotencyKey = "idem-renew-current-blocked-" + state.name().toLowerCase();
             RegulatedMutationClaimToken token = claimedEvidenceGatedCommand(idempotencyKey, RegulatedMutationState.FINALIZING);
             RegulatedMutationCommandDocument document = mongoTemplate.findById(
                     "command-" + idempotencyKey,
@@ -262,11 +267,11 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
     @Test
     void evidenceGatedBudgetExceededMarksDurableFinalizeRecoveryRequired() {
         RegulatedMutationClaimToken token = claimedEvidenceGatedCommand(
-                "idem-renew-fdp29-budget",
+                "idem-renew-current-budget",
                 RegulatedMutationState.FINALIZING
         );
         RegulatedMutationCommandDocument persisted = mongoTemplate.findById(
-                "command-idem-renew-fdp29-budget",
+                "command-idem-renew-current-budget",
                 RegulatedMutationCommandDocument.class
         );
         persisted.setLeaseRenewalCount(3);
@@ -277,7 +282,7 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
                 .isInstanceOf(RegulatedMutationLeaseRenewalBudgetExceededException.class);
 
         RegulatedMutationCommandDocument after = mongoTemplate.findById(
-                "command-idem-renew-fdp29-budget",
+                "command-idem-renew-current-budget",
                 RegulatedMutationCommandDocument.class
         );
         assertThat(after.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
@@ -288,10 +293,10 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
     }
 
     @Test
-    void legacyCommandMissingRenewalFieldsInitializesThemOnRenewal() {
+    void currentCommandMissingRenewalFieldsInitializesThemOnRenewal() {
         RegulatedMutationCommandDocument document = commandDocument(
                 "idem-renew-missing-fields",
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
         );
         document.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
         document.setLeaseOwner("owner-missing");
@@ -305,8 +310,8 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
                 START.plusMillis(150),
                 START,
                 1,
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.REQUESTED,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING
         );
         clock.advance(Duration.ofMillis(100));
@@ -324,9 +329,9 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
 
     @Test
     void leaseExactlyAtExpiryCannotRenew() {
-        mongoTemplate.save(commandDocument("idem-renew-at-expiry", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION));
+        mongoTemplate.save(commandDocument("idem-renew-at-expiry", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1));
         RegulatedMutationClaimToken token = claimService.claim(
-                command("idem-renew-at-expiry", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
+                command("idem-renew-at-expiry", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
                 "idem-renew-at-expiry"
         ).orElseThrow();
         clock.advance(Duration.ofMillis(150));
@@ -339,9 +344,9 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
 
     @Test
     void renewedLeaseBlocksPrematureTakeover() {
-        mongoTemplate.save(commandDocument("idem-renew-blocks-takeover", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION));
+        mongoTemplate.save(commandDocument("idem-renew-blocks-takeover", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1));
         RegulatedMutationCommand<String, String> command =
-                command("idem-renew-blocks-takeover", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
+                command("idem-renew-blocks-takeover", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
         RegulatedMutationClaimToken workerA = claimService.claim(command, "idem-renew-blocks-takeover").orElseThrow();
         clock.advance(Duration.ofMillis(100));
         renewalService.renew(workerA, Duration.ofMillis(300));
@@ -356,9 +361,9 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
 
     @Test
     void concurrentRenewalRaceStaysWithinBudget() throws Exception {
-        mongoTemplate.save(commandDocument("idem-renew-race", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION));
+        mongoTemplate.save(commandDocument("idem-renew-race", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1));
         RegulatedMutationClaimToken token = claimService.claim(
-                command("idem-renew-race", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
+                command("idem-renew-race", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
                 "idem-renew-race"
         ).orElseThrow();
         clock.advance(Duration.ofMillis(100));
@@ -381,9 +386,9 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
 
     @Test
     void concurrentRenewalAtLastAllowedSlotAllowsOnlyOneSuccess() throws Exception {
-        mongoTemplate.save(commandDocument("idem-renew-last-slot", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION));
+        mongoTemplate.save(commandDocument("idem-renew-last-slot", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1));
         RegulatedMutationClaimToken token = claimService.claim(
-                command("idem-renew-last-slot", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
+                command("idem-renew-last-slot", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
                 "idem-renew-last-slot"
         ).orElseThrow();
         RegulatedMutationCommandDocument document = mongoTemplate.findById(
@@ -409,7 +414,7 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
         assertThat(persisted.leaseRenewalCountOrZero()).isEqualTo(3);
         assertThat(persisted.getLeaseExpiresAt())
                 .isBeforeOrEqualTo(persisted.getLeaseBudgetStartedAt().plusSeconds(1));
-        assertThat(persisted.getState()).isEqualTo(RegulatedMutationState.REQUESTED);
+        assertThat(persisted.getState()).isEqualTo(RegulatedMutationState.EVIDENCE_PREPARING);
         assertThat(persisted.getExecutionStatus()).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
         assertNoBusinessEvidenceFields(persisted);
         assertThat(meterRegistry.find("regulated_mutation_lease_renewal_total")
@@ -422,9 +427,9 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
 
     @Test
     void concurrentRenewalNearTotalBudgetDoesNotExtendPastBudgetEnd() throws Exception {
-        mongoTemplate.save(commandDocument("idem-renew-budget-edge", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION));
+        mongoTemplate.save(commandDocument("idem-renew-budget-edge", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1));
         RegulatedMutationClaimToken token = claimService.claim(
-                command("idem-renew-budget-edge", RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
+                command("idem-renew-budget-edge", RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
                 "idem-renew-budget-edge"
         ).orElseThrow();
         clock.advance(Duration.ofMillis(800));
@@ -459,8 +464,14 @@ class RegulatedMutationLeaseRenewalIntegrationTest extends AbstractIntegrationTe
         document.setId("command-" + idempotencyKey);
         document.setIdempotencyKey(idempotencyKey);
         document.setRequestHash("request-hash-" + idempotencyKey);
+        document.setActorId("principal-7");
+        document.setIntentActorId("principal-7");
+        document.setResourceId("alert-1");
+        document.setResourceType(AuditResourceType.ALERT.name());
+        document.setAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
         document.setMutationModelVersion(modelVersion);
-        document.setState(RegulatedMutationState.REQUESTED);
+        document.setRevision(0L);
+        document.setState(RegulatedMutationState.EVIDENCE_PREPARING);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.NEW);
         document.setAttemptCount(0);
         document.setCreatedAt(clock.instant());

@@ -29,9 +29,9 @@ for (const file of [
 for (const className of [
   "RegulatedMutationReleaseImageSeparationTest",
   "FixtureDockerfileMustNotBeUsedByReleaseWorkflowTest",
-  "Fdp39GovernanceArtifactsTest",
-  "Fdp39NoOverclaimDocumentationTest",
-  "Fdp39MustNotChangeRuntimeMutationSemanticsTest",
+  "ReleaseGovernanceArtifactsTest",
+  "ReleaseGovernanceNoOverclaimDocumentationTest",
+  "ReleaseGovernanceRuntimeIsolationTest",
   "RegulatedMutationRecoveryInspectionGovernanceTest"
 ]) {
   assertJUnitClassPassed({

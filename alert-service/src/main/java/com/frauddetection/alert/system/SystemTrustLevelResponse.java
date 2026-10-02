@@ -69,6 +69,12 @@ public record SystemTrustLevelResponse(
         @JsonProperty("outbox_projection_mismatch_count")
         long outboxProjectionMismatchCount,
 
+        @JsonProperty("outbox_projection_reconciliation_pending_count")
+        long outboxProjectionReconciliationPendingCount,
+
+        @JsonProperty("outbox_recovery_required_count")
+        long outboxRecoveryRequiredCount,
+
         @JsonProperty("terminal_outbox_failure_count")
         long terminalOutboxFailureCount,
 
@@ -93,14 +99,11 @@ public record SystemTrustLevelResponse(
         @JsonProperty("stale_processing_lease_count")
         long staleProcessingLeaseCount,
 
-        @JsonProperty("committed_degraded_count")
-        long committedDegradedCount,
+        @JsonProperty("finalize_recovery_required_count")
+        long finalizeRecoveryRequiredCount,
 
         @JsonProperty("evidence_confirmation_pending_count")
         long evidenceConfirmationPendingCount,
-
-        @JsonProperty("evidence_confirmation_failed_count")
-        long evidenceConfirmationFailedCount,
 
         @JsonProperty("repeated_recovery_failure_count")
         long repeatedRecoveryFailureCount,

@@ -11,19 +11,14 @@ import java.util.Set;
 
 final class AlertServiceTransactionScoredEventFixtureLoader {
 
-    private static final String OLD = "transaction_scored_event_historical_without_engine_intelligence.json";
-    private static final String LEGACY_V1_ENGINE_INTELLIGENCE =
-            "transaction_scored_event_historical_engine_intelligence_v1_legacy_comparison.json";
-    private static final String PARTIAL_COMPARISON_TYPE_ONLY =
-            "transaction_scored_event_historical_engine_intelligence_v1_partial_comparison_type_only.json";
+    private static final String WITHOUT_ENGINE_INTELLIGENCE =
+            "transaction_scored_event_v2_without_engine_intelligence.json";
     private static final String MINIMAL = "transaction_scored_event_v2_minimal_engine_intelligence.json";
     private static final String FULL = "transaction_scored_event_v2_full_bounded_engine_intelligence.json";
     private static final String UNKNOWN_NESTED = "transaction_scored_event_v2_unknown_nested_engine_intelligence_fields.json";
     private static final String UNKNOWN_TOP_LEVEL = "transaction_scored_event_v2_unknown_top_level_field.json";
     private static final Set<String> KNOWN_FIXTURES = Set.of(
-            OLD,
-            LEGACY_V1_ENGINE_INTELLIGENCE,
-            PARTIAL_COMPARISON_TYPE_ONLY,
+            WITHOUT_ENGINE_INTELLIGENCE,
             MINIMAL,
             FULL,
             UNKNOWN_NESTED,
@@ -36,39 +31,35 @@ final class AlertServiceTransactionScoredEventFixtureLoader {
     private AlertServiceTransactionScoredEventFixtureLoader() {
     }
 
-    static TransactionScoredEvent oldWithoutEngineIntelligence() {
-        return deserialize(readFixture(OLD));
-    }
-
-    static TransactionScoredEvent legacyV1EngineIntelligence() {
-        return deserialize(readFixture(LEGACY_V1_ENGINE_INTELLIGENCE));
-    }
-
-    static TransactionScoredEvent partialComparisonTypeOnly() {
-        return deserialize(readFixture(PARTIAL_COMPARISON_TYPE_ONLY));
+    static TransactionScoredEvent withoutEngineIntelligence() {
+        return deserializeJson(readFixture(WITHOUT_ENGINE_INTELLIGENCE));
     }
 
     static TransactionScoredEvent minimalEngineIntelligence() {
-        return deserialize(readFixture(MINIMAL));
+        return deserializeJson(readFixture(MINIMAL));
     }
 
     static TransactionScoredEvent fullBoundedEngineIntelligence() {
-        return deserialize(readFixture(FULL));
+        return deserializeJson(readFixture(FULL));
     }
 
     static TransactionScoredEvent unknownNestedEngineIntelligenceFields() {
-        return deserialize(readFixture(UNKNOWN_NESTED));
+        return deserializeJson(readFixture(UNKNOWN_NESTED));
     }
 
     static TransactionScoredEvent unknownTopLevelField() {
-        return deserialize(readFixture(UNKNOWN_TOP_LEVEL));
+        return deserializeJson(readFixture(UNKNOWN_TOP_LEVEL));
+    }
+
+    static String minimalEngineIntelligenceJson() {
+        return readFixture(MINIMAL);
     }
 
     static String fullBoundedEngineIntelligenceJson() {
         return readFixture(FULL);
     }
 
-    private static TransactionScoredEvent deserialize(String json) {
+    static TransactionScoredEvent deserializeJson(String json) {
         return DESERIALIZER.deserialize("transactions.scored", json.getBytes(StandardCharsets.UTF_8));
     }
 

@@ -8,7 +8,7 @@ class EngineIntelligenceConsumerReadinessDocsTest {
 
     @Test
     void docsStateConsumerFirstBoundaryAndFutureProducerGate() throws Exception {
-        String docs = EngineIntelligenceFdp93SourceScanSupport.read(
+        String docs = EngineIntelligenceSourceScanSupport.read(
                 "docs/architecture/engine_intelligence_consumer_readiness.md"
         );
 
@@ -49,9 +49,10 @@ class EngineIntelligenceConsumerReadinessDocsTest {
                 "New TransactionScoredEvent",
                 "consumers must be added to the inventory intentionally",
                 "TRANSACTION_SCORED_EVENT_CONSUMER_INVENTORY_REVIEW_REQUIRED",
-                "Fixture name prefix v1/v2 describes the TransactionScoredEvent fixture shape",
-                "pre-FDP-92 scored-event shape",
-                "scored-event shape with optional engineIntelligence present",
+                "Fixture names describe the current `TransactionScoredEvent` shape",
+                "`v2_without_engine_intelligence` proves legitimate optional absence",
+                "current scored-event shape with optional engineIntelligence present",
+                "Identity-free historical comparison payloads are not fixtures and are rejected rather than normalized during replay",
                 "does not change `EngineIntelligenceSummary.contractVersion`",
                 "`contractVersion = 1`",
                 "FDP-93 fixtures cover valid and forward-compatible event shapes",
@@ -63,7 +64,7 @@ class EngineIntelligenceConsumerReadinessDocsTest {
 
     @Test
     void docsDoNotContainRolloutOverclaims() throws Exception {
-        assertThat(EngineIntelligenceFdp93SourceScanSupport.read(
+        assertThat(EngineIntelligenceSourceScanSupport.read(
                 "docs/architecture/engine_intelligence_consumer_readiness.md"
         )).doesNotContainIgnoringCase(
                 "production emission enabled",

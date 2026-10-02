@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { repoRoot } from "./fdp-scope/scopeGuardHelpers.mjs";
+import { repoRoot } from "./scope-guards/scopeGuardHelpers.mjs";
 
 const riskyPhrases = [
   ["production-ready", /\bproduction-ready\b/i],

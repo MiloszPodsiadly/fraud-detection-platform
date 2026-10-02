@@ -10,6 +10,7 @@ import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
 import com.frauddetection.alert.regulated.mutation.outbox.OutboxConfirmationResolutionMutationHandler;
 import com.frauddetection.alert.service.DecisionOutboxStatus;
+import com.mongodb.client.result.UpdateResult;
 import org.bson.Document;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -20,6 +21,7 @@ import org.springframework.data.mongodb.core.query.Update;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -45,7 +47,10 @@ class TransactionalOutboxFailureInjectionTest {
                 eq(TransactionalOutboxStatus.PUBLISH_ATTEMPTED),
                 any()
         )).thenReturn(List.of(attempted));
-        when(fixture.repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc()).thenReturn(List.of());
+        when(fixture.repository
+                .findTop100ByStatusInAndProjectionMismatchTrueAndProjectionReconcileAfterIsNullOrderByCreatedAtAsc(
+                        any()
+                )).thenReturn(List.of());
 
         OutboxRecoveryRunResponse response = fixture.service.recoverNow();
 
@@ -63,19 +68,74 @@ class TransactionalOutboxFailureInjectionTest {
         published.setProjectionMismatch(true);
         published.setProjectionMismatchReason("ALERT_PROJECTION_UPDATE_FAILED");
         published.setPublishedAt(Instant.parse("2026-05-03T00:05:00Z"));
+        com.frauddetection.alert.persistence.AlertDocument outdated =
+                new com.frauddetection.alert.persistence.AlertDocument();
+        outdated.setAlertId(published.getResourceId());
+        outdated.setDecisionOutboxEventId(published.getEventId());
+        outdated.setDecisionOutboxProjectionRevision(published.getProjectionRevision() - 1L);
+        outdated.setDecisionOutboxStatus(DecisionOutboxStatus.PENDING);
+        when(fixture.mongoTemplate.findById(
+                published.getResourceId(),
+                com.frauddetection.alert.persistence.AlertDocument.class
+        )).thenReturn(outdated);
         when(fixture.repository.findTop100ByStatusAndLeaseExpiresAtBeforeOrderByCreatedAtAsc(any(), any()))
                 .thenReturn(List.of());
-        when(fixture.repository.findTop100ByProjectionMismatchTrueOrderByCreatedAtAsc()).thenReturn(List.of(published));
+        when(fixture.repository
+                .findTop100ByStatusInAndProjectionMismatchTrueAndProjectionReconcileAfterIsNullOrderByCreatedAtAsc(
+                        any()
+                )).thenReturn(List.of(published));
+        List<String> writeOrder = new ArrayList<>();
+        List<Query> outboxQueries = new ArrayList<>();
+        List<Update> outboxUpdates = new ArrayList<>();
+        when(fixture.mongoTemplate.updateFirst(
+                any(Query.class),
+                any(Update.class),
+                eq(TransactionalOutboxRecordDocument.class)
+        )).thenAnswer(invocation -> {
+            Query query = invocation.getArgument(0);
+            Update update = invocation.getArgument(1);
+            Document unset = (Document) update.getUpdateObject().get("$unset");
+            writeOrder.add(unset != null && unset.containsKey("projection_mismatch") ? "CLEAR" : "CLAIM");
+            outboxQueries.add(query);
+            outboxUpdates.add(update);
+            return UpdateResult.acknowledged(1, 1L, null);
+        });
+        when(fixture.mongoTemplate.updateFirst(
+                any(Query.class),
+                any(Update.class),
+                eq(com.frauddetection.alert.persistence.AlertDocument.class)
+        )).thenAnswer(invocation -> {
+            writeOrder.add("PROJECT");
+            return UpdateResult.acknowledged(1, 1L, null);
+        });
 
         OutboxRecoveryRunResponse response = fixture.service.recoverNow();
 
         assertThat(response.projectionRepaired()).isEqualTo(1);
-        assertThat(published.isProjectionMismatch()).isFalse();
-        assertThat(published.getProjectionMismatchReason()).isNull();
+        assertThat(writeOrder).containsExactly("CLAIM", "PROJECT", "CLEAR");
         ArgumentCaptor<Update> updateCaptor = ArgumentCaptor.forClass(Update.class);
         verify(fixture.mongoTemplate).updateFirst(any(Query.class), updateCaptor.capture(), eq(com.frauddetection.alert.persistence.AlertDocument.class));
         Document set = (Document) updateCaptor.getValue().getUpdateObject().get("$set");
         assertThat(set.get("decisionOutboxStatus")).isEqualTo(DecisionOutboxStatus.PUBLISHED);
+        assertThat(outboxUpdates).hasSize(2);
+        Document claimSet = (Document) outboxUpdates.get(0).getUpdateObject().get("$set");
+        String repairToken = claimSet.getString("projection_repair_token");
+        assertThat(repairToken).isNotBlank();
+        Document clearUnset = (Document) outboxUpdates.get(1).getUpdateObject().get("$unset");
+        assertThat(clearUnset).containsKeys(
+                "projection_mismatch",
+                "projection_mismatch_reason",
+                "projection_reconcile_after",
+                "projection_repair_token",
+                "projection_repair_claimed_at"
+        );
+        List<Document> clearConditions = outboxQueries.get(1).getQueryObject().getList("$and", Document.class);
+        assertThat(clearConditions)
+                .anySatisfy(condition -> assertThat(condition).containsEntry("_id", published.getEventId()))
+                .anySatisfy(condition -> assertThat(condition).containsEntry("status", published.getStatus()))
+                .anySatisfy(condition -> assertThat(condition)
+                        .containsEntry("projection_revision", published.getProjectionRevision()))
+                .anySatisfy(condition -> assertThat(condition).containsEntry("projection_repair_token", repairToken));
     }
 
     private TransactionalOutboxRecordDocument record(String eventId, TransactionalOutboxStatus status) {
@@ -102,14 +162,22 @@ class TransactionalOutboxFailureInjectionTest {
         private final RegulatedMutationCoordinator regulatedMutationCoordinator = mock(RegulatedMutationCoordinator.class);
         private final OutboxConfirmationResolutionMutationHandler resolutionMutationHandler = mock(OutboxConfirmationResolutionMutationHandler.class);
         private final AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        private final OutboxRecoveryService service = new OutboxRecoveryService(
-                repository,
-                mongoTemplate,
-                publisherCoordinator,
-                regulatedMutationCoordinator,
-                resolutionMutationHandler,
-                metrics,
-                Duration.ofMinutes(2)
-        );
+        private final OutboxRecoveryService service;
+
+        private Fixture() {
+            when(mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(TransactionalOutboxRecordDocument.class)))
+                    .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+            when(mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(com.frauddetection.alert.persistence.AlertDocument.class)))
+                    .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+            service = new OutboxRecoveryService(
+                    repository,
+                    mongoTemplate,
+                    publisherCoordinator,
+                    regulatedMutationCoordinator,
+                    resolutionMutationHandler,
+                    metrics,
+                    Duration.ofMinutes(2)
+            );
+        }
     }
 }

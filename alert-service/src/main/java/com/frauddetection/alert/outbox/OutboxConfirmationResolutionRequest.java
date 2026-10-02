@@ -11,6 +11,10 @@ public record OutboxConfirmationResolutionRequest(
         @NotNull
         OutboxConfirmationResolution resolution,
 
+        @JsonProperty("pending_request_id")
+        @Size(max = 100)
+        String pendingRequestId,
+
         @NotBlank
         @Size(max = 300)
         String reason,

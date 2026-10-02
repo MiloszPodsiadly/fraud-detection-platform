@@ -1,4 +1,4 @@
-# Explicit local/demo override for FDP-108 Shadow Performance metrics.
+# Explicit local/demo override for Shadow Performance metrics.
 # This is not production current summary configuration.
 services:
   alert-service:

@@ -46,14 +46,14 @@ class FraudCaseMutationInvariantTest {
         when(fixture.coordinator.commit(any())).thenAnswer(invocation -> {
             RegulatedMutationCommand<FraudCaseDocument, UpdateFraudCaseResponse> command = invocation.getArgument(0);
             return new RegulatedMutationResult<>(
-                    RegulatedMutationState.BUSINESS_COMMITTING,
-                    command.statusResponseFactory().response(RegulatedMutationState.BUSINESS_COMMITTING)
+                    RegulatedMutationState.FINALIZING,
+                    command.statusResponseFactory().response(RegulatedMutationState.FINALIZING)
             );
         });
 
         UpdateFraudCaseResponse response = fixture.service.updateCase("case-1", request(), "fraud-case-update-1");
 
-        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMIT_UNKNOWN);
+        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZING);
         assertThat(response.updatedCase()).isNull();
         assertThat(response.currentCaseSnapshot()).isNotNull();
         assertThat(response.currentCaseSnapshot().status()).isEqualTo(FraudCaseStatus.OPEN);
@@ -77,7 +77,7 @@ class FraudCaseMutationInvariantTest {
 
         UpdateFraudCaseResponse response = fixture.service.updateCase("case-1", request(), "fraud-case-update-1");
 
-        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.RECOVERY_REQUIRED);
+        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED);
         assertThat(response.updatedCase()).isNull();
         assertThat(response.currentCaseSnapshot()).isNotNull();
         assertThat(response.currentCaseSnapshot().status()).isEqualTo(FraudCaseStatus.OPEN);

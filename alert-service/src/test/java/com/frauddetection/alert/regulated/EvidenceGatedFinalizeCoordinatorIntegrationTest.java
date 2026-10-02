@@ -15,6 +15,8 @@ import com.frauddetection.alert.audit.AuditEventRepository;
 import com.frauddetection.alert.audit.AuditFailureCategory;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
+import com.frauddetection.alert.audit.ResolutionEvidenceReference;
+import com.frauddetection.alert.audit.ResolutionEvidenceType;
 import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.audit.PersistentAuditEventPublisher;
 import com.frauddetection.alert.audit.RegulatedMutationLocalAuditPhaseWriter;
@@ -22,19 +24,32 @@ import com.frauddetection.alert.audit.external.ExternalAuditAnchorPublisher;
 import com.frauddetection.alert.mapper.AlertDocumentMapper;
 import com.frauddetection.alert.mapper.FraudDecisionEventMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.outbox.OutboxConfirmationResolution;
+import com.frauddetection.alert.outbox.OutboxConfirmationResolutionRequest;
+import com.frauddetection.alert.outbox.OutboxPublicationConfirmationProvenance;
+import com.frauddetection.alert.outbox.OutboxPublisherCoordinator;
+import com.frauddetection.alert.outbox.OutboxRecordResponse;
+import com.frauddetection.alert.outbox.OutboxRecoveryService;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
+import com.frauddetection.alert.outbox.TransactionalOutboxPersistedContractPreflight;
+import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
+import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.regulated.mutation.submitdecision.SubmitDecisionMutationHandler;
+import com.frauddetection.alert.regulated.mutation.outbox.OutboxConfirmationResolutionMutationHandler;
+import com.frauddetection.alert.regulated.mutation.outbox.TransactionalOutboxRecoveryStrategy;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.AnalystDecisionStatusMapper;
+import com.frauddetection.alert.service.DecisionOutboxStatus;
 import com.frauddetection.alert.service.DecisionOutboxWriter;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.testsupport.base.AbstractIntegrationTest;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
+import com.mongodb.client.model.IndexOptions;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -97,7 +112,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
 
     @BeforeEach
     void setUp() {
-        String databaseName = "fdp29_coord_" + UUID.randomUUID().toString().replace("-", "");
+        String databaseName = "regulated_mutation_coord_" + UUID.randomUUID().toString().replace("-", "");
         databaseFactory = new SimpleMongoClientDatabaseFactory(
                 FraudPlatformContainers.mongodb().getReplicaSetUrl(databaseName)
         );
@@ -108,6 +123,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         outboxRepository = repositoryFactory.getRepository(TransactionalOutboxRecordRepository.class);
         auditEventRepository = new AuditEventRepository(mongoTemplate);
         ensureAuditIndexes();
+        ensureSingleDecisionIndex();
         auditPublisher = new LocalMongoAuditPublisher(mongoTemplate);
         localAuditPhaseWriter = new RegulatedMutationLocalAuditPhaseWriter(
                 auditEventRepository,
@@ -151,6 +167,20 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                         .named("audit_anchor_partition_chain_position_uidx_test"));
     }
 
+    private void ensureSingleDecisionIndex() {
+        mongoTemplate.getCollection("regulated_mutation_commands").createIndex(
+                new org.bson.Document("resource_id", 1)
+                        .append("resource_type", 1)
+                        .append("action", 1),
+                new IndexOptions()
+                        .name("single_submit_decision_per_alert_idx")
+                        .unique(true)
+                        .partialFilterExpression(new org.bson.Document("resource_type", "ALERT")
+                                .append("action", "SUBMIT_ANALYST_DECISION")
+                                .append("decision_slot_claimed", true))
+        );
+    }
+
     private MongoRegulatedMutationCoordinator coordinator(
             RegulatedMutationCommandRepository commandRepository,
             RegulatedMutationTransactionRunner transactionRunner,
@@ -181,7 +211,10 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                 transactionRunner,
                 provider(outboxRepository),
                 provider(alertRepository),
-                List.of(new SubmitDecisionRecoveryStrategy(alertRepository)),
+                List.of(
+                        new SubmitDecisionRecoveryStrategy(alertRepository, outboxRepository),
+                        new TransactionalOutboxRecoveryStrategy(outboxRepository)
+                ),
                 true
         );
         EvidenceGatedFinalizeExecutor evidenceGatedFinalizeExecutor = new EvidenceGatedFinalizeExecutor(
@@ -193,19 +226,13 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                 new RegulatedMutationPublicStatusMapper(),
                 evidencePreconditionEvaluator,
                 localAuditPhaseWriter,
+                RegulatedMutationProofTestFixtures.accepted(),
                 Duration.ofSeconds(30)
         );
         return new MongoRegulatedMutationCoordinator(
                 commandRepository,
-                transitionMongoTemplate,
-                auditPhaseService,
-                mock(AuditDegradationService.class),
-                metrics,
-                transactionRunner,
-                new RegulatedMutationPublicStatusMapper(),
-                evidenceGatedFinalizeExecutor,
-                false,
-                Duration.ofSeconds(30)
+                new RegulatedMutationExecutorRegistry(List.of(evidenceGatedFinalizeExecutor)),
+                new RegulatedMutationConflictPolicy()
         );
     }
 
@@ -232,7 +259,10 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                 transactionRunner,
                 provider(outboxRepository),
                 provider(alertRepository),
-                List.of(new SubmitDecisionRecoveryStrategy(alertRepository)),
+                List.of(
+                        new SubmitDecisionRecoveryStrategy(alertRepository, outboxRepository),
+                        new TransactionalOutboxRecoveryStrategy(outboxRepository)
+                ),
                 true
         );
         EvidenceGatedFinalizeExecutor evidenceGatedFinalizeExecutor = new EvidenceGatedFinalizeExecutor(
@@ -244,19 +274,13 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                 new RegulatedMutationPublicStatusMapper(),
                 evidencePreconditionEvaluator,
                 localAuditPhaseWriter,
+                RegulatedMutationProofTestFixtures.accepted(),
                 Duration.ofSeconds(30)
         );
         return new MongoRegulatedMutationCoordinator(
                 commandRepository,
-                mongoTemplate,
-                auditPhaseService,
-                mock(AuditDegradationService.class),
-                metrics,
-                transactionRunner,
-                new RegulatedMutationPublicStatusMapper(),
-                evidenceGatedFinalizeExecutor,
-                false,
-                Duration.ofSeconds(30)
+                new RegulatedMutationExecutorRegistry(List.of(evidenceGatedFinalizeExecutor)),
+                new RegulatedMutationConflictPolicy()
         );
     }
 
@@ -277,7 +301,8 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         SubmitDecisionMutationHandler handler = new SubmitDecisionMutationHandler(
                 alertRepository,
                 new AlertDocumentMapper(),
-                new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository)
+                new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository,
+                        mock(TransactionalOutboxRuntimeReadiness.class))
         );
 
         RegulatedMutationResult<SubmitAnalystDecisionResponse> result = coordinator.commit(command(
@@ -317,6 +342,192 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
     }
 
     @Test
+    void sameKeyReplaysWhileDifferentKeyCannotReplacePendingDecisionEvidence() {
+        String alertId = "alert-single-pending";
+        alertRepository.save(alert(alertId));
+        AtomicInteger businessMutations = new AtomicInteger();
+        SubmitDecisionMutationHandler handler = submitDecisionHandler();
+
+        RegulatedMutationResult<SubmitAnalystDecisionResponse> first = submitDecision(
+                "idem-single-pending-1",
+                alertId,
+                businessMutations,
+                handler
+        );
+        RegulatedMutationResult<SubmitAnalystDecisionResponse> replay = coordinator.commit(command(
+                "idem-single-pending-1",
+                alertId,
+                businessMutations,
+                context -> {
+                    throw new AssertionError("idempotent replay must not repeat the business mutation");
+                }
+        ));
+
+        assertThat(replay.response()).isEqualTo(first.response());
+        assertThatThrownBy(() -> submitDecision(
+                "idem-single-pending-2",
+                alertId,
+                businessMutations,
+                handler
+        )).isInstanceOf(ConflictingResourceMutationException.class);
+        assertSingleDecisionEvidence(alertId, first.response().decisionEventId(), businessMutations);
+        assertThat(new TransactionalOutboxPersistedContractPreflight(mongoTemplate, Duration.ofSeconds(5))
+                .inspect(10).blocksStartup()).isFalse();
+    }
+
+    @Test
+    void rejectedPreCommitDecisionReleasesSlotWithoutLosingReplayHistory() {
+        String alertId = "alert-rejected-slot-release";
+        alertRepository.save(alert(alertId));
+        AtomicInteger businessMutations = new AtomicInteger();
+        auditPublisher.failAttemptedPublish = true;
+
+        assertThatThrownBy(() -> submitDecision(
+                "idem-rejected-slot-1",
+                alertId,
+                businessMutations,
+                submitDecisionHandler()
+        )).isInstanceOf(DataAccessResourceFailureException.class);
+
+        RegulatedMutationCommandDocument rejected = commandRepository
+                .findByIdempotencyKey("idem-rejected-slot-1")
+                .orElseThrow();
+        assertThat(rejected.getState()).isEqualTo(RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE);
+        assertThat(rejected.isDecisionSlotClaimed()).isFalse();
+        assertThat(rejected.getResponseSnapshot()).isNull();
+        assertThat(rejected.getOutboxEventId()).isNull();
+        assertThat(outboxRepository.findByMutationCommandId(rejected.getId())).isEmpty();
+        assertThat(alertRepository.findById(alertId).orElseThrow().getAnalystDecision()).isNull();
+        assertThat(businessMutations).hasValue(0);
+
+        RegulatedMutationResult<SubmitAnalystDecisionResponse> firstReplay = coordinator.commit(command(
+                "idem-rejected-slot-1",
+                alertId,
+                businessMutations,
+                context -> {
+                    throw new AssertionError("terminal rejected replay must not execute the business mutation");
+                }
+        ));
+        assertThat(firstReplay.state()).isEqualTo(RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE);
+        assertThat(firstReplay.response().alertId()).isEqualTo(alertId);
+        assertThat(firstReplay.response().decision()).isNull();
+        assertThat(firstReplay.response().resultingStatus()).isEqualTo(AlertStatus.OPEN);
+        assertThat(firstReplay.response().decisionEventId()).isNull();
+        assertThat(firstReplay.response().decidedAt()).isNull();
+
+        auditPublisher.failAttemptedPublish = false;
+        RegulatedMutationResult<SubmitAnalystDecisionResponse> replacement = submitDecision(
+                "idem-rejected-slot-2",
+                alertId,
+                businessMutations,
+                submitDecisionHandler()
+        );
+        assertThat(replacement.state()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        RegulatedMutationResult<SubmitAnalystDecisionResponse> replacementReplay = coordinator.commit(command(
+                "idem-rejected-slot-2",
+                alertId,
+                businessMutations,
+                context -> {
+                    throw new AssertionError("successful replacement replay must use its persisted response snapshot");
+                }
+        ));
+        assertThat(replacementReplay.response()).isEqualTo(replacement.response());
+
+        RegulatedMutationResult<SubmitAnalystDecisionResponse> replayAfterReplacement = coordinator.commit(command(
+                "idem-rejected-slot-1",
+                alertId,
+                businessMutations,
+                context -> {
+                    throw new AssertionError("released historical command must remain terminal");
+                }
+        ));
+        assertThat(replayAfterReplacement.state()).isEqualTo(RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE);
+        assertThat(replayAfterReplacement.response().alertId()).isEqualTo(alertId);
+        assertThat(replayAfterReplacement.response().decision()).isNull();
+        assertThat(replayAfterReplacement.response().resultingStatus()).isEqualTo(AlertStatus.OPEN);
+        assertThat(replayAfterReplacement.response().decisionEventId()).isNull();
+        assertThat(replayAfterReplacement.response().decidedAt()).isNull();
+        assertThat(commandRepository.count()).isEqualTo(2);
+        assertThat(commandRepository.findById(rejected.getId())).isPresent();
+        assertThat(outboxRepository.count()).isOne();
+        assertThat(businessMutations).hasValue(1);
+    }
+
+    @Test
+    void differentKeyCannotReplacePublishedDecisionEvidence() {
+        String alertId = "alert-single-published";
+        alertRepository.save(alert(alertId));
+        AtomicInteger businessMutations = new AtomicInteger();
+        SubmitDecisionMutationHandler handler = submitDecisionHandler();
+        RegulatedMutationResult<SubmitAnalystDecisionResponse> first = submitDecision(
+                "idem-single-published-1",
+                alertId,
+                businessMutations,
+                handler
+        );
+        String eventId = first.response().decisionEventId();
+        Instant publishedAt = Instant.parse("2026-10-02T10:00:00Z");
+        TransactionalOutboxRecordDocument outbox = outboxRepository.findById(eventId).orElseThrow();
+        outbox.setStatus(TransactionalOutboxStatus.PUBLISHED);
+        outbox.setProjectionRevision(1L);
+        outbox.setPublishedAt(publishedAt);
+        outbox.setPublicationConfirmationProvenance(OutboxPublicationConfirmationProvenance.BROKER_ACKNOWLEDGED);
+        outboxRepository.save(outbox);
+        AlertDocument projected = alertRepository.findById(alertId).orElseThrow();
+        projected.setDecisionOutboxStatus(DecisionOutboxStatus.PUBLISHED);
+        projected.setDecisionOutboxProjectionRevision(1L);
+        projected.setDecisionOutboxPublishedAt(publishedAt);
+        projected.setDecisionOutboxPublicationConfirmationProvenance(
+                OutboxPublicationConfirmationProvenance.BROKER_ACKNOWLEDGED.name()
+        );
+        alertRepository.save(projected);
+        mongoTemplate.updateFirst(
+                Query.query(Criteria.where("_id").is(alertId)),
+                new Update().unset("decisionOutboxResolutionPending"),
+                AlertDocument.class
+        );
+
+        assertThatThrownBy(() -> submitDecision(
+                "idem-single-published-2",
+                alertId,
+                businessMutations,
+                handler
+        )).isInstanceOf(ConflictingResourceMutationException.class);
+        assertSingleDecisionEvidence(alertId, eventId, businessMutations);
+        assertThat(new TransactionalOutboxPersistedContractPreflight(mongoTemplate, Duration.ofSeconds(5))
+                .inspect(10).blocksStartup()).isFalse();
+    }
+
+    @Test
+    void concurrentDifferentKeysCreateOnlyOneDecisionOutbox() throws Exception {
+        String alertId = "alert-single-concurrent";
+        alertRepository.save(alert(alertId));
+        AtomicInteger businessMutations = new AtomicInteger();
+        SubmitDecisionMutationHandler handler = submitDecisionHandler();
+        CountDownLatch start = new CountDownLatch(1);
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Future<RegulatedMutationResult<SubmitAnalystDecisionResponse>> first = executor.submit(() -> {
+                assertThat(start.await(5, TimeUnit.SECONDS)).isTrue();
+                return submitDecision("idem-single-concurrent-1", alertId, businessMutations, handler);
+            });
+            Future<RegulatedMutationResult<SubmitAnalystDecisionResponse>> second = executor.submit(() -> {
+                assertThat(start.await(5, TimeUnit.SECONDS)).isTrue();
+                return submitDecision("idem-single-concurrent-2", alertId, businessMutations, handler);
+            });
+            start.countDown();
+
+            List<Future<RegulatedMutationResult<SubmitAnalystDecisionResponse>>> attempts = List.of(first, second);
+            assertThat(attempts.stream().filter(this::completedSuccessfully).count()).isOne();
+            assertThat(attempts.stream().filter(this::failedWithResourceConflict).count()).isOne();
+        }
+        String eventId = alertRepository.findById(alertId).orElseThrow().getDecisionOutboxEventId();
+        assertSingleDecisionEvidence(alertId, eventId, businessMutations);
+        assertThat(new TransactionalOutboxPersistedContractPreflight(mongoTemplate, Duration.ofSeconds(5))
+                .inspect(10).blocksStartup()).isFalse();
+    }
+
+    @Test
     void shouldRollbackCoordinatorPathWhenOutboxWriteFailsInsideFinalize() {
         alertRepository.save(alert("alert-outbox-fail"));
         AtomicInteger businessMutations = new AtomicInteger();
@@ -338,6 +549,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         AlertDocument alert = alertRepository.findById("alert-outbox-fail").orElseThrow();
 
         assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(command.isDecisionSlotClaimed()).isTrue();
         assertThat(command.getResponseSnapshot()).isNull();
         assertThat(command.getLocalCommitMarker()).isNull();
         assertThat(command.getSuccessAuditId()).isNull();
@@ -356,6 +568,13 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         ));
         assertThat(replay.state()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
         assertThat(businessMutations).hasValue(1);
+
+        assertThatThrownBy(() -> submitDecision(
+                "idem-outbox-fail-replacement",
+                "alert-outbox-fail",
+                businessMutations,
+                submitDecisionHandler()
+        )).isInstanceOf(ConflictingResourceMutationException.class);
     }
 
     @Test
@@ -374,7 +593,8 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         SubmitDecisionMutationHandler handler = new SubmitDecisionMutationHandler(
                 alertRepository,
                 new AlertDocumentMapper(),
-                new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository)
+                new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository,
+                        mock(TransactionalOutboxRuntimeReadiness.class))
         );
 
         assertThatThrownBy(() -> coordinator.commit(command(
@@ -424,7 +644,8 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         SubmitDecisionMutationHandler handler = new SubmitDecisionMutationHandler(
                 alertRepository,
                 new AlertDocumentMapper(),
-                new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository)
+                new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository,
+                        mock(TransactionalOutboxRuntimeReadiness.class))
         );
 
         assertThatThrownBy(() -> coordinator.commit(command(
@@ -470,7 +691,131 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
     }
 
     @Test
-    void shouldKeepAuditChainContinuousUnderConcurrentFdp29Finalizations() throws Exception {
+    void competingOutboxApprovalCommandsCommitExactlyOneDurableResolution() throws Exception {
+        String eventId = "outbox-coordinator-race-event";
+        String alertId = "outbox-coordinator-race-alert";
+        alertRepository.save(alertProjection(alertId, eventId));
+        outboxRepository.save(confirmationUnknownRecord(eventId, alertId));
+        coordinator = coordinatorWithPersistentAudit(
+                commandRepository,
+                new RegulatedMutationTransactionRunner(
+                        RegulatedMutationTransactionMode.REQUIRED,
+                        new TransactionTemplate(new MongoTransactionManager(databaseFactory))
+                ),
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                localAuditPhaseWriter
+        );
+        OutboxRecoveryService service = outboxRecoveryService(coordinator);
+
+        OutboxRecordResponse pending = service.resolveConfirmation(
+                eventId,
+                resolutionRequest(null, "request reason", "request-verifier", "offset=40"),
+                "requester",
+                "outbox-request-idempotency"
+        );
+        assertThat(pending.resolutionPending()).isTrue();
+        assertThat(pending.resolutionRequestId()).isNotBlank();
+
+        CountDownLatch start = new CountDownLatch(1);
+        List<ApprovalAttempt> attempts;
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Future<ApprovalAttempt> first = executor.submit(() -> approveOutbox(
+                    start,
+                    service,
+                    eventId,
+                    pending.resolutionRequestId(),
+                    "outbox-approval-a",
+                    "approver-a",
+                    "approval reason a",
+                    "offset=41"
+            ));
+            Future<ApprovalAttempt> second = executor.submit(() -> approveOutbox(
+                    start,
+                    service,
+                    eventId,
+                    pending.resolutionRequestId(),
+                    "outbox-approval-b",
+                    "approver-b",
+                    "approval reason b",
+                    "offset=42"
+            ));
+            start.countDown();
+            attempts = List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS));
+        }
+
+        ApprovalAttempt winner = attempts.stream().filter(ApprovalAttempt::succeeded).findFirst().orElseThrow();
+        ApprovalAttempt loser = attempts.stream().filter(attempt -> !attempt.succeeded()).findFirst().orElseThrow();
+        assertThat(attempts).filteredOn(ApprovalAttempt::succeeded).hasSize(1);
+        assertThat(loser.failure()).isNotNull();
+
+        TransactionalOutboxRecordDocument source = outboxRepository.findById(eventId).orElseThrow();
+        assertThat(source.getStatus()).isEqualTo(TransactionalOutboxStatus.PUBLISHED);
+        assertThat(source.getPublicationConfirmationProvenance())
+                .isEqualTo(OutboxPublicationConfirmationProvenance.MANUAL_DUAL_CONTROL_ATTESTED);
+        assertThat(source.getResolutionRequestId()).isEqualTo(pending.resolutionRequestId());
+        assertThat(source.getResolutionProposedOutcome()).isEqualTo(OutboxConfirmationResolution.PUBLISHED.name());
+        assertThat(source.getResolutionRequestedBy()).isEqualTo("requester");
+        assertThat(source.getResolutionRequestReason()).isEqualTo("request reason");
+        assertThat(source.getResolutionApprovedBy()).isEqualTo(winner.actorId());
+        assertThat(source.getResolutionApprovalReason()).isEqualTo(winner.reason());
+
+        RegulatedMutationCommandDocument winningCommand =
+                commandRepository.findByIdempotencyKey(winner.idempotencyKey()).orElseThrow();
+        RegulatedMutationCommandDocument losingCommand =
+                commandRepository.findByIdempotencyKey(loser.idempotencyKey()).orElseThrow();
+        assertThat(winningCommand.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        assertThat(winningCommand.isSuccessAuditRecorded()).isTrue();
+        assertThat(winningCommand.getResponseSnapshot()).isNotNull();
+        assertThat(countAudit(winningCommand.getId(), RegulatedMutationAuditPhase.SUCCESS)).isEqualTo(1);
+        assertThat(losingCommand.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(losingCommand.isSuccessAuditRecorded()).isFalse();
+        assertThat(losingCommand.getResponseSnapshot()).isNull();
+        assertThat(countAudit(losingCommand.getId(), RegulatedMutationAuditPhase.SUCCESS)).isZero();
+        assertThat(countAudit(losingCommand.getId(), RegulatedMutationAuditPhase.FAILED)).isEqualTo(1);
+
+        MongoRegulatedMutationCoordinator restartedCoordinator = coordinatorWithPersistentAudit(
+                commandRepository,
+                new RegulatedMutationTransactionRunner(
+                        RegulatedMutationTransactionMode.REQUIRED,
+                        new TransactionTemplate(new MongoTransactionManager(databaseFactory))
+                ),
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                localAuditPhaseWriter
+        );
+        OutboxRecordResponse replay = outboxRecoveryService(restartedCoordinator).resolveConfirmation(
+                eventId,
+                resolutionRequest(
+                        pending.resolutionRequestId(),
+                        winner.reason(),
+                        winner.actorId(),
+                        winner.evidenceReference()
+                ),
+                winner.actorId(),
+                winner.idempotencyKey()
+        );
+        assertThat(replay.status()).isEqualTo(TransactionalOutboxStatus.PUBLISHED.name());
+        assertThat(replay.resolutionRequestId()).isEqualTo(pending.resolutionRequestId());
+        assertThat(replay.resolutionProposedOutcome()).isEqualTo(OutboxConfirmationResolution.PUBLISHED.name());
+
+        TransactionalOutboxRecordDocument afterRestart = outboxRepository.findById(eventId).orElseThrow();
+        AlertDocument projection = alertRepository.findById(alertId).orElseThrow();
+        assertThat(afterRestart.getProjectionRevision()).isEqualTo(source.getProjectionRevision());
+        assertThat(afterRestart.getResolutionApprovedBy()).isEqualTo(winner.actorId());
+        assertThat(projection.getDecisionOutboxEventId()).isEqualTo(eventId);
+        assertThat(projection.getDecisionOutboxProjectionRevision()).isEqualTo(afterRestart.getProjectionRevision());
+        assertThat(projection.getDecisionOutboxResolutionRequestId()).isEqualTo(pending.resolutionRequestId());
+        assertThat(projection.getDecisionOutboxResolutionProposedOutcome())
+                .isEqualTo(OutboxConfirmationResolution.PUBLISHED.name());
+        assertThat(projection.getDecisionOutboxResolutionRequestedBy()).isEqualTo("requester");
+        assertThat(projection.getDecisionOutboxResolutionRequestReason()).isEqualTo("request reason");
+        assertThat(projection.getDecisionOutboxResolutionApprovedBy()).isEqualTo(winner.actorId());
+        assertThat(projection.getDecisionOutboxResolutionApprovalReason()).isEqualTo(winner.reason());
+        assertThat(projection.getDecisionOutboxPublicationConfirmationProvenance())
+                .isEqualTo(OutboxPublicationConfirmationProvenance.MANUAL_DUAL_CONTROL_ATTESTED.name());
+    }
+
+    @Test
+    void shouldKeepAuditChainContinuousUnderConcurrentFinalizations() throws Exception {
         alertRepository.save(alert("alert-concurrent-a"));
         alertRepository.save(alert("alert-concurrent-b"));
         coordinator = coordinatorWithPersistentAudit(
@@ -485,15 +830,17 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         SubmitDecisionMutationHandler handler = new SubmitDecisionMutationHandler(
                 alertRepository,
                 new AlertDocumentMapper(),
-                new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository)
+                new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository,
+                        mock(TransactionalOutboxRuntimeReadiness.class))
         );
-        AtomicInteger businessMutations = new AtomicInteger();
+        AtomicInteger firstBusinessMutations = new AtomicInteger();
+        AtomicInteger secondBusinessMutations = new AtomicInteger();
         CountDownLatch start = new CountDownLatch(1);
         List<Future<RegulatedMutationResult<SubmitAnalystDecisionResponse>>> futures = new java.util.ArrayList<>();
 
         try (var executor = Executors.newFixedThreadPool(2)) {
-            futures.add(executor.submit(() -> concurrentCommit(start, "idem-concurrent-a", "alert-concurrent-a", businessMutations, handler)));
-            futures.add(executor.submit(() -> concurrentCommit(start, "idem-concurrent-b", "alert-concurrent-b", businessMutations, handler)));
+            futures.add(executor.submit(() -> concurrentCommit(start, "idem-concurrent-a", "alert-concurrent-a", firstBusinessMutations, handler)));
+            futures.add(executor.submit(() -> concurrentCommit(start, "idem-concurrent-b", "alert-concurrent-b", secondBusinessMutations, handler)));
             start.countDown();
 
             List<Throwable> failures = new java.util.ArrayList<>();
@@ -505,13 +852,21 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                     failures.add(exception.getCause());
                 }
             }
+            String failureDiagnostics = failureDiagnostics(failures);
 
             assertThat(results)
+                    .as("Concurrent finalization failures:%n%s", failureDiagnostics)
                     .extracting(RegulatedMutationResult::state)
                     .containsOnly(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
-            assertThat(results.size() + failures.size()).isEqualTo(2);
-            assertThat(results).isNotEmpty();
-            assertThat(failures).hasSizeLessThanOrEqualTo(1);
+            assertThat(results.size() + failures.size())
+                    .as("Concurrent finalization failures:%n%s", failureDiagnostics)
+                    .isEqualTo(2);
+            assertThat(results)
+                    .as("Concurrent finalization failures:%n%s", failureDiagnostics)
+                    .isNotEmpty();
+            assertThat(failures)
+                    .as("Concurrent finalization failures:%n%s", failureDiagnostics)
+                    .hasSizeLessThanOrEqualTo(1);
             assertThat(failures)
                     .allSatisfy(failure -> assertThat(failure)
                             .isInstanceOfAny(RuntimeException.class));
@@ -527,6 +882,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
             assertThat(command.getState()).isNotEqualTo(RegulatedMutationState.FINALIZING);
             if (command.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL) {
                 assertThat(countAudit(command.getId(), RegulatedMutationAuditPhase.SUCCESS)).isEqualTo(1);
+                assertThat(countAudit(command.getId(), RegulatedMutationAuditPhase.FAILED)).isZero();
                 assertThat(command.getResponseSnapshot()).isNotNull();
                 assertThat(command.getLocalCommitMarker()).isEqualTo("EVIDENCE_GATED_FINALIZED");
                 assertThat(command.isSuccessAuditRecorded()).isTrue();
@@ -535,6 +891,8 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
             } else {
                 assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
                 assertThat(countAudit(command.getId(), RegulatedMutationAuditPhase.SUCCESS)).isZero();
+                assertThat(countAudit(command.getId(), RegulatedMutationAuditPhase.FAILED)).isEqualTo(1);
+                assertThat(command.getFailedAuditId()).isNotBlank();
                 assertThat(command.getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED);
             }
         }
@@ -542,13 +900,17 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         long finalizedCommands = commands.stream()
                 .filter(command -> command.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL)
                 .count();
+        assertThat(firstBusinessMutations).hasValueLessThanOrEqualTo(1);
+        assertThat(secondBusinessMutations).hasValueLessThanOrEqualTo(1);
+        assertThat(firstBusinessMutations.get() + secondBusinessMutations.get())
+                .isBetween((int) finalizedCommands, 2);
         List<AuditEventDocument> auditEvents = auditEventRepository.findFullChain("source_service:alert-service", 10);
         List<com.frauddetection.alert.audit.AuditAnchorDocument> anchors = mongoTemplate.find(
                 new Query(),
                 com.frauddetection.alert.audit.AuditAnchorDocument.class
         );
 
-        assertThat(auditEvents).hasSize((int) (2 + finalizedCommands));
+        assertThat(auditEvents).hasSize(2 + commands.size());
         assertContinuousChain(auditEvents);
         assertThat(auditEvents.stream().map(AuditEventDocument::auditId)).doesNotHaveDuplicates();
         assertThat(auditEvents.stream().map(AuditEventDocument::chainPosition)).doesNotHaveDuplicates();
@@ -564,6 +926,74 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         ).stream().filter(alert -> alert.getAnalystDecision() == AnalystDecision.CONFIRMED_FRAUD).count())
                 .isEqualTo(finalizedCommands);
         assertThat(commands).noneMatch(command -> command.getState() == RegulatedMutationState.FINALIZING);
+    }
+
+    private SubmitDecisionMutationHandler submitDecisionHandler() {
+        return new SubmitDecisionMutationHandler(
+                alertRepository,
+                new AlertDocumentMapper(),
+                new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository,
+                        mock(TransactionalOutboxRuntimeReadiness.class))
+        );
+    }
+
+    private RegulatedMutationResult<SubmitAnalystDecisionResponse> submitDecision(
+            String idempotencyKey,
+            String alertId,
+            AtomicInteger businessMutations,
+            SubmitDecisionMutationHandler handler
+    ) {
+        return coordinator.commit(command(
+                idempotencyKey,
+                alertId,
+                businessMutations,
+                context -> handler.applyDecision(
+                        alertId,
+                        request(),
+                        AlertStatus.RESOLVED,
+                        "principal-7",
+                        idempotencyKey,
+                        "request-hash-" + idempotencyKey,
+                        context.commandId(),
+                        SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+                )
+        ));
+    }
+
+    private void assertSingleDecisionEvidence(
+            String alertId,
+            String eventId,
+            AtomicInteger businessMutations
+    ) {
+        AlertDocument persistedAlert = alertRepository.findById(alertId).orElseThrow();
+        RegulatedMutationCommandDocument command = commandRepository.findAll().getFirst();
+
+        assertThat(commandRepository.count()).isOne();
+        assertThat(outboxRepository.count()).isOne();
+        assertThat(outboxRepository.findByMutationCommandId(command.getId()))
+                .get().extracting(TransactionalOutboxRecordDocument::getEventId).isEqualTo(eventId);
+        assertThat(persistedAlert.getDecisionOutboxEventId()).isEqualTo(eventId);
+        assertThat(businessMutations).hasValue(1);
+    }
+
+    private boolean completedSuccessfully(Future<?> attempt) {
+        try {
+            attempt.get(10, TimeUnit.SECONDS);
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private boolean failedWithResourceConflict(Future<?> attempt) {
+        try {
+            attempt.get(10, TimeUnit.SECONDS);
+            return false;
+        } catch (ExecutionException exception) {
+            return exception.getCause() instanceof ConflictingResourceMutationException;
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     private RegulatedMutationResult<SubmitAnalystDecisionResponse> concurrentCommit(
@@ -658,6 +1088,92 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         );
     }
 
+    private OutboxRecoveryService outboxRecoveryService(RegulatedMutationCoordinator mutationCoordinator) {
+        return new OutboxRecoveryService(
+                outboxRepository,
+                mongoTemplate,
+                mock(OutboxPublisherCoordinator.class),
+                mutationCoordinator,
+                new OutboxConfirmationResolutionMutationHandler(outboxRepository, mongoTemplate, true, true),
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                Duration.ofMinutes(2)
+        );
+    }
+
+    private ApprovalAttempt approveOutbox(
+            CountDownLatch start,
+            OutboxRecoveryService service,
+            String eventId,
+            String pendingRequestId,
+            String idempotencyKey,
+            String actorId,
+            String reason,
+            String evidenceReference
+    ) throws InterruptedException {
+        assertThat(start.await(5, TimeUnit.SECONDS)).isTrue();
+        try {
+            OutboxRecordResponse response = service.resolveConfirmation(
+                    eventId,
+                    resolutionRequest(pendingRequestId, reason, actorId, evidenceReference),
+                    actorId,
+                    idempotencyKey
+            );
+            return new ApprovalAttempt(idempotencyKey, actorId, reason, evidenceReference, response, null);
+        } catch (RuntimeException failure) {
+            return new ApprovalAttempt(idempotencyKey, actorId, reason, evidenceReference, null, failure);
+        }
+    }
+
+    private OutboxConfirmationResolutionRequest resolutionRequest(
+            String pendingRequestId,
+            String reason,
+            String verifiedBy,
+            String evidenceReference
+    ) {
+        Instant verifiedAt = pendingRequestId == null
+                ? Instant.parse("2026-10-01T08:00:00Z")
+                : Instant.parse("2026-10-01T09:00:00Z");
+        return new OutboxConfirmationResolutionRequest(
+                OutboxConfirmationResolution.PUBLISHED,
+                pendingRequestId,
+                reason,
+                new ResolutionEvidenceReference(
+                        ResolutionEvidenceType.BROKER_OFFSET,
+                        evidenceReference,
+                        verifiedAt,
+                        verifiedBy
+                )
+        );
+    }
+
+    private TransactionalOutboxRecordDocument confirmationUnknownRecord(String eventId, String alertId) {
+        Instant now = Instant.parse("2026-10-01T07:00:00Z");
+        TransactionalOutboxRecordDocument record = new TransactionalOutboxRecordDocument();
+        record.setEventId(eventId);
+        record.setDedupeKey("dedupe-" + eventId);
+        record.setMutationCommandId("source-command");
+        record.setResourceType(AuditResourceType.ALERT.name());
+        record.setResourceId(alertId);
+        record.setEventType("FRAUD_DECISION");
+        record.setPayloadHash("payload-hash");
+        record.setStatus(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
+        record.setAttempts(1);
+        record.setProjectionRevision(0L);
+        record.setConfirmationUnknownAt(now);
+        record.setCreatedAt(now);
+        record.setUpdatedAt(now);
+        return record;
+    }
+
+    private AlertDocument alertProjection(String alertId, String eventId) {
+        AlertDocument document = alert(alertId);
+        document.setDecisionOutboxEventId(eventId);
+        document.setDecisionOutboxProjectionRevision(0L);
+        document.setDecisionOutboxStatus(DecisionOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
+        document.setDecisionOutboxAttempts(1);
+        return document;
+    }
+
     private AlertDocument alert(String alertId) {
         AlertDocument document = new AlertDocument();
         document.setAlertId(alertId);
@@ -671,6 +1187,50 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         document.setFraudScore(0.91d);
         document.setFeatureSnapshot(Map.of("velocity", 3));
         return document;
+    }
+
+    private record ApprovalAttempt(
+            String idempotencyKey,
+            String actorId,
+            String reason,
+            String evidenceReference,
+            OutboxRecordResponse response,
+            RuntimeException failure
+    ) {
+        boolean succeeded() {
+            return response != null;
+        }
+    }
+
+    private String failureDiagnostics(List<Throwable> failures) {
+        if (failures.isEmpty()) {
+            return "none";
+        }
+        StringBuilder diagnostics = new StringBuilder();
+        for (int index = 0; index < failures.size(); index++) {
+            appendCauseChain(diagnostics, "future[" + index + "]", failures.get(index), 0);
+        }
+        return diagnostics.toString();
+    }
+
+    private void appendCauseChain(StringBuilder diagnostics, String label, Throwable failure, int depth) {
+        if (failure == null) {
+            diagnostics.append(label).append(": <null>\n");
+            return;
+        }
+        diagnostics.append("  ".repeat(depth))
+                .append(label)
+                .append(": ")
+                .append(failure.getClass().getName())
+                .append(": ")
+                .append(failure.getMessage())
+                .append('\n');
+        for (Throwable suppressed : failure.getSuppressed()) {
+            appendCauseChain(diagnostics, "suppressed", suppressed, depth + 1);
+        }
+        if (failure.getCause() != null && failure.getCause() != failure) {
+            appendCauseChain(diagnostics, "caused by", failure.getCause(), depth + 1);
+        }
     }
 
     private long countAudit(String commandId, RegulatedMutationAuditPhase phase) {
@@ -724,6 +1284,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
     private final class LocalMongoAuditPublisher implements AuditEventPublisher {
         private final MongoTemplate mongoTemplate;
         private int successPublishCalls;
+        private boolean failAttemptedPublish;
 
         private LocalMongoAuditPublisher(MongoTemplate mongoTemplate) {
             this.mongoTemplate = mongoTemplate;
@@ -731,6 +1292,9 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
 
         @Override
         public void publish(AuditEvent event) {
+            if (failAttemptedPublish && event.outcome() == AuditOutcome.ATTEMPTED) {
+                throw new DataAccessResourceFailureException("attempted audit unavailable");
+            }
             if (event.outcome() == AuditOutcome.SUCCESS) {
                 successPublishCalls++;
             }
@@ -768,6 +1332,11 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
     private static final class FailingLocalAuditPhaseWriter extends RegulatedMutationLocalAuditPhaseWriter {
         private FailingLocalAuditPhaseWriter() {
             super(null, null, null);
+        }
+
+        @Override
+        public <T> T withChainLock(java.util.function.Supplier<T> callback) {
+            return callback.get();
         }
 
         @Override

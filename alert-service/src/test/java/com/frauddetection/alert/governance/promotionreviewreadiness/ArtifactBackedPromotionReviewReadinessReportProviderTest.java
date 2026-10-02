@@ -43,7 +43,7 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
     }
 
     @Test
-    void realFdp111GeneratedReportFixtureCanBeReadByProvider() throws Exception {
+    void realGeneratedReportFixtureCanBeReadByProvider() throws Exception {
         Path artifact = copyFixture();
 
         Optional<PromotionReviewReadinessReport> result = provider(artifact).currentReport();
@@ -116,6 +116,25 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
     @Test
     void configuredSchemaInvalidSourceMapsToUnavailable() throws Exception {
         assertUnavailable(provider(writeJson(validReportJson().replace("CURRENT_SUMMARY_PRESENT", "PROMOTION_APPROVED"))));
+    }
+
+    @Test
+    void configuredResealedArtifactWithNonCanonicalEvaluationTypeMapsToUnavailable() throws Exception {
+        for (String reportType : new String[]{
+                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "UNKNOWN_PLATFORM_EVALUATION",
+                "ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1"
+        }) {
+            assertUnavailable(provider(writeJson(reportWithEvaluationReportType(reportType))));
+        }
+
+        JsonNode missing = objectMapper.readTree(validReportJson());
+        ((ObjectNode) missing.get("checkInputs").get("evaluation")).remove("evaluationReportType");
+        assertUnavailable(provider(writeJson(objectMapper.writeValueAsString(missing))));
+
+        JsonNode nullValue = objectMapper.readTree(validReportJson());
+        ((ObjectNode) nullValue.get("checkInputs").get("evaluation")).putNull("evaluationReportType");
+        assertUnavailable(provider(writeJson(objectMapper.writeValueAsString(nullValue))));
     }
 
     @Test
@@ -283,7 +302,7 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
     }
 
     @Test
-    void acceptsValidFdp111ReportWithRecordsEvaluatedAbove500() throws Exception {
+    void acceptsValidReportWithRecordsEvaluatedAbove500() throws Exception {
         JsonNode root = objectMapper.readTree(validReportJson());
         ((ObjectNode) root.get("inputs")).put("recordsEvaluated", 501);
         ((ObjectNode) root.get("checkInputs")).put("recordsEvaluated", 501);
@@ -296,7 +315,7 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
     }
 
     @Test
-    void acceptsValidFdp111ReportWithMinimumDiagnosticEvidenceRecordsAbove500() throws Exception {
+    void acceptsValidReportWithMinimumDiagnosticEvidenceRecordsAbove500() throws Exception {
         JsonNode root = objectMapper.readTree(validReportJson());
         ((ObjectNode) root.get("inputs")).put("minimumDiagnosticEvidenceRecords", 501);
         ((ObjectNode) root.get("inputs")).put("recordsEvaluated", 501);
@@ -347,6 +366,15 @@ class ArtifactBackedPromotionReviewReadinessReportProviderTest {
         objectMapper.writeValue(artifact.toFile(), report);
         Files.writeString(artifact.resolveSibling("manifest.json"), manifestFor(Files.readString(artifact)));
         return artifact;
+    }
+
+    private String reportWithEvaluationReportType(String reportType) throws Exception {
+        JsonNode root = objectMapper.readTree(validReportJson());
+        ((ObjectNode) root.get("checkInputs").get("evaluation")).put("evaluationReportType", reportType);
+        ((ObjectNode) root.get("checks").get(10)).put("status", "FAIL");
+        ((ObjectNode) root).put("readinessStatus", "NOT_REVIEWABLE");
+        ((ObjectNode) root).putArray("reasonCodes").add("EVALUATION_REPORT_TYPE_SUPPORTED_FAILED");
+        return objectMapper.writeValueAsString(root);
     }
 
     private Path writeJson(String json) throws IOException {

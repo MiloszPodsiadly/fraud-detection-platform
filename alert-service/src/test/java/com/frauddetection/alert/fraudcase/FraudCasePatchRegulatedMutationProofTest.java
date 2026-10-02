@@ -160,17 +160,17 @@ class FraudCasePatchRegulatedMutationProofTest {
 
     @Test
     void nonTerminalStateDoesNotExposeCommittedTargetState() throws Exception {
-        coordinator.responseState = RegulatedMutationState.BUSINESS_COMMITTING;
+        coordinator.responseState = RegulatedMutationState.FINALIZING;
 
         mockMvc.perform(patch("/api/v1/fraud-cases/case-1")
                         .header("X-Idempotency-Key", "update-key-uncertain")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(payload("CONFIRMED_FRAUD", "spoofed-actor", "review")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.operation_status").value("COMMIT_UNKNOWN"))
+                .andExpect(jsonPath("$.operation_status").value("FINALIZING"))
                 .andExpect(jsonPath("$.updated_case").value(nullValue()))
                 .andExpect(jsonPath("$.current_case_snapshot.status").value("OPEN"))
-                .andExpect(jsonPath("$.recovery_required_reason").value("BUSINESS_COMMITTING"));
+                .andExpect(jsonPath("$.recovery_required_reason").value(nullValue()));
 
         assertThat(coordinator.mutationCount).isZero();
         verify(fraudCaseRepository, never()).save(any(FraudCaseDocument.class));
@@ -229,13 +229,13 @@ class FraudCasePatchRegulatedMutationProofTest {
                 }
                 @SuppressWarnings("unchecked")
                 S response = (S) existing.response;
-                return new RegulatedMutationResult<>(RegulatedMutationState.EVIDENCE_PENDING, response);
+                return new RegulatedMutationResult<>(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL, response);
             }
             R saved = command.mutation().execute(new RegulatedMutationExecutionContext("command-1"));
             mutationCount++;
-            S response = command.responseMapper().response(saved, RegulatedMutationState.EVIDENCE_PENDING);
+            S response = command.responseMapper().response(saved, RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
             resultsByKey.put(command.idempotencyKey(), new StoredResult(command.requestHash(), response));
-            return new RegulatedMutationResult<>(RegulatedMutationState.EVIDENCE_PENDING, response);
+            return new RegulatedMutationResult<>(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL, response);
         }
     }
 

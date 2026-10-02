@@ -44,6 +44,8 @@ class BankProfileIntegrationTest {
         assertThat(properties).isNotNull();
         assertThat(properties.getProperty("app.audit.bank-mode.fail-closed")).isEqualTo("false");
         assertThat(properties.getProperty("app.audit.external-anchoring.publication.enabled")).isEqualTo("false");
+        assertThat(properties.getProperty("app.audit.external-anchoring.publication.required")).isEqualTo("false");
+        assertThat(properties.getProperty("app.audit.external-anchoring.publication.fail-closed")).isEqualTo("false");
         assertThat(properties.getProperty("app.audit.trust-authority.enabled")).isEqualTo("false");
         assertThat(properties.getProperty("app.security.demo-auth.enabled")).isEqualTo("true");
     }

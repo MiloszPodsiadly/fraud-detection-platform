@@ -12,6 +12,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 
 import java.time.Instant;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -39,7 +40,8 @@ class RegulatedMutationFencedCommandWriterTest {
                 token("owner-a", Instant.now().plusSeconds(30)),
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                0L,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 null,
                 update -> update.set("attempted_audit_recorded", true)
@@ -52,10 +54,187 @@ class RegulatedMutationFencedCommandWriterTest {
         assertThat(queryJson).contains("lease_expires_at");
         assertThat(queryJson).contains("state=REQUESTED");
         assertThat(queryJson).contains("execution_status=PROCESSING");
+        assertThat(queryJson).contains("revision=0");
         Document set = setDocument();
-        assertThat(set.get("state")).isEqualTo(RegulatedMutationState.AUDIT_ATTEMPTED);
+        assertThat(set.get("state")).isEqualTo(RegulatedMutationState.EVIDENCE_PREPARING);
         assertThat(set.get("execution_status")).isEqualTo(RegulatedMutationExecutionStatus.PROCESSING);
         assertThat(set.get("attempted_audit_recorded")).isEqualTo(true);
+        assertThat(incDocument().get("revision")).isEqualTo(1);
+    }
+
+
+
+    @Test
+    void preCommitRejectionReleasesDecisionSlotOnlyWithPersistedNoCommitProof() {
+        when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+
+        writer.rejectPreCommitAndReleaseDecisionSlot(
+                token("owner-a", Instant.now().plusSeconds(30)),
+                RegulatedMutationState.REQUESTED,
+                RegulatedMutationExecutionStatus.PROCESSING,
+                0L,
+                RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE,
+                RegulatedMutationExecutionStatus.FAILED,
+                "EVIDENCE_UNAVAILABLE",
+                null
+        );
+
+        Document queryDocument = capturedQuery().getQueryObject();
+        String queryJson = queryDocument.toString();
+
+        assertThat(queryJson)
+                .contains("resource_type=ALERT")
+                .contains("action=SUBMIT_ANALYST_DECISION")
+                .contains("decision_slot_claimed=true")
+                .contains("response_snapshot=null")
+                .contains("outbox_event_id=null")
+                .contains("local_commit_marker=null")
+                .contains("local_committed_at=null")
+                .contains("success_audit_id=null");
+
+        Document expression = queryDocument.getList("$and", Document.class)
+                .stream()
+                .filter(condition -> condition.containsKey("$expr"))
+                .findFirst()
+                .orElseThrow()
+                .get("$expr", Document.class);
+
+        List<Document> predicates = expression.getList("$and", Document.class);
+        for (String field : List.of(
+                "response_snapshot",
+                "outbox_event_id",
+                "local_commit_marker",
+                "local_committed_at",
+                "success_audit_id"
+        )) {
+            assertThat(predicates).contains(
+                    new Document("$in", List.of(
+                            new Document("$type", "$" + field),
+                            List.of("missing", "null")
+                    ))
+            );
+        }
+
+        assertThat(predicates).contains(
+                new Document("$eq", List.of(
+                        new Document("$type", "$decision_slot_claimed"),
+                        "bool"
+                )),
+                new Document("$eq", List.of(
+                        "$decision_slot_claimed",
+                        true
+                ))
+        );
+
+        assertThat(predicates).contains(
+                new Document("$eq", List.of(
+                        new Document("$ifNull", List.of(
+                                "$success_audit_recorded",
+                                false
+                        )),
+                        false
+                ))
+        );
+
+        assertThat(setDocument().get("decision_slot_claimed")).isEqualTo(false);
+    }
+
+
+    @Test
+    void preCommitReleaseCallbackCannotAddCommitProof() {
+        for (String field : new String[]{
+                "response_snapshot",
+                "outbox_event_id",
+                "local_commit_marker",
+                "local_committed_at",
+                "success_audit_id",
+                "success_audit_recorded"
+        }) {
+            assertThatThrownBy(() -> writer.rejectPreCommitAndReleaseDecisionSlot(
+                    token("owner-a", Instant.now().plusSeconds(30)),
+                    RegulatedMutationState.REQUESTED,
+                    RegulatedMutationExecutionStatus.PROCESSING,
+                    0L,
+                    RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE,
+                    RegulatedMutationExecutionStatus.FAILED,
+                    "EVIDENCE_UNAVAILABLE",
+                    update -> update.set(field, "forbidden-proof")
+            ))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(field);
+        }
+    }
+
+    @Test
+    void preCommitReleaseCallbackCannotRemoveCommitProof() {
+        for (String field : new String[]{
+                "response_snapshot",
+                "outbox_event_id",
+                "local_commit_marker",
+                "local_committed_at",
+                "success_audit_id",
+                "success_audit_recorded"
+        }) {
+            assertThatThrownBy(() -> writer.rejectPreCommitAndReleaseDecisionSlot(
+                    token("owner-a", Instant.now().plusSeconds(30)),
+                    RegulatedMutationState.REQUESTED,
+                    RegulatedMutationExecutionStatus.PROCESSING,
+                    0L,
+                    RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE,
+                    RegulatedMutationExecutionStatus.FAILED,
+                    "EVIDENCE_UNAVAILABLE",
+                    update -> update.unset(field)
+            ))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(field);
+        }
+    }
+
+    @Test
+    void preCommitReleaseCallbackCannotRenameOrNestCommitProof() {
+        assertThatThrownBy(() -> writer.rejectPreCommitAndReleaseDecisionSlot(
+                token("owner-a", Instant.now().plusSeconds(30)),
+                RegulatedMutationState.REQUESTED,
+                RegulatedMutationExecutionStatus.PROCESSING,
+                0L,
+                RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE,
+                RegulatedMutationExecutionStatus.FAILED,
+                "EVIDENCE_UNAVAILABLE",
+                update -> update.rename("degradation_reason", "success_audit_id")
+        )).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("success_audit_id");
+
+        assertThatThrownBy(() -> writer.rejectPreCommitAndReleaseDecisionSlot(
+                token("owner-a", Instant.now().plusSeconds(30)),
+                RegulatedMutationState.REQUESTED,
+                RegulatedMutationExecutionStatus.PROCESSING,
+                0L,
+                RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE,
+                RegulatedMutationExecutionStatus.FAILED,
+                "EVIDENCE_UNAVAILABLE",
+                update -> update.set("success_audit_id.value", "forbidden-proof")
+        )).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("success_audit_id");
+    }
+
+    @Test
+    void failedNoCommitProofFenceCannotReleaseDecisionSlot() {
+        when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
+                .thenReturn(UpdateResult.acknowledged(0, 0L, null));
+        when(mongoTemplate.findById("command-1", RegulatedMutationCommandDocument.class))
+                .thenReturn(current("owner-a", Instant.now().plusSeconds(30)));
+
+        assertThatThrownBy(() -> writer.rejectPreCommitAndReleaseDecisionSlot(
+                token("owner-a", Instant.now().plusSeconds(30)),
+                RegulatedMutationState.REQUESTED,
+                RegulatedMutationExecutionStatus.PROCESSING,
+                0L,
+                RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE,
+                RegulatedMutationExecutionStatus.FAILED,
+                "EVIDENCE_UNAVAILABLE",
+                null
+        )).isInstanceOf(StaleRegulatedMutationLeaseException.class);
+
+        assertThat(setDocument().get("decision_slot_claimed")).isEqualTo(false);
     }
 
     @Test
@@ -65,7 +244,8 @@ class RegulatedMutationFencedCommandWriterTest {
         writer.validateActiveLease(
                 token("owner-a", Instant.now().plusSeconds(30)),
                 RegulatedMutationState.REQUESTED,
-                RegulatedMutationExecutionStatus.PROCESSING
+                RegulatedMutationExecutionStatus.PROCESSING,
+                0L
         );
 
         ArgumentCaptor<Query> captor = ArgumentCaptor.forClass(Query.class);
@@ -87,7 +267,8 @@ class RegulatedMutationFencedCommandWriterTest {
         assertThatThrownBy(() -> writer.validateActiveLease(
                 token("owner-a", Instant.now().minusSeconds(1)),
                 RegulatedMutationState.REQUESTED,
-                RegulatedMutationExecutionStatus.PROCESSING
+                RegulatedMutationExecutionStatus.PROCESSING,
+                0L
         ))
                 .isInstanceOf(StaleRegulatedMutationLeaseException.class)
                 .extracting("reason")
@@ -114,12 +295,14 @@ class RegulatedMutationFencedCommandWriterTest {
         assertThat(queryJson).contains("_id=command-1");
         assertThat(queryJson).contains("state=FINALIZING");
         assertThat(queryJson).contains("execution_status=PROCESSING");
+        assertThat(queryJson).contains("revision=0");
         assertThat(queryJson).contains("lease_owner=owner-a");
         assertThat(queryJson).contains("lease_expires_at");
         Document set = setDocument();
         assertThat(set.get("state")).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
         assertThat(set.get("execution_status")).isEqualTo(RegulatedMutationExecutionStatus.RECOVERY_REQUIRED);
         assertThat(set.get("degradation_reason")).isEqualTo("FINALIZING_RETRY_REQUIRES_RECONCILIATION");
+        assertThat(incDocument().get("revision")).isEqualTo(1);
     }
 
     @Test
@@ -158,7 +341,7 @@ class RegulatedMutationFencedCommandWriterTest {
                 .contains("execution_status=PROCESSING")
                 .contains("lease_expires_at");
         assertThat(meterRegistry.find("regulated_mutation_recovery_write_conflict_total")
-                .tag("model_version", "LEGACY_REGULATED_MUTATION")
+                .tag("model_version", "EVIDENCE_GATED_FINALIZE_V1")
                 .tag("state", "REQUESTED")
                 .tag("reason", "RECOVERY_WRITE_CONFLICT")
                 .counter()).isNotNull();
@@ -201,7 +384,7 @@ class RegulatedMutationFencedCommandWriterTest {
         when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
                 .thenReturn(UpdateResult.acknowledged(0, 0L, null));
         RegulatedMutationCommandDocument document = current("owner-a", Instant.now().minusSeconds(1));
-        document.setPublicStatus(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING);
+        document.setPublicStatus(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
 
         assertThatThrownBy(() -> writer.recoveryTransition(
                 document,
@@ -263,6 +446,16 @@ class RegulatedMutationFencedCommandWriterTest {
     }
 
     @Test
+    void allowedFieldUpdatesCannotMutateRevision() {
+        assertProtectedFieldRejected("revision", 99L);
+    }
+
+    @Test
+    void allowedFieldUpdatesCannotMutateDecisionSlotClaim() {
+        assertProtectedFieldRejected("decision_slot_claimed", false);
+    }
+
+    @Test
     void normalAllowedTransitionEvidenceFieldsStillWork() {
         when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
                 .thenReturn(UpdateResult.acknowledged(1, 1L, null));
@@ -271,7 +464,8 @@ class RegulatedMutationFencedCommandWriterTest {
                 token("owner-a", Instant.now().plusSeconds(30)),
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.EVIDENCE_PENDING,
+                0L,
+                RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 RegulatedMutationExecutionStatus.COMPLETED,
                 null,
                 update -> {
@@ -280,7 +474,7 @@ class RegulatedMutationFencedCommandWriterTest {
                     update.set("local_commit_marker", "marker-1");
                     update.set("success_audit_id", "success-1");
                     update.set("degradation_reason", "NONE");
-                    update.set("public_status", SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING);
+                    update.set("public_status", SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
                 }
         );
 
@@ -290,7 +484,7 @@ class RegulatedMutationFencedCommandWriterTest {
         assertThat(set.get("local_commit_marker")).isEqualTo("marker-1");
         assertThat(set.get("success_audit_id")).isEqualTo("success-1");
         assertThat(set.get("degradation_reason")).isEqualTo("NONE");
-        assertThat(set.get("public_status")).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING);
+        assertThat(set.get("public_status")).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
     }
 
     @Test
@@ -304,7 +498,8 @@ class RegulatedMutationFencedCommandWriterTest {
                 token("owner-a", Instant.now().plusSeconds(30)),
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                0L,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 null,
                 null
@@ -325,7 +520,8 @@ class RegulatedMutationFencedCommandWriterTest {
                 token("owner-a", Instant.now().minusSeconds(1)),
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                0L,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 null,
                 null
@@ -340,14 +536,15 @@ class RegulatedMutationFencedCommandWriterTest {
         when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
                 .thenReturn(UpdateResult.acknowledged(0, 0L, null));
         RegulatedMutationCommandDocument current = current("owner-a", Instant.now().plusSeconds(30));
-        current.setState(RegulatedMutationState.BUSINESS_COMMITTING);
+        current.setState(RegulatedMutationState.FINALIZING);
         when(mongoTemplate.findById("command-1", RegulatedMutationCommandDocument.class)).thenReturn(current);
 
         assertThatThrownBy(() -> writer.transition(
                 token("owner-a", Instant.now().plusSeconds(30)),
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                0L,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 null,
                 null
@@ -369,7 +566,8 @@ class RegulatedMutationFencedCommandWriterTest {
                 token("owner-a", Instant.now().plusSeconds(30)),
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                0L,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 null,
                 null
@@ -390,24 +588,25 @@ class RegulatedMutationFencedCommandWriterTest {
                 token("owner-a", Instant.now().plusSeconds(30)),
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                0L,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 null,
                 null
         )).isInstanceOf(StaleRegulatedMutationLeaseException.class);
 
         assertThat(meterRegistry.find("regulated_mutation_stale_write_rejected_total")
-                .tag("model_version", "LEGACY_REGULATED_MUTATION")
+                .tag("model_version", "EVIDENCE_GATED_FINALIZE_V1")
                 .tag("state", "REQUESTED")
                 .tag("reason", "STALE_LEASE_OWNER")
                 .counter()).isNotNull();
         assertThat(meterRegistry.find("regulated_mutation_lease_remaining_at_transition_seconds")
-                .tag("model_version", "LEGACY_REGULATED_MUTATION")
+                .tag("model_version", "EVIDENCE_GATED_FINALIZE_V1")
                 .tag("state", "REQUESTED")
                 .tag("outcome", "REJECTED")
                 .timer()).isNotNull();
         assertThat(meterRegistry.find("regulated_mutation_transition_latency_seconds")
-                .tag("model_version", "LEGACY_REGULATED_MUTATION")
+                .tag("model_version", "EVIDENCE_GATED_FINALIZE_V1")
                 .tag("state", "REQUESTED")
                 .tag("outcome", "REJECTED")
                 .timer()).isNotNull();
@@ -429,16 +628,17 @@ class RegulatedMutationFencedCommandWriterTest {
                         Instant.now().plusMillis(50),
                         Instant.now().minusMillis(1000),
                         1,
-                        RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                        RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                         RegulatedMutationState.REQUESTED,
                         RegulatedMutationExecutionStatus.PROCESSING
                 ),
                 RegulatedMutationState.REQUESTED,
-                RegulatedMutationExecutionStatus.PROCESSING
+                RegulatedMutationExecutionStatus.PROCESSING,
+                0L
         );
 
         assertThat(meterRegistry.find("regulated_mutation_lease_budget_warning_total")
-                .tag("model_version", "LEGACY_REGULATED_MUTATION")
+                .tag("model_version", "EVIDENCE_GATED_FINALIZE_V1")
                 .tag("state", "REQUESTED")
                 .tag("threshold", "LOW_REMAINING")
                 .counter()).isNotNull();
@@ -462,13 +662,14 @@ class RegulatedMutationFencedCommandWriterTest {
                         Instant.now().plusSeconds(30),
                         Instant.now(),
                         1,
-                        RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                        RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                         RegulatedMutationState.REQUESTED,
                         RegulatedMutationExecutionStatus.PROCESSING
                 ),
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                0L,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 "raw exception path /api/v1/alerts/alert-123 actor-456 idem-789",
                 null
@@ -491,7 +692,8 @@ class RegulatedMutationFencedCommandWriterTest {
                 token("owner-a", Instant.now().plusSeconds(30)),
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                0L,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 null,
                 update -> update.set(field, value)
@@ -512,6 +714,12 @@ class RegulatedMutationFencedCommandWriterTest {
         return (Document) captor.getValue().getUpdateObject().get("$set");
     }
 
+    private Document incDocument() {
+        ArgumentCaptor<Update> captor = ArgumentCaptor.forClass(Update.class);
+        verify(mongoTemplate).updateFirst(any(Query.class), captor.capture(), eq(RegulatedMutationCommandDocument.class));
+        return (Document) captor.getValue().getUpdateObject().get("$inc");
+    }
+
     private RegulatedMutationClaimToken token(String owner, Instant expiresAt) {
         return new RegulatedMutationClaimToken(
                 "command-1",
@@ -519,7 +727,7 @@ class RegulatedMutationFencedCommandWriterTest {
                 expiresAt,
                 Instant.now(),
                 1,
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                 RegulatedMutationState.REQUESTED,
                 RegulatedMutationExecutionStatus.PROCESSING
         );
@@ -530,6 +738,8 @@ class RegulatedMutationFencedCommandWriterTest {
         document.setId("command-1");
         document.setLeaseOwner(owner);
         document.setLeaseExpiresAt(expiresAt);
+        document.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        document.setRevision(0L);
         document.setState(RegulatedMutationState.REQUESTED);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
         return document;

@@ -18,25 +18,6 @@ class RegulatedMutationLeaseRenewalPolicyTest {
             new RegulatedMutationLeaseRenewalPolicy(Duration.ofSeconds(30), Duration.ofMinutes(2), 3);
 
     @Test
-    void legacyRenewableStatesAreExplicit() {
-        Set<RegulatedMutationState> allowed = Set.of(
-                RegulatedMutationState.REQUESTED,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
-                RegulatedMutationState.BUSINESS_COMMITTING,
-                RegulatedMutationState.BUSINESS_COMMITTED,
-                RegulatedMutationState.SUCCESS_AUDIT_PENDING
-        );
-
-        for (RegulatedMutationState state : RegulatedMutationState.values()) {
-            assertThat(policy.isRenewable(
-                    RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                    state,
-                    RegulatedMutationExecutionStatus.PROCESSING
-            )).as(state.name()).isEqualTo(allowed.contains(state));
-        }
-    }
-
-    @Test
     void evidenceGatedRenewableStatesAreExplicit() {
         Set<RegulatedMutationState> allowed = Set.of(
                 RegulatedMutationState.EVIDENCE_PREPARING,
@@ -54,12 +35,12 @@ class RegulatedMutationLeaseRenewalPolicyTest {
     }
 
     @Test
-    void nullModelVersionUsesLegacyTable() {
+    void nullModelVersionFailsClosed() {
         assertThat(policy.isRenewable(
                 null,
-                RegulatedMutationState.REQUESTED,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING
-        )).isTrue();
+        )).isFalse();
     }
 
     @Test
@@ -69,35 +50,29 @@ class RegulatedMutationLeaseRenewalPolicyTest {
                 Duration.ofMinutes(2),
                 3,
                 List.of(
-                        new LegacyLeaseRenewalModelPolicy(),
-                        new LegacyLeaseRenewalModelPolicy(),
+                        new EvidenceGatedLeaseRenewalModelPolicy(),
                         new EvidenceGatedLeaseRenewalModelPolicy()
                 )
         ))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Duplicate regulated mutation lease renewal model policy")
-                .hasMessageContaining("LEGACY_REGULATED_MUTATION");
+                .hasMessageContaining("EVIDENCE_GATED_FINALIZE_V1");
     }
 
     @Test
-    void missingLegacyModelPolicyFailsConstruction() {
+    void missingCurrentModelPolicyFailsConstruction() {
         assertThatThrownBy(() -> new RegulatedMutationLeaseRenewalPolicy(
                 Duration.ofSeconds(30),
                 Duration.ofMinutes(2),
                 3,
-                List.of(new EvidenceGatedLeaseRenewalModelPolicy())
+                List.of()
         ))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Missing regulated mutation lease renewal model policy")
-                .hasMessageContaining("LEGACY_REGULATED_MUTATION");
+                .hasMessageContaining("model policies are required");
     }
 
     @Test
     void modelPoliciesOwnRecoveryStateForBudgetExceeded() {
-        assertThat(policy.recoveryStateForBudgetExceeded(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.BUSINESS_COMMITTED
-        )).isEqualTo(RegulatedMutationState.BUSINESS_COMMITTED);
         assertThat(policy.recoveryStateForBudgetExceeded(
                 RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                 RegulatedMutationState.FINALIZING
@@ -107,7 +82,7 @@ class RegulatedMutationLeaseRenewalPolicyTest {
     @Test
     void missingCommandRejectsWithCommandNotFound() {
         RegulatedMutationLeaseRenewalDecision decision = policy.evaluate(
-                token(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
+                token(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
                 null,
                 Duration.ofSeconds(40),
                 NOW
@@ -120,8 +95,8 @@ class RegulatedMutationLeaseRenewalPolicyTest {
     @Test
     void nullRequestedExtensionRejectsWithInvalidExtension() {
         RegulatedMutationLeaseRenewalDecision decision = policy.evaluate(
-                token(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
-                document(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION, RegulatedMutationState.REQUESTED,
+                token(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
+                document(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1, RegulatedMutationState.EVIDENCE_PREPARING,
                         RegulatedMutationExecutionStatus.PROCESSING),
                 null,
                 NOW
@@ -135,8 +110,8 @@ class RegulatedMutationLeaseRenewalPolicyTest {
     void zeroOrNegativeRequestedExtensionRejectsWithInvalidExtension() {
         for (Duration extension : Set.of(Duration.ZERO, Duration.ofMillis(-1))) {
             RegulatedMutationLeaseRenewalDecision decision = policy.evaluate(
-                    token(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
-                    document(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION, RegulatedMutationState.REQUESTED,
+                    token(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
+                    document(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1, RegulatedMutationState.EVIDENCE_PREPARING,
                             RegulatedMutationExecutionStatus.PROCESSING),
                     extension,
                     NOW
@@ -150,8 +125,8 @@ class RegulatedMutationLeaseRenewalPolicyTest {
     @Test
     void nonProcessingExecutionStatusRejectsRenewal() {
         RegulatedMutationLeaseRenewalDecision decision = policy.evaluate(
-                token(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
-                document(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION, RegulatedMutationState.REQUESTED,
+                token(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
+                document(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1, RegulatedMutationState.EVIDENCE_PREPARING,
                         RegulatedMutationExecutionStatus.COMPLETED),
                 Duration.ofSeconds(40),
                 NOW
@@ -164,8 +139,8 @@ class RegulatedMutationLeaseRenewalPolicyTest {
     @Test
     void terminalStateRejectsRenewal() {
         RegulatedMutationLeaseRenewalDecision decision = policy.evaluate(
-                token(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
-                document(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION, RegulatedMutationState.COMMITTED,
+                token(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
+                document(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1, RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED,
                         RegulatedMutationExecutionStatus.PROCESSING),
                 Duration.ofSeconds(40),
                 NOW
@@ -193,8 +168,8 @@ class RegulatedMutationLeaseRenewalPolicyTest {
     @Test
     void modelVersionMismatchRejectsRenewal() {
         RegulatedMutationLeaseRenewalDecision decision = policy.evaluate(
-                token(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
-                document(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                token(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
+                document(null,
                         RegulatedMutationState.EVIDENCE_PREPARING,
                         RegulatedMutationExecutionStatus.PROCESSING),
                 Duration.ofSeconds(40),
@@ -208,15 +183,15 @@ class RegulatedMutationLeaseRenewalPolicyTest {
     @Test
     void extensionIsCappedBySingleExtensionAndTotalBudget() {
         RegulatedMutationCommandDocument document = document(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.REQUESTED,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING
         );
         document.setLeaseBudgetStartedAt(NOW.minusSeconds(100));
         document.setLeaseExpiresAt(NOW.plusSeconds(5));
 
         RegulatedMutationLeaseRenewalDecision decision = policy.evaluate(
-                token(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
+                token(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
                 document,
                 Duration.ofSeconds(90),
                 NOW
@@ -231,14 +206,14 @@ class RegulatedMutationLeaseRenewalPolicyTest {
     @Test
     void exhaustedRenewalCountFailsClosed() {
         RegulatedMutationCommandDocument document = document(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.REQUESTED,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING
         );
         document.setLeaseRenewalCount(3);
 
         RegulatedMutationLeaseRenewalDecision decision = policy.evaluate(
-                token(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION),
+                token(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1),
                 document,
                 Duration.ofSeconds(40),
                 NOW
@@ -272,7 +247,7 @@ class RegulatedMutationLeaseRenewalPolicyTest {
                 NOW,
                 1,
                 modelVersion,
-                RegulatedMutationState.REQUESTED,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING
         );
     }

@@ -12,14 +12,14 @@ describe("api client boundary", () => {
     expect(source).not.toMatch(/^export function (listAlerts|listFraudCaseWorkQueue|getFraudCaseWorkQueueSummary|listScoredTransactions|listGovernanceAdvisories|getGovernanceAdvisoryAnalytics|getGovernanceAdvisoryAudit|recordGovernanceAdvisoryAudit|getAlert|getAssistantSummary|getFraudCase|updateFraudCase|submitAnalystDecision)\(/m);
   });
 
-  it("runs the FDP-49 boundary script that blocks wrappers, re-exports, dynamic imports and raw fetch", () => {
+  it("runs the API boundary script that blocks wrappers, re-exports, dynamic imports and raw fetch", () => {
     expect(() => execFileSync("node", ["../scripts/check-fdp49-api-client-boundary.mjs"], {
       cwd: process.cwd(),
       stdio: "pipe"
     })).not.toThrow();
   });
 
-  it("runs the FDP-50 AST boundary script for workspace-scoped API clients", () => {
+  it("runs the AST boundary script for workspace-scoped API clients", () => {
     expect(() => execFileSync("node", ["../scripts/check-fdp50-api-client-boundary.mjs"], {
       cwd: process.cwd(),
       stdio: "pipe"
@@ -74,7 +74,7 @@ describe("api client boundary", () => {
     }
   });
 
-  it("rejects default wrapper named imports through the FDP-50 AST guard", () => {
+  it("rejects default wrapper named imports through the workspace API guard", () => {
     const fixture = createBoundaryFixture({
       "analyst-console-ui/src/workspace/hook.js": "import { listAlerts } from '../api/alertsApi.js'; export const load = () => listAlerts();"
     });
@@ -86,7 +86,7 @@ describe("api client boundary", () => {
     }
   });
 
-  it("rejects future auth-sensitive folders through the FDP-50 AST guard", () => {
+  it("rejects future auth-sensitive folders through the workspace API guard", () => {
     const fixture = createBoundaryFixture({
       "analyst-console-ui/src/hooks/useCases.js": "import { listAlerts } from '../api/alertsApi.js'; export const load = () => listAlerts();",
       "analyst-console-ui/src/features/rawFetch.js": "export const load = () => fetch('/api/v1/alerts');"
@@ -101,7 +101,7 @@ describe("api client boundary", () => {
     }
   });
 
-  it("allows raw fetch only inside API and auth bootstrap folders for the FDP-50 AST guard", () => {
+  it("allows raw fetch only inside API and auth bootstrap folders", () => {
     const fixture = createBoundaryFixture({
       "analyst-console-ui/src/api/bootstrap.js": "export const api = () => fetch('/api/v1/session');",
       "analyst-console-ui/src/auth/authProvider.js": "export const auth = () => window.fetch('/api/v1/session');",
@@ -115,7 +115,7 @@ describe("api client boundary", () => {
     }
   });
 
-  it("keeps removed wrapper names blocked by the FDP-50 guard", () => {
+  it("keeps removed wrapper names blocked by the workspace API guard", () => {
     const script = readFileSync(join(process.cwd(), "../scripts/check-fdp50-api-client-boundary.mjs"), "utf8");
     const removedWrappers = [
       "listAlerts",
@@ -138,7 +138,7 @@ describe("api client boundary", () => {
     }
   });
 
-  it("fails closed when the FDP-50 scope base ref is missing", () => {
+  it("fails closed when the API client scope base ref is missing", () => {
     const failure = captureScopeFailure({
       FDP50_SCOPE_BASE: "refs/heads/does-not-exist-fdp50"
     });
@@ -146,20 +146,20 @@ describe("api client boundary", () => {
     expect(failure).toContain("Cannot resolve FDP-50 scope base ref refs/heads/does-not-exist-fdp50");
   });
 
-  it("honors an explicit FDP-50 scope base ref", () => {
+  it("honors an explicit API client scope base ref", () => {
     expect(() => runScopeGuard({
       FDP50_SCOPE_BASE: "HEAD"
     })).not.toThrow();
   });
 
-  it("lets explicit changed files bypass git base resolution for FDP-50 scope fixtures", () => {
+  it("lets explicit changed files bypass git base resolution for API client scope fixtures", () => {
     expect(() => runScopeGuard({
       FDP50_SCOPE_BASE: "refs/heads/does-not-exist-fdp50",
-      FDP50_SCOPE_CHANGED_FILES: "docs/fdp/fdp_50_frontend_api_client_boundary.md"
+      FDP50_SCOPE_CHANGED_FILES: "docs/frontend/api_client_boundary.md"
     })).not.toThrow();
   });
 
-  it("allows ES module exports while blocking product export workflows in the FDP-51 scope guard", () => {
+  it("allows ES module exports while blocking product export workflows in the runtime scope guard", () => {
     const script = readFileSync(join(process.cwd(), "../scripts/check-fdp51-scope.mjs"), "utf8");
 
     expect(script).toContain("introducesForbiddenWorkflow");
@@ -176,7 +176,7 @@ describe("api client boundary", () => {
     }, "fdp51")).not.toThrow();
   });
 
-  it("still rejects explicit backend production files in the FDP-51 scope guard", () => {
+  it("still rejects explicit backend production files in the runtime scope guard", () => {
     const failure = captureScopeFailure({
       FDP51_SCOPE_BASE: "refs/heads/does-not-exist-fdp51",
       FDP51_SCOPE_CHANGED_FILES: "fraud-scoring-service/src/main/java/com/frauddetection/scoring/service/MlFraudScoringEngine.java"
@@ -185,7 +185,7 @@ describe("api client boundary", () => {
     expect(failure).toContain("FDP-51 is frontend runtime only; backend production code must not change.");
   });
 
-  it("keeps the FDP-53 backend guard branch-scoped while honoring explicit fixtures", () => {
+  it("keeps the runtime ownership backend guard branch-scoped while honoring explicit fixtures", () => {
     const script = readFileSync(join(process.cwd(), "../scripts/check-fdp53-scope.mjs"), "utf8");
 
     expect(script).toContain("isFdp53ScopeBranch");
@@ -197,7 +197,7 @@ describe("api client boundary", () => {
     expect(failure).toContain("FDP-53 is frontend runtime decomposition only; backend production code/resources must not change.");
   });
 
-  it("allows only approved backend production files in the FDP-50 scope guard", () => {
+  it("allows only approved backend production files in the API client scope guard", () => {
     expect(() => runScopeGuard({
       FDP50_SCOPE_BASE: "refs/heads/does-not-exist-fdp50",
       FDP50_SCOPE_CHANGED_FILES: [
@@ -205,14 +205,14 @@ describe("api client boundary", () => {
         "alert-service/src/main/java/com/frauddetection/alert/security/config/FraudCaseAuthorizationRules.java",
         "alert-service/src/main/java/com/frauddetection/alert/security/config/BffSessionSecurityConfigurer.java",
         "alert-service/src/main/java/com/frauddetection/alert/security/auth/BffLogoutSuccessHandler.java",
-        "alert-service/src/test/java/com/frauddetection/alert/controller/Fdp50RetiredRouteTest.java",
-        "docs/release/fdp_50_legacy_api_removal.md",
+        "alert-service/src/test/java/com/frauddetection/alert/controller/RetiredFraudCaseRouteTest.java",
+        "docs/release/fraud_case_api_cleanup.md",
         "scripts/check-fdp50-scope.mjs"
       ].join(",")
     })).not.toThrow();
   });
 
-  it("rejects unapproved backend production files in the FDP-50 scope guard", () => {
+  it("rejects unapproved backend production files in the API client scope guard", () => {
     const failure = captureScopeFailure({
       FDP50_SCOPE_BASE: "refs/heads/does-not-exist-fdp50",
       FDP50_SCOPE_CHANGED_FILES: "alert-service/src/main/java/com/frauddetection/alert/service/FraudCaseManagementService.java"
@@ -221,17 +221,15 @@ describe("api client boundary", () => {
     expect(failure).toContain("FDP-50 backend production changes are restricted to the approved legacy fraud-case route removal and FDP-55 BFF logout allowlist.");
   });
 
-  it("documents the FDP-50 frontend API client boundary", () => {
-    const fdp50 = readFileSync(join(process.cwd(), "../docs/fdp/fdp_50_frontend_api_client_boundary.md"), "utf8");
+  it("documents the frontend API client boundary", () => {
     const howTo = readFileSync(join(process.cwd(), "../docs/frontend/api_client_boundary.md"), "utf8");
-    const combined = `${fdp50}\n${howTo}`;
 
-    expect(combined).toContain("createAlertsApiClient");
-    expect(combined).toContain("BFF");
-    expect(combined).toContain("JWT");
-    expect(combined).toContain("demo");
-    expect(combined).toContain("raw fetch");
-    expect(combined).toContain("default wrappers");
+    expect(howTo).toContain("createAlertsApiClient");
+    expect(howTo).toContain("BFF");
+    expect(howTo).toContain("JWT");
+    expect(howTo).toContain("demo");
+    expect(howTo).toContain("Raw `fetch`");
+    expect(howTo).toContain("Default wrappers");
   });
 });
 

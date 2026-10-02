@@ -25,6 +25,8 @@ public record OutboxRecordResponse(
         String lastError,
         @JsonProperty("published_at")
         Instant publishedAt,
+        @JsonProperty("publication_confirmation_provenance")
+        String publicationConfirmationProvenance,
         @JsonProperty("confirmation_unknown_at")
         Instant confirmationUnknownAt,
         @JsonProperty("updated_at")
@@ -33,6 +35,10 @@ public record OutboxRecordResponse(
         boolean resolutionPending,
         @JsonProperty("resolution_control_mode")
         String resolutionControlMode,
+        @JsonProperty("resolution_request_id")
+        String resolutionRequestId,
+        @JsonProperty("resolution_proposed_outcome")
+        String resolutionProposedOutcome,
         @JsonProperty("resolution_requested_by")
         String resolutionRequestedBy,
         @JsonProperty("resolution_requested_at")
@@ -40,7 +46,9 @@ public record OutboxRecordResponse(
         @JsonProperty("resolution_approved_by")
         String resolutionApprovedBy,
         @JsonProperty("resolution_approved_at")
-        Instant resolutionApprovedAt
+        Instant resolutionApprovedAt,
+        @JsonProperty("operation_status")
+        String operationStatus
 ) {
     public static OutboxRecordResponse from(TransactionalOutboxRecordDocument document) {
         return new OutboxRecordResponse(
@@ -55,14 +63,48 @@ public record OutboxRecordResponse(
                 document.getAttempts(),
                 document.getLastError(),
                 document.getPublishedAt(),
+                document.getPublicationConfirmationProvenance() == null
+                        ? null
+                        : document.getPublicationConfirmationProvenance().name(),
                 document.getConfirmationUnknownAt(),
                 document.getUpdatedAt(),
                 document.isResolutionPending(),
                 document.getResolutionControlMode(),
+                document.getResolutionRequestId(),
+                document.getResolutionProposedOutcome(),
                 document.getResolutionRequestedBy(),
                 document.getResolutionRequestedAt(),
                 document.getResolutionApprovedBy(),
-                document.getResolutionApprovedAt()
+                document.getResolutionApprovedAt(),
+                null
+        );
+    }
+
+    public OutboxRecordResponse withOperationStatus(String value) {
+        return new OutboxRecordResponse(
+                eventId,
+                dedupeKey,
+                mutationCommandId,
+                resourceType,
+                resourceId,
+                eventType,
+                payloadHash,
+                status,
+                attempts,
+                lastError,
+                publishedAt,
+                publicationConfirmationProvenance,
+                confirmationUnknownAt,
+                updatedAt,
+                resolutionPending,
+                resolutionControlMode,
+                resolutionRequestId,
+                resolutionProposedOutcome,
+                resolutionRequestedBy,
+                resolutionRequestedAt,
+                resolutionApprovedBy,
+                resolutionApprovedAt,
+                value
         );
     }
 }

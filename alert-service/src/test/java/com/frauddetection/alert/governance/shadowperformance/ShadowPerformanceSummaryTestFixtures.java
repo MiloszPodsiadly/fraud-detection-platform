@@ -36,7 +36,7 @@ final class ShadowPerformanceSummaryTestFixtures {
                         "platform-recommendation-evaluation-card-v1",
                         "OFFLINE_DIAGNOSTIC",
                         "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-                        "FDP-124",
+                        ShadowPerformanceSummaryContract.EVALUATION_REPORT_VERSION,
                         "2026-06-10T00:00:00Z",
                         "2026-06-12T00:00:00Z",
                         "feedback-dataset-evaluation-report-artifact-set-v1",

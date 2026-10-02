@@ -42,7 +42,6 @@ from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import (
     normalize_rfc3339_timestamp,
 )
 from offline_evaluation.feedback_dataset_evaluation.report_contract import (
-    LEGACY_READ_ONLY_REPORT_TYPE,
     validate_platform_evaluation_artifact_identity,
     validate_platform_evaluation_artifact_provenance,
 )
@@ -141,7 +140,7 @@ def _normalize_timestamp(value: Any, field: str) -> str:
         raise FeedbackDatasetEvaluationCardValidationError(str(exc)) from exc
 
 
-def generate_evaluation_card_from_fdp124_artifacts(
+def generate_platform_evaluation_card_from_artifacts(
         evaluation_summary_path: Path,
         evaluation_manifest_path: Path,
         governance_metadata: dict[str, Any],
@@ -255,7 +254,9 @@ def _validate_manifest(manifest: dict[str, Any], summary: dict[str, Any], artifa
         raise FeedbackDatasetEvaluationCardValidationError("manifest generatedAt must match evaluation summary generatedAt")
     files = manifest.get("files")
     if not isinstance(files, list) or len(files) != len(EXPECTED_EVALUATION_ARTIFACT_FILENAMES):
-        raise FeedbackDatasetEvaluationCardValidationError("manifest files must list canonical FDP-124 artifacts")
+        raise FeedbackDatasetEvaluationCardValidationError(
+            "manifest files must list canonical platform evaluation artifacts"
+        )
     seen_names: set[str] = set()
     for item in files:
         if not isinstance(item, dict):
@@ -284,7 +285,9 @@ def _validate_manifest(manifest: dict[str, Any], summary: dict[str, Any], artifa
         if size_bytes != len(expected_bytes):
             raise FeedbackDatasetEvaluationCardValidationError(f"{name} size mismatch")
     if seen_names != EXPECTED_EVALUATION_ARTIFACT_FILENAMES:
-        raise FeedbackDatasetEvaluationCardValidationError("manifest files must list canonical FDP-124 artifacts")
+        raise FeedbackDatasetEvaluationCardValidationError(
+            "manifest files must list canonical platform evaluation artifacts"
+        )
 
 
 def _validate_summary(summary: dict[str, Any]) -> None:
@@ -292,7 +295,7 @@ def _validate_summary(summary: dict[str, Any]) -> None:
     extra_missing = sorted(REQUIRED_SUMMARY_FIELDS - set(summary))
     if extra_missing:
         raise FeedbackDatasetEvaluationCardValidationError(f"evaluation summary missing required fields: {', '.join(extra_missing)}")
-    if summary.get("reportType") not in {EXPECTED_EVALUATION_REPORT_TYPE, LEGACY_READ_ONLY_REPORT_TYPE}:
+    if summary.get("reportType") != EXPECTED_EVALUATION_REPORT_TYPE:
         raise FeedbackDatasetEvaluationCardValidationError("evaluation summary reportType unsupported")
     _validate_evaluation_subject(summary.get("evaluationSubject"))
     if summary.get("metricsSubject") != METRICS_SUBJECT:

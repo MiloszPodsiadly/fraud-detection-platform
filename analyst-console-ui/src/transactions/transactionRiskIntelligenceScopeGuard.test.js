@@ -178,7 +178,7 @@ describe("transactionRiskIntelligenceScopeGuard", () => {
     }
   });
 
-  it("uses only the FDP-115 scored transaction detail read endpoint in the new client method", () => {
+  it("uses only the scored transaction detail read endpoint in the client method", () => {
     const clientMethod = scoredTransactionDetailClientSource();
 
     expect(clientMethod).toContain(scoredTransactionsEndpoint());

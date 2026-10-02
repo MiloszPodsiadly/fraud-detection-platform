@@ -25,7 +25,7 @@ class EngineIntelligenceNoApiUiExposureAfterProducerWiringTest {
 
     @Test
     void apiUiAndFeedbackWorkflowExposeEngineIntelligenceOnlyThroughApprovedSurfaces() throws Exception {
-        List<String> backendExposure = EngineIntelligenceFdp93SourceScanSupport.filesContainingAny(
+        List<String> backendExposure = EngineIntelligenceSourceScanSupport.filesContainingAny(
                 "alert-service/src/main/java/com/frauddetection/alert",
                 List.of("EngineIntelligenceSummary", "engineIntelligence", "engineResults",
                         "diagnosticSignals", "agreementStatus", "riskMismatchStatus", "scoreDeltaBucket",
@@ -39,12 +39,12 @@ class EngineIntelligenceNoApiUiExposureAfterProducerWiringTest {
         assertThat(backendExposure).isSubsetOf(
                 FDP115_SCORED_TRANSACTION_DETAIL_ALLOWED_BACKEND_FILES
         );
-        assertThat(EngineIntelligenceFdp93SourceScanSupport.filesContainingAny(
+        assertThat(EngineIntelligenceSourceScanSupport.filesContainingAny(
                 "analyst-console-ui/src",
                 List.of("engineIntelligence", "engineResults", "diagnosticSignals",
                         "agreementStatus", "riskMismatchStatus", "scoreDeltaBucket")
         )).isSubsetOf(
-                EngineIntelligenceFdp93SourceScanSupport.FDP97_ANALYST_CONSOLE_ENGINE_INTELLIGENCE_ALLOWED_FILES
+                EngineIntelligenceSourceScanSupport.ANALYST_CONSOLE_ENGINE_INTELLIGENCE_ALLOWED_FILES
         );
     }
 }

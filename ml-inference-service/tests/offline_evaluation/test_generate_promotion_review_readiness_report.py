@@ -56,8 +56,6 @@ OPENAPI_ROOT = ROOT / "docs" / "openapi"
 UI_ROOT = ROOT / "analyst-console-ui"
 CANONICAL_SHADOW_FIXTURE = ROOT / "deployment" / "local-fixtures" / "shadow-performance" / "current-summary.json"
 CANONICAL_SHADOW_FIXTURE_MANIFEST = CANONICAL_SHADOW_FIXTURE.with_name("manifest.json")
-HISTORICAL_SHADOW_FIXTURE = ROOT / "contract-fixtures" / "governance" / "shadow-performance-fdp123" / "current-summary.json"
-HISTORICAL_SHADOW_FIXTURE_MANIFEST = HISTORICAL_SHADOW_FIXTURE.with_name("manifest.json")
 
 
 class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
@@ -87,6 +85,28 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
             self.assertEqual(report, validate_promotion_review_readiness_report(report))
             self.assertEqual(64, len(report["checkInputs"]["sourceShadowSummaryManifestSha256"]))
             self.assertTrue(paths.output.with_name("manifest.json").exists())
+
+    def test_nonCanonicalEvaluationReportTypeIsRejectedEvenWhenFailureStateIsConsistent(self):
+        for value in (
+                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "UNKNOWN_PLATFORM_EVALUATION",
+                "ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1",
+                None,
+        ):
+            with self.subTest(value=value):
+                report = build_report()
+                report["checkInputs"]["evaluation"]["evaluationReportType"] = value
+                report["checks"][10]["status"] = "FAIL"
+                report["readinessStatus"] = "NOT_REVIEWABLE"
+                report["reasonCodes"] = ["EVALUATION_REPORT_TYPE_SUPPORTED_FAILED"]
+
+                with self.assertRaises(PromotionReviewReadinessValidationError):
+                    validate_promotion_review_readiness_report(report)
+
+        missing = build_report()
+        del missing["checkInputs"]["evaluation"]["evaluationReportType"]
+        with self.assertRaises(PromotionReviewReadinessValidationError):
+            validate_promotion_review_readiness_report(missing)
 
     def test_canonicalTimestampMatrixAcceptedByPromotionReadinessValidation(self):
         for value in VALID_CANONICAL_TIMESTAMPS:
@@ -161,33 +181,6 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
         self.assertEqual(summary_before, CANONICAL_SHADOW_FIXTURE.read_bytes())
         self.assertEqual(manifest_before, CANONICAL_SHADOW_FIXTURE_MANIFEST.read_bytes())
 
-    def test_historicalShadowFixtureGeneratesReadinessWithoutRewritingSource(self):
-        summary_before = HISTORICAL_SHADOW_FIXTURE.read_bytes()
-        manifest_before = HISTORICAL_SHADOW_FIXTURE_MANIFEST.read_bytes()
-        with tempfile.TemporaryDirectory() as tmp:
-            output = Path(tmp) / "promotion-readiness" / "promotion-review-readiness-report.json"
-
-            generate_promotion_review_readiness_report(
-                HISTORICAL_SHADOW_FIXTURE,
-                HISTORICAL_SHADOW_FIXTURE_MANIFEST,
-                output,
-                generated_at="2026-06-14T00:00:00Z",
-                allowed_output_root=output.parent,
-            )
-
-            report = validate_promotion_review_readiness_artifact_set(output, output.with_name("manifest.json"))
-            self.assertEqual(
-                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-                report["checkInputs"]["evaluation"]["evaluationReportType"],
-            )
-            self.assertEqual(
-                hashlib.sha256(manifest_before).hexdigest(),
-                report["checkInputs"]["sourceShadowSummaryManifestSha256"],
-            )
-
-        self.assertEqual(summary_before, HISTORICAL_SHADOW_FIXTURE.read_bytes())
-        self.assertEqual(manifest_before, HISTORICAL_SHADOW_FIXTURE_MANIFEST.read_bytes())
-
     def test_tamperedCanonicalShadowFixtureCopyDoesNotPublishPromotionReadinessArtifactSet(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -237,6 +230,33 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
             manifest_payload["files"][0]["sha256"] = "b" * 64
             manifest.write_text(json.dumps(manifest_payload, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
             self.assertPromotionArtifactRejected(paths.output, manifest, "sha256", paths.root)
+
+    def test_correctlyResealedManifestDoesNotRescueNonCanonicalEvaluationReportType(self):
+        with workspace() as paths:
+            report = generate(paths)
+            report["checkInputs"]["evaluation"]["evaluationReportType"] = "UNKNOWN_PLATFORM_EVALUATION"
+            report["checks"][10]["status"] = "FAIL"
+            report["readinessStatus"] = "NOT_REVIEWABLE"
+            report["reasonCodes"] = ["EVALUATION_REPORT_TYPE_SUPPORTED_FAILED"]
+            payload = json.dumps(report, sort_keys=True, separators=(",", ":")) + "\n"
+            paths.output.write_text(payload, encoding="utf-8", newline="\n")
+
+            manifest = paths.output.with_name("manifest.json")
+            manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
+            manifest_payload["files"][0]["sha256"] = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+            manifest_payload["files"][0]["sizeBytes"] = len(payload.encode("utf-8"))
+            manifest.write_text(
+                json.dumps(manifest_payload, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            self.assertPromotionArtifactRejected(
+                paths.output,
+                manifest,
+                "evaluationReportType",
+                paths.root,
+            )
 
     def test_promotionReadinessManifestSizeMismatchRejected(self):
         for value in (1, 1_000_000, -1, True):
@@ -695,7 +715,7 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
         )
 
     def test_sourceDoesNotIntroduceRuntimeOrDecisioningCreep(self):
-        source = fdp111_source()
+        source = promotion_readiness_source()
         for term in (
             "KafkaTemplate",
             "KafkaProducer",
@@ -733,17 +753,17 @@ class PromotionReviewReadinessReportGenerationTest(unittest.TestCase):
     def test_docsDescribeDiagnosticOnlyBoundary(self):
         doc = DOC.read_text(encoding="utf-8")
         for text in (
-            "FDP-111 is a diagnostic report only.",
-            "FDP-111 consumes existing bounded artifacts.",
-            "FDP-111 does not recompute metrics from raw data.",
-            "FDP-111 does not approve promotion.",
-            "FDP-111 does not recommend threshold changes.",
-            "FDP-111 does not change scoring.",
-            "FDP-111 does not authorize payments.",
-            "FDP-111 does not recommend analyst action.",
-            "FDP-111 does not add API, OpenAPI, UI, workflow, scheduler, or Kafka triggers.",
+            "Promotion Review Readiness is a diagnostic report only.",
+            "Promotion Review Readiness consumes existing bounded artifacts.",
+            "Promotion Review Readiness does not recompute metrics from raw data.",
+            "Promotion Review Readiness does not approve promotion.",
+            "Promotion Review Readiness does not recommend threshold changes.",
+            "Promotion Review Readiness does not change scoring.",
+            "Promotion Review Readiness does not authorize payments.",
+            "Promotion Review Readiness does not recommend analyst action.",
+            "Promotion Review Readiness does not add API, OpenAPI, UI, workflow, scheduler, or Kafka triggers.",
             "Minimum diagnostic evidence is a review sufficiency check, not a model threshold and not a promotion threshold.",
-            "FDP-111 v1 primarily consumes the FDP-109 generated Shadow Performance Summary artifact set.",
+            "Promotion Review Readiness v1 primarily consumes the generated Shadow Performance Summary artifact set.",
             "EVALUATION_CARD_VERSION_SUPPORTED",
             "This check validates that the consumed summary was derived from the current Platform Recommendation Evaluation Card contract.",
         ):
@@ -850,7 +870,7 @@ def generated_at():
     return "2026-06-14T00:00:00Z"
 
 
-def fdp111_source():
+def promotion_readiness_source():
     return "\n".join(path.read_text(encoding="utf-8") for path in (GENERATOR_SOURCE, SCHEMA_SOURCE))
 
 

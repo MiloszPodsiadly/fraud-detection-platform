@@ -35,8 +35,7 @@ class NoFakeClaimsDocumentationTest {
             "RUNTIME_REACHED_TEST_FIXTURE is RUNTIME_REACHED_PRODUCTION_IMAGE",
             "READY_FOR_ENABLEMENT_REVIEW means PRODUCTION_ENABLED",
             "recovery required is success",
-            "local evidence confirmation is external confirmation",
-            "FINALIZED_VISIBLE means externally confirmed"
+            "local evidence confirmation is external confirmation"
     );
 
     private static final List<String> ALLOWED_NEGATIVE_CONTEXT = List.of(

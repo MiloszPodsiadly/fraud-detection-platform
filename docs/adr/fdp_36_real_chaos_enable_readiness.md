@@ -44,7 +44,7 @@ FDP-36 changes are limited to:
 - architecture guards
 - documentation, proof matrix, and runbooks
 
-Runtime code remains clean. Executors, coordinators, domain handlers, transaction boundaries, public statuses, Kafka/outbox semantics, and FDP-29 production defaults must not change.
+Runtime code remains clean. Executors, coordinators, domain handlers, current-model routing, transaction boundaries, public statuses, and Kafka/outbox semantics must not change.
 
 ## Non-Goals
 
@@ -58,7 +58,7 @@ Runtime code remains clean. Executors, coordinators, domain handlers, transactio
 - no exactly-once Kafka guarantee
 - no legal/WORM/notarization guarantee
 - no KMS/HSM proof
-- no FDP-29 production-mode enablement
+- no alternate regulated mutation runtime or fallback
 - no runtime chaos hooks in executors, coordinators, or domain services
 
 ## Required Evidence
@@ -83,7 +83,7 @@ FDP-36 may claim real alert-service JVM/process kill-restart proof over selected
 
 ## Forbidden Claim
 
-FDP-36 must not claim production enabled, production certified, external finality, distributed ACID, distributed lock, exactly-once Kafka, WORM/legal notarization, runtime chaos hook requirement, automatic bank enablement, or FDP-29 auto-enabled behavior.
+FDP-36 must not claim production enabled, production certified, external finality, distributed ACID, distributed lock, exactly-once Kafka, WORM/legal notarization, runtime chaos hook requirement, automatic bank enablement, or alternate model enablement.
 
 ## Future FDP-37 Candidate: Full Alert-Service Image Container Chaos
 

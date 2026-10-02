@@ -47,9 +47,9 @@ class AlertServiceEngineIntelligenceProjectionFixtureTest {
     }
 
     @Test
-    void legacyV1EngineIntelligenceComparisonIsProjectedWithCanonicalIdentity() {
+    void currentEngineIntelligenceComparisonIsProjectedWithExplicitIdentity() {
         EngineIntelligenceProjection projection = project(
-                AlertServiceTransactionScoredEventFixtureLoader.legacyV1EngineIntelligence()
+                AlertServiceTransactionScoredEventFixtureLoader.minimalEngineIntelligence()
         );
 
         assertThat(projection.getEngineCount()).isEqualTo(2);

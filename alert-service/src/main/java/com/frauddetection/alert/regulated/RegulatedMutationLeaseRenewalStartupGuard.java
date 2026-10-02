@@ -91,7 +91,7 @@ public class RegulatedMutationLeaseRenewalStartupGuard implements ApplicationRun
 
     private void require(String setting, String required, boolean valid, String reason) {
         if (!valid) {
-            throw new IllegalStateException("FDP-33 bank/prod startup guard failed: setting="
+            throw new IllegalStateException("Regulated mutation lease renewal startup guard failed: setting="
                     + setting + "; required=" + required + "; reason=" + reason);
         }
     }

@@ -21,10 +21,16 @@ public class OutboxRecoveryController {
 
     private final OutboxRecoveryService service;
     private final SensitiveReadAuditService sensitiveReadAuditService;
+    private final TransactionalOutboxRuntimeReadiness runtimeReadiness;
 
-    public OutboxRecoveryController(OutboxRecoveryService service, SensitiveReadAuditService sensitiveReadAuditService) {
+    public OutboxRecoveryController(
+            OutboxRecoveryService service,
+            SensitiveReadAuditService sensitiveReadAuditService,
+            TransactionalOutboxRuntimeReadiness runtimeReadiness
+    ) {
         this.service = service;
         this.sensitiveReadAuditService = sensitiveReadAuditService;
+        this.runtimeReadiness = runtimeReadiness;
     }
 
     @GetMapping("/recovery/backlog")
@@ -43,6 +49,7 @@ public class OutboxRecoveryController {
 
     @PostMapping("/recovery/run")
     public OutboxRecoveryRunResponse recoverNow() {
+        runtimeReadiness.requireReady();
         return service.recoverNow();
     }
 
@@ -53,6 +60,12 @@ public class OutboxRecoveryController {
             @Valid @RequestBody OutboxConfirmationResolutionRequest request,
             Authentication authentication
     ) {
-        return OutboxRecordResponse.from(service.resolveConfirmation(eventId, request, authentication == null ? null : authentication.getName(), idempotencyKey));
+        runtimeReadiness.requireReady();
+        return service.resolveConfirmation(
+                eventId,
+                request,
+                authentication == null ? null : authentication.getName(),
+                idempotencyKey
+        );
     }
 }

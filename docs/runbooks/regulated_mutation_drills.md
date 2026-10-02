@@ -85,7 +85,7 @@ Full alert-service image container chaos is future scope.
 - no production certification claim
 - no external finality claim
 - no runtime chaos hooks in executors, coordinators, or domain services
-- no FDP-29 production-mode enablement
+- no alternate regulated mutation runtime or fallback
 
 `READY_FOR_ENABLEMENT_REVIEW` is not production enablement.
 

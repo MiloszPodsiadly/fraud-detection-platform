@@ -22,7 +22,6 @@ public final class AnalystAuthority {
     public static final String AUDIT_VERIFY = "audit:verify";
     public static final String AUDIT_EXPORT = "audit:export";
     public static final String AUDIT_DEGRADATION_RESOLVE = "audit-degradation:resolve";
-    public static final String DECISION_OUTBOX_RECONCILE = "decision-outbox:reconcile";
     public static final String REGULATED_MUTATION_RECOVER = "regulated-mutation:recover";
     public static final String OUTBOX_INSPECT = "outbox:inspect";
     public static final String OUTBOX_RECOVER = "outbox:recover";
@@ -52,7 +51,6 @@ public final class AnalystAuthority {
             AUDIT_VERIFY,
             AUDIT_EXPORT,
             AUDIT_DEGRADATION_RESOLVE,
-            DECISION_OUTBOX_RECONCILE,
             REGULATED_MUTATION_RECOVER,
             OUTBOX_INSPECT,
             OUTBOX_RECOVER,

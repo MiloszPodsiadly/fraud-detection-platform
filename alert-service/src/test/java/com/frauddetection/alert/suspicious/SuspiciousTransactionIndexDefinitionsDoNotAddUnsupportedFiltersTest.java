@@ -23,7 +23,7 @@ class SuspiciousTransactionIndexDefinitionsDoNotAddUnsupportedFiltersTest {
     );
 
     @Test
-    void indexDefinitionsStayLimitedToFdp62CursorAccessPatterns() {
+    void indexDefinitionsStayLimitedToCursorAccessPatterns() {
         indexesByName().keySet().forEach(indexName ->
                 assertThat(keys(indexName).keySet())
                         .as(indexName)

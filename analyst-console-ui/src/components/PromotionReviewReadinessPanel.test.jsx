@@ -175,7 +175,7 @@ describe("PromotionReviewReadinessPanel", () => {
     expect(container.textContent).not.toMatch(/C:\/Users|secret|stacktrace|token|raw artifact/i);
   });
 
-  it("does not expose raw FDP artifact data or entity identifiers", () => {
+  it("does not expose raw governance artifact data or entity identifiers", () => {
     const { container } = renderPanel({
       report: report({
         fdp102: "raw FDP-102 data",

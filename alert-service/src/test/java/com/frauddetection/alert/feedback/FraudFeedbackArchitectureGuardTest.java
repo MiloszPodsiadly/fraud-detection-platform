@@ -147,10 +147,11 @@ class FraudFeedbackArchitectureGuardTest {
     }
 
     @Test
-    void fdp122DoesNotExposeOutboxOrDatasetPublicApiOrRuntimeExport() throws IOException {
-        String fdp122Main = source(FEEDBACK_MAIN, path -> true) + source(AUDIT_OUTBOX_MAIN, path -> true);
+    void feedbackDoesNotExposeOutboxOrDatasetPublicApiOrRuntimeExport() throws IOException {
+        String feedbackAndAuditOutboxSources = source(FEEDBACK_MAIN, path -> true)
+                + source(AUDIT_OUTBOX_MAIN, path -> true);
 
-        assertThat(fdp122Main)
+        assertThat(feedbackAndAuditOutboxSources)
                 .doesNotContain("WriteActionAuditOutboxController")
                 .doesNotContain("FeedbackDatasetController")
                 .doesNotContain("FraudFeedbackDatasetController")

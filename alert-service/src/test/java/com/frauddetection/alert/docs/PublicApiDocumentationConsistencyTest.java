@@ -22,9 +22,21 @@ class PublicApiDocumentationConsistencyTest {
             "HTTP",
             "WORM",
             "ACID",
+            "EVIDENCE_GATED_FINALIZE_V1",
             "FRAUD_CASE_VALIDATION_FAILED",
             "MISSING_IDEMPOTENCY_KEY"
     );
+
+    @Test
+    void alertServiceOpenApiUsesSemanticVersionAndCurrentDomainLanguage() throws Exception {
+        String openApi = Files.readString(
+                DocumentationTestSupport.docsRoot().resolve("openapi/alert_service.openapi.yaml")
+        );
+
+        assertThat(openApi)
+                .contains("version: \"1.0.0\"")
+                .doesNotContainPattern("\\bFDP-\\d+\\b");
+    }
 
     @Test
     void publicStatusDocsCoverEverySubmitDecisionOperationStatus() throws Exception {
@@ -106,9 +118,7 @@ class PublicApiDocumentationConsistencyTest {
                 .contains("Local evidence is not external finality")
                 .contains("not success")
                 .contains("not distributed exactly-once")
-                .contains("not proof of business correctness")
-                .contains("FINALIZED_VISIBLE is a compatibility-visible status")
-                .contains("FINALIZED_VISIBLE is not external confirmation");
+                .contains("not proof of business correctness");
 
         assertThat(combined.toLowerCase())
                 .doesNotContain("local committed == external finality")

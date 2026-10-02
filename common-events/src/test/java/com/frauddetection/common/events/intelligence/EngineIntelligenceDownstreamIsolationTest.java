@@ -42,11 +42,11 @@ class EngineIntelligenceDownstreamIsolationTest {
         Path controllers = root.resolve("alert-service/src/main/java/com/frauddetection/alert/controller");
         assertThat(sourcesExcluding(controllers, controllers.resolve("ScoredTransactionController.java")))
                 .doesNotContain("EngineIntelligenceSummary", "engineIntelligence");
-        assertThat(EngineIntelligenceFdp93SourceScanSupport.filesContainingAny(
+        assertThat(EngineIntelligenceSourceScanSupport.filesContainingAny(
                 "analyst-console-ui/src",
                 List.of("engineIntelligence")
         )).isSubsetOf(
-                EngineIntelligenceFdp93SourceScanSupport.FDP97_ANALYST_CONSOLE_ENGINE_INTELLIGENCE_ALLOWED_FILES
+                EngineIntelligenceSourceScanSupport.ANALYST_CONSOLE_ENGINE_INTELLIGENCE_ALLOWED_FILES
         );
     }
 

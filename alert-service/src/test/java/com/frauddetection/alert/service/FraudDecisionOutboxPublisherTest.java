@@ -3,7 +3,11 @@ package com.frauddetection.alert.service;
 import com.frauddetection.alert.messaging.FraudDecisionEventPublisher;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
+import com.frauddetection.alert.outbox.OutboxOperationalControls;
+import com.frauddetection.alert.outbox.OutboxPublisherCoordinator;
+import com.frauddetection.alert.outbox.OutboxPublicationConfirmationProvenance;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
+import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.common.events.contract.FraudDecisionEvent;
@@ -30,6 +34,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @Tag("failure-injection")
@@ -37,12 +42,28 @@ import static org.mockito.Mockito.when;
 class FraudDecisionOutboxPublisherTest {
 
     @Test
+    void shouldNotPublishScheduledOrDirectlyWhenPublisherIsDisabled() {
+        OutboxPublisherCoordinator coordinator = mock(OutboxPublisherCoordinator.class);
+        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(
+                coordinator,
+                readyReadiness(),
+                new OutboxOperationalControls(false, true)
+        );
+
+        outboxPublisher.publishPending();
+        int published = outboxPublisher.publishPending(100);
+
+        assertThat(published).isZero();
+        verifyNoInteractions(coordinator);
+    }
+
+    @Test
     void shouldPublishPendingOutboxEventAndMarkPublished() {
         AlertRepository repository = mock(AlertRepository.class);
         FraudDecisionEventPublisher publisher = mock(FraudDecisionEventPublisher.class);
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5);
+        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5, readyReadiness());
         TransactionalOutboxRecordDocument document = pendingOutboxRecord();
         document.setStatus(TransactionalOutboxStatus.PROCESSING);
         document.setAttempts(1);
@@ -57,9 +78,15 @@ class FraudDecisionOutboxPublisherTest {
         int published = outboxPublisher.publishPending(100);
 
         assertThat(published).isEqualTo(1);
+        assertThat(document.getPublicationConfirmationProvenance())
+                .isEqualTo(OutboxPublicationConfirmationProvenance.BROKER_ACKNOWLEDGED);
         verify(publisher).publish(document.getPayload());
-        verify(mongoTemplate, times(2)).updateFirst(any(Query.class), any(Update.class), eq(TransactionalOutboxRecordDocument.class));
-        verify(mongoTemplate).updateFirst(any(Query.class), any(Update.class), eq(AlertDocument.class));
+        verify(mongoTemplate, times(3)).updateFirst(any(Query.class), any(Update.class), eq(TransactionalOutboxRecordDocument.class));
+        org.mockito.ArgumentCaptor<Update> alertUpdate = org.mockito.ArgumentCaptor.forClass(Update.class);
+        verify(mongoTemplate).updateFirst(any(Query.class), alertUpdate.capture(), eq(AlertDocument.class));
+        org.bson.Document projectionSet = alertUpdate.getValue().getUpdateObject().get("$set", org.bson.Document.class);
+        assertThat(projectionSet.getString("decisionOutboxPublicationConfirmationProvenance"))
+                .isEqualTo("BROKER_ACKNOWLEDGED");
     }
 
     @Test
@@ -68,7 +95,7 @@ class FraudDecisionOutboxPublisherTest {
         FraudDecisionEventPublisher publisher = mock(FraudDecisionEventPublisher.class);
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5);
+        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5, readyReadiness());
         TransactionalOutboxRecordDocument document = pendingOutboxRecord();
         document.setStatus(TransactionalOutboxStatus.PROCESSING);
         document.setAttempts(1);
@@ -85,10 +112,10 @@ class FraudDecisionOutboxPublisherTest {
 
         assertThat(published).isZero();
         assertThat(document.getAttempts()).isEqualTo(1);
-        verify(mongoTemplate, times(2)).updateFirst(any(Query.class), any(Update.class), eq(TransactionalOutboxRecordDocument.class));
+        verify(mongoTemplate, times(3)).updateFirst(any(Query.class), any(Update.class), eq(TransactionalOutboxRecordDocument.class));
         verify(mongoTemplate).updateFirst(any(Query.class), any(Update.class), eq(AlertDocument.class));
         org.mockito.ArgumentCaptor<Update> updateCaptor = org.mockito.ArgumentCaptor.forClass(Update.class);
-        verify(mongoTemplate, times(2)).updateFirst(any(Query.class), updateCaptor.capture(), eq(TransactionalOutboxRecordDocument.class));
+        verify(mongoTemplate, times(3)).updateFirst(any(Query.class), updateCaptor.capture(), eq(TransactionalOutboxRecordDocument.class));
         org.bson.Document setDocument = (org.bson.Document) updateCaptor.getAllValues().get(1).getUpdateObject().get("$set");
         assertThat(setDocument.get("status")).isEqualTo(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
         assertThat(setDocument.get("status")).isNotEqualTo(TransactionalOutboxStatus.PUBLISHED);
@@ -100,7 +127,7 @@ class FraudDecisionOutboxPublisherTest {
         FraudDecisionEventPublisher publisher = mock(FraudDecisionEventPublisher.class);
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5);
+        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5, readyReadiness());
         TransactionalOutboxRecordDocument document = pendingOutboxRecord();
         document.setStatus(TransactionalOutboxStatus.PROCESSING);
         document.setAttempts(1);
@@ -120,7 +147,7 @@ class FraudDecisionOutboxPublisherTest {
         verify(publisher).publish(document.getPayload());
         verify(metrics).recordDecisionOutboxPublishConfirmationFailed();
         org.mockito.ArgumentCaptor<Update> updateCaptor = org.mockito.ArgumentCaptor.forClass(Update.class);
-        verify(mongoTemplate, times(3)).updateFirst(any(Query.class), updateCaptor.capture(), eq(TransactionalOutboxRecordDocument.class));
+        verify(mongoTemplate, times(4)).updateFirst(any(Query.class), updateCaptor.capture(), eq(TransactionalOutboxRecordDocument.class));
         org.bson.Document setDocument = (org.bson.Document) updateCaptor.getAllValues().get(2).getUpdateObject().get("$set");
         assertThat(setDocument.get("status")).isEqualTo(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
     }
@@ -131,7 +158,7 @@ class FraudDecisionOutboxPublisherTest {
         FraudDecisionEventPublisher publisher = mock(FraudDecisionEventPublisher.class);
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5);
+        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5, readyReadiness());
         TransactionalOutboxRecordDocument document = pendingOutboxRecord();
         document.setStatus(TransactionalOutboxStatus.PROCESSING);
         document.setAttempts(1);
@@ -159,7 +186,7 @@ class FraudDecisionOutboxPublisherTest {
         FraudDecisionEventPublisher publisher = mock(FraudDecisionEventPublisher.class);
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5);
+        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5, readyReadiness());
         TransactionalOutboxRecordDocument document = pendingOutboxRecord();
         document.setPayload(null);
         document.setStatus(TransactionalOutboxStatus.PROCESSING);
@@ -177,8 +204,8 @@ class FraudDecisionOutboxPublisherTest {
         assertThat(published).isZero();
         verify(publisher, never()).publish(any(FraudDecisionEvent.class));
         org.mockito.ArgumentCaptor<Update> updateCaptor = org.mockito.ArgumentCaptor.forClass(Update.class);
-        verify(mongoTemplate).updateFirst(any(Query.class), updateCaptor.capture(), eq(TransactionalOutboxRecordDocument.class));
-        org.bson.Document setDocument = (org.bson.Document) updateCaptor.getValue().getUpdateObject().get("$set");
+        verify(mongoTemplate, times(2)).updateFirst(any(Query.class), updateCaptor.capture(), eq(TransactionalOutboxRecordDocument.class));
+        org.bson.Document setDocument = (org.bson.Document) updateCaptor.getAllValues().get(0).getUpdateObject().get("$set");
         assertThat(setDocument.get("status")).isEqualTo(TransactionalOutboxStatus.FAILED_TERMINAL);
         assertThat(setDocument.get("last_error")).isEqualTo("MISSING_PAYLOAD");
     }
@@ -189,7 +216,7 @@ class FraudDecisionOutboxPublisherTest {
         FraudDecisionEventPublisher publisher = mock(FraudDecisionEventPublisher.class);
         MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
-        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5);
+        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(repository, publisher, mongoTemplate, metrics, Duration.ofMinutes(1), 5, readyReadiness());
         when(mongoTemplate.findAndModify(any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(TransactionalOutboxRecordDocument.class)))
                 .thenReturn(null);
 
@@ -199,6 +226,13 @@ class FraudDecisionOutboxPublisherTest {
         verify(publisher, never()).publish(any(FraudDecisionEvent.class));
         verify(mongoTemplate, never()).updateFirst(any(Query.class), any(Update.class), eq(TransactionalOutboxRecordDocument.class));
         verify(mongoTemplate, never()).updateFirst(any(Query.class), any(Update.class), eq(AlertDocument.class));
+    }
+
+    private TransactionalOutboxRuntimeReadiness readyReadiness() {
+        TransactionalOutboxRuntimeReadiness readiness = new TransactionalOutboxRuntimeReadiness();
+        readiness.markPreflightPassed();
+        readiness.onApplicationEvent(mock(org.springframework.boot.context.event.ApplicationReadyEvent.class));
+        return readiness;
     }
 
     private TransactionalOutboxRecordDocument pendingOutboxRecord() {

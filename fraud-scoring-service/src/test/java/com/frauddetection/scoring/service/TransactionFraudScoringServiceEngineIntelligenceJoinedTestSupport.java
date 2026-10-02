@@ -8,11 +8,13 @@ import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparison;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceEngineResult;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.EngineIntelligenceEmissionProperties;
 import com.frauddetection.scoring.config.ScoringMode;
@@ -132,10 +134,17 @@ final class TransactionFraudScoringServiceEngineIntelligenceJoinedTestSupport {
                                 FraudEngineStatus.AVAILABLE,
                                 RiskLevel.LOW,
                                 EngineIntelligenceScoreBucket.LOW,
-                                List.of("LOW_MODEL_RISK")
+                                List.of("LOW_MODEL_RISK"),
+                                new MlModelIdentity(
+                                        "python-logistic-fraud-model",
+                                        "model-X",
+                                        "feature-contract-v2"
+                                )
                         )
                 ),
                 new EngineIntelligenceComparison(
+                        EngineIntelligenceComparisonType.RULES_VS_ML,
+                        List.of("rules.primary", "ml.python.primary"),
                         EngineIntelligenceAgreementStatus.DISAGREEMENT,
                         EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH,
                         EngineIntelligenceScoreDeltaBucket.LARGE
@@ -168,6 +177,8 @@ final class TransactionFraudScoringServiceEngineIntelligenceJoinedTestSupport {
                         )
                 ),
                 new EngineIntelligenceComparison(
+                        EngineIntelligenceComparisonType.RULES_VS_ML,
+                        List.of("rules.primary", "ml.python.primary"),
                         EngineIntelligenceAgreementStatus.PARTIAL,
                         EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                         EngineIntelligenceScoreDeltaBucket.UNAVAILABLE

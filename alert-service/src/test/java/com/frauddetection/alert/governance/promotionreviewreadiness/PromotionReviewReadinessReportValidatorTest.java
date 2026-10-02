@@ -26,6 +26,20 @@ class PromotionReviewReadinessReportValidatorTest {
     }
 
     @Test
+    void rejectsNonCanonicalEvaluationReportTypeEvenWhenFailureStateIsConsistent() {
+        for (String reportType : java.util.Arrays.asList(
+                "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                "UNKNOWN_PLATFORM_EVALUATION",
+                "ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1",
+                null
+        )) {
+            assertThatThrownBy(() -> validator.validate(withEvaluationReportType(reportType)))
+                    .isInstanceOf(PromotionReviewReadinessReportValidationException.class)
+                    .hasMessage("checkInputs.evaluation.evaluationReportType is unsupported");
+        }
+    }
+
+    @Test
     void acceptsCanonicalTimestampPrecision() {
         for (String generatedAt : validCanonicalTimestamps()) {
             assertThatCode(() -> validator.validate(withAllTimestamps(generatedAt)))
@@ -114,6 +128,33 @@ class PromotionReviewReadinessReportValidatorTest {
             List<PromotionReviewReadinessReport.PromotionReviewReadinessCheck> checks
     ) {
         return report(source, source.readinessStatus(), source.inputs(), source.checkInputs(), checks, source.reasonCodes());
+    }
+
+    private PromotionReviewReadinessReport withEvaluationReportType(String reportType) {
+        PromotionReviewReadinessReport source = PromotionReviewReadinessReportTestFixtures.validReport();
+        PromotionReviewReadinessReport.PromotionReviewReadinessCheckInputs checkInputs =
+                new PromotionReviewReadinessReport.PromotionReviewReadinessCheckInputs(
+                        source.checkInputs().sourceShadowSummaryManifestSha256(),
+                        source.checkInputs().shadowPerformanceSummary(),
+                        source.checkInputs().governance(),
+                        new PromotionReviewReadinessReport.PromotionReadinessEvaluationCheckInput(
+                                source.checkInputs().evaluation().evaluationCardType(),
+                                source.checkInputs().evaluation().evaluationCardVersion(),
+                                reportType
+                        ),
+                        source.checkInputs().metricBasis(),
+                        source.checkInputs().minimumDiagnosticEvidenceRecords(),
+                        source.checkInputs().recordsEvaluated(),
+                        source.checkInputs().metrics()
+                );
+        return report(
+                source,
+                "NOT_REVIEWABLE",
+                source.inputs(),
+                checkInputs,
+                replaceCheckStatus(source.checks(), 10, "FAIL"),
+                List.of("EVALUATION_REPORT_TYPE_SUPPORTED_FAILED")
+        );
     }
 
     private PromotionReviewReadinessReport withGeneratedAt(String generatedAt) {

@@ -104,6 +104,41 @@ class EngineIntelligenceReadModelMapperTest {
     }
 
     @Test
+    void availableMlProjectionWithoutModelIdentityFailsClosed() {
+        EngineIntelligenceProjection source = fullProjection();
+        EngineIntelligenceEngineProjection ml = source.getEngines().get(1);
+        EngineIntelligenceProjection identityFree = new EngineIntelligenceProjection(
+                source.getTransactionId(),
+                source.getContractVersion(),
+                source.getGeneratedAt(),
+                source.getComparisonType(),
+                source.getComparedEngineIds(),
+                source.getComparisonStatus(),
+                source.getRiskMismatchStatus(),
+                source.getScoreDeltaBucket(),
+                List.of(
+                        source.getEngines().getFirst(),
+                        new EngineIntelligenceEngineProjection(
+                                ml.engineId(),
+                                ml.engineType(),
+                                FraudEngineStatus.AVAILABLE,
+                                com.frauddetection.common.events.enums.RiskLevel.HIGH,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("MODEL_HIGH_RISK")
+                        )
+                ),
+                source.getDiagnosticSignals(),
+                source.getWarnings(),
+                source.getCreatedAt(),
+                source.getUpdatedAt()
+        );
+
+        assertThatThrownBy(() -> mapper.map(identityFree))
+                .isInstanceOf(EngineIntelligenceProjectionReadUnavailableException.class)
+                .hasMessage("Engine intelligence projection is temporarily unavailable.");
+    }
+
+    @Test
     void unavailableEngineHasRiskLevelNull() {
         var unavailableEngine = mapper.map(projectionWithStatus(FraudEngineStatus.UNAVAILABLE)).engines().get(1);
 
@@ -158,6 +193,8 @@ class EngineIntelligenceReadModelMapperTest {
                 "txn-oversized",
                 1,
                 now,
+                EngineIntelligenceComparisonType.RULES_VS_ML,
+                List.of("rules.primary", "ml.python.primary"),
                 EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
                 EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                 EngineIntelligenceScoreDeltaBucket.UNAVAILABLE,
@@ -275,6 +312,8 @@ class EngineIntelligenceReadModelMapperTest {
                 "txn-fdp96-operational",
                 1,
                 now,
+                EngineIntelligenceComparisonType.RULES_VS_ML,
+                List.of("rules.primary", "ml.python.primary"),
                 EngineIntelligenceAgreementStatus.PARTIAL,
                 EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                 EngineIntelligenceScoreDeltaBucket.UNAVAILABLE,
@@ -335,6 +374,8 @@ class EngineIntelligenceReadModelMapperTest {
                 "txn-corrupted",
                 1,
                 now,
+                null,
+                null,
                 EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
                 EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                 EngineIntelligenceScoreDeltaBucket.UNAVAILABLE,
@@ -381,6 +422,8 @@ class EngineIntelligenceReadModelMapperTest {
                 "txn-corrupted-available-bucket",
                 1,
                 now,
+                EngineIntelligenceComparisonType.RULES_VS_ML,
+                List.of("rules.primary", "ml.python.primary"),
                 EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
                 EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                 EngineIntelligenceScoreDeltaBucket.UNAVAILABLE,

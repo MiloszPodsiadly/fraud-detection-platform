@@ -183,7 +183,7 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
     }
 
     @Test
-    void broadRouteMatchersRequireExplicitFdp49ReviewAllowlist() {
+    void broadRouteMatchersRequireExplicitSecurityReviewAllowlist() {
         assertThat(SecurityRuleSource.discoveredAuthorizationRuleGroups()
                 .stream()
                 .filter(group -> !"DenyByDefaultAuthorizationRules".equals(group))
@@ -192,7 +192,7 @@ class AuthorizationRulesCoverageTest extends AbstractSecurityRouteBoundaryWebMvc
                         .map(matcher -> new BroadRouteMatcher(group, matcher)))
                 .filter(matcher -> !BROAD_ROUTE_MATCHER_ALLOWLIST.containsKey(matcher.group() + ":" + matcher.matcher()))
                 .map(matcher -> "Broad route matcher " + matcher.matcher() + " in " + matcher.group()
-                        + " requires explicit FDP-49 review and allowlist justification.")
+                        + " requires explicit security review and allowlist justification.")
                 .toList())
                 .isEmpty();
     }

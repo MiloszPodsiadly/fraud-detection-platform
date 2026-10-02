@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class EngineIntelligenceAlertServiceProjectionDocsTest {
 
     @Test
-    void docsExplainFdp95ProjectionScopeAndNonGoals() throws Exception {
+    void docsExplainProjectionScopeAndNonGoals() throws Exception {
         assertThat(readDocs()).contains(
                 "## Purpose",
                 "## Scope",
@@ -82,7 +82,7 @@ class EngineIntelligenceAlertServiceProjectionDocsTest {
     }
 
     @Test
-    void historicalFdp96GateRemainsAsCurrentReadModelChecklist() throws Exception {
+    void historicalApiGateRemainsAsCurrentReadModelChecklist() throws Exception {
         assertThat(readDocs()).contains(
                 "Historical FDP-95 required separate FDP-96/FDP-97 review before API/UI exposure.",
                 "That gate has been superseded by the",

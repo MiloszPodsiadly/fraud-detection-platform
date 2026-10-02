@@ -3,6 +3,7 @@ package com.frauddetection.alert.regulated;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditResourceType;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DuplicateKeyException;
 
 import java.time.Instant;
 import java.util.List;
@@ -22,112 +23,100 @@ import static org.mockito.Mockito.when;
 class MongoRegulatedMutationCoordinatorRoutingTest {
 
     @Test
-    void newCommandWithNullModelVersionRoutesToLegacyExecutor() {
-        RegulatedMutationExecutor legacy = executor(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                "legacy"
-        );
-        Fixture fixture = new Fixture(legacy);
+    void newCommandWithNullModelVersionFailsBeforePersistence() {
+        Fixture fixture = new Fixture(currentExecutor("current"));
+        AtomicInteger businessWrites = new AtomicInteger();
+
+        assertThatThrownBy(() -> fixture.coordinator.commit(command(
+                        null,
+                        AuditAction.SUBMIT_ANALYST_DECISION,
+                        AuditResourceType.ALERT,
+                        businessWrites
+                )))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("explicit model version EVIDENCE_GATED_FINALIZE_V1");
+
+        assertThat(businessWrites).hasValue(0);
+        verify(fixture.commandRepository, never()).findByIdempotencyKey(anyString());
+        verify(fixture.commandRepository, never()).save(any());
+    }
+
+    @Test
+    void unsupportedActionResourcePairFailsBeforePersistence() {
+        Fixture fixture = new Fixture(currentExecutor("current"));
+        AtomicInteger businessWrites = new AtomicInteger();
+
+        assertThatThrownBy(() -> fixture.coordinator.commit(command(
+                        RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                        AuditAction.SUBMIT_ANALYST_DECISION,
+                        AuditResourceType.FRAUD_CASE,
+                        businessWrites
+                )))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Unsupported regulated mutation action/resource")
+                .hasMessageContaining("SUBMIT_ANALYST_DECISION/FRAUD_CASE");
+
+        assertThat(businessWrites).hasValue(0);
+        verify(fixture.commandRepository, never()).findByIdempotencyKey(anyString());
+        verify(fixture.commandRepository, never()).save(any());
+    }
+
+    @Test
+    void currentModelRoutesToCurrentExecutorAndPersistsExplicitVersion() {
+        RegulatedMutationExecutor current = currentExecutor("current");
+        Fixture fixture = new Fixture(current);
         fixture.noExistingCommand();
         AtomicInteger businessWrites = new AtomicInteger();
 
         RegulatedMutationResult<String> result = fixture.coordinator.commit(command(
-                null,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                 AuditAction.SUBMIT_ANALYST_DECISION,
                 AuditResourceType.ALERT,
                 businessWrites
         ));
 
-        assertThat(result.response()).isEqualTo("legacy");
+        assertThat(result.response()).isEqualTo("current");
         assertThat(businessWrites).hasValue(0);
-        verify(legacy).execute(any(), eq("idem-1"), any());
-        assertThat(fixture.saved.getMutationModelVersion()).isNull();
-        assertThat(fixture.saved.mutationModelVersionOrLegacy())
-                .isEqualTo(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
-    }
-
-    @Test
-    void existingCommandWithNullModelVersionRoutesToLegacyExecutor() {
-        RegulatedMutationExecutor legacy = executor(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                "legacy"
-        );
-        Fixture fixture = new Fixture(legacy);
-        fixture.existingCommand(commandDocument(null, AuditAction.UPDATE_FRAUD_CASE, AuditResourceType.FRAUD_CASE));
-        AtomicInteger businessWrites = new AtomicInteger();
-
-        RegulatedMutationResult<String> result = fixture.coordinator.commit(command(
-                null,
-                AuditAction.UPDATE_FRAUD_CASE,
-                AuditResourceType.FRAUD_CASE,
-                businessWrites
-        ));
-
-        assertThat(result.response()).isEqualTo("legacy");
-        assertThat(businessWrites).hasValue(0);
-        verify(legacy).execute(any(), eq("idem-1"), any());
-    }
-
-    @Test
-    void explicitLegacyModelVersionRoutesToLegacyExecutor() {
-        RegulatedMutationExecutor legacy = executor(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                "legacy"
-        );
-        Fixture fixture = new Fixture(legacy);
-        fixture.noExistingCommand();
-        AtomicInteger businessWrites = new AtomicInteger();
-
-        RegulatedMutationResult<String> result = fixture.coordinator.commit(command(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                AuditAction.SUBMIT_ANALYST_DECISION,
-                AuditResourceType.ALERT,
-                businessWrites
-        ));
-
-        assertThat(result.response()).isEqualTo("legacy");
-        assertThat(businessWrites).hasValue(0);
-        verify(legacy).execute(any(), eq("idem-1"), any());
+        verify(current).execute(any(), eq("idem-1"), any());
         assertThat(fixture.saved.getMutationModelVersion())
-                .isEqualTo(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
+                .isEqualTo(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
     }
 
     @Test
-    void evidenceGatedModelRoutesToEvidenceGatedExecutor() {
-        RegulatedMutationExecutor legacy = executor(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                "legacy"
-        );
-        RegulatedMutationExecutor evidence = executor(
+    void differentKeyCannotClaimAnExistingResourceAction() {
+        RegulatedMutationExecutor current = currentExecutor("current");
+        Fixture fixture = new Fixture(current);
+        RegulatedMutationCommandDocument existing = commandDocument(
                 RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
-                "evidence"
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT
         );
-        Fixture fixture = new Fixture(legacy, evidence);
+        existing.setIdempotencyKey("idem-existing");
         fixture.noExistingCommand();
-        AtomicInteger businessWrites = new AtomicInteger();
+        when(fixture.commandRepository.save(any(RegulatedMutationCommandDocument.class)))
+                .thenThrow(new DuplicateKeyException("single resource action"));
+        when(fixture.commandRepository.findByResourceIdAndResourceTypeAndActionAndDecisionSlotClaimedTrue(
+                "resource-1",
+                AuditResourceType.ALERT.name(),
+                AuditAction.SUBMIT_ANALYST_DECISION.name()
+        )).thenReturn(Optional.of(existing));
 
-        RegulatedMutationResult<String> result = fixture.coordinator.commit(command(
+        assertThatThrownBy(() -> fixture.coordinator.commit(command(
                 RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                 AuditAction.SUBMIT_ANALYST_DECISION,
                 AuditResourceType.ALERT,
-                businessWrites
-        ));
+                new AtomicInteger()
+        ))).isInstanceOf(ConflictingResourceMutationException.class);
 
-        assertThat(result.response()).isEqualTo("evidence");
-        assertThat(businessWrites).hasValue(0);
-        verify(evidence).execute(any(), eq("idem-1"), any());
-        verify(legacy, never()).execute(any(), anyString(), any());
+        verify(current, never()).execute(any(), anyString(), any());
     }
 
     @Test
-    void unsupportedEvidenceGatedModelDoesNotDowngradeToLegacyExecutor() {
-        RegulatedMutationExecutor legacy = executor(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                "legacy"
-        );
-        Fixture fixture = new Fixture(legacy);
+    void existingCommandWithMissingModelCannotBeClaimedByCurrentRequest() {
+        RegulatedMutationExecutor current = currentExecutor("current");
+        Fixture fixture = new Fixture(current);
         fixture.existingCommand(commandDocument(
-                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                null,
                 AuditAction.SUBMIT_ANALYST_DECISION,
                 AuditResourceType.ALERT
         ));
@@ -140,24 +129,18 @@ class MongoRegulatedMutationCoordinatorRoutingTest {
                         businessWrites
                 )))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("EVIDENCE_GATED_FINALIZE_V1");
+                .hasMessageContaining("model version");
 
         assertThat(businessWrites).hasValue(0);
-        verify(legacy, never()).execute(any(), anyString(), any());
+        verify(current, never()).execute(any(), anyString(), any());
+        verify(fixture.commandRepository, never()).save(any());
     }
 
     @Test
-    void unsupportedActionResourcePairFailsBeforeExecutorExecution() {
-        RegulatedMutationExecutor legacy = executor(
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                "legacy"
-        );
-        RegulatedMutationExecutor evidence = executor(
-                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
-                "evidence"
-        );
-        when(evidence.supports(AuditAction.UPDATE_FRAUD_CASE, AuditResourceType.FRAUD_CASE)).thenReturn(false);
-        Fixture fixture = new Fixture(legacy, evidence);
+    void executorSupportMismatchFailsBeforeExecution() {
+        RegulatedMutationExecutor current = currentExecutor("current");
+        when(current.supports(AuditAction.UPDATE_FRAUD_CASE, AuditResourceType.FRAUD_CASE)).thenReturn(false);
+        Fixture fixture = new Fixture(current);
         fixture.existingCommand(commandDocument(
                 RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                 AuditAction.UPDATE_FRAUD_CASE,
@@ -176,8 +159,7 @@ class MongoRegulatedMutationCoordinatorRoutingTest {
                 .hasMessageContaining("UPDATE_FRAUD_CASE/FRAUD_CASE");
 
         assertThat(businessWrites).hasValue(0);
-        verify(evidence, never()).execute(any(), anyString(), any());
-        verify(legacy, never()).execute(any(), anyString(), any());
+        verify(current, never()).execute(any(), anyString(), any());
     }
 
     private RegulatedMutationCommand<String, String> command(
@@ -226,6 +208,7 @@ class MongoRegulatedMutationCoordinatorRoutingTest {
         document.setIntentAction(action.name());
         document.setIntentActorId("principal-7");
         document.setMutationModelVersion(modelVersion);
+        document.setRevision(0L);
         document.setState(RegulatedMutationState.REQUESTED);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.NEW);
         document.setCreatedAt(Instant.parse("2026-05-01T00:00:00Z"));
@@ -234,9 +217,9 @@ class MongoRegulatedMutationCoordinatorRoutingTest {
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
-    private RegulatedMutationExecutor executor(RegulatedMutationModelVersion modelVersion, String response) {
+    private RegulatedMutationExecutor currentExecutor(String response) {
         RegulatedMutationExecutor executor = mock(RegulatedMutationExecutor.class);
-        when(executor.modelVersion()).thenReturn(modelVersion);
+        when(executor.modelVersion()).thenReturn(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
         when(executor.supports(any(), any())).thenReturn(true);
         when(executor.execute(any(RegulatedMutationCommand.class), anyString(), any(RegulatedMutationCommandDocument.class)))
                 .thenReturn(new RegulatedMutationResult<>(RegulatedMutationState.REQUESTED, response));
@@ -248,10 +231,10 @@ class MongoRegulatedMutationCoordinatorRoutingTest {
         private final MongoRegulatedMutationCoordinator coordinator;
         private RegulatedMutationCommandDocument saved;
 
-        private Fixture(RegulatedMutationExecutor... executors) {
+        private Fixture(RegulatedMutationExecutor executor) {
             this.coordinator = new MongoRegulatedMutationCoordinator(
                     commandRepository,
-                    new RegulatedMutationExecutorRegistry(List.of(executors), false)
+                    new RegulatedMutationExecutorRegistry(List.of(executor))
             );
             when(commandRepository.save(any(RegulatedMutationCommandDocument.class))).thenAnswer(invocation -> {
                 saved = invocation.getArgument(0);

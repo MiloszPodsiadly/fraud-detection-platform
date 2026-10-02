@@ -55,33 +55,12 @@ public class RegulatedMutationCheckpointRenewalService {
         this.enabled = enabled;
     }
 
-    static RegulatedMutationCheckpointRenewalService disabled() {
+    static RegulatedMutationCheckpointRenewalService disabledForTesting() {
         return new RegulatedMutationCheckpointRenewalService(null, null, null, Duration.ZERO, Clock.systemUTC(), false);
     }
 
     boolean isEnabledForTesting() {
         return enabled;
-    }
-
-    public RegulatedMutationCheckpointRenewalDecision beforeAttemptedAudit(
-            RegulatedMutationClaimToken claimToken,
-            RegulatedMutationCommandDocument document
-    ) {
-        return checkpoint(claimToken, document, RegulatedMutationRenewalCheckpoint.BEFORE_ATTEMPTED_AUDIT);
-    }
-
-    public RegulatedMutationCheckpointRenewalDecision beforeLegacyBusinessCommit(
-            RegulatedMutationClaimToken claimToken,
-            RegulatedMutationCommandDocument document
-    ) {
-        return checkpoint(claimToken, document, RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT);
-    }
-
-    public RegulatedMutationCheckpointRenewalDecision beforeSuccessAuditRetry(
-            RegulatedMutationClaimToken claimToken,
-            RegulatedMutationCommandDocument document
-    ) {
-        return checkpoint(claimToken, document, RegulatedMutationRenewalCheckpoint.BEFORE_SUCCESS_AUDIT_RETRY);
     }
 
     public RegulatedMutationCheckpointRenewalDecision beforeEvidencePreparation(
@@ -120,7 +99,10 @@ public class RegulatedMutationCheckpointRenewalService {
             throw new IllegalArgumentException("Regulated mutation checkpoint renewal requires command document.");
         }
         Instant startedAt = clock.instant();
-        RegulatedMutationModelVersion modelVersion = document.mutationModelVersionOrLegacy();
+        RegulatedMutationModelVersion modelVersion = document.getMutationModelVersion();
+        if (modelVersion != RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1) {
+            throw new IllegalStateException("Unsupported persisted regulated mutation model version.");
+        }
         RegulatedMutationLeaseRenewalReason policyReason = checkpointPolicy.rejectionReason(
                 modelVersion,
                 document.getState(),
@@ -135,7 +117,11 @@ public class RegulatedMutationCheckpointRenewalService {
 
         try {
             RegulatedMutationLeaseRenewalDecision renewal = leaseRenewalService.renew(claimToken, requestedExtension);
+            if (renewal.resultingRevision() == null) {
+                throw new IllegalStateException("Successful lease renewal requires resulting command revision.");
+            }
             document.setLeaseExpiresAt(renewal.newLeaseExpiresAt());
+            document.setRevision(renewal.resultingRevision());
             recordRenewed(modelVersion, checkpoint, startedAt);
             return RegulatedMutationCheckpointRenewalDecision.renewed(checkpoint, renewal.newLeaseExpiresAt());
         } catch (RegulatedMutationLeaseRenewalBudgetExceededException exception) {

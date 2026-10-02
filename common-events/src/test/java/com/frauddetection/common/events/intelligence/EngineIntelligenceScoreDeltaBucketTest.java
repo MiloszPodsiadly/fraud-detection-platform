@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.RecordComponent;
 import java.util.Arrays;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -34,6 +35,8 @@ class EngineIntelligenceScoreDeltaBucketTest {
     @Test
     void unavailableDeltaSerializesAsUnavailable() throws Exception {
         assertThat(EngineIntelligenceTestSupport.objectMapper().writeValueAsString(new EngineIntelligenceComparison(
+                EngineIntelligenceComparisonType.RULES_VS_ML,
+                List.of("rules.primary", "ml.python.primary"),
                 EngineIntelligenceAgreementStatus.INSUFFICIENT_DATA,
                 EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
                 EngineIntelligenceScoreDeltaBucket.UNAVAILABLE

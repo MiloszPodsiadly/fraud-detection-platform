@@ -19,6 +19,7 @@ import com.frauddetection.alert.regulated.RegulatedMutationCommand;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
 import com.frauddetection.alert.regulated.RegulatedMutationIntent;
 import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
+import com.frauddetection.alert.regulated.RegulatedMutationModelVersion;
 import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.fraudcase.FraudCaseUpdateMutationHandler;
@@ -170,7 +171,8 @@ public class FraudCaseManagementService {
                 RegulatedMutationResponseSnapshot::fromUpdateFraudCaseResponse,
                 RegulatedMutationResponseSnapshot::toUpdateFraudCaseResponse,
                 state -> statusResponse(caseId, document, idempotencyKeyHash, state),
-                intent
+                intent,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1
         );
         return regulatedMutationCoordinator.commit(command).response();
     }
@@ -213,7 +215,8 @@ public class FraudCaseManagementService {
                 caseId,
                 responseMapper.toResponse(current),
                 null,
-                status == SubmitDecisionOperationStatus.RECOVERY_REQUIRED || status == SubmitDecisionOperationStatus.COMMIT_UNKNOWN
+                status == SubmitDecisionOperationStatus.RECOVERY_REQUIRED
+                        || status == SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED
                         ? state.name()
                         : null
         );
@@ -221,23 +224,16 @@ public class FraudCaseManagementService {
 
     private SubmitDecisionOperationStatus publicStatus(RegulatedMutationState state) {
         return switch (state) {
-            case REQUESTED, AUDIT_ATTEMPTED -> SubmitDecisionOperationStatus.IN_PROGRESS;
+            case REQUESTED -> SubmitDecisionOperationStatus.IN_PROGRESS;
             case EVIDENCE_PREPARING -> SubmitDecisionOperationStatus.EVIDENCE_PREPARING;
             case EVIDENCE_PREPARED -> SubmitDecisionOperationStatus.EVIDENCE_PREPARED;
             case FINALIZING -> SubmitDecisionOperationStatus.FINALIZING;
-            case FINALIZED_VISIBLE -> SubmitDecisionOperationStatus.FINALIZED_VISIBLE;
             case FINALIZED_EVIDENCE_PENDING_EXTERNAL -> SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL;
             case FINALIZED_EVIDENCE_CONFIRMED -> SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED;
             case REJECTED_EVIDENCE_UNAVAILABLE -> SubmitDecisionOperationStatus.REJECTED_EVIDENCE_UNAVAILABLE;
             case FAILED_BUSINESS_VALIDATION -> SubmitDecisionOperationStatus.FAILED_BUSINESS_VALIDATION;
             case FINALIZE_RECOVERY_REQUIRED -> SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED;
-            case BUSINESS_COMMITTING -> SubmitDecisionOperationStatus.COMMIT_UNKNOWN;
-            case EVIDENCE_PENDING, COMMITTED, SUCCESS_AUDIT_RECORDED ->
-                    SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_PENDING;
-            case EVIDENCE_CONFIRMED -> SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED;
-            case COMMITTED_DEGRADED -> SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE;
-            case FAILED, BUSINESS_COMMITTED, SUCCESS_AUDIT_PENDING -> SubmitDecisionOperationStatus.RECOVERY_REQUIRED;
-            case REJECTED -> SubmitDecisionOperationStatus.REJECTED_BEFORE_MUTATION;
+            case FAILED -> SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED;
         };
     }
 

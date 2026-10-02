@@ -8,28 +8,143 @@ import com.frauddetection.alert.audit.AuditExternalAnchorStatus;
 import com.frauddetection.alert.audit.AuditFailureCategory;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
+import com.frauddetection.alert.audit.ResolutionEvidenceReference;
+import com.frauddetection.alert.audit.ResolutionEvidenceType;
 import com.frauddetection.alert.audit.external.AuditEventExternalEvidenceStatus;
 import com.frauddetection.alert.audit.external.AuditEventPublicationStatusLookup;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
+import com.frauddetection.alert.outbox.OutboxPublicationConfirmationProvenance;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
+import com.mongodb.client.result.UpdateResult;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class MutationEvidenceConfirmationServiceTest {
+
+    @Test
+    void shouldConfirmValidDualControlManualPublicationWithoutCallingItBrokerVerified() {
+        Fixture fixture = new Fixture(false, false);
+        RegulatedMutationCommandDocument command = committedCommand();
+        fixture.pending(command);
+        when(fixture.outboxRepository.findByMutationCommandId("command-1"))
+                .thenReturn(Optional.of(manualDualControlOutbox()));
+
+        int promoted = fixture.service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isOne();
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
+    }
+
+    @Test
+    void shouldFailClosedWhenManualDualControlEvidenceIsIncomplete() {
+        Fixture fixture = new Fixture(false, false);
+        RegulatedMutationCommandDocument command = committedCommand();
+        TransactionalOutboxRecordDocument outbox = manualDualControlOutbox();
+        outbox.setResolutionApprovalEvidenceFingerprint(null);
+        fixture.pending(command);
+        when(fixture.outboxRepository.findByMutationCommandId("command-1")).thenReturn(Optional.of(outbox));
+
+        int promoted = fixture.service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isZero();
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        verify(fixture.metrics).recordEvidenceConfirmationFailed("MANUAL_PUBLICATION_EVIDENCE_INVALID");
+    }
+
+    @Test
+    void shouldFailClosedWhenRequestEvidenceWasVerifiedAfterTheRequestTransition() {
+        TransactionalOutboxRecordDocument outbox = manualDualControlOutbox();
+        Instant impossibleVerifiedAt = outbox.getResolutionRequestedAt().plusMillis(1);
+        ResolutionEvidenceReference evidence = new ResolutionEvidenceReference(
+                ResolutionEvidenceType.BROKER_OFFSET,
+                outbox.getResolutionEvidenceReference(),
+                impossibleVerifiedAt,
+                outbox.getResolutionEvidenceVerifiedBy()
+        );
+        outbox.setResolutionEvidenceVerifiedAt(impossibleVerifiedAt);
+        outbox.setResolutionEvidenceFingerprint(RegulatedMutationIntentHasher.hash(evidence));
+
+        assertInvalidManualPublicationEvidence(outbox);
+    }
+
+    @Test
+    void shouldFailClosedWhenApprovalEvidenceWasVerifiedAfterTheApprovalTransition() {
+        TransactionalOutboxRecordDocument outbox = manualDualControlOutbox();
+        Instant impossibleVerifiedAt = outbox.getResolutionApprovedAt().plusMillis(1);
+        ResolutionEvidenceReference evidence = new ResolutionEvidenceReference(
+                ResolutionEvidenceType.BROKER_OFFSET,
+                outbox.getResolutionApprovalEvidenceReference(),
+                impossibleVerifiedAt,
+                outbox.getResolutionApprovalEvidenceVerifiedBy()
+        );
+        outbox.setResolutionApprovalEvidenceVerifiedAt(impossibleVerifiedAt);
+        outbox.setResolutionApprovalEvidenceFingerprint(RegulatedMutationIntentHasher.hash(evidence));
+
+        assertInvalidManualPublicationEvidence(outbox);
+    }
+
+    @Test
+    void shouldKeepSingleControlManualPublicationPending() {
+        Fixture fixture = new Fixture(false, false);
+        RegulatedMutationCommandDocument command = committedCommand();
+        TransactionalOutboxRecordDocument outbox = manualSingleControlOutbox();
+        fixture.pending(command);
+        when(fixture.outboxRepository.findByMutationCommandId("command-1")).thenReturn(Optional.of(outbox));
+
+        int promoted = fixture.service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isZero();
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        verify(fixture.metrics).recordEvidenceConfirmationFailed("MANUAL_PUBLICATION_REQUIRES_DUAL_CONTROL");
+    }
+
+    @Test
+    void shouldFailClosedWhenPublishedRecordHasNoConfirmationProvenance() {
+        Fixture fixture = new Fixture(false, false);
+        RegulatedMutationCommandDocument command = committedCommand();
+        TransactionalOutboxRecordDocument outbox = outbox(TransactionalOutboxStatus.PUBLISHED);
+        outbox.setPublicationConfirmationProvenance(null);
+        fixture.pending(command);
+        when(fixture.outboxRepository.findByMutationCommandId("command-1")).thenReturn(Optional.of(outbox));
+
+        int promoted = fixture.service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isZero();
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        verify(fixture.metrics).recordEvidenceConfirmationFailed("PUBLICATION_CONFIRMATION_PROVENANCE_MISSING");
+    }
+
+    @Test
+    void shouldFailClosedWhenPublishedRecordHasNoPublicationTimestamp() {
+        Fixture fixture = new Fixture(false, false);
+        RegulatedMutationCommandDocument command = committedCommand();
+        TransactionalOutboxRecordDocument outbox = outbox(TransactionalOutboxStatus.PUBLISHED);
+        outbox.setPublishedAt(null);
+        fixture.pending(command);
+        when(fixture.outboxRepository.findByMutationCommandId("command-1")).thenReturn(Optional.of(outbox));
+
+        int promoted = fixture.service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isZero();
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        verify(fixture.metrics).recordEvidenceConfirmationFailed("PUBLICATION_TIMESTAMP_MISSING");
+    }
 
     @Test
     void shouldTreatZeroAndNegativeLimitAsNoOp() {
@@ -40,6 +155,8 @@ class MutationEvidenceConfirmationServiceTest {
                 commandRepository,
                 outboxRepository,
                 metrics,
+                mock(RegulatedMutationFencedCommandWriter.class),
+                acceptedProof(),
                 false,
                 false
         );
@@ -60,6 +177,8 @@ class MutationEvidenceConfirmationServiceTest {
                 commandRepository,
                 outboxRepository,
                 metrics,
+                mock(RegulatedMutationFencedCommandWriter.class),
+                acceptedProof(),
                 false,
                 false
         );
@@ -70,10 +189,8 @@ class MutationEvidenceConfirmationServiceTest {
         int promoted = service.confirmPendingEvidence(100);
 
         assertThat(promoted).isEqualTo(1);
-        ArgumentCaptor<RegulatedMutationCommandDocument> captor = ArgumentCaptor.forClass(RegulatedMutationCommandDocument.class);
-        verify(commandRepository).save(captor.capture());
-        assertThat(captor.getValue().getState()).isEqualTo(RegulatedMutationState.EVIDENCE_CONFIRMED);
-        assertThat(captor.getValue().getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED);
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
+        assertThat(command.getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED);
     }
 
     @Test
@@ -85,6 +202,8 @@ class MutationEvidenceConfirmationServiceTest {
                 commandRepository,
                 outboxRepository,
                 metrics,
+                mock(RegulatedMutationFencedCommandWriter.class),
+                proofReturning(DurableLocalFinalizationProofResult.invalid("SUCCESS_AUDIT_MISSING")),
                 false,
                 false
         );
@@ -96,11 +215,9 @@ class MutationEvidenceConfirmationServiceTest {
         int promoted = service.confirmPendingEvidence(100);
 
         assertThat(promoted).isZero();
-        ArgumentCaptor<RegulatedMutationCommandDocument> captor = ArgumentCaptor.forClass(RegulatedMutationCommandDocument.class);
-        verify(commandRepository).save(captor.capture());
-        assertThat(captor.getValue().getState()).isEqualTo(RegulatedMutationState.COMMITTED_DEGRADED);
-        assertThat(captor.getValue().getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
-        assertThat(captor.getValue().getDegradationReason()).isEqualTo("SUCCESS_AUDIT_MISSING");
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(command.getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(command.getDegradationReason()).isEqualTo("SUCCESS_AUDIT_MISSING");
     }
 
     @Test
@@ -112,6 +229,8 @@ class MutationEvidenceConfirmationServiceTest {
                 commandRepository,
                 outboxRepository,
                 metrics,
+                mock(RegulatedMutationFencedCommandWriter.class),
+                acceptedProof(),
                 false,
                 false
         );
@@ -122,7 +241,7 @@ class MutationEvidenceConfirmationServiceTest {
         int promoted = service.confirmPendingEvidence(100);
 
         assertThat(promoted).isZero();
-        verify(commandRepository, never()).save(any());
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         verify(metrics).recordEvidenceConfirmationFailed("OUTBOX_NOT_YET_PUBLISHED");
     }
 
@@ -135,6 +254,8 @@ class MutationEvidenceConfirmationServiceTest {
                 commandRepository,
                 outboxRepository,
                 metrics,
+                mock(RegulatedMutationFencedCommandWriter.class),
+                acceptedProof(),
                 false,
                 false
         );
@@ -146,11 +267,9 @@ class MutationEvidenceConfirmationServiceTest {
         int promoted = service.confirmPendingEvidence(100);
 
         assertThat(promoted).isZero();
-        ArgumentCaptor<RegulatedMutationCommandDocument> captor = ArgumentCaptor.forClass(RegulatedMutationCommandDocument.class);
-        verify(commandRepository).save(captor.capture());
-        assertThat(captor.getValue().getState()).isEqualTo(RegulatedMutationState.COMMITTED_DEGRADED);
-        assertThat(captor.getValue().getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE);
-        assertThat(captor.getValue().getDegradationReason()).isEqualTo("OUTBOX_FAILED_TERMINAL");
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(command.getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(command.getDegradationReason()).isEqualTo("OUTBOX_FAILED_TERMINAL");
     }
 
     @Test
@@ -162,6 +281,8 @@ class MutationEvidenceConfirmationServiceTest {
                 commandRepository,
                 outboxRepository,
                 metrics,
+                mock(RegulatedMutationFencedCommandWriter.class),
+                acceptedProof(),
                 false,
                 false
         );
@@ -175,15 +296,14 @@ class MutationEvidenceConfirmationServiceTest {
         int promoted = service.confirmPendingEvidence(100);
 
         assertThat(promoted).isZero();
-        verify(commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
-                saved.getState() == RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
-                        && saved.getPublicStatus() == SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED
-                        && "OUTBOX_FAILED_TERMINAL".equals(saved.getDegradationReason())));
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(command.getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(command.getDegradationReason()).isEqualTo("OUTBOX_FAILED_TERMINAL");
         verify(metrics).recordEvidenceGatedFinalizeRecoveryRequired("OUTBOX_FAILED_TERMINAL");
     }
 
     @Test
-    void shouldMapEvidenceGatedMissingOutboxAfterLocalCommitToFinalizeRecoveryRequired() {
+    void shouldMapMissingRequiredOutboxProofToFinalizeRecoveryRequired() {
         RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
         TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
@@ -191,6 +311,8 @@ class MutationEvidenceConfirmationServiceTest {
                 commandRepository,
                 outboxRepository,
                 metrics,
+                mock(RegulatedMutationFencedCommandWriter.class),
+                proofReturning(DurableLocalFinalizationProofResult.invalid("TRANSACTIONAL_OUTBOX_PROOF_MISSING")),
                 false,
                 false
         );
@@ -204,11 +326,10 @@ class MutationEvidenceConfirmationServiceTest {
         int promoted = service.confirmPendingEvidence(100);
 
         assertThat(promoted).isZero();
-        verify(commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
-                saved.getState() == RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
-                        && saved.getPublicStatus() == SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED
-                        && "OUTBOX_RECORD_MISSING_AFTER_LOCAL_COMMIT".equals(saved.getDegradationReason())));
-        verify(metrics).recordEvidenceGatedFinalizeRecoveryRequired("OUTBOX_RECORD_MISSING_AFTER_LOCAL_COMMIT");
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(command.getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(command.getDegradationReason()).isEqualTo("TRANSACTIONAL_OUTBOX_PROOF_MISSING");
+        verify(metrics).recordEvidenceGatedFinalizeRecoveryRequired("TRANSACTIONAL_OUTBOX_PROOF_MISSING");
     }
 
     @Test
@@ -220,6 +341,8 @@ class MutationEvidenceConfirmationServiceTest {
                 commandRepository,
                 outboxRepository,
                 metrics,
+                mock(RegulatedMutationFencedCommandWriter.class),
+                acceptedProof(),
                 false,
                 false
         );
@@ -233,38 +356,53 @@ class MutationEvidenceConfirmationServiceTest {
         int promoted = service.confirmPendingEvidence(100);
 
         assertThat(promoted).isEqualTo(1);
-        verify(commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
-                saved.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED
-                        && saved.getPublicStatus() == SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED));
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
+        assertThat(command.getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED);
     }
 
     @Test
-    void shouldRepairEvidenceGatedFinalizedVisibleToPendingExternalWhenEvidenceStillPending() {
+    void shouldConfirmCanonicalOperationThatDoesNotRequireTransactionalOutbox() {
+        Fixture fixture = new Fixture(false, false);
+        RegulatedMutationCommandDocument command = committedCommand();
+        command.setResourceId("case-1");
+        command.setResourceType(AuditResourceType.FRAUD_CASE.name());
+        command.setAction(AuditAction.UPDATE_FRAUD_CASE.name());
+        fixture.pending(command);
+
+        int promoted = fixture.service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isEqualTo(1);
+        verify(fixture.outboxRepository, never()).findByMutationCommandId(any());
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_CONFIRMED);
+    }
+
+    @Test
+    void shouldKeepNewerDurableStateWhenConfirmationCandidateLosesCompareAndSet() {
         RegulatedMutationCommandRepository commandRepository = mock(RegulatedMutationCommandRepository.class);
         TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
         AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        RegulatedMutationFencedCommandWriter fencedWriter = mock(RegulatedMutationFencedCommandWriter.class);
         MutationEvidenceConfirmationService service = new MutationEvidenceConfirmationService(
                 commandRepository,
                 outboxRepository,
                 metrics,
+                fencedWriter,
+                acceptedProof(),
                 false,
                 false
         );
         RegulatedMutationCommandDocument command = committedCommand();
-        command.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
-        command.setState(RegulatedMutationState.FINALIZED_VISIBLE);
         when(commandRepository.findTop100ByStateInAndUpdatedAtBefore(any(), any())).thenReturn(List.of(command));
         when(outboxRepository.findByMutationCommandId("command-1"))
-                .thenReturn(Optional.of(outbox(TransactionalOutboxStatus.PENDING)));
+                .thenReturn(Optional.of(outbox(TransactionalOutboxStatus.PUBLISHED)));
+        doThrow(new RegulatedMutationRecoveryWriteConflictException(command.getId()))
+                .when(fencedWriter)
+                .recoveryTransition(any(), any(), any(), any(), any());
 
         int promoted = service.confirmPendingEvidence(100);
 
         assertThat(promoted).isZero();
-        verify(commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
-                saved.getState() == RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
-                        && saved.getPublicStatus() == SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL));
-        verify(metrics).recordEvidenceGatedFinalizeStuckVisible();
-        verify(metrics).recordEvidenceConfirmationFailed("OUTBOX_NOT_YET_PUBLISHED");
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
     }
 
     @Test
@@ -278,8 +416,7 @@ class MutationEvidenceConfirmationServiceTest {
         int promoted = fixture.service.confirmPendingEvidence(100);
 
         assertThat(promoted).isEqualTo(1);
-        verify(fixture.commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
-                saved.getPublicStatus() == SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED));
+        assertThat(command.getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED);
     }
 
     @Test
@@ -293,7 +430,7 @@ class MutationEvidenceConfirmationServiceTest {
         int promoted = fixture.service.confirmPendingEvidence(100);
 
         assertThat(promoted).isZero();
-        verify(fixture.commandRepository, never()).save(any());
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         verify(fixture.metrics).recordEvidenceConfirmationFailed("EXTERNAL_ANCHOR_MISSING");
     }
 
@@ -308,8 +445,7 @@ class MutationEvidenceConfirmationServiceTest {
         int promoted = fixture.service.confirmPendingEvidence(100);
 
         assertThat(promoted).isEqualTo(1);
-        verify(fixture.commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
-                saved.getPublicStatus() == SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_CONFIRMED));
+        assertThat(command.getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED);
     }
 
     @Test
@@ -323,7 +459,7 @@ class MutationEvidenceConfirmationServiceTest {
         int promoted = fixture.service.confirmPendingEvidence(100);
 
         assertThat(promoted).isZero();
-        verify(fixture.commandRepository, never()).save(any());
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         verify(fixture.metrics).recordEvidenceConfirmationFailed("SIGNATURE_UNAVAILABLE");
     }
 
@@ -338,10 +474,9 @@ class MutationEvidenceConfirmationServiceTest {
         int promoted = fixture.service.confirmPendingEvidence(100);
 
         assertThat(promoted).isZero();
-        verify(fixture.commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
-                saved.getState() == RegulatedMutationState.COMMITTED_DEGRADED
-                        && saved.getPublicStatus() == SubmitDecisionOperationStatus.COMMITTED_EVIDENCE_INCOMPLETE
-                        && "SIGNATURE_INVALID".equals(saved.getDegradationReason())));
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(command.getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(command.getDegradationReason()).isEqualTo("SIGNATURE_INVALID");
         verify(fixture.metrics).recordEvidenceConfirmationFailed("SIGNATURE_INVALID");
     }
 
@@ -358,18 +493,45 @@ class MutationEvidenceConfirmationServiceTest {
         int promoted = fixture.service.confirmPendingEvidence(100);
 
         assertThat(promoted).isZero();
-        verify(fixture.commandRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
-                saved.getState() == RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED
-                        && saved.getPublicStatus() == SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED
-                        && "SIGNATURE_INVALID".equals(saved.getDegradationReason())));
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(command.getPublicStatus()).isEqualTo(SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(command.getDegradationReason()).isEqualTo("SIGNATURE_INVALID");
         verify(fixture.metrics).recordEvidenceGatedFinalizeRecoveryRequired("SIGNATURE_INVALID");
+    }
+
+    @Test
+    void shouldFailClosedWhenAlertStatusProjectionTargetDoesNotMatch() {
+        Fixture fixture = new Fixture(false, false);
+        RegulatedMutationCommandDocument command = committedCommand();
+        when(fixture.mongoTemplate.updateFirst(any(), any(), eq(com.frauddetection.alert.persistence.AlertDocument.class)))
+                .thenReturn(UpdateResult.acknowledged(0, 0L, null));
+        when(fixture.mongoTemplate.findById("alert-1", com.frauddetection.alert.persistence.AlertDocument.class))
+                .thenReturn(null);
+
+        assertThatThrownBy(() -> fixture.service.updateAlertOperationStatus(
+                command,
+                SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED
+        )).isInstanceOf(RegulatedMutationAlertProjectionException.class);
+
+        verify(fixture.metrics).recordRegulatedMutationAlertStatusProjection(
+                "FAILED",
+                "TARGET_NOT_FOUND_OR_MISMATCH"
+        );
     }
 
     private RegulatedMutationCommandDocument committedCommand() {
         RegulatedMutationCommandDocument command = new RegulatedMutationCommandDocument();
         command.setId("command-1");
-        command.setState(RegulatedMutationState.EVIDENCE_PENDING);
-        command.setLocalCommitMarker("LOCAL_COMMITTED");
+        command.setIdempotencyKey("idem-1");
+        command.setActorId("principal-7");
+        command.setCorrelationId("corr-1");
+        command.setResourceId("alert-1");
+        command.setResourceType(AuditResourceType.ALERT.name());
+        command.setAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
+        command.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        command.setRevision(0L);
+        command.setState(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        command.setLocalCommitMarker(RegulatedMutationDurableLocalFinalizationProof.LOCAL_COMMIT_MARKER);
         command.setLocalCommittedAt(Instant.parse("2026-05-02T10:00:00Z"));
         command.setSuccessAuditRecorded(true);
         command.setSuccessAuditId("audit-success-1");
@@ -377,12 +539,97 @@ class MutationEvidenceConfirmationServiceTest {
         return command;
     }
 
+    private void assertInvalidManualPublicationEvidence(TransactionalOutboxRecordDocument outbox) {
+        Fixture fixture = new Fixture(false, false);
+        RegulatedMutationCommandDocument command = committedCommand();
+        fixture.pending(command);
+        when(fixture.outboxRepository.findByMutationCommandId("command-1")).thenReturn(Optional.of(outbox));
+
+        int promoted = fixture.service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isZero();
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        verify(fixture.metrics).recordEvidenceConfirmationFailed("MANUAL_PUBLICATION_EVIDENCE_INVALID");
+    }
+
     private TransactionalOutboxRecordDocument outbox(TransactionalOutboxStatus status) {
         TransactionalOutboxRecordDocument document = new TransactionalOutboxRecordDocument();
         document.setEventId("event-1");
         document.setMutationCommandId("command-1");
         document.setStatus(status);
+        if (status == TransactionalOutboxStatus.PUBLISHED) {
+            document.setPublicationConfirmationProvenance(
+                    OutboxPublicationConfirmationProvenance.BROKER_ACKNOWLEDGED
+            );
+            document.setPublishedAt(Instant.parse("2026-05-02T10:01:00Z"));
+        }
         document.setCreatedAt(Instant.parse("2026-05-02T10:00:00Z"));
+        return document;
+    }
+
+    private TransactionalOutboxRecordDocument manualDualControlOutbox() {
+        TransactionalOutboxRecordDocument document = outbox(TransactionalOutboxStatus.PUBLISHED);
+        Instant requestedAt = Instant.parse("2026-05-02T10:05:00Z");
+        Instant approvedAt = Instant.parse("2026-05-02T10:06:00Z");
+        ResolutionEvidenceReference requestEvidence = new ResolutionEvidenceReference(
+                ResolutionEvidenceType.BROKER_OFFSET,
+                "topic=fraud-decisions,partition=0,offset=42",
+                requestedAt,
+                "request-verifier"
+        );
+        ResolutionEvidenceReference approvalEvidence = new ResolutionEvidenceReference(
+                ResolutionEvidenceType.BROKER_OFFSET,
+                "topic=fraud-decisions,partition=0,offset=42",
+                approvedAt,
+                "approval-verifier"
+        );
+        document.setPublicationConfirmationProvenance(
+                OutboxPublicationConfirmationProvenance.MANUAL_DUAL_CONTROL_ATTESTED
+        );
+        document.setResolutionControlMode("DUAL_CONTROL_APPROVED");
+        document.setResolutionRequestId("request-1");
+        document.setResolutionProposedOutcome("PUBLISHED");
+        document.setResolutionRequestedBy("requester");
+        document.setResolutionRequestedAt(requestedAt);
+        document.setResolutionRequestReason("request reason");
+        document.setResolutionEvidenceType(requestEvidence.type().name());
+        document.setResolutionEvidenceReference(requestEvidence.reference());
+        document.setResolutionEvidenceVerifiedAt(requestEvidence.verifiedAt());
+        document.setResolutionEvidenceVerifiedBy(requestEvidence.verifiedBy());
+        document.setResolutionEvidenceFingerprint(RegulatedMutationIntentHasher.hash(requestEvidence));
+        document.setResolutionApprovedBy("approver");
+        document.setResolutionApprovedAt(approvedAt);
+        document.setResolutionApprovalReason("approval reason");
+        document.setResolutionApprovalEvidenceType(approvalEvidence.type().name());
+        document.setResolutionApprovalEvidenceReference(approvalEvidence.reference());
+        document.setResolutionApprovalEvidenceVerifiedAt(approvalEvidence.verifiedAt());
+        document.setResolutionApprovalEvidenceVerifiedBy(approvalEvidence.verifiedBy());
+        document.setResolutionApprovalEvidenceFingerprint(RegulatedMutationIntentHasher.hash(approvalEvidence));
+        return document;
+    }
+
+    private TransactionalOutboxRecordDocument manualSingleControlOutbox() {
+        TransactionalOutboxRecordDocument document = outbox(TransactionalOutboxStatus.PUBLISHED);
+        Instant approvedAt = Instant.parse("2026-05-02T10:06:00Z");
+        ResolutionEvidenceReference evidence = new ResolutionEvidenceReference(
+                ResolutionEvidenceType.BROKER_OFFSET,
+                "topic=fraud-decisions,partition=0,offset=42",
+                approvedAt.minusSeconds(1),
+                "operator-verifier"
+        );
+        document.setPublicationConfirmationProvenance(
+                OutboxPublicationConfirmationProvenance.MANUAL_SINGLE_CONTROL_ATTESTED
+        );
+        document.setResolutionControlMode("SINGLE_CONTROL_OPERATOR_ATTESTED");
+        document.setResolutionProposedOutcome("PUBLISHED");
+        document.setResolutionApprovedBy("operator");
+        document.setResolutionApprovedAt(approvedAt);
+        document.setResolutionApprovalReason("operator reason");
+        document.setResolutionEvidenceType(evidence.type().name());
+        document.setResolutionEvidenceReference(evidence.reference());
+        document.setResolutionEvidenceVerifiedAt(evidence.verifiedAt());
+        document.setResolutionEvidenceVerifiedBy(evidence.verifiedBy());
+        document.setResolutionEvidenceFingerprint(RegulatedMutationIntentHasher.hash(evidence));
         return document;
     }
 
@@ -422,9 +669,14 @@ class MutationEvidenceConfirmationServiceTest {
         private final AuditEventPublicationStatusLookup publicationStatusLookup = mock(AuditEventPublicationStatusLookup.class);
         private final MongoTemplate mongoTemplate = mock(MongoTemplate.class);
         private final AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        private final RegulatedMutationFencedCommandWriter fencedCommandWriter =
+                mock(RegulatedMutationFencedCommandWriter.class);
+        private final RegulatedMutationDurableLocalFinalizationProof durableProof = acceptedProof();
         private final MutationEvidenceConfirmationService service;
 
         private Fixture(boolean externalAnchorRequired, boolean signatureRequired) {
+            when(mongoTemplate.updateFirst(any(), any(), eq(com.frauddetection.alert.persistence.AlertDocument.class)))
+                    .thenReturn(UpdateResult.acknowledged(1, 1L, null));
             this.service = new MutationEvidenceConfirmationService(
                     commandRepository,
                     outboxRepository,
@@ -432,6 +684,8 @@ class MutationEvidenceConfirmationServiceTest {
                     publicationStatusLookup,
                     mongoTemplate,
                     metrics,
+                    fencedCommandWriter,
+                    durableProof,
                     externalAnchorRequired,
                     signatureRequired
             );
@@ -451,5 +705,18 @@ class MutationEvidenceConfirmationServiceTest {
             when(publicationStatusLookup.evidenceStatusesByAuditEventId(List.of(auditEvent)))
                     .thenReturn(java.util.Map.of("audit-success-1", status));
         }
+    }
+
+    private static RegulatedMutationDurableLocalFinalizationProof acceptedProof() {
+        return proofReturning(DurableLocalFinalizationProofResult.accepted());
+    }
+
+    private static RegulatedMutationDurableLocalFinalizationProof proofReturning(
+            DurableLocalFinalizationProofResult result
+    ) {
+        RegulatedMutationDurableLocalFinalizationProof proof =
+                mock(RegulatedMutationDurableLocalFinalizationProof.class);
+        when(proof.verify(any())).thenReturn(result);
+        return proof;
     }
 }

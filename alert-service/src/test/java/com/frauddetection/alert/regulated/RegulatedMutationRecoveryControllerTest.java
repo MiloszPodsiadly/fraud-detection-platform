@@ -26,15 +26,25 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class RegulatedMutationRecoveryControllerTest {
 
     @Test
+    void rawIdempotencyKeyInspectionRouteIsNotRegistered() throws Exception {
+        RegulatedMutationRecoveryService service = mock(RegulatedMutationRecoveryService.class);
+
+        mockMvc(service)
+                .perform(get("/api/v1/regulated-mutations/raw-idempotency-key")
+                        .principal(new TestingAuthenticationToken("ops-admin", "n/a", "FRAUD_OPS_ADMIN")))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     void apiReportsLongRunningProcessingOperationally() throws Exception {
         RegulatedMutationRecoveryService service = mock(RegulatedMutationRecoveryService.class);
-        when(service.inspect("idem-long-running")).thenReturn(new RegulatedMutationCommandInspectionResponse(
+        when(service.inspectByCommandId("command-long-running")).thenReturn(RegulatedMutationInspectionTestFixtures.currentInspection(
                 "96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b",
                 "idem-l...ning",
                 "SUBMIT_ANALYST_DECISION",
                 "ALERT",
                 "alert-1",
-                "AUDIT_ATTEMPTED",
+                "EVIDENCE_PREPARING",
                 "PROCESSING",
                 "owner-1",
                 Instant.parse("2026-05-05T18:10:00Z"),
@@ -49,10 +59,10 @@ class RegulatedMutationRecoveryControllerTest {
         ));
 
         mockMvc(service)
-                .perform(get("/api/v1/regulated-mutations/idem-long-running")
+                .perform(get("/api/v1/regulated-mutations/by-command/command-long-running")
                         .principal(new TestingAuthenticationToken("ops-admin", "n/a", "FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.state").value("AUDIT_ATTEMPTED"))
+                .andExpect(jsonPath("$.state").value("EVIDENCE_PREPARING"))
                 .andExpect(jsonPath("$.execution_status").value("PROCESSING"))
                 .andExpect(jsonPath("$.lease_expires_at").exists())
                 .andExpect(jsonPath("$.lease_renewal_count").value(1))
@@ -72,7 +82,7 @@ class RegulatedMutationRecoveryControllerTest {
     @Test
     void apiDoesNotTreatCheckpointRenewalAsProgress() throws Exception {
         RegulatedMutationRecoveryService service = mock(RegulatedMutationRecoveryService.class);
-        when(service.inspect("idem-checkpoint-only")).thenReturn(new RegulatedMutationCommandInspectionResponse(
+        when(service.inspectByCommandId("command-checkpoint-only")).thenReturn(RegulatedMutationInspectionTestFixtures.currentInspection(
                 "86e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535c",
                 "idem-c...only",
                 "SUBMIT_ANALYST_DECISION",
@@ -93,7 +103,7 @@ class RegulatedMutationRecoveryControllerTest {
         ));
 
         mockMvc(service)
-                .perform(get("/api/v1/regulated-mutations/idem-checkpoint-only")
+                .perform(get("/api/v1/regulated-mutations/by-command/command-checkpoint-only")
                         .principal(new TestingAuthenticationToken("ops-admin", "n/a", "FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.state").value("REQUESTED"))
@@ -111,13 +121,13 @@ class RegulatedMutationRecoveryControllerTest {
     @Test
     void inspectionEndpointNeverReturnsRawSensitiveFieldsOrExceptionText() throws Exception {
         RegulatedMutationRecoveryService service = mock(RegulatedMutationRecoveryService.class);
-        when(service.inspect("idem-sensitive")).thenReturn(new RegulatedMutationCommandInspectionResponse(
+        when(service.inspectByCommandId("command-sensitive-redaction")).thenReturn(RegulatedMutationInspectionTestFixtures.currentInspection(
                 "raw-request-hash-must-not-appear",
                 "idem-s...tive",
                 "SUBMIT_ANALYST_DECISION",
                 "ALERT",
                 "alert-sensitive",
-                "BUSINESS_COMMITTING",
+                "FINALIZING",
                 "RECOVERY_REQUIRED",
                 "raw-owner-sensitive",
                 Instant.parse("2026-05-05T18:15:00Z"),
@@ -132,7 +142,7 @@ class RegulatedMutationRecoveryControllerTest {
         ));
 
         mockMvc(service)
-                .perform(get("/api/v1/regulated-mutations/idem-sensitive")
+                .perform(get("/api/v1/regulated-mutations/by-command/command-sensitive-redaction")
                         .principal(new TestingAuthenticationToken("ops-admin", "n/a", "FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.idempotency_key").doesNotExist())
@@ -159,13 +169,13 @@ class RegulatedMutationRecoveryControllerTest {
     void inspectionEndpointAuditsReadWithoutRawResourceIdentifiers() throws Exception {
         RegulatedMutationRecoveryService service = mock(RegulatedMutationRecoveryService.class);
         SensitiveReadAuditService auditService = mock(SensitiveReadAuditService.class);
-        when(service.inspectByCommandId("command-sensitive")).thenReturn(new RegulatedMutationCommandInspectionResponse(
+        when(service.inspectByCommandId("command-sensitive")).thenReturn(RegulatedMutationInspectionTestFixtures.currentInspection(
                 "96e6f95f0d3c51986336fb4eb7074b28ba1a765241b3853b779a0731b69a535b",
                 "idem-s...tive",
                 "SUBMIT_ANALYST_DECISION",
                 "ALERT",
                 "alert-sensitive",
-                "BUSINESS_COMMITTING",
+                "FINALIZING",
                 "PROCESSING",
                 "raw-owner-sensitive",
                 Instant.parse("2026-05-05T18:15:00Z"),

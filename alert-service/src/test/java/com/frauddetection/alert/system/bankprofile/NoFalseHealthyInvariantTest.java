@@ -9,7 +9,6 @@ import com.frauddetection.alert.audit.external.ExternalWitnessCapabilities;
 import com.frauddetection.alert.audit.external.ExternalWitnessTimestampType;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorCoverageResponse;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorMissingRange;
-import com.frauddetection.alert.fdp28.InvariantAssert;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.persistence.AlertRepository;
@@ -43,10 +42,94 @@ class NoFalseHealthyInvariantTest {
 
         SystemTrustLevelResponse response = fixture.controller().trustLevel();
 
-        InvariantAssert.noFalseHealthy(response);
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
         assertThat(response.reasonCode()).isEqualTo("OUTBOX_STATUS_UNAVAILABLE");
-        assertThat(response.outboxFailedTerminalCount()).isEqualTo(1L);
-        assertThat(response.outboxConfirmationUnknownCount()).isEqualTo(1L);
+        assertThat(response.outboxFailedTerminalCount()).isZero();
+        assertThat(response.outboxConfirmationUnknownCount()).isZero();
+    }
+
+    @Test
+    void shouldNotReportHealthyWhenProjectionReconciliationRemainsWithoutMismatchMarker() {
+        Fixture fixture = new Fixture();
+        when(fixture.outboxRepository.countByProjectionReconcileAfterIsNotNull()).thenReturn(1L);
+
+        SystemTrustLevelResponse response = fixture.controller().trustLevel();
+
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
+        assertThat(response.outboxProjectionMismatchCount()).isZero();
+        assertThat(response.outboxProjectionReconciliationPendingCount()).isOne();
+        assertThat(response.reasonCode()).isEqualTo("OUTBOX_PROJECTION_RECONCILIATION_PENDING");
+    }
+
+    @Test
+    void shouldNotReportHealthyWhenProjectionMismatchHasNoScheduledReconciliation() {
+        Fixture fixture = new Fixture();
+        when(fixture.outboxRepository.countByProjectionMismatchTrue()).thenReturn(1L);
+
+        SystemTrustLevelResponse response = fixture.controller().trustLevel();
+
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
+        assertThat(response.outboxProjectionMismatchCount()).isOne();
+        assertThat(response.outboxProjectionReconciliationPendingCount()).isZero();
+        assertThat(response.reasonCode()).isEqualTo("OUTBOX_PROJECTION_MISMATCH");
+    }
+
+    @Test
+    void shouldNotReportHealthyAndKeepsBothProjectionDiagnosticsDistinct() {
+        Fixture fixture = new Fixture();
+        when(fixture.outboxRepository.countByProjectionMismatchTrue()).thenReturn(1L);
+        when(fixture.outboxRepository.countByProjectionReconcileAfterIsNotNull()).thenReturn(2L);
+
+        SystemTrustLevelResponse response = fixture.controller().trustLevel();
+
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
+        assertThat(response.outboxProjectionMismatchCount()).isOne();
+        assertThat(response.outboxProjectionReconciliationPendingCount()).isEqualTo(2L);
+        assertThat(response.reasonCode()).isEqualTo("OUTBOX_PROJECTION_MISMATCH");
+    }
+
+    @Test
+    void shouldNotReportHealthyWhenDualControlResolutionIsPending() {
+        Fixture fixture = new Fixture();
+        when(fixture.outboxRepository.countByResolutionPendingTrue()).thenReturn(1L);
+
+        SystemTrustLevelResponse response = fixture.controller().trustLevel();
+
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
+        assertThat(response.pendingOutboxResolutionCount()).isOne();
+        assertThat(response.reasonCode()).isEqualTo("OUTBOX_RESOLUTION_PENDING_APPROVAL");
+    }
+
+    @Test
+    void shouldNotReportHealthyWhenOutboxRecoveryIsRequired() {
+        Fixture fixture = new Fixture();
+        when(fixture.outboxRepository.countByStatus(TransactionalOutboxStatus.RECOVERY_REQUIRED)).thenReturn(1L);
+
+        SystemTrustLevelResponse response = fixture.controller().trustLevel();
+
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
+        assertThat(response.outboxRecoveryRequiredCount()).isOne();
+        assertThat(response.reasonCode()).isEqualTo("OUTBOX_RECOVERY_REQUIRED");
+    }
+
+    @Test
+    void shouldReportHealthyOnlyWhenAuthoritativeOutboxHasNoUnresolvedWork() {
+        Fixture fixture = new Fixture();
+
+        SystemTrustLevelResponse response = fixture.controller().trustLevel();
+
+        assertThat(response.guaranteeLevel())
+                .as("reason=%s mismatch=%s reconciliation=%s recovery=%s resolution=%s",
+                        response.reasonCode(),
+                        response.outboxProjectionMismatchCount(),
+                        response.outboxProjectionReconciliationPendingCount(),
+                        response.outboxRecoveryRequiredCount(),
+                        response.pendingOutboxResolutionCount())
+                .isEqualTo("FDP24_HEALTHY");
+        assertThat(response.outboxProjectionMismatchCount()).isZero();
+        assertThat(response.outboxProjectionReconciliationPendingCount()).isZero();
+        assertThat(response.outboxRecoveryRequiredCount()).isZero();
+        assertThat(response.pendingOutboxResolutionCount()).isZero();
     }
 
     @Test
@@ -56,7 +139,7 @@ class NoFalseHealthyInvariantTest {
 
         SystemTrustLevelResponse response = fixture.controller().trustLevel();
 
-        InvariantAssert.noFalseHealthy(response);
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
         assertThat(response.reasonCode()).isEqualTo("TRUST_INCIDENT_UNACKNOWLEDGED_CRITICAL");
         assertThat(response.incidentHealthStatus()).isEqualTo("CRITICAL");
     }
@@ -79,7 +162,7 @@ class NoFalseHealthyInvariantTest {
 
         SystemTrustLevelResponse response = fixture.controller().trustLevel();
 
-        InvariantAssert.noFalseHealthy(response);
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
         assertThat(response.coverageStatus()).isEqualTo("DEGRADED");
         assertThat(response.reasonCode()).isEqualTo("HEAD_SCAN_PAGINATION_UNSUPPORTED");
     }
@@ -102,7 +185,7 @@ class NoFalseHealthyInvariantTest {
 
         SystemTrustLevelResponse response = fixture.controller().trustLevel();
 
-        InvariantAssert.noFalseHealthy(response);
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
         assertThat(response.coverageStatus()).isEqualTo("DEGRADED");
         assertThat(response.reasonCode()).isEqualTo("EXTERNAL_WITNESS_UNAVAILABLE");
         assertThat(response.externalAnchorStrength()).isEqualTo("NONE");
@@ -127,7 +210,7 @@ class NoFalseHealthyInvariantTest {
 
         SystemTrustLevelResponse response = fixture.controller().trustLevel();
 
-        InvariantAssert.noFalseHealthy(response);
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
         assertThat(response.coverageStatus()).isEqualTo("DEGRADED");
         assertThat(response.missingRanges()).isEqualTo(1);
     }
@@ -139,7 +222,7 @@ class NoFalseHealthyInvariantTest {
 
         SystemTrustLevelResponse response = fixture.controller().trustLevel();
 
-        InvariantAssert.noFalseHealthy(response);
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
         assertThat(response.requiredPublicationFailures()).isEqualTo(1);
     }
 
@@ -150,7 +233,7 @@ class NoFalseHealthyInvariantTest {
 
         SystemTrustLevelResponse response = fixture.controller().trustLevel();
 
-        InvariantAssert.noFalseHealthy(response);
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
         assertThat(response.localStatusUnverified()).isEqualTo(1);
     }
 
@@ -198,7 +281,7 @@ class NoFalseHealthyInvariantTest {
 
         SystemTrustLevelResponse response = fixture.controller().trustLevel();
 
-        InvariantAssert.noFalseHealthy(response);
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
         assertThat(response.reasonCode()).isEqualTo("SIGNATURE_UNAVAILABLE_REQUIRED");
     }
 
@@ -216,7 +299,7 @@ class NoFalseHealthyInvariantTest {
 
         SystemTrustLevelResponse response = fixture.controller().trustLevel();
 
-        InvariantAssert.noFalseHealthy(response);
+        TrustPostureInvariantAssertions.noFalseHealthy(response);
         assertThat(response.reasonCode()).isEqualTo("TRUST_INCIDENT_OPEN_CRITICAL");
         assertThat(response.openCriticalIncidentCount()).isEqualTo(1L);
     }
@@ -238,7 +321,10 @@ class NoFalseHealthyInvariantTest {
             when(degradationService.resolvedCount()).thenReturn(0L);
             when(outboxRepository.countByStatus(any(TransactionalOutboxStatus.class))).thenReturn(0L);
             when(outboxRepository.countByProjectionMismatchTrue()).thenReturn(0L);
+            when(outboxRepository.countByProjectionReconcileAfterIsNotNull()).thenReturn(0L);
+            when(outboxRepository.countByResolutionPendingTrue()).thenReturn(0L);
             when(outboxRepository.findTopByStatusInOrderByCreatedAtAsc(any())).thenReturn(java.util.Optional.empty());
+            when(recoveryService.oldestRecoveryRequiredAgeSeconds()).thenReturn(null);
             when(trustIncidentService.summary()).thenReturn(com.frauddetection.alert.trust.TrustIncidentSummary.empty());
         }
 

@@ -14,5 +14,5 @@ uses SAN URI values including:
 - `spiffe://fraud-platform/fraud-scoring-service`
 - `spiffe://fraud-platform/alert-service`
 
-CN-only identity is intentionally not accepted by FDP-18 mTLS service identity.
+CN-only identity is intentionally not accepted by the mTLS service-identity contract.
 These fixtures must never be used in production or shared environments.

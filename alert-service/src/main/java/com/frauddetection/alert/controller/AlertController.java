@@ -82,7 +82,8 @@ public class AlertController {
     ) {
         SubmitAnalystDecisionResponse response = alertManagementUseCase.submitDecision(alertId, request, idempotencyKey);
         HttpStatus status = switch (response.operationStatus()) {
-            case IN_PROGRESS, RECOVERY_REQUIRED, COMMIT_UNKNOWN -> HttpStatus.ACCEPTED;
+            case IN_PROGRESS, RECOVERY_REQUIRED, EVIDENCE_PREPARING, EVIDENCE_PREPARED,
+                 FINALIZING, FINALIZE_RECOVERY_REQUIRED -> HttpStatus.ACCEPTED;
             default -> HttpStatus.OK;
         };
         return ResponseEntity.status(status).body(response);

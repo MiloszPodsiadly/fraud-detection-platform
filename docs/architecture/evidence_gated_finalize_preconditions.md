@@ -1,6 +1,7 @@
 # Evidence-Gated Finalize Preconditions
 
-This document defines the local evidence preconditions that must be satisfied before the feature-flagged submit-decision path may enter `FINALIZING`.
+This document defines the local evidence preconditions that must be satisfied before the canonical submit-decision
+path may enter `FINALIZING`.
 
 Do not require Kafka publish before finalize. Kafka publication is a downstream outbox effect after the local finalize transaction.
 
@@ -41,8 +42,6 @@ New evidence-gated submit-decision commands persist `FINALIZED_EVIDENCE_PENDING_
 transaction that applies the business aggregate mutation, writes the transactional outbox record, stores the response
 snapshot, writes local success audit evidence through `RegulatedMutationLocalAuditPhaseWriter`, and stores the local
 finalize marker.
-
-`FINALIZED_VISIBLE` is retained only as a compatibility/repair state for previously persisted or interrupted commands.
 
 ## Checked Preconditions
 
@@ -96,10 +95,10 @@ fork, or indefinitely wait on the local audit chain.
 
 Writer health is exposed through low-cardinality metrics:
 
-- `fdp29_local_audit_chain_append_total{outcome}`
-- `fdp29_local_audit_chain_retry_total{reason}`
-- `fdp29_local_audit_chain_append_duration_ms`
-- `fdp29_local_audit_chain_lock_release_failure_total`
+- `regulated_mutation_local_audit_chain_append_total{outcome}`
+- `regulated_mutation_local_audit_chain_retry_total{reason}`
+- `regulated_mutation_local_audit_chain_append_duration_ms`
+- `regulated_mutation_local_audit_chain_lock_release_failure_total`
 
 These metrics are operational signals only. They are not compliance evidence and must not use dynamic labels such as
 actors, resources, command ids, audit ids, lock owners, paths, or exception messages.

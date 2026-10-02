@@ -21,7 +21,7 @@ class RegulatedMutationLeaseRenewalStartupGuardTest {
         assertThatThrownBy(() -> guard(true, Duration.ofSeconds(30), Duration.ofSeconds(30),
                 Duration.ofMinutes(2), Duration.ofMinutes(10), Duration.ofSeconds(30), 0).run(null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("FDP-33 bank/prod startup guard failed")
+                .hasMessageContaining("Regulated mutation lease renewal startup guard failed")
                 .hasMessageContaining("max-renewal-count");
     }
 

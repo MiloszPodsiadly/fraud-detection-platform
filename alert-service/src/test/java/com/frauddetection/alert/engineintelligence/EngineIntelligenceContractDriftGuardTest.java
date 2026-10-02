@@ -115,7 +115,9 @@ class EngineIntelligenceContractDriftGuardTest {
                 .contains("contractVersion=1")
                 .contains("repository-controlled")
                 .contains("atomically")
-                .contains("does not prove the absence")
+                .contains("does not infer either field")
+                .contains("retires historical comparison normalization")
+                .contains("accepted compatibility break")
                 .contains("external consumers");
         assertThat(consumerReadiness)
                 .contains("no direct `TransactionScoredEvent` deserializer in API or analyst console UI");

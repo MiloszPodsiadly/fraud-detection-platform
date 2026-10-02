@@ -42,7 +42,7 @@ class RegulatedMutationRollbackReadinessTest {
         RegulatedMutationCommandDocument current = command(
                 "command-stale-owner",
                 "idem-stale-owner",
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                RegulatedMutationState.EVIDENCE_PREPARED,
                 RegulatedMutationExecutionStatus.PROCESSING
         );
         current.setLeaseOwner("current-owner");
@@ -53,12 +53,13 @@ class RegulatedMutationRollbackReadinessTest {
         when(mongoTemplate.findById("command-stale-owner", RegulatedMutationCommandDocument.class))
                 .thenReturn(current);
 
-        assertThat(RegulatedMutationCheckpointRenewalService.disabled().isEnabledForTesting()).isFalse();
+        assertThat(RegulatedMutationCheckpointRenewalService.disabledForTesting().isEnabledForTesting()).isFalse();
         assertThatThrownBy(() -> writer.transition(
                 token("command-stale-owner", "stale-owner"),
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                RegulatedMutationState.EVIDENCE_PREPARED,
                 RegulatedMutationExecutionStatus.PROCESSING,
-                RegulatedMutationState.BUSINESS_COMMITTING,
+                0L,
+                RegulatedMutationState.FINALIZING,
                 RegulatedMutationExecutionStatus.PROCESSING,
                 null,
                 update -> update.set("response_snapshot", "must-not-commit")
@@ -83,7 +84,7 @@ class RegulatedMutationRollbackReadinessTest {
         RegulatedMutationCommandDocument current = command(
                 "command-budget",
                 "idem-budget",
-                RegulatedMutationState.REQUESTED,
+                RegulatedMutationState.EVIDENCE_PREPARING,
                 RegulatedMutationExecutionStatus.PROCESSING
         );
         current.setLeaseOwner("owner-budget");
@@ -111,7 +112,7 @@ class RegulatedMutationRollbackReadinessTest {
         RegulatedMutationCommandDocument recovery = command(
                 "command-recovery",
                 "idem-recovery",
-                RegulatedMutationState.BUSINESS_COMMITTING,
+                RegulatedMutationState.FAILED,
                 RegulatedMutationExecutionStatus.RECOVERY_REQUIRED
         );
         RegulatedMutationCommandDocument finalizeRecovery = command(
@@ -133,22 +134,23 @@ class RegulatedMutationRollbackReadinessTest {
                 .thenReturn(List.of(recovery, finalizeRecovery));
         when(repository.findTop100ByExecutionStatusAndLeaseExpiresAtBeforeOrderByUpdatedAtAsc(eq(RegulatedMutationExecutionStatus.PROCESSING), any()))
                 .thenReturn(List.of());
-        when(repository.findByIdempotencyKey("idem-finalize-recovery")).thenReturn(Optional.of(finalizeRecovery));
+        when(repository.findById(finalizeRecovery.getId())).thenReturn(Optional.of(finalizeRecovery));
 
         RegulatedMutationRecoveryService service = new RegulatedMutationRecoveryService(
                 repository,
-                mock(RegulatedMutationAuditPhaseService.class),
-                mock(com.frauddetection.alert.audit.AuditDegradationService.class),
                 mock(AlertServiceMetrics.class),
                 List.of(),
+                mock(RegulatedMutationFencedCommandWriter.class),
+                mock(RegulatedMutationDurableLocalFinalizationProof.class),
+                new RegulatedMutationPublicStatusMapper(),
                 Duration.ofMinutes(2)
         );
 
         RegulatedMutationRecoveryBacklogResponse backlog = service.backlog();
-        RegulatedMutationCommandInspectionResponse inspection = service.inspect("idem-finalize-recovery");
+        RegulatedMutationCommandInspectionResponse inspection = service.inspectByCommandId(finalizeRecovery.getId());
 
         assertThat(backlog.totalRecoveryRequired()).isEqualTo(2L);
-        assertThat(backlog.byState()).containsEntry("BUSINESS_COMMITTING", 1L)
+        assertThat(backlog.byState()).containsEntry("FAILED", 1L)
                 .containsEntry("FINALIZE_RECOVERY_REQUIRED", 1L);
         assertThat(inspection.state()).isEqualTo("FINALIZE_RECOVERY_REQUIRED");
         assertThat(inspection.executionStatus()).isEqualTo("RECOVERY_REQUIRED");
@@ -156,18 +158,14 @@ class RegulatedMutationRollbackReadinessTest {
     }
 
     @Test
-    void rollbackDoesNotEnableFdp29Production() throws Exception {
+    void currentRuntimeDoesNotStartAutonomousMutationSchedulers() throws Exception {
         String application = java.nio.file.Files.readString(java.nio.file.Path.of("src/main/resources/application.yml"));
-        String legacyExecutor = java.nio.file.Files.readString(java.nio.file.Path.of(
-                "src/main/java/com/frauddetection/alert/regulated/LegacyRegulatedMutationExecutor.java"
-        ));
         String evidenceExecutor = java.nio.file.Files.readString(java.nio.file.Path.of(
                 "src/main/java/com/frauddetection/alert/regulated/EvidenceGatedFinalizeExecutor.java"
         ));
 
-        assertThat(application).doesNotContain("evidence-gated-finalize.enabled: true");
-        assertThat(application).doesNotContain("submit-decision.enabled: true");
-        assertThat(legacyExecutor + evidenceExecutor)
+        assertThat(application).doesNotContain("evidence-gated-finalize:");
+        assertThat(evidenceExecutor)
                 .doesNotContain("@Scheduled")
                 .doesNotContain("fixedDelay")
                 .doesNotContain("fixedRate");
@@ -176,14 +174,17 @@ class RegulatedMutationRollbackReadinessTest {
     @Test
     void rollbackApiSmoke_doesNotHideRecovery() throws Exception {
         RegulatedMutationRecoveryService service = mock(RegulatedMutationRecoveryService.class);
-        when(service.inspect("idem-recovery")).thenReturn(new RegulatedMutationCommandInspectionResponse(
+        when(service.inspectByCommandId("command-recovery")).thenReturn(new RegulatedMutationCommandInspectionResponse(
                 RegulatedMutationIntentHasher.hash("idem-recovery"),
                 "idem-r...very",
                 "SUBMIT_ANALYST_DECISION",
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1.name(),
                 "ALERT",
-                "alert-1",
-                "BUSINESS_COMMITTING",
+                true,
+                RegulatedMutationIntentHasher.hash("resourceId=alert-1"),
+                "FINALIZE_RECOVERY_REQUIRED",
                 "RECOVERY_REQUIRED",
+                false,
                 null,
                 null,
                 0,
@@ -207,11 +208,11 @@ class RegulatedMutationRollbackReadinessTest {
                     return request;
                 }))
                 .build()
-                .perform(get("/api/v1/regulated-mutations/idem-recovery")
+                .perform(get("/api/v1/regulated-mutations/by-command/command-recovery")
                         .principal(new TestingAuthenticationToken("ops-admin", "n/a", "FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.execution_status").value("RECOVERY_REQUIRED"))
-                .andExpect(jsonPath("$.state").value("BUSINESS_COMMITTING"))
+                .andExpect(jsonPath("$.state").value("FINALIZE_RECOVERY_REQUIRED"))
                 .andExpect(jsonPath("$.response_snapshot_present").value(false))
                 .andExpect(jsonPath("$.resource_id").doesNotExist())
                 .andExpect(jsonPath("$.resource_id_present").value(true))
@@ -237,7 +238,8 @@ class RegulatedMutationRollbackReadinessTest {
         command.setIntentHash("intent-hash");
         command.setState(state);
         command.setExecutionStatus(status);
-        command.setMutationModelVersion(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
+        command.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        command.setRevision(0L);
         command.setUpdatedAt(Instant.now().minusSeconds(120));
         return command;
     }
@@ -250,8 +252,8 @@ class RegulatedMutationRollbackReadinessTest {
                 now.plusSeconds(30),
                 now,
                 1,
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
-                RegulatedMutationState.AUDIT_ATTEMPTED,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                RegulatedMutationState.EVIDENCE_PREPARED,
                 RegulatedMutationExecutionStatus.PROCESSING
         );
     }

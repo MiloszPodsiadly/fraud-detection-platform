@@ -37,8 +37,8 @@ public class PersistentAuditEventPublisher implements AuditEventPublisher {
             AuditChainLockRepository lockRepository,
             AlertServiceMetrics metrics,
             ObjectProvider<ExternalAuditAnchorPublisher> externalAnchorPublisher,
-            @Value("${app.audit.external-anchoring.publication.required:${app.audit.external-anchoring.enabled:false}}") boolean externalPublicationRequired,
-            @Value("${app.audit.external-anchoring.publication.fail-closed:${app.audit.external-anchoring.publication.required:${app.audit.external-anchoring.enabled:false}}}") boolean externalPublicationFailClosed
+            @Value("${app.audit.external-anchoring.publication.required:false}") boolean externalPublicationRequired,
+            @Value("${app.audit.external-anchoring.publication.fail-closed:false}") boolean externalPublicationFailClosed
     ) {
         this(
                 repository,

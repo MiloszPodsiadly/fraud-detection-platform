@@ -63,7 +63,7 @@ public class TrustIncidentRefreshMutationHandler {
                     true,
                     "PERSISTENCE_UNAVAILABLE",
                     persistedIncidents,
-                    "COMMITTED_DEGRADED",
+                    "FINALIZE_RECOVERY_REQUIRED",
                     transactionRunner.mode().name(),
                     false,
                     "TRUST_INCIDENT_REFRESH_PARTIAL_OFF_MODE"

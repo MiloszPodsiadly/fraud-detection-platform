@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { repoRoot } from "../fdp-scope/scopeGuardHelpers.mjs";
+import { repoRoot } from "../scope-guards/scopeGuardHelpers.mjs";
 import { getCiSuite } from "./ci-suites.mjs";
 
 const suiteName = parseSuiteName(process.argv.slice(2));

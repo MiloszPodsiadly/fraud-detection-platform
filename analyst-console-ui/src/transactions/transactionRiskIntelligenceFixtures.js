@@ -423,6 +423,11 @@ function mlEngine(overrides = {}) {
     riskLevel: "LOW",
     scoreBucket: "LOW",
     reasonCodes: ["LOW_MODEL_RISK"],
+    modelIdentity: {
+      modelName: "python-logistic-fraud-model",
+      modelVersion: "2026-06-18.v1",
+      featureContractVersion: "feature-contract-v2"
+    },
     ...overrides
   };
 }

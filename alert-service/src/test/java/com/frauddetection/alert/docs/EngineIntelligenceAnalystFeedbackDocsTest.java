@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class EngineIntelligenceAnalystFeedbackDocsTest {
 
     @Test
-    void docsStateFdp98ScopeAndNonGoals() throws Exception {
+    void docsStateAnalystFeedbackScopeAndNonGoals() throws Exception {
         String docs = Files.readString(repositoryRoot().resolve("docs/architecture/engine_intelligence_analyst_feedback.md"));
 
         assertThat(docs).contains(

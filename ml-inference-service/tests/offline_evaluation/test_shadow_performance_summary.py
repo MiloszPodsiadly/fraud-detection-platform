@@ -24,8 +24,6 @@ from feedback_dataset_evaluation.evaluation_card.test_schema import (
 GENERATED_AT = "2026-06-13T02:00:00Z"
 CARD_MANIFEST_SHA256 = "b" * 64
 ROOT = Path(__file__).resolve().parents[3]
-HISTORICAL_FIXTURE = ROOT / "contract-fixtures" / "governance" / "shadow-performance-fdp123" / "current-summary.json"
-HISTORICAL_FIXTURE_MANIFEST = HISTORICAL_FIXTURE.with_name("manifest.json")
 
 
 class ShadowPerformanceSummaryTest(unittest.TestCase):
@@ -40,6 +38,7 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
             summary["evaluationSubject"]["identityCompleteness"],
         )
         self.assertEqual("2026-06-10T00:00:00Z", summary["evaluation"]["evaluationReportGeneratedAt"])
+        self.assertEqual("feedback-dataset-evaluation-v1", summary["evaluation"]["evaluationReportVersion"])
         self.assertEqual("2026-06-12T00:00:00Z", summary["evaluation"]["evaluationCardGeneratedAt"])
         self.assertEqual(CARD_MANIFEST_SHA256, summary["evaluation"]["sourceEvaluationCardManifestSha256"])
         self.assertNotIn("model", summary)
@@ -57,28 +56,6 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
         self.assertEqual("2026-06-13T02:00:00Z", summary["generatedAt"])
         self.assertEqual("shadow-performance-artifact-set-v1", json.loads(manifest_path.read_text())["artifactSetVersion"])
         self.assertEqual(64, len(manifest_sha256))
-
-    def test_historicalMasterFixturePassesWithoutRewrite(self):
-        summary_before = HISTORICAL_FIXTURE.read_bytes()
-        manifest_before = HISTORICAL_FIXTURE_MANIFEST.read_bytes()
-
-        summary, manifest_sha256 = read_validated_shadow_performance_artifact_set(
-            HISTORICAL_FIXTURE,
-            HISTORICAL_FIXTURE_MANIFEST,
-        )
-
-        self.assertEqual(
-            "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
-            summary["evaluationSubject"]["identityCompleteness"],
-        )
-        self.assertEqual(
-            "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-            summary["evaluation"]["evaluationReportType"],
-        )
-        self.assertEqual("fdp123-report-artifact-set-v1", summary["evaluation"]["evaluationArtifactSetVersion"])
-        self.assertEqual(64, len(manifest_sha256))
-        self.assertEqual(summary_before, HISTORICAL_FIXTURE.read_bytes())
-        self.assertEqual(manifest_before, HISTORICAL_FIXTURE_MANIFEST.read_bytes())
 
     def test_canonicalTimestampMatrixAccepted(self):
         for value in VALID_CANONICAL_TIMESTAMPS:
@@ -259,46 +236,29 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
         with self.assertRaises(ShadowPerformanceValidationError):
             write_shadow_performance_summary(summary)
 
-    def test_rejectsFdp103LineageLabelledAsCurrent(self):
+    def test_rejectsRetiredModelEvaluationLineageLabelledAsCurrent(self):
         summary = self.summary()
         summary["evaluation"]["evaluationReportType"] = "PYTHON_ML_EVALUATION_FOUNDATION"
 
         with self.assertRaises(ShadowPerformanceValidationError):
             write_shadow_performance_summary(summary)
 
-    def test_acceptsExactLegacyReadOnlyPlatformEvaluationIdentityPair(self):
-        summary = self.summary()
-        summary["evaluationSubject"]["identityCompleteness"] = "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE"
-        summary["evaluation"]["evaluationReportType"] = "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"
-        summary["evaluation"]["evaluationArtifactSetVersion"] = "fdp123-report-artifact-set-v1"
-
-        payload = write_shadow_performance_summary(summary)
-
-        evaluation = json.loads(payload)["evaluation"]
-        self.assertEqual("FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1", evaluation["evaluationReportType"])
-        self.assertEqual("fdp123-report-artifact-set-v1", evaluation["evaluationArtifactSetVersion"])
-
-    def test_rejectsMixedPlatformEvaluationProvenance(self):
+    def test_rejectsUnsupportedPlatformEvaluationProvenance(self):
         for report_type, artifact_set_version, identity_completeness in (
                 (
                     "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-                    "fdp123-report-artifact-set-v1",
+                    "unsupported-artifact-set-v1",
                     "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
                 ),
                 (
-                    "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
+                    "UNSUPPORTED_PLATFORM_EVALUATION",
                     "feedback-dataset-evaluation-report-artifact-set-v1",
-                    "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
+                    "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
                 ),
                 (
                     "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
                     "feedback-dataset-evaluation-report-artifact-set-v1",
-                    "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
-                ),
-                (
-                    "FDP123_FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
-                    "fdp123-report-artifact-set-v1",
-                    "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
+                    "UNSUPPORTED_IDENTITY_COMPLETENESS",
                 ),
         ):
             with self.subTest(
@@ -316,6 +276,8 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
 
     def test_rejectsUnsupportedLineageVersions(self):
         for field, value in (
+                ("evaluationReportVersion", "FDP-124"),
+                ("evaluationReportVersion", "unknown-evaluation-version"),
                 ("evaluationArtifactSetVersion", "other-artifact-format-v99"),
                 ("datasetVersion", "unknown-dataset-v77"),
                 ("datasetTimeBasis", "TRANSACTION_CREATED_AT"),
@@ -325,6 +287,13 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
 
             with self.assertRaises(ShadowPerformanceValidationError):
                 write_shadow_performance_summary(summary)
+
+    def test_rejectsMissingEvaluationReportVersion(self):
+        summary = self.summary()
+        summary["evaluation"].pop("evaluationReportVersion")
+
+        with self.assertRaises(ShadowPerformanceValidationError):
+            write_shadow_performance_summary(summary)
 
     def test_rejectsTwentyOneLimitations(self):
         summary = self.summary()

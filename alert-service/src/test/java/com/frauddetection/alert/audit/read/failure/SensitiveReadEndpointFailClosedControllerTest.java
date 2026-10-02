@@ -45,6 +45,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static com.frauddetection.alert.regulated.RegulatedMutationInspectionTestFixtures.currentInspection;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -84,13 +85,13 @@ class SensitiveReadEndpointFailClosedControllerTest {
     void shouldFailClosedWhenRegulatedMutationInspectionAuditFailsInBankMode() {
         failAudit();
         RegulatedMutationRecoveryService service = mock(RegulatedMutationRecoveryService.class);
-        when(service.inspect("idem-raw-secret")).thenReturn(new RegulatedMutationCommandInspectionResponse(
+        when(service.inspectByCommandId("command-sensitive")).thenReturn(currentInspection(
                 "hash",
                 "idem-r...cret",
                 "SUBMIT_ANALYST_DECISION",
                 "ALERT",
                 "alert-1",
-                "EVIDENCE_PENDING",
+                "FINALIZED_EVIDENCE_PENDING_EXTERNAL",
                 "COMPLETED",
                 null,
                 null,
@@ -108,15 +109,19 @@ class SensitiveReadEndpointFailClosedControllerTest {
                 sensitiveReadAuditService
         );
 
-        assertFailClosed(() -> controller.inspect("idem-raw-secret", auth(), request));
+        assertFailClosed(() -> controller.inspectByCommandId("command-sensitive", auth(), request));
     }
 
     @Test
     void shouldFailClosedWhenOutboxBacklogAuditFailsInBankMode() {
         failAudit();
         OutboxRecoveryService service = mock(OutboxRecoveryService.class);
-        when(service.backlog()).thenReturn(new OutboxBacklogResponse(1, 0, 0, 0, 0, 0, 0, 0, 60L));
-        OutboxRecoveryController controller = new OutboxRecoveryController(service, sensitiveReadAuditService);
+        when(service.backlog()).thenReturn(new OutboxBacklogResponse(1, 0, 0, 0, 0, 0, 0, 0, 0, 60L));
+        OutboxRecoveryController controller = new OutboxRecoveryController(
+                service,
+                sensitiveReadAuditService,
+                mock(com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness.class)
+        );
 
         assertFailClosed(() -> controller.backlog(request));
     }

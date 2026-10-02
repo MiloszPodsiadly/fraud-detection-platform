@@ -31,8 +31,8 @@ class RegulatedMutationCheckpointRenewalServiceTest {
 
     @Test
     void allowedCheckpointDelegatesToBoundedLeaseRenewalAndUpdatesLocalDocumentLease() {
-        RegulatedMutationClaimToken token = token(RegulatedMutationState.AUDIT_ATTEMPTED);
-        RegulatedMutationCommandDocument document = document(RegulatedMutationState.AUDIT_ATTEMPTED);
+        RegulatedMutationClaimToken token = token(RegulatedMutationState.EVIDENCE_PREPARED);
+        RegulatedMutationCommandDocument document = document(RegulatedMutationState.EVIDENCE_PREPARED);
         Instant renewedUntil = Instant.parse("2026-05-05T08:00:20Z");
         when(leaseRenewalService.renew(token, Duration.ofSeconds(10))).thenReturn(RegulatedMutationLeaseRenewalDecision.renew(
                 renewedUntil,
@@ -40,16 +40,17 @@ class RegulatedMutationCheckpointRenewalServiceTest {
                 Duration.ofSeconds(30),
                 false,
                 false
-        ));
+        ).withResultingRevision(1L));
 
-        RegulatedMutationCheckpointRenewalDecision decision = service.beforeLegacyBusinessCommit(token, document);
+        RegulatedMutationCheckpointRenewalDecision decision = service.beforeEvidenceGatedFinalize(token, document);
 
         assertThat(decision.type()).isEqualTo(RegulatedMutationCheckpointRenewalDecisionType.RENEWED);
-        assertThat(decision.checkpoint()).isEqualTo(RegulatedMutationRenewalCheckpoint.BEFORE_LEGACY_BUSINESS_COMMIT);
+        assertThat(decision.checkpoint()).isEqualTo(RegulatedMutationRenewalCheckpoint.BEFORE_EVIDENCE_GATED_FINALIZE);
         assertThat(document.getLeaseExpiresAt()).isEqualTo(renewedUntil);
+        assertThat(document.getRevision()).isEqualTo(1L);
         verify(leaseRenewalService).renew(token, Duration.ofSeconds(10));
         assertThat(meterRegistry.get("regulated_mutation_checkpoint_renewal_total")
-                .tag("checkpoint", "BEFORE_LEGACY_BUSINESS_COMMIT")
+                .tag("checkpoint", "BEFORE_EVIDENCE_GATED_FINALIZE")
                 .tag("outcome", "RENEWED")
                 .counter()
                 .count()).isEqualTo(1.0d);
@@ -58,21 +59,21 @@ class RegulatedMutationCheckpointRenewalServiceTest {
 
     @Test
     void unsupportedCheckpointFailsClosedBeforeCallingRenewalPrimitive() {
-        RegulatedMutationClaimToken token = token(RegulatedMutationState.REQUESTED);
-        RegulatedMutationCommandDocument document = document(RegulatedMutationState.REQUESTED);
+        RegulatedMutationClaimToken token = token(RegulatedMutationState.EVIDENCE_PREPARING);
+        RegulatedMutationCommandDocument document = document(RegulatedMutationState.EVIDENCE_PREPARING);
 
-        assertThatThrownBy(() -> service.beforeLegacyBusinessCommit(token, document))
+        assertThatThrownBy(() -> service.beforeEvidenceGatedFinalize(token, document))
                 .isInstanceOf(RegulatedMutationCheckpointRenewalException.class)
                 .hasMessageContaining("NON_RENEWABLE_STATE");
 
         verifyNoInteractions(leaseRenewalService);
         assertThat(meterRegistry.get("regulated_mutation_checkpoint_renewal_blocked_total")
-                .tag("checkpoint", "BEFORE_LEGACY_BUSINESS_COMMIT")
+                .tag("checkpoint", "BEFORE_EVIDENCE_GATED_FINALIZE")
                 .tag("reason", "NON_RENEWABLE_STATE")
                 .counter()
                 .count()).isEqualTo(1.0d);
         assertThat(meterRegistry.get("regulated_mutation_checkpoint_no_progress_total")
-                .tag("checkpoint", "BEFORE_LEGACY_BUSINESS_COMMIT")
+                .tag("checkpoint", "BEFORE_EVIDENCE_GATED_FINALIZE")
                 .tag("reason", "NON_RENEWABLE_STATE")
                 .counter()
                 .count()).isEqualTo(1.0d);
@@ -80,22 +81,22 @@ class RegulatedMutationCheckpointRenewalServiceTest {
 
     @Test
     void budgetExceededFromRenewalPrimitivePropagatesAndRecordsFailedCheckpoint() {
-        RegulatedMutationClaimToken token = token(RegulatedMutationState.AUDIT_ATTEMPTED);
-        RegulatedMutationCommandDocument document = document(RegulatedMutationState.AUDIT_ATTEMPTED);
+        RegulatedMutationClaimToken token = token(RegulatedMutationState.EVIDENCE_PREPARED);
+        RegulatedMutationCommandDocument document = document(RegulatedMutationState.EVIDENCE_PREPARED);
         when(leaseRenewalService.renew(token, Duration.ofSeconds(10)))
                 .thenThrow(new RegulatedMutationLeaseRenewalBudgetExceededException("command-1"));
 
-        assertThatThrownBy(() -> service.beforeLegacyBusinessCommit(token, document))
+        assertThatThrownBy(() -> service.beforeEvidenceGatedFinalize(token, document))
                 .isInstanceOf(RegulatedMutationLeaseRenewalBudgetExceededException.class);
 
         assertThat(meterRegistry.get("regulated_mutation_checkpoint_renewal_total")
-                .tag("checkpoint", "BEFORE_LEGACY_BUSINESS_COMMIT")
+                .tag("checkpoint", "BEFORE_EVIDENCE_GATED_FINALIZE")
                 .tag("outcome", "FAILED")
                 .tag("reason", "BUDGET_EXCEEDED")
                 .counter()
                 .count()).isEqualTo(1.0d);
         assertThat(meterRegistry.get("regulated_mutation_checkpoint_no_progress_total")
-                .tag("checkpoint", "BEFORE_LEGACY_BUSINESS_COMMIT")
+                .tag("checkpoint", "BEFORE_EVIDENCE_GATED_FINALIZE")
                 .tag("reason", "BUDGET_EXCEEDED")
                 .counter()
                 .count()).isEqualTo(1.0d);
@@ -108,7 +109,7 @@ class RegulatedMutationCheckpointRenewalServiceTest {
                 Instant.parse("2026-05-05T08:00:10Z"),
                 Instant.parse("2026-05-05T08:00:00Z"),
                 1,
-                RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION,
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
                 state,
                 RegulatedMutationExecutionStatus.PROCESSING
         );
@@ -117,7 +118,8 @@ class RegulatedMutationCheckpointRenewalServiceTest {
     private RegulatedMutationCommandDocument document(RegulatedMutationState state) {
         RegulatedMutationCommandDocument document = new RegulatedMutationCommandDocument();
         document.setId("command-1");
-        document.setMutationModelVersion(RegulatedMutationModelVersion.LEGACY_REGULATED_MUTATION);
+        document.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+        document.setRevision(0L);
         document.setState(state);
         document.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
         document.setLeaseOwner("owner-1");

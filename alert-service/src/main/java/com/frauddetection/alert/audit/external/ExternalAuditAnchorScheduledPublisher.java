@@ -12,7 +12,7 @@ class ExternalAuditAnchorScheduledPublisher {
 
     ExternalAuditAnchorScheduledPublisher(
             ExternalAuditAnchorPublisher publisher,
-            @Value("${app.audit.external-anchoring.publication.enabled:${app.audit.external-anchoring.enabled:false}}") boolean publicationEnabled
+            @Value("${app.audit.external-anchoring.publication.enabled:false}") boolean publicationEnabled
     ) {
         this.publisher = publisher;
         this.publicationEnabled = publicationEnabled;

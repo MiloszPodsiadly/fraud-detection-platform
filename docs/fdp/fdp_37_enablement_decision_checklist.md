@@ -56,4 +56,4 @@ The reviewer must confirm:
 | Config review complete | `PENDING_SEPARATE_RELEASE_REVIEW` |
 | Final decision | `READY_FOR_ENABLEMENT_REVIEW` |
 
-FDP-37 does not enable FDP-29. Any production or bank enablement requires a separate release/config PR and human approval.
+FDP-37 does not change or select the regulated mutation runtime model. Any production or bank enablement requires a separate release/config PR and human approval.

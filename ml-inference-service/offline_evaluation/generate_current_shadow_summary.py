@@ -107,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate a validated Shadow Performance Summary v2 current artifact for FDP-126."
+        description="Generate a validated current Shadow Performance Summary v2 artifact."
     )
     parser.add_argument("--evaluation-card", default=str(DEFAULT_EVALUATION_CARD))
     parser.add_argument("--evaluation-card-manifest", default=str(DEFAULT_EVALUATION_CARD_MANIFEST))

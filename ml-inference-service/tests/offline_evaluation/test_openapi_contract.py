@@ -124,18 +124,29 @@ class OpenApiContractTest(unittest.TestCase):
             [fixture["banner"]],
         )
 
-    def test_shadowIdentityCompletenessDocumentsCurrentAndLegacyReadOnlyMarkers(self):
+    def test_shadowIdentityCompletenessDocumentsCanonicalMarker(self):
         document = yaml.safe_load(OPENAPI.read_text(encoding="utf-8"))
-        marker_schema = document["components"]["schemas"]["ShadowPerformanceEvaluationSubjectResponse"][
+        schemas = document["components"]["schemas"]
+        marker_schema = schemas["ShadowPerformanceEvaluationSubjectResponse"][
             "properties"
         ]["identityCompleteness"]
+        evaluation_schema = schemas["ShadowPerformanceEvaluationResponse"]["properties"]
 
         self.assertEqual(
-            [
-                "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
-                "NO_MODEL_ARTIFACT_IDENTITY_IN_FDP123_SOURCE",
-            ],
+            ["NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"],
             marker_schema["enum"],
+        )
+        self.assertEqual(
+            ["FEEDBACK_DATASET_OFFLINE_EVALUATION_V1"],
+            evaluation_schema["evaluationReportType"]["enum"],
+        )
+        self.assertEqual(
+            ["feedback-dataset-evaluation-report-artifact-set-v1"],
+            evaluation_schema["evaluationArtifactSetVersion"]["enum"],
+        )
+        self.assertEqual(
+            ["feedback-dataset-evaluation-v1"],
+            evaluation_schema["evaluationReportVersion"]["enum"],
         )
 
     def test_mlInferencePublicIdentityFieldsUseCanonicalFieldSpecificContracts(self):
