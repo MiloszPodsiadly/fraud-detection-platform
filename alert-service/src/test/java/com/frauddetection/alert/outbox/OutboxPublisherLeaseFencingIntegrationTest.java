@@ -33,6 +33,8 @@ import static org.mockito.Mockito.verify;
 @Tag("invariant-proof")
 class OutboxPublisherLeaseFencingIntegrationTest extends AbstractIntegrationTest {
 
+    private static final int RECOVERY_MAX_ATTEMPTS = 5;
+
     private SimpleMongoClientDatabaseFactory databaseFactory;
     private MongoTemplate mongoTemplate;
     private TransactionalOutboxRecordRepository repository;
@@ -138,15 +140,9 @@ class OutboxPublisherLeaseFencingIntegrationTest extends AbstractIntegrationTest
         record.setLeaseExpiresAt(Instant.now().minusSeconds(60));
         repository.save(record);
 
-        OutboxRecoveryService recoveryService = new OutboxRecoveryService(
-                repository,
-                mongoTemplate,
-                mock(OutboxPublisherCoordinator.class),
-                mock(RegulatedMutationCoordinator.class),
-                mock(OutboxConfirmationResolutionMutationHandler.class),
-                mock(AlertServiceMetrics.class),
-                Duration.ZERO
-        );
+        OutboxPublisherCoordinator recoveryCoordinator = spy(coordinator());
+        doReturn(0).when(recoveryCoordinator).publishPending(100);
+        OutboxRecoveryService recoveryService = recoveryService(repository, recoveryCoordinator);
 
         OutboxRecoveryRunResponse response = recoveryService.recoverNow();
         TransactionalOutboxRecordDocument recovered = repository.findById(record.getEventId()).orElseThrow();
@@ -308,7 +304,7 @@ class OutboxPublisherLeaseFencingIntegrationTest extends AbstractIntegrationTest
                 mongoTemplate,
                 mock(AlertServiceMetrics.class),
                 Duration.ofMinutes(5),
-                5
+                RECOVERY_MAX_ATTEMPTS
         );
     }
 

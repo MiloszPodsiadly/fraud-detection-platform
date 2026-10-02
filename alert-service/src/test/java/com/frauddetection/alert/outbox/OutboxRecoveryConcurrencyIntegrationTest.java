@@ -49,6 +49,8 @@ import static org.mockito.Mockito.mock;
 @Tag("invariant-proof")
 class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
 
+    private static final int RECOVERY_MAX_ATTEMPTS = 5;
+
     private SimpleMongoClientDatabaseFactory databaseFactory;
     private MongoTemplate mongoTemplate;
     private TransactionalOutboxRecordRepository actualRepository;
@@ -81,7 +83,7 @@ class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
                 mongoTemplate,
                 mock(AlertServiceMetrics.class),
                 Duration.ofMinutes(1),
-                5,
+                RECOVERY_MAX_ATTEMPTS,
                 controls
         );
         OutboxRecoveryService recoveryService = new OutboxRecoveryService(
@@ -851,6 +853,9 @@ class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
         assertThat(persisted).isNotNull();
         assertThat(persisted.getDecisionOutboxStatus()).isEqualTo("PUBLISHED");
         assertThat(persisted.getDecisionOutboxPublishedAt()).isEqualTo(newerPublishedAt);
+        assertThat(persistedOutbox.getProjectionRevision()).isEqualTo(original.getProjectionRevision());
+        assertThat(persisted.getDecisionOutboxProjectionRevision())
+                .isGreaterThan(persistedOutbox.getProjectionRevision());
         assertThat(persistedOutbox.isProjectionMismatch()).isTrue();
         assertThat(persistedOutbox.getProjectionMismatchReason())
                 .isEqualTo("ALERT_PROJECTION_NEWER_THAN_SOURCE");
@@ -1008,7 +1013,15 @@ class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
     }
 
     private OutboxRecoveryService service(TransactionalOutboxRecordRepository repository) {
-        OutboxPublisherCoordinator publisherCoordinator = mock(OutboxPublisherCoordinator.class);
+        OutboxOperationalControls controls = new OutboxOperationalControls(false, true);
+        OutboxPublisherCoordinator publisherCoordinator = new OutboxPublisherCoordinator(
+                mock(FraudDecisionEventPublisher.class),
+                mongoTemplate,
+                mock(AlertServiceMetrics.class),
+                Duration.ofMinutes(1),
+                RECOVERY_MAX_ATTEMPTS,
+                controls
+        );
         return new OutboxRecoveryService(
                 repository,
                 mongoTemplate,
@@ -1016,7 +1029,8 @@ class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
                 mock(RegulatedMutationCoordinator.class),
                 mock(OutboxConfirmationResolutionMutationHandler.class),
                 mock(AlertServiceMetrics.class),
-                Duration.ofMinutes(2)
+                Duration.ofMinutes(2),
+                controls
         );
     }
 
