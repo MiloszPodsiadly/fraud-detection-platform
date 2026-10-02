@@ -32,6 +32,7 @@ import com.frauddetection.alert.outbox.OutboxRecordResponse;
 import com.frauddetection.alert.outbox.OutboxRecoveryService;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
+import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
@@ -283,7 +284,8 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         SubmitDecisionMutationHandler handler = new SubmitDecisionMutationHandler(
                 alertRepository,
                 new AlertDocumentMapper(),
-                new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository)
+                new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository,
+                        mock(TransactionalOutboxRuntimeReadiness.class))
         );
 
         RegulatedMutationResult<SubmitAnalystDecisionResponse> result = coordinator.commit(command(
@@ -380,7 +382,8 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         SubmitDecisionMutationHandler handler = new SubmitDecisionMutationHandler(
                 alertRepository,
                 new AlertDocumentMapper(),
-                new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository)
+                new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository,
+                        mock(TransactionalOutboxRuntimeReadiness.class))
         );
 
         assertThatThrownBy(() -> coordinator.commit(command(
@@ -430,7 +433,8 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         SubmitDecisionMutationHandler handler = new SubmitDecisionMutationHandler(
                 alertRepository,
                 new AlertDocumentMapper(),
-                new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository)
+                new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository,
+                        mock(TransactionalOutboxRuntimeReadiness.class))
         );
 
         assertThatThrownBy(() -> coordinator.commit(command(
@@ -615,7 +619,8 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         SubmitDecisionMutationHandler handler = new SubmitDecisionMutationHandler(
                 alertRepository,
                 new AlertDocumentMapper(),
-                new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository)
+                new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository,
+                        mock(TransactionalOutboxRuntimeReadiness.class))
         );
         AtomicInteger firstBusinessMutations = new AtomicInteger();
         AtomicInteger secondBusinessMutations = new AtomicInteger();

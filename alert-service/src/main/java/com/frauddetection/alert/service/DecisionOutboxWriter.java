@@ -3,6 +3,7 @@ package com.frauddetection.alert.service;
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.domain.AlertCase;
 import com.frauddetection.alert.mapper.FraudDecisionEventMapper;
+import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
@@ -20,18 +21,17 @@ public class DecisionOutboxWriter {
 
     private final FraudDecisionEventMapper fraudDecisionEventMapper;
     private final TransactionalOutboxRecordRepository outboxRepository;
+    private final TransactionalOutboxRuntimeReadiness runtimeReadiness;
 
     @Autowired
     public DecisionOutboxWriter(
             FraudDecisionEventMapper fraudDecisionEventMapper,
-            TransactionalOutboxRecordRepository outboxRepository
+            TransactionalOutboxRecordRepository outboxRepository,
+            TransactionalOutboxRuntimeReadiness runtimeReadiness
     ) {
         this.fraudDecisionEventMapper = fraudDecisionEventMapper;
         this.outboxRepository = outboxRepository;
-    }
-
-    public DecisionOutboxWriter(FraudDecisionEventMapper fraudDecisionEventMapper) {
-        this(fraudDecisionEventMapper, null);
+        this.runtimeReadiness = runtimeReadiness;
     }
 
     public FraudDecisionEvent attachPendingOutbox(
@@ -42,6 +42,7 @@ public class DecisionOutboxWriter {
             String actorId,
             String mutationCommandId
     ) {
+        runtimeReadiness.requireReady();
         FraudDecisionEvent event = fraudDecisionEventMapper.toEvent(alertCase, request, resultingStatus, actorId);
         if (outboxRepository == null) {
             throw new IllegalStateException(

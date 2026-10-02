@@ -211,7 +211,8 @@ class FraudDecisionOutboxPublisherTest {
 
     private TransactionalOutboxRuntimeReadiness readyReadiness() {
         TransactionalOutboxRuntimeReadiness readiness = new TransactionalOutboxRuntimeReadiness();
-        readiness.markReady();
+        readiness.markPreflightPassed();
+        readiness.onApplicationEvent(mock(org.springframework.boot.context.event.ApplicationReadyEvent.class));
         return readiness;
     }
 

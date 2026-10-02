@@ -16,6 +16,7 @@ import com.frauddetection.alert.mapper.FraudDecisionEventMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
+import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.regulated.MissingIdempotencyKeyException;
@@ -261,7 +262,11 @@ class SubmitDecisionRegulatedMutationServiceTest {
 
     @Test
     void shouldFailFastWhenDecisionOutboxRepositoryIsMissing() {
-        DecisionOutboxWriter writer = new DecisionOutboxWriter(new FraudDecisionEventMapper());
+        DecisionOutboxWriter writer = new DecisionOutboxWriter(
+                new FraudDecisionEventMapper(),
+                null,
+                mock(TransactionalOutboxRuntimeReadiness.class)
+        );
         AlertDocument alert = new Fixture().alert();
 
         assertThatThrownBy(() -> writer.attachPendingOutbox(
@@ -288,7 +293,8 @@ class SubmitDecisionRegulatedMutationServiceTest {
         SubmitDecisionMutationHandler handler = new SubmitDecisionMutationHandler(
                 fixture.alertRepository,
                 new AlertDocumentMapper(),
-                new DecisionOutboxWriter(new FraudDecisionEventMapper(), fixture.outboxRepository)
+                new DecisionOutboxWriter(new FraudDecisionEventMapper(), fixture.outboxRepository,
+                        mock(TransactionalOutboxRuntimeReadiness.class))
         );
 
         handler.applyDecision(
@@ -413,7 +419,8 @@ class SubmitDecisionRegulatedMutationServiceTest {
                     new SubmitDecisionMutationHandler(
                             alertRepository,
                             new AlertDocumentMapper(),
-                            new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository)
+                            new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository,
+                                    mock(TransactionalOutboxRuntimeReadiness.class))
                     ),
                     com.frauddetection.alert.regulated.CanonicalRegulatedMutationTestRuntime.coordinator(
                             commandRepository,

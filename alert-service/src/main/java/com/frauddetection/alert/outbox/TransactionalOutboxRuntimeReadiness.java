@@ -1,16 +1,18 @@
 package com.frauddetection.alert.outbox;
 
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.ApplicationListener;
 import org.springframework.stereotype.Component;
 
 import java.util.concurrent.atomic.AtomicReference;
 
 @Component
-public class TransactionalOutboxRuntimeReadiness {
+public class TransactionalOutboxRuntimeReadiness implements ApplicationListener<ApplicationReadyEvent> {
 
     private final AtomicReference<State> state = new AtomicReference<>(State.PENDING);
 
-    public void markReady() {
-        state.compareAndSet(State.PENDING, State.READY);
+    public void markPreflightPassed() {
+        state.compareAndSet(State.PENDING, State.PREFLIGHT_PASSED);
     }
 
     public void markFailed() {
@@ -21,14 +23,20 @@ public class TransactionalOutboxRuntimeReadiness {
         return state.get() == State.READY;
     }
 
+    @Override
+    public void onApplicationEvent(ApplicationReadyEvent event) {
+        state.compareAndSet(State.PREFLIGHT_PASSED, State.READY);
+    }
+
     public void requireReady() {
         if (!isReady()) {
-            throw new IllegalStateException("Transactional outbox persisted-contract preflight is not complete.");
+            throw new IllegalStateException("Transactional outbox runtime startup readiness is not complete.");
         }
     }
 
     private enum State {
         PENDING,
+        PREFLIGHT_PASSED,
         READY,
         FAILED
     }

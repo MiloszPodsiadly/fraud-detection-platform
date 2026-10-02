@@ -41,6 +41,9 @@ public class FraudDecisionOutboxPublisher {
 
     @Scheduled(fixedDelayString = "${app.outbox.publisher.delay-ms:5000}")
     public void publishPending() {
+        if (!runtimeReadiness.isReady()) {
+            return;
+        }
         publishPending(100);
     }
 

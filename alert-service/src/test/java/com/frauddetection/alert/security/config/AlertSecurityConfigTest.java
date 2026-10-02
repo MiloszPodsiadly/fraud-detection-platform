@@ -76,6 +76,7 @@ import com.frauddetection.alert.outbox.OutboxRecoveryRunResponse;
 import com.frauddetection.alert.outbox.OutboxRecoveryService;
 import com.frauddetection.alert.outbox.OutboxRecordResponse;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
+import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
@@ -136,6 +137,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -248,6 +250,9 @@ class AlertSecurityConfigTest {
 
     @MockitoBean
     private OutboxRecoveryService outboxRecoveryService;
+
+    @MockitoBean
+    private TransactionalOutboxRuntimeReadiness outboxRuntimeReadiness;
 
     @MockitoBean
     private TrustIncidentService trustIncidentService;
@@ -404,6 +409,54 @@ class AlertSecurityConfigTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"decision\":\"ACKNOWLEDGED\"}"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void shouldApplySecurityBeforeOutboxRuntimeReadiness() throws Exception {
+        mockMvc.perform(post("/api/v1/outbox/recovery/run"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/outbox/event-1/resolve-confirmation")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "outbox-security-before-readiness")
+                        .content("{\"resolution\":\"PUBLISHED\",\"reason\":\"verified\",\"evidence_reference\":{\"type\":\"BROKER_OFFSET\",\"reference\":\"offset=42\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(outboxRuntimeReadiness, outboxRecoveryService);
+    }
+
+    @Test
+    void shouldBlockAuthorizedOutboxMutationsWhileReadinessIsPendingOrFailed() throws Exception {
+        doThrow(
+                new IllegalStateException("pending internal readiness detail"),
+                new IllegalStateException("failed internal readiness detail")
+        ).when(outboxRuntimeReadiness).requireReady();
+
+        mockMvc.perform(post("/api/v1/outbox/recovery/run").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.message").value("An unexpected error occurred."));
+        mockMvc.perform(post("/api/v1/outbox/event-1/resolve-confirmation")
+                        .with(demoUser("FRAUD_OPS_ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "outbox-readiness-blocked")
+                        .content("{\"resolution\":\"PUBLISHED\",\"reason\":\"verified\",\"evidence_reference\":{\"type\":\"BROKER_OFFSET\",\"reference\":\"offset=42\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.message").value("An unexpected error occurred."));
+
+        verify(outboxRuntimeReadiness, times(2)).requireReady();
+        verify(outboxRecoveryService, never()).recoverNow();
+        verify(outboxRecoveryService, never()).resolveConfirmation(any(), any(), any(), any());
+    }
+
+    @Test
+    void shouldAllowAuthorizedOutboxRecoveryAfterReadinessGuardPasses() throws Exception {
+        when(outboxRecoveryService.recoverNow()).thenReturn(new OutboxRecoveryRunResponse(1, 0, 0, 1));
+
+        mockMvc.perform(post("/api/v1/outbox/recovery/run").with(demoUser("FRAUD_OPS_ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.publish_attempted").value(1));
+
+        verify(outboxRuntimeReadiness).requireReady();
+        verify(outboxRecoveryService).recoverNow();
     }
 
     @Test

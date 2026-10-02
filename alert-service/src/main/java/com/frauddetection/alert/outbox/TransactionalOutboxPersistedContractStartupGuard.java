@@ -37,7 +37,7 @@ public class TransactionalOutboxPersistedContractStartupGuard implements Applica
                                 + "; samples=" + report.samples()
                 );
             }
-            runtimeReadiness.markReady();
+            runtimeReadiness.markPreflightPassed();
         } catch (RuntimeException exception) {
             runtimeReadiness.markFailed();
             throw exception;
