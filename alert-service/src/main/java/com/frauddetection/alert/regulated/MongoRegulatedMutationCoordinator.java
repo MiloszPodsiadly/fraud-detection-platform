@@ -89,6 +89,10 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         document.setRequestHash(command.requestHash());
         document.setIdempotencyKeyHash(RegulatedMutationIntentHasher.hash(idempotencyKey));
         document.setMutationModelVersion(command.mutationModelVersion());
+        if (command.resourceType() == com.frauddetection.alert.audit.AuditResourceType.ALERT
+                && command.action() == com.frauddetection.alert.audit.AuditAction.SUBMIT_ANALYST_DECISION) {
+            document.setDecisionSlotClaimed(true);
+        }
         document.setRevision(0L);
         applyIntent(command, document);
         document.setState(RegulatedMutationState.REQUESTED);
@@ -104,7 +108,7 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             if (idempotentReplay.isPresent()) {
                 return conflictPolicy.existingOrConflict(idempotentReplay.get(), command);
             }
-            if (commandRepository.findByResourceIdAndResourceTypeAndAction(
+            if (commandRepository.findByResourceIdAndResourceTypeAndActionAndDecisionSlotClaimedTrue(
                     command.resourceId(),
                     command.resourceType().name(),
                     command.action().name()

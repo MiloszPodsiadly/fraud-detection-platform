@@ -1,5 +1,7 @@
 package com.frauddetection.alert.regulated;
 
+import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.mongodb.client.result.UpdateResult;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,10 +37,18 @@ public class RegulatedMutationFencedCommandWriter {
             "attempt_count",
             "created_at",
             "mutation_model_version",
+            "decision_slot_claimed",
             "revision",
             "resource_id",
             "action",
             "resource_type"
+    );
+    private static final Set<String> PRE_COMMIT_PROOF_FIELDS = Set.of(
+            "response_snapshot",
+            "outbox_event_id",
+            "local_commit_marker",
+            "local_committed_at",
+            "success_audit_recorded"
     );
 
     private final MongoTemplate mongoTemplate;
@@ -66,13 +76,72 @@ public class RegulatedMutationFencedCommandWriter {
             String lastError,
             Consumer<Update> allowedFieldUpdates
     ) {
+        return transition(
+                claimToken,
+                expectedState,
+                expectedExecutionStatus,
+                expectedRevision,
+                newState,
+                newExecutionStatus,
+                lastError,
+                false,
+                allowedFieldUpdates
+        );
+    }
+
+    public long rejectPreCommitAndReleaseDecisionSlot(
+            RegulatedMutationClaimToken claimToken,
+            RegulatedMutationState expectedState,
+            RegulatedMutationExecutionStatus expectedExecutionStatus,
+            long expectedRevision,
+            RegulatedMutationState newState,
+            RegulatedMutationExecutionStatus newExecutionStatus,
+            String lastError,
+            Consumer<Update> allowedFieldUpdates
+    ) {
+        if (newState != RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE
+                && newState != RegulatedMutationState.FAILED_BUSINESS_VALIDATION) {
+            throw new IllegalArgumentException("Decision slot release requires a terminal pre-commit rejection.");
+        }
+        return transition(
+                claimToken,
+                expectedState,
+                expectedExecutionStatus,
+                expectedRevision,
+                newState,
+                newExecutionStatus,
+                lastError,
+                true,
+                allowedFieldUpdates
+        );
+    }
+
+    private long transition(
+            RegulatedMutationClaimToken claimToken,
+            RegulatedMutationState expectedState,
+            RegulatedMutationExecutionStatus expectedExecutionStatus,
+            long expectedRevision,
+            RegulatedMutationState newState,
+            RegulatedMutationExecutionStatus newExecutionStatus,
+            String lastError,
+            boolean releaseDecisionSlot,
+            Consumer<Update> allowedFieldUpdates
+    ) {
         if (claimToken == null) {
             throw new IllegalArgumentException("Regulated mutation fenced transition requires claim token.");
         }
         long resultingRevision = Math.incrementExact(expectedRevision);
         Instant now = clock.instant();
         Instant startedAt = now;
-        Query query = activeLeaseQuery(claimToken, expectedState, expectedExecutionStatus, expectedRevision, now);
+        Query query = releaseDecisionSlot
+                ? preCommitDecisionSlotReleaseQuery(
+                        claimToken,
+                        expectedState,
+                        expectedExecutionStatus,
+                        expectedRevision,
+                        now
+                )
+                : activeLeaseQuery(claimToken, expectedState, expectedExecutionStatus, expectedRevision, now);
         Update update = new Update()
                 .set("state", newState)
                 .set("execution_status", newExecutionStatus)
@@ -84,11 +153,17 @@ public class RegulatedMutationFencedCommandWriter {
             update.set("lease_owner", null);
             update.set("lease_expires_at", null);
         }
+        if (releaseDecisionSlot) {
+            update.set("decision_slot_claimed", false);
+        }
         Map<String, Map<String, Object>> protectedBaseline = protectedFieldBaseline(update);
         if (allowedFieldUpdates != null) {
             allowedFieldUpdates.accept(update);
         }
         validateProtectedFieldsUnchanged(update, protectedBaseline);
+        if (releaseDecisionSlot) {
+            validateNoCommitProofUpdates(update);
+        }
 
         UpdateResult result = mongoTemplate.updateFirst(query, update, RegulatedMutationCommandDocument.class);
         if (result.getMatchedCount() == 0) {
@@ -303,6 +378,22 @@ public class RegulatedMutationFencedCommandWriter {
         }
     }
 
+    private void validateNoCommitProofUpdates(Update update) {
+        for (Object operation : update.getUpdateObject().values()) {
+            if (!(operation instanceof org.bson.Document document)) {
+                continue;
+            }
+            PRE_COMMIT_PROOF_FIELDS.stream()
+                    .filter(document::containsKey)
+                    .findFirst()
+                    .ifPresent(field -> {
+                        throw new IllegalArgumentException(
+                                "Decision slot release update cannot modify commit proof field: " + field
+                        );
+                    });
+        }
+    }
+
     private Query activeLeaseQuery(
             RegulatedMutationClaimToken claimToken,
             RegulatedMutationState expectedState,
@@ -318,6 +409,32 @@ public class RegulatedMutationFencedCommandWriter {
                 Criteria.where("execution_status").is(expectedExecutionStatus),
                 Criteria.where("revision").is(expectedRevision),
                 mutationModelCriteria(claimToken.mutationModelVersion())
+        ));
+    }
+
+    private Query preCommitDecisionSlotReleaseQuery(
+            RegulatedMutationClaimToken claimToken,
+            RegulatedMutationState expectedState,
+            RegulatedMutationExecutionStatus expectedExecutionStatus,
+            long expectedRevision,
+            Instant now
+    ) {
+        return new Query(new Criteria().andOperator(
+                Criteria.where("_id").is(claimToken.commandId()),
+                Criteria.where("lease_owner").is(claimToken.leaseOwner()),
+                Criteria.where("lease_expires_at").gt(now),
+                Criteria.where("state").is(expectedState),
+                Criteria.where("execution_status").is(expectedExecutionStatus),
+                Criteria.where("revision").is(expectedRevision),
+                mutationModelCriteria(claimToken.mutationModelVersion()),
+                Criteria.where("resource_type").is(AuditResourceType.ALERT.name()),
+                Criteria.where("action").is(AuditAction.SUBMIT_ANALYST_DECISION.name()),
+                Criteria.where("decision_slot_claimed").is(true),
+                Criteria.where("response_snapshot").is(null),
+                Criteria.where("outbox_event_id").is(null),
+                Criteria.where("local_commit_marker").is(null),
+                Criteria.where("local_committed_at").is(null),
+                Criteria.where("success_audit_recorded").ne(true)
         ));
     }
 

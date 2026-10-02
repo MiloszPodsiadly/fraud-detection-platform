@@ -62,6 +62,80 @@ class RegulatedMutationFencedCommandWriterTest {
     }
 
     @Test
+    void preCommitRejectionReleasesDecisionSlotOnlyWithPersistedNoCommitProof() {
+        when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+
+        writer.rejectPreCommitAndReleaseDecisionSlot(
+                token("owner-a", Instant.now().plusSeconds(30)),
+                RegulatedMutationState.REQUESTED,
+                RegulatedMutationExecutionStatus.PROCESSING,
+                0L,
+                RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE,
+                RegulatedMutationExecutionStatus.FAILED,
+                "EVIDENCE_UNAVAILABLE",
+                null
+        );
+
+        String queryJson = capturedQuery().getQueryObject().toString();
+        assertThat(queryJson)
+                .contains("resource_type=ALERT")
+                .contains("action=SUBMIT_ANALYST_DECISION")
+                .contains("decision_slot_claimed=true")
+                .contains("response_snapshot=null")
+                .contains("outbox_event_id=null")
+                .contains("local_commit_marker=null")
+                .contains("local_committed_at=null")
+                .contains("success_audit_recorded=Document{{$ne=true}}");
+        assertThat(setDocument().get("decision_slot_claimed")).isEqualTo(false);
+    }
+
+    @Test
+    void preCommitReleaseCallbackCannotAddCommitProof() {
+        for (String field : new String[]{
+                "response_snapshot",
+                "outbox_event_id",
+                "local_commit_marker",
+                "local_committed_at",
+                "success_audit_recorded"
+        }) {
+            assertThatThrownBy(() -> writer.rejectPreCommitAndReleaseDecisionSlot(
+                    token("owner-a", Instant.now().plusSeconds(30)),
+                    RegulatedMutationState.REQUESTED,
+                    RegulatedMutationExecutionStatus.PROCESSING,
+                    0L,
+                    RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE,
+                    RegulatedMutationExecutionStatus.FAILED,
+                    "EVIDENCE_UNAVAILABLE",
+                    update -> update.set(field, "forbidden-proof")
+            ))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(field);
+        }
+    }
+
+    @Test
+    void failedNoCommitProofFenceCannotReleaseDecisionSlot() {
+        when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
+                .thenReturn(UpdateResult.acknowledged(0, 0L, null));
+        when(mongoTemplate.findById("command-1", RegulatedMutationCommandDocument.class))
+                .thenReturn(current("owner-a", Instant.now().plusSeconds(30)));
+
+        assertThatThrownBy(() -> writer.rejectPreCommitAndReleaseDecisionSlot(
+                token("owner-a", Instant.now().plusSeconds(30)),
+                RegulatedMutationState.REQUESTED,
+                RegulatedMutationExecutionStatus.PROCESSING,
+                0L,
+                RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE,
+                RegulatedMutationExecutionStatus.FAILED,
+                "EVIDENCE_UNAVAILABLE",
+                null
+        )).isInstanceOf(StaleRegulatedMutationLeaseException.class);
+
+        assertThat(setDocument().get("decision_slot_claimed")).isEqualTo(false);
+    }
+
+    @Test
     void activeLeaseValidationUsesSameLeaseOwnerExpiryStateAndExecutionStatusFence() {
         when(mongoTemplate.count(any(Query.class), eq(RegulatedMutationCommandDocument.class))).thenReturn(1L);
 
@@ -272,6 +346,11 @@ class RegulatedMutationFencedCommandWriterTest {
     @Test
     void allowedFieldUpdatesCannotMutateRevision() {
         assertProtectedFieldRejected("revision", 99L);
+    }
+
+    @Test
+    void allowedFieldUpdatesCannotMutateDecisionSlotClaim() {
+        assertProtectedFieldRejected("decision_slot_claimed", false);
     }
 
     @Test

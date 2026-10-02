@@ -12,7 +12,7 @@ public interface RegulatedMutationCommandRepository extends MongoRepository<Regu
 
     Optional<RegulatedMutationCommandDocument> findByIdempotencyKeyHash(String idempotencyKeyHash);
 
-    Optional<RegulatedMutationCommandDocument> findByResourceIdAndResourceTypeAndAction(
+    Optional<RegulatedMutationCommandDocument> findByResourceIdAndResourceTypeAndActionAndDecisionSlotClaimedTrue(
             String resourceId,
             String resourceType,
             String action

@@ -176,7 +176,8 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                         .name("single_submit_decision_per_alert_idx")
                         .unique(true)
                         .partialFilterExpression(new org.bson.Document("resource_type", "ALERT")
-                                .append("action", "SUBMIT_ANALYST_DECISION"))
+                                .append("action", "SUBMIT_ANALYST_DECISION")
+                                .append("decision_slot_claimed", true))
         );
     }
 
@@ -375,6 +376,65 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
     }
 
     @Test
+    void rejectedPreCommitDecisionReleasesSlotWithoutLosingReplayHistory() {
+        String alertId = "alert-rejected-slot-release";
+        alertRepository.save(alert(alertId));
+        AtomicInteger businessMutations = new AtomicInteger();
+        auditPublisher.failAttemptedPublish = true;
+
+        assertThatThrownBy(() -> submitDecision(
+                "idem-rejected-slot-1",
+                alertId,
+                businessMutations,
+                submitDecisionHandler()
+        )).isInstanceOf(DataAccessResourceFailureException.class);
+
+        RegulatedMutationCommandDocument rejected = commandRepository
+                .findByIdempotencyKey("idem-rejected-slot-1")
+                .orElseThrow();
+        assertThat(rejected.getState()).isEqualTo(RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE);
+        assertThat(rejected.isDecisionSlotClaimed()).isFalse();
+        assertThat(rejected.getResponseSnapshot()).isNull();
+        assertThat(rejected.getOutboxEventId()).isNull();
+        assertThat(outboxRepository.findByMutationCommandId(rejected.getId())).isEmpty();
+        assertThat(alertRepository.findById(alertId).orElseThrow().getAnalystDecision()).isNull();
+        assertThat(businessMutations).hasValue(0);
+
+        RegulatedMutationResult<SubmitAnalystDecisionResponse> firstReplay = coordinator.commit(command(
+                "idem-rejected-slot-1",
+                alertId,
+                businessMutations,
+                context -> {
+                    throw new AssertionError("terminal rejected replay must not execute the business mutation");
+                }
+        ));
+        assertThat(firstReplay.state()).isEqualTo(RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE);
+
+        auditPublisher.failAttemptedPublish = false;
+        RegulatedMutationResult<SubmitAnalystDecisionResponse> replacement = submitDecision(
+                "idem-rejected-slot-2",
+                alertId,
+                businessMutations,
+                submitDecisionHandler()
+        );
+        assertThat(replacement.state()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+
+        RegulatedMutationResult<SubmitAnalystDecisionResponse> replayAfterReplacement = coordinator.commit(command(
+                "idem-rejected-slot-1",
+                alertId,
+                businessMutations,
+                context -> {
+                    throw new AssertionError("released historical command must remain terminal");
+                }
+        ));
+        assertThat(replayAfterReplacement.state()).isEqualTo(RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE);
+        assertThat(commandRepository.count()).isEqualTo(2);
+        assertThat(commandRepository.findById(rejected.getId())).isPresent();
+        assertThat(outboxRepository.count()).isOne();
+        assertThat(businessMutations).hasValue(1);
+    }
+
+    @Test
     void differentKeyCannotReplacePublishedDecisionEvidence() {
         String alertId = "alert-single-published";
         alertRepository.save(alert(alertId));
@@ -470,6 +530,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         AlertDocument alert = alertRepository.findById("alert-outbox-fail").orElseThrow();
 
         assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        assertThat(command.isDecisionSlotClaimed()).isTrue();
         assertThat(command.getResponseSnapshot()).isNull();
         assertThat(command.getLocalCommitMarker()).isNull();
         assertThat(command.getSuccessAuditId()).isNull();
@@ -488,6 +549,13 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         ));
         assertThat(replay.state()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
         assertThat(businessMutations).hasValue(1);
+
+        assertThatThrownBy(() -> submitDecision(
+                "idem-outbox-fail-replacement",
+                "alert-outbox-fail",
+                businessMutations,
+                submitDecisionHandler()
+        )).isInstanceOf(ConflictingResourceMutationException.class);
     }
 
     @Test
@@ -1197,6 +1265,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
     private final class LocalMongoAuditPublisher implements AuditEventPublisher {
         private final MongoTemplate mongoTemplate;
         private int successPublishCalls;
+        private boolean failAttemptedPublish;
 
         private LocalMongoAuditPublisher(MongoTemplate mongoTemplate) {
             this.mongoTemplate = mongoTemplate;
@@ -1204,6 +1273,9 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
 
         @Override
         public void publish(AuditEvent event) {
+            if (failAttemptedPublish && event.outcome() == AuditOutcome.ATTEMPTED) {
+                throw new DataAccessResourceFailureException("attempted audit unavailable");
+            }
             if (event.outcome() == AuditOutcome.SUCCESS) {
                 successPublishCalls++;
             }

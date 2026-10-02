@@ -457,23 +457,50 @@ public class EvidenceGatedFinalizeExecutor implements RegulatedMutationExecutor 
         RegulatedMutationExecutionStatus previousExecutionStatus = document.getExecutionStatus();
         stateMachine.requireTransition(document.getState(), state);
         var publicStatus = publicStatusMapper.currentStatus(state);
-        long resultingRevision = fencedCommandWriter.transition(
-                claimToken,
-                previous,
-                previousExecutionStatus,
-                document.requireRevision(),
-                state,
-                executionStatus,
-                lastError,
-                update -> {
-                    update.set("public_status", publicStatus);
-                    allowedFieldUpdates.accept(update);
-                }
-        );
+        Consumer<Update> transitionUpdates = update -> {
+            update.set("public_status", publicStatus);
+            allowedFieldUpdates.accept(update);
+        };
+        boolean releaseDecisionSlot = shouldReleaseDecisionSlot(document, state);
+        long resultingRevision = releaseDecisionSlot
+                ? fencedCommandWriter.rejectPreCommitAndReleaseDecisionSlot(
+                        claimToken,
+                        previous,
+                        previousExecutionStatus,
+                        document.requireRevision(),
+                        state,
+                        executionStatus,
+                        lastError,
+                        transitionUpdates
+                )
+                : fencedCommandWriter.transition(
+                        claimToken,
+                        previous,
+                        previousExecutionStatus,
+                        document.requireRevision(),
+                        state,
+                        executionStatus,
+                        lastError,
+                        transitionUpdates
+                );
         applyTransition(document, state, executionStatus, lastError);
+        if (releaseDecisionSlot) {
+            document.setDecisionSlotClaimed(false);
+        }
         document.setRevision(resultingRevision);
         document.setPublicStatus(publicStatus);
         metrics.recordEvidenceGatedFinalizeStateTransition(previous, state, lastError == null ? "SUCCESS" : "FAILED");
+    }
+
+    private boolean shouldReleaseDecisionSlot(
+            RegulatedMutationCommandDocument document,
+            RegulatedMutationState targetState
+    ) {
+        return document.isDecisionSlotClaimed()
+                && AuditResourceType.ALERT.name().equals(document.getResourceType())
+                && AuditAction.SUBMIT_ANALYST_DECISION.name().equals(document.getAction())
+                && (targetState == RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE
+                        || targetState == RegulatedMutationState.FAILED_BUSINESS_VALIDATION);
     }
 
     private void recoveryTransition(

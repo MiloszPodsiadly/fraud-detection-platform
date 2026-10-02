@@ -12,12 +12,18 @@ import java.time.Instant;
 @Document(collection = "regulated_mutation_commands")
 @CompoundIndex(name = "resource_action_created_idx", def = "{'resource_id': 1, 'action': 1, 'created_at': -1}")
 @CompoundIndex(
-        name = "single_submit_decision_per_alert_idx",
-        def = "{'resource_id': 1, 'resource_type': 1, 'action': 1}",
+        name = RegulatedMutationCommandDocument.DECISION_SLOT_INDEX_NAME,
+        def = RegulatedMutationCommandDocument.DECISION_SLOT_INDEX_KEYS,
         unique = true,
-        partialFilter = "{'resource_type': 'ALERT', 'action': 'SUBMIT_ANALYST_DECISION'}"
+        partialFilter = RegulatedMutationCommandDocument.DECISION_SLOT_PARTIAL_FILTER
 )
 public class RegulatedMutationCommandDocument {
+
+    public static final String DECISION_SLOT_INDEX_NAME = "single_submit_decision_per_alert_idx";
+    public static final String DECISION_SLOT_INDEX_KEYS =
+            "{'resource_id': 1, 'resource_type': 1, 'action': 1}";
+    public static final String DECISION_SLOT_PARTIAL_FILTER =
+            "{'resource_type': 'ALERT', 'action': 'SUBMIT_ANALYST_DECISION', 'decision_slot_claimed': true}";
 
     @Id
     private String id;
@@ -64,6 +70,8 @@ public class RegulatedMutationCommandDocument {
     private String intentPayloadHash;
     @Field("mutation_model_version")
     private RegulatedMutationModelVersion mutationModelVersion;
+    @Field("decision_slot_claimed")
+    private Boolean decisionSlotClaimed;
     private Long revision;
     private RegulatedMutationState state;
     @Field("execution_status")
@@ -153,6 +161,8 @@ public class RegulatedMutationCommandDocument {
     public void setIntentPayloadHash(String intentPayloadHash) { this.intentPayloadHash = intentPayloadHash; }
     public RegulatedMutationModelVersion getMutationModelVersion() { return mutationModelVersion; }
     public void setMutationModelVersion(RegulatedMutationModelVersion mutationModelVersion) { this.mutationModelVersion = mutationModelVersion; }
+    public boolean isDecisionSlotClaimed() { return Boolean.TRUE.equals(decisionSlotClaimed); }
+    public void setDecisionSlotClaimed(Boolean decisionSlotClaimed) { this.decisionSlotClaimed = decisionSlotClaimed; }
     public Long getRevision() { return revision; }
     public void setRevision(Long revision) { this.revision = revision; }
     public long requireRevision() {

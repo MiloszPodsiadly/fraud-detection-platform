@@ -95,7 +95,7 @@ class MongoRegulatedMutationCoordinatorRoutingTest {
         fixture.noExistingCommand();
         when(fixture.commandRepository.save(any(RegulatedMutationCommandDocument.class)))
                 .thenThrow(new DuplicateKeyException("single resource action"));
-        when(fixture.commandRepository.findByResourceIdAndResourceTypeAndAction(
+        when(fixture.commandRepository.findByResourceIdAndResourceTypeAndActionAndDecisionSlotClaimedTrue(
                 "resource-1",
                 AuditResourceType.ALERT.name(),
                 AuditAction.SUBMIT_ANALYST_DECISION.name()
