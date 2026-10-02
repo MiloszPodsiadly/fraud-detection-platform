@@ -289,6 +289,75 @@ class TransactionalOutboxPersistedContractPreflightTest {
     }
 
     @Test
+    void rejectsProcessingWithNonCanonicalPendingProjection() {
+        Document source = activeOutbox(
+                "event-invalid-pending",
+                "alert-invalid-pending",
+                "PROCESSING",
+                1,
+                0L
+        );
+
+        Document alert = canonicalAlert(
+                "alert-invalid-pending",
+                "event-invalid-pending",
+                "PENDING",
+                0L
+        )
+                .append("decisionOutboxAttempts", 1)
+                .append("decisionOutboxLastError", "BROKER_UNAVAILABLE")
+                .append("decisionOutboxFailureReason", "BROKER_UNAVAILABLE");
+
+        assertThat(violations(inspect(source, alert))).contains(
+                "ALERT_PROJECTION_SEMANTIC_MISMATCH_decisionOutboxAttempts",
+                "ALERT_PROJECTION_SEMANTIC_MISMATCH_decisionOutboxLastError",
+                "ALERT_PROJECTION_SEMANTIC_MISMATCH_decisionOutboxFailureReason"
+        );
+    }
+
+    @Test
+    void rejectsPublishAttemptedWithNonCanonicalPendingRevision() {
+        Document source = activeOutbox(
+                "event-invalid-revision",
+                "alert-invalid-revision",
+                "PUBLISH_ATTEMPTED",
+                1,
+                0L
+        );
+
+        Document alert = canonicalAlert(
+                "alert-invalid-revision",
+                "event-invalid-revision",
+                "PENDING",
+                1L
+        );
+
+        assertThat(violations(inspect(source, alert))).contains(
+                "ALERT_PROJECTION_SEMANTIC_MISMATCH_decisionOutboxProjectionRevision"
+        );
+    }
+
+    @Test
+    void acceptsPublishAttemptedWithCanonicalInitialPendingProjection() {
+        Document source = activeOutbox(
+                "event-valid-pending",
+                "alert-valid-pending",
+                "PUBLISH_ATTEMPTED",
+                1,
+                0L
+        );
+
+        Document alert = canonicalAlert(
+                "alert-valid-pending",
+                "event-valid-pending",
+                "PENDING",
+                0L
+        );
+
+        assertThat(inspect(source, alert).blocksStartup()).isFalse();
+    }
+
+    @Test
     void acceptsProcessingWithLaggingFailedRetryableProjection() {
         Document source = activeOutbox("event-processing-retry", "alert-processing-retry", "PROCESSING", 2, 1L);
         Document alert = canonicalAlert(

@@ -124,29 +124,55 @@ public final class OutboxAlertProjectionPolicy {
         );
     }
 
+
     private static List<String> initialPendingProjectionViolations(
             Document source,
             Document alert,
             TransactionalOutboxRecordDocument record
     ) {
         List<String> violations = new ArrayList<>();
+
         if (!persistedValueEquals(0, source.get("attempts"))
                 || !persistedValueEquals(0L, source.get("projection_revision"))
                 || source.get("last_error") != null) {
             violations.add("PENDING_SOURCE_NOT_CANONICAL_INITIAL_STATE");
         }
-        addExpectedProjectionValue(violations, alert, "decisionOutboxEventId", record.getEventId());
-        addExpectedProjectionValue(violations, alert, "decisionOutboxProjectionRevision", 0L);
-        addExpectedProjectionValue(violations, alert, "decisionOutboxStatus", "PENDING");
-        addExpectedProjectionValue(violations, alert, "decisionOutboxAttempts", 0);
+
+        violations.addAll(canonicalPendingAlertViolations(record, alert));
+
+        return violations;
+    }
+
+    private static List<String> canonicalPendingAlertViolations(
+            TransactionalOutboxRecordDocument record,
+            Document alert
+    ) {
+        List<String> violations = new ArrayList<>();
+
+        addExpectedProjectionValue(
+                violations, alert, "decisionOutboxEventId", record.getEventId()
+        );
+        addExpectedProjectionValue(
+                violations, alert, "decisionOutboxProjectionRevision", 0L
+        );
+        addExpectedProjectionValue(
+                violations, alert, "decisionOutboxStatus", DecisionOutboxStatus.PENDING
+        );
+        addExpectedProjectionValue(
+                violations, alert, "decisionOutboxAttempts", 0
+        );
+
         INITIAL_PENDING_FORBIDDEN_PROJECTION_FIELDS.stream()
                 .filter(field -> alert.get(field) != null)
                 .map(OutboxAlertProjectionPolicy::projectionMismatch)
                 .forEach(violations::add);
+
         Object resolutionPending = alert.get("decisionOutboxResolutionPending");
+
         if (resolutionPending != null && !Boolean.FALSE.equals(resolutionPending)) {
             violations.add(projectionMismatch("decisionOutboxResolutionPending"));
         }
+
         return violations;
     }
 
@@ -156,13 +182,19 @@ public final class OutboxAlertProjectionPolicy {
     ) {
         List<String> violations = new ArrayList<>(forbiddenManualResolutionProjectionViolations(alert));
         String projectionStatus = string(alert, "decisionOutboxStatus");
+
         if (!PRE_CONFIRMATION_PROJECTED_STATUSES.contains(projectionStatus)) {
             violations.add(projectionMismatch("decisionOutboxStatus"));
             return violations;
         }
-        if (!DecisionOutboxStatus.FAILED_RETRYABLE.equals(projectionStatus)) {
-            return violations;
+
+        if (DecisionOutboxStatus.PENDING.equals(projectionStatus)) {
+            return mergedViolations(
+                    violations,
+                    canonicalPendingAlertViolations(record, alert)
+            );
         }
+
         Integer projectedAttempts = projectedAttempts(alert.get("decisionOutboxAttempts"));
         long projectedRevision = number(alert.get("decisionOutboxProjectionRevision"), -1L);
         if (projectedAttempts == null || projectedAttempts <= 0 || record.getAttempts() <= projectedAttempts) {
