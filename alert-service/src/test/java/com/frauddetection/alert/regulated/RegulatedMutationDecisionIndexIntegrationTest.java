@@ -83,6 +83,42 @@ class RegulatedMutationDecisionIndexIntegrationTest extends AbstractIntegrationT
     }
 
     @Test
+    void releasedPreCommitCommandWithNonBooleanSuccessAuditRecordedFailsClosed() {
+        createCanonicalIndex();
+
+        mongoTemplate.getCollection(
+                RegulatedMutationDecisionIndexStartupGuard.COLLECTION
+        ).insertOne(
+                releasedPreCommitCommand(
+                        "command-invalid-audit-type",
+                        "alert-invalid-audit-type"
+                ).append("success_audit_recorded", "true")
+        );
+
+        assertThatThrownBy(guard::verify)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("OWNERSHIP_DATA_INVALID");
+    }
+
+    @Test
+    void releasedPreCommitCommandWithArraySuccessAuditRecordedFailsClosed() {
+        createCanonicalIndex();
+
+        mongoTemplate.getCollection(
+                RegulatedMutationDecisionIndexStartupGuard.COLLECTION
+        ).insertOne(
+                releasedPreCommitCommand(
+                        "command-invalid-audit-array",
+                        "alert-invalid-audit-array"
+                ).append("success_audit_recorded", java.util.List.of(false))
+        );
+
+        assertThatThrownBy(guard::verify)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("OWNERSHIP_DATA_INVALID");
+    }
+
+    @Test
     void canonicalReleasedAndCommittedOwnershipRecordsAreAccepted() {
         createCanonicalIndex();
         mongoTemplate.getCollection(RegulatedMutationDecisionIndexStartupGuard.COLLECTION).insertOne(

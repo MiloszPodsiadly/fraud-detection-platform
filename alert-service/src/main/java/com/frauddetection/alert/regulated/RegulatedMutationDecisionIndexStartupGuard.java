@@ -34,14 +34,24 @@ public class RegulatedMutationDecisionIndexStartupGuard implements ApplicationRu
             Filters.eq("resource_type", "ALERT"),
             Filters.eq("action", "SUBMIT_ANALYST_DECISION")
     );
+
     private static final Bson NO_COMMIT_PROOF = Filters.and(
             Filters.eq("response_snapshot", null),
             Filters.eq("outbox_event_id", null),
             Filters.eq("local_commit_marker", null),
             Filters.eq("local_committed_at", null),
             Filters.eq("success_audit_id", null),
-            Filters.ne("success_audit_recorded", true)
+            Filters.expr(
+                    new Document("$eq", List.of(
+                            new Document("$ifNull", List.of(
+                                    "$success_audit_recorded",
+                                    false
+                            )),
+                            false
+                    ))
+            )
     );
+
     private static final Bson SAFE_RELEASED_COMMAND = Filters.and(
             Filters.in(
                     "state",

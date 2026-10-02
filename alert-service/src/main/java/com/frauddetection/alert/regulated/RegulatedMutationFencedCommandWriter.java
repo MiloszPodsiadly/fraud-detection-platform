@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -469,7 +470,16 @@ public class RegulatedMutationFencedCommandWriter {
                 Criteria.where("local_commit_marker").is(null),
                 Criteria.where("local_committed_at").is(null),
                 Criteria.where("success_audit_id").is(null),
-                Criteria.where("success_audit_recorded").ne(true)
+                Criteria.where("$expr").is(
+                        new org.bson.Document("$eq", List.of(
+                                new org.bson.Document("$ifNull", List.of(
+                                        "$success_audit_recorded",
+                                        false
+                                )),
+                                false
+                        ))
+                )
+
         ));
     }
 

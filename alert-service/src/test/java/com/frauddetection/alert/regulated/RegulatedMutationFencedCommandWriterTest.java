@@ -12,6 +12,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 
 import java.time.Instant;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -61,6 +62,7 @@ class RegulatedMutationFencedCommandWriterTest {
         assertThat(incDocument().get("revision")).isEqualTo(1);
     }
 
+
     @Test
     void preCommitRejectionReleasesDecisionSlotOnlyWithPersistedNoCommitProof() {
         when(mongoTemplate.updateFirst(any(), any(), eq(RegulatedMutationCommandDocument.class)))
@@ -77,7 +79,9 @@ class RegulatedMutationFencedCommandWriterTest {
                 null
         );
 
-        String queryJson = capturedQuery().getQueryObject().toString();
+        Document queryDocument = capturedQuery().getQueryObject();
+        String queryJson = queryDocument.toString();
+
         assertThat(queryJson)
                 .contains("resource_type=ALERT")
                 .contains("action=SUBMIT_ANALYST_DECISION")
@@ -86,8 +90,22 @@ class RegulatedMutationFencedCommandWriterTest {
                 .contains("outbox_event_id=null")
                 .contains("local_commit_marker=null")
                 .contains("local_committed_at=null")
-                .contains("success_audit_id=null")
-                .contains("success_audit_recorded=Document{{$ne=true}}");
+                .contains("success_audit_id=null");
+
+        Document expectedExpression = new Document("$eq", List.of(
+                new Document("$ifNull", List.of(
+                        "$success_audit_recorded",
+                        false
+                )),
+                false
+        ));
+
+        assertThat(queryDocument.getList("$and", Document.class))
+                .anySatisfy(condition ->
+                        assertThat(condition.get("$expr"))
+                                .isEqualTo(expectedExpression)
+                );
+
         assertThat(setDocument().get("decision_slot_claimed")).isEqualTo(false);
     }
 
