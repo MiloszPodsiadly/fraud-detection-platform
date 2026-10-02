@@ -117,6 +117,22 @@ public class TransactionalOutboxPersistedContractPreflight {
             "decisionOutboxResolutionApprovalEvidenceFingerprint", "decisionOutboxResolutionApprovedAt",
             "decisionOutboxResolutionApprovedBy", JOINED_OUTBOX
     );
+    private static final List<String> ALERT_PROJECTION_MARKER_FIELDS = List.of(
+            "decisionOutboxEvent", "decisionOutboxEventId", "decisionOutboxStatus",
+            "decisionOutboxPublishedAt", "decisionOutboxPublicationConfirmationProvenance",
+            "decisionOutboxLastError", "decisionOutboxFailureReason", "decisionOutboxLeaseOwner",
+            "decisionOutboxLeaseExpiresAt", "decisionOutboxResolutionRequestId",
+            "decisionOutboxResolutionProposedOutcome", "decisionOutboxResolutionRequestedAt",
+            "decisionOutboxResolutionRequestedBy", "decisionOutboxResolutionRequestReason",
+            "decisionOutboxResolutionApprovalReason", "decisionOutboxResolutionEvidenceType",
+            "decisionOutboxResolutionEvidenceReference", "decisionOutboxResolutionEvidenceVerifiedAt",
+            "decisionOutboxResolutionEvidenceVerifiedBy", "decisionOutboxResolutionEvidenceFingerprint",
+            "decisionOutboxResolutionApprovalEvidenceType", "decisionOutboxResolutionApprovalEvidenceReference",
+            "decisionOutboxResolutionApprovalEvidenceVerifiedAt",
+            "decisionOutboxResolutionApprovalEvidenceVerifiedBy",
+            "decisionOutboxResolutionApprovalEvidenceFingerprint", "decisionOutboxResolutionApprovedAt",
+            "decisionOutboxResolutionApprovedBy"
+    );
 
     private final MongoTemplate mongoTemplate;
     private final Duration startupValidationBudget;
@@ -147,12 +163,7 @@ public class TransactionalOutboxPersistedContractPreflight {
                 )), inspection::inspectOutbox, deadlineNanos);
 
         MongoCollection<Document> alerts = mongoTemplate.getCollection(ALERT_COLLECTION);
-        Bson hasOutboxProjection = Filters.or(
-                Filters.exists("decisionOutboxEvent", true),
-                Filters.exists("decisionOutboxEventId", true),
-                Filters.exists("decisionOutboxProjectionRevision", true),
-                Filters.exists("decisionOutboxStatus", true)
-        );
+        Bson hasOutboxProjection = hasOutboxProjectionFilter();
         inspectAll(alerts.aggregate(List.of(
                         Aggregates.match(hasOutboxProjection),
                         Aggregates.lookup(COLLECTION, "decisionOutboxEventId", "_id", JOINED_OUTBOX),
@@ -456,10 +467,27 @@ public class TransactionalOutboxPersistedContractPreflight {
     }
 
     private static boolean hasAnyOutboxProjectionField(Document document) {
-        return document.containsKey("decisionOutboxEvent")
-                || document.containsKey("decisionOutboxEventId")
-                || document.containsKey("decisionOutboxProjectionRevision")
-                || document.containsKey("decisionOutboxStatus");
+        return hasAny(document, ALERT_PROJECTION_MARKER_FIELDS)
+                || hasNonDefaultValue(document, "decisionOutboxProjectionRevision", 0L)
+                || hasNonDefaultValue(document, "decisionOutboxAttempts", 0)
+                || hasNonDefaultValue(document, "decisionOutboxResolutionPending", false);
+    }
+
+    private static Bson hasOutboxProjectionFilter() {
+        List<Bson> markers = new ArrayList<>();
+        ALERT_PROJECTION_MARKER_FIELDS.forEach(field -> markers.add(Filters.exists(field, true)));
+        markers.add(nonDefaultField("decisionOutboxProjectionRevision", 0L));
+        markers.add(nonDefaultField("decisionOutboxAttempts", 0));
+        markers.add(nonDefaultField("decisionOutboxResolutionPending", false));
+        return Filters.or(markers);
+    }
+
+    private static Bson nonDefaultField(String field, Object defaultValue) {
+        return Filters.and(Filters.exists(field, true), Filters.ne(field, defaultValue));
+    }
+
+    private static boolean hasNonDefaultValue(Document document, String field, Object defaultValue) {
+        return document.containsKey(field) && !java.util.Objects.equals(document.get(field), defaultValue);
     }
 
     private static boolean hasText(Object value) {

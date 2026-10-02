@@ -96,10 +96,56 @@ class TransactionalOutboxPersistedContractPreflightIntegrationTest extends Abstr
     }
 
     @Test
+    void aggregationBackedInspectRejectsMarkerMaskedFalsePublication() {
+        Document source = new Document("_id", "event-marker-masked")
+                .append("resource_type", "ALERT")
+                .append("resource_id", "alert-marker-masked")
+                .append("status", "FAILED_TERMINAL")
+                .append("attempts", 3)
+                .append("projection_revision", 5L)
+                .append("last_error", "RETRY_EXHAUSTED")
+                .append("projection_mismatch", true)
+                .append("projection_reconcile_after", Date.from(Instant.parse("2026-10-01T10:10:00Z")))
+                .append("resolution_pending", false);
+        Document alert = new Document("_id", "alert-marker-masked")
+                .append("decisionOutboxEventId", "event-marker-masked")
+                .append("decisionOutboxProjectionRevision", 4L)
+                .append("decisionOutboxStatus", "PUBLISHED")
+                .append("decisionOutboxAttempts", 2)
+                .append("decisionOutboxPublishedAt", Date.from(Instant.parse("2026-10-01T10:00:00Z")))
+                .append("decisionOutboxPublicationConfirmationProvenance", "BROKER_ACKNOWLEDGED");
+        insert(source, alert);
+
+        TransactionalOutboxPersistedContractPreflight.Report report = preflight.inspect(10);
+
+        assertThat(report.blocksStartup()).isTrue();
+        assertThat(report.samples().getFirst().violations()).contains(
+                "ALERT_STATUS_DOES_NOT_MATCH_SOURCE",
+                "ALERT_PUBLISHED_AT_DOES_NOT_MATCH_SOURCE",
+                "ALERT_PUBLICATION_PROVENANCE_DOES_NOT_MATCH_SOURCE"
+        );
+    }
+
+    @Test
     void aggregationBackedInspectAcceptsCanonicalPair() {
         insert(publishedSource(), publishedAlert("PUBLISHED"));
 
         assertThat(preflight.inspect(10).blocksStartup()).isFalse();
+    }
+
+    @Test
+    void aggregationBackedInspectIgnoresDefaultOutboxFieldsOnUndecidedAlert() {
+        mongoTemplate.getCollection(TransactionalOutboxPersistedContractPreflight.ALERT_COLLECTION).insertOne(
+                new Document("_id", "alert-without-decision")
+                        .append("decisionOutboxProjectionRevision", 0L)
+                        .append("decisionOutboxAttempts", 0)
+                        .append("decisionOutboxResolutionPending", false)
+        );
+
+        TransactionalOutboxPersistedContractPreflight.Report report = preflight.inspect(10);
+
+        assertThat(report.blocksStartup()).isFalse();
+        assertThat(report.unsupportedAlertProjectionCount()).isZero();
     }
 
     @Test

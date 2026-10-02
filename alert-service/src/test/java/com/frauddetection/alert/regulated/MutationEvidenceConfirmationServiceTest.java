@@ -621,6 +621,7 @@ class MutationEvidenceConfirmationServiceTest {
                 OutboxPublicationConfirmationProvenance.MANUAL_SINGLE_CONTROL_ATTESTED
         );
         document.setResolutionControlMode("SINGLE_CONTROL_OPERATOR_ATTESTED");
+        document.setResolutionProposedOutcome("PUBLISHED");
         document.setResolutionApprovedBy("operator");
         document.setResolutionApprovedAt(approvedAt);
         document.setResolutionApprovalReason("operator reason");

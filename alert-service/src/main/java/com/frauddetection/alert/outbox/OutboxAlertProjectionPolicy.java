@@ -12,6 +12,7 @@ import org.springframework.data.mongodb.core.query.Update;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -28,6 +29,10 @@ public final class OutboxAlertProjectionPolicy {
     private static final Set<TransactionalOutboxStatus> PRE_CONFIRMATION_STATUSES = Set.of(
             TransactionalOutboxStatus.PROCESSING,
             TransactionalOutboxStatus.PUBLISH_ATTEMPTED
+    );
+    private static final Set<String> PRE_CONFIRMATION_PROJECTED_STATUSES = Set.of(
+            DecisionOutboxStatus.PENDING,
+            DecisionOutboxStatus.FAILED_RETRYABLE
     );
     private static final List<String> INITIAL_PENDING_FORBIDDEN_PROJECTION_FIELDS = List.of(
             "decisionOutboxLeaseOwner",
@@ -81,11 +86,17 @@ public final class OutboxAlertProjectionPolicy {
         if (record == null) {
             return List.of();
         }
+        List<String> publicationViolations = record.getStatus() == TransactionalOutboxStatus.PUBLISHED
+                ? List.of()
+                : falsePublicationViolations(alert);
         if (record.getStatus() == TransactionalOutboxStatus.PENDING) {
-            return initialPendingProjectionViolations(source, alert, record);
+            return mergedViolations(
+                    publicationViolations,
+                    initialPendingProjectionViolations(source, alert, record)
+            );
         }
         if (PRE_CONFIRMATION_STATUSES.contains(record.getStatus())) {
-            return preConfirmationProjectionViolations(alert);
+            return mergedViolations(publicationViolations, preConfirmationProjectionViolations(alert));
         }
         if (!STABLE_PROJECTED_STATUSES.contains(record.getStatus())
                 || !persistedValueEquals(
@@ -94,9 +105,12 @@ public final class OutboxAlertProjectionPolicy {
                 )
                 || Boolean.TRUE.equals(source.get("projection_mismatch"))
                 || instant(source.get("projection_reconcile_after")) != null) {
-            return List.of();
+            return publicationViolations;
         }
-        return expectedProjectionViolations(recovery(record).update(), alert);
+        return mergedViolations(
+                publicationViolations,
+                expectedProjectionViolations(recovery(record).update(), alert)
+        );
     }
 
     private static List<String> initialPendingProjectionViolations(
@@ -127,7 +141,15 @@ public final class OutboxAlertProjectionPolicy {
 
     private static List<String> preConfirmationProjectionViolations(Document alert) {
         List<String> violations = new ArrayList<>();
-        if ("PUBLISHED".equals(string(alert, "decisionOutboxStatus"))) {
+        if (!PRE_CONFIRMATION_PROJECTED_STATUSES.contains(string(alert, "decisionOutboxStatus"))) {
+            violations.add(projectionMismatch("decisionOutboxStatus"));
+        }
+        return violations;
+    }
+
+    private static List<String> falsePublicationViolations(Document alert) {
+        List<String> violations = new ArrayList<>();
+        if (DecisionOutboxStatus.PUBLISHED.equals(string(alert, "decisionOutboxStatus"))) {
             violations.add(projectionMismatch("decisionOutboxStatus"));
         }
         if (alert.get("decisionOutboxPublishedAt") != null) {
@@ -137,6 +159,12 @@ public final class OutboxAlertProjectionPolicy {
             violations.add(projectionMismatch("decisionOutboxPublicationConfirmationProvenance"));
         }
         return violations;
+    }
+
+    private static List<String> mergedViolations(List<String> first, List<String> second) {
+        LinkedHashSet<String> violations = new LinkedHashSet<>(first);
+        violations.addAll(second);
+        return List.copyOf(violations);
     }
 
     private static void addExpectedProjectionValue(

@@ -80,7 +80,10 @@ class TransactionalOutboxPersistedContractPreflightTest {
                 .append("lease_claim_token", "claim-generation-1")
                 .append("lease_expires_at", Instant.parse("2026-10-01T10:05:00Z"));
 
-        TransactionalOutboxPersistedContractPreflight.Report report = inspect(source);
+        TransactionalOutboxPersistedContractPreflight.Report report = inspect(
+                source,
+                canonicalAlert("alert-current-claim", "event-current-claim", "FAILED_RETRYABLE", 1L)
+        );
 
         assertThat(report.blocksStartup()).isFalse();
     }
@@ -317,6 +320,26 @@ class TransactionalOutboxPersistedContractPreflightTest {
     }
 
     @Test
+    void rejectsProcessingWithTerminalFailureProjection() {
+        assertIllegalPreConfirmationProjection("PROCESSING", "FAILED_TERMINAL");
+    }
+
+    @Test
+    void rejectsPublishAttemptedWithTerminalFailureProjection() {
+        assertIllegalPreConfirmationProjection("PUBLISH_ATTEMPTED", "FAILED_TERMINAL");
+    }
+
+    @Test
+    void rejectsProcessingWithConfirmationUnknownProjection() {
+        assertIllegalPreConfirmationProjection("PROCESSING", "PUBLISH_CONFIRMATION_UNKNOWN");
+    }
+
+    @Test
+    void rejectsPublishAttemptedWithConfirmationUnknownProjection() {
+        assertIllegalPreConfirmationProjection("PUBLISH_ATTEMPTED", "PUBLISH_CONFIRMATION_UNKNOWN");
+    }
+
+    @Test
     void rejectsEqualRevisionWithDifferentStableStatus() {
         Document source = canonicalOutbox("event-status", "alert-status", "PUBLISHED", 5L);
         Document alert = canonicalAlert("alert-status", "event-status", "FAILED_TERMINAL", 5L);
@@ -500,10 +523,48 @@ class TransactionalOutboxPersistedContractPreflightTest {
     }
 
     @Test
+    void rejectsFalsePublicationHiddenBehindReconciliationMarker() {
+        Document source = canonicalOutbox("event-false-marker", "alert-false-marker", "FAILED_TERMINAL", 5L)
+                .append("projection_mismatch", true)
+                .append("projection_reconcile_after", Instant.parse("2026-10-01T10:10:00Z"));
+        Document alert = canonicalAlert("alert-false-marker", "event-false-marker", "PUBLISHED", 4L);
+
+        assertThat(violations(inspect(source, alert))).contains(
+                "ALERT_STATUS_DOES_NOT_MATCH_SOURCE",
+                "ALERT_PUBLISHED_AT_DOES_NOT_MATCH_SOURCE",
+                "ALERT_PUBLICATION_PROVENANCE_DOES_NOT_MATCH_SOURCE"
+        );
+    }
+
+    @Test
+    void acceptsScheduledLaggingProjectionForRetryableSource() {
+        Document source = canonicalOutbox("event-retry-scheduled", "alert-retry-scheduled", "FAILED_RETRYABLE", 2L)
+                .append("projection_mismatch", true)
+                .append("projection_reconcile_after", Instant.parse("2026-10-01T10:10:00Z"));
+        Document alert = canonicalAlert("alert-retry-scheduled", "event-retry-scheduled", "PENDING", 1L);
+
+        assertThat(inspect(source, alert).blocksStartup()).isFalse();
+    }
+
+    @Test
     void acceptsFullyCanonicalPublishedDocumentPair() {
         Document source = canonicalDualPublished("event-canonical", "alert-canonical", 7L);
 
         assertThat(inspect(source, canonicalProjectedAlert(source)).blocksStartup()).isFalse();
+    }
+
+    @Test
+    void rawInspectionIgnoresDefaultOutboxFieldsOnUndecidedAlert() {
+        Document alert = new Document("_id", "alert-without-decision")
+                .append("decisionOutboxProjectionRevision", 0L)
+                .append("decisionOutboxAttempts", 0)
+                .append("decisionOutboxResolutionPending", false);
+
+        TransactionalOutboxPersistedContractPreflight.Report report =
+                preflight.inspectRawDocuments(List.of(), List.of(alert), 10);
+
+        assertThat(report.blocksStartup()).isFalse();
+        assertThat(report.unsupportedAlertProjectionCount()).isZero();
     }
 
     @Test
@@ -601,6 +662,14 @@ class TransactionalOutboxPersistedContractPreflightTest {
 
     private TransactionalOutboxPersistedContractPreflight.Report inspect(Document source, Document alert) {
         return preflight.inspectRawDocuments(List.of(source), List.of(alert), 10);
+    }
+
+    private void assertIllegalPreConfirmationProjection(String sourceStatus, String projectionStatus) {
+        String suffix = sourceStatus.toLowerCase() + "-" + projectionStatus.toLowerCase();
+        Document source = activeOutbox("event-" + suffix, "alert-" + suffix, sourceStatus, 2, 1L);
+        Document alert = canonicalAlert("alert-" + suffix, "event-" + suffix, projectionStatus, 1L);
+
+        assertThat(violations(inspect(source, alert))).contains("ALERT_STATUS_DOES_NOT_MATCH_SOURCE");
     }
 
     private Document canonicalPendingDual(String eventId, String alertId, long revision) {
