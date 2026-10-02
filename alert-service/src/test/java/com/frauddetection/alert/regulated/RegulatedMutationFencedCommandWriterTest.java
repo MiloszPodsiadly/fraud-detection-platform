@@ -86,6 +86,7 @@ class RegulatedMutationFencedCommandWriterTest {
                 .contains("outbox_event_id=null")
                 .contains("local_commit_marker=null")
                 .contains("local_committed_at=null")
+                .contains("success_audit_id=null")
                 .contains("success_audit_recorded=Document{{$ne=true}}");
         assertThat(setDocument().get("decision_slot_claimed")).isEqualTo(false);
     }
@@ -97,6 +98,7 @@ class RegulatedMutationFencedCommandWriterTest {
                 "outbox_event_id",
                 "local_commit_marker",
                 "local_committed_at",
+                "success_audit_id",
                 "success_audit_recorded"
         }) {
             assertThatThrownBy(() -> writer.rejectPreCommitAndReleaseDecisionSlot(
@@ -112,6 +114,56 @@ class RegulatedMutationFencedCommandWriterTest {
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining(field);
         }
+    }
+
+    @Test
+    void preCommitReleaseCallbackCannotRemoveCommitProof() {
+        for (String field : new String[]{
+                "response_snapshot",
+                "outbox_event_id",
+                "local_commit_marker",
+                "local_committed_at",
+                "success_audit_id",
+                "success_audit_recorded"
+        }) {
+            assertThatThrownBy(() -> writer.rejectPreCommitAndReleaseDecisionSlot(
+                    token("owner-a", Instant.now().plusSeconds(30)),
+                    RegulatedMutationState.REQUESTED,
+                    RegulatedMutationExecutionStatus.PROCESSING,
+                    0L,
+                    RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE,
+                    RegulatedMutationExecutionStatus.FAILED,
+                    "EVIDENCE_UNAVAILABLE",
+                    update -> update.unset(field)
+            ))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(field);
+        }
+    }
+
+    @Test
+    void preCommitReleaseCallbackCannotRenameOrNestCommitProof() {
+        assertThatThrownBy(() -> writer.rejectPreCommitAndReleaseDecisionSlot(
+                token("owner-a", Instant.now().plusSeconds(30)),
+                RegulatedMutationState.REQUESTED,
+                RegulatedMutationExecutionStatus.PROCESSING,
+                0L,
+                RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE,
+                RegulatedMutationExecutionStatus.FAILED,
+                "EVIDENCE_UNAVAILABLE",
+                update -> update.rename("degradation_reason", "success_audit_id")
+        )).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("success_audit_id");
+
+        assertThatThrownBy(() -> writer.rejectPreCommitAndReleaseDecisionSlot(
+                token("owner-a", Instant.now().plusSeconds(30)),
+                RegulatedMutationState.REQUESTED,
+                RegulatedMutationExecutionStatus.PROCESSING,
+                0L,
+                RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE,
+                RegulatedMutationExecutionStatus.FAILED,
+                "EVIDENCE_UNAVAILABLE",
+                update -> update.set("success_audit_id.value", "forbidden-proof")
+        )).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("success_audit_id");
     }
 
     @Test

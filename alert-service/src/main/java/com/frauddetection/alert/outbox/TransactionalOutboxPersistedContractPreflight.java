@@ -245,7 +245,7 @@ public class TransactionalOutboxPersistedContractPreflight {
         if (!validRevision(document.get("projection_revision"))) {
             violations.add("PROJECTION_REVISION_MISSING_OR_INVALID");
         }
-        if (!validAttempts(document.get("attempts"))) {
+        if (!OutboxAlertProjectionPolicy.validBoundedAttempts(document.get("attempts"))) {
             violations.add("ATTEMPTS_MISSING_OR_INVALID");
         }
         validateLeaseState(document, status, violations);
@@ -429,6 +429,9 @@ public class TransactionalOutboxPersistedContractPreflight {
         if (!validRevision(alert.get("decisionOutboxProjectionRevision"))) {
             violations.add("ALERT_PROJECTION_REVISION_MISSING_OR_INVALID");
         }
+        if (!OutboxAlertProjectionPolicy.validBoundedAttempts(alert.get("decisionOutboxAttempts"))) {
+            violations.add("ALERT_PROJECTION_SEMANTIC_MISMATCH_decisionOutboxAttempts");
+        }
         String status = safeString(alert.get("decisionOutboxStatus"));
         if (status == null || !ALERT_PROJECTION_STATUSES.contains(status)) {
             violations.add("ALERT_PROJECTION_STATUS_MISSING_OR_INVALID");
@@ -500,11 +503,6 @@ public class TransactionalOutboxPersistedContractPreflight {
 
     private static boolean validRevision(Object value) {
         return revision(value) >= 0;
-    }
-
-    private static boolean validAttempts(Object value) {
-        return value instanceof Integer integer && integer >= 0
-                || value instanceof Long longValue && longValue >= 0 && longValue <= Integer.MAX_VALUE;
     }
 
     private static long revision(Object value) {

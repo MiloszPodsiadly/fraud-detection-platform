@@ -96,6 +96,26 @@ class TransactionalOutboxPersistedContractPreflightIntegrationTest extends Abstr
     }
 
     @Test
+    void aggregationBackedInspectRejectsPublicationMetadataOnLaggingNonPublishedProjection() {
+        Document source = publishedSource()
+                .append("projection_mismatch", true)
+                .append("projection_reconcile_after", Date.from(Instant.parse("2026-10-01T10:10:00Z")));
+        Document alert = publishedAlert("FAILED_TERMINAL")
+                .append("decisionOutboxProjectionRevision", 4L)
+                .append("decisionOutboxPublishedAt", Date.from(Instant.parse("2026-10-01T10:00:01Z")))
+                .append("decisionOutboxPublicationConfirmationProvenance", "MANUAL_DUAL_CONTROL_ATTESTED");
+        insert(source, alert);
+
+        TransactionalOutboxPersistedContractPreflight.Report report = preflight.inspect(10);
+
+        assertThat(report.blocksStartup()).isTrue();
+        assertThat(report.samples().getFirst().violations()).contains(
+                "ALERT_PUBLISHED_AT_DOES_NOT_MATCH_SOURCE",
+                "ALERT_PUBLICATION_PROVENANCE_DOES_NOT_MATCH_SOURCE"
+        );
+    }
+
+    @Test
     void aggregationBackedInspectRejectsMarkerMaskedFalsePublication() {
         Document source = new Document("_id", "event-marker-masked")
                 .append("resource_type", "ALERT")

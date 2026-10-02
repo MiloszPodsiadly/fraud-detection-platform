@@ -68,6 +68,40 @@ class RegulatedMutationDecisionIndexIntegrationTest extends AbstractIntegrationT
                 .hasMessageContaining("OWNERSHIP_DATA_INVALID");
     }
 
+    @Test
+    void releasedPreCommitCommandWithSuccessAuditIdFailsClosed() {
+        createCanonicalIndex();
+        mongoTemplate.getCollection(RegulatedMutationDecisionIndexStartupGuard.COLLECTION).insertOne(
+                releasedPreCommitCommand("command-ambiguous", "alert-ambiguous")
+                        .append("success_audit_id", "audit-success-1")
+                        .append("success_audit_recorded", false)
+        );
+
+        assertThatThrownBy(guard::verify)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("OWNERSHIP_DATA_INVALID");
+    }
+
+    @Test
+    void canonicalReleasedAndCommittedOwnershipRecordsAreAccepted() {
+        createCanonicalIndex();
+        mongoTemplate.getCollection(RegulatedMutationDecisionIndexStartupGuard.COLLECTION).insertOne(
+                releasedPreCommitCommand("command-rejected", "alert-reusable")
+        );
+        mongoTemplate.getCollection(RegulatedMutationDecisionIndexStartupGuard.COLLECTION).insertOne(
+                new Document("_id", "command-committed")
+                        .append("resource_id", "alert-owned")
+                        .append("resource_type", "ALERT")
+                        .append("action", "SUBMIT_ANALYST_DECISION")
+                        .append("state", RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL.name())
+                        .append("decision_slot_claimed", true)
+                        .append("success_audit_id", "audit-success-2")
+                        .append("success_audit_recorded", true)
+        );
+
+        assertThatCode(guard::verify).doesNotThrowAnyException();
+    }
+
     private void createCanonicalIndex() {
         mongoTemplate.getCollection(RegulatedMutationDecisionIndexStartupGuard.COLLECTION).createIndex(
                 Document.parse(RegulatedMutationCommandDocument.DECISION_SLOT_INDEX_KEYS),
@@ -78,6 +112,15 @@ class RegulatedMutationDecisionIndexIntegrationTest extends AbstractIntegrationT
                                 RegulatedMutationCommandDocument.DECISION_SLOT_PARTIAL_FILTER
                         ))
         );
+    }
+
+    private Document releasedPreCommitCommand(String commandId, String alertId) {
+        return new Document("_id", commandId)
+                .append("resource_id", alertId)
+                .append("resource_type", "ALERT")
+                .append("action", "SUBMIT_ANALYST_DECISION")
+                .append("state", RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE.name())
+                .append("decision_slot_claimed", false);
     }
 
     private static final class MongoCollectionFixture {

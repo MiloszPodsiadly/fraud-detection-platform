@@ -6,9 +6,11 @@ import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
 import com.frauddetection.alert.service.FraudDecisionOutboxPublisher;
 import org.bson.Document;
+import org.bson.types.Decimal128;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.ApplicationArguments;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -323,6 +325,79 @@ class TransactionalOutboxPersistedContractPreflightTest {
     }
 
     @Test
+    void rejectsProcessingPredecessorWithFabricatedManualApproval() {
+        Document source = activeOutbox("event-forged-approval", "alert-forged-approval", "PROCESSING", 2, 1L);
+        Document alert = canonicalAlert("alert-forged-approval", "event-forged-approval", "FAILED_RETRYABLE", 1L)
+                .append("decisionOutboxAttempts", 1)
+                .append("decisionOutboxLastError", "BROKER_UNAVAILABLE")
+                .append("decisionOutboxFailureReason", "BROKER_UNAVAILABLE")
+                .append("decisionOutboxResolutionApprovedBy", "forged-operator")
+                .append("decisionOutboxResolutionApprovedAt", Instant.parse("2026-10-01T10:00:00Z"));
+
+        assertThat(violations(inspect(source, alert))).contains(
+                "ALERT_PROJECTION_SEMANTIC_MISMATCH_decisionOutboxResolutionApprovedBy",
+                "ALERT_PROJECTION_SEMANTIC_MISMATCH_decisionOutboxResolutionApprovedAt"
+        );
+    }
+
+    @Test
+    void rejectsPublishAttemptedPredecessorWithFabricatedManualEvidence() {
+        Document source = activeOutbox(
+                "event-forged-evidence",
+                "alert-forged-evidence",
+                "PUBLISH_ATTEMPTED",
+                2,
+                1L
+        );
+        Document alert = canonicalAlert("alert-forged-evidence", "event-forged-evidence", "FAILED_RETRYABLE", 1L)
+                .append("decisionOutboxAttempts", 1)
+                .append("decisionOutboxLastError", "BROKER_UNAVAILABLE")
+                .append("decisionOutboxFailureReason", "BROKER_UNAVAILABLE")
+                .append("decisionOutboxResolutionEvidenceReference", "forged-evidence");
+
+        assertThat(violations(inspect(source, alert)))
+                .contains("ALERT_PROJECTION_SEMANTIC_MISMATCH_decisionOutboxResolutionEvidenceReference");
+    }
+
+    @Test
+    void rejectsInitialPendingPredecessorWithResolutionPending() {
+        Document source = activeOutbox("event-forged-pending", "alert-forged-pending", "PROCESSING", 1, 0L);
+        Document alert = canonicalAlert("alert-forged-pending", "event-forged-pending", "PENDING", 0L)
+                .append("decisionOutboxResolutionPending", true);
+
+        assertThat(violations(inspect(source, alert)))
+                .contains("ALERT_PROJECTION_SEMANTIC_MISMATCH_decisionOutboxResolutionPending");
+    }
+
+    @Test
+    void rejectsLossyOrOutOfRangeProjectedAttemptsForEveryProjectionStatus() {
+        for (Object invalidAttempts : List.of(
+                1.9d,
+                0.9d,
+                new Decimal128(new BigDecimal("1.9")),
+                -1,
+                (long) Integer.MAX_VALUE + 1L
+        )) {
+            Document source = canonicalOutbox("event-invalid-attempts", "alert-invalid-attempts", "PUBLISHED", 1L);
+            Document alert = canonicalAlert("alert-invalid-attempts", "event-invalid-attempts", "PUBLISHED", 1L)
+                    .append("decisionOutboxAttempts", invalidAttempts);
+
+            assertThat(violations(inspect(source, alert)))
+                    .contains("ALERT_PROJECTION_SEMANTIC_MISMATCH_decisionOutboxAttempts");
+        }
+    }
+
+    @Test
+    void acceptsSupportedLongProjectedAttempts() {
+        Document source = canonicalOutbox("event-long-attempts", "alert-long-attempts", "PUBLISHED", 1L)
+                .append("attempts", 1);
+        Document alert = canonicalAlert("alert-long-attempts", "event-long-attempts", "PUBLISHED", 1L)
+                .append("decisionOutboxAttempts", 1L);
+
+        assertThat(inspect(source, alert).blocksStartup()).isFalse();
+    }
+
+    @Test
     void rejectsActiveSourceWithFailedRetryableProjectionWithoutPriorFailureHistory() {
         Document source = activeOutbox("event-no-history", "alert-no-history", "PROCESSING", 1, 0L);
         Document alert = canonicalAlert("alert-no-history", "event-no-history", "FAILED_RETRYABLE", 0L);
@@ -599,6 +674,33 @@ class TransactionalOutboxPersistedContractPreflightTest {
         Document alert = canonicalAlert("alert-scheduled", "event-scheduled", "FAILED_TERMINAL", 5L);
 
         assertThat(inspect(source, alert).blocksStartup()).isFalse();
+    }
+
+    @Test
+    void rejectsPublicationProvenanceOnLaggingNonPublishedProjection() {
+        Document source = canonicalDualPublished("event-lagging-provenance", "alert-lagging-provenance", 5L)
+                .append("projection_mismatch", true)
+                .append("projection_reconcile_after", Instant.parse("2026-10-01T10:10:00Z"));
+        Document alert = canonicalAlert(
+                "alert-lagging-provenance",
+                "event-lagging-provenance",
+                "FAILED_TERMINAL",
+                4L
+        ).append("decisionOutboxPublicationConfirmationProvenance", "BROKER_ACKNOWLEDGED");
+
+        assertThat(violations(inspect(source, alert)))
+                .contains("ALERT_PUBLICATION_PROVENANCE_DOES_NOT_MATCH_SOURCE");
+    }
+
+    @Test
+    void rejectsPublishedAtOnLaggingNonPublishedProjection() {
+        Document source = canonicalDualPublished("event-lagging-time", "alert-lagging-time", 5L)
+                .append("projection_mismatch", true)
+                .append("projection_reconcile_after", Instant.parse("2026-10-01T10:10:00Z"));
+        Document alert = canonicalAlert("alert-lagging-time", "event-lagging-time", "FAILED_TERMINAL", 4L)
+                .append("decisionOutboxPublishedAt", Instant.parse("2026-10-01T10:00:01Z"));
+
+        assertThat(violations(inspect(source, alert))).contains("ALERT_PUBLISHED_AT_DOES_NOT_MATCH_SOURCE");
     }
 
     @Test

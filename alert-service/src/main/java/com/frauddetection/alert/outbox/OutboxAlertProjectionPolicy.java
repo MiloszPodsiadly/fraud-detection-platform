@@ -60,6 +60,10 @@ public final class OutboxAlertProjectionPolicy {
             "decisionOutboxResolutionApprovedAt",
             "decisionOutboxResolutionApprovedBy"
     );
+    private static final List<String> PRE_CONFIRMATION_FORBIDDEN_MANUAL_RESOLUTION_FIELDS =
+            INITIAL_PENDING_FORBIDDEN_PROJECTION_FIELDS.stream()
+                    .filter(field -> field.startsWith("decisionOutboxResolution"))
+                    .toList();
 
     private OutboxAlertProjectionPolicy() {
     }
@@ -83,21 +87,25 @@ public final class OutboxAlertProjectionPolicy {
 
     static List<String> persistedProjectionViolations(Document source, Document alert) {
         TransactionalOutboxRecordDocument record = persistedRecord(source);
+        List<String> attemptsViolations = validBoundedAttempts(alert.get("decisionOutboxAttempts"))
+                ? List.of()
+                : List.of(projectionMismatch("decisionOutboxAttempts"));
         if (record == null) {
-            return List.of();
+            return attemptsViolations;
         }
         List<String> publicationViolations = record.getStatus() == TransactionalOutboxStatus.PUBLISHED
                 ? positivePublicationViolations(record, alert)
                 : falsePublicationViolations(alert);
+        List<String> boundaryViolations = mergedViolations(attemptsViolations, publicationViolations);
         if (record.getStatus() == TransactionalOutboxStatus.PENDING) {
             return mergedViolations(
-                    publicationViolations,
+                    boundaryViolations,
                     initialPendingProjectionViolations(source, alert, record)
             );
         }
         if (PRE_CONFIRMATION_STATUSES.contains(record.getStatus())) {
             return mergedViolations(
-                    publicationViolations,
+                    boundaryViolations,
                     preConfirmationProjectionViolations(record, alert)
             );
         }
@@ -108,10 +116,10 @@ public final class OutboxAlertProjectionPolicy {
                 )
                 || Boolean.TRUE.equals(source.get("projection_mismatch"))
                 || instant(source.get("projection_reconcile_after")) != null) {
-            return publicationViolations;
+            return boundaryViolations;
         }
         return mergedViolations(
-                publicationViolations,
+                boundaryViolations,
                 expectedProjectionViolations(recovery(record).update(), alert)
         );
     }
@@ -146,7 +154,7 @@ public final class OutboxAlertProjectionPolicy {
             TransactionalOutboxRecordDocument record,
             Document alert
     ) {
-        List<String> violations = new ArrayList<>();
+        List<String> violations = new ArrayList<>(forbiddenManualResolutionProjectionViolations(alert));
         String projectionStatus = string(alert, "decisionOutboxStatus");
         if (!PRE_CONFIRMATION_PROJECTED_STATUSES.contains(projectionStatus)) {
             violations.add(projectionMismatch("decisionOutboxStatus"));
@@ -155,9 +163,9 @@ public final class OutboxAlertProjectionPolicy {
         if (!DecisionOutboxStatus.FAILED_RETRYABLE.equals(projectionStatus)) {
             return violations;
         }
-        int projectedAttempts = number(alert.get("decisionOutboxAttempts"), -1);
+        Integer projectedAttempts = projectedAttempts(alert.get("decisionOutboxAttempts"));
         long projectedRevision = number(alert.get("decisionOutboxProjectionRevision"), -1L);
-        if (projectedAttempts <= 0 || record.getAttempts() <= projectedAttempts) {
+        if (projectedAttempts == null || projectedAttempts <= 0 || record.getAttempts() <= projectedAttempts) {
             violations.add(projectionMismatch("decisionOutboxAttempts"));
         }
         if (projectedRevision <= 0 || record.getProjectionRevision() < projectedRevision) {
@@ -171,12 +179,24 @@ public final class OutboxAlertProjectionPolicy {
         return violations;
     }
 
+    private static List<String> forbiddenManualResolutionProjectionViolations(Document alert) {
+        List<String> violations = PRE_CONFIRMATION_FORBIDDEN_MANUAL_RESOLUTION_FIELDS.stream()
+                .filter(field -> alert.get(field) != null)
+                .map(OutboxAlertProjectionPolicy::projectionMismatch)
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        Object resolutionPending = alert.get("decisionOutboxResolutionPending");
+        if (resolutionPending != null && !Boolean.FALSE.equals(resolutionPending)) {
+            violations.add(projectionMismatch("decisionOutboxResolutionPending"));
+        }
+        return violations;
+    }
+
     private static List<String> positivePublicationViolations(
             TransactionalOutboxRecordDocument record,
             Document alert
     ) {
         if (!DecisionOutboxStatus.PUBLISHED.equals(string(alert, "decisionOutboxStatus"))) {
-            return List.of();
+            return publicationMetadataWithoutPublishedStatusViolations(alert);
         }
         List<String> violations = new ArrayList<>();
         if (!persistedValueEquals(record.getPublishedAt(), alert.get("decisionOutboxPublishedAt"))) {
@@ -195,10 +215,15 @@ public final class OutboxAlertProjectionPolicy {
     }
 
     private static List<String> falsePublicationViolations(Document alert) {
-        List<String> violations = new ArrayList<>();
+        List<String> violations = new ArrayList<>(publicationMetadataWithoutPublishedStatusViolations(alert));
         if (DecisionOutboxStatus.PUBLISHED.equals(string(alert, "decisionOutboxStatus"))) {
             violations.add(projectionMismatch("decisionOutboxStatus"));
         }
+        return violations;
+    }
+
+    private static List<String> publicationMetadataWithoutPublishedStatusViolations(Document alert) {
+        List<String> violations = new ArrayList<>();
         if (alert.get("decisionOutboxPublishedAt") != null) {
             violations.add(projectionMismatch("decisionOutboxPublishedAt"));
         }
@@ -541,6 +566,20 @@ public final class OutboxAlertProjectionPolicy {
 
     private static int number(Object value, int fallback) {
         return value instanceof Number number ? number.intValue() : fallback;
+    }
+
+    static boolean validBoundedAttempts(Object value) {
+        return projectedAttempts(value) != null;
+    }
+
+    private static Integer projectedAttempts(Object value) {
+        if (value instanceof Integer integer && integer >= 0) {
+            return integer;
+        }
+        if (value instanceof Long longValue && longValue >= 0 && longValue <= Integer.MAX_VALUE) {
+            return longValue.intValue();
+        }
+        return null;
     }
 
     private static long number(Object value, long fallback) {
