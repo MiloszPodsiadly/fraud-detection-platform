@@ -113,6 +113,23 @@ Safe response:
 
 Metrics are operational signals only. They are not compliance evidence by themselves.
 
+## Decision-Slot Index Hard Cut
+
+Before deploying a build that uses `decision_slot_claimed`, suspend regulated-mutation ingress and inspect the
+`regulated_mutation_commands` collection offline. Preserve every command and its idempotency/audit history. Classify
+`REJECTED_EVIDENCE_UNAVAILABLE` and `FAILED_BUSINESS_VALIDATION` as released only when `response_snapshot`,
+`outbox_event_id`, `local_commit_marker`, and `local_committed_at` are absent and `success_audit_recorded` is not true.
+All finalized, active, recovery-required, or otherwise ambiguous commands retain ownership. Detect duplicate claimed
+owners per `(resource_id, resource_type, action)` and stop the rollout if any exist.
+
+With the runtime stopped, use an approved evidence-preserving migration to populate the ownership field. Intentionally
+remove the obsolete `single_submit_decision_per_alert_idx` definition and create the canonical unique ordered key
+`resource_id, resource_type, action` with exact partial filter `resource_type=ALERT`,
+`action=SUBMIT_ANALYST_DECISION`, and `decision_slot_claimed=true`. Do not delete historical commands and do not perform
+index replacement or document repair from application startup. Verify the resulting index through MongoDB
+`listIndexes()`, rerun persisted-command preflight, and start the runtime only after both checks pass. A missing field,
+conflicting active claim, missing index, or metadata mismatch is a failed hard-cut deployment, not a fallback signal.
+
 ## Escalation Clock
 
 - T+5m: triage command state, lease status, public status, outbox, and audit phases.
