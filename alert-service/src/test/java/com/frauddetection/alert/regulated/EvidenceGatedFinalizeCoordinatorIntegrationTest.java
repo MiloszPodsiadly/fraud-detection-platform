@@ -409,6 +409,11 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                 }
         ));
         assertThat(firstReplay.state()).isEqualTo(RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE);
+        assertThat(firstReplay.response().alertId()).isEqualTo(alertId);
+        assertThat(firstReplay.response().decision()).isNull();
+        assertThat(firstReplay.response().resultingStatus()).isEqualTo(AlertStatus.OPEN);
+        assertThat(firstReplay.response().decisionEventId()).isNull();
+        assertThat(firstReplay.response().decidedAt()).isNull();
 
         auditPublisher.failAttemptedPublish = false;
         RegulatedMutationResult<SubmitAnalystDecisionResponse> replacement = submitDecision(
@@ -418,6 +423,15 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                 submitDecisionHandler()
         );
         assertThat(replacement.state()).isEqualTo(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
+        RegulatedMutationResult<SubmitAnalystDecisionResponse> replacementReplay = coordinator.commit(command(
+                "idem-rejected-slot-2",
+                alertId,
+                businessMutations,
+                context -> {
+                    throw new AssertionError("successful replacement replay must use its persisted response snapshot");
+                }
+        ));
+        assertThat(replacementReplay.response()).isEqualTo(replacement.response());
 
         RegulatedMutationResult<SubmitAnalystDecisionResponse> replayAfterReplacement = coordinator.commit(command(
                 "idem-rejected-slot-1",
@@ -428,6 +442,11 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                 }
         ));
         assertThat(replayAfterReplacement.state()).isEqualTo(RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE);
+        assertThat(replayAfterReplacement.response().alertId()).isEqualTo(alertId);
+        assertThat(replayAfterReplacement.response().decision()).isNull();
+        assertThat(replayAfterReplacement.response().resultingStatus()).isEqualTo(AlertStatus.OPEN);
+        assertThat(replayAfterReplacement.response().decisionEventId()).isNull();
+        assertThat(replayAfterReplacement.response().decidedAt()).isNull();
         assertThat(commandRepository.count()).isEqualTo(2);
         assertThat(commandRepository.findById(rejected.getId())).isPresent();
         assertThat(outboxRepository.count()).isOne();

@@ -218,7 +218,11 @@ class SubmitDecisionRegulatedMutationServiceTest {
                 SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
         ));
         fixture.commandLookup(Optional.of(existing));
-        when(fixture.alertRepository.findById("alert-1")).thenReturn(Optional.of(fixture.alert()));
+        AlertDocument current = fixture.alert();
+        current.setAnalystDecision(AnalystDecision.MARKED_LEGITIMATE);
+        current.setAlertStatus(AlertStatus.CLOSED);
+        current.setDecidedAt(Instant.parse("2026-05-02T00:00:00Z"));
+        when(fixture.alertRepository.findById("alert-1")).thenReturn(Optional.of(current));
         when(fixture.actorResolver.resolveActorId(eq("analyst-7"), eq("SUBMIT_ANALYST_DECISION"), eq("alert-1")))
                 .thenReturn("principal-7");
 
@@ -226,7 +230,40 @@ class SubmitDecisionRegulatedMutationServiceTest {
 
         assertThat(response.decisionEventId()).isEqualTo("event-1");
         assertThat(response.decidedAt()).isEqualTo(Instant.parse("2026-05-01T00:00:00Z"));
+        assertThat(response.decision()).isEqualTo(AnalystDecision.CONFIRMED_FRAUD);
+        assertThat(response.resultingStatus()).isEqualTo(AlertStatus.RESOLVED);
+        assertThat(response.operationStatus())
+                .isEqualTo(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
         verify(fixture.auditService, never()).audit(any(), any(), any(), any(), any(), any(), any(), any(), any());
+        verify(fixture.alertRepository, never()).save(any(AlertDocument.class));
+    }
+
+    @Test
+    void shouldNotExposeLaterDecisionWhenReplayingRejectedPreCommitCommand() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument rejected = fixture.existingCommand(
+                RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE
+        );
+        rejected.setExecutionStatus(RegulatedMutationExecutionStatus.FAILED);
+        fixture.commandLookup(Optional.of(rejected));
+        AlertDocument current = fixture.alert();
+        current.setAnalystDecision(AnalystDecision.MARKED_LEGITIMATE);
+        current.setAlertStatus(AlertStatus.CLOSED);
+        current.setDecidedAt(Instant.parse("2026-05-02T00:00:00Z"));
+        current.setDecisionOutboxEventId("event-from-later-command");
+        when(fixture.alertRepository.findById("alert-1")).thenReturn(Optional.of(current));
+        when(fixture.actorResolver.resolveActorId(eq("analyst-7"), eq("SUBMIT_ANALYST_DECISION"), eq("alert-1")))
+                .thenReturn("principal-7");
+
+        SubmitAnalystDecisionResponse response = fixture.service().submit("alert-1", request(), "idem-1");
+
+        assertThat(response.alertId()).isEqualTo("alert-1");
+        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.REJECTED_EVIDENCE_UNAVAILABLE);
+        assertThat(response.decision()).isNull();
+        assertThat(response.resultingStatus()).isNull();
+        assertThat(response.decidedAt()).isNull();
+        assertThat(response.decisionEventId()).isNull();
+        verify(fixture.outboxRepository, never()).findByMutationCommandId(anyString());
         verify(fixture.alertRepository, never()).save(any(AlertDocument.class));
     }
 

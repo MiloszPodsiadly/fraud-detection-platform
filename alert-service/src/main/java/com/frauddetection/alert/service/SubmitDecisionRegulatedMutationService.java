@@ -112,7 +112,7 @@ public class SubmitDecisionRegulatedMutationService {
                 ),
                 RegulatedMutationResponseSnapshot::from,
                 RegulatedMutationResponseSnapshot::toSubmitDecisionResponse,
-                state -> evidenceGatedStatusResponse(current, publicStatus(state, modelVersion), idempotencyKey),
+                state -> statusResponse(alertId, current, state, modelVersion, idempotencyKey),
                 intent,
                 modelVersion
         );
@@ -138,18 +138,17 @@ public class SubmitDecisionRegulatedMutationService {
 
     private SubmitAnalystDecisionResponse statusResponse(
             String alertId,
-            SubmitAnalystDecisionRequest request,
-            AlertStatus resultingStatus,
-            SubmitDecisionOperationStatus status
+            AlertDocument current,
+            RegulatedMutationState state,
+            RegulatedMutationModelVersion modelVersion,
+            String idempotencyKey
     ) {
-        return new SubmitAnalystDecisionResponse(
-                alertId,
-                request.decision(),
-                resultingStatus,
-                null,
-                null,
-                status
-        );
+        SubmitDecisionOperationStatus status = publicStatus(state, modelVersion);
+        if (state == RegulatedMutationState.REJECTED_EVIDENCE_UNAVAILABLE
+                || state == RegulatedMutationState.FAILED_BUSINESS_VALIDATION) {
+            return new SubmitAnalystDecisionResponse(alertId, null, null, null, null, status);
+        }
+        return evidenceGatedStatusResponse(current, status, idempotencyKey);
     }
 
     private SubmitAnalystDecisionResponse evidenceGatedStatusResponse(
