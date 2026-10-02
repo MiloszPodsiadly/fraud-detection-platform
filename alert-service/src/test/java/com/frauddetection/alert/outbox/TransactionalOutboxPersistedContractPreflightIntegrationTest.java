@@ -127,6 +127,25 @@ class TransactionalOutboxPersistedContractPreflightIntegrationTest extends Abstr
     }
 
     @Test
+    void aggregationBackedInspectRejectsMarkerMaskedFalsePublishedProvenance() {
+        Document source = publishedSource()
+                .append("projection_mismatch", true)
+                .append("projection_reconcile_after", Date.from(Instant.parse("2026-10-01T10:10:00Z")));
+        Document alert = publishedAlert("PUBLISHED")
+                .append("decisionOutboxPublicationConfirmationProvenance", "MANUAL_DUAL_CONTROL_ATTESTED")
+                .append("decisionOutboxPublishedAt", Date.from(Instant.parse("2026-10-01T10:00:01Z")));
+        insert(source, alert);
+
+        TransactionalOutboxPersistedContractPreflight.Report report = preflight.inspect(10);
+
+        assertThat(report.blocksStartup()).isTrue();
+        assertThat(report.samples().getFirst().violations()).contains(
+                "ALERT_PUBLICATION_PROVENANCE_DOES_NOT_MATCH_SOURCE",
+                "ALERT_PUBLISHED_AT_DOES_NOT_MATCH_SOURCE"
+        );
+    }
+
+    @Test
     void aggregationBackedInspectAcceptsCanonicalPair() {
         insert(publishedSource(), publishedAlert("PUBLISHED"));
 

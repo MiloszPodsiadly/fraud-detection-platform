@@ -75,14 +75,17 @@ class TransactionalOutboxPersistedContractPreflightTest {
 
     @Test
     void acceptsActiveClaimWithCompletePerClaimGenerationFence() {
-        Document source = canonicalOutbox("event-current-claim", "alert-current-claim", "PROCESSING", 1L)
-                .append("lease_owner", "coordinator-1")
-                .append("lease_claim_token", "claim-generation-1")
-                .append("lease_expires_at", Instant.parse("2026-10-01T10:05:00Z"));
+        Document source = activeOutbox(
+                "event-current-claim",
+                "alert-current-claim",
+                "PROCESSING",
+                1,
+                0L
+        );
 
         TransactionalOutboxPersistedContractPreflight.Report report = inspect(
                 source,
-                canonicalAlert("alert-current-claim", "event-current-claim", "FAILED_RETRYABLE", 1L)
+                canonicalAlert("alert-current-claim", "event-current-claim", "PENDING", 0L)
         );
 
         assertThat(report.blocksStartup()).isFalse();
@@ -320,6 +323,58 @@ class TransactionalOutboxPersistedContractPreflightTest {
     }
 
     @Test
+    void rejectsActiveSourceWithFailedRetryableProjectionWithoutPriorFailureHistory() {
+        Document source = activeOutbox("event-no-history", "alert-no-history", "PROCESSING", 1, 0L);
+        Document alert = canonicalAlert("alert-no-history", "event-no-history", "FAILED_RETRYABLE", 0L);
+
+        assertThat(violations(inspect(source, alert))).contains(
+                "ALERT_PROJECTION_SEMANTIC_MISMATCH_decisionOutboxAttempts",
+                "ALERT_PROJECTION_SEMANTIC_MISMATCH_decisionOutboxProjectionRevision",
+                "ALERT_PROJECTION_SEMANTIC_MISMATCH_decisionOutboxFailureReason"
+        );
+    }
+
+    @Test
+    void rejectsPublishAttemptedWithImpossibleFailedRetryableHistory() {
+        Document source = activeOutbox("event-impossible-history", "alert-impossible-history",
+                "PUBLISH_ATTEMPTED", 2, 1L);
+        Document alert = canonicalAlert("alert-impossible-history", "event-impossible-history",
+                "FAILED_RETRYABLE", 1L)
+                .append("decisionOutboxAttempts", 2)
+                .append("decisionOutboxLastError", "BROKER_UNAVAILABLE")
+                .append("decisionOutboxFailureReason", "DIFFERENT_REASON");
+
+        assertThat(violations(inspect(source, alert))).contains(
+                "ALERT_PROJECTION_SEMANTIC_MISMATCH_decisionOutboxAttempts",
+                "ALERT_PROJECTION_SEMANTIC_MISMATCH_decisionOutboxFailureReason"
+        );
+    }
+
+    @Test
+    void acceptsExpiredLeaseReclaimWithOlderFailedRetryableAttempt() {
+        Document source = activeOutbox("event-reclaimed", "alert-reclaimed", "PROCESSING", 4, 1L);
+        Document alert = canonicalAlert("alert-reclaimed", "event-reclaimed", "FAILED_RETRYABLE", 1L)
+                .append("decisionOutboxAttempts", 1)
+                .append("decisionOutboxLastError", "BROKER_UNAVAILABLE")
+                .append("decisionOutboxFailureReason", "BROKER_UNAVAILABLE");
+
+        assertThat(inspect(source, alert).blocksStartup()).isFalse();
+    }
+
+    @Test
+    void acceptsScheduledRevisionLagWithLegalFailedRetryableHistory() {
+        Document source = activeOutbox("event-lagging-history", "alert-lagging-history", "PROCESSING", 3, 2L)
+                .append("projection_mismatch", true)
+                .append("projection_reconcile_after", Instant.parse("2026-10-01T10:10:00Z"));
+        Document alert = canonicalAlert("alert-lagging-history", "event-lagging-history", "FAILED_RETRYABLE", 1L)
+                .append("decisionOutboxAttempts", 1)
+                .append("decisionOutboxLastError", "BROKER_UNAVAILABLE")
+                .append("decisionOutboxFailureReason", "BROKER_UNAVAILABLE");
+
+        assertThat(inspect(source, alert).blocksStartup()).isFalse();
+    }
+
+    @Test
     void rejectsProcessingWithTerminalFailureProjection() {
         assertIllegalPreConfirmationProjection("PROCESSING", "FAILED_TERMINAL");
     }
@@ -357,6 +412,30 @@ class TransactionalOutboxPersistedContractPreflightTest {
 
         assertThat(violations(inspect(source, alert)))
                 .contains("ALERT_PUBLICATION_PROVENANCE_DOES_NOT_MATCH_SOURCE");
+    }
+
+    @Test
+    void rejectsPublishedManualSourceWithBrokerProjectionDespiteReconciliationMarkers() {
+        Document source = canonicalDualPublished("event-manual-provenance", "alert-manual-provenance", 5L)
+                .append("projection_mismatch", true)
+                .append("projection_reconcile_after", Instant.parse("2026-10-01T10:10:00Z"));
+        Document alert = canonicalProjectedAlert(source)
+                .append("decisionOutboxPublicationConfirmationProvenance", "BROKER_ACKNOWLEDGED")
+                .append("decisionOutboxPublishedAt", Instant.parse("2026-10-01T10:00:01Z"));
+
+        assertThat(violations(inspect(source, alert))).contains(
+                "ALERT_PUBLICATION_PROVENANCE_DOES_NOT_MATCH_SOURCE",
+                "ALERT_PUBLISHED_AT_DOES_NOT_MATCH_SOURCE"
+        );
+    }
+
+    @Test
+    void acceptsMatchingPublishedEvidenceWithScheduledReconciliation() {
+        Document source = canonicalDualPublished("event-matching-published", "alert-matching-published", 5L)
+                .append("projection_mismatch", true)
+                .append("projection_reconcile_after", Instant.parse("2026-10-01T10:10:00Z"));
+
+        assertThat(inspect(source, canonicalProjectedAlert(source)).blocksStartup()).isFalse();
     }
 
     @Test

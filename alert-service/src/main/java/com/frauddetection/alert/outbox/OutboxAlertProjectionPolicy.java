@@ -87,7 +87,7 @@ public final class OutboxAlertProjectionPolicy {
             return List.of();
         }
         List<String> publicationViolations = record.getStatus() == TransactionalOutboxStatus.PUBLISHED
-                ? List.of()
+                ? positivePublicationViolations(record, alert)
                 : falsePublicationViolations(alert);
         if (record.getStatus() == TransactionalOutboxStatus.PENDING) {
             return mergedViolations(
@@ -96,7 +96,10 @@ public final class OutboxAlertProjectionPolicy {
             );
         }
         if (PRE_CONFIRMATION_STATUSES.contains(record.getStatus())) {
-            return mergedViolations(publicationViolations, preConfirmationProjectionViolations(alert));
+            return mergedViolations(
+                    publicationViolations,
+                    preConfirmationProjectionViolations(record, alert)
+            );
         }
         if (!STABLE_PROJECTED_STATUSES.contains(record.getStatus())
                 || !persistedValueEquals(
@@ -139,10 +142,54 @@ public final class OutboxAlertProjectionPolicy {
         return violations;
     }
 
-    private static List<String> preConfirmationProjectionViolations(Document alert) {
+    private static List<String> preConfirmationProjectionViolations(
+            TransactionalOutboxRecordDocument record,
+            Document alert
+    ) {
         List<String> violations = new ArrayList<>();
-        if (!PRE_CONFIRMATION_PROJECTED_STATUSES.contains(string(alert, "decisionOutboxStatus"))) {
+        String projectionStatus = string(alert, "decisionOutboxStatus");
+        if (!PRE_CONFIRMATION_PROJECTED_STATUSES.contains(projectionStatus)) {
             violations.add(projectionMismatch("decisionOutboxStatus"));
+            return violations;
+        }
+        if (!DecisionOutboxStatus.FAILED_RETRYABLE.equals(projectionStatus)) {
+            return violations;
+        }
+        int projectedAttempts = number(alert.get("decisionOutboxAttempts"), -1);
+        long projectedRevision = number(alert.get("decisionOutboxProjectionRevision"), -1L);
+        if (projectedAttempts <= 0 || record.getAttempts() <= projectedAttempts) {
+            violations.add(projectionMismatch("decisionOutboxAttempts"));
+        }
+        if (projectedRevision <= 0 || record.getProjectionRevision() < projectedRevision) {
+            violations.add(projectionMismatch("decisionOutboxProjectionRevision"));
+        }
+        String lastError = string(alert, "decisionOutboxLastError");
+        String failureReason = string(alert, "decisionOutboxFailureReason");
+        if (lastError == null || !lastError.equals(failureReason)) {
+            violations.add(projectionMismatch("decisionOutboxFailureReason"));
+        }
+        return violations;
+    }
+
+    private static List<String> positivePublicationViolations(
+            TransactionalOutboxRecordDocument record,
+            Document alert
+    ) {
+        if (!DecisionOutboxStatus.PUBLISHED.equals(string(alert, "decisionOutboxStatus"))) {
+            return List.of();
+        }
+        List<String> violations = new ArrayList<>();
+        if (!persistedValueEquals(record.getPublishedAt(), alert.get("decisionOutboxPublishedAt"))) {
+            violations.add(projectionMismatch("decisionOutboxPublishedAt"));
+        }
+        String authoritativeProvenance = record.getPublicationConfirmationProvenance() == null
+                ? null
+                : record.getPublicationConfirmationProvenance().name();
+        if (!persistedValueEquals(
+                authoritativeProvenance,
+                alert.get("decisionOutboxPublicationConfirmationProvenance")
+        )) {
+            violations.add(projectionMismatch("decisionOutboxPublicationConfirmationProvenance"));
         }
         return violations;
     }
