@@ -95,6 +95,7 @@ public class OutboxRecoveryService {
 
     public OutboxRecoveryRunResponse recoverNow() {
         int released = releaseStaleProcessing();
+        finalizeExhaustedRetryable();
         int markedUnknown = markStalePublishAttemptedUnknown();
         int repaired = reconcileProjections();
         int attempted = publisherCoordinator.publishPending(100);
@@ -140,10 +141,19 @@ public class OutboxRecoveryService {
         int released = 0;
         for (TransactionalOutboxRecordDocument record : stale) {
             Instant now = Instant.now();
+            boolean exhausted = publisherCoordinator.retryBudgetExhausted(record);
+            TransactionalOutboxStatus targetStatus = exhausted
+                    ? TransactionalOutboxStatus.FAILED_TERMINAL
+                    : TransactionalOutboxStatus.FAILED_RETRYABLE;
+            String reason = exhausted
+                    ? "RETRY_BUDGET_EXHAUSTED_BEFORE_PUBLISH_ATTEMPT"
+                    : "STALE_PROCESSING_LEASE_RELEASED";
             Update update = new Update()
-                    .set("status", TransactionalOutboxStatus.FAILED_RETRYABLE)
-                    .set("last_error", "STALE_PROCESSING_LEASE_RELEASED")
+                    .set("status", targetStatus)
+                    .set("last_error", reason)
                     .set("updated_at", now)
+                    .set("projection_reconcile_after", now)
+                    .inc("projection_revision", 1L)
                     .unset("lease_owner")
                     .unset("lease_claim_token")
                     .unset("lease_expires_at");
@@ -152,10 +162,71 @@ public class OutboxRecoveryService {
                     update,
                     TransactionalOutboxRecordDocument.class
             ).getModifiedCount() == 1) {
+                applyRecoveredPrePublishFailure(record, targetStatus, reason, now);
                 released++;
             }
         }
         return released;
+    }
+
+    private void finalizeExhaustedRetryable() {
+        List<TransactionalOutboxRecordDocument> retryable = repository
+                .findTop100ByStatusOrderByCreatedAtAsc(TransactionalOutboxStatus.FAILED_RETRYABLE);
+        for (TransactionalOutboxRecordDocument record : retryable) {
+            if (!publisherCoordinator.retryBudgetExhausted(record)) {
+                continue;
+            }
+            Instant now = Instant.now();
+            String reason = "RETRY_BUDGET_EXHAUSTED_BEFORE_PUBLISH_ATTEMPT";
+            Query query = Query.query(new Criteria().andOperator(
+                    Criteria.where("_id").is(record.getEventId()),
+                    Criteria.where("status").is(TransactionalOutboxStatus.FAILED_RETRYABLE),
+                    Criteria.where("attempts").is(record.getAttempts()),
+                    Criteria.where("projection_revision").is(record.getProjectionRevision())
+            ));
+            Update update = new Update()
+                    .set("status", TransactionalOutboxStatus.FAILED_TERMINAL)
+                    .set("last_error", reason)
+                    .set("updated_at", now)
+                    .set("projection_reconcile_after", now)
+                    .inc("projection_revision", 1L)
+                    .unset("lease_owner")
+                    .unset("lease_claim_token")
+                    .unset("lease_expires_at");
+            if (mongoTemplate.updateFirst(query, update, TransactionalOutboxRecordDocument.class)
+                    .getModifiedCount() == 1) {
+                applyRecoveredPrePublishFailure(
+                        record,
+                        TransactionalOutboxStatus.FAILED_TERMINAL,
+                        reason,
+                        now
+                );
+            }
+        }
+    }
+
+    private void applyRecoveredPrePublishFailure(
+            TransactionalOutboxRecordDocument record,
+            TransactionalOutboxStatus targetStatus,
+            String reason,
+            Instant transitionAt
+    ) {
+        record.setStatus(targetStatus);
+        record.setLastError(reason);
+        record.setProjectionRevision(record.getProjectionRevision() + 1L);
+        record.setProjectionReconcileAfter(transitionAt);
+        record.setUpdatedAt(transitionAt);
+        record.setLeaseOwner(null);
+        record.setLeaseClaimToken(null);
+        record.setLeaseExpiresAt(null);
+        publisherCoordinator.updateAlertProjection(
+                record,
+                targetStatus == TransactionalOutboxStatus.FAILED_TERMINAL
+                        ? DecisionOutboxStatus.FAILED_TERMINAL
+                        : DecisionOutboxStatus.FAILED_RETRYABLE,
+                reason,
+                null
+        );
     }
 
     private int markStalePublishAttemptedUnknown() {

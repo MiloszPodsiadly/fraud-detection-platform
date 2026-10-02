@@ -2,6 +2,7 @@ package com.frauddetection.alert.outbox;
 
 import com.frauddetection.alert.messaging.FraudDecisionEventPublisher;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
 import com.frauddetection.alert.regulated.mutation.outbox.OutboxConfirmationResolutionMutationHandler;
 import com.frauddetection.common.testsupport.base.AbstractIntegrationTest;
@@ -23,6 +24,10 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 
 @Tag("integration")
 @Tag("invariant-proof")
@@ -153,6 +158,150 @@ class OutboxPublisherLeaseFencingIntegrationTest extends AbstractIntegrationTest
         assertThat(recovered.getLeaseExpiresAt()).isNull();
     }
 
+    @Test
+    void exhaustedStaleProcessingBecomesTerminalAndItsFailedProjectionRemainsRecoverable() {
+        TransactionalOutboxRecordDocument record = pending("event-exhausted-processing");
+        record.setResourceId("alert-exhausted-processing");
+        record.setStatus(TransactionalOutboxStatus.PROCESSING);
+        record.setAttempts(1);
+        record.setLeaseOwner("stopped-instance");
+        record.setLeaseClaimToken("stopped-generation");
+        record.setLeaseExpiresAt(Instant.now().minusSeconds(60));
+        repository.save(record);
+        FraudDecisionEventPublisher broker = mock(FraudDecisionEventPublisher.class);
+        OutboxPublisherCoordinator coordinator = new OutboxPublisherCoordinator(
+                broker,
+                mongoTemplate,
+                mock(AlertServiceMetrics.class),
+                Duration.ofMinutes(1),
+                1
+        );
+        OutboxRecoveryService recoveryService = recoveryService(repository, coordinator);
+
+        recoveryService.recoverNow();
+
+        TransactionalOutboxRecordDocument exhausted = repository.findById(record.getEventId()).orElseThrow();
+        assertThat(exhausted.getStatus()).isEqualTo(TransactionalOutboxStatus.FAILED_TERMINAL);
+        assertThat(exhausted.getLastError()).isEqualTo("RETRY_BUDGET_EXHAUSTED_BEFORE_PUBLISH_ATTEMPT");
+        assertThat(exhausted.getProjectionRevision()).isEqualTo(1L);
+        assertThat(exhausted.getProjectionReconcileAfter()).isNotNull();
+        assertThat(exhausted.isProjectionMismatch()).isTrue();
+        assertThat(recoveryService.backlog().failedTerminalCount()).isOne();
+        assertThat(recoveryService.backlog().failedRetryableCount()).isZero();
+        verify(broker, never()).publish(org.mockito.ArgumentMatchers.any());
+
+        AlertDocument alert = new AlertDocument();
+        alert.setAlertId(record.getResourceId());
+        alert.setDecisionOutboxEventId(record.getEventId());
+        alert.setDecisionOutboxProjectionRevision(0L);
+        alert.setDecisionOutboxStatus("PROCESSING");
+        mongoTemplate.save(alert);
+        mongoTemplate.updateFirst(
+                Query.query(Criteria.where("_id").is(record.getEventId())),
+                new Update().set("projection_reconcile_after", Instant.now().minusSeconds(1)),
+                TransactionalOutboxRecordDocument.class
+        );
+
+        recoveryService.recoverNow();
+
+        AlertDocument repaired = mongoTemplate.findById(record.getResourceId(), AlertDocument.class);
+        TransactionalOutboxRecordDocument reconciled = repository.findById(record.getEventId()).orElseThrow();
+        assertThat(repaired.getDecisionOutboxStatus()).isEqualTo("FAILED_TERMINAL");
+        assertThat(repaired.getDecisionOutboxProjectionRevision()).isEqualTo(1L);
+        assertThat(reconciled.isProjectionMismatch()).isFalse();
+        assertThat(reconciled.getProjectionReconcileAfter()).isNull();
+    }
+
+    @Test
+    void expiredPublishAttemptRemainsConfirmationUnknownAfterRetryBudgetIsConsumed() {
+        TransactionalOutboxRecordDocument record = pending("event-ambiguous-attempt");
+        record.setResourceId("alert-ambiguous-attempt");
+        record.setStatus(TransactionalOutboxStatus.PUBLISH_ATTEMPTED);
+        record.setAttempts(1);
+        record.setLeaseOwner("stopped-instance");
+        record.setLeaseClaimToken("stopped-generation");
+        record.setLeaseExpiresAt(Instant.now().minusSeconds(60));
+        repository.save(record);
+        AlertDocument alert = alertProjection(record, "PROCESSING");
+        mongoTemplate.save(alert);
+        OutboxRecoveryService recoveryService = recoveryService(repository, new OutboxPublisherCoordinator(
+                mock(FraudDecisionEventPublisher.class),
+                mongoTemplate,
+                mock(AlertServiceMetrics.class),
+                Duration.ofMinutes(1),
+                1
+        ));
+
+        recoveryService.recoverNow();
+
+        TransactionalOutboxRecordDocument recovered = repository.findById(record.getEventId()).orElseThrow();
+        assertThat(recovered.getStatus()).isEqualTo(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
+        assertThat(recovered.getStatus()).isNotEqualTo(TransactionalOutboxStatus.FAILED_TERMINAL);
+        assertThat(recovered.getLastError()).isEqualTo("STALE_PUBLISH_ATTEMPT_CONFIRMATION_UNKNOWN");
+        assertThat(recovered.getProjectionRevision()).isEqualTo(1L);
+    }
+
+    @Test
+    void staleProcessingBelowRetryLimitRemainsClaimable() {
+        TransactionalOutboxRecordDocument record = pending("event-retryable-processing");
+        record.setResourceId("alert-retryable-processing");
+        record.setStatus(TransactionalOutboxStatus.PROCESSING);
+        record.setAttempts(1);
+        record.setLeaseOwner("stopped-instance");
+        record.setLeaseClaimToken("stopped-generation");
+        record.setLeaseExpiresAt(Instant.now().minusSeconds(60));
+        repository.save(record);
+        mongoTemplate.save(alertProjection(record, "PROCESSING"));
+        OutboxPublisherCoordinator recoveryCoordinator = spy(new OutboxPublisherCoordinator(
+                mock(FraudDecisionEventPublisher.class),
+                mongoTemplate,
+                mock(AlertServiceMetrics.class),
+                Duration.ofMinutes(1),
+                2
+        ));
+        doReturn(0).when(recoveryCoordinator).publishPending(100);
+
+        recoveryService(repository, recoveryCoordinator).recoverNow();
+
+        TransactionalOutboxRecordDocument retryable = repository.findById(record.getEventId()).orElseThrow();
+        assertThat(retryable.getStatus()).isEqualTo(TransactionalOutboxStatus.FAILED_RETRYABLE);
+        OutboxPublisherCoordinator nextPublisher = new OutboxPublisherCoordinator(
+                mock(FraudDecisionEventPublisher.class),
+                mongoTemplate,
+                mock(AlertServiceMetrics.class),
+                Duration.ofMinutes(1),
+                2
+        );
+        TransactionalOutboxRecordDocument claimed = nextPublisher.claimNext();
+        assertThat(claimed).isNotNull();
+        assertThat(claimed.getStatus()).isEqualTo(TransactionalOutboxStatus.PROCESSING);
+        assertThat(claimed.getAttempts()).isEqualTo(2);
+    }
+
+    @Test
+    void alreadyExhaustedRetryableIsFinalizedInsteadOfBeingIgnored() {
+        TransactionalOutboxRecordDocument record = pending("event-exhausted-retryable");
+        record.setResourceId("alert-exhausted-retryable");
+        record.setStatus(TransactionalOutboxStatus.FAILED_RETRYABLE);
+        record.setAttempts(1);
+        repository.save(record);
+        OutboxRecoveryService recoveryService = recoveryService(repository, new OutboxPublisherCoordinator(
+                mock(FraudDecisionEventPublisher.class),
+                mongoTemplate,
+                mock(AlertServiceMetrics.class),
+                Duration.ofMinutes(1),
+                1
+        ));
+
+        recoveryService.recoverNow();
+
+        TransactionalOutboxRecordDocument recovered = repository.findById(record.getEventId()).orElseThrow();
+        assertThat(recovered.getStatus()).isEqualTo(TransactionalOutboxStatus.FAILED_TERMINAL);
+        assertThat(recovered.getLastError()).isEqualTo("RETRY_BUDGET_EXHAUSTED_BEFORE_PUBLISH_ATTEMPT");
+        assertThat(recovered.getProjectionRevision()).isEqualTo(1L);
+        assertThat(recoveryService.backlog().failedTerminalCount()).isOne();
+    }
+
     private OutboxPublisherCoordinator coordinator() {
         return new OutboxPublisherCoordinator(
                 mock(FraudDecisionEventPublisher.class),
@@ -161,6 +310,31 @@ class OutboxPublisherLeaseFencingIntegrationTest extends AbstractIntegrationTest
                 Duration.ofMinutes(5),
                 5
         );
+    }
+
+    private OutboxRecoveryService recoveryService(
+            TransactionalOutboxRecordRepository outboxRepository,
+            OutboxPublisherCoordinator coordinator
+    ) {
+        return new OutboxRecoveryService(
+                outboxRepository,
+                mongoTemplate,
+                coordinator,
+                mock(RegulatedMutationCoordinator.class),
+                mock(OutboxConfirmationResolutionMutationHandler.class),
+                mock(AlertServiceMetrics.class),
+                Duration.ZERO
+        );
+    }
+
+    private AlertDocument alertProjection(TransactionalOutboxRecordDocument record, String status) {
+        AlertDocument alert = new AlertDocument();
+        alert.setAlertId(record.getResourceId());
+        alert.setDecisionOutboxEventId(record.getEventId());
+        alert.setDecisionOutboxProjectionRevision(record.getProjectionRevision());
+        alert.setDecisionOutboxStatus(status);
+        alert.setDecisionOutboxAttempts(record.getAttempts());
+        return alert;
     }
 
     private void expire(TransactionalOutboxRecordDocument claim) {

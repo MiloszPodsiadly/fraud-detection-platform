@@ -218,10 +218,18 @@ public class OutboxPublisherCoordinator {
     }
 
     boolean markFailed(TransactionalOutboxRecordDocument record, TransactionalOutboxStatus status, String reason) {
+        TransactionalOutboxStatus effectiveStatus = status == TransactionalOutboxStatus.FAILED_RETRYABLE
+                && retryBudgetExhausted(record)
+                ? TransactionalOutboxStatus.FAILED_TERMINAL
+                : status;
+        String effectiveReason = effectiveStatus == TransactionalOutboxStatus.FAILED_TERMINAL
+                && status == TransactionalOutboxStatus.FAILED_RETRYABLE
+                ? "RETRY_BUDGET_EXHAUSTED_BEFORE_PUBLISH_ATTEMPT"
+                : reason;
         Instant now = Instant.now();
         Update update = new Update()
-                .set("status", status)
-                .set("last_error", reason)
+                .set("status", effectiveStatus)
+                .set("last_error", effectiveReason)
                 .unset("publication_confirmation_provenance")
                 .set("updated_at", now)
                 .set("projection_reconcile_after", now)
@@ -236,25 +244,29 @@ public class OutboxPublisherCoordinator {
                     TransactionalOutboxRecordDocument.class
             );
             if (result.getModifiedCount() == 1) {
-                record.setStatus(status);
+                record.setStatus(effectiveStatus);
                 record.setPublicationConfirmationProvenance(null);
                 record.setProjectionRevision(record.getProjectionRevision() + 1L);
                 record.setProjectionReconcileAfter(now);
-                record.setLastError(reason);
+                record.setLastError(effectiveReason);
                 record.setUpdatedAt(now);
                 record.setLeaseOwner(null);
                 record.setLeaseClaimToken(null);
                 record.setLeaseExpiresAt(null);
-                String alertStatus = status == TransactionalOutboxStatus.FAILED_TERMINAL
+                String alertStatus = effectiveStatus == TransactionalOutboxStatus.FAILED_TERMINAL
                         ? DecisionOutboxStatus.FAILED_TERMINAL
                         : DecisionOutboxStatus.FAILED_RETRYABLE;
-                updateAlertProjection(record, alertStatus, reason, null);
+                updateAlertProjection(record, alertStatus, effectiveReason, null);
                 return true;
             }
         } catch (DataAccessException exception) {
             log.warn("Transactional outbox status update failed: reason=OUTBOX_STATUS_UPDATE_FAILED");
         }
         return false;
+    }
+
+    boolean retryBudgetExhausted(TransactionalOutboxRecordDocument record) {
+        return record.getAttempts() >= maxAttempts;
     }
 
     private Query leasedRecordQuery(TransactionalOutboxRecordDocument record, TransactionalOutboxStatus status) {
