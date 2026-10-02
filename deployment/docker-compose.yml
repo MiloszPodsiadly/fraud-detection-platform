@@ -138,7 +138,7 @@ services:
 
   grafana:
     <<: *service-defaults
-    image: grafana/grafana:13.2.0
+    image: grafana/grafana:13.2.3
     depends_on:
       prometheus:
         condition: service_started
