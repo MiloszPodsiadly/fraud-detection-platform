@@ -83,7 +83,7 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
         RegulatedMutationChaosScenario scenario = committedScenario(
                 "outbox-dedupe",
                 RegulatedMutationChaosWindow.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
-                command -> mongoTemplate.save(outboxRecord(command.getResourceId(), command.getId()))
+                command -> { }
         );
 
         RegulatedMutationChaosResult result = chaosHarness.run(scenario);
@@ -134,7 +134,6 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
                     command.setState(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
                     command.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
                     command.setPublicStatus(SubmitDecisionOperationStatus.RECOVERY_REQUIRED);
-                    mongoTemplate.save(outboxRecord(command.getResourceId(), command.getId()));
                 }
         );
 
@@ -154,7 +153,6 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
                 "pending-external-dedupe",
                 RegulatedMutationChaosWindow.FINALIZED_EVIDENCE_PENDING_EXTERNAL,
                 command -> {
-                    mongoTemplate.save(outboxRecord(command.getResourceId(), command.getId()));
                     insertAudit(command, AuditOutcome.SUCCESS, "success-" + command.getId());
                     insertLocalAnchor(command.getId(), RegulatedMutationAuditPhase.SUCCESS);
                 }
@@ -186,6 +184,7 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
                 template -> {
                     mongoTemplate.save(committedAlert(alertId));
                     RegulatedMutationCommandDocument command = command(commandId, idempotencyKey, alertId);
+                    mongoTemplate.save(outboxRecord(alertId, commandId));
                     customizer.accept(command);
                     commandRepository.save(command);
                 }
@@ -201,6 +200,7 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
         command.setResourceId(alertId);
         command.setResourceType(AuditResourceType.ALERT.name());
         command.setAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
+        command.setDecisionSlotClaimed(true);
         command.setCorrelationId("corr-" + alertId);
         command.setRequestHash("request-" + idempotencyKey);
         command.setIntentHash("intent-" + idempotencyKey);
@@ -226,6 +226,7 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
 
     private AlertDocument committedAlert(String alertId) {
         AlertDocument alert = new AlertDocument();
+        FraudDecisionEvent event = fraudDecisionEvent(alertId);
         alert.setAlertId(alertId);
         alert.setTransactionId(alertId + "-txn");
         alert.setCustomerId(alertId + "-customer");
@@ -238,8 +239,11 @@ class RegulatedMutationRealAlertServiceEvidenceIntegrityIT extends AbstractInteg
         alert.setDecisionReason(DECISION_REASON);
         alert.setDecisionTags(DECISION_TAGS);
         alert.setDecidedAt(Instant.parse("2026-05-06T00:01:00Z"));
-        alert.setDecisionOutboxEvent(fraudDecisionEvent(alertId));
+        alert.setDecisionOutboxEvent(event);
+        alert.setDecisionOutboxEventId(event.eventId());
+        alert.setDecisionOutboxProjectionRevision(0L);
         alert.setDecisionOutboxStatus(DecisionOutboxStatus.PENDING);
+        alert.setDecisionOutboxAttempts(0);
         alert.setDecisionOperationStatus(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL.name());
         alert.setRiskLevel(RiskLevel.HIGH);
         alert.setFraudScore(0.91d);

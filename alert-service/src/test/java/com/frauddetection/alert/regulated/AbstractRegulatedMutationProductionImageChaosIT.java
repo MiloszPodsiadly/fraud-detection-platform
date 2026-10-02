@@ -139,6 +139,7 @@ abstract class AbstractRegulatedMutationProductionImageChaosIT extends AbstractI
         document.setResourceId(alertId);
         document.setResourceType(AuditResourceType.ALERT.name());
         document.setAction(AuditAction.SUBMIT_ANALYST_DECISION.name());
+        document.setDecisionSlotClaimed(true);
         document.setCorrelationId("corr-" + alertId);
         document.setRequestHash("request-hash-" + idempotencyKey);
         document.setIdempotencyKeyHash(RegulatedMutationIntentHasher.hash(idempotencyKey));
@@ -171,14 +172,18 @@ abstract class AbstractRegulatedMutationProductionImageChaosIT extends AbstractI
 
     protected void mutateAlert(String alertId) {
         AlertDocument alert = alertRepository.findById(alertId).orElseThrow();
+        FraudDecisionEvent event = fraudDecisionEvent(alertId);
         alert.setAnalystDecision(AnalystDecision.CONFIRMED_FRAUD);
         alert.setAlertStatus(AlertStatus.RESOLVED);
         alert.setAnalystId(ACTOR_ID);
         alert.setDecisionReason(DECISION_REASON);
         alert.setDecisionTags(DECISION_TAGS);
         alert.setDecidedAt(Instant.parse("2026-05-06T00:01:00Z"));
-        alert.setDecisionOutboxEvent(fraudDecisionEvent(alertId));
+        alert.setDecisionOutboxEvent(event);
+        alert.setDecisionOutboxEventId(event.eventId());
+        alert.setDecisionOutboxProjectionRevision(0L);
         alert.setDecisionOutboxStatus(DecisionOutboxStatus.PENDING);
+        alert.setDecisionOutboxAttempts(0);
         alert.setDecisionOperationStatus(SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL.name());
         alertRepository.save(alert);
     }
