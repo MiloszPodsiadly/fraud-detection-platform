@@ -51,6 +51,7 @@ import com.frauddetection.alert.mapper.ScoredTransactionResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.outbox.OutboxRecoveryController;
 import com.frauddetection.alert.outbox.OutboxRecoveryService;
+import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationInspectionRateLimiter;
 import com.frauddetection.alert.regulated.RegulatedMutationRecoveryController;
@@ -209,6 +210,9 @@ class RouteCoverageAgainstMvcMappingsTest {
 
     @MockitoBean
     private OutboxRecoveryService outboxRecoveryService;
+
+    @MockitoBean
+    private TransactionalOutboxRuntimeReadiness transactionalOutboxRuntimeReadiness;
 
     @MockitoBean
     private TrustIncidentService trustIncidentService;

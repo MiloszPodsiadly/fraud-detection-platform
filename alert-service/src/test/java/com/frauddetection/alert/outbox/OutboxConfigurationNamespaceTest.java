@@ -25,6 +25,7 @@ class OutboxConfigurationNamespaceTest {
             .withBean(FraudDecisionEventPublisher.class, () -> mock(FraudDecisionEventPublisher.class))
             .withBean(MongoTemplate.class, () -> mock(MongoTemplate.class))
             .withBean(AlertServiceMetrics.class, () -> mock(AlertServiceMetrics.class))
+            .withBean(OutboxOperationalControls.class, () -> new OutboxOperationalControls(true, true))
             .withBean(OutboxPublisherCoordinator.class);
 
     @Test
