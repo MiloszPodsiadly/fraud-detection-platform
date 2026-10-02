@@ -802,7 +802,7 @@ paths:
   /api/v1/alerts/{alertId}/decision:
     post:
       summary: Submit analyst decision
-      description: Records an analyst decision through the current evidence-gated regulated mutation coordinator. X-Idempotency-Key is required. Every executable command declares EVIDENCE_GATED_FINALIZE_V1; missing, null, retired, and unknown persisted mutation_model_version values fail closed and are never reinterpreted as current. The local Mongo transaction persists the business state, command transition, local success audit, transactional outbox record, response snapshot, and local finalize marker. Matching canonical intent replays the stored result; conflicting key reuse returns 409. Kafka delivery and external evidence confirmation remain asynchronous. Preparation, finalizing, and recovery statuses are not completed success. This contract does not claim distributed ACID, exactly-once broker delivery, WORM storage, legal notarization, SIEM integration, or certified archive evidence.
+      description: Records one analyst decision per Alert through the current evidence-gated regulated mutation coordinator. X-Idempotency-Key is required. Every executable command declares EVIDENCE_GATED_FINALIZE_V1; missing, null, retired, and unknown persisted mutation_model_version values fail closed and are never reinterpreted as current. The local Mongo transaction persists the business state, command transition, local success audit, transactional outbox record, response snapshot, and local finalize marker. Matching canonical intent replays the stored result; conflicting key reuse or a second independent decision for the same Alert returns 409. Kafka delivery and external evidence confirmation remain asynchronous. Preparation, finalizing, and recovery statuses are not completed success. This contract does not claim distributed ACID, exactly-once broker delivery, WORM storage, legal notarization, SIEM integration, or certified archive evidence.
       security:
         - bearerAuth: []
         - demoAuth: []
@@ -849,7 +849,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: Idempotency key was reused with a different payload.
+          description: Idempotency key was reused with a different payload, or an independent analyst decision already exists for the Alert.
           content:
             application/json:
               schema:

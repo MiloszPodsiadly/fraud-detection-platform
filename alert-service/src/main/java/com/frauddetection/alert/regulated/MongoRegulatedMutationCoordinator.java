@@ -6,6 +6,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -98,9 +99,19 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
         try {
             return commandRepository.save(document);
         } catch (DuplicateKeyException duplicate) {
-            return commandRepository.findByIdempotencyKey(idempotencyKey)
-                    .map(existing -> conflictPolicy.existingOrConflict(existing, command))
-                    .orElseThrow(() -> duplicate);
+            Optional<RegulatedMutationCommandDocument> idempotentReplay =
+                    commandRepository.findByIdempotencyKey(idempotencyKey);
+            if (idempotentReplay.isPresent()) {
+                return conflictPolicy.existingOrConflict(idempotentReplay.get(), command);
+            }
+            if (commandRepository.findByResourceIdAndResourceTypeAndAction(
+                    command.resourceId(),
+                    command.resourceType().name(),
+                    command.action().name()
+            ).isPresent()) {
+                throw new ConflictingResourceMutationException();
+            }
+            throw duplicate;
         }
     }
 

@@ -11,6 +11,12 @@ import java.time.Instant;
 
 @Document(collection = "regulated_mutation_commands")
 @CompoundIndex(name = "resource_action_created_idx", def = "{'resource_id': 1, 'action': 1, 'created_at': -1}")
+@CompoundIndex(
+        name = "single_submit_decision_per_alert_idx",
+        def = "{'resource_id': 1, 'resource_type': 1, 'action': 1}",
+        unique = true,
+        partialFilter = "{'resource_type': 'ALERT', 'action': 'SUBMIT_ANALYST_DECISION'}"
+)
 public class RegulatedMutationCommandDocument {
 
     @Id

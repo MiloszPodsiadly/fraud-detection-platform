@@ -32,6 +32,7 @@ import com.frauddetection.alert.outbox.OutboxRecordResponse;
 import com.frauddetection.alert.outbox.OutboxRecoveryService;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
+import com.frauddetection.alert.outbox.TransactionalOutboxPersistedContractPreflight;
 import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.persistence.AlertDocument;
@@ -48,6 +49,7 @@ import com.frauddetection.common.events.enums.AnalystDecision;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.testsupport.base.AbstractIntegrationTest;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
+import com.mongodb.client.model.IndexOptions;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -121,6 +123,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         outboxRepository = repositoryFactory.getRepository(TransactionalOutboxRecordRepository.class);
         auditEventRepository = new AuditEventRepository(mongoTemplate);
         ensureAuditIndexes();
+        ensureSingleDecisionIndex();
         auditPublisher = new LocalMongoAuditPublisher(mongoTemplate);
         localAuditPhaseWriter = new RegulatedMutationLocalAuditPhaseWriter(
                 auditEventRepository,
@@ -162,6 +165,19 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                         .unique()
                         .sparse()
                         .named("audit_anchor_partition_chain_position_uidx_test"));
+    }
+
+    private void ensureSingleDecisionIndex() {
+        mongoTemplate.getCollection("regulated_mutation_commands").createIndex(
+                new org.bson.Document("resource_id", 1)
+                        .append("resource_type", 1)
+                        .append("action", 1),
+                new IndexOptions()
+                        .name("single_submit_decision_per_alert_idx")
+                        .unique(true)
+                        .partialFilterExpression(new org.bson.Document("resource_type", "ALERT")
+                                .append("action", "SUBMIT_ANALYST_DECISION"))
+        );
     }
 
     private MongoRegulatedMutationCoordinator coordinator(
@@ -322,6 +338,114 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         assertThat(countAudit(command.getId(), RegulatedMutationAuditPhase.ATTEMPTED)).isEqualTo(1);
         assertThat(countAudit(command.getId(), RegulatedMutationAuditPhase.SUCCESS)).isEqualTo(1);
         assertThat(auditPublisher.successPublishCalls).isZero();
+    }
+
+    @Test
+    void sameKeyReplaysWhileDifferentKeyCannotReplacePendingDecisionEvidence() {
+        String alertId = "alert-single-pending";
+        alertRepository.save(alert(alertId));
+        AtomicInteger businessMutations = new AtomicInteger();
+        SubmitDecisionMutationHandler handler = submitDecisionHandler();
+
+        RegulatedMutationResult<SubmitAnalystDecisionResponse> first = submitDecision(
+                "idem-single-pending-1",
+                alertId,
+                businessMutations,
+                handler
+        );
+        RegulatedMutationResult<SubmitAnalystDecisionResponse> replay = coordinator.commit(command(
+                "idem-single-pending-1",
+                alertId,
+                businessMutations,
+                context -> {
+                    throw new AssertionError("idempotent replay must not repeat the business mutation");
+                }
+        ));
+
+        assertThat(replay.response()).isEqualTo(first.response());
+        assertThatThrownBy(() -> submitDecision(
+                "idem-single-pending-2",
+                alertId,
+                businessMutations,
+                handler
+        )).isInstanceOf(ConflictingResourceMutationException.class);
+        assertSingleDecisionEvidence(alertId, first.response().decisionEventId(), businessMutations);
+        assertThat(new TransactionalOutboxPersistedContractPreflight(mongoTemplate, Duration.ofSeconds(5))
+                .inspect(10).blocksStartup()).isFalse();
+    }
+
+    @Test
+    void differentKeyCannotReplacePublishedDecisionEvidence() {
+        String alertId = "alert-single-published";
+        alertRepository.save(alert(alertId));
+        AtomicInteger businessMutations = new AtomicInteger();
+        SubmitDecisionMutationHandler handler = submitDecisionHandler();
+        RegulatedMutationResult<SubmitAnalystDecisionResponse> first = submitDecision(
+                "idem-single-published-1",
+                alertId,
+                businessMutations,
+                handler
+        );
+        String eventId = first.response().decisionEventId();
+        Instant publishedAt = Instant.parse("2026-10-02T10:00:00Z");
+        TransactionalOutboxRecordDocument outbox = outboxRepository.findById(eventId).orElseThrow();
+        outbox.setStatus(TransactionalOutboxStatus.PUBLISHED);
+        outbox.setProjectionRevision(1L);
+        outbox.setPublishedAt(publishedAt);
+        outbox.setPublicationConfirmationProvenance(OutboxPublicationConfirmationProvenance.BROKER_ACKNOWLEDGED);
+        outboxRepository.save(outbox);
+        AlertDocument projected = alertRepository.findById(alertId).orElseThrow();
+        projected.setDecisionOutboxStatus(DecisionOutboxStatus.PUBLISHED);
+        projected.setDecisionOutboxProjectionRevision(1L);
+        projected.setDecisionOutboxPublishedAt(publishedAt);
+        projected.setDecisionOutboxPublicationConfirmationProvenance(
+                OutboxPublicationConfirmationProvenance.BROKER_ACKNOWLEDGED.name()
+        );
+        alertRepository.save(projected);
+        mongoTemplate.updateFirst(
+                Query.query(Criteria.where("_id").is(alertId)),
+                new Update().unset("decisionOutboxResolutionPending"),
+                AlertDocument.class
+        );
+
+        assertThatThrownBy(() -> submitDecision(
+                "idem-single-published-2",
+                alertId,
+                businessMutations,
+                handler
+        )).isInstanceOf(ConflictingResourceMutationException.class);
+        assertSingleDecisionEvidence(alertId, eventId, businessMutations);
+        assertThat(new TransactionalOutboxPersistedContractPreflight(mongoTemplate, Duration.ofSeconds(5))
+                .inspect(10).blocksStartup()).isFalse();
+    }
+
+    @Test
+    void concurrentDifferentKeysCreateOnlyOneDecisionOutbox() throws Exception {
+        String alertId = "alert-single-concurrent";
+        alertRepository.save(alert(alertId));
+        AtomicInteger businessMutations = new AtomicInteger();
+        SubmitDecisionMutationHandler handler = submitDecisionHandler();
+        CountDownLatch start = new CountDownLatch(1);
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Future<RegulatedMutationResult<SubmitAnalystDecisionResponse>> first = executor.submit(() -> {
+                assertThat(start.await(5, TimeUnit.SECONDS)).isTrue();
+                return submitDecision("idem-single-concurrent-1", alertId, businessMutations, handler);
+            });
+            Future<RegulatedMutationResult<SubmitAnalystDecisionResponse>> second = executor.submit(() -> {
+                assertThat(start.await(5, TimeUnit.SECONDS)).isTrue();
+                return submitDecision("idem-single-concurrent-2", alertId, businessMutations, handler);
+            });
+            start.countDown();
+
+            List<Future<RegulatedMutationResult<SubmitAnalystDecisionResponse>>> attempts = List.of(first, second);
+            assertThat(attempts.stream().filter(this::completedSuccessfully).count()).isOne();
+            assertThat(attempts.stream().filter(this::failedWithResourceConflict).count()).isOne();
+        }
+        String eventId = alertRepository.findById(alertId).orElseThrow().getDecisionOutboxEventId();
+        assertSingleDecisionEvidence(alertId, eventId, businessMutations);
+        assertThat(new TransactionalOutboxPersistedContractPreflight(mongoTemplate, Duration.ofSeconds(5))
+                .inspect(10).blocksStartup()).isFalse();
     }
 
     @Test
@@ -715,6 +839,74 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         ).stream().filter(alert -> alert.getAnalystDecision() == AnalystDecision.CONFIRMED_FRAUD).count())
                 .isEqualTo(finalizedCommands);
         assertThat(commands).noneMatch(command -> command.getState() == RegulatedMutationState.FINALIZING);
+    }
+
+    private SubmitDecisionMutationHandler submitDecisionHandler() {
+        return new SubmitDecisionMutationHandler(
+                alertRepository,
+                new AlertDocumentMapper(),
+                new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository,
+                        mock(TransactionalOutboxRuntimeReadiness.class))
+        );
+    }
+
+    private RegulatedMutationResult<SubmitAnalystDecisionResponse> submitDecision(
+            String idempotencyKey,
+            String alertId,
+            AtomicInteger businessMutations,
+            SubmitDecisionMutationHandler handler
+    ) {
+        return coordinator.commit(command(
+                idempotencyKey,
+                alertId,
+                businessMutations,
+                context -> handler.applyDecision(
+                        alertId,
+                        request(),
+                        AlertStatus.RESOLVED,
+                        "principal-7",
+                        idempotencyKey,
+                        "request-hash-" + idempotencyKey,
+                        context.commandId(),
+                        SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+                )
+        ));
+    }
+
+    private void assertSingleDecisionEvidence(
+            String alertId,
+            String eventId,
+            AtomicInteger businessMutations
+    ) {
+        AlertDocument persistedAlert = alertRepository.findById(alertId).orElseThrow();
+        RegulatedMutationCommandDocument command = commandRepository.findAll().getFirst();
+
+        assertThat(commandRepository.count()).isOne();
+        assertThat(outboxRepository.count()).isOne();
+        assertThat(outboxRepository.findByMutationCommandId(command.getId()))
+                .get().extracting(TransactionalOutboxRecordDocument::getEventId).isEqualTo(eventId);
+        assertThat(persistedAlert.getDecisionOutboxEventId()).isEqualTo(eventId);
+        assertThat(businessMutations).hasValue(1);
+    }
+
+    private boolean completedSuccessfully(Future<?> attempt) {
+        try {
+            attempt.get(10, TimeUnit.SECONDS);
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private boolean failedWithResourceConflict(Future<?> attempt) {
+        try {
+            attempt.get(10, TimeUnit.SECONDS);
+            return false;
+        } catch (ExecutionException exception) {
+            return exception.getCause() instanceof ConflictingResourceMutationException;
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     private RegulatedMutationResult<SubmitAnalystDecisionResponse> concurrentCommit(

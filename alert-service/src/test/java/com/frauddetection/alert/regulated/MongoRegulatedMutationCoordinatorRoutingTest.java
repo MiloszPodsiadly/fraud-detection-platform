@@ -3,6 +3,7 @@ package com.frauddetection.alert.regulated;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditResourceType;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DuplicateKeyException;
 
 import java.time.Instant;
 import java.util.List;
@@ -79,6 +80,35 @@ class MongoRegulatedMutationCoordinatorRoutingTest {
         verify(current).execute(any(), eq("idem-1"), any());
         assertThat(fixture.saved.getMutationModelVersion())
                 .isEqualTo(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+    }
+
+    @Test
+    void differentKeyCannotClaimAnExistingResourceAction() {
+        RegulatedMutationExecutor current = currentExecutor("current");
+        Fixture fixture = new Fixture(current);
+        RegulatedMutationCommandDocument existing = commandDocument(
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT
+        );
+        existing.setIdempotencyKey("idem-existing");
+        fixture.noExistingCommand();
+        when(fixture.commandRepository.save(any(RegulatedMutationCommandDocument.class)))
+                .thenThrow(new DuplicateKeyException("single resource action"));
+        when(fixture.commandRepository.findByResourceIdAndResourceTypeAndAction(
+                "resource-1",
+                AuditResourceType.ALERT.name(),
+                AuditAction.SUBMIT_ANALYST_DECISION.name()
+        )).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> fixture.coordinator.commit(command(
+                RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1,
+                AuditAction.SUBMIT_ANALYST_DECISION,
+                AuditResourceType.ALERT,
+                new AtomicInteger()
+        ))).isInstanceOf(ConflictingResourceMutationException.class);
+
+        verify(current, never()).execute(any(), anyString(), any());
     }
 
     @Test
