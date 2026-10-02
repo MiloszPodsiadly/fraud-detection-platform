@@ -118,6 +118,8 @@ public final class OutboxAlertProjectionPolicy {
                 && !record.getResolutionApprovalEvidenceVerifiedAt().isAfter(record.getResolutionApprovedAt())
                 && hasText(record.getResolutionRequestReason())
                 && hasText(record.getResolutionApprovalReason())
+                && evidenceTypeAllowed(record.getResolutionEvidenceType(), expectedOutcome)
+                && evidenceTypeAllowed(record.getResolutionApprovalEvidenceType(), expectedOutcome)
                 && evidenceFingerprintMatches(
                         record.getResolutionEvidenceType(),
                         record.getResolutionEvidenceReference(),
@@ -142,6 +144,10 @@ public final class OutboxAlertProjectionPolicy {
                 && hasText(record.getResolutionRequestedBy())
                 && record.getResolutionRequestedAt() != null
                 && hasText(record.getResolutionRequestReason())
+                && evidenceTypeAllowed(
+                        record.getResolutionEvidenceType(),
+                        record.getResolutionProposedOutcome()
+                )
                 && record.getResolutionEvidenceVerifiedAt() != null
                 && !record.getResolutionEvidenceVerifiedAt().isAfter(record.getResolutionRequestedAt())
                 && evidenceFingerprintMatches(
@@ -154,13 +160,22 @@ public final class OutboxAlertProjectionPolicy {
     }
 
     public static boolean validSingleControlPublicationEvidence(TransactionalOutboxRecordDocument record) {
+        return validSingleControlEvidence(record, "PUBLISHED");
+    }
+
+    static boolean validSingleControlEvidence(
+            TransactionalOutboxRecordDocument record,
+            String expectedOutcome
+    ) {
         return "SINGLE_CONTROL_OPERATOR_ATTESTED".equals(record.getResolutionControlMode())
                 && !record.isResolutionPending()
+                && expectedOutcome.equals(record.getResolutionProposedOutcome())
                 && hasText(record.getResolutionApprovedBy())
                 && record.getResolutionApprovedAt() != null
                 && hasText(record.getResolutionApprovalReason())
                 && record.getResolutionEvidenceVerifiedAt() != null
                 && !record.getResolutionEvidenceVerifiedAt().isAfter(record.getResolutionApprovedAt())
+                && evidenceTypeAllowed(record.getResolutionEvidenceType(), expectedOutcome)
                 && evidenceFingerprintMatches(
                         record.getResolutionEvidenceType(),
                         record.getResolutionEvidenceReference(),
@@ -376,20 +391,40 @@ public final class OutboxAlertProjectionPolicy {
             String verifiedBy,
             String expectedFingerprint
     ) {
-        if (!ResolutionEvidenceType.BROKER_OFFSET.name().equals(type)
+        if (!hasText(type)
                 || !hasText(reference)
                 || verifiedAt == null
                 || !hasText(verifiedBy)
                 || !hasText(expectedFingerprint)) {
             return false;
         }
+        ResolutionEvidenceType evidenceType;
+        try {
+            evidenceType = ResolutionEvidenceType.valueOf(type);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
         ResolutionEvidenceReference evidence = new ResolutionEvidenceReference(
-                ResolutionEvidenceType.BROKER_OFFSET,
+                evidenceType,
                 reference,
                 verifiedAt,
                 verifiedBy
         );
         return RegulatedMutationIntentHasher.hash(evidence).equals(expectedFingerprint);
+    }
+
+    private static boolean evidenceTypeAllowed(String type, String outcome) {
+        ResolutionEvidenceType evidenceType;
+        try {
+            evidenceType = ResolutionEvidenceType.valueOf(type);
+        } catch (RuntimeException exception) {
+            return false;
+        }
+        return switch (outcome) {
+            case "PUBLISHED" -> evidenceType == ResolutionEvidenceType.BROKER_OFFSET;
+            case "RECOVERY_REQUIRED" -> true;
+            default -> false;
+        };
     }
 
     private static boolean hasText(String value) {

@@ -301,12 +301,82 @@ class TransactionalOutboxPersistedContractPreflightTest {
 
     @Test
     void acceptsRecoveryRequiredToFailedTerminalProjectionMapping() {
-        Document source = canonicalOutbox("event-recovery", "alert-recovery", "RECOVERY_REQUIRED", 3L)
-                .append("last_error", "MANUAL_RECOVERY_REQUIRED");
+        Document source = canonicalSingleRecoveryRequired(
+                "event-recovery",
+                "alert-recovery",
+                3L,
+                ResolutionEvidenceType.RUNBOOK_STEP
+        );
         Document alert = canonicalProjectedAlert(source);
 
         assertThat(alert.getString("decisionOutboxStatus")).isEqualTo("FAILED_TERMINAL");
         assertThat(inspect(source, alert).blocksStartup()).isFalse();
+    }
+
+    @Test
+    void acceptsPendingAndApprovedRecoveryRequiredWithTicketEvidence() {
+        Document pending = canonicalPendingDual(
+                "event-pending-ticket",
+                "alert-pending-ticket",
+                2L,
+                "RECOVERY_REQUIRED",
+                ResolutionEvidenceType.TICKET
+        );
+        Document approved = canonicalDualRecoveryRequired(
+                "event-approved-ticket",
+                "alert-approved-ticket",
+                3L,
+                ResolutionEvidenceType.TICKET
+        );
+
+        assertThat(inspect(pending, canonicalProjectedAlert(pending)).blocksStartup()).isFalse();
+        assertThat(inspect(approved, canonicalProjectedAlert(approved)).blocksStartup()).isFalse();
+    }
+
+    @Test
+    void rejectsRecoveryRequiredWithMalformedFingerprintOrMissingOperator() {
+        Document malformed = canonicalSingleRecoveryRequired(
+                "event-malformed",
+                "alert-malformed",
+                3L,
+                ResolutionEvidenceType.RUNBOOK_STEP
+        ).append("resolution_evidence_fingerprint", "malformed");
+        Document missingOperator = canonicalSingleRecoveryRequired(
+                "event-missing-operator",
+                "alert-missing-operator",
+                3L,
+                ResolutionEvidenceType.TICKET
+        );
+        missingOperator.remove("resolution_approved_by");
+
+        assertThat(violations(inspect(malformed))).contains("SINGLE_CONTROL_SEMANTICS_INVALID");
+        assertThat(violations(inspect(missingOperator))).contains("SINGLE_CONTROL_APPROVAL_INCOMPLETE");
+    }
+
+    @Test
+    void rejectsMetadataFreeRecoveryRequired() {
+        Document source = canonicalOutbox("event-no-provenance", "alert-no-provenance", "RECOVERY_REQUIRED", 1L)
+                .append("last_error", "MANUAL_RECOVERY_REQUIRED");
+
+        assertThat(violations(inspect(source))).contains("RECOVERY_REQUIRED_PROVENANCE_MISSING");
+    }
+
+    @Test
+    void rejectsPublishedManualResolutionWithTicketEvidence() {
+        Document source = canonicalDualPublished("event-ticket-published", "alert-ticket-published", 2L);
+        ResolutionEvidenceReference ticket = new ResolutionEvidenceReference(
+                ResolutionEvidenceType.TICKET,
+                "incident=INC-42",
+                Instant.parse("2026-10-01T10:04:00Z"),
+                "request-verifier"
+        );
+        source.append("resolution_evidence_type", ticket.type().name())
+                .append("resolution_evidence_reference", ticket.reference())
+                .append("resolution_evidence_verified_at", ticket.verifiedAt())
+                .append("resolution_evidence_verified_by", ticket.verifiedBy())
+                .append("resolution_evidence_fingerprint", RegulatedMutationIntentHasher.hash(ticket));
+
+        assertThat(violations(inspect(source))).contains("DUAL_CONTROL_SEMANTICS_INVALID");
     }
 
     @Test
@@ -424,16 +494,95 @@ class TransactionalOutboxPersistedContractPreflightTest {
     }
 
     private Document canonicalPendingDual(String eventId, String alertId, long revision) {
+        return canonicalPendingDual(
+                eventId,
+                alertId,
+                revision,
+                "PUBLISHED",
+                ResolutionEvidenceType.BROKER_OFFSET
+        );
+    }
+
+    private Document canonicalPendingDual(
+            String eventId,
+            String alertId,
+            long revision,
+            String outcome,
+            ResolutionEvidenceType evidenceType
+    ) {
         Instant requestedAt = Instant.parse("2026-10-01T10:05:00Z");
-        ResolutionEvidenceReference evidence = evidence("partition=1,offset=42", requestedAt.minusSeconds(1), "request-verifier");
+        ResolutionEvidenceReference evidence = new ResolutionEvidenceReference(
+                evidenceType,
+                "evidence=request",
+                requestedAt.minusSeconds(1),
+                "request-verifier"
+        );
         return canonicalOutbox(eventId, alertId, "PUBLISH_CONFIRMATION_UNKNOWN", revision)
                 .append("resolution_pending", true)
                 .append("resolution_control_mode", "DUAL_CONTROL_REQUESTED")
                 .append("resolution_request_id", "request-1")
-                .append("resolution_proposed_outcome", "PUBLISHED")
+                .append("resolution_proposed_outcome", outcome)
                 .append("resolution_requested_by", "requester")
                 .append("resolution_requested_at", requestedAt)
                 .append("resolution_request_reason", "verified broker evidence")
+                .append("resolution_evidence_type", evidence.type().name())
+                .append("resolution_evidence_reference", evidence.reference())
+                .append("resolution_evidence_verified_at", evidence.verifiedAt())
+                .append("resolution_evidence_verified_by", evidence.verifiedBy())
+                .append("resolution_evidence_fingerprint", RegulatedMutationIntentHasher.hash(evidence));
+    }
+
+    private Document canonicalDualRecoveryRequired(
+            String eventId,
+            String alertId,
+            long revision,
+            ResolutionEvidenceType evidenceType
+    ) {
+        Instant requestedAt = Instant.parse("2026-10-01T10:05:00Z");
+        Instant approvedAt = Instant.parse("2026-10-01T10:06:00Z");
+        ResolutionEvidenceReference requestEvidence = new ResolutionEvidenceReference(
+                evidenceType, "evidence=request", requestedAt.minusSeconds(1), "request-verifier");
+        ResolutionEvidenceReference approvalEvidence = new ResolutionEvidenceReference(
+                evidenceType, "evidence=approval", approvedAt.minusSeconds(1), "approval-verifier");
+        return canonicalOutbox(eventId, alertId, "RECOVERY_REQUIRED", revision)
+                .append("last_error", "MANUAL_RECOVERY_REQUIRED")
+                .append("resolution_control_mode", "DUAL_CONTROL_APPROVED")
+                .append("resolution_request_id", "request-1")
+                .append("resolution_proposed_outcome", "RECOVERY_REQUIRED")
+                .append("resolution_requested_by", "requester")
+                .append("resolution_requested_at", requestedAt)
+                .append("resolution_request_reason", "request reason")
+                .append("resolution_evidence_type", requestEvidence.type().name())
+                .append("resolution_evidence_reference", requestEvidence.reference())
+                .append("resolution_evidence_verified_at", requestEvidence.verifiedAt())
+                .append("resolution_evidence_verified_by", requestEvidence.verifiedBy())
+                .append("resolution_evidence_fingerprint", RegulatedMutationIntentHasher.hash(requestEvidence))
+                .append("resolution_approved_by", "approver")
+                .append("resolution_approved_at", approvedAt)
+                .append("resolution_approval_reason", "approval reason")
+                .append("resolution_approval_evidence_type", approvalEvidence.type().name())
+                .append("resolution_approval_evidence_reference", approvalEvidence.reference())
+                .append("resolution_approval_evidence_verified_at", approvalEvidence.verifiedAt())
+                .append("resolution_approval_evidence_verified_by", approvalEvidence.verifiedBy())
+                .append("resolution_approval_evidence_fingerprint", RegulatedMutationIntentHasher.hash(approvalEvidence));
+    }
+
+    private Document canonicalSingleRecoveryRequired(
+            String eventId,
+            String alertId,
+            long revision,
+            ResolutionEvidenceType evidenceType
+    ) {
+        Instant approvedAt = Instant.parse("2026-10-01T10:06:00Z");
+        ResolutionEvidenceReference evidence = new ResolutionEvidenceReference(
+                evidenceType, "evidence=single", approvedAt.minusSeconds(1), "evidence-verifier");
+        return canonicalOutbox(eventId, alertId, "RECOVERY_REQUIRED", revision)
+                .append("last_error", "MANUAL_RECOVERY_REQUIRED")
+                .append("resolution_control_mode", "SINGLE_CONTROL_OPERATOR_ATTESTED")
+                .append("resolution_proposed_outcome", "RECOVERY_REQUIRED")
+                .append("resolution_approved_by", "operator")
+                .append("resolution_approved_at", approvedAt)
+                .append("resolution_approval_reason", "recovery required")
                 .append("resolution_evidence_type", evidence.type().name())
                 .append("resolution_evidence_reference", evidence.reference())
                 .append("resolution_evidence_verified_at", evidence.verifiedAt())

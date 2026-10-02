@@ -179,6 +179,7 @@ public class OutboxConfirmationResolutionMutationHandler {
         requireEvidenceVerifiedByTransition(request.evidenceReference(), transitionAt);
         Update update = new Update()
                 .set("resolution_control_mode", "SINGLE_CONTROL_OPERATOR_ATTESTED")
+                .set("resolution_proposed_outcome", request.resolution().name())
                 .set("resolution_approved_at", transitionAt)
                 .set("resolution_approved_by", actorId);
         applyResolution(update, request, transitionAt, true);

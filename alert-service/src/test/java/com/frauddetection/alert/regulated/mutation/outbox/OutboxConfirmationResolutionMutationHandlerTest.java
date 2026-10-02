@@ -165,6 +165,88 @@ class OutboxConfirmationResolutionMutationHandlerTest {
     }
 
     @Test
+    void shouldApproveRecoveryRequiredWithTicketEvidence() {
+        Fixture fixture = fixture(true, true, fixedClock(Instant.parse("2026-10-02T10:00:00Z")));
+        mockPersistence(fixture, record());
+        when(fixture.mongoTemplate.updateFirst(any(), any(), any(Class.class)))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+        ResolutionEvidenceReference requestEvidence = evidence(
+                ResolutionEvidenceType.TICKET,
+                "incident=INC-42",
+                "request-verifier"
+        );
+        ResolutionEvidenceReference approvalEvidence = evidence(
+                ResolutionEvidenceType.TICKET,
+                "incident=INC-42,approval=2",
+                "approval-verifier"
+        );
+
+        TransactionalOutboxRecordDocument requested = fixture.handler.resolve(
+                "event-1",
+                request(OutboxConfirmationResolution.RECOVERY_REQUIRED, null, "request recovery", requestEvidence),
+                "requester"
+        );
+        TransactionalOutboxRecordDocument approved = fixture.handler.resolve(
+                "event-1",
+                request(
+                        OutboxConfirmationResolution.RECOVERY_REQUIRED,
+                        requested.getResolutionRequestId(),
+                        "approve recovery",
+                        approvalEvidence
+                ),
+                "approver"
+        );
+
+        assertThat(requested.getResolutionEvidenceType()).isEqualTo(ResolutionEvidenceType.TICKET.name());
+        assertThat(approved.getStatus()).isEqualTo(TransactionalOutboxStatus.RECOVERY_REQUIRED);
+        assertThat(approved.getResolutionProposedOutcome()).isEqualTo("RECOVERY_REQUIRED");
+        assertThat(approved.getResolutionRequestedBy()).isEqualTo("requester");
+        assertThat(approved.getResolutionApprovedBy()).isEqualTo("approver");
+        assertThat(approved.getResolutionApprovalEvidenceType()).isEqualTo(ResolutionEvidenceType.TICKET.name());
+    }
+
+    @Test
+    void shouldAcceptRunbookEvidenceForSingleControlRecoveryRequired() {
+        Fixture fixture = fixture(false, false);
+        mockPersistence(fixture, record());
+        when(fixture.mongoTemplate.updateFirst(any(), any(), any(Class.class)))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+
+        TransactionalOutboxRecordDocument resolved = fixture.handler.resolve(
+                "event-1",
+                request(
+                        OutboxConfirmationResolution.RECOVERY_REQUIRED,
+                        null,
+                        "runbook recovery",
+                        evidence(ResolutionEvidenceType.RUNBOOK_STEP, "runbook=outbox,step=7", "ops")
+                ),
+                "operator"
+        );
+
+        assertThat(resolved.getStatus()).isEqualTo(TransactionalOutboxStatus.RECOVERY_REQUIRED);
+        assertThat(resolved.getResolutionProposedOutcome()).isEqualTo("RECOVERY_REQUIRED");
+        assertThat(resolved.getResolutionEvidenceType()).isEqualTo(ResolutionEvidenceType.RUNBOOK_STEP.name());
+    }
+
+    @Test
+    void shouldRejectTicketEvidenceForPublishedResolution() {
+        Fixture fixture = fixture(false, false);
+        when(fixture.repository.findById("event-1")).thenReturn(Optional.of(record()));
+
+        assertThatThrownBy(() -> fixture.handler.resolve(
+                "event-1",
+                request(
+                        OutboxConfirmationResolution.PUBLISHED,
+                        null,
+                        "ticket is not broker proof",
+                        evidence(ResolutionEvidenceType.TICKET, "incident=INC-42", "ops")
+                ),
+                "operator"
+        )).isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("broker evidence");
+    }
+
+    @Test
     void shouldKeepApprovalChronologyMonotonicWhenApproverClockIsBehind() {
         Instant requesterTime = Instant.parse("2026-10-02T10:10:00Z");
         Instant approverTime = Instant.parse("2026-10-02T10:00:00Z");
@@ -698,8 +780,16 @@ class OutboxConfirmationResolutionMutationHandlerTest {
     }
 
     private ResolutionEvidenceReference evidence(String reference, String verifiedBy) {
+        return evidence(ResolutionEvidenceType.BROKER_OFFSET, reference, verifiedBy);
+    }
+
+    private ResolutionEvidenceReference evidence(
+            ResolutionEvidenceType type,
+            String reference,
+            String verifiedBy
+    ) {
         return new ResolutionEvidenceReference(
-                ResolutionEvidenceType.BROKER_OFFSET,
+                type,
                 reference,
                 Instant.parse("2026-05-02T10:00:00Z"),
                 verifiedBy

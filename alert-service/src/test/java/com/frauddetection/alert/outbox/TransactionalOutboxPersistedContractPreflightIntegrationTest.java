@@ -1,5 +1,8 @@
 package com.frauddetection.alert.outbox;
 
+import com.frauddetection.alert.audit.ResolutionEvidenceReference;
+import com.frauddetection.alert.audit.ResolutionEvidenceType;
+import com.frauddetection.alert.regulated.mutation.outbox.OutboxConfirmationResolutionMutationHandler;
 import com.frauddetection.common.testsupport.base.AbstractIntegrationTest;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
 import org.bson.Document;
@@ -17,6 +20,8 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 @Tag("integration")
 @Tag("invariant-proof")
@@ -70,6 +75,60 @@ class TransactionalOutboxPersistedContractPreflightIntegrationTest extends Abstr
     void aggregationBackedInspectAcceptsCanonicalPair() {
         insert(publishedSource(), publishedAlert("PUBLISHED"));
 
+        assertThat(preflight.inspect(10).blocksStartup()).isFalse();
+    }
+
+    @Test
+    void recoveryRequiredProducedByMutationHandlerPassesAggregationBackedPreflight() {
+        Document source = new Document("_id", "event-recovery")
+                .append("resource_type", "ALERT")
+                .append("resource_id", "alert-recovery")
+                .append("status", "PUBLISH_CONFIRMATION_UNKNOWN")
+                .append("attempts", 1)
+                .append("projection_revision", 0L)
+                .append("resolution_pending", false)
+                .append("updated_at", Date.from(Instant.parse("2026-10-01T10:00:00Z")));
+        Document alert = new Document("_id", "alert-recovery")
+                .append("decisionOutboxEventId", "event-recovery")
+                .append("decisionOutboxProjectionRevision", 0L)
+                .append("decisionOutboxStatus", "PUBLISH_CONFIRMATION_UNKNOWN")
+                .append("decisionOutboxAttempts", 1)
+                .append("decisionOutboxLastError", "PUBLISH_CONFIRMATION_UNKNOWN")
+                .append("decisionOutboxFailureReason", "PUBLISH_CONFIRMATION_UNKNOWN");
+        insert(source, alert);
+        TransactionalOutboxRecordRepository repository = mock(TransactionalOutboxRecordRepository.class);
+        when(repository.findById("event-recovery")).thenAnswer(invocation -> mongoTemplate.findById(
+                "event-recovery",
+                TransactionalOutboxRecordDocument.class
+        ) == null ? java.util.Optional.empty() : java.util.Optional.of(mongoTemplate.findById(
+                "event-recovery",
+                TransactionalOutboxRecordDocument.class
+        )));
+        OutboxConfirmationResolutionMutationHandler handler = new OutboxConfirmationResolutionMutationHandler(
+                repository,
+                mongoTemplate,
+                false,
+                false,
+                java.time.Clock.fixed(Instant.parse("2026-10-01T10:10:00Z"), java.time.ZoneOffset.UTC)
+        );
+
+        TransactionalOutboxRecordDocument resolved = handler.resolve(
+                "event-recovery",
+                new OutboxConfirmationResolutionRequest(
+                        OutboxConfirmationResolution.RECOVERY_REQUIRED,
+                        null,
+                        "runbook escalation",
+                        new ResolutionEvidenceReference(
+                                ResolutionEvidenceType.RUNBOOK_STEP,
+                                "runbook=outbox,step=7",
+                                Instant.parse("2026-10-01T10:09:00Z"),
+                                "ops-verifier"
+                        )
+                ),
+                "ops-operator"
+        );
+
+        assertThat(resolved.getStatus()).isEqualTo(TransactionalOutboxStatus.RECOVERY_REQUIRED);
         assertThat(preflight.inspect(10).blocksStartup()).isFalse();
     }
 

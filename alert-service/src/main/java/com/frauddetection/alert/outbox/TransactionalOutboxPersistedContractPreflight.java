@@ -340,6 +340,9 @@ public class TransactionalOutboxPersistedContractPreflight {
             if (hasAny(document, REQUEST_FIELDS) || hasAny(document, APPROVAL_FIELDS)) {
                 violations.add("RESOLUTION_METADATA_WITHOUT_CONTROL_MODE");
             }
+            if (TransactionalOutboxStatus.RECOVERY_REQUIRED.name().equals(status)) {
+                violations.add("RECOVERY_REQUIRED_PROVENANCE_MISSING");
+            }
             return;
         }
         if ("DUAL_CONTROL_REQUESTED".equals(controlMode)) {
@@ -369,9 +372,17 @@ public class TransactionalOutboxPersistedContractPreflight {
                 "SINGLE_CONTROL_APPROVAL_INCOMPLETE",
                 violations
         );
-        if (!TransactionalOutboxStatus.PUBLISHED.name().equals(status)
-                && !TransactionalOutboxStatus.RECOVERY_REQUIRED.name().equals(status)) {
+        String expectedOutcome = TransactionalOutboxStatus.PUBLISHED.name().equals(status)
+                ? "PUBLISHED"
+                : TransactionalOutboxStatus.RECOVERY_REQUIRED.name().equals(status)
+                ? "RECOVERY_REQUIRED"
+                : null;
+        TransactionalOutboxRecordDocument record = OutboxAlertProjectionPolicy.persistedRecord(document);
+        if (expectedOutcome == null) {
             violations.add("SINGLE_CONTROL_STATUS_INVALID");
+        } else if (record == null
+                || !OutboxAlertProjectionPolicy.validSingleControlEvidence(record, expectedOutcome)) {
+            violations.add("SINGLE_CONTROL_SEMANTICS_INVALID");
         }
     }
 
