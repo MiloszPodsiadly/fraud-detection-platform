@@ -59,7 +59,7 @@ services:
 
   mongodb:
     <<: *service-defaults
-    image: mongo:7.0
+    image: mongo:8.2
     command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     volumes:
       - mongodb-data:/data/db
