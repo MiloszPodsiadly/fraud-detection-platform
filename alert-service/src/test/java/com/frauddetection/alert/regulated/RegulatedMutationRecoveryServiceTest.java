@@ -10,6 +10,8 @@ import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
+import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.service.DecisionOutboxStatus;
@@ -202,6 +204,131 @@ class RegulatedMutationRecoveryServiceTest {
     }
 
     @Test
+    void shouldNeverAdoptEmbeddedEventIdentityDuringRecovery() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument command = fixture.command(
+                RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+        );
+        setSubmitDecisionIntent(
+                command,
+                AnalystDecision.CONFIRMED_FRAUD,
+                "Manual review",
+                List.of("chargeback"),
+                "principal-7"
+        );
+        AlertDocument alert = committedAlert(DecisionOutboxStatus.PUBLISHED);
+        alert.setDecisionOutboxEvent(new FraudDecisionEvent(
+                "event-B",
+                "decision-1",
+                "alert-1",
+                "txn-1",
+                "cust-1",
+                "corr-1",
+                "principal-7",
+                AnalystDecision.CONFIRMED_FRAUD,
+                AlertStatus.RESOLVED,
+                "Manual review",
+                List.of("chargeback"),
+                java.util.Map.of(),
+                Instant.parse("2026-05-01T00:00:00Z"),
+                Instant.parse("2026-05-01T00:00:00Z")
+        ));
+        when(fixture.alertRepository.findById("alert-1")).thenReturn(Optional.of(alert));
+        command.setLocalCommitMarker(RegulatedMutationDurableLocalFinalizationProof.LOCAL_COMMIT_MARKER);
+        command.setLocalCommittedAt(Instant.parse("2026-05-01T00:00:00Z"));
+        command.setSuccessAuditRecorded(true);
+        command.setSuccessAuditId("audit-success");
+        AuditEventDocument successAudit = mock(AuditEventDocument.class);
+        when(successAudit.auditId()).thenReturn("audit-success");
+        when(successAudit.action()).thenReturn(AuditAction.SUBMIT_ANALYST_DECISION);
+        when(successAudit.resourceType()).thenReturn(AuditResourceType.ALERT);
+        when(successAudit.resourceId()).thenReturn("alert-1");
+        when(successAudit.actorId()).thenReturn("principal-7");
+        when(successAudit.correlationId()).thenReturn("corr-1");
+        when(successAudit.requestId()).thenReturn("mutation-1:SUCCESS");
+        when(successAudit.outcome()).thenReturn(AuditOutcome.SUCCESS);
+        when(fixture.auditEventRepository.findByAuditId("audit-success")).thenReturn(Optional.of(successAudit));
+        RegulatedMutationDurableLocalFinalizationProof proof = new RegulatedMutationDurableLocalFinalizationProof(
+                fixture.auditEventRepository,
+                fixture.outboxRepository
+        );
+        assertThat(proof.verify(command)).isEqualTo(DurableLocalFinalizationProofResult.accepted());
+        RegulatedMutationRecoveryService service = new RegulatedMutationRecoveryService(
+                fixture.commandRepository,
+                fixture.metrics,
+                List.of(new SubmitDecisionRecoveryStrategy(fixture.alertRepository, fixture.outboxRepository)),
+                fixture.fencedCommandWriter,
+                proof,
+                new RegulatedMutationPublicStatusMapper(),
+                Duration.ofMinutes(2)
+        );
+
+        RegulatedMutationRecoveryResult result = service.recover(command);
+
+        assertThat(result.outcome()).isEqualTo(RegulatedMutationRecoveryOutcome.RECOVERED);
+        assertThat(command.getResponseSnapshot().decisionEventId()).isEqualTo("event-1");
+        assertThat(command.getOutboxEventId()).isEqualTo("event-1");
+    }
+
+    @Test
+    void shouldReconstructWithoutEmbeddedEventWhenCanonicalOutboxEvidenceExists() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument command = fixture.command(
+                RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+        );
+        setSubmitDecisionIntent(
+                command,
+                AnalystDecision.CONFIRMED_FRAUD,
+                "Manual review",
+                List.of("chargeback"),
+                "principal-7"
+        );
+        AlertDocument alert = committedAlert(DecisionOutboxStatus.PUBLISHED);
+        alert.setDecisionOutboxEvent(null);
+        when(fixture.alertRepository.findById("alert-1")).thenReturn(Optional.of(alert));
+
+        RegulatedMutationRecoveryResult result = fixture.service.recover(command);
+
+        assertThat(result.outcome()).isEqualTo(RegulatedMutationRecoveryOutcome.RECOVERED);
+        assertThat(command.getResponseSnapshot().decisionEventId()).isEqualTo("event-1");
+    }
+
+    @Test
+    void shouldFailClosedWhenAuthoritativeOutboxIsMissing() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument command = fixture.command(
+                RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+        );
+        when(fixture.outboxRepository.findByMutationCommandId("mutation-1")).thenReturn(Optional.empty());
+        when(fixture.alertRepository.findById("alert-1"))
+                .thenReturn(Optional.of(committedAlert(DecisionOutboxStatus.PUBLISHED)));
+
+        RegulatedMutationRecoveryResult result = fixture.service.recover(command);
+
+        assertThat(result.outcome()).isEqualTo(RegulatedMutationRecoveryOutcome.RECOVERY_REQUIRED);
+        assertThat(command.getResponseSnapshot()).isNull();
+        assertThat(command.getOutboxEventId()).isEqualTo("event-1");
+    }
+
+    @Test
+    void shouldFailClosedWhenCommandAndAuthoritativeOutboxIdentityDiffer() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument command = fixture.command(
+                RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+        );
+        when(fixture.outboxRepository.findByMutationCommandId("mutation-1"))
+                .thenReturn(Optional.of(fixture.outbox("mutation-1", "event-B")));
+        when(fixture.alertRepository.findById("alert-1"))
+                .thenReturn(Optional.of(committedAlert(DecisionOutboxStatus.PUBLISHED)));
+
+        RegulatedMutationRecoveryResult result = fixture.service.recover(command);
+
+        assertThat(result.outcome()).isEqualTo(RegulatedMutationRecoveryOutcome.RECOVERY_REQUIRED);
+        assertThat(command.getResponseSnapshot()).isNull();
+        assertThat(command.getOutboxEventId()).isEqualTo("event-1");
+    }
+
+    @Test
     void shouldRequireRecoveryWhenCommittedBusinessStateDoesNotMatchIntent() {
         Fixture fixture = new Fixture();
         RegulatedMutationCommandDocument command = fixture.command(RegulatedMutationState.FINALIZED_EVIDENCE_PENDING_EXTERNAL);
@@ -385,6 +512,7 @@ class RegulatedMutationRecoveryServiceTest {
         document.setAlertStatus(AlertStatus.RESOLVED);
         document.setDecidedAt(Instant.parse("2026-05-01T00:00:00Z"));
         document.setDecisionOutboxStatus(outboxStatus);
+        document.setDecisionOutboxEventId("event-1");
         document.setDecisionOutboxEvent(new FraudDecisionEvent(
                 "event-1",
                 "decision-1",
@@ -440,6 +568,8 @@ class RegulatedMutationRecoveryServiceTest {
         private final AuditDegradationService auditDegradationService = mock(AuditDegradationService.class);
         private final AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
         private final AlertRepository alertRepository = mock(AlertRepository.class);
+        private final TransactionalOutboxRecordRepository outboxRepository =
+                mock(TransactionalOutboxRecordRepository.class);
         private final RegulatedMutationFencedCommandWriter fencedCommandWriter =
                 mock(RegulatedMutationFencedCommandWriter.class);
         private final RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof =
@@ -447,7 +577,7 @@ class RegulatedMutationRecoveryServiceTest {
         private final RegulatedMutationRecoveryService service = new RegulatedMutationRecoveryService(
                 commandRepository,
                 metrics,
-                List.of(new SubmitDecisionRecoveryStrategy(alertRepository)),
+                List.of(new SubmitDecisionRecoveryStrategy(alertRepository, outboxRepository)),
                 fencedCommandWriter,
                 durableLocalFinalizationProof,
                 new RegulatedMutationPublicStatusMapper(),
@@ -465,6 +595,8 @@ class RegulatedMutationRecoveryServiceTest {
                     .thenReturn(List.of());
             when(durableLocalFinalizationProof.verify(any()))
                     .thenReturn(DurableLocalFinalizationProofResult.accepted());
+            when(outboxRepository.findByMutationCommandId("mutation-1"))
+                    .thenReturn(Optional.of(outbox("mutation-1", "event-1")));
             when(fencedCommandWriter.recoveryTransition(any(), any(), any(), any(), any()))
                     .thenAnswer(invocation -> ((RegulatedMutationCommandDocument) invocation.getArgument(0)).requireRevision() + 1L);
         }
@@ -480,12 +612,23 @@ class RegulatedMutationRecoveryServiceTest {
             command.setCorrelationId("corr-1");
             command.setRequestHash("request-hash");
             command.setMutationModelVersion(RegulatedMutationModelVersion.EVIDENCE_GATED_FINALIZE_V1);
+            command.setOutboxEventId("event-1");
             command.setRevision(0L);
             command.setState(state);
             command.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
             command.setCreatedAt(Instant.now().minusSeconds(300));
             command.setUpdatedAt(Instant.now().minusSeconds(300));
             return command;
+        }
+
+        private TransactionalOutboxRecordDocument outbox(String commandId, String eventId) {
+            TransactionalOutboxRecordDocument outbox = new TransactionalOutboxRecordDocument();
+            outbox.setEventId(eventId);
+            outbox.setMutationCommandId(commandId);
+            outbox.setResourceType(AuditResourceType.ALERT.name());
+            outbox.setResourceId("alert-1");
+            outbox.setEventType("FRAUD_DECISION");
+            return outbox;
         }
     }
 }

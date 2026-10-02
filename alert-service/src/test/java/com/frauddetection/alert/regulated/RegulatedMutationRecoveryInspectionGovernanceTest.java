@@ -4,6 +4,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
 import com.frauddetection.alert.security.authorization.AnalystAuthority;
 import com.frauddetection.alert.security.config.AlertSecurityConfig;
 import com.frauddetection.alert.security.config.SecurityDeniedAccessTelemetrySliceTestConfig;
@@ -66,6 +67,9 @@ class RegulatedMutationRecoveryInspectionGovernanceTest {
 
     @MockitoBean
     private AlertServiceMetrics metrics;
+
+    @MockitoBean
+    private TransactionalOutboxRuntimeReadiness runtimeReadiness;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 

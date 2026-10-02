@@ -13,6 +13,7 @@ import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.OutboxPublicationConfirmationProvenance;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
+import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.mongodb.client.result.UpdateResult;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,6 +43,7 @@ public class MutationEvidenceConfirmationService {
     private final RegulatedMutationTransactionRunner transactionRunner;
     private final boolean externalAnchorRequired;
     private final boolean signatureRequired;
+    private final TransactionalOutboxRuntimeReadiness runtimeReadiness;
 
     @Autowired
     public MutationEvidenceConfirmationService(
@@ -55,7 +57,8 @@ public class MutationEvidenceConfirmationService {
             RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof,
             RegulatedMutationTransactionRunner transactionRunner,
             @Value("${app.audit.external-anchoring.publication.required:false}") boolean externalAnchorRequired,
-            @Value("${app.audit.trust-authority.signing-required:false}") boolean signatureRequired
+            @Value("${app.audit.trust-authority.signing-required:false}") boolean signatureRequired,
+            TransactionalOutboxRuntimeReadiness runtimeReadiness
     ) {
         this.commandRepository = commandRepository;
         this.outboxRepository = outboxRepository;
@@ -69,6 +72,25 @@ public class MutationEvidenceConfirmationService {
         this.transactionRunner = transactionRunner;
         this.externalAnchorRequired = externalAnchorRequired;
         this.signatureRequired = signatureRequired;
+        this.runtimeReadiness = runtimeReadiness;
+    }
+
+    MutationEvidenceConfirmationService(
+            RegulatedMutationCommandRepository commandRepository,
+            TransactionalOutboxRecordRepository outboxRepository,
+            AuditEventRepository auditEventRepository,
+            AuditEventPublicationStatusLookup publicationStatusLookup,
+            MongoTemplate mongoTemplate,
+            AlertServiceMetrics metrics,
+            RegulatedMutationFencedCommandWriter fencedCommandWriter,
+            RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof,
+            RegulatedMutationTransactionRunner transactionRunner,
+            boolean externalAnchorRequired,
+            boolean signatureRequired
+    ) {
+        this(commandRepository, outboxRepository, auditEventRepository, publicationStatusLookup, mongoTemplate,
+                metrics, fencedCommandWriter, durableLocalFinalizationProof, transactionRunner,
+                externalAnchorRequired, signatureRequired, readyReadiness());
     }
 
     MutationEvidenceConfirmationService(
@@ -86,7 +108,7 @@ public class MutationEvidenceConfirmationService {
         this(commandRepository, outboxRepository, auditEventRepository, publicationStatusLookup, mongoTemplate,
                 metrics, fencedCommandWriter, durableLocalFinalizationProof,
                 new RegulatedMutationTransactionRunner(RegulatedMutationTransactionMode.OFF, null),
-                externalAnchorRequired, signatureRequired);
+                externalAnchorRequired, signatureRequired, readyReadiness());
     }
 
     MutationEvidenceConfirmationService(
@@ -101,10 +123,11 @@ public class MutationEvidenceConfirmationService {
         this(commandRepository, outboxRepository, null, null, null, metrics, fencedCommandWriter,
                 durableLocalFinalizationProof,
                 new RegulatedMutationTransactionRunner(RegulatedMutationTransactionMode.OFF, null),
-                externalAnchorRequired, signatureRequired);
+                externalAnchorRequired, signatureRequired, readyReadiness());
     }
 
     public int confirmPendingEvidence(int limit) {
+        runtimeReadiness.requireReady();
         if (limit <= 0) {
             return 0;
         }
@@ -169,6 +192,13 @@ public class MutationEvidenceConfirmationService {
             metrics.recordEvidenceConfirmationFailed(decision.reason());
         }
         return 0;
+    }
+
+    private static TransactionalOutboxRuntimeReadiness readyReadiness() {
+        TransactionalOutboxRuntimeReadiness readiness = new TransactionalOutboxRuntimeReadiness();
+        readiness.markPreflightPassed();
+        readiness.onApplicationEvent(null);
+        return readiness;
     }
 
     private void transition(

@@ -20,9 +20,10 @@ class RegulatedMutationRecoveryStrategyGuardTest {
     @Test
     void everyRegisteredRegulatedMutationHasRecoveryStrategy() {
         AlertRepository alertRepository = mock(AlertRepository.class);
+        TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
         List<RegulatedMutationRecoveryStrategy> strategies = List.of(
-                new SubmitDecisionRecoveryStrategy(alertRepository),
-                new TransactionalOutboxRecoveryStrategy(mock(TransactionalOutboxRecordRepository.class)),
+                new SubmitDecisionRecoveryStrategy(alertRepository, outboxRepository),
+                new TransactionalOutboxRecoveryStrategy(outboxRepository),
                 new FraudCaseUpdateRecoveryStrategy(mock(FraudCaseRepository.class)),
                 new TrustIncidentRecoveryStrategy(mock(TrustIncidentRepository.class))
         );
@@ -36,7 +37,10 @@ class RegulatedMutationRecoveryStrategyGuardTest {
     @Test
     void bankModeFailsStartupWhenStrategyIsMissing() {
         RegulatedMutationRecoveryStrategyGuard guard = new RegulatedMutationRecoveryStrategyGuard(
-                List.of(new SubmitDecisionRecoveryStrategy(mock(AlertRepository.class))),
+                List.of(new SubmitDecisionRecoveryStrategy(
+                        mock(AlertRepository.class),
+                        mock(TransactionalOutboxRecordRepository.class)
+                )),
                 true
         );
 

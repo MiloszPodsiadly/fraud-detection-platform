@@ -8,7 +8,10 @@ import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.exception.AlertNotFoundException;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.persistence.AlertRepository;
+import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
+import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationCommand;
+import com.frauddetection.alert.regulated.RegulatedMutationCommandRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
 import com.frauddetection.alert.regulated.RegulatedMutationIntent;
 import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
@@ -18,7 +21,6 @@ import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.submitdecision.SubmitDecisionMutationHandler;
 import com.frauddetection.alert.security.principal.AnalystActorResolver;
-import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -32,16 +34,21 @@ public class SubmitDecisionRegulatedMutationService {
     private final SubmitDecisionMutationHandler mutationHandler;
     private final RegulatedMutationCoordinator regulatedMutationCoordinator;
     private final RegulatedMutationPublicStatusMapper publicStatusMapper;
+    private final TransactionalOutboxRecordRepository outboxRepository;
+    private final RegulatedMutationCommandRepository commandRepository;
 
     public SubmitDecisionRegulatedMutationService(
             AlertRepository alertRepository,
             AnalystDecisionStatusMapper analystDecisionStatusMapper,
             AnalystActorResolver analystActorResolver,
             SubmitDecisionMutationHandler mutationHandler,
-            RegulatedMutationCoordinator regulatedMutationCoordinator
+            RegulatedMutationCoordinator regulatedMutationCoordinator,
+            TransactionalOutboxRecordRepository outboxRepository,
+            RegulatedMutationCommandRepository commandRepository
     ) {
         this(alertRepository, analystDecisionStatusMapper, analystActorResolver, mutationHandler,
-                regulatedMutationCoordinator, new RegulatedMutationPublicStatusMapper());
+                regulatedMutationCoordinator, new RegulatedMutationPublicStatusMapper(), outboxRepository,
+                commandRepository);
     }
 
     @Autowired
@@ -51,7 +58,9 @@ public class SubmitDecisionRegulatedMutationService {
             AnalystActorResolver analystActorResolver,
             SubmitDecisionMutationHandler mutationHandler,
             RegulatedMutationCoordinator regulatedMutationCoordinator,
-            RegulatedMutationPublicStatusMapper publicStatusMapper
+            RegulatedMutationPublicStatusMapper publicStatusMapper,
+            TransactionalOutboxRecordRepository outboxRepository,
+            RegulatedMutationCommandRepository commandRepository
     ) {
         this.alertRepository = alertRepository;
         this.analystDecisionStatusMapper = analystDecisionStatusMapper;
@@ -59,6 +68,8 @@ public class SubmitDecisionRegulatedMutationService {
         this.mutationHandler = mutationHandler;
         this.regulatedMutationCoordinator = regulatedMutationCoordinator;
         this.publicStatusMapper = publicStatusMapper;
+        this.outboxRepository = outboxRepository;
+        this.commandRepository = commandRepository;
     }
 
     public SubmitAnalystDecisionResponse submit(String alertId, SubmitAnalystDecisionRequest request, String idempotencyKey) {
@@ -92,10 +103,16 @@ public class SubmitDecisionRegulatedMutationService {
                         context.commandId(),
                         SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
                 ),
-                (saved, state) -> response(saved, request, resultingStatus, publicStatus(state, modelVersion)),
+                (saved, state) -> response(
+                        saved,
+                        request,
+                        resultingStatus,
+                        publicStatus(state, modelVersion),
+                        idempotencyKey
+                ),
                 RegulatedMutationResponseSnapshot::from,
                 RegulatedMutationResponseSnapshot::toSubmitDecisionResponse,
-                state -> evidenceGatedStatusResponse(current, publicStatus(state, modelVersion)),
+                state -> evidenceGatedStatusResponse(current, publicStatus(state, modelVersion), idempotencyKey),
                 intent,
                 modelVersion
         );
@@ -106,14 +123,14 @@ public class SubmitDecisionRegulatedMutationService {
             AlertDocument saved,
             SubmitAnalystDecisionRequest request,
             AlertStatus resultingStatus,
-            SubmitDecisionOperationStatus status
+            SubmitDecisionOperationStatus status,
+            String idempotencyKey
     ) {
-        FraudDecisionEvent event = saved.getDecisionOutboxEvent();
         return new SubmitAnalystDecisionResponse(
                 saved.getAlertId(),
                 request.decision(),
                 resultingStatus,
-                event == null ? null : event.eventId(),
+                authoritativeDecisionEventId(saved, idempotencyKey),
                 saved.getDecidedAt(),
                 status
         );
@@ -137,13 +154,14 @@ public class SubmitDecisionRegulatedMutationService {
 
     private SubmitAnalystDecisionResponse evidenceGatedStatusResponse(
             AlertDocument current,
-            SubmitDecisionOperationStatus status
+            SubmitDecisionOperationStatus status,
+            String idempotencyKey
     ) {
         return new SubmitAnalystDecisionResponse(
                 current.getAlertId(),
                 current.getAnalystDecision(),
                 current.getAlertStatus(),
-                current.getDecisionOutboxEvent() == null ? null : current.getDecisionOutboxEvent().eventId(),
+                authoritativeDecisionEventId(current, idempotencyKey),
                 current.getDecidedAt(),
                 status
         );
@@ -154,6 +172,33 @@ public class SubmitDecisionRegulatedMutationService {
             RegulatedMutationModelVersion modelVersion
     ) {
         return publicStatusMapper.submitDecisionStatus(state, modelVersion);
+    }
+
+    private String authoritativeDecisionEventId(AlertDocument alert, String idempotencyKey) {
+        String projectedEventId = alert.getDecisionOutboxEventId();
+        if (projectedEventId == null || projectedEventId.isBlank()
+                || idempotencyKey == null || idempotencyKey.isBlank()) {
+            return null;
+        }
+        return commandRepository.findByIdempotencyKey(idempotencyKey.trim())
+                .filter(command -> AuditAction.SUBMIT_ANALYST_DECISION.name().equals(command.getAction()))
+                .filter(command -> AuditResourceType.ALERT.name().equals(command.getResourceType()))
+                .filter(command -> alert.getAlertId().equals(command.getResourceId()))
+                .flatMap(command -> outboxRepository.findByMutationCommandId(command.getId())
+                        .filter(outbox -> authoritativeForAlert(outbox, alert, command.getId())))
+                .map(TransactionalOutboxRecordDocument::getEventId)
+                .orElse(null);
+    }
+
+    private boolean authoritativeForAlert(
+            TransactionalOutboxRecordDocument outbox,
+            AlertDocument alert,
+            String commandId
+    ) {
+        return outbox.getEventId() != null
+                && outbox.getEventId().equals(alert.getDecisionOutboxEventId())
+                && alert.getAlertId().equals(outbox.getResourceId())
+                && commandId.equals(outbox.getMutationCommandId());
     }
 
     private String requestHash(SubmitAnalystDecisionRequest request) {

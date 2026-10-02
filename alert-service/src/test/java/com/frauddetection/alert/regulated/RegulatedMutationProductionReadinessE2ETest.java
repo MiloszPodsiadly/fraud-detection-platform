@@ -225,7 +225,7 @@ class RegulatedMutationProductionReadinessE2ETest extends AbstractIntegrationTes
         return new RegulatedMutationRecoveryService(
                 commandRepository,
                 metrics,
-                List.of(new SubmitDecisionRecoveryStrategy(alertRepository)),
+                List.of(new SubmitDecisionRecoveryStrategy(alertRepository, outboxRepository)),
                 new RegulatedMutationFencedCommandWriter(mongoTemplate, metrics),
                 durableLocalFinalizationProof,
                 new RegulatedMutationPublicStatusMapper(),

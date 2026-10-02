@@ -1,5 +1,6 @@
 package com.frauddetection.alert.regulated;
 
+import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -13,27 +14,39 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
     private final RegulatedMutationCommandRepository commandRepository;
     private final RegulatedMutationExecutorRegistry executorRegistry;
     private final RegulatedMutationConflictPolicy conflictPolicy;
+    private final TransactionalOutboxRuntimeReadiness runtimeReadiness;
 
     public MongoRegulatedMutationCoordinator(
             RegulatedMutationCommandRepository commandRepository,
             RegulatedMutationExecutorRegistry executorRegistry
     ) {
-        this(commandRepository, executorRegistry, new RegulatedMutationConflictPolicy());
+        this(commandRepository, executorRegistry, new RegulatedMutationConflictPolicy(), readyReadiness());
     }
 
     @Autowired
     public MongoRegulatedMutationCoordinator(
             RegulatedMutationCommandRepository commandRepository,
             RegulatedMutationExecutorRegistry executorRegistry,
-            RegulatedMutationConflictPolicy conflictPolicy
+            RegulatedMutationConflictPolicy conflictPolicy,
+            TransactionalOutboxRuntimeReadiness runtimeReadiness
     ) {
         this.commandRepository = commandRepository;
         this.executorRegistry = executorRegistry;
         this.conflictPolicy = conflictPolicy;
+        this.runtimeReadiness = runtimeReadiness;
+    }
+
+    public MongoRegulatedMutationCoordinator(
+            RegulatedMutationCommandRepository commandRepository,
+            RegulatedMutationExecutorRegistry executorRegistry,
+            RegulatedMutationConflictPolicy conflictPolicy
+    ) {
+        this(commandRepository, executorRegistry, conflictPolicy, readyReadiness());
     }
 
     @Override
     public <R, S> RegulatedMutationResult<S> commit(RegulatedMutationCommand<R, S> command) {
+        runtimeReadiness.requireReady();
         requireCurrentCommand(command);
         String idempotencyKey = normalize(command.idempotencyKey());
         if (idempotencyKey == null) {
@@ -118,6 +131,13 @@ public class MongoRegulatedMutationCoordinator implements RegulatedMutationCoord
             return null;
         }
         return value.trim();
+    }
+
+    private static TransactionalOutboxRuntimeReadiness readyReadiness() {
+        TransactionalOutboxRuntimeReadiness readiness = new TransactionalOutboxRuntimeReadiness();
+        readiness.markPreflightPassed();
+        readiness.onApplicationEvent(null);
+        return readiness;
     }
 
 }

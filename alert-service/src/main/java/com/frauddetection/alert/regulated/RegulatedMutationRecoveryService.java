@@ -3,6 +3,8 @@ package com.frauddetection.alert.regulated;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -29,7 +31,9 @@ public class RegulatedMutationRecoveryService {
     private final RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof;
     private final RegulatedMutationPublicStatusMapper publicStatusMapper;
     private final Duration stuckThreshold;
+    private final TransactionalOutboxRuntimeReadiness runtimeReadiness;
 
+    @Autowired
     public RegulatedMutationRecoveryService(
             RegulatedMutationCommandRepository commandRepository,
             AlertServiceMetrics metrics,
@@ -37,7 +41,8 @@ public class RegulatedMutationRecoveryService {
             RegulatedMutationFencedCommandWriter fencedCommandWriter,
             RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof,
             RegulatedMutationPublicStatusMapper publicStatusMapper,
-            @Value("${app.regulated-mutation.recovery.stuck-threshold:PT2M}") Duration stuckThreshold
+            @Value("${app.regulated-mutation.recovery.stuck-threshold:PT2M}") Duration stuckThreshold,
+            TransactionalOutboxRuntimeReadiness runtimeReadiness
     ) {
         this.commandRepository = commandRepository;
         this.metrics = metrics;
@@ -46,9 +51,32 @@ public class RegulatedMutationRecoveryService {
         this.durableLocalFinalizationProof = durableLocalFinalizationProof;
         this.publicStatusMapper = publicStatusMapper;
         this.stuckThreshold = stuckThreshold;
+        this.runtimeReadiness = runtimeReadiness;
+    }
+
+    RegulatedMutationRecoveryService(
+            RegulatedMutationCommandRepository commandRepository,
+            AlertServiceMetrics metrics,
+            List<RegulatedMutationRecoveryStrategy> recoveryStrategies,
+            RegulatedMutationFencedCommandWriter fencedCommandWriter,
+            RegulatedMutationDurableLocalFinalizationProof durableLocalFinalizationProof,
+            RegulatedMutationPublicStatusMapper publicStatusMapper,
+            Duration stuckThreshold
+    ) {
+        this(
+                commandRepository,
+                metrics,
+                recoveryStrategies,
+                fencedCommandWriter,
+                durableLocalFinalizationProof,
+                publicStatusMapper,
+                stuckThreshold,
+                readyReadiness()
+        );
     }
 
     public List<RegulatedMutationRecoveryResult> recoverStuckCommands() {
+        runtimeReadiness.requireReady();
         Instant now = Instant.now();
         Instant cutoff = now.minus(stuckThreshold);
         Map<String, RegulatedMutationCommandDocument> commands = new LinkedHashMap<>();
@@ -187,6 +215,7 @@ public class RegulatedMutationRecoveryService {
     }
 
     RegulatedMutationRecoveryResult recover(RegulatedMutationCommandDocument command) {
+        runtimeReadiness.requireReady();
         requireCurrentSupportedCommand(command);
         RegulatedMutationRecoveryOutcome outcome = switch (command.getState()) {
             case REQUESTED, EVIDENCE_PREPARING, EVIDENCE_PREPARED -> stillPending(command);
@@ -327,7 +356,6 @@ public class RegulatedMutationRecoveryService {
             }
             Optional<RegulatedMutationResponseSnapshot> snapshot = strategy.get().reconstructSnapshot(command);
             snapshot.ifPresent(command::setResponseSnapshot);
-            snapshot.map(RegulatedMutationResponseSnapshot::decisionEventId).ifPresent(command::setOutboxEventId);
             return snapshot.isPresent();
         } catch (RuntimeException exception) {
             command.setLastError("RECOVERY_STRATEGY_FAILED");
@@ -359,5 +387,12 @@ public class RegulatedMutationRecoveryService {
 
     private void recordBacklogMetric() {
         backlog();
+    }
+
+    private static TransactionalOutboxRuntimeReadiness readyReadiness() {
+        TransactionalOutboxRuntimeReadiness readiness = new TransactionalOutboxRuntimeReadiness();
+        readiness.markPreflightPassed();
+        readiness.onApplicationEvent(null);
+        return readiness;
     }
 }

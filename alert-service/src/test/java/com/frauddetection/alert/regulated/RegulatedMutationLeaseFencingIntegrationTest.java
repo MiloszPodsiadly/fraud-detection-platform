@@ -371,6 +371,7 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
         outbox.setPublicationConfirmationProvenance(
                 OutboxPublicationConfirmationProvenance.BROKER_ACKNOWLEDGED
         );
+        outbox.setPublishedAt(command.getLocalCommittedAt().plusSeconds(1));
         when(commandRepository.findTop100ByStateInAndUpdatedAtBefore(any(), any()))
                 .thenReturn(List.of(confirmationSnapshot));
         when(outboxRepository.findByMutationCommandId(command.getId())).thenReturn(Optional.of(outbox));
@@ -472,6 +473,7 @@ class RegulatedMutationLeaseFencingIntegrationTest extends AbstractIntegrationTe
         outbox.setPublicationConfirmationProvenance(
                 OutboxPublicationConfirmationProvenance.BROKER_ACKNOWLEDGED
         );
+        outbox.setPublishedAt(command.getLocalCommittedAt().plusSeconds(1));
         when(outboxRepository.findByMutationCommandId(command.getId())).thenReturn(Optional.of(outbox));
         RegulatedMutationDurableLocalFinalizationProof durableProof =
                 mock(RegulatedMutationDurableLocalFinalizationProof.class);

@@ -57,6 +57,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
@@ -331,6 +332,31 @@ class SubmitDecisionRegulatedMutationServiceTest {
     }
 
     @Test
+    void shouldNotExposeAnotherCommandsOutboxEventForTheSameAlert() {
+        Fixture fixture = new Fixture();
+        RegulatedMutationCommandDocument existing = fixture.existingCommand(RegulatedMutationState.EVIDENCE_PREPARING);
+        existing.setExecutionStatus(RegulatedMutationExecutionStatus.PROCESSING);
+        existing.setLeaseExpiresAt(Instant.now().plusSeconds(30));
+        fixture.commandLookup(Optional.of(existing));
+        AlertDocument alert = fixture.alert();
+        alert.setDecisionOutboxEventId("event-from-other-command");
+        TransactionalOutboxRecordDocument otherOutbox = new TransactionalOutboxRecordDocument();
+        otherOutbox.setEventId("event-from-other-command");
+        otherOutbox.setMutationCommandId("other-command");
+        otherOutbox.setResourceId("alert-1");
+        fixture.currentOutbox = otherOutbox;
+        when(fixture.alertRepository.findById("alert-1")).thenReturn(Optional.of(alert));
+        when(fixture.actorResolver.resolveActorId(eq("analyst-7"), eq("SUBMIT_ANALYST_DECISION"), eq("alert-1")))
+                .thenReturn("principal-7");
+
+        SubmitAnalystDecisionResponse response = fixture.service().submit("alert-1", request(), "idem-1");
+
+        assertThat(response.operationStatus()).isEqualTo(SubmitDecisionOperationStatus.EVIDENCE_PREPARING);
+        assertThat(response.decisionEventId()).isNull();
+        verify(fixture.outboxRepository).findByMutationCommandId("mutation-1");
+    }
+
+    @Test
     void shouldReturnInProgressWhenConcurrentRequestWinsAtomicClaim() {
         Fixture fixture = new Fixture();
         fixture.commandLookup(Optional.empty());
@@ -369,7 +395,9 @@ class SubmitDecisionRegulatedMutationServiceTest {
                 new AnalystDecisionStatusMapper(),
                 actorResolver,
                 mock(SubmitDecisionMutationHandler.class),
-                coordinator
+                coordinator,
+                mock(TransactionalOutboxRecordRepository.class),
+                mock(RegulatedMutationCommandRepository.class)
         );
 
         SubmitAnalystDecisionResponse response = service.submit("alert-1", request(), "idem-1");
@@ -407,11 +435,21 @@ class SubmitDecisionRegulatedMutationServiceTest {
                 mock(com.frauddetection.alert.security.principal.AnalystActorResolver.class);
         private final List<RegulatedMutationState> states = new ArrayList<>();
         private RegulatedMutationCommandDocument currentCommand;
+        private TransactionalOutboxRecordDocument currentOutbox;
         private boolean claimReturnsNull;
 
         private SubmitDecisionRegulatedMutationService service() {
             when(outboxRepository.save(any(TransactionalOutboxRecordDocument.class)))
-                    .thenAnswer(invocation -> invocation.getArgument(0));
+                    .thenAnswer(invocation -> {
+                        currentOutbox = invocation.getArgument(0);
+                        return currentOutbox;
+                    });
+            when(outboxRepository.findByMutationCommandId(anyString())).thenAnswer(invocation -> {
+                String commandId = invocation.getArgument(0);
+                return currentOutbox != null && commandId.equals(currentOutbox.getMutationCommandId())
+                        ? Optional.of(currentOutbox)
+                        : Optional.empty();
+            });
             return new SubmitDecisionRegulatedMutationService(
                     alertRepository,
                     new AnalystDecisionStatusMapper(),
@@ -427,7 +465,9 @@ class SubmitDecisionRegulatedMutationServiceTest {
                             mongoTemplate,
                             new RegulatedMutationAuditPhaseService(auditEventRepository, auditService),
                             metrics
-                    )
+                    ),
+                    outboxRepository,
+                    commandRepository
             );
         }
 

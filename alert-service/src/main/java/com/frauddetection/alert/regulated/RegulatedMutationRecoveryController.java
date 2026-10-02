@@ -4,6 +4,7 @@ import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
 import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
 import com.frauddetection.alert.audit.read.ReadAccessResourceType;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
+import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.beans.factory.annotation.Autowired;
 
 @RestController
 @RequestMapping("/api/v1/regulated-mutations")
@@ -21,19 +23,32 @@ public class RegulatedMutationRecoveryController {
     private final RegulatedMutationRecoveryService recoveryService;
     private final RegulatedMutationInspectionRateLimiter inspectionRateLimiter;
     private final SensitiveReadAuditService sensitiveReadAuditService;
+    private final TransactionalOutboxRuntimeReadiness runtimeReadiness;
+
+    @Autowired
+    public RegulatedMutationRecoveryController(
+            RegulatedMutationRecoveryService recoveryService,
+            RegulatedMutationInspectionRateLimiter inspectionRateLimiter,
+            SensitiveReadAuditService sensitiveReadAuditService,
+            TransactionalOutboxRuntimeReadiness runtimeReadiness
+    ) {
+        this.recoveryService = recoveryService;
+        this.inspectionRateLimiter = inspectionRateLimiter;
+        this.sensitiveReadAuditService = sensitiveReadAuditService;
+        this.runtimeReadiness = runtimeReadiness;
+    }
 
     public RegulatedMutationRecoveryController(
             RegulatedMutationRecoveryService recoveryService,
             RegulatedMutationInspectionRateLimiter inspectionRateLimiter,
             SensitiveReadAuditService sensitiveReadAuditService
     ) {
-        this.recoveryService = recoveryService;
-        this.inspectionRateLimiter = inspectionRateLimiter;
-        this.sensitiveReadAuditService = sensitiveReadAuditService;
+        this(recoveryService, inspectionRateLimiter, sensitiveReadAuditService, readyReadiness());
     }
 
     @PostMapping("/recover")
     public RegulatedMutationRecoveryRunResponse recover() {
+        runtimeReadiness.requireReady();
         return recoveryService.recoverNow();
     }
 
@@ -98,5 +113,12 @@ public class RegulatedMutationRecoveryController {
                 1,
                 request
         );
+    }
+
+    private static TransactionalOutboxRuntimeReadiness readyReadiness() {
+        TransactionalOutboxRuntimeReadiness readiness = new TransactionalOutboxRuntimeReadiness();
+        readiness.markPreflightPassed();
+        readiness.onApplicationEvent(null);
+        return readiness;
     }
 }

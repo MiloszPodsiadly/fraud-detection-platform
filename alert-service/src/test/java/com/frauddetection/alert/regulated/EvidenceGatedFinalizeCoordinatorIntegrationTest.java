@@ -195,7 +195,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                 provider(outboxRepository),
                 provider(alertRepository),
                 List.of(
-                        new SubmitDecisionRecoveryStrategy(alertRepository),
+                        new SubmitDecisionRecoveryStrategy(alertRepository, outboxRepository),
                         new TransactionalOutboxRecoveryStrategy(outboxRepository)
                 ),
                 true
@@ -243,7 +243,7 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                 provider(outboxRepository),
                 provider(alertRepository),
                 List.of(
-                        new SubmitDecisionRecoveryStrategy(alertRepository),
+                        new SubmitDecisionRecoveryStrategy(alertRepository, outboxRepository),
                         new TransactionalOutboxRecoveryStrategy(outboxRepository)
                 ),
                 true
