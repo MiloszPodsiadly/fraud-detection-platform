@@ -103,11 +103,7 @@ class MutationEvidenceConfirmationServiceTest {
     void shouldKeepSingleControlManualPublicationPending() {
         Fixture fixture = new Fixture(false, false);
         RegulatedMutationCommandDocument command = committedCommand();
-        TransactionalOutboxRecordDocument outbox = outbox(TransactionalOutboxStatus.PUBLISHED);
-        outbox.setPublicationConfirmationProvenance(
-                OutboxPublicationConfirmationProvenance.MANUAL_SINGLE_CONTROL_ATTESTED
-        );
-        outbox.setResolutionControlMode("SINGLE_CONTROL_OPERATOR_ATTESTED");
+        TransactionalOutboxRecordDocument outbox = manualSingleControlOutbox();
         fixture.pending(command);
         when(fixture.outboxRepository.findByMutationCommandId("command-1")).thenReturn(Optional.of(outbox));
 
@@ -132,6 +128,22 @@ class MutationEvidenceConfirmationServiceTest {
         assertThat(promoted).isZero();
         assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
         verify(fixture.metrics).recordEvidenceConfirmationFailed("PUBLICATION_CONFIRMATION_PROVENANCE_MISSING");
+    }
+
+    @Test
+    void shouldFailClosedWhenPublishedRecordHasNoPublicationTimestamp() {
+        Fixture fixture = new Fixture(false, false);
+        RegulatedMutationCommandDocument command = committedCommand();
+        TransactionalOutboxRecordDocument outbox = outbox(TransactionalOutboxStatus.PUBLISHED);
+        outbox.setPublishedAt(null);
+        fixture.pending(command);
+        when(fixture.outboxRepository.findByMutationCommandId("command-1")).thenReturn(Optional.of(outbox));
+
+        int promoted = fixture.service.confirmPendingEvidence(100);
+
+        assertThat(promoted).isZero();
+        assertThat(command.getState()).isEqualTo(RegulatedMutationState.FINALIZE_RECOVERY_REQUIRED);
+        verify(fixture.metrics).recordEvidenceConfirmationFailed("PUBLICATION_TIMESTAMP_MISSING");
     }
 
     @Test
@@ -549,6 +561,7 @@ class MutationEvidenceConfirmationServiceTest {
             document.setPublicationConfirmationProvenance(
                     OutboxPublicationConfirmationProvenance.BROKER_ACKNOWLEDGED
             );
+            document.setPublishedAt(Instant.parse("2026-05-02T10:01:00Z"));
         }
         document.setCreatedAt(Instant.parse("2026-05-02T10:00:00Z"));
         return document;
@@ -592,6 +605,30 @@ class MutationEvidenceConfirmationServiceTest {
         document.setResolutionApprovalEvidenceVerifiedAt(approvalEvidence.verifiedAt());
         document.setResolutionApprovalEvidenceVerifiedBy(approvalEvidence.verifiedBy());
         document.setResolutionApprovalEvidenceFingerprint(RegulatedMutationIntentHasher.hash(approvalEvidence));
+        return document;
+    }
+
+    private TransactionalOutboxRecordDocument manualSingleControlOutbox() {
+        TransactionalOutboxRecordDocument document = outbox(TransactionalOutboxStatus.PUBLISHED);
+        Instant approvedAt = Instant.parse("2026-05-02T10:06:00Z");
+        ResolutionEvidenceReference evidence = new ResolutionEvidenceReference(
+                ResolutionEvidenceType.BROKER_OFFSET,
+                "topic=fraud-decisions,partition=0,offset=42",
+                approvedAt.minusSeconds(1),
+                "operator-verifier"
+        );
+        document.setPublicationConfirmationProvenance(
+                OutboxPublicationConfirmationProvenance.MANUAL_SINGLE_CONTROL_ATTESTED
+        );
+        document.setResolutionControlMode("SINGLE_CONTROL_OPERATOR_ATTESTED");
+        document.setResolutionApprovedBy("operator");
+        document.setResolutionApprovedAt(approvedAt);
+        document.setResolutionApprovalReason("operator reason");
+        document.setResolutionEvidenceType(evidence.type().name());
+        document.setResolutionEvidenceReference(evidence.reference());
+        document.setResolutionEvidenceVerifiedAt(evidence.verifiedAt());
+        document.setResolutionEvidenceVerifiedBy(evidence.verifiedBy());
+        document.setResolutionEvidenceFingerprint(RegulatedMutationIntentHasher.hash(evidence));
         return document;
     }
 

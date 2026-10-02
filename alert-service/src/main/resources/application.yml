@@ -63,6 +63,8 @@ app:
     transaction-capability-probe:
       enabled: ${REGULATED_MUTATIONS_TRANSACTION_CAPABILITY_PROBE_ENABLED:true}
   outbox:
+    preflight:
+      startup-validation-budget: ${OUTBOX_PREFLIGHT_STARTUP_VALIDATION_BUDGET:PT30S}
     publisher:
       enabled: ${OUTBOX_PUBLISHER_ENABLED:true}
       delay-ms: ${OUTBOX_PUBLISHER_DELAY_MS:5000}

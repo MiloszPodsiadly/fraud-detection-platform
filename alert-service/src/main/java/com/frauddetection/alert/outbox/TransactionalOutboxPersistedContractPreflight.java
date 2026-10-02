@@ -1,15 +1,19 @@
 package com.frauddetection.alert.outbox;
 
 import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
+import com.mongodb.client.AggregateIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Projections;
 import org.bson.Document;
 import org.bson.conversions.Bson;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
@@ -19,6 +23,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 @Component
 public class TransactionalOutboxPersistedContractPreflight {
@@ -28,6 +34,7 @@ public class TransactionalOutboxPersistedContractPreflight {
     private static final String JOINED_ALERT = "_contract_alert_projection";
     private static final String JOINED_OUTBOX = "_contract_authoritative_outbox";
     private static final String STATUS_FIELD = "status";
+    private static final Duration DEFAULT_STARTUP_VALIDATION_BUDGET = Duration.ofSeconds(30);
     private static final Set<String> CURRENT_STATUSES = enumNames(TransactionalOutboxStatus.values());
     private static final Set<String> TERMINAL_STATUSES = Set.of(
             TransactionalOutboxStatus.PUBLISHED.name(),
@@ -81,9 +88,9 @@ public class TransactionalOutboxPersistedContractPreflight {
             "resolution_evidence_fingerprint"
     );
     private static final List<String> OUTBOX_INSPECTION_FIELDS = List.of(
-            "_id", STATUS_FIELD, "resource_type", "resource_id", "projection_revision",
+            "_id", STATUS_FIELD, "resource_type", "resource_id", "attempts", "projection_revision",
             "projection_mismatch", "projection_reconcile_after", "publication_confirmation_provenance",
-            "lease_owner", "lease_claim_token", "lease_expires_at",
+            "published_at", "last_error", "lease_owner", "lease_claim_token", "lease_expires_at",
             "resolution_reason", "resolution_pending", "resolution_control_mode", "resolution_request_id",
             "resolution_proposed_outcome", "resolution_requested_by", "resolution_requested_at",
             "resolution_request_reason", "resolution_approval_reason", "resolution_evidence_type",
@@ -95,24 +102,49 @@ public class TransactionalOutboxPersistedContractPreflight {
     );
     private static final List<String> ALERT_INSPECTION_FIELDS = List.of(
             "_id", "decisionOutboxEvent", "decisionOutboxEventId", "decisionOutboxProjectionRevision",
-            "decisionOutboxStatus", "decisionOutboxPublicationConfirmationProvenance", JOINED_OUTBOX
+            "decisionOutboxStatus", "decisionOutboxAttempts", "decisionOutboxPublishedAt",
+            "decisionOutboxPublicationConfirmationProvenance", "decisionOutboxLastError",
+            "decisionOutboxFailureReason", "decisionOutboxLeaseOwner", "decisionOutboxLeaseExpiresAt",
+            "decisionOutboxResolutionPending", "decisionOutboxResolutionRequestId",
+            "decisionOutboxResolutionProposedOutcome", "decisionOutboxResolutionRequestedAt",
+            "decisionOutboxResolutionRequestedBy", "decisionOutboxResolutionRequestReason",
+            "decisionOutboxResolutionApprovalReason", "decisionOutboxResolutionEvidenceType",
+            "decisionOutboxResolutionEvidenceReference", "decisionOutboxResolutionEvidenceVerifiedAt",
+            "decisionOutboxResolutionEvidenceVerifiedBy", "decisionOutboxResolutionEvidenceFingerprint",
+            "decisionOutboxResolutionApprovalEvidenceType", "decisionOutboxResolutionApprovalEvidenceReference",
+            "decisionOutboxResolutionApprovalEvidenceVerifiedAt",
+            "decisionOutboxResolutionApprovalEvidenceVerifiedBy",
+            "decisionOutboxResolutionApprovalEvidenceFingerprint", "decisionOutboxResolutionApprovedAt",
+            "decisionOutboxResolutionApprovedBy", JOINED_OUTBOX
     );
 
     private final MongoTemplate mongoTemplate;
+    private final Duration startupValidationBudget;
 
-    public TransactionalOutboxPersistedContractPreflight(MongoTemplate mongoTemplate) {
+    @Autowired
+    public TransactionalOutboxPersistedContractPreflight(
+            MongoTemplate mongoTemplate,
+            @Value("${app.outbox.preflight.startup-validation-budget:PT30S}") Duration startupValidationBudget
+    ) {
         this.mongoTemplate = mongoTemplate;
+        if (startupValidationBudget == null || startupValidationBudget.isZero() || startupValidationBudget.isNegative()) {
+            throw new IllegalArgumentException("Outbox preflight startup validation budget must be positive.");
+        }
+        this.startupValidationBudget = startupValidationBudget;
+    }
+
+    TransactionalOutboxPersistedContractPreflight(MongoTemplate mongoTemplate) {
+        this(mongoTemplate, DEFAULT_STARTUP_VALIDATION_BUDGET);
     }
 
     public Report inspect(int sampleLimit) {
-        Inspection inspection = new Inspection(sampleLimit);
+        long deadlineNanos = System.nanoTime() + startupValidationBudget.toNanos();
+        Inspection inspection = new Inspection(sampleLimit, () -> requireBudgetRemaining(deadlineNanos));
         MongoCollection<Document> outbox = mongoTemplate.getCollection(COLLECTION);
-        outbox.aggregate(List.of(
+        inspectAll(outbox.aggregate(List.of(
                         Aggregates.lookup(ALERT_COLLECTION, "resource_id", "_id", JOINED_ALERT),
                         Aggregates.project(Projections.include(OUTBOX_INSPECTION_FIELDS))
-                ))
-                .allowDiskUse(true)
-                .forEach(inspection::inspectOutbox);
+                )), inspection::inspectOutbox, deadlineNanos);
 
         MongoCollection<Document> alerts = mongoTemplate.getCollection(ALERT_COLLECTION);
         Bson hasOutboxProjection = Filters.or(
@@ -121,14 +153,43 @@ public class TransactionalOutboxPersistedContractPreflight {
                 Filters.exists("decisionOutboxProjectionRevision", true),
                 Filters.exists("decisionOutboxStatus", true)
         );
-        alerts.aggregate(List.of(
+        inspectAll(alerts.aggregate(List.of(
                         Aggregates.match(hasOutboxProjection),
                         Aggregates.lookup(COLLECTION, "decisionOutboxEventId", "_id", JOINED_OUTBOX),
                         Aggregates.project(Projections.include(ALERT_INSPECTION_FIELDS))
-                ))
-                .allowDiskUse(true)
-                .forEach(inspection::inspectOrphanAlert);
+                )), inspection::inspectOrphanAlert, deadlineNanos);
         return inspection.report();
+    }
+
+    private void inspectAll(
+            AggregateIterable<Document> aggregation,
+            Consumer<Document> inspector,
+            long deadlineNanos
+    ) {
+        aggregation.allowDiskUse(true)
+                .maxTime(remainingBudgetMillis(deadlineNanos), TimeUnit.MILLISECONDS)
+                .forEach(inspector);
+        requireBudgetRemaining(deadlineNanos);
+    }
+
+    private long remainingBudgetMillis(long deadlineNanos) {
+        long remainingNanos = requireBudgetRemaining(deadlineNanos);
+        long millis = TimeUnit.NANOSECONDS.toMillis(remainingNanos);
+        return Math.max(1L, millis);
+    }
+
+    private long requireBudgetRemaining(long deadlineNanos) {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new IllegalStateException("Transactional outbox persisted-contract startup validation interrupted.");
+        }
+        long remainingNanos = deadlineNanos - System.nanoTime();
+        if (remainingNanos <= 0L) {
+            throw new IllegalStateException(
+                    "Transactional outbox persisted-contract startup validation budget exceeded: "
+                            + startupValidationBudget
+            );
+        }
+        return remainingNanos;
     }
 
     Report inspectRawDocuments(List<Document> outboxRecords, List<Document> alertRecords, int sampleLimit) {
@@ -173,6 +234,9 @@ public class TransactionalOutboxPersistedContractPreflight {
         if (!validRevision(document.get("projection_revision"))) {
             violations.add("PROJECTION_REVISION_MISSING_OR_INVALID");
         }
+        if (!validAttempts(document.get("attempts"))) {
+            violations.add("ATTEMPTS_MISSING_OR_INVALID");
+        }
         validateLeaseState(document, status, violations);
         if (document.containsKey("resolution_reason")) {
             violations.add("RETIRED_RESOLUTION_REASON_PRESENT");
@@ -211,24 +275,35 @@ public class TransactionalOutboxPersistedContractPreflight {
     ) {
         String provenance = safeString(document.get("publication_confirmation_provenance"));
         if (TransactionalOutboxStatus.PUBLISHED.name().equals(status)) {
+            if (!validInstant(document.get("published_at"))) {
+                violations.add("PUBLISHED_AT_MISSING_OR_INVALID");
+            }
             if (provenance == null || !PUBLICATION_PROVENANCE.contains(provenance)) {
                 violations.add("PUBLISHED_PROVENANCE_MISSING_OR_INVALID");
             }
-            String controlMode = safeString(document.get("resolution_control_mode"));
+            TransactionalOutboxRecordDocument record = OutboxAlertProjectionPolicy.persistedRecord(document);
             if (OutboxPublicationConfirmationProvenance.BROKER_ACKNOWLEDGED.name().equals(provenance)
-                    && controlMode != null) {
-                violations.add("BROKER_PROVENANCE_HAS_MANUAL_CONTROL_MODE");
+                    && record != null
+                    && !OutboxAlertProjectionPolicy.brokerPublicationHasNoManualMetadata(record)) {
+                violations.add("BROKER_PROVENANCE_HAS_MANUAL_METADATA");
             }
             if (OutboxPublicationConfirmationProvenance.MANUAL_SINGLE_CONTROL_ATTESTED.name().equals(provenance)
-                    && !"SINGLE_CONTROL_OPERATOR_ATTESTED".equals(controlMode)) {
+                    && (record == null
+                    || !OutboxAlertProjectionPolicy.validSingleControlPublicationEvidence(record))) {
                 violations.add("MANUAL_SINGLE_PROVENANCE_CONTROL_MISMATCH");
             }
             if (OutboxPublicationConfirmationProvenance.MANUAL_DUAL_CONTROL_ATTESTED.name().equals(provenance)
-                    && !"DUAL_CONTROL_APPROVED".equals(controlMode)) {
+                    && (record == null
+                    || !OutboxAlertProjectionPolicy.validDualControlPublicationEvidence(record))) {
                 violations.add("MANUAL_DUAL_PROVENANCE_CONTROL_MISMATCH");
             }
-        } else if (provenance != null) {
-            violations.add("NON_PUBLISHED_PROVENANCE_PRESENT");
+        } else {
+            if (provenance != null) {
+                violations.add("NON_PUBLISHED_PROVENANCE_PRESENT");
+            }
+            if (document.containsKey("published_at")) {
+                violations.add("NON_PUBLISHED_AT_PRESENT");
+            }
         }
     }
 
@@ -255,6 +330,10 @@ public class TransactionalOutboxPersistedContractPreflight {
             if (hasAny(document, APPROVAL_FIELDS)) {
                 violations.add("PENDING_RESOLUTION_HAS_APPROVAL_METADATA");
             }
+            TransactionalOutboxRecordDocument record = OutboxAlertProjectionPolicy.persistedRecord(document);
+            if (record != null && !OutboxAlertProjectionPolicy.validPendingDualControlEvidence(record)) {
+                violations.add("PENDING_RESOLUTION_EVIDENCE_INVALID");
+            }
             return;
         }
         if (controlMode == null) {
@@ -270,6 +349,17 @@ public class TransactionalOutboxPersistedContractPreflight {
         if ("DUAL_CONTROL_APPROVED".equals(controlMode)) {
             requireRequestFields(document, violations);
             requireFields(document, APPROVAL_FIELDS, "DUAL_CONTROL_APPROVAL_INCOMPLETE", violations);
+            String expectedOutcome = TransactionalOutboxStatus.PUBLISHED.name().equals(status)
+                    ? "PUBLISHED"
+                    : TransactionalOutboxStatus.RECOVERY_REQUIRED.name().equals(status)
+                    ? "RECOVERY_REQUIRED"
+                    : null;
+            TransactionalOutboxRecordDocument record = OutboxAlertProjectionPolicy.persistedRecord(document);
+            if (expectedOutcome == null
+                    || record == null
+                    || !OutboxAlertProjectionPolicy.validDualControlEvidence(record, expectedOutcome)) {
+                violations.add("DUAL_CONTROL_SEMANTICS_INVALID");
+            }
             return;
         }
         requireFields(document, PRIMARY_EVIDENCE_FIELDS, "SINGLE_CONTROL_EVIDENCE_INCOMPLETE", violations);
@@ -279,6 +369,10 @@ public class TransactionalOutboxPersistedContractPreflight {
                 "SINGLE_CONTROL_APPROVAL_INCOMPLETE",
                 violations
         );
+        if (!TransactionalOutboxStatus.PUBLISHED.name().equals(status)
+                && !TransactionalOutboxStatus.RECOVERY_REQUIRED.name().equals(status)) {
+            violations.add("SINGLE_CONTROL_STATUS_INVALID");
+        }
     }
 
     private static void requireRequestFields(Document document, List<String> violations) {
@@ -342,6 +436,11 @@ public class TransactionalOutboxPersistedContractPreflight {
         if (!safeEquals(source.get("resource_id"), alert.get("_id"))) {
             violations.add("ALERT_RESOURCE_ID_DOES_NOT_MATCH_SOURCE");
         }
+        boolean reconciliationOutstanding = Boolean.TRUE.equals(source.get("projection_mismatch"))
+                || validInstant(source.get("projection_reconcile_after"));
+        if (sourceRevision >= 0 && sourceRevision == alertRevision && !reconciliationOutstanding) {
+            violations.addAll(OutboxAlertProjectionPolicy.persistedProjectionViolations(source, alert));
+        }
         return violations;
     }
 
@@ -366,6 +465,11 @@ public class TransactionalOutboxPersistedContractPreflight {
 
     private static boolean validRevision(Object value) {
         return revision(value) >= 0;
+    }
+
+    private static boolean validAttempts(Object value) {
+        return value instanceof Integer integer && integer >= 0
+                || value instanceof Long longValue && longValue >= 0 && longValue <= Integer.MAX_VALUE;
     }
 
     private static long revision(Object value) {
@@ -393,16 +497,23 @@ public class TransactionalOutboxPersistedContractPreflight {
 
     private static final class Inspection {
         private final int sampleLimit;
+        private final Runnable budgetCheck;
         private final List<UnsupportedPersistedRecord> samples = new ArrayList<>();
         private long unsupportedUnfinished;
         private long unsupportedTerminal;
         private long unsupportedAlertProjection;
 
         private Inspection(int sampleLimit) {
+            this(sampleLimit, () -> { });
+        }
+
+        private Inspection(int sampleLimit, Runnable budgetCheck) {
             this.sampleLimit = Math.max(0, Math.min(sampleLimit, 100));
+            this.budgetCheck = budgetCheck;
         }
 
         private void inspectOutbox(Document source) {
+            budgetCheck.run();
             List<String> violations = outboxViolations(source);
             List<Document> linkedAlerts = documents(source.get(JOINED_ALERT));
             if (!"ALERT".equals(safeString(source.get("resource_type")))
@@ -428,6 +539,7 @@ public class TransactionalOutboxPersistedContractPreflight {
         }
 
         private void inspectOrphanAlert(Document alert) {
+            budgetCheck.run();
             if (!documents(alert.get(JOINED_OUTBOX)).isEmpty()) {
                 return;
             }

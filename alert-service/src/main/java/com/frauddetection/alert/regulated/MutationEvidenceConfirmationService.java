@@ -5,11 +5,10 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditEventDocument;
 import com.frauddetection.alert.audit.AuditEventRepository;
 import com.frauddetection.alert.audit.AuditResourceType;
-import com.frauddetection.alert.audit.ResolutionEvidenceReference;
-import com.frauddetection.alert.audit.ResolutionEvidenceType;
 import com.frauddetection.alert.audit.external.AuditEventExternalEvidenceStatus;
 import com.frauddetection.alert.audit.external.AuditEventPublicationStatusLookup;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.outbox.OutboxAlertProjectionPolicy;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.OutboxPublicationConfirmationProvenance;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
@@ -259,6 +258,9 @@ public class MutationEvidenceConfirmationService {
     }
 
     private EvidenceDecision publicationConfirmationDecision(TransactionalOutboxRecordDocument outbox) {
+        if (outbox.getPublishedAt() == null) {
+            return new EvidenceDecision(EvidenceConfirmationOutcome.FAILED, "PUBLICATION_TIMESTAMP_MISSING");
+        }
         OutboxPublicationConfirmationProvenance provenance = outbox.getPublicationConfirmationProvenance();
         if (provenance == null) {
             return new EvidenceDecision(
@@ -267,77 +269,21 @@ public class MutationEvidenceConfirmationService {
             );
         }
         return switch (provenance) {
-            case BROKER_ACKNOWLEDGED -> outbox.getResolutionControlMode() == null
+            case BROKER_ACKNOWLEDGED -> OutboxAlertProjectionPolicy.brokerPublicationHasNoManualMetadata(outbox)
                     ? confirmedPublication()
                     : invalidManualPublicationEvidence();
-            case MANUAL_DUAL_CONTROL_ATTESTED -> validDualControlPublicationEvidence(outbox)
+            case MANUAL_DUAL_CONTROL_ATTESTED ->
+                    OutboxAlertProjectionPolicy.validDualControlPublicationEvidence(outbox)
                     ? confirmedPublication()
                     : invalidManualPublicationEvidence();
-            case MANUAL_SINGLE_CONTROL_ATTESTED -> new EvidenceDecision(
-                    EvidenceConfirmationOutcome.PENDING,
-                    "MANUAL_PUBLICATION_REQUIRES_DUAL_CONTROL"
-            );
+            case MANUAL_SINGLE_CONTROL_ATTESTED ->
+                    OutboxAlertProjectionPolicy.validSingleControlPublicationEvidence(outbox)
+                            ? new EvidenceDecision(
+                                    EvidenceConfirmationOutcome.PENDING,
+                                    "MANUAL_PUBLICATION_REQUIRES_DUAL_CONTROL"
+                            )
+                            : invalidManualPublicationEvidence();
         };
-    }
-
-    private boolean validDualControlPublicationEvidence(TransactionalOutboxRecordDocument outbox) {
-        return "DUAL_CONTROL_APPROVED".equals(outbox.getResolutionControlMode())
-                && !outbox.isResolutionPending()
-                && hasText(outbox.getResolutionRequestId())
-                && "PUBLISHED".equals(outbox.getResolutionProposedOutcome())
-                && hasText(outbox.getResolutionRequestedBy())
-                && hasText(outbox.getResolutionApprovedBy())
-                && !outbox.getResolutionRequestedBy().equals(outbox.getResolutionApprovedBy())
-                && outbox.getResolutionRequestedAt() != null
-                && outbox.getResolutionApprovedAt() != null
-                && !outbox.getResolutionApprovedAt().isBefore(outbox.getResolutionRequestedAt())
-                && outbox.getResolutionEvidenceVerifiedAt() != null
-                && !outbox.getResolutionEvidenceVerifiedAt().isAfter(outbox.getResolutionRequestedAt())
-                && outbox.getResolutionApprovalEvidenceVerifiedAt() != null
-                && !outbox.getResolutionApprovalEvidenceVerifiedAt().isAfter(outbox.getResolutionApprovedAt())
-                && hasText(outbox.getResolutionRequestReason())
-                && hasText(outbox.getResolutionApprovalReason())
-                && evidenceFingerprintMatches(
-                        outbox.getResolutionEvidenceType(),
-                        outbox.getResolutionEvidenceReference(),
-                        outbox.getResolutionEvidenceVerifiedAt(),
-                        outbox.getResolutionEvidenceVerifiedBy(),
-                        outbox.getResolutionEvidenceFingerprint()
-                )
-                && evidenceFingerprintMatches(
-                        outbox.getResolutionApprovalEvidenceType(),
-                        outbox.getResolutionApprovalEvidenceReference(),
-                        outbox.getResolutionApprovalEvidenceVerifiedAt(),
-                        outbox.getResolutionApprovalEvidenceVerifiedBy(),
-                        outbox.getResolutionApprovalEvidenceFingerprint()
-                );
-    }
-
-    private boolean evidenceFingerprintMatches(
-            String type,
-            String reference,
-            java.time.Instant verifiedAt,
-            String verifiedBy,
-            String expectedFingerprint
-    ) {
-        if (!ResolutionEvidenceType.BROKER_OFFSET.name().equals(type)
-                || !hasText(reference)
-                || verifiedAt == null
-                || !hasText(verifiedBy)
-                || !hasText(expectedFingerprint)) {
-            return false;
-        }
-        ResolutionEvidenceReference evidence = new ResolutionEvidenceReference(
-                ResolutionEvidenceType.BROKER_OFFSET,
-                reference,
-                verifiedAt,
-                verifiedBy
-        );
-        return RegulatedMutationIntentHasher.hash(evidence).equals(expectedFingerprint);
-    }
-
-    private boolean hasText(String value) {
-        return value != null && !value.isBlank();
     }
 
     private EvidenceDecision confirmedPublication() {
