@@ -3,6 +3,7 @@ package com.frauddetection.alert.outbox;
 import com.frauddetection.alert.audit.ResolutionEvidenceReference;
 import com.frauddetection.alert.audit.ResolutionEvidenceType;
 import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.messaging.FraudDecisionEventPublisher;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
 import com.frauddetection.alert.regulated.RegulatedMutationCommand;
@@ -42,6 +43,125 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class OutboxRecoveryServiceTest {
+
+    @Test
+    void exhaustedRetrySelectionFiltersByCanonicalMaxAttemptsBeforeTheBatchLimit() {
+        Fixture fixture = new Fixture();
+        TransactionalOutboxRecordDocument exhausted = record(
+                "event-exhausted",
+                TransactionalOutboxStatus.FAILED_RETRYABLE
+        );
+        exhausted.setAttempts(5);
+        exhausted.setProjectionRevision(7L);
+        when(fixture.publisherCoordinator.maxAttempts()).thenReturn(5);
+        when(fixture.repository.findTop100ByStatusAndAttemptsGreaterThanEqualOrderByCreatedAtAsc(
+                TransactionalOutboxStatus.FAILED_RETRYABLE,
+                5
+        )).thenReturn(List.of(exhausted));
+
+        fixture.service.recoverNow();
+
+        ArgumentCaptor<Query> queryCaptor = ArgumentCaptor.forClass(Query.class);
+        ArgumentCaptor<Update> updateCaptor = ArgumentCaptor.forClass(Update.class);
+        verify(fixture.mongoTemplate).updateFirst(
+                queryCaptor.capture(),
+                updateCaptor.capture(),
+                eq(TransactionalOutboxRecordDocument.class)
+        );
+        assertThat(queryCaptor.getValue().getQueryObject().toString())
+                .contains("event-exhausted")
+                .contains("FAILED_RETRYABLE")
+                .contains("attempts=5")
+                .contains("projection_revision=7");
+        Document set = updateCaptor.getValue().getUpdateObject().get("$set", Document.class);
+        Document unset = updateCaptor.getValue().getUpdateObject().get("$unset", Document.class);
+        assertThat(set)
+                .containsEntry("status", TransactionalOutboxStatus.FAILED_TERMINAL)
+                .containsEntry("last_error", "RETRY_BUDGET_EXHAUSTED_BEFORE_PUBLISH_ATTEMPT");
+        assertThat(updateCaptor.getValue().getUpdateObject().get("$inc", Document.class))
+                .containsEntry("projection_revision", 1L);
+        assertThat(unset).containsKeys("lease_owner", "lease_claim_token", "lease_expires_at");
+    }
+
+    @Test
+    void recoveryRepairsProjectionWithoutPublishingWhenPublisherIsDisabled() {
+        TransactionalOutboxRecordRepository repository = mock(TransactionalOutboxRecordRepository.class);
+        MongoTemplate mongoTemplate = mock(MongoTemplate.class);
+        FraudDecisionEventPublisher publisher = mock(FraudDecisionEventPublisher.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        OutboxOperationalControls controls = new OutboxOperationalControls(false, true);
+        OutboxPublisherCoordinator publisherCoordinator = new OutboxPublisherCoordinator(
+                publisher,
+                mongoTemplate,
+                metrics,
+                Duration.ofMinutes(1),
+                5,
+                controls
+        );
+        OutboxRecoveryService service = new OutboxRecoveryService(
+                repository,
+                mongoTemplate,
+                publisherCoordinator,
+                mock(RegulatedMutationCoordinator.class),
+                mock(OutboxConfirmationResolutionMutationHandler.class),
+                metrics,
+                Duration.ofMinutes(2),
+                controls
+        );
+        TransactionalOutboxRecordDocument record = mismatchedRecord(TransactionalOutboxStatus.PUBLISHED);
+        com.frauddetection.alert.persistence.AlertDocument alert =
+                new com.frauddetection.alert.persistence.AlertDocument();
+        alert.setAlertId(record.getResourceId());
+        alert.setDecisionOutboxEventId(record.getEventId());
+        alert.setDecisionOutboxProjectionRevision(record.getProjectionRevision() - 1L);
+        alert.setDecisionOutboxStatus(DecisionOutboxStatus.PENDING);
+        when(repository.findTop100ByStatusInAndProjectionMismatchTrueAndProjectionReconcileAfterIsNullOrderByCreatedAtAsc(any()))
+                .thenReturn(List.of(record));
+        when(mongoTemplate.findById(record.getResourceId(), com.frauddetection.alert.persistence.AlertDocument.class))
+                .thenReturn(alert);
+        when(mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(TransactionalOutboxRecordDocument.class)))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+        when(mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(com.frauddetection.alert.persistence.AlertDocument.class)))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+
+        OutboxRecoveryRunResponse response = service.recoverNow();
+
+        assertThat(response.projectionRepaired()).isOne();
+        assertThat(response.publishAttempted()).isZero();
+        verify(mongoTemplate, never()).findAndModify(
+                any(Query.class),
+                any(Update.class),
+                any(org.springframework.data.mongodb.core.FindAndModifyOptions.class),
+                eq(TransactionalOutboxRecordDocument.class)
+        );
+        verifyNoInteractions(publisher);
+    }
+
+    @Test
+    void disabledRecoveryDoesNotMutateAuthoritativeOutboxState() {
+        Fixture fixture = new Fixture(new OutboxOperationalControls(false, false));
+
+        assertThat(fixture.service.recoverNow()).isEqualTo(new OutboxRecoveryRunResponse(0, 0, 0, 0));
+
+        verifyNoInteractions(fixture.repository, fixture.mongoTemplate, fixture.publisherCoordinator);
+    }
+
+    @Test
+    void disabledRecoveryRejectsManualConfirmationResolutionBeforeMutation() {
+        Fixture fixture = new Fixture(new OutboxOperationalControls(false, false));
+
+        assertThatThrownBy(() -> fixture.service.resolveConfirmation("event-1", null, "operator", "idem-1"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Transactional outbox recovery is disabled.");
+
+        verifyNoInteractions(
+                fixture.repository,
+                fixture.mongoTemplate,
+                fixture.publisherCoordinator,
+                fixture.regulatedMutationCoordinator,
+                fixture.resolutionMutationHandler
+        );
+    }
 
     @ParameterizedTest
     @EnumSource(value = TransactionalOutboxStatus.class, names = {
@@ -446,6 +566,10 @@ class OutboxRecoveryServiceTest {
         private final OutboxRecoveryService service;
 
         private Fixture() {
+            this(new OutboxOperationalControls(true, true));
+        }
+
+        private Fixture(OutboxOperationalControls controls) {
             when(mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(TransactionalOutboxRecordDocument.class)))
                     .thenReturn(UpdateResult.acknowledged(1, 1L, null));
             when(mongoTemplate.updateFirst(any(Query.class), any(Update.class), eq(com.frauddetection.alert.persistence.AlertDocument.class)))
@@ -457,7 +581,8 @@ class OutboxRecoveryServiceTest {
                     regulatedMutationCoordinator,
                     resolutionMutationHandler,
                     metrics,
-                    Duration.ofMinutes(2)
+                    Duration.ofMinutes(2),
+                    controls
             );
         }
     }

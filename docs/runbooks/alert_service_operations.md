@@ -70,12 +70,13 @@ do not partially roll forward or synthesize missing facts.
 
 Use a restored production-size database snapshot for the offline dry-run. Inventory unsupported historical records by
 category before changing them, preserve the original BSON and hashes in the approved archive, prepare and test database
-rollback, and verify the standard `_id` indexes are ready on both collections. Start an isolated `alert-service` with
-publisher and recovery disabled and the same startup validation budget as the target deployment. A successful start
-must report the canonical Alert/outbox relationship across the full inventory; any timeout or exception is a failed
-dry-run. After the approved evidence-preserving migration or archive operation, repeat the dry-run and only then enable
-publisher and recovery in a controlled deployment. There is no automatic destructive migration and no synthetic broker
-provenance.
+rollback, and verify the standard `_id` indexes are ready on both collections. Run the persisted-contract preflight as
+an explicit offline validation step with publisher and recovery disabled and the same validation budget as the target
+deployment; do not start the full bank/prod application profile, whose startup guards correctly require both controls.
+A successful preflight must report the canonical Alert/outbox relationship across the full inventory; any timeout or
+exception is a failed dry-run. After the approved evidence-preserving migration or archive operation, repeat the
+preflight and only then enable publisher and recovery in a controlled deployment. There is no automatic destructive
+migration and no synthetic broker provenance.
 
 For substantial performance verification, use a separately executed staging exercise, not normal CI. Generate or
 restore representative canonical outbox and Alert counts plus a small known-invalid tail record beyond the diagnostic

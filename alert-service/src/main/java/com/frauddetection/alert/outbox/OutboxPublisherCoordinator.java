@@ -7,6 +7,7 @@ import com.frauddetection.alert.service.DecisionOutboxStatus;
 import com.mongodb.client.result.UpdateResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.domain.Sort;
@@ -32,13 +33,16 @@ public class OutboxPublisherCoordinator {
     private final String leaseOwner;
     private final Duration leaseDuration;
     private final int maxAttempts;
+    private final OutboxOperationalControls operationalControls;
 
+    @Autowired
     public OutboxPublisherCoordinator(
             FraudDecisionEventPublisher publisher,
             MongoTemplate mongoTemplate,
             AlertServiceMetrics metrics,
             @Value("${app.outbox.lease-duration:PT1M}") Duration leaseDuration,
-            @Value("${app.outbox.max-attempts:5}") int maxAttempts
+            @Value("${app.outbox.max-attempts:5}") int maxAttempts,
+            OutboxOperationalControls operationalControls
     ) {
         this.publisher = publisher;
         this.mongoTemplate = mongoTemplate;
@@ -46,9 +50,23 @@ public class OutboxPublisherCoordinator {
         this.leaseOwner = UUID.randomUUID().toString();
         this.leaseDuration = leaseDuration == null ? Duration.ofMinutes(1) : leaseDuration;
         this.maxAttempts = Math.max(1, maxAttempts);
+        this.operationalControls = operationalControls;
+    }
+
+    public OutboxPublisherCoordinator(
+            FraudDecisionEventPublisher publisher,
+            MongoTemplate mongoTemplate,
+            AlertServiceMetrics metrics,
+            Duration leaseDuration,
+            int maxAttempts
+    ) {
+        this(publisher, mongoTemplate, metrics, leaseDuration, maxAttempts, new OutboxOperationalControls(true, true));
     }
 
     public int publishPending(int limit) {
+        if (!operationalControls.publisherEnabled()) {
+            return 0;
+        }
         int published = 0;
         int boundedLimit = Math.max(1, Math.min(limit, 100));
         for (int index = 0; index < boundedLimit; index++) {
@@ -267,6 +285,10 @@ public class OutboxPublisherCoordinator {
 
     boolean retryBudgetExhausted(TransactionalOutboxRecordDocument record) {
         return record.getAttempts() >= maxAttempts;
+    }
+
+    int maxAttempts() {
+        return maxAttempts;
     }
 
     private Query leasedRecordQuery(TransactionalOutboxRecordDocument record, TransactionalOutboxStatus status) {

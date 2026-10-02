@@ -21,9 +21,29 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class OutboxPublisherCoordinatorProjectionTest {
+
+    @Test
+    void disabledPublisherDoesNotClaimOrMutateOutboxRecords() {
+        FraudDecisionEventPublisher publisher = mock(FraudDecisionEventPublisher.class);
+        MongoTemplate mongoTemplate = mock(MongoTemplate.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        OutboxPublisherCoordinator coordinator = new OutboxPublisherCoordinator(
+                publisher,
+                mongoTemplate,
+                metrics,
+                Duration.ofMinutes(1),
+                5,
+                new OutboxOperationalControls(false, true)
+        );
+
+        assertThat(coordinator.publishPending(100)).isZero();
+
+        verifyNoInteractions(publisher, mongoTemplate, metrics);
+    }
 
     @Test
     void clearsExistingMismatchOnlyAfterSuccessfulAlertProjection() {

@@ -1,5 +1,6 @@
 package com.frauddetection.alert.service;
 
+import com.frauddetection.alert.outbox.OutboxOperationalControls;
 import com.frauddetection.alert.outbox.OutboxPublisherCoordinator;
 import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
 import com.frauddetection.alert.messaging.FraudDecisionEventPublisher;
@@ -17,14 +18,24 @@ public class FraudDecisionOutboxPublisher {
 
     private final OutboxPublisherCoordinator coordinator;
     private final TransactionalOutboxRuntimeReadiness runtimeReadiness;
+    private final OutboxOperationalControls operationalControls;
 
     @Autowired
     public FraudDecisionOutboxPublisher(
             OutboxPublisherCoordinator coordinator,
-            TransactionalOutboxRuntimeReadiness runtimeReadiness
+            TransactionalOutboxRuntimeReadiness runtimeReadiness,
+            OutboxOperationalControls operationalControls
     ) {
         this.coordinator = coordinator;
         this.runtimeReadiness = runtimeReadiness;
+        this.operationalControls = operationalControls;
+    }
+
+    public FraudDecisionOutboxPublisher(
+            OutboxPublisherCoordinator coordinator,
+            TransactionalOutboxRuntimeReadiness runtimeReadiness
+    ) {
+        this(coordinator, runtimeReadiness, new OutboxOperationalControls(true, true));
     }
 
     public FraudDecisionOutboxPublisher(
@@ -36,12 +47,15 @@ public class FraudDecisionOutboxPublisher {
             int maxAttempts,
             TransactionalOutboxRuntimeReadiness runtimeReadiness
     ) {
-        this(new OutboxPublisherCoordinator(publisher, mongoTemplate, metrics, leaseDuration, maxAttempts), runtimeReadiness);
+        this(
+                new OutboxPublisherCoordinator(publisher, mongoTemplate, metrics, leaseDuration, maxAttempts),
+                runtimeReadiness
+        );
     }
 
     @Scheduled(fixedDelayString = "${app.outbox.publisher.delay-ms:5000}")
     public void publishPending() {
-        if (!runtimeReadiness.isReady()) {
+        if (!runtimeReadiness.isReady() || !operationalControls.publisherEnabled()) {
             return;
         }
         publishPending(100);
@@ -49,6 +63,9 @@ public class FraudDecisionOutboxPublisher {
 
     public int publishPending(int limit) {
         runtimeReadiness.requireReady();
+        if (!operationalControls.publisherEnabled()) {
+            return 0;
+        }
         return coordinator.publishPending(limit);
     }
 }

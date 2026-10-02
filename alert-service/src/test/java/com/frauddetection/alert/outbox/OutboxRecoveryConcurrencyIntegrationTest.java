@@ -53,6 +53,69 @@ class OutboxRecoveryConcurrencyIntegrationTest extends AbstractIntegrationTest {
     private MongoTemplate mongoTemplate;
     private TransactionalOutboxRecordRepository actualRepository;
 
+    @Test
+    void exhaustedRetryBeyondFirstHundredNonExhaustedRecordsIsTerminalized() {
+        Instant base = Instant.parse("2026-09-30T10:00:00Z");
+        for (int index = 0; index < 100; index++) {
+            TransactionalOutboxRecordDocument nonExhausted = record(
+                    "event-non-exhausted-" + index,
+                    TransactionalOutboxStatus.FAILED_RETRYABLE
+            );
+            nonExhausted.setAttempts(4);
+            nonExhausted.setCreatedAt(base.plusSeconds(index));
+            nonExhausted.setResourceId(null);
+            actualRepository.save(nonExhausted);
+        }
+        TransactionalOutboxRecordDocument exhausted = record(
+                "event-exhausted-101",
+                TransactionalOutboxStatus.FAILED_RETRYABLE
+        );
+        exhausted.setAttempts(5);
+        exhausted.setProjectionRevision(3L);
+        exhausted.setCreatedAt(base.plusSeconds(101));
+        exhausted.setResourceId(null);
+        actualRepository.save(exhausted);
+        OutboxOperationalControls controls = new OutboxOperationalControls(false, true);
+        OutboxPublisherCoordinator coordinator = new OutboxPublisherCoordinator(
+                mock(FraudDecisionEventPublisher.class),
+                mongoTemplate,
+                mock(AlertServiceMetrics.class),
+                Duration.ofMinutes(1),
+                5,
+                controls
+        );
+        OutboxRecoveryService recoveryService = new OutboxRecoveryService(
+                actualRepository,
+                mongoTemplate,
+                coordinator,
+                mock(RegulatedMutationCoordinator.class),
+                mock(OutboxConfirmationResolutionMutationHandler.class),
+                mock(AlertServiceMetrics.class),
+                Duration.ofMinutes(2),
+                controls
+        );
+
+        recoveryService.recoverNow();
+
+        TransactionalOutboxRecordDocument terminal = actualRepository.findById("event-exhausted-101")
+                .orElseThrow();
+        assertThat(terminal.getStatus()).isEqualTo(TransactionalOutboxStatus.FAILED_TERMINAL);
+        assertThat(terminal.getLastError()).isEqualTo("RETRY_BUDGET_EXHAUSTED_BEFORE_PUBLISH_ATTEMPT");
+        assertThat(terminal.getProjectionRevision()).isEqualTo(4L);
+        assertThat(terminal.getProjectionReconcileAfter()).isNotNull();
+        assertThat(actualRepository.countByStatus(TransactionalOutboxStatus.FAILED_RETRYABLE)).isEqualTo(100L);
+        assertThat(mongoTemplate.updateFirst(
+                Query.query(new Criteria().andOperator(
+                        Criteria.where("_id").is("event-exhausted-101"),
+                        Criteria.where("status").is(TransactionalOutboxStatus.FAILED_RETRYABLE),
+                        Criteria.where("attempts").is(5),
+                        Criteria.where("projection_revision").is(3L)
+                )),
+                new Update().set("status", TransactionalOutboxStatus.PENDING),
+                TransactionalOutboxRecordDocument.class
+        ).getModifiedCount()).isZero();
+    }
+
     @BeforeEach
     void setUp() {
         String databaseName = "outbox_recovery_" + UUID.randomUUID().toString().replace("-", "");

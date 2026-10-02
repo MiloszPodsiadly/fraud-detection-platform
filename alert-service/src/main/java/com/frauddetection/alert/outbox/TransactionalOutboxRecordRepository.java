@@ -23,7 +23,10 @@ public interface TransactionalOutboxRecordRepository extends MongoRepository<Tra
 
     Optional<TransactionalOutboxRecordDocument> findTopByStatusInOrderByCreatedAtAsc(Collection<TransactionalOutboxStatus> statuses);
 
-    List<TransactionalOutboxRecordDocument> findTop100ByStatusOrderByCreatedAtAsc(TransactionalOutboxStatus status);
+    List<TransactionalOutboxRecordDocument> findTop100ByStatusAndAttemptsGreaterThanEqualOrderByCreatedAtAsc(
+            TransactionalOutboxStatus status,
+            int attempts
+    );
 
     List<TransactionalOutboxRecordDocument> findTop100ByStatusInOrderByCreatedAtAsc(Collection<TransactionalOutboxStatus> statuses);
 

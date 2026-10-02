@@ -3,6 +3,8 @@ package com.frauddetection.alert.service;
 import com.frauddetection.alert.messaging.FraudDecisionEventPublisher;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
+import com.frauddetection.alert.outbox.OutboxOperationalControls;
+import com.frauddetection.alert.outbox.OutboxPublisherCoordinator;
 import com.frauddetection.alert.outbox.OutboxPublicationConfirmationProvenance;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
@@ -32,11 +34,28 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @Tag("failure-injection")
 @Tag("invariant-proof")
 class FraudDecisionOutboxPublisherTest {
+
+    @Test
+    void shouldNotPublishScheduledOrDirectlyWhenPublisherIsDisabled() {
+        OutboxPublisherCoordinator coordinator = mock(OutboxPublisherCoordinator.class);
+        FraudDecisionOutboxPublisher outboxPublisher = new FraudDecisionOutboxPublisher(
+                coordinator,
+                readyReadiness(),
+                new OutboxOperationalControls(false, true)
+        );
+
+        outboxPublisher.publishPending();
+        int published = outboxPublisher.publishPending(100);
+
+        assertThat(published).isZero();
+        verifyNoInteractions(coordinator);
+    }
 
     @Test
     void shouldPublishPendingOutboxEventAndMarkPublished() {

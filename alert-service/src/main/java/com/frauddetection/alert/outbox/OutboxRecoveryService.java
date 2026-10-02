@@ -14,6 +14,7 @@ import com.frauddetection.alert.regulated.RegulatedMutationResult;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.outbox.OutboxConfirmationResolutionMutationHandler;
 import com.frauddetection.alert.service.DecisionOutboxStatus;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -49,7 +50,9 @@ public class OutboxRecoveryService {
     private final OutboxConfirmationResolutionMutationHandler resolutionMutationHandler;
     private final AlertServiceMetrics metrics;
     private final Duration staleProcessingThreshold;
+    private final OutboxOperationalControls operationalControls;
 
+    @Autowired
     public OutboxRecoveryService(
             TransactionalOutboxRecordRepository repository,
             MongoTemplate mongoTemplate,
@@ -57,7 +60,8 @@ public class OutboxRecoveryService {
             RegulatedMutationCoordinator regulatedMutationCoordinator,
             OutboxConfirmationResolutionMutationHandler resolutionMutationHandler,
             AlertServiceMetrics metrics,
-            @Value("${app.outbox.recovery.stale-processing-threshold:PT2M}") Duration staleProcessingThreshold
+            @Value("${app.outbox.recovery.stale-processing-threshold:PT2M}") Duration staleProcessingThreshold,
+            OutboxOperationalControls operationalControls
     ) {
         this.repository = repository;
         this.mongoTemplate = mongoTemplate;
@@ -66,6 +70,28 @@ public class OutboxRecoveryService {
         this.resolutionMutationHandler = resolutionMutationHandler;
         this.metrics = metrics;
         this.staleProcessingThreshold = staleProcessingThreshold == null ? Duration.ofMinutes(2) : staleProcessingThreshold;
+        this.operationalControls = operationalControls;
+    }
+
+    public OutboxRecoveryService(
+            TransactionalOutboxRecordRepository repository,
+            MongoTemplate mongoTemplate,
+            OutboxPublisherCoordinator publisherCoordinator,
+            RegulatedMutationCoordinator regulatedMutationCoordinator,
+            OutboxConfirmationResolutionMutationHandler resolutionMutationHandler,
+            AlertServiceMetrics metrics,
+            Duration staleProcessingThreshold
+    ) {
+        this(
+                repository,
+                mongoTemplate,
+                publisherCoordinator,
+                regulatedMutationCoordinator,
+                resolutionMutationHandler,
+                metrics,
+                staleProcessingThreshold,
+                new OutboxOperationalControls(true, true)
+        );
     }
 
     public OutboxBacklogResponse backlog() {
@@ -94,6 +120,9 @@ public class OutboxRecoveryService {
     }
 
     public OutboxRecoveryRunResponse recoverNow() {
+        if (!operationalControls.recoveryEnabled()) {
+            return new OutboxRecoveryRunResponse(0, 0, 0, 0);
+        }
         int released = releaseStaleProcessing();
         finalizeExhaustedRetryable();
         int markedUnknown = markStalePublishAttemptedUnknown();
@@ -108,6 +137,7 @@ public class OutboxRecoveryService {
             String actorId,
             String idempotencyKey
     ) {
+        operationalControls.requireRecoveryEnabled();
         String authenticatedActor = requireAuthenticatedActor(actorId);
         String requestHash = RegulatedMutationIntentHasher.hash("eventId=" + eventId
                 + "|resolution=" + request.resolution()
@@ -171,11 +201,11 @@ public class OutboxRecoveryService {
 
     private void finalizeExhaustedRetryable() {
         List<TransactionalOutboxRecordDocument> retryable = repository
-                .findTop100ByStatusOrderByCreatedAtAsc(TransactionalOutboxStatus.FAILED_RETRYABLE);
+                .findTop100ByStatusAndAttemptsGreaterThanEqualOrderByCreatedAtAsc(
+                        TransactionalOutboxStatus.FAILED_RETRYABLE,
+                        publisherCoordinator.maxAttempts()
+                );
         for (TransactionalOutboxRecordDocument record : retryable) {
-            if (!publisherCoordinator.retryBudgetExhausted(record)) {
-                continue;
-            }
             Instant now = Instant.now();
             String reason = "RETRY_BUDGET_EXHAUSTED_BEFORE_PUBLISH_ATTEMPT";
             Query query = Query.query(new Criteria().andOperator(
