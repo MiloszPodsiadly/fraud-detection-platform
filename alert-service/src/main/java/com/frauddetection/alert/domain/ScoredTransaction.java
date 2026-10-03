@@ -20,8 +20,40 @@ public record ScoredTransaction(
         RiskLevel riskLevel,
         Boolean alertRecommended,
         List<String> reasonCodes,
-        AnalystRecommendationResult analystRecommendation
+        AnalystRecommendationResult analystRecommendation,
+        ScoringOccurrenceOwnership scoringOccurrenceOwnership
 ) {
+    public ScoredTransaction(
+            String transactionId,
+            String customerId,
+            String correlationId,
+            Instant transactionTimestamp,
+            Instant scoredAt,
+            Money transactionAmount,
+            MerchantInfo merchantInfo,
+            Double fraudScore,
+            RiskLevel riskLevel,
+            Boolean alertRecommended,
+            List<String> reasonCodes,
+            AnalystRecommendationResult analystRecommendation
+    ) {
+        this(
+                transactionId,
+                customerId,
+                correlationId,
+                transactionTimestamp,
+                scoredAt,
+                transactionAmount,
+                merchantInfo,
+                fraudScore,
+                riskLevel,
+                alertRecommended,
+                reasonCodes,
+                analystRecommendation,
+                ScoringOccurrenceOwnership.unknown()
+        );
+    }
+
     public ScoredTransaction(
             String transactionId,
             String customerId,
@@ -47,7 +79,8 @@ public record ScoredTransaction(
                 riskLevel,
                 alertRecommended,
                 reasonCodes,
-                null
+                null,
+                ScoringOccurrenceOwnership.unknown()
         );
     }
 }

@@ -9,10 +9,10 @@ import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionP
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionRepository;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionResult;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionService;
-import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionService;
 import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
+import com.frauddetection.alert.persistence.ScoredTransactionProjectionWriter;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -38,23 +38,25 @@ class TransactionMonitoringServiceEngineIntelligenceProjectionTest {
     private final ScoredTransactionRepository repository = mock(ScoredTransactionRepository.class);
     private final ScoredTransactionDocumentMapper mapper = mock(ScoredTransactionDocumentMapper.class);
     private final EngineIntelligenceProjectionService projectionService = mock(EngineIntelligenceProjectionService.class);
+    private final ScoredTransactionProjectionWriter projectionWriter = mock(ScoredTransactionProjectionWriter.class);
     private final TransactionMonitoringService service = new TransactionMonitoringService(
             repository,
             mapper,
             mock(MongoTemplate.class),
             new ScoredTransactionSearchPolicy(),
-            projectionService
+            projectionService,
+            projectionWriter
     );
 
     @Test
-    void oldEventStillInvokesInternalProjectionBoundaryAfterBaseSave() {
+    void eventStillInvokesInternalProjectionBoundaryAfterBaseProjectionWrite() {
         TransactionScoredEvent event = mock(TransactionScoredEvent.class);
         ScoredTransactionDocument document = new ScoredTransactionDocument();
         when(mapper.toDocument(event)).thenReturn(document);
 
         service.recordScoredTransaction(event);
 
-        verify(repository).save(same(document));
+        verify(projectionWriter).write(same(document));
         verify(projectionService).project(same(event));
     }
 
@@ -71,11 +73,13 @@ class TransactionMonitoringServiceEngineIntelligenceProjectionTest {
                 new EngineIntelligenceProjectionService(
                         projectionRepository,
                         new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy()),
-                        new AlertServiceMetrics(new SimpleMeterRegistry()),
-                        mock(MlPredictionEvidenceProjectionService.class)
-                )
+                        new AlertServiceMetrics(new SimpleMeterRegistry())
+                ),
+                projectionWriter
         );
         TransactionScoredEvent event = mock(TransactionScoredEvent.class);
+        when(event.eventId()).thenReturn("event-current-1");
+        when(event.createdAt()).thenReturn(java.time.Instant.parse("2026-10-03T12:00:00Z"));
         when(event.transactionId()).thenReturn("txn-fdp95-old");
         when(event.fraudScore()).thenReturn(0.82d);
         when(event.riskLevel()).thenReturn(RiskLevel.HIGH);
@@ -85,7 +89,7 @@ class TransactionMonitoringServiceEngineIntelligenceProjectionTest {
         assertThatCode(() -> monitoringService.recordScoredTransaction(event)).doesNotThrowAnyException();
 
         var captor = org.mockito.ArgumentCaptor.forClass(ScoredTransactionDocument.class);
-        verify(baseRepository).save(captor.capture());
+        verify(projectionWriter).write(captor.capture());
         verify(projectionRepository, never()).save(any());
         assertThat(captor.getValue().getFraudScore()).isEqualTo(0.82d);
         assertThat(captor.getValue().getRiskLevel()).isEqualTo(RiskLevel.HIGH);
@@ -103,7 +107,7 @@ class TransactionMonitoringServiceEngineIntelligenceProjectionTest {
 
         assertThatCode(() -> service.recordScoredTransaction(event)).doesNotThrowAnyException();
 
-        verify(repository).save(same(document));
+        verify(projectionWriter).write(same(document));
     }
 
     @Test
@@ -115,7 +119,7 @@ class TransactionMonitoringServiceEngineIntelligenceProjectionTest {
 
         assertThatCode(() -> service.recordScoredTransaction(event)).doesNotThrowAnyException();
 
-        verify(repository).save(same(document));
+        verify(projectionWriter).write(same(document));
     }
 
     @Test

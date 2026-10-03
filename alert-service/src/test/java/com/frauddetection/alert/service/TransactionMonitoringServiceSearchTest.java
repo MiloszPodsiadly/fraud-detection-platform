@@ -4,6 +4,7 @@ import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionService;
 import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
+import com.frauddetection.alert.persistence.ScoredTransactionProjectionWriter;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.bson.Document;
@@ -37,7 +38,8 @@ class TransactionMonitoringServiceSearchTest {
             mapper,
             mongoTemplate,
             searchPolicy,
-            engineIntelligenceProjectionService
+            engineIntelligenceProjectionService,
+            mock(ScoredTransactionProjectionWriter.class)
     );
 
     @Test

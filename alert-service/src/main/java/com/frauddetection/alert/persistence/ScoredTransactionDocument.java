@@ -17,6 +17,11 @@ public class ScoredTransactionDocument {
     @Id
     private String transactionId;
 
+    private String sourceEventId;
+    private String sourceEventCreatedAt;
+    private Long sourceEventCreatedAtEpochSecond;
+    private Integer sourceEventCreatedAtNano;
+
     private String customerId;
     private String correlationId;
     private Instant transactionTimestamp;
@@ -51,6 +56,14 @@ public class ScoredTransactionDocument {
 
     public String getTransactionId() { return transactionId; }
     public void setTransactionId(String transactionId) { this.transactionId = transactionId; }
+    public String getSourceEventId() { return sourceEventId; }
+    public void setSourceEventId(String sourceEventId) { this.sourceEventId = sourceEventId; }
+    public String getSourceEventCreatedAt() { return sourceEventCreatedAt; }
+    public void setSourceEventCreatedAt(String sourceEventCreatedAt) { this.sourceEventCreatedAt = sourceEventCreatedAt; }
+    public Long getSourceEventCreatedAtEpochSecond() { return sourceEventCreatedAtEpochSecond; }
+    public void setSourceEventCreatedAtEpochSecond(Long sourceEventCreatedAtEpochSecond) { this.sourceEventCreatedAtEpochSecond = sourceEventCreatedAtEpochSecond; }
+    public Integer getSourceEventCreatedAtNano() { return sourceEventCreatedAtNano; }
+    public void setSourceEventCreatedAtNano(Integer sourceEventCreatedAtNano) { this.sourceEventCreatedAtNano = sourceEventCreatedAtNano; }
     public String getCustomerId() { return customerId; }
     public void setCustomerId(String customerId) { this.customerId = customerId; }
     public String getCorrelationId() { return correlationId; }

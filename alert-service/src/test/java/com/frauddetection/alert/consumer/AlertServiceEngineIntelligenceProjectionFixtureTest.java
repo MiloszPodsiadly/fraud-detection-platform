@@ -5,7 +5,6 @@ import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionM
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionPolicy;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionRepository;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionService;
-import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -23,8 +22,7 @@ class AlertServiceEngineIntelligenceProjectionFixtureTest {
     private final EngineIntelligenceProjectionService service = new EngineIntelligenceProjectionService(
             repository,
             new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy()),
-            new AlertServiceMetrics(new SimpleMeterRegistry()),
-            mock(MlPredictionEvidenceProjectionService.class)
+            new AlertServiceMetrics(new SimpleMeterRegistry())
     );
 
     @Test

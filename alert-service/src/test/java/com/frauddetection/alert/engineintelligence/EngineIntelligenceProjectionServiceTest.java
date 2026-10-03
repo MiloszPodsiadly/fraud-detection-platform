@@ -39,13 +39,10 @@ class EngineIntelligenceProjectionServiceTest {
     );
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private final AlertServiceMetrics metrics = new AlertServiceMetrics(meterRegistry);
-    private final MlPredictionEvidenceProjectionService evidenceProjectionService =
-            mock(MlPredictionEvidenceProjectionService.class);
     private final EngineIntelligenceProjectionService service = new EngineIntelligenceProjectionService(
             repository,
             mapper,
-            metrics,
-            evidenceProjectionService
+            metrics
     );
 
     @Test
@@ -77,7 +74,6 @@ class EngineIntelligenceProjectionServiceTest {
         assertThat(result.omissionReason()).contains(
                 EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_ABSENT
         );
-        verify(evidenceProjectionService).project(event);
         verify(repository, never()).save(any());
     }
 
@@ -303,7 +299,7 @@ class EngineIntelligenceProjectionServiceTest {
         appender.start();
         logger.addAppender(appender);
         EngineIntelligenceProjectionValidationException validationException = catchThrowableOfType(
-                () -> new EngineIntelligenceProjectionPolicy().validatedTransactionId("txn-rawPayload-secret"),
+                () -> new EngineIntelligenceProjectionPolicy().validatedTransactionId("txn invalid rawPayload-secret"),
                 EngineIntelligenceProjectionValidationException.class
         );
 
@@ -337,7 +333,7 @@ class EngineIntelligenceProjectionServiceTest {
                         Clock.fixed(instant, ZoneOffset.UTC)
                 ),
                 metrics,
-                evidenceProjectionService
+                Clock.fixed(instant, ZoneOffset.UTC)
         );
     }
 

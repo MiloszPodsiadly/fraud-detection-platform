@@ -21,33 +21,26 @@ public class EngineIntelligenceProjectionService {
     private final EngineIntelligenceProjectionRepository repository;
     private final EngineIntelligenceProjectionMapper mapper;
     private final AlertServiceMetrics metrics;
-    private final MlPredictionEvidenceProjectionService mlPredictionEvidenceProjectionService;
     private final Clock clock;
 
     @Autowired
     public EngineIntelligenceProjectionService(
             EngineIntelligenceProjectionRepository repository,
             EngineIntelligenceProjectionMapper mapper,
-            AlertServiceMetrics metrics,
-            MlPredictionEvidenceProjectionService mlPredictionEvidenceProjectionService
+            AlertServiceMetrics metrics
     ) {
-        this(repository, mapper, metrics, mlPredictionEvidenceProjectionService, Clock.systemUTC());
+        this(repository, mapper, metrics, Clock.systemUTC());
     }
 
     EngineIntelligenceProjectionService(
             EngineIntelligenceProjectionRepository repository,
             EngineIntelligenceProjectionMapper mapper,
             AlertServiceMetrics metrics,
-            MlPredictionEvidenceProjectionService mlPredictionEvidenceProjectionService,
             Clock clock
     ) {
         this.repository = Objects.requireNonNull(repository, "repository is required");
         this.mapper = Objects.requireNonNull(mapper, "mapper is required");
         this.metrics = Objects.requireNonNull(metrics, "metrics is required");
-        this.mlPredictionEvidenceProjectionService = Objects.requireNonNull(
-                mlPredictionEvidenceProjectionService,
-                "mlPredictionEvidenceProjectionService is required"
-        );
         this.clock = clock == null ? Clock.systemUTC() : clock;
     }
 
@@ -63,7 +56,6 @@ public class EngineIntelligenceProjectionService {
                 logOmission(result);
                 return result;
             }
-            mlPredictionEvidenceProjectionService.project(event);
             if (event.engineIntelligence() == null) {
                 EngineIntelligenceProjectionResult result = EngineIntelligenceProjectionResult.omitted(
                         EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_ABSENT

@@ -5,6 +5,7 @@ import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.model.Money;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -49,6 +50,10 @@ class ScoredTransactionDocumentMapperTest {
         assertThat(document.getCustomerIdSearch()).isEqualTo("customer-123");
         assertThat(document.getMerchantIdSearch()).isEqualTo("merchant-9");
         assertThat(document.getCurrencySearch()).isEqualTo("pln");
+        assertThat(document.getSourceEventId()).isEqualTo("event-1");
+        assertThat(document.getSourceEventCreatedAt()).isEqualTo("2026-01-01T00:00:00Z");
+        assertThat(mapper.toDomain(document).scoringOccurrenceOwnership().state())
+                .isEqualTo(ScoringOccurrenceOwnership.State.AUTHORITATIVE);
     }
 
     @Test
@@ -86,5 +91,16 @@ class ScoredTransactionDocumentMapperTest {
 
         assertThat(document.getAnalystRecommendation()).isSameAs(event.analystRecommendation());
         assertThat(domain.analystRecommendation()).isSameAs(event.analystRecommendation());
+    }
+
+    @Test
+    void shouldKeepHistoricalProjectionWithoutSourceIdentityExplicitlyUnknown() {
+        var historical = new com.frauddetection.alert.persistence.ScoredTransactionDocument();
+        historical.setTransactionId("txn-historical");
+
+        var domain = mapper.toDomain(historical);
+
+        assertThat(domain.scoringOccurrenceOwnership())
+                .isEqualTo(ScoringOccurrenceOwnership.unknown());
     }
 }
