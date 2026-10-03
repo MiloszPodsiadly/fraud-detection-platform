@@ -5,6 +5,7 @@ import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionO
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionService;
 import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
+import com.frauddetection.alert.persistence.ScoredTransactionProjectionWriter;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import org.slf4j.Logger;
@@ -31,24 +32,27 @@ public class TransactionMonitoringService implements TransactionMonitoringUseCas
     private final MongoTemplate mongoTemplate;
     private final ScoredTransactionSearchPolicy searchPolicy;
     private final EngineIntelligenceProjectionService engineIntelligenceProjectionService;
+    private final ScoredTransactionProjectionWriter projectionWriter;
 
     public TransactionMonitoringService(
             ScoredTransactionRepository repository,
             ScoredTransactionDocumentMapper mapper,
             MongoTemplate mongoTemplate,
             ScoredTransactionSearchPolicy searchPolicy,
-            EngineIntelligenceProjectionService engineIntelligenceProjectionService
+            EngineIntelligenceProjectionService engineIntelligenceProjectionService,
+            ScoredTransactionProjectionWriter projectionWriter
     ) {
         this.repository = repository;
         this.mapper = mapper;
         this.mongoTemplate = mongoTemplate;
         this.searchPolicy = searchPolicy;
         this.engineIntelligenceProjectionService = engineIntelligenceProjectionService;
+        this.projectionWriter = projectionWriter;
     }
 
     @Override
     public void recordScoredTransaction(TransactionScoredEvent event) {
-        repository.save(mapper.toDocument(event));
+        projectionWriter.write(mapper.toDocument(event));
         try {
             engineIntelligenceProjectionService.project(event);
         } catch (RuntimeException exception) {

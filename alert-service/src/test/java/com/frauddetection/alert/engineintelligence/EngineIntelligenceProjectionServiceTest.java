@@ -39,7 +39,11 @@ class EngineIntelligenceProjectionServiceTest {
     );
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private final AlertServiceMetrics metrics = new AlertServiceMetrics(meterRegistry);
-    private final EngineIntelligenceProjectionService service = new EngineIntelligenceProjectionService(repository, mapper, metrics);
+    private final EngineIntelligenceProjectionService service = new EngineIntelligenceProjectionService(
+            repository,
+            mapper,
+            metrics
+    );
 
     @Test
     void nullEventReturnsInvalidShape() {
@@ -63,7 +67,8 @@ class EngineIntelligenceProjectionServiceTest {
 
     @Test
     void oldEventWithoutEngineIntelligenceKeepsProjectionUnchanged() {
-        EngineIntelligenceProjectionResult result = service.project(EngineIntelligenceProjectionTestFixtures.oldEvent());
+        var event = EngineIntelligenceProjectionTestFixtures.oldEvent();
+        EngineIntelligenceProjectionResult result = service.project(event);
 
         assertThat(result.projection()).isEmpty();
         assertThat(result.omissionReason()).contains(
@@ -294,7 +299,7 @@ class EngineIntelligenceProjectionServiceTest {
         appender.start();
         logger.addAppender(appender);
         EngineIntelligenceProjectionValidationException validationException = catchThrowableOfType(
-                () -> new EngineIntelligenceProjectionPolicy().validatedTransactionId("txn-rawPayload-secret"),
+                () -> new EngineIntelligenceProjectionPolicy().validatedTransactionId("txn invalid rawPayload-secret"),
                 EngineIntelligenceProjectionValidationException.class
         );
 
@@ -327,7 +332,8 @@ class EngineIntelligenceProjectionServiceTest {
                         new EngineIntelligenceProjectionPolicy(),
                         Clock.fixed(instant, ZoneOffset.UTC)
                 ),
-                metrics
+                metrics,
+                Clock.fixed(instant, ZoneOffset.UTC)
         );
     }
 

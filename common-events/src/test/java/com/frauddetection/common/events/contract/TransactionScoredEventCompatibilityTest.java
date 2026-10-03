@@ -18,6 +18,7 @@ class TransactionScoredEventCompatibilityTest {
     @Test
     void currentTransactionScoredEventJsonWithoutEngineIntelligenceDeserializes() throws Exception {
         assertThat(objectMapper().readValue(currentJson(), TransactionScoredEvent.class).engineIntelligence()).isNull();
+        assertThat(objectMapper().readValue(currentJson(), TransactionScoredEvent.class).mlPredictionEvidence()).isNull();
         assertThat(objectMapper().readValue(currentJson(), TransactionScoredEvent.class).analystRecommendation()).isNull();
     }
 
@@ -97,19 +98,24 @@ class TransactionScoredEventCompatibilityTest {
                         "transactionTimestamp", "transactionAmount", "merchantInfo", "deviceInfo", "locationInfo",
                         "customerContext", "fraudScore", "riskLevel", "scoringStrategy", "modelName", "modelVersion",
                         "inferenceTimestamp", "reasonCodes", "scoreDetails", "featureSnapshot", "alertRecommended",
-                        "scoringEvidence", "engineIntelligence", "analystRecommendation"
+                        "scoringEvidence", "engineIntelligence", "mlPredictionEvidence", "analystRecommendation"
                 );
     }
 
     @Test
     void existingScoredEventSerializationWithoutEngineIntelligenceRemainsStable() throws Exception {
         assertThat(objectMapper().writeValueAsString(oldConstructorEvent()))
-                .doesNotContain("engineIntelligence", "analystRecommendation");
+                .doesNotContain("engineIntelligence", "mlPredictionEvidence", "analystRecommendation");
     }
 
     @Test
     void newEngineIntelligenceFieldIsOptional() {
         assertThat(oldConstructorEvent().engineIntelligence()).isNull();
+    }
+
+    @Test
+    void newMlPredictionEvidenceFieldIsOptional() {
+        assertThat(oldConstructorEvent().mlPredictionEvidence()).isNull();
     }
 
     @Test

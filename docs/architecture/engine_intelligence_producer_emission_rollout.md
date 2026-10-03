@@ -1,12 +1,11 @@
 # Controlled Engine Intelligence Producer Emission Rollout
 
-Status: FDP-94 disabled-by-default runtime producer emission.
+Status: current disabled-by-default runtime producer emission.
 
 ## Purpose
 
-FDP-94 wires optional producer emission for the bounded public `engineIntelligence` summary already
-defined by FDP-92 and tolerated by consumers under FDP-93. The runtime producer emission remains
-disabled by default.
+The scoring producer can emit the bounded public `engineIntelligence` summary after consumer compatibility has
+been established. Runtime producer emission remains disabled by default.
 
 ## Rollout Flag
 
@@ -26,16 +25,35 @@ FRAUD_SCORING_EVENTS_ENGINE_INTELLIGENCE_EMIT_ENABLED
 
 ## Mapping Boundary
 
-`TransactionScoredEventMapper` accepts an optional public `EngineIntelligenceSummary`.
-An empty optional keeps the pre-FDP-94 event shape and omits the `engineIntelligence` JSON field.
-A present optional adds only the bounded public DTO. Internal aggregation objects, raw evidence,
+`TransactionScoredEventMapper` accepts an optional public `EngineIntelligenceSummary` and optional internal
+`MlPredictionEvidenceV1`.
+An empty optional keeps the evidence-free event shape and omits the `engineIntelligence` JSON field.
+A present summary adds only the bounded public DTO. Internal aggregation objects, raw model payloads,
 contributions, and internal diagnostics are not event payload fields.
+
+Internal prediction evidence capture may additionally carry `MlPredictionEvidenceV1` for an `AVAILABLE` `ml.python.primary` result. It exists
+to preserve the exact diagnostic ML output for later governed evaluation; it is not another public Engine
+Intelligence score. Its only authority is the `FraudEngineResult` returned by the same orchestrator execution used
+for aggregation. The evidence preserves that result's exact bounded score, complete model and feature-contract
+identity, engine ID, risk level, and execution timestamp. It is never reconstructed from the public score bucket,
+score delta, top-level platform `fraudScore`, registry state, or another ML call.
+
+For ML evidence, `sourceExecutionTimestamp` is the inference timestamp returned by the Python model response. It is
+not the Java orchestration completion time. `FraudEngineResult.generatedAt` remains the Java engine-completion time,
+`TransactionScoredEvent.createdAt` remains event creation time, and the evidence document `projectedAt` remains the
+alert-service persistence time. These clocks describe separate lifecycle facts and do not assert distributed-clock
+chronology. UTC `Instant` serialization preserves the source fractional precision through the event and evidence
+projection.
+
+The exact ML score may differ from the platform `fraudScore` because baseline scoring and diagnostic execution are
+separate responsibilities. The platform score remains authoritative for the scored event and alert recommendation.
 
 ## Runtime Boundary
 
 Baseline scoring remains in the existing `FraudScoringEngine` path.
 
-Disabled mode keeps the pre-FDP-94 serialized event shape.
+Disabled mode keeps the evidence-free serialized event shape and emits neither Engine Intelligence nor ML prediction
+evidence.
 It does not invoke orchestrator, aggregation, public mapper, rules, or ML diagnostic path.
 It does not initialize the conditional diagnostic runtime graph.
 
@@ -51,13 +69,18 @@ Diagnostic enrichment is not scoring migration and does not feed back into the b
 
 ## Failure Isolation
 
-Enrichment failure returns the base event without `engineIntelligence`. Failure logging is bounded
+Enrichment failure returns the base event without `engineIntelligence` or ML prediction evidence. Non-AVAILABLE ML
+statuses are represented in the bounded public summary but do not manufacture exact prediction evidence. Failure logging is bounded
 and does not include raw exception messages. Baseline scoring failures are not swallowed.
+
+Current behavior is passive capture and persistence for evaluation. It does not train, promote, calibrate, or activate
+a model and does not change decision authority. Future governed evaluation or promotion may consume the evidence only
+through a separately reviewed contract.
 
 ## Rollout Sequence
 
 1. Keep `fraud.scoring.events.engine-intelligence.emit-enabled=false`.
-2. Verify FDP-92 public-contract and FDP-93 consumer-readiness tests remain green.
+2. Verify public-contract and consumer-readiness tests remain green.
 3. Keep enabled mode disabled by default until latency and load are validated.
 4. Enable emission gradually in an explicitly controlled environment after payload and consumer validation.
 5. Verify latency, timeout, rejection, and enrichment-omission behavior before expanding rollout.
@@ -65,14 +88,14 @@ and does not include raw exception messages. Baseline scoring failures are not s
 ## Rollback
 
 Set `fraud.scoring.events.engine-intelligence.emit-enabled=false` and redeploy. Disabled mode omits
-the nested JSON field and restores the old emitted event shape. No alert-service projection,
-persistence, API, or UI rollback is required because FDP-94 does not add those capabilities.
+both optional diagnostic fields and restores the prior emitted event shape. Existing alert-service projections and
+private evidence remain governed by their retention policy; rollback does not delete or rewrite accepted records.
 
 ## Operational Observability Boundary
 
-FDP-94 includes a no-op metrics boundary for disabled skips, enrichment attempts, successes,
+The producer includes a no-op metrics boundary for disabled skips, enrichment attempts, successes,
 omissions, and latency. Metrics recording is best-effort and cannot block event publishing.
-Production metrics backend integration remains future scope. Before wider rollout, FDP-95/FDP-96
+Production metrics backend integration remains future scope. Before wider rollout, projection and API owners
 must connect the low-cardinality metrics boundary to production telemetry for:
 
 - `enrichment_attempt_total`
@@ -86,7 +109,7 @@ diagnostic pipeline that returns empty is recorded as a bounded omission. Enable
 attempts record latency for success, empty result, missing pipeline, and failure. Disabled skips do
 not record enrichment attempt latency.
 
-FDP-94 records `UNKNOWN_FAILURE` for runtime pipeline failures. Stage-specific omission reasons are
+The producer records `UNKNOWN_FAILURE` for runtime pipeline failures. Stage-specific omission reasons are
 reserved for future pipeline instrumentation. Current omission reasons remain bounded and
 low-cardinality. Raw exception messages are not used as omission reasons.
 
@@ -96,8 +119,8 @@ endpoint URLs, payloads, or feature vectors.
 
 ## Scope Guardrails
 
-- No alert-service projection or persistence.
-- No API or analyst-console UI exposure.
+- No public exposure of exact ML evidence through API or Analyst Console UI.
+- Alert-service persistence is owned by the separate projection boundary, not by the scoring producer.
 - No final decisioning, automatic approve, automatic decline, or payment authorization.
 - No migration of baseline scoring decisions to `FraudScoringOrchestrator`.
 - No raw or internal aggregation serialization.

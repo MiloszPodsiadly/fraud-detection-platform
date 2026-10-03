@@ -6,6 +6,7 @@ import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrationResult;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrator;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceDiagnosticEnrichmentPipeline;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEnrichmentResult;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
 import com.frauddetection.scoring.orchestration.aggregation.FraudEngineAggregationResult;
 import com.frauddetection.scoring.orchestration.aggregation.FraudEngineAggregationService;
@@ -103,7 +104,8 @@ class EngineIntelligenceEmissionServiceSpringWiringTest {
 
         assertThat(service.emitIfEnabled(
                 FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build())
-        )).contains(summary);
+        )).flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
+                .contains(summary);
         verify(mapper).map(aggregation);
     }
 

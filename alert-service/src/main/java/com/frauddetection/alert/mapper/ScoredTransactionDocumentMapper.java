@@ -1,6 +1,7 @@
 package com.frauddetection.alert.mapper;
 
 import com.frauddetection.alert.domain.ScoredTransaction;
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import org.springframework.stereotype.Component;
@@ -12,8 +13,16 @@ import java.util.Locale;
 public class ScoredTransactionDocumentMapper {
 
     public ScoredTransactionDocument toDocument(TransactionScoredEvent event) {
+        ScoringOccurrenceOwnership occurrence = ScoringOccurrenceOwnership.authoritative(
+                event.eventId(),
+                event.createdAt()
+        );
         ScoredTransactionDocument document = new ScoredTransactionDocument();
         document.setTransactionId(event.transactionId());
+        document.setSourceEventId(occurrence.sourceEventId());
+        document.setSourceEventCreatedAt(occurrence.sourceEventCreatedAt().toString());
+        document.setSourceEventCreatedAtEpochSecond(occurrence.sourceEventCreatedAt().getEpochSecond());
+        document.setSourceEventCreatedAtNano(occurrence.sourceEventCreatedAt().getNano());
         document.setCustomerId(event.customerId());
         document.setCorrelationId(event.correlationId());
         document.setTransactionTimestamp(event.transactionTimestamp());
@@ -45,8 +54,33 @@ public class ScoredTransactionDocumentMapper {
                 document.getRiskLevel(),
                 document.getAlertRecommended(),
                 document.getReasonCodes(),
-                document.getAnalystRecommendation()
+                document.getAnalystRecommendation(),
+                occurrence(document)
         );
+    }
+
+    private ScoringOccurrenceOwnership occurrence(ScoredTransactionDocument document) {
+        if (document.getSourceEventId() == null
+                || document.getSourceEventCreatedAt() == null
+                || document.getSourceEventCreatedAtEpochSecond() == null
+                || document.getSourceEventCreatedAtNano() == null) {
+            return ScoringOccurrenceOwnership.unknown();
+        }
+        try {
+            Instant sourceEventCreatedAt = Instant.ofEpochSecond(
+                    document.getSourceEventCreatedAtEpochSecond(),
+                    document.getSourceEventCreatedAtNano()
+            );
+            if (!sourceEventCreatedAt.equals(Instant.parse(document.getSourceEventCreatedAt()))) {
+                return ScoringOccurrenceOwnership.unknown();
+            }
+            return ScoringOccurrenceOwnership.authoritative(
+                    document.getSourceEventId(),
+                    sourceEventCreatedAt
+            );
+        } catch (RuntimeException exception) {
+            return ScoringOccurrenceOwnership.unknown();
+        }
     }
 
     private Instant resolveScoredAt(TransactionScoredEvent event) {

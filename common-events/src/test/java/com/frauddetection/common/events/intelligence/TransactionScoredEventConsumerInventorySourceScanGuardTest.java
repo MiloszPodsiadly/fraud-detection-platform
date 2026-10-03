@@ -13,9 +13,12 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
     private static final List<String> REVIEWED_PRODUCTION_REFERENCES = List.of(
             "alert-service/src/main/java/com/frauddetection/alert/config/AlertKafkaConfig.java",
             "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/EngineIntelligenceProjectionService.java",
+            "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/MlPredictionEvidenceProjectionService.java",
             "alert-service/src/main/java/com/frauddetection/alert/evidence/AlertEvidenceSnapshotProjectionService.java",
             "alert-service/src/main/java/com/frauddetection/alert/evidence/EvidenceProjectionService.java",
             "alert-service/src/main/java/com/frauddetection/alert/mapper/ScoredTransactionDocumentMapper.java",
+            "alert-service/src/main/java/com/frauddetection/alert/messaging/AuthoritativeTransactionScoredEventDeserializer.java",
+            "alert-service/src/main/java/com/frauddetection/alert/messaging/MlPredictionEvidenceEventListener.java",
             "alert-service/src/main/java/com/frauddetection/alert/messaging/TransactionScoredEventListener.java",
             "alert-service/src/main/java/com/frauddetection/alert/service/AlertCaseFactory.java",
             "alert-service/src/main/java/com/frauddetection/alert/service/AlertManagementService.java",
@@ -62,7 +65,10 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
                 "docs/architecture/engine_intelligence_consumer_readiness.md"
         )).contains(
                 "AlertKafkaConfig",
+                "AuthoritativeTransactionScoredEventDeserializer",
                 "TransactionScoredEventListener",
+                "MlPredictionEvidenceEventListener",
+                "MlPredictionEvidenceProjectionService",
                 "TransactionMonitoringService",
                 "ScoredTransactionDocumentMapper",
                 "AlertManagementService",

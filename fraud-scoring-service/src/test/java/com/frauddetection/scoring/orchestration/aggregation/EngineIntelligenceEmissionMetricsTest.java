@@ -52,9 +52,13 @@ class EngineIntelligenceEmissionMetricsTest {
         EngineIntelligenceDiagnosticEnrichmentPipeline pipeline =
                 mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class);
         EngineIntelligenceSummary summary = mock(EngineIntelligenceSummary.class);
-        when(pipeline.enrich(any())).thenReturn(Optional.of(summary));
+        when(pipeline.enrich(any())).thenReturn(Optional.of(
+                EngineIntelligenceEnrichmentResult.of(summary, Optional.empty())
+        ));
 
-        assertThat(service(true, pipeline, metrics).emitIfEnabled(request())).contains(summary);
+        assertThat(service(true, pipeline, metrics).emitIfEnabled(request()))
+                .flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
+                .contains(summary);
         verify(metrics).recordAttempt();
         verify(metrics).recordSuccess();
         verify(metrics, never()).recordOmitted(any());
@@ -107,9 +111,13 @@ class EngineIntelligenceEmissionMetricsTest {
                 mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class);
         EngineIntelligenceSummary summary = mock(EngineIntelligenceSummary.class);
         doThrow(new IllegalStateException("metrics-backend-failure")).when(metrics).recordLatency(any());
-        when(pipeline.enrich(any())).thenReturn(Optional.of(summary));
+        when(pipeline.enrich(any())).thenReturn(Optional.of(
+                EngineIntelligenceEnrichmentResult.of(summary, Optional.empty())
+        ));
 
-        assertThat(service(true, pipeline, metrics).emitIfEnabled(request())).contains(summary);
+        assertThat(service(true, pipeline, metrics).emitIfEnabled(request()))
+                .flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
+                .contains(summary);
     }
 
     @Test

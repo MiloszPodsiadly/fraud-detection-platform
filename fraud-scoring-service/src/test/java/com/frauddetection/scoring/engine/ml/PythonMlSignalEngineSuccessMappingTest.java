@@ -6,6 +6,8 @@ import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.reason.ReasonCode;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+
 import static com.frauddetection.scoring.engine.ml.PythonMlSignalEngineTestSupport.context;
 import static com.frauddetection.scoring.engine.ml.PythonMlSignalEngineTestSupport.flatten;
 import static com.frauddetection.scoring.engine.ml.PythonMlSignalEngineTestSupport.result;
@@ -28,6 +30,7 @@ class PythonMlSignalEngineSuccessMappingTest {
         assertThat(result.modelName()).isEqualTo("python-logistic-fraud-model");
         assertThat(result.modelVersion()).isEqualTo("2026-05-30.v1");
         assertThat(result.featureContractVersion()).isEqualTo(PythonMlSignalEngineTestSupport.FEATURE_CONTRACT_VERSION);
+        assertThat(result.sourceInferenceTimestamp()).isEqualTo(Instant.parse("2026-05-30T09:59:59Z"));
         assertThat(result.reasonCodes()).containsExactly(PythonMlSignalReasonCode.ML_MODEL_SIGNAL.wireValue());
         assertThat(result.evidence()).extracting(evidence -> evidence.reasonCode())
                 .containsExactly(PythonMlSignalReasonCode.ML_MODEL_SIGNAL.wireValue());

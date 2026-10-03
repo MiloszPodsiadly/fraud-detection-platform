@@ -1,25 +1,25 @@
 # Public Engine Intelligence Event Contract
 
-Status: current public Engine Intelligence event contract with historical FDP-92 foundation.
+Status: current public Engine Intelligence event contract.
 
 ## Purpose
 
 The public Engine Intelligence event is a safe, bounded, optional
-`TransactionScoredEvent.engineIntelligence` summary. Historical FDP-92 defined the contract-only foundation. Later
-scoped work wires disabled-by-default producer emission, alert-service projection, bounded API/OpenAPI, and Analyst
+`TransactionScoredEvent.engineIntelligence` summary. The current implementation wires disabled-by-default producer
+emission, alert-service projection, bounded API/OpenAPI, and Analyst
 Console rendering without making engine intelligence a final decision source.
 
 ## Public Contract Boundary
 
-FDP-92 does not publish the internal aggregation model 1:1. Public engine intelligence is an
+The producer does not publish the internal aggregation model 1:1. Public engine intelligence is an
 allowlisted projection of internal aggregation semantics. `FraudEngineAggregationResult` is
 internal and must not be serialized directly. The public event contract is smaller and more stable
 than the internal model. This is a separate public event contract.
 
 ## Internal-To-Public Mapping Policy
 
-`PublicEngineIntelligenceMapper` defines a deterministic mapping from FDP-91 aggregation semantics
-to the public DTOs. FDP-94 may call it only for disabled-by-default producer diagnostic enrichment.
+`PublicEngineIntelligenceMapper` defines a deterministic mapping from internal aggregation semantics
+to the public DTOs. It is called only for disabled-by-default producer diagnostic enrichment.
 
 ## Versioning Strategy
 
@@ -29,8 +29,8 @@ shape requires explicit compatibility review and a new contract version.
 ## Backward Compatibility Rules
 
 `TransactionScoredEvent.engineIntelligence` is optional. Old producers may omit it, and old event
-JSON remains valid. A missing summary does not mean safe, low risk, or zero score. FDP-93 producer
-wiring requires a consumer-first rollout: consumers must deploy the FDP-92 contract before any
+JSON remains valid. A missing summary does not mean safe, low risk, or zero score. Producer
+wiring requires a consumer-first rollout: consumers must deploy the compatible contract before any
 producer emits `engineIntelligence`, because historical consumers may reject an unknown top-level
 field.
 
@@ -39,6 +39,14 @@ which is accepted as absence and does not invent model lineage. When a summary i
 be complete and explicit regardless of the outer event `modelVersion`. Historical identity-free comparisons, partial
 comparison identity, summaries missing Rules or ML, incorrect engine ordering, unsupported IDs, and malformed current
 canonical values are rejected or fail closed; the read boundary does not repair them.
+
+`TransactionScoredEvent.mlPredictionEvidence` is a separate optional internal field. Valid
+events may omit it, so current events without evidence remain compatible and consumers must not backfill evidence.
+When present, it requires a matching `AVAILABLE` `ml.python.primary` entry in `engineIntelligence`, complete identical
+model identity, matching risk level and status, canonical engine identity, supported evidence version, finite exact
+score, matching forward-derived public score bucket, and source execution timestamp. This check maps the exact score
+to its canonical bucket; it never reconstructs an exact score from a bucket. Invalid evidence fails event deserialization; it is not silently reduced to a
+bucket or detached from its summary. The exact field is not part of the public Engine Intelligence API/UI DTO.
 
 ## Payload Limits
 
@@ -95,6 +103,10 @@ for exact zero, `SMALL` for `>0.00-0.15`, `MEDIUM` for `>0.15-0.35`, and `LARGE`
 For score buckets, `NONE` does not mean score zero and does not mean a missing score. Missing score
 maps to `UNAVAILABLE`.
 
+The internal evidence field is the narrow exception inside the Kafka event, not an expansion of this public
+summary. It preserves the exact diagnostic ML score from the same `FraudEngineResult` so governed backend evaluation
+does not reverse-map a bucket. The top-level `fraudScore` remains the platform result and can legitimately differ.
+
 ## Confidence Exposure Decision
 
 `confidence` is an explicit engine output field, not a value inferred by the public mapper. Public
@@ -104,7 +116,7 @@ type, or availability status.
 
 ## Evidence Exposure Decision
 
-Evidence free-text descriptions are omitted or templated, not raw. FDP-92 v1 also omits evidence
+Evidence free-text descriptions are omitted or templated, not raw. Contract version 1 also omits evidence
 titles and display text.
 
 ## Diagnostic Signal Exposure Decision
@@ -124,21 +136,20 @@ signals must not carry fraud risk or fraud score buckets.
 ## No Final Decisioning
 
 Rules-vs-ML agreement is not approval. Rules-vs-ML disagreement is not decline. Risk mismatch is not final decision.
-FDP-92 does not add final decisioning.
+The event contract does not add final decisioning.
 
 ## Non-Goals
 
 The public event contract does not expose raw `FraudEngineResult`, raw feature vectors, internal aggregation objects,
 final decisioning, payment authorization, automatic approve/decline/block behavior, or generic all-engine comparison.
-Historical FDP-92 did not add alert-service projection, API/UI, or production publication; those branch limits are
-superseded by later scoped Engine Intelligence work.
+The current alert-service projection, API/UI, and controlled producer publication are separately owned boundaries.
 
-## FDP-93 Consumer-First Rollout Guard
+## Consumer-First Rollout Guard
 
-FDP-92 defined the public contract without runtime emission. FDP-93 required a consumer-first
-rollout. FDP-94 adds disabled-by-default producer diagnostic enrichment after that review.
+The public contract was deployed before runtime emission. Producer diagnostic enrichment remains disabled by default
+and follows a consumer-first rollout.
 Historical consumers may reject unknown top-level fields, so emission must remain explicitly
-controlled and required consumers must remain compatible with the FDP-92 contract.
+controlled and required consumers must remain compatible with the current contract.
 
 Producer mapping must use `PublicEngineIntelligenceMapper` or an explicitly reviewed equivalent.
 Producer mapping must preserve timeout does not mean low risk, missing score does not become zero,
@@ -147,5 +158,5 @@ diagnostic signals do not carry fraud score buckets, agreement is not approval, 
 decline, and diagnostic signals are not recommendations.
 
 Producer rollout must not add final decisioning. Any future change to projection, API/UI, or event semantics must be
-explicitly scoped and reviewed rather than hidden inside producer rollout. FDP-94 itself did not add downstream
+explicitly scoped and reviewed rather than hidden inside producer rollout. Producer rollout does not itself own downstream
 projection, API/UI, or final decisioning.

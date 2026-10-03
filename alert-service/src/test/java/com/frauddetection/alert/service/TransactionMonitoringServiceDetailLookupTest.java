@@ -3,6 +3,7 @@ package com.frauddetection.alert.service;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionService;
 import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
+import com.frauddetection.alert.persistence.ScoredTransactionProjectionWriter;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
@@ -29,7 +30,8 @@ class TransactionMonitoringServiceDetailLookupTest {
             mapper,
             mongoTemplate,
             new ScoredTransactionSearchPolicy(),
-            mock(EngineIntelligenceProjectionService.class)
+            mock(EngineIntelligenceProjectionService.class),
+            mock(ScoredTransactionProjectionWriter.class)
     );
 
     @Test

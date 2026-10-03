@@ -46,7 +46,9 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
 
     @Test
     void enrichmentExceptionPublishesEventWithoutEngineIntelligence() {
-        assertThat(throwingEnrichmentHarness().scoreAndCapture().engineIntelligence()).isNull();
+        TransactionScoredEvent event = throwingEnrichmentHarness().scoreAndCapture();
+        assertThat(event.engineIntelligence()).isNull();
+        assertThat(event.mlPredictionEvidence()).isNull();
     }
 
     @Test
@@ -68,7 +70,11 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
     @Test
     void enrichmentExceptionDoesNotLeakRawExceptionIntoSerializedEvent() throws Exception {
         TransactionScoredEvent event = throwingEnrichmentHarness().scoreAndCapture();
-        assertThat(json(event)).doesNotContain("raw-secret-must-not-leak", "\"engineIntelligence\"");
+        assertThat(json(event)).doesNotContain(
+                "raw-secret-must-not-leak",
+                "\"engineIntelligence\"",
+                "\"mlPredictionEvidence\""
+        );
     }
 
     @Test
@@ -85,7 +91,13 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
         ScoringMetrics metrics = mock(ScoringMetrics.class);
         when(scoringEngine.score(request)).thenReturn(scoreResult);
         when(emissionService.emitIfEnabled(request)).thenThrow(new IllegalStateException("raw-secret"));
-        when(mapper.toEvent(request, scoreResult, Optional.empty(), recommendation)).thenReturn(baseEvent);
+        when(mapper.toEvent(
+                request,
+                scoreResult,
+                Optional.empty(),
+                Optional.empty(),
+                recommendation
+        )).thenReturn(baseEvent);
         var service = new TransactionFraudScoringService(
                 scoringEngine,
                 mapper,
@@ -98,7 +110,13 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
 
         service.score(input);
 
-        verify(mapper).toEvent(request, scoreResult, Optional.empty(), recommendation);
+        verify(mapper).toEvent(
+                request,
+                scoreResult,
+                Optional.empty(),
+                Optional.empty(),
+                recommendation
+        );
         verify(publisher).publish(baseEvent);
         verify(metrics).recordScoringRequest(
                 eq(ScoringMode.RULE_BASED),
@@ -108,6 +126,7 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
                 anyLong()
         );
         assertThat(baseEvent.engineIntelligence()).isNull();
+        assertThat(baseEvent.mlPredictionEvidence()).isNull();
         assertThat(baseEvent.analystRecommendation().status().name()).isEqualTo("UNAVAILABLE");
         assertThat(baseEvent.fraudScore()).isEqualTo(scoreResult.fraudScore());
         assertThat(baseEvent.riskLevel()).isEqualTo(scoreResult.riskLevel());
@@ -115,7 +134,11 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
         assertThat(baseEvent.reasonCodes()).isEqualTo(scoreResult.reasonCodes());
         assertThat(baseEvent.scoringEvidence()).isEqualTo(scoreResult.scoringEvidence());
         assertThat(baseEvent.scoreDetails()).isEqualTo(scoreResult.scoreDetails());
-        assertThat(json(baseEvent)).doesNotContain("\"engineIntelligence\"", "raw-secret");
+        assertThat(json(baseEvent)).doesNotContain(
+                "\"engineIntelligence\"",
+                "\"mlPredictionEvidence\"",
+                "raw-secret"
+        );
     }
 
     @Test

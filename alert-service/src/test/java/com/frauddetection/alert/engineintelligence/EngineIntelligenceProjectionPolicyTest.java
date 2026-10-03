@@ -10,6 +10,8 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCat
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningSummary;
+import com.frauddetection.common.events.intelligence.MlModelIdentity;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -28,6 +30,40 @@ class EngineIntelligenceProjectionPolicyTest {
     void acceptsBoundedPublicContractValues() {
         assertThat(policy.validatedCopy(EngineIntelligenceProjectionTestFixtures.fullSummary()))
                 .isEqualTo(EngineIntelligenceProjectionTestFixtures.fullSummary());
+    }
+
+    @Test
+    void evidenceProjectionUsesCanonicalModelIdentityPolicyWithoutFreeTextBlacklist() {
+        MlPredictionEvidenceV1 source = new MlPredictionEvidenceV1(
+                0.8123d,
+                RiskLevel.HIGH,
+                new MlModelIdentity(
+                        "python-payload-risk",
+                        "2026-05-30.v1",
+                        "2026-05-30.feature-contract.v1"
+                ),
+                MlPredictionEvidenceProjectionTestSupport.EXECUTED_AT
+        );
+
+        assertThat(policy.validatedEvidenceCopy(source)).isEqualTo(source);
+    }
+
+    @Test
+    void evidenceProjectionRejectsIdentityForbiddenByCanonicalPolicy() {
+        MlPredictionEvidenceV1 source = mock(MlPredictionEvidenceV1.class);
+        when(source.contractVersion()).thenReturn(MlPredictionEvidenceV1.CONTRACT_VERSION);
+        when(source.sourceEngineId()).thenReturn("ml.python.primary");
+        when(source.engineStatus()).thenReturn(FraudEngineStatus.AVAILABLE);
+        when(source.mlScore()).thenReturn(0.8123d);
+        when(source.mlRiskLevel()).thenReturn(RiskLevel.HIGH);
+        when(source.modelName()).thenReturn("raw-payload-model");
+        when(source.modelVersion()).thenReturn("2026-05-30.v1");
+        when(source.featureContractVersion()).thenReturn("2026-05-30.feature-contract.v1");
+        when(source.sourceExecutionTimestamp()).thenReturn(MlPredictionEvidenceProjectionTestSupport.EXECUTED_AT);
+
+        assertThatThrownBy(() -> policy.validatedEvidenceCopy(source))
+                .isInstanceOf(EngineIntelligenceProjectionValidationException.class)
+                .hasMessage(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE.name());
     }
 
     @Test
@@ -304,12 +340,18 @@ class EngineIntelligenceProjectionPolicyTest {
     }
 
     @Test
-    void typedValidationExceptionMessageContainsOnlyBoundedReason() {
-        assertThatThrownBy(() -> policy.validatedTransactionId("txn-secret-rawPayload"))
+    void sourceIdentifiersUseIdentifierSyntaxInsteadOfFreeTextScanning() {
+        assertThat(policy.validatedSourceEventId("event-secret-rawPayload")).isEqualTo("event-secret-rawPayload");
+        assertThat(policy.validatedTransactionId("txn-secret-rawPayload")).isEqualTo("txn-secret-rawPayload");
+        assertThat(policy.validatedCorrelationId("corr-secret-rawPayload")).isEqualTo("corr-secret-rawPayload");
+    }
+
+    @Test
+    void invalidSourceIdentifierProducesOnlyBoundedReason() {
+        assertThatThrownBy(() -> policy.validatedCorrelationId("correlation with spaces"))
                 .isInstanceOf(EngineIntelligenceProjectionValidationException.class)
                 .hasMessage(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE.name())
-                .hasMessageNotContaining("secret")
-                .hasMessageNotContaining("rawPayload");
+                .hasMessageNotContaining("correlation with spaces");
     }
 
     private EngineIntelligenceSummary summaryMock() {
