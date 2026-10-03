@@ -8,6 +8,7 @@ import com.frauddetection.alert.evidence.EvidenceProjectionState;
 import com.frauddetection.alert.engineintelligence.observability.EngineIntelligenceFeedbackReadMetricReason;
 import com.frauddetection.alert.engineintelligence.observability.EngineIntelligenceFeedbackSubmitMetricReason;
 import com.frauddetection.alert.engineintelligence.observability.EngineIntelligenceProjectionMetricReason;
+import com.frauddetection.alert.engineintelligence.observability.MlPredictionEvidenceProjectionMetricReason;
 import com.frauddetection.alert.outbox.OutboxBacklogResponse;
 import com.frauddetection.alert.security.error.SecurityFailureClassifier;
 import com.frauddetection.alert.suspicious.SuspiciousTransactionStatus;
@@ -1005,6 +1006,42 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
                 .record(nonNegativeDuration(latency));
     }
 
+    public void recordMlPredictionEvidenceProjectionAttempt() {
+        counter("ml_prediction_evidence_projection_attempt_total").increment();
+    }
+
+    public void recordMlPredictionEvidenceProjectionSuccess() {
+        counter("ml_prediction_evidence_projection_success_total").increment();
+    }
+
+    public void recordMlPredictionEvidenceProjectionIdempotentReplay() {
+        counter("ml_prediction_evidence_projection_idempotent_replay_total").increment();
+    }
+
+    public void recordMlPredictionEvidenceProjectionOmitted(
+            MlPredictionEvidenceProjectionMetricReason reason
+    ) {
+        counter(
+                "ml_prediction_evidence_projection_omitted_total",
+                "reason", normalizeMlPredictionEvidenceProjectionReason(reason)
+        ).increment();
+    }
+
+    public void recordMlPredictionEvidenceProjectionFailure(
+            MlPredictionEvidenceProjectionMetricReason reason
+    ) {
+        counter(
+                "ml_prediction_evidence_projection_failure_total",
+                "reason", normalizeMlPredictionEvidenceProjectionReason(reason)
+        ).increment();
+    }
+
+    public void recordMlPredictionEvidenceProjectionLatency(Duration latency) {
+        Timer.builder("ml_prediction_evidence_projection_latency_seconds")
+                .register(meterRegistry)
+                .record(nonNegativeDuration(latency));
+    }
+
     public void recordEngineIntelligenceFeedbackSubmitAttempt() {
         counter("engine_intelligence_feedback_submit_attempt_total").increment();
     }
@@ -1220,6 +1257,14 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
 
     private String normalizeEngineIntelligenceProjectionReason(EngineIntelligenceProjectionMetricReason reason) {
         return reason == null ? EngineIntelligenceProjectionMetricReason.UNKNOWN_FAILURE.name() : reason.name();
+    }
+
+    private String normalizeMlPredictionEvidenceProjectionReason(
+            MlPredictionEvidenceProjectionMetricReason reason
+    ) {
+        return reason == null
+                ? MlPredictionEvidenceProjectionMetricReason.UNKNOWN_FAILURE.name()
+                : reason.name();
     }
 
     private String normalizeEngineIntelligenceFeedbackSubmitReason(EngineIntelligenceFeedbackSubmitMetricReason reason) {

@@ -39,7 +39,14 @@ class EngineIntelligenceProjectionServiceTest {
     );
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private final AlertServiceMetrics metrics = new AlertServiceMetrics(meterRegistry);
-    private final EngineIntelligenceProjectionService service = new EngineIntelligenceProjectionService(repository, mapper, metrics);
+    private final MlPredictionEvidenceProjectionService evidenceProjectionService =
+            mock(MlPredictionEvidenceProjectionService.class);
+    private final EngineIntelligenceProjectionService service = new EngineIntelligenceProjectionService(
+            repository,
+            mapper,
+            metrics,
+            evidenceProjectionService
+    );
 
     @Test
     void nullEventReturnsInvalidShape() {
@@ -63,12 +70,14 @@ class EngineIntelligenceProjectionServiceTest {
 
     @Test
     void oldEventWithoutEngineIntelligenceKeepsProjectionUnchanged() {
-        EngineIntelligenceProjectionResult result = service.project(EngineIntelligenceProjectionTestFixtures.oldEvent());
+        var event = EngineIntelligenceProjectionTestFixtures.oldEvent();
+        EngineIntelligenceProjectionResult result = service.project(event);
 
         assertThat(result.projection()).isEmpty();
         assertThat(result.omissionReason()).contains(
                 EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_ABSENT
         );
+        verify(evidenceProjectionService).project(event);
         verify(repository, never()).save(any());
     }
 
@@ -327,7 +336,8 @@ class EngineIntelligenceProjectionServiceTest {
                         new EngineIntelligenceProjectionPolicy(),
                         Clock.fixed(instant, ZoneOffset.UTC)
                 ),
-                metrics
+                metrics,
+                evidenceProjectionService
         );
     }
 

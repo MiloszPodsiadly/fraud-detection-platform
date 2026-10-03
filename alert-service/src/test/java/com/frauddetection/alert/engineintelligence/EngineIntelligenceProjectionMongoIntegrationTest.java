@@ -175,7 +175,8 @@ class EngineIntelligenceProjectionMongoIntegrationTest {
                         new EngineIntelligenceProjectionPolicy(),
                         Clock.fixed(instant, ZoneOffset.UTC)
                 ),
-                new AlertServiceMetrics(new SimpleMeterRegistry())
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                mock(MlPredictionEvidenceProjectionService.class)
         );
     }
 

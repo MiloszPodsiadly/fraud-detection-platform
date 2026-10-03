@@ -13,6 +13,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCat
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningSummary;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -77,6 +78,21 @@ public class EngineIntelligenceProjectionPolicy {
                         this::validatedDiagnosticSignal
                 ),
                 copyBounded(source.warnings(), MAX_WARNINGS, this::validatedWarning)
+        ));
+    }
+
+    public MlPredictionEvidenceV1 validatedEvidenceCopy(MlPredictionEvidenceV1 source) {
+        requireShape(source);
+        return publicContract(() -> new MlPredictionEvidenceV1(
+                source.contractVersion(),
+                boundedString(source.sourceEngineId()),
+                boundedEnum(source.engineStatus(), FraudEngineStatus.class),
+                source.mlScore(),
+                boundedEnum(source.mlRiskLevel(), RiskLevel.class),
+                boundedString(source.modelName()),
+                boundedString(source.modelVersion()),
+                boundedString(source.featureContractVersion()),
+                source.sourceExecutionTimestamp()
         ));
     }
 

@@ -9,6 +9,7 @@ import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionP
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionRepository;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionResult;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionService;
+import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionService;
 import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
@@ -70,7 +71,8 @@ class TransactionMonitoringServiceEngineIntelligenceProjectionTest {
                 new EngineIntelligenceProjectionService(
                         projectionRepository,
                         new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy()),
-                        new AlertServiceMetrics(new SimpleMeterRegistry())
+                        new AlertServiceMetrics(new SimpleMeterRegistry()),
+                        mock(MlPredictionEvidenceProjectionService.class)
                 )
         );
         TransactionScoredEvent event = mock(TransactionScoredEvent.class);

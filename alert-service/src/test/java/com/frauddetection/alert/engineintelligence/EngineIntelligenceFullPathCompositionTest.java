@@ -27,6 +27,7 @@ import com.frauddetection.enricher.service.TransactionFeatureCalculator;
 import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.config.ScoringProperties;
 import com.frauddetection.scoring.context.ScoringContext;
+import com.frauddetection.scoring.context.ScoringContextFactory;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.domain.MlModelOutput;
@@ -44,6 +45,8 @@ import com.frauddetection.scoring.orchestration.FraudScoringOrchestrator;
 import com.frauddetection.scoring.orchestration.FraudSignalEngineRegistry;
 import com.frauddetection.scoring.orchestration.aggregation.FraudEngineAggregationPolicy;
 import com.frauddetection.scoring.orchestration.aggregation.FraudEngineAggregationService;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEnrichmentResult;
+import com.frauddetection.scoring.orchestration.aggregation.OrchestratedEngineIntelligenceDiagnosticEnrichmentPipeline;
 import com.frauddetection.scoring.orchestration.aggregation.PublicEngineIntelligenceMapper;
 import com.frauddetection.scoring.orchestration.runtime.BoundedFraudEngineExecutor;
 import com.frauddetection.scoring.orchestration.runtime.FraudScoringOrchestratorExecutionPolicy;
@@ -97,10 +100,16 @@ class EngineIntelligenceFullPathCompositionTest {
                 RECEIVED_AT
         );
 
+        EngineIntelligenceEnrichmentResult enrichment = enrichment(
+                request,
+                productionEngines(baselineEngine, true)
+        );
         TransactionScoredEvent event = scoredKafkaRoundTrip(new TransactionScoredEventMapper().toEvent(
                 request,
                 baselineResult,
-                Optional.of(summary(evaluate(context, productionEngines(baselineEngine, true))))
+                enrichment.engineIntelligenceSummary(),
+                enrichment.mlPredictionEvidence(),
+                null
         ));
         EngineIntelligenceResponse response = responseFor(event);
 
@@ -129,6 +138,14 @@ class EngineIntelligenceFullPathCompositionTest {
         assertThat(event.riskLevel()).isEqualTo(baselineResult.riskLevel());
         assertThat(event.alertRecommended()).isEqualTo(baselineResult.alertRecommended());
         assertThat(event.reasonCodes()).isEqualTo(baselineResult.reasonCodes());
+        assertThat(event.mlPredictionEvidence()).isNotNull();
+        assertThat(event.mlPredictionEvidence().mlScore()).isEqualTo(0.62d)
+                .isNotEqualTo(baselineResult.fraudScore());
+        assertThat(event.mlPredictionEvidence().modelName()).isEqualTo("python-logistic-fraud-model");
+        assertThat(event.mlPredictionEvidence().modelVersion()).isEqualTo("2026-06-18.v1");
+        assertThat(event.mlPredictionEvidence().featureContractVersion()).isEqualTo("feature-contract-v2");
+        assertThat(event.mlPredictionEvidence().sourceExecutionTimestamp())
+                .isEqualTo(GENERATED_AT);
         assertThat(event.toString()).doesNotContain("finalDecision", "recommendedAction", "velocityScore");
 
         assertThat(response.status()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
@@ -366,15 +383,35 @@ class EngineIntelligenceFullPathCompositionTest {
     }
 
     private FraudScoringOrchestrationResult evaluate(ScoringContext context, List<FraudSignalEngine> engines) {
-        try (FraudScoringOrchestrator orchestrator = new FraudScoringOrchestrator(
+        try (FraudScoringOrchestrator orchestrator = orchestrator(engines)) {
+            return orchestrator.evaluate(context);
+        }
+    }
+
+    private EngineIntelligenceEnrichmentResult enrichment(
+            FraudScoringRequest request,
+            List<FraudSignalEngine> engines
+    ) {
+        try (FraudScoringOrchestrator orchestrator = orchestrator(engines)) {
+            return new OrchestratedEngineIntelligenceDiagnosticEnrichmentPipeline(
+                    new ScoringContextFactory(),
+                    new ScoringProperties(0.75d, 0.90d, ScoringMode.RULE_BASED),
+                    orchestrator,
+                    new FraudEngineAggregationService(FraudEngineAggregationPolicy.defaultInternalPolicy()),
+                    new PublicEngineIntelligenceMapper(),
+                    Clock.fixed(GENERATED_AT, ZoneOffset.UTC)
+            ).enrich(request).orElseThrow();
+        }
+    }
+
+    private FraudScoringOrchestrator orchestrator(List<FraudSignalEngine> engines) {
+        return new FraudScoringOrchestrator(
                 new FraudSignalEngineRegistry(engines),
                 FraudScoringOrchestratorExecutionPolicy.defaultInternalPolicy(),
                 BoundedFraudEngineExecutor.defaultInternalExecutor(),
                 new NoOpFraudScoringOrchestratorMetrics(),
                 Clock.fixed(GENERATED_AT, ZoneOffset.UTC)
-        )) {
-            return orchestrator.evaluate(context);
-        }
+        );
     }
 
     private com.frauddetection.common.events.intelligence.EngineIntelligenceSummary summary(
