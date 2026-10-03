@@ -34,8 +34,7 @@ public final class FraudEngineScorePolicy {
         if (decimalScore.compareTo(MIN_SCORE) < 0 || decimalScore.compareTo(MAX_SCORE) > 0) {
             throw new IllegalArgumentException(fieldName + " must be null or between 0.0000 and 1.0000");
         }
-        double rounded = Math.rint(score * 10_000.0d) / 10_000.0d;
-        if (Math.abs(score - rounded) > 0.000000001d) {
+        if (decimalScore.stripTrailingZeros().scale() > SCORE_SCALE_MAX) {
             throw new IllegalArgumentException(fieldName + " scale must be less than or equal to " + SCORE_SCALE_MAX);
         }
         return score;

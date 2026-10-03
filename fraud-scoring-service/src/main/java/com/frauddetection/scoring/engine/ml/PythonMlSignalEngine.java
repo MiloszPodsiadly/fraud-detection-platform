@@ -128,7 +128,8 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
                 sourceResult.modelName(),
                 sourceResult.modelVersion(),
                 sourceResult.featureContractVersion(),
-                null
+                null,
+                sourceResult.inferenceTimestamp()
         );
     }
 

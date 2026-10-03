@@ -135,9 +135,21 @@ class MlPredictionEvidenceV1ContractTest {
     @Test
     void rejectsMissingNonFiniteOutOfRangeAndOverPrecisionScores() {
         for (Double score : new Double[]{null, Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY,
-                -0.0001d, 1.0001d, 0.12345d}) {
+                -0.0001d, 1.0001d, 0.12345d, 0.8123000001d}) {
             assertThatThrownBy(() -> evidenceWithScore(score)).isInstanceOf(IllegalArgumentException.class);
         }
+    }
+
+    @Test
+    void acceptsCanonicalIdentityThatProjectionFreeTextPolicyPreviouslyRejected() {
+        MlModelIdentity identity = new MlModelIdentity(
+                "python-payload-risk",
+                MODEL_IDENTITY.modelVersion(),
+                MODEL_IDENTITY.featureContractVersion()
+        );
+
+        assertThat(new MlPredictionEvidenceV1(0.8123d, RiskLevel.HIGH, identity, EXECUTED_AT).modelIdentity())
+                .isEqualTo(identity);
     }
 
     @Test

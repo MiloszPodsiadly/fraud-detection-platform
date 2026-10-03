@@ -40,14 +40,15 @@ final class MlPredictionEvidenceMapper {
                 source.score(),
                 source.riskLevel(),
                 new MlModelIdentity(source.modelName(), source.modelVersion(), source.featureContractVersion()),
-                source.generatedAt()
+                source.sourceInferenceTimestamp()
         ));
     }
 
     private boolean usableMlResult(FraudEngineResult result) {
         return result != null
                 && result.engineType() == FraudEngineType.ML_MODEL
-                && result.status() == FraudEngineStatus.AVAILABLE;
+                && result.status() == FraudEngineStatus.AVAILABLE
+                && result.sourceInferenceTimestamp() != null;
     }
 
     private boolean sameAcceptedPrediction(

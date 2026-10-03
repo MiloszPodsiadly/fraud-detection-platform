@@ -2,6 +2,7 @@ import unittest
 import json
 import importlib.util
 import os
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
@@ -214,6 +215,16 @@ class FraudModelTest(unittest.TestCase):
 
         self.assertEqual(result["riskLevel"], "LOW")
         self.assertLess(result["fraudScore"], 0.45)
+
+    def test_score_json_round_trip_emits_canonical_decimal_precision(self):
+        result = self._runtime_with_weights({"countryMismatch": 0.3333333333}).score(
+            self._production_payload(countryMismatch=True)
+        )
+
+        round_tripped_score = json.loads(json.dumps(result))["fraudScore"]
+
+        self.assertEqual(result["fraudScore"], round_tripped_score)
+        self.assertGreaterEqual(Decimal(str(round_tripped_score)).as_tuple().exponent, -4)
 
     def test_scores_rapid_transfer_burst_as_high_or_critical(self):
         result = FraudModel().score(

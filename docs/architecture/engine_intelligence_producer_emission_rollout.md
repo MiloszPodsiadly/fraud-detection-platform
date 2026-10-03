@@ -38,6 +38,13 @@ for aggregation. The evidence preserves that result's exact bounded score, compl
 identity, engine ID, risk level, and execution timestamp. It is never reconstructed from the public score bucket,
 score delta, top-level platform `fraudScore`, registry state, or another ML call.
 
+For ML evidence, `sourceExecutionTimestamp` is the inference timestamp returned by the Python model response. It is
+not the Java orchestration completion time. `FraudEngineResult.generatedAt` remains the Java engine-completion time,
+`TransactionScoredEvent.createdAt` remains event creation time, and the evidence document `projectedAt` remains the
+alert-service persistence time. These clocks describe separate lifecycle facts and do not assert distributed-clock
+chronology. UTC `Instant` serialization preserves the source fractional precision through the event and evidence
+projection.
+
 The exact ML score may differ from the platform `fraudScore` because baseline scoring and diagnostic execution are
 separate responsibilities. The platform score remains authoritative for the scored event and alert recommendation.
 

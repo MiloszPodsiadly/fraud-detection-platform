@@ -36,6 +36,11 @@ must emit finite bounded values from `0.0000` through `1.0000` with at most four
 present with `score` whenever status semantics require or allow scored output. `BigDecimal` may be considered in a
 future breaking contract cleanup if needed.
 
+The Python inference API rounds `fraudScore` to at most four decimal places before JSON serialization. Java validates
+the JSON-number value by its exact decimal representation after removing trailing zeroes; it neither rounds incoming
+scores nor accepts hidden precision through an epsilon. Thus `0.8123`, `0`, and `1` are canonical, while
+`0.8123000001` is rejected.
+
 ## Bounds
 
 | Field | Bound |

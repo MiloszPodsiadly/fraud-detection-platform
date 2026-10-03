@@ -61,6 +61,8 @@ class FraudEngineResultValidationTest {
                 .hasMessageContaining("score");
         assertThatThrownBy(() -> result(FraudEngineStatus.AVAILABLE, 0.12345d, RiskLevel.MEDIUM))
                 .hasMessageContaining("score scale");
+        assertThatThrownBy(() -> result(FraudEngineStatus.AVAILABLE, 0.8123000001d, RiskLevel.MEDIUM))
+                .hasMessageContaining("score scale");
         assertThatThrownBy(() -> result(FraudEngineStatus.AVAILABLE, null, RiskLevel.MEDIUM))
                 .hasMessageContaining("requires score");
         assertThatThrownBy(() -> result(FraudEngineStatus.AVAILABLE, 0.4000d, null))
@@ -69,6 +71,10 @@ class FraudEngineResultValidationTest {
         FraudEngineResult unavailable = operational(FraudEngineStatus.UNAVAILABLE, null);
         assertThat(unavailable.score()).isNull();
         assertThat(unavailable.riskLevel()).isNull();
+
+        assertThat(result(FraudEngineStatus.AVAILABLE, 0.0d, RiskLevel.LOW).score()).isZero();
+        assertThat(result(FraudEngineStatus.AVAILABLE, 0.8123d, RiskLevel.HIGH).score()).isEqualTo(0.8123d);
+        assertThat(result(FraudEngineStatus.AVAILABLE, 1.0d, RiskLevel.CRITICAL).score()).isEqualTo(1.0d);
     }
 
     @Test

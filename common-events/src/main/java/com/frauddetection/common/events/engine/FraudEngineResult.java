@@ -30,7 +30,8 @@ public record FraudEngineResult(
         @JsonInclude(JsonInclude.Include.NON_NULL)
         String featureContractVersion,
         @JsonAlias("fallbackReason") String statusReason,
-        Instant generatedAt
+        Instant generatedAt,
+        @JsonIgnore Instant sourceInferenceTimestamp
 ) {
     public static final int REASON_CODES_MAX_SIZE = 10;
     public static final int CONTRIBUTIONS_MAX_SIZE = 10;
@@ -112,6 +113,45 @@ public record FraudEngineResult(
             Long latencyMs,
             String modelName,
             String modelVersion,
+            String featureContractVersion,
+            String statusReason,
+            Instant generatedAt
+    ) {
+        this(
+                engineId,
+                engineType,
+                engineLanguage,
+                status,
+                score,
+                riskLevel,
+                confidence,
+                reasonCodes,
+                contributions,
+                evidence,
+                latencyMs,
+                modelName,
+                modelVersion,
+                featureContractVersion,
+                statusReason,
+                generatedAt,
+                null
+        );
+    }
+
+    public FraudEngineResult(
+            String engineId,
+            FraudEngineType engineType,
+            String engineLanguage,
+            FraudEngineStatus status,
+            Double score,
+            RiskLevel riskLevel,
+            FraudEngineConfidence confidence,
+            List<String> reasonCodes,
+            List<FraudEngineContribution> contributions,
+            List<FraudEngineEvidence> evidence,
+            Long latencyMs,
+            String modelName,
+            String modelVersion,
             String statusReason,
             Instant generatedAt
     ) {
@@ -131,7 +171,8 @@ public record FraudEngineResult(
                 modelVersion,
                 null,
                 statusReason,
-                generatedAt
+                generatedAt,
+                null
         );
     }
 

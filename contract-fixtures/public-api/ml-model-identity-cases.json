@@ -13,6 +13,13 @@
       "validRuntime": true
     },
     {
+      "caseId": "model-name-containing-projection-policy-term",
+      "field": "modelName",
+      "value": "python-payload-risk",
+      "validSyntax": true,
+      "validRuntime": true
+    },
+    {
       "caseId": "canonical-model-version",
       "field": "modelVersion",
       "value": "2026-05-30.v1",
