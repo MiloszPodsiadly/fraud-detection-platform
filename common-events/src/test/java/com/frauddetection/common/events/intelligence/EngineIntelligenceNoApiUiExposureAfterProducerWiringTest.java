@@ -29,7 +29,7 @@ class EngineIntelligenceNoApiUiExposureAfterProducerWiringTest {
                 "alert-service/src/main/java/com/frauddetection/alert",
                 List.of("EngineIntelligenceSummary", "engineIntelligence", "engineResults",
                         "diagnosticSignals", "agreementStatus", "riskMismatchStatus", "scoreDeltaBucket",
-                        "winningEngine")
+                        "winningEngine", "mlPredictionEvidence", "MlPredictionEvidenceV1")
         ).stream()
                 .filter(file -> file.startsWith("alert-service/src/main/java/com/frauddetection/alert/api/")
                         || file.startsWith("alert-service/src/main/java/com/frauddetection/alert/controller/")
@@ -42,7 +42,7 @@ class EngineIntelligenceNoApiUiExposureAfterProducerWiringTest {
         assertThat(EngineIntelligenceSourceScanSupport.filesContainingAny(
                 "analyst-console-ui/src",
                 List.of("engineIntelligence", "engineResults", "diagnosticSignals",
-                        "agreementStatus", "riskMismatchStatus", "scoreDeltaBucket")
+                        "agreementStatus", "riskMismatchStatus", "scoreDeltaBucket", "mlPredictionEvidence")
         )).isSubsetOf(
                 EngineIntelligenceSourceScanSupport.ANALYST_CONSOLE_ENGINE_INTELLIGENCE_ALLOWED_FILES
         );
