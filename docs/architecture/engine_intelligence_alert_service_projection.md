@@ -7,8 +7,8 @@ consumption are separate read boundaries over that projection.
 
 ## Scope
 
-The `TransactionMonitoringService` keeps the existing base scored-transaction save path and invokes an optional
-internal projection after that save succeeds. The projection reads the optional public `engineIntelligence` event
+The `TransactionMonitoringService` writes the base scored-transaction projection and invokes an optional
+internal projection after that write succeeds. The projection reads the optional public `engineIntelligence` event
 field and writes a bounded Mongo read model. Internal evidence capture also routes optional validated
 `mlPredictionEvidence` to a
 separate private evidence collection; it does not add that exact score to the public read model.
@@ -39,6 +39,27 @@ The private `ml_prediction_evidence_projections` collection stores one immutable
 preserves transaction and correlation ownership, original event time, canonical engine ID and status, exact bounded
 ML score and risk, complete model/feature-contract identity, source execution timestamp, and projection time. Source
 timestamps use canonical UTC text so Mongo date precision cannot truncate the authoritative fractional value.
+
+### Scoring occurrence ownership
+
+The base `scored_transactions` document privately preserves the authoritative scored event ID and its exact event
+timestamp. One scoring occurrence is one immutable `TransactionScoredEvent.eventId`. Replaying that ID cannot mutate
+the accepted transaction state. For distinct event IDs concerning the same transaction, the later event `createdAt`
+wins; equal timestamps use the lexicographically greater event ID as the deterministic tie breaker. Exact epoch second
+and nanosecond components are persisted so ordering does not depend on Mongo date precision or delivery order.
+
+Selection is an atomic conditional write. Concurrent and out-of-order deliveries therefore converge on the same
+occurrence without read-then-save behavior. A historical document missing any occurrence identity component maps to
+`UNKNOWN_OCCURRENCE`; identity is never reconstructed from transaction ID, processing time, model registry state, or
+Mongo natural order. The first valid current event may replace that unknown state.
+
+Event time is producer-owned ordering, so producer clock skew can delay or prevent a later real-world execution from
+replacing a future-dated occurrence. The consumer does not silently substitute processing time because that would make
+replay results delivery-dependent. Producer clock health and future explicit sequence contracts are operational
+concerns; the stored source event ID remains the exact join key to immutable ML evidence.
+
+Occurrence ownership is private persistence/domain metadata. It is intentionally absent from scored-transaction API
+DTOs. It establishes a reliable future feedback join but does not itself snapshot evidence or change alert decisions.
 
 ## Projection Policy and Limits
 
@@ -79,6 +100,14 @@ event ID. An identical replay is idempotent; a conflicting replay is observable 
 evidence. Concurrent duplicate delivery produces one immutable document. A different source event ID is a distinct
 scoring occurrence, even for the same transaction. Replay classification reads the authoritative stored document;
 there is no read-then-save update path.
+
+Evidence capture consumes the scored-event topic through its own consumer group and record-level acknowledgement.
+Transient store and unknown infrastructure failures retain the Kafka delivery for bounded retry. Permanently invalid
+evidence, unsupported wire shapes, corrupt stored documents, and conflicting replays are quarantined without being
+converted into accepted evidence. After bounded retries, handoff to the durable dead-letter topic must complete
+successfully before the source record is acknowledged; failed handoff remains a consumer failure. Replaying a
+quarantined or previously interrupted valid source event invokes only the evidence projection consumer, not baseline
+transaction, alert, or audit business processing.
 
 ## Mongo projection identity and idempotency
 
@@ -127,6 +156,22 @@ isolated from the base scored-transaction save and alert processing.
 
 Current ownership ends at passive internal evidence capture. Governed evaluation, dataset use, calibration, model
 promotion, threshold changes, and production decision authority require a separate design and review.
+
+## Private evidence operational controls
+
+Exact ML score and model identity are restricted to the internal scored-event topic and the private immutable evidence
+collection. They are absent from logs, exception messages, metric labels, public read DTOs, and the Analyst Console.
+Kafka authorization must grant scored-event read access to the baseline and evidence consumer service identities only;
+the evidence group requires write access to its dead-letter topic, while unrelated clients receive no evidence-topic
+read grant. Mongo credentials for the evidence collection are limited to the projection writer and explicitly approved
+governance readers. Application roles and public API credentials do not grant collection access.
+
+Broad rollout requires an approved retention and archival period long enough to cover associated evaluation and
+governance artifacts. No TTL is configured because uncoordinated expiry could destroy required evidence. Operations
+must monitor consumer lag/recovery backlog, persistent projection failures and dead-letter growth, collection size and
+storage capacity, and replay-conflict/corrupt-document rates. Alerts must be low-cardinality and must not contain exact
+scores, model identities, source event IDs, transaction IDs, payloads, or exception text. Immutable records are
+insert-only by source event ID; archival and deletion require a separately governed process.
 
 ## No Decisioning
 

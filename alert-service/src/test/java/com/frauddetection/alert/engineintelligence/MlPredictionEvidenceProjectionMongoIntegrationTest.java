@@ -1,6 +1,8 @@
 package com.frauddetection.alert.engineintelligence;
 
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.messaging.MlPredictionEvidenceEventListener;
+import com.frauddetection.alert.messaging.MlPredictionEvidenceTransientProcessingException;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -9,6 +11,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.mongodb.repository.support.MongoRepositoryFactory;
 import org.testcontainers.containers.MongoDBContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -25,6 +28,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.AdditionalAnswers.delegatesTo;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 
 @Testcontainers
 class MlPredictionEvidenceProjectionMongoIntegrationTest {
@@ -186,6 +196,51 @@ class MlPredictionEvidenceProjectionMongoIntegrationTest {
     }
 
     @Test
+    void transientEvidenceFailureSurvivesConsumerRestartAndRecoversExactOccurrence() {
+        var event = MlPredictionEvidenceProjectionTestSupport.event(
+                "evt-durable-recovery",
+                0.8123d,
+                "model-v1"
+        );
+        MlPredictionEvidenceProjectionRepository faultInjectedRepository = mock(
+                MlPredictionEvidenceProjectionRepository.class,
+                delegatesTo(repository)
+        );
+        doThrow(new DataAccessResourceFailureException("simulated evidence store interruption"))
+                .doAnswer(invocation -> repository.insert(
+                        (MlPredictionEvidenceProjection) invocation.getArgument(0)
+                ))
+                .when(faultInjectedRepository)
+                .insert((MlPredictionEvidenceProjection) any(MlPredictionEvidenceProjection.class));
+
+        MlPredictionEvidenceEventListener interruptedConsumer = new MlPredictionEvidenceEventListener(
+                evidenceService(faultInjectedRepository)
+        );
+
+        assertThatThrownBy(() -> interruptedConsumer.onMessage(event))
+                .isInstanceOf(MlPredictionEvidenceTransientProcessingException.class)
+                .hasMessage("ML_PREDICTION_EVIDENCE_PROJECTION_STORE_UNAVAILABLE");
+        assertThat(repository.count()).isZero();
+
+        MlPredictionEvidenceEventListener restartedConsumer = new MlPredictionEvidenceEventListener(
+                evidenceService(faultInjectedRepository)
+        );
+        assertThatCode(() -> restartedConsumer.onMessage(event)).doesNotThrowAnyException();
+        assertThatCode(() -> restartedConsumer.onMessage(event)).doesNotThrowAnyException();
+
+        MlPredictionEvidenceProjection stored = repository.findById(event.eventId()).orElseThrow();
+        assertThat(repository.count()).isEqualTo(1L);
+        assertThat(stored.getSourceEventId()).isEqualTo(event.eventId());
+        assertThat(stored.getTransactionId()).isEqualTo(event.transactionId());
+        assertThat(stored.getCorrelationId()).isEqualTo(event.correlationId());
+        assertThat(stored.getMlScore()).isEqualTo(event.mlPredictionEvidence().mlScore());
+        assertThat(stored.getModelName()).isEqualTo(event.mlPredictionEvidence().modelName());
+        assertThat(stored.getModelVersion()).isEqualTo(event.mlPredictionEvidence().modelVersion());
+        assertThat(stored.getFeatureContractVersion())
+                .isEqualTo(event.mlPredictionEvidence().featureContractVersion());
+    }
+
+    @Test
     void invalidStoredShapeFailsClosedDuringReplayClassification() {
         var event = MlPredictionEvidenceProjectionTestSupport.event("evt-corrupt", 0.8123d, "model-v1");
         Document corrupt = new Document("_id", "evt-corrupt")
@@ -214,6 +269,17 @@ class MlPredictionEvidenceProjectionMongoIntegrationTest {
     private void assertConflict(MlPredictionEvidenceProjectionResult result) {
         assertThat(result.status()).isEqualTo(MlPredictionEvidenceProjectionStatus.FAILED);
         assertThat(result.reason()).contains(MlPredictionEvidenceProjectionReason.REPLAY_CONFLICT);
+    }
+
+    private MlPredictionEvidenceProjectionService evidenceService(
+            MlPredictionEvidenceProjectionRepository projectionRepository
+    ) {
+        return new MlPredictionEvidenceProjectionService(
+                projectionRepository,
+                new EngineIntelligenceProjectionPolicy(),
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                Clock.fixed(PROJECTED_AT, ZoneOffset.UTC)
+        );
     }
 
     private List<MlPredictionEvidenceProjectionStatus> expectedConcurrentStatuses(int workers) {

@@ -94,9 +94,9 @@ public class MlPredictionEvidenceProjectionService {
             throw new MlPredictionEvidenceProjectionShapeException();
         }
         return MlPredictionEvidenceProjection.create(
-                policy.validatedTransactionId(event.eventId()),
+                policy.validatedSourceEventId(event.eventId()),
                 policy.validatedTransactionId(event.transactionId()),
-                policy.validatedTransactionId(event.correlationId()),
+                policy.validatedCorrelationId(event.correlationId()),
                 event.createdAt(),
                 evidence,
                 clock.instant()

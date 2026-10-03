@@ -7,6 +7,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.QueryTimeoutException;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -89,6 +90,19 @@ class MlPredictionEvidenceProjectionServiceTest {
         assertThat(meterRegistry.get("ml_prediction_evidence_projection_failure_total")
                 .tag("reason", "STORE_UNAVAILABLE")
                 .counter().count()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void mongoTimeoutIsClassifiedAsRetryableStoreUnavailability() {
+        when(repository.insert(any(MlPredictionEvidenceProjection.class)))
+                .thenThrow(new QueryTimeoutException("simulated bounded store timeout"));
+
+        MlPredictionEvidenceProjectionResult result = service.project(
+                MlPredictionEvidenceProjectionTestSupport.event("evt-store-timeout", 0.8123d, "model-v1")
+        );
+
+        assertThat(result.status()).isEqualTo(MlPredictionEvidenceProjectionStatus.FAILED);
+        assertThat(result.reason()).contains(MlPredictionEvidenceProjectionReason.STORE_UNAVAILABLE);
     }
 
     @Test

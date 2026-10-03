@@ -24,6 +24,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 @Component
 public class EngineIntelligenceProjectionPolicy {
@@ -33,6 +34,8 @@ public class EngineIntelligenceProjectionPolicy {
     public static final int MAX_WARNINGS = 10;
     public static final int MAX_REASON_CODES_PER_ENGINE = 5;
     public static final int MAX_STRING_LENGTH = 128;
+
+    private static final Pattern SOURCE_IDENTIFIER_PATTERN = Pattern.compile("[A-Za-z0-9._:-]+");
 
     private static final Set<String> FORBIDDEN_COMPACT_TEXT = Set.of(
             "rawevidence",
@@ -56,7 +59,15 @@ public class EngineIntelligenceProjectionPolicy {
     );
 
     public String validatedTransactionId(String transactionId) {
-        return boundedString(transactionId);
+        return validatedSourceIdentifier(transactionId);
+    }
+
+    public String validatedSourceEventId(String sourceEventId) {
+        return validatedSourceIdentifier(sourceEventId);
+    }
+
+    public String validatedCorrelationId(String correlationId) {
+        return validatedSourceIdentifier(correlationId);
     }
 
     public EngineIntelligenceSummary validatedCopy(EngineIntelligenceSummary source) {
@@ -85,15 +96,25 @@ public class EngineIntelligenceProjectionPolicy {
         requireShape(source);
         return publicContract(() -> new MlPredictionEvidenceV1(
                 source.contractVersion(),
-                boundedString(source.sourceEngineId()),
-                boundedEnum(source.engineStatus(), FraudEngineStatus.class),
+                source.sourceEngineId(),
+                source.engineStatus(),
                 source.mlScore(),
-                boundedEnum(source.mlRiskLevel(), RiskLevel.class),
-                boundedString(source.modelName()),
-                boundedString(source.modelVersion()),
-                boundedString(source.featureContractVersion()),
+                source.mlRiskLevel(),
+                source.modelName(),
+                source.modelVersion(),
+                source.featureContractVersion(),
                 source.sourceExecutionTimestamp()
         ));
+    }
+
+    private String validatedSourceIdentifier(String value) {
+        if (value == null || value.isBlank()
+                || value.length() > MAX_STRING_LENGTH
+                || value.chars().anyMatch(Character::isISOControl)
+                || !SOURCE_IDENTIFIER_PATTERN.matcher(value).matches()) {
+            throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
+        }
+        return value;
     }
 
     private EngineIntelligenceEngineResult validatedEngine(EngineIntelligenceEngineResult source) {

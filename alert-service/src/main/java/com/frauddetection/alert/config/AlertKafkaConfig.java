@@ -1,5 +1,7 @@
 package com.frauddetection.alert.config;
 
+import com.frauddetection.alert.messaging.AuthoritativeTransactionScoredEventDeserializer;
+import com.frauddetection.alert.messaging.MlPredictionEvidencePermanentProcessingException;
 import com.frauddetection.common.events.contract.FraudAlertEvent;
 import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
@@ -15,6 +17,7 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
 import org.springframework.context.annotation.Bean;
@@ -53,6 +56,19 @@ public class AlertKafkaConfig {
 
     @Bean
     public ConsumerFactory<String, TransactionScoredEvent> transactionScoredEventConsumerFactory(KafkaProperties kafkaProperties) {
+        Map<String, Object> properties = new HashMap<>(kafkaProperties.buildConsumerProperties());
+
+        return new DefaultKafkaConsumerFactory<>(
+                properties,
+                new StringDeserializer(),
+                new ErrorHandlingDeserializer<>(new AuthoritativeTransactionScoredEventDeserializer())
+        );
+    }
+
+    @Bean
+    public ConsumerFactory<String, TransactionScoredEvent> mlPredictionEvidenceConsumerFactory(
+            KafkaProperties kafkaProperties
+    ) {
         Map<String, Object> properties = new HashMap<>(kafkaProperties.buildConsumerProperties());
 
         return new DefaultKafkaConsumerFactory<>(
@@ -165,7 +181,10 @@ public class AlertKafkaConfig {
         long retryAttempts = Math.max((kafkaConsumerProperties.retryAttempts() == null ? 3 : kafkaConsumerProperties.retryAttempts()) - 1L, 0L);
         long retryBackoffMillis = kafkaConsumerProperties.retryBackoffMillis() == null ? 1000L : kafkaConsumerProperties.retryBackoffMillis();
         DefaultErrorHandler errorHandler = new DefaultErrorHandler(deadLetterPublishingRecoverer, new FixedBackOff(retryBackoffMillis, retryAttempts));
-        errorHandler.addNotRetryableExceptions(DeserializationException.class);
+        errorHandler.addNotRetryableExceptions(
+                DeserializationException.class,
+                MlPredictionEvidencePermanentProcessingException.class
+        );
         errorHandler.setAckAfterHandle(true);
         errorHandler.setRetryListeners((ConsumerRecord<?, ?> record, Exception exception, int deliveryAttempt) ->
                 log.atWarn()
@@ -181,6 +200,7 @@ public class AlertKafkaConfig {
 
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, TransactionScoredEvent> transactionScoredKafkaListenerContainerFactory(
+            @Qualifier("transactionScoredEventConsumerFactory")
             ConsumerFactory<String, TransactionScoredEvent> transactionScoredEventConsumerFactory,
             DefaultErrorHandler kafkaErrorHandler,
             KafkaConsumerProperties kafkaConsumerProperties
@@ -190,6 +210,24 @@ public class AlertKafkaConfig {
         factory.setConsumerFactory(transactionScoredEventConsumerFactory);
         factory.setCommonErrorHandler(kafkaErrorHandler);
         factory.setConcurrency(kafkaConsumerProperties.concurrency() == null ? 1 : kafkaConsumerProperties.concurrency());
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, TransactionScoredEvent> mlPredictionEvidenceKafkaListenerContainerFactory(
+            @Qualifier("mlPredictionEvidenceConsumerFactory")
+            ConsumerFactory<String, TransactionScoredEvent> mlPredictionEvidenceConsumerFactory,
+            DefaultErrorHandler kafkaErrorHandler,
+            KafkaConsumerProperties kafkaConsumerProperties
+    ) {
+        ConcurrentKafkaListenerContainerFactory<String, TransactionScoredEvent> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(mlPredictionEvidenceConsumerFactory);
+        factory.setCommonErrorHandler(kafkaErrorHandler);
+        factory.setConcurrency(kafkaConsumerProperties.concurrency() == null ? 1 : kafkaConsumerProperties.concurrency());
+        factory.getContainerProperties().setAckMode(
+                org.springframework.kafka.listener.ContainerProperties.AckMode.RECORD
+        );
         return factory;
     }
 

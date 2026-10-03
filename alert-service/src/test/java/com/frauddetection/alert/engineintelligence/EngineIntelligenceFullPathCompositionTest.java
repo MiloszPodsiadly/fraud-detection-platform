@@ -74,6 +74,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class EngineIntelligenceFullPathCompositionTest {
     private static final Instant RECEIVED_AT = Instant.parse("2026-06-18T10:00:00Z");
     private static final Instant GENERATED_AT = Instant.parse("2026-06-18T10:00:02Z");
+    private static final Instant ML_INFERENCE_AT = Instant.parse("2026-06-18T09:59:59.123456789Z");
     private static final String ENRICHED_TOPIC = "transactions.enriched";
     private static final String SCORED_TOPIC = "transactions.scored";
     private static final String ORCHESTRATOR_ENGINE_EXCEPTION = "ORCHESTRATOR_ENGINE_EXCEPTION";
@@ -145,7 +146,8 @@ class EngineIntelligenceFullPathCompositionTest {
         assertThat(event.mlPredictionEvidence().modelVersion()).isEqualTo("2026-06-18.v1");
         assertThat(event.mlPredictionEvidence().featureContractVersion()).isEqualTo("feature-contract-v2");
         assertThat(event.mlPredictionEvidence().sourceExecutionTimestamp())
-                .isEqualTo(GENERATED_AT);
+                .isEqualTo(ML_INFERENCE_AT)
+                .isNotEqualTo(GENERATED_AT);
         assertThat(event.toString()).doesNotContain("finalDecision", "recommendedAction", "velocityScore");
 
         assertThat(response.status()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
@@ -372,7 +374,7 @@ class EngineIntelligenceFullPathCompositionTest {
                         "python-logistic-fraud-model",
                         "2026-06-18.v1",
                         "feature-contract-v2",
-                        Instant.parse("2026-06-18T09:59:59Z"),
+                        ML_INFERENCE_AT,
                         List.of("MODEL_MEDIUM_RISK"),
                         Map.of("modelScoreBucket", "MEDIUM"),
                         Map.of("modelAvailable", true),
