@@ -71,6 +71,7 @@ class TransactionFraudScoringServiceTest {
                 FraudScoringRequest.from(event),
                 scoreResult,
                 Optional.empty(),
+                Optional.empty(),
                 com.frauddetection.common.events.recommendation.AnalystRecommendationResult.absent(GENERATED_AT)
         )).thenReturn(scoredEvent);
 
@@ -82,6 +83,7 @@ class TransactionFraudScoringServiceTest {
         inOrder.verify(mapper).toEvent(
                 FraudScoringRequest.from(event),
                 scoreResult,
+                Optional.empty(),
                 Optional.empty(),
                 com.frauddetection.common.events.recommendation.AnalystRecommendationResult.absent(GENERATED_AT)
         );

@@ -3,6 +3,7 @@ package com.frauddetection.scoring.mapper;
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
@@ -33,6 +34,22 @@ public class TransactionScoredEventMapper {
             Optional<EngineIntelligenceSummary> engineIntelligence,
             AnalystRecommendationResult analystRecommendation
     ) {
+        return toEvent(
+                scoringRequest,
+                scoreResult,
+                engineIntelligence,
+                Optional.empty(),
+                analystRecommendation
+        );
+    }
+
+    public TransactionScoredEvent toEvent(
+            FraudScoringRequest scoringRequest,
+            FraudScoreResult scoreResult,
+            Optional<EngineIntelligenceSummary> engineIntelligence,
+            Optional<MlPredictionEvidenceV1> mlPredictionEvidence,
+            AnalystRecommendationResult analystRecommendation
+    ) {
         TransactionEnrichedEvent event = scoringRequest.event();
         return new TransactionScoredEvent(
                 UUID.randomUUID().toString(),
@@ -59,6 +76,7 @@ public class TransactionScoredEventMapper {
                 scoreResult.alertRecommended(),
                 scoreResult.scoringEvidence(),
                 engineIntelligence.orElse(null),
+                mlPredictionEvidence.orElse(null),
                 analystRecommendation
         );
     }

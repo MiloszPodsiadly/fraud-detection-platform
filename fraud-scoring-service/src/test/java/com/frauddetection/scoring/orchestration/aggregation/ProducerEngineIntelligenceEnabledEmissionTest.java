@@ -28,13 +28,14 @@ class ProducerEngineIntelligenceEnabledEmissionTest {
                         "ORCHESTRATOR_ENGINE_TIMEOUT"
                 )
         ));
-        var summary = service(true, pipeline(
+        var enrichment = service(true, pipeline(
                 orchestrator,
                 new FraudEngineAggregationService(FraudEngineAggregationPolicy.defaultInternalPolicy()),
                 new PublicEngineIntelligenceMapper()
         ))
                 .emitIfEnabled(request())
                 .orElseThrow();
+        var summary = enrichment.engineIntelligenceSummary().orElseThrow();
         String json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build().writeValueAsString(summary);
 
         assertThat(summary.engines()).hasSize(2);

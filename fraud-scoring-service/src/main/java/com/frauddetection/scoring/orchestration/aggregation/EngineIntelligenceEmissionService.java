@@ -1,6 +1,5 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
-import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.scoring.config.EngineIntelligenceEmissionProperties;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import org.slf4j.Logger;
@@ -29,7 +28,7 @@ public class EngineIntelligenceEmissionService {
         this.metrics = Objects.requireNonNull(metrics, "metrics is required");
     }
 
-    public Optional<EngineIntelligenceSummary> emitIfEnabled(FraudScoringRequest scoringRequest) {
+    public Optional<EngineIntelligenceEnrichmentResult> emitIfEnabled(FraudScoringRequest scoringRequest) {
         Objects.requireNonNull(scoringRequest, "scoringRequest is required");
         if (!properties.emitEnabled()) {
             recordMetrics(metrics::recordSkippedDisabled);
@@ -44,7 +43,7 @@ public class EngineIntelligenceEmissionService {
                 log.warn("Engine intelligence enrichment omitted.");
                 return Optional.empty();
             }
-            Optional<EngineIntelligenceSummary> result = pipeline.enrich(scoringRequest);
+            Optional<EngineIntelligenceEnrichmentResult> result = pipeline.enrich(scoringRequest);
             if (result.isPresent()) {
                 recordMetrics(metrics::recordSuccess);
             } else {
