@@ -53,6 +53,11 @@ occurrence without read-then-save behavior. A historical document missing any oc
 `UNKNOWN_OCCURRENCE`; identity is never reconstructed from transaction ID, processing time, model registry state, or
 Mongo natural order. The first valid current event may replace that unknown state.
 
+This is temporary deployment compatibility for fully identity-free historical Mongo documents, not a second current
+runtime path. Current domain construction and writes require explicit authoritative ownership; partial identity fails
+closed. The inventory, archival procedure, and verifiable removal gate are defined in
+[Scoring Occurrence Ownership Migration](scoring_occurrence_ownership_migration.md).
+
 Event time is producer-owned ordering, so producer clock skew can delay or prevent a later real-world execution from
 replacing a future-dated occurrence. The consumer does not silently substitute processing time because that would make
 replay results delivery-dependent. Producer clock health and future explicit sequence contracts are operational
@@ -60,6 +65,12 @@ concerns; the stored source event ID remains the exact join key to immutable ML 
 
 Occurrence ownership is private persistence/domain metadata. It is intentionally absent from scored-transaction API
 DTOs. It establishes a reliable future feedback join but does not itself snapshot evidence or change alert decisions.
+
+Alert creation and its `fraud.alerts` publication intent commit in the same MongoDB transaction. The scheduled
+publisher claims pending intents with a bounded lease and records `PUBLISH_ATTEMPTED` before contacting Kafka. An
+expired pre-publication claim is safe to resume; an expired post-attempt lease becomes
+`PUBLISH_CONFIRMATION_UNKNOWN` and is never published automatically because delivery may already have succeeded.
+Operators must reconcile that explicit ambiguous state instead of treating it as a normal retry.
 
 ## Projection Policy and Limits
 
@@ -102,12 +113,15 @@ scoring occurrence, even for the same transaction. Replay classification reads t
 there is no read-then-save update path.
 
 Evidence capture consumes the scored-event topic through its own consumer group and record-level acknowledgement.
-Transient store and unknown infrastructure failures retain the Kafka delivery for bounded retry. Permanently invalid
-evidence, unsupported wire shapes, corrupt stored documents, and conflicting replays are quarantined without being
-converted into accepted evidence. After bounded retries, handoff to the durable dead-letter topic must complete
-successfully before the source record is acknowledged; failed handoff remains a consumer failure. Replaying a
-quarantined or previously interrupted valid source event invokes only the evidence projection consumer, not baseline
-transaction, alert, or audit business processing.
+Transient store and unknown infrastructure failures retain the Kafka delivery for bounded retry. Exhausted transient
+failures go to the private evidence DLT; permanently invalid evidence, unsupported wire shapes, corrupt stored
+documents, and conflicting replays go to the private terminal quarantine. Handoff must complete successfully before
+the source record is acknowledged; failed handoff remains a consumer failure. Controlled recovery copies selected DLT
+records, with original source headers intact, to the evidence-only redrive topic. That consumer delegates to the same
+canonical projection service and cannot activate baseline transaction, alert, fraud-case, or audit processing. The
+redrive listener is disabled by default and its failures return to DLT or quarantine rather than looping automatically.
+The operational procedure and retention boundary are defined in
+[ML Prediction Evidence Recovery](../runbooks/ml_prediction_evidence_recovery.md).
 
 ## Mongo projection identity and idempotency
 
@@ -161,10 +175,11 @@ promotion, threshold changes, and production decision authority require a separa
 
 Exact ML score and model identity are restricted to the internal scored-event topic and the private immutable evidence
 collection. They are absent from logs, exception messages, metric labels, public read DTOs, and the Analyst Console.
-Kafka authorization must grant scored-event read access to the baseline and evidence consumer service identities only;
-the evidence group requires write access to its dead-letter topic, while unrelated clients receive no evidence-topic
-read grant. Mongo credentials for the evidence collection are limited to the projection writer and explicitly approved
-governance readers. Application roles and public API credentials do not grant collection access.
+Kafka authorization must grant scored-event read access to the baseline and evidence consumer service identities only.
+The evidence group requires write access to its DLT and quarantine topics. A separate, time-bounded recovery identity
+may read the DLT and write redrive, while unrelated clients receive no evidence-topic read grant. Mongo credentials for
+the evidence collection are limited to the projection writer and explicitly approved governance readers. Application
+roles and public API credentials do not grant collection access.
 
 Broad rollout requires an approved retention and archival period long enough to cover associated evaluation and
 governance artifacts. No TTL is configured because uncoordinated expiry could destroy required evidence. Operations

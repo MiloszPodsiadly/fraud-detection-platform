@@ -21,9 +21,9 @@ Status: current product documentation index.
 | [Reason Codes](reason_codes.md) | Current product-domain semantics for scoring reason codes, UNKNOWN handling, and non-claims. |
 | [Scoring Evidence Contract](scoring_evidence_contract.md) | Current product-domain semantics for typed scoring evidence, diagnostic evidence, compatibility, and attributes safety. |
 | [Alert Evidence Snapshot](alert_evidence_snapshot.md) | Current product-domain semantics for point-in-time alert evidence snapshot projection, boundedness, lineage, and non-claims. |
-| [Suspicious Transactions](suspicious_transactions.md) | Current product-domain semantics for the FDP-60 backend suspicious scoring signal read model and non-claims. |
-| [SuspiciousTransaction Internal Read API](suspicious_transaction_read_api.md) | Current product-domain semantics for the protected FDP-62 internal read-only SuspiciousTransaction API. |
-| [SuspiciousTransaction Internal UI](suspicious_transaction_internal_ui.md) | Current product-domain semantics for the FDP-66 internal read-only SuspiciousTransaction UI. |
+| [Suspicious Transactions](suspicious_transactions.md) | Current product-domain semantics for the backend suspicious scoring signal read model and non-claims. |
+| [SuspiciousTransaction Internal Read API](suspicious_transaction_read_api.md) | Current product-domain semantics for the protected internal read-only SuspiciousTransaction API. |
+| [SuspiciousTransaction Internal UI](suspicious_transaction_internal_ui.md) | Current product-domain semantics for the internal read-only SuspiciousTransaction UI. |
 
 ## Related Technical Sources
 

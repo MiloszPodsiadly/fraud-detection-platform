@@ -150,7 +150,7 @@ Declared read indexes:
 | idx_suspicious_tx_risk_cursor | riskLevel ASC, detectedAt DESC, _id DESC | riskLevel filter with cursor ordering |
 | idx_suspicious_tx_customer_cursor | customerId ASC, detectedAt DESC, _id DESC | customerId filter with cursor ordering |
 | idx_suspicious_tx_alert_cursor | linkedAlertId ASC, detectedAt DESC, _id DESC | linkedAlertId filter with cursor ordering |
-| suspicious_transaction_source_event_unique_idx | transactionId ASC, sourceEventId ASC | Idempotency for projection writes |
+| suspicious_transaction_current_unique_idx | transactionId ASC | One current projection per transaction |
 
 The API field remains suspiciousTransactionId. It maps to Mongo _id because suspiciousTransactionId is the document @Id.
 Cursor indexes use _id as the physical tie-breaker field.
