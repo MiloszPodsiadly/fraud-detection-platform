@@ -3,6 +3,7 @@ package com.frauddetection.alert.mapper;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
+import com.frauddetection.alert.persistence.ScoringOccurrenceFingerprint;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import org.springframework.stereotype.Component;
 
@@ -23,6 +24,7 @@ public class ScoredTransactionDocumentMapper {
         document.setSourceEventCreatedAt(occurrence.sourceEventCreatedAt().toString());
         document.setSourceEventCreatedAtEpochSecond(occurrence.sourceEventCreatedAt().getEpochSecond());
         document.setSourceEventCreatedAtNano(occurrence.sourceEventCreatedAt().getNano());
+        document.setSourceEventFingerprint(ScoringOccurrenceFingerprint.from(event));
         document.setCustomerId(event.customerId());
         document.setCorrelationId(event.correlationId());
         document.setTransactionTimestamp(event.transactionTimestamp());
@@ -60,26 +62,36 @@ public class ScoredTransactionDocumentMapper {
     }
 
     private ScoringOccurrenceOwnership occurrence(ScoredTransactionDocument document) {
-        if (document.getSourceEventId() == null
-                || document.getSourceEventCreatedAt() == null
-                || document.getSourceEventCreatedAtEpochSecond() == null
-                || document.getSourceEventCreatedAtNano() == null) {
+        boolean hasNoOccurrenceIdentity = document.getSourceEventId() == null
+                && document.getSourceEventCreatedAt() == null
+                && document.getSourceEventCreatedAtEpochSecond() == null
+                && document.getSourceEventCreatedAtNano() == null
+                && document.getSourceEventFingerprint() == null;
+        if (hasNoOccurrenceIdentity) {
             return ScoringOccurrenceOwnership.unknown();
         }
         try {
+            if (document.getSourceEventId() == null
+                    || document.getSourceEventCreatedAt() == null
+                    || document.getSourceEventCreatedAtEpochSecond() == null
+                    || document.getSourceEventCreatedAtNano() == null) {
+                throw new IllegalStateException("SCORING_OCCURRENCE_IDENTITY_INVALID");
+            }
             Instant sourceEventCreatedAt = Instant.ofEpochSecond(
                     document.getSourceEventCreatedAtEpochSecond(),
                     document.getSourceEventCreatedAtNano()
             );
             if (!sourceEventCreatedAt.equals(Instant.parse(document.getSourceEventCreatedAt()))) {
-                return ScoringOccurrenceOwnership.unknown();
+                throw new IllegalStateException("SCORING_OCCURRENCE_IDENTITY_INVALID");
             }
             return ScoringOccurrenceOwnership.authoritative(
                     document.getSourceEventId(),
                     sourceEventCreatedAt
             );
+        } catch (IllegalStateException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
-            return ScoringOccurrenceOwnership.unknown();
+            throw new IllegalStateException("SCORING_OCCURRENCE_IDENTITY_INVALID", exception);
         }
     }
 

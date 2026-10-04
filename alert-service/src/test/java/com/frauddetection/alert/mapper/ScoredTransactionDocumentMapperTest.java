@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ScoredTransactionDocumentMapperTest {
 
@@ -52,6 +53,7 @@ class ScoredTransactionDocumentMapperTest {
         assertThat(document.getCurrencySearch()).isEqualTo("pln");
         assertThat(document.getSourceEventId()).isEqualTo("event-1");
         assertThat(document.getSourceEventCreatedAt()).isEqualTo("2026-01-01T00:00:00Z");
+        assertThat(document.getSourceEventFingerprint()).matches("[0-9a-f]{64}");
         assertThat(mapper.toDomain(document).scoringOccurrenceOwnership().state())
                 .isEqualTo(ScoringOccurrenceOwnership.State.AUTHORITATIVE);
     }
@@ -102,5 +104,16 @@ class ScoredTransactionDocumentMapperTest {
 
         assertThat(domain.scoringOccurrenceOwnership())
                 .isEqualTo(ScoringOccurrenceOwnership.unknown());
+    }
+
+    @Test
+    void shouldRejectPartiallyPersistedOccurrenceIdentityInsteadOfTreatingItAsHistorical() {
+        var corrupted = new com.frauddetection.alert.persistence.ScoredTransactionDocument();
+        corrupted.setTransactionId("txn-corrupted");
+        corrupted.setSourceEventId("event-1");
+
+        assertThatThrownBy(() -> mapper.toDomain(corrupted))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("SCORING_OCCURRENCE_IDENTITY_INVALID");
     }
 }
