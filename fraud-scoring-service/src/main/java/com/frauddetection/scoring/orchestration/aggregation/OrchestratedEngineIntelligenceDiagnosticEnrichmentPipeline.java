@@ -43,9 +43,10 @@ public final class OrchestratedEngineIntelligenceDiagnosticEnrichmentPipeline
                 scoringContextFactory.from(scoringRequest, scoringProperties.mode(), clock.instant())
         );
         var aggregationResult = aggregationService.aggregate(orchestrationResult);
-        return Optional.of(EngineIntelligenceEnrichmentResult.of(
+        return Optional.of(evidenceMapper.map(
                 mapper.map(aggregationResult),
-                evidenceMapper.map(orchestrationResult, aggregationResult)
+                orchestrationResult,
+                aggregationResult
         ));
     }
 }

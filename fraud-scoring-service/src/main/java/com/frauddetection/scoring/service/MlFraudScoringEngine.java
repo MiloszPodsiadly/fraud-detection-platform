@@ -18,6 +18,8 @@ import java.util.Map;
 @Component
 public class MlFraudScoringEngine implements FraudScoringEngine {
 
+    public static final String MODEL_IDENTITY_VALIDATION_FAILED = "modelIdentityValidationFailed";
+
     private final MlModelScoringClient mlModelScoringClient;
     private final ScoringMetrics scoringMetrics;
     private final ScoringEvidenceFactory scoringEvidenceFactory = new ScoringEvidenceFactory();
@@ -82,6 +84,7 @@ public class MlFraudScoringEngine implements FraudScoringEngine {
         scoreDetails.put("fallbackReason", fallbackReason);
         Map<String, Object> explanationMetadata = copyOf(output.explanationMetadata());
         explanationMetadata.put("modelAvailable", false);
+        explanationMetadata.put(MODEL_IDENTITY_VALIDATION_FAILED, true);
         explanationMetadata.put("fallbackReason", fallbackReason);
         List<ReasonCodeParseResult> parsedReasonCodes = ReasonCode.parseInputList(
                 List.of(ReasonCode.ML_MODEL_UNAVAILABLE.wireValue())

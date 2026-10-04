@@ -27,6 +27,7 @@ import com.frauddetection.scoring.messaging.TransactionScoredEventPublisher;
 import com.frauddetection.scoring.observability.ScoringMetrics;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEnrichmentResult;
+import com.frauddetection.scoring.orchestration.aggregation.MlPredictionEvidenceOmissionReason;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.mockito.ArgumentCaptor;
 
@@ -53,7 +54,10 @@ final class TransactionFraudScoringServiceEngineIntelligenceTestSupport {
         TransactionEnrichedEvent input = TransactionFixtures.enrichedTransaction().build();
         FraudScoringRequest request = FraudScoringRequest.from(input);
         when(emissionService.emitIfEnabled(request)).thenReturn(
-                summary.map(value -> EngineIntelligenceEnrichmentResult.of(value, Optional.empty()))
+                summary.map(value -> EngineIntelligenceEnrichmentResult.withoutEvidence(
+                        value,
+                        MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE
+                ))
         );
         return harness(input, request, emissionService);
     }

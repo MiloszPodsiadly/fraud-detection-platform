@@ -14,6 +14,7 @@ import com.frauddetection.scoring.orchestration.aggregation.FraudEngineAggregati
 import com.frauddetection.scoring.orchestration.aggregation.FraudEngineAggregationService;
 import com.frauddetection.scoring.orchestration.aggregation.OrchestratedEngineIntelligenceDiagnosticEnrichmentPipeline;
 import com.frauddetection.scoring.orchestration.aggregation.NoOpEngineIntelligenceEmissionMetrics;
+import com.frauddetection.scoring.orchestration.aggregation.MicrometerEngineIntelligenceEmissionMetrics;
 import com.frauddetection.scoring.orchestration.aggregation.PublicEngineIntelligenceMapper;
 import com.frauddetection.scoring.orchestration.runtime.BoundedFraudEngineExecutor;
 import com.frauddetection.scoring.orchestration.runtime.FraudScoringOrchestratorExecutionPolicy;
@@ -49,8 +50,13 @@ public class EngineIntelligenceRuntimeConfig {
     }
 
     @Bean
-    public EngineIntelligenceEmissionMetrics engineIntelligenceEmissionMetrics() {
-        return new NoOpEngineIntelligenceEmissionMetrics();
+    public EngineIntelligenceEmissionMetrics engineIntelligenceEmissionMetrics(
+            ObjectProvider<MeterRegistry> meterRegistry
+    ) {
+        MeterRegistry registry = meterRegistry.getIfAvailable();
+        return registry == null
+                ? new NoOpEngineIntelligenceEmissionMetrics()
+                : new MicrometerEngineIntelligenceEmissionMetrics(registry);
     }
 
     @Bean

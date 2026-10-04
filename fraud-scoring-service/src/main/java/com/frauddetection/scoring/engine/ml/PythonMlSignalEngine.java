@@ -67,6 +67,9 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
         if (sourceResult == null) {
             return degradedResult(PythonMlSignalReasonCode.ML_MODEL_INVALID_RESPONSE);
         }
+        if (modelIdentityValidationFailed(sourceResult)) {
+            return degradedResult(PythonMlSignalReasonCode.ML_MODEL_METADATA_MISSING);
+        }
         ModelAvailabilityStatus availabilityStatus = modelAvailabilityStatus(sourceResult);
         if (availabilityStatus == ModelAvailabilityStatus.UNAVAILABLE) {
             return unavailableResult(FraudEngineStatus.UNAVAILABLE, PythonMlSignalReasonCode.ML_MODEL_UNAVAILABLE);
@@ -89,7 +92,17 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
         if (missingModelMetadata(sourceResult)) {
             return degradedResult(PythonMlSignalReasonCode.ML_MODEL_METADATA_MISSING);
         }
+        if (sourceResult.inferenceTimestamp() == null) {
+            return degradedResult(PythonMlSignalReasonCode.ML_INFERENCE_TIMESTAMP_MISSING);
+        }
         return availableResult(sourceResult);
+    }
+
+    private boolean modelIdentityValidationFailed(FraudScoreResult sourceResult) {
+        return sourceResult.explanationMetadata() != null
+                && Boolean.TRUE.equals(sourceResult.explanationMetadata().get(
+                        MlFraudScoringEngine.MODEL_IDENTITY_VALIDATION_FAILED
+                ));
     }
 
     private ModelAvailabilityStatus modelAvailabilityStatus(FraudScoreResult sourceResult) {

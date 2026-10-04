@@ -32,6 +32,9 @@ public class EngineIntelligenceEmissionService {
         Objects.requireNonNull(scoringRequest, "scoringRequest is required");
         if (!properties.emitEnabled()) {
             recordMetrics(metrics::recordSkippedDisabled);
+            recordMetrics(() -> metrics.recordEvidenceOmitted(
+                    MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED
+            ));
             return Optional.empty();
         }
         recordMetrics(metrics::recordAttempt);
@@ -46,6 +49,8 @@ public class EngineIntelligenceEmissionService {
             Optional<EngineIntelligenceEnrichmentResult> result = pipeline.enrich(scoringRequest);
             if (result.isPresent()) {
                 recordMetrics(metrics::recordSuccess);
+                result.orElseThrow().mlPredictionEvidenceOmissionReason()
+                        .ifPresent(reason -> recordMetrics(() -> metrics.recordEvidenceOmitted(reason)));
             } else {
                 recordMetrics(() -> metrics.recordOmitted(EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT));
             }

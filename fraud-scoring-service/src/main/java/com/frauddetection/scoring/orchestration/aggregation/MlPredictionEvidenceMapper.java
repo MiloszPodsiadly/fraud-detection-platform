@@ -4,19 +4,22 @@ import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineResult;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import com.frauddetection.scoring.engine.ml.PythonMlSignalReasonCode;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrationResult;
 
 import java.util.Objects;
-import java.util.Optional;
 
 final class MlPredictionEvidenceMapper {
 
-    Optional<MlPredictionEvidenceV1> map(
+    EngineIntelligenceEnrichmentResult map(
+            EngineIntelligenceSummary summary,
             FraudScoringOrchestrationResult orchestrationResult,
             FraudEngineAggregationResult aggregationResult
     ) {
+        Objects.requireNonNull(summary, "summary is required");
         Objects.requireNonNull(orchestrationResult, "orchestrationResult is required");
         Objects.requireNonNull(aggregationResult, "aggregationResult is required");
 
@@ -24,8 +27,9 @@ final class MlPredictionEvidenceMapper {
                 .filter(result -> FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID.equals(result.engineId()))
                 .findFirst()
                 .orElse(null);
-        if (!usableMlResult(source)) {
-            return Optional.empty();
+        MlPredictionEvidenceOmissionReason omissionReason = omissionReason(source);
+        if (omissionReason != null) {
+            return EngineIntelligenceEnrichmentResult.withoutEvidence(summary, omissionReason);
         }
 
         NormalizedFraudEngineResult normalized = aggregationResult.normalizedEngineResults().stream()
@@ -33,10 +37,13 @@ final class MlPredictionEvidenceMapper {
                 .findFirst()
                 .orElse(null);
         if (!sameAcceptedPrediction(source, normalized)) {
-            return Optional.empty();
+            return EngineIntelligenceEnrichmentResult.withoutEvidence(
+                    summary,
+                    MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED
+            );
         }
 
-        return Optional.of(new MlPredictionEvidenceV1(
+        return EngineIntelligenceEnrichmentResult.withEvidence(summary, new MlPredictionEvidenceV1(
                 source.score(),
                 source.riskLevel(),
                 new MlModelIdentity(source.modelName(), source.modelVersion(), source.featureContractVersion()),
@@ -44,11 +51,32 @@ final class MlPredictionEvidenceMapper {
         ));
     }
 
-    private boolean usableMlResult(FraudEngineResult result) {
-        return result != null
-                && result.engineType() == FraudEngineType.ML_MODEL
-                && result.status() == FraudEngineStatus.AVAILABLE
-                && result.sourceInferenceTimestamp() != null;
+    private MlPredictionEvidenceOmissionReason omissionReason(FraudEngineResult result) {
+        if (result == null || result.engineType() != FraudEngineType.ML_MODEL) {
+            return MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE;
+        }
+        if (PythonMlSignalReasonCode.ML_INFERENCE_TIMESTAMP_MISSING.wireValue().equals(result.statusReason())) {
+            return MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING;
+        }
+        if (PythonMlSignalReasonCode.ML_SCORE_MISSING.wireValue().equals(result.statusReason())
+                || PythonMlSignalReasonCode.ML_SCORE_OUT_OF_RANGE.wireValue().equals(result.statusReason())) {
+            return MlPredictionEvidenceOmissionReason.INVALID_SCORE;
+        }
+        if (PythonMlSignalReasonCode.ML_MODEL_METADATA_MISSING.wireValue().equals(result.statusReason())) {
+            return MlPredictionEvidenceOmissionReason.IDENTITY_VALIDATION_FAILURE;
+        }
+        if (result.status() == FraudEngineStatus.UNAVAILABLE
+                || result.status() == FraudEngineStatus.TIMEOUT
+                || result.status() == FraudEngineStatus.SKIPPED) {
+            return MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE;
+        }
+        if (result.status() != FraudEngineStatus.AVAILABLE) {
+            return MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED;
+        }
+        if (result.sourceInferenceTimestamp() == null) {
+            return MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING;
+        }
+        return null;
     }
 
     private boolean sameAcceptedPrediction(

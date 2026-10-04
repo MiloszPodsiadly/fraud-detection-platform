@@ -10,6 +10,7 @@ import com.frauddetection.scoring.messaging.TransactionScoredEventPublisher;
 import com.frauddetection.scoring.observability.ScoringMetrics;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEnrichmentResult;
+import com.frauddetection.scoring.orchestration.aggregation.MlPredictionEvidenceOmissionReason;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
@@ -59,12 +60,27 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
         var summary = availableMlSummary();
         var evidence = mlPredictionEvidence();
         TransactionScoredEvent event = harnessWithEnrichment(
-                EngineIntelligenceEnrichmentResult.of(summary, Optional.of(evidence))
+                EngineIntelligenceEnrichmentResult.withEvidence(summary, evidence)
         ).scoreAndCapture();
 
         assertThat(event.engineIntelligence()).isEqualTo(summary);
         assertThat(event.mlPredictionEvidence()).isEqualTo(evidence);
         assertThat(json(event)).contains("\"mlPredictionEvidence\"", "\"mlScore\":0.8123");
+    }
+
+    @Test
+    void missingMlSourceTimestampOmitsEvidenceWithoutChangingBaselineScore() {
+        TransactionScoredEvent event = harnessWithEnrichment(
+                EngineIntelligenceEnrichmentResult.withoutEvidence(
+                        availableMlSummary(),
+                        MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING
+                )
+        ).scoreAndCapture();
+
+        assertThat(event.fraudScore()).isEqualTo(scoreResult().fraudScore());
+        assertThat(event.riskLevel()).isEqualTo(scoreResult().riskLevel());
+        assertThat(event.mlPredictionEvidence()).isNull();
+        assertThat(json(event)).doesNotContain("\"mlPredictionEvidence\"");
     }
 
     @Test
@@ -82,7 +98,10 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
         ScoringMetrics metrics = mock(ScoringMetrics.class);
         when(scoringEngine.score(request)).thenReturn(scoreResult);
         when(emissionService.emitIfEnabled(request)).thenReturn(Optional.of(
-                EngineIntelligenceEnrichmentResult.of(summary, Optional.empty())
+                EngineIntelligenceEnrichmentResult.withoutEvidence(
+                        summary,
+                        MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE
+                )
         ));
         when(mapper.toEvent(
                 request,

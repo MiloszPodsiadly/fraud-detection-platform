@@ -13,6 +13,7 @@ import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEm
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
 import com.frauddetection.scoring.orchestration.aggregation.FraudEngineAggregationService;
 import com.frauddetection.scoring.orchestration.aggregation.NoOpEngineIntelligenceEmissionMetrics;
+import com.frauddetection.scoring.orchestration.aggregation.MicrometerEngineIntelligenceEmissionMetrics;
 import com.frauddetection.scoring.orchestration.aggregation.PublicEngineIntelligenceMapper;
 import com.frauddetection.scoring.orchestration.runtime.BoundedFraudEngineExecutor;
 import org.junit.jupiter.api.Test;
@@ -64,6 +65,8 @@ class EngineIntelligenceConditionalRuntimeGraphTest {
             assertThat(context).hasSingleBean(BoundedFraudEngineExecutor.class);
             assertThat(context).hasSingleBean(FraudEngineAggregationService.class);
             assertThat(context).hasSingleBean(PublicEngineIntelligenceMapper.class);
+            assertThat(context).hasSingleBean(MicrometerEngineIntelligenceEmissionMetrics.class);
+            assertThat(context).doesNotHaveBean(NoOpEngineIntelligenceEmissionMetrics.class);
         });
     }
 

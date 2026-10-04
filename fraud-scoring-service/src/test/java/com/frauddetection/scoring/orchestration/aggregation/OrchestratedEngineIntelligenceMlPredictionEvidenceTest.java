@@ -10,6 +10,7 @@ import com.frauddetection.scoring.orchestration.FraudScoringOrchestrationStatus;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
 import java.util.List;
@@ -47,8 +48,11 @@ class OrchestratedEngineIntelligenceMlPredictionEvidenceTest {
         assertThat(evidence.modelName()).isEqualTo("python-logistic-fraud-model");
         assertThat(evidence.modelVersion()).isEqualTo("2026-05-30.v1");
         assertThat(evidence.featureContractVersion()).isEqualTo("2026-05-30.feature-contract.v1");
-        assertThat(evidence.sourceExecutionTimestamp()).isEqualTo(AggregationTestSupport.GENERATED_AT);
+        assertThat(evidence.sourceExecutionTimestamp())
+                .isEqualTo(AggregationTestSupport.SOURCE_INFERENCE_AT)
+                .isNotEqualTo(AggregationTestSupport.GENERATED_AT);
         assertThat(enrichment.engineIntelligenceSummary()).isPresent();
+        assertThat(enrichment.mlPredictionEvidenceOmissionReason()).isEmpty();
         verify(orchestrator, times(1)).evaluate(any());
     }
 
@@ -75,6 +79,78 @@ class OrchestratedEngineIntelligenceMlPredictionEvidenceTest {
 
         assertThat(enrichment.engineIntelligenceSummary()).isPresent();
         assertThat(enrichment.mlPredictionEvidence()).isEmpty();
+        MlPredictionEvidenceOmissionReason expectedReason = switch (status) {
+            case UNAVAILABLE, TIMEOUT, SKIPPED -> MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE;
+            case DEGRADED, FALLBACK_USED -> MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED;
+            case AVAILABLE -> throw new IllegalArgumentException("AVAILABLE is excluded by the parameter source");
+        };
+        assertThat(enrichment.mlPredictionEvidenceOmissionReason()).contains(expectedReason);
+    }
+
+    @Test
+    void availableMlWithoutSourceTimestampHasExplicitOmissionAndNoFabricatedEvidence() {
+        FraudScoringOrchestrator orchestrator = mock(FraudScoringOrchestrator.class);
+        FraudEngineResult sourceWithoutTimestamp = new FraudEngineResult(
+                "ml.python.primary",
+                FraudEngineType.ML_MODEL,
+                "python",
+                FraudEngineStatus.AVAILABLE,
+                0.8765d,
+                RiskLevel.HIGH,
+                FraudEngineConfidence.MEDIUM,
+                List.of("MODEL_HIGH_RISK"),
+                List.of(),
+                List.of(),
+                2L,
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                "2026-05-30.feature-contract.v1",
+                null,
+                AggregationTestSupport.GENERATED_AT,
+                null
+        );
+        when(orchestrator.evaluate(any())).thenReturn(AggregationTestSupport.orchestration(
+                AggregationTestSupport.available("rules.primary", 0.1111d, RiskLevel.LOW, "HIGH_VELOCITY"),
+                sourceWithoutTimestamp
+        ));
+
+        EngineIntelligenceEnrichmentResult enrichment = service(true, pipeline(
+                orchestrator,
+                new FraudEngineAggregationService(FraudEngineAggregationPolicy.defaultInternalPolicy()),
+                new PublicEngineIntelligenceMapper()
+        )).emitIfEnabled(request()).orElseThrow();
+
+        assertThat(enrichment.engineIntelligenceSummary()).isPresent();
+        assertThat(enrichment.mlPredictionEvidence()).isEmpty();
+        assertThat(enrichment.mlPredictionEvidenceOmissionReason()).contains(
+                MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING
+        );
+        verify(orchestrator, times(1)).evaluate(any());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "ML_SCORE_OUT_OF_RANGE, INVALID_SCORE",
+            "ML_MODEL_METADATA_MISSING, IDENTITY_VALIDATION_FAILURE"
+    })
+    void rejectedMlResultRetainsSpecificEvidenceOmissionReason(
+            String statusReason,
+            MlPredictionEvidenceOmissionReason expectedReason
+    ) {
+        FraudScoringOrchestrator orchestrator = mock(FraudScoringOrchestrator.class);
+        when(orchestrator.evaluate(any())).thenReturn(AggregationTestSupport.orchestration(
+                AggregationTestSupport.available("rules.primary", 0.1111d, RiskLevel.LOW, "HIGH_VELOCITY"),
+                AggregationTestSupport.unavailable("ml.python.primary", FraudEngineStatus.DEGRADED, statusReason)
+        ));
+
+        EngineIntelligenceEnrichmentResult enrichment = service(true, pipeline(
+                orchestrator,
+                new FraudEngineAggregationService(FraudEngineAggregationPolicy.defaultInternalPolicy()),
+                new PublicEngineIntelligenceMapper()
+        )).emitIfEnabled(request()).orElseThrow();
+
+        assertThat(enrichment.mlPredictionEvidence()).isEmpty();
+        assertThat(enrichment.mlPredictionEvidenceOmissionReason()).contains(expectedReason);
     }
 
     @Test

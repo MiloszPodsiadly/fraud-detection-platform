@@ -42,6 +42,9 @@ class EngineIntelligenceEmissionMetricsTest {
         verify(metrics, never()).recordAttempt();
         verify(metrics, never()).recordSuccess();
         verify(metrics, never()).recordOmitted(any());
+        verify(metrics).recordEvidenceOmitted(
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED
+        );
         verify(metrics, never()).recordLatency(any());
         verifyNoInteractions(provider);
     }
@@ -53,7 +56,10 @@ class EngineIntelligenceEmissionMetricsTest {
                 mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class);
         EngineIntelligenceSummary summary = mock(EngineIntelligenceSummary.class);
         when(pipeline.enrich(any())).thenReturn(Optional.of(
-                EngineIntelligenceEnrichmentResult.of(summary, Optional.empty())
+                EngineIntelligenceEnrichmentResult.withoutEvidence(
+                        summary,
+                        MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE
+                )
         ));
 
         assertThat(service(true, pipeline, metrics).emitIfEnabled(request()))
@@ -62,6 +68,7 @@ class EngineIntelligenceEmissionMetricsTest {
         verify(metrics).recordAttempt();
         verify(metrics).recordSuccess();
         verify(metrics, never()).recordOmitted(any());
+        verify(metrics).recordEvidenceOmitted(MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE);
         verify(metrics).recordLatency(any(Duration.class));
     }
 
@@ -77,6 +84,25 @@ class EngineIntelligenceEmissionMetricsTest {
         verify(metrics).recordOmitted(EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT);
         verify(metrics, never()).recordSuccess();
         verify(metrics).recordLatency(any(Duration.class));
+    }
+
+    @Test
+    void missingSourceTimestampRecordsSpecificEvidenceOmission() {
+        EngineIntelligenceEmissionMetrics metrics = mock(EngineIntelligenceEmissionMetrics.class);
+        EngineIntelligenceDiagnosticEnrichmentPipeline pipeline =
+                mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class);
+        EngineIntelligenceSummary summary = mock(EngineIntelligenceSummary.class);
+        when(pipeline.enrich(any())).thenReturn(Optional.of(
+                EngineIntelligenceEnrichmentResult.withoutEvidence(
+                        summary,
+                        MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING
+                )
+        ));
+
+        assertThat(service(true, pipeline, metrics).emitIfEnabled(request())).isPresent();
+
+        verify(metrics).recordSuccess();
+        verify(metrics).recordEvidenceOmitted(MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING);
     }
 
     @Test
@@ -112,7 +138,10 @@ class EngineIntelligenceEmissionMetricsTest {
         EngineIntelligenceSummary summary = mock(EngineIntelligenceSummary.class);
         doThrow(new IllegalStateException("metrics-backend-failure")).when(metrics).recordLatency(any());
         when(pipeline.enrich(any())).thenReturn(Optional.of(
-                EngineIntelligenceEnrichmentResult.of(summary, Optional.empty())
+                EngineIntelligenceEnrichmentResult.withoutEvidence(
+                        summary,
+                        MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE
+                )
         ));
 
         assertThat(service(true, pipeline, metrics).emitIfEnabled(request()))
@@ -148,6 +177,15 @@ class EngineIntelligenceEmissionMetricsTest {
                 EngineIntelligenceEmissionOmissionReason.AGGREGATION_FAILURE,
                 EngineIntelligenceEmissionOmissionReason.MAPPER_FAILURE,
                 EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE
+        );
+        assertThat(Arrays.asList(MlPredictionEvidenceOmissionReason.values())).containsExactly(
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE,
+                MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING,
+                MlPredictionEvidenceOmissionReason.INVALID_SCORE,
+                MlPredictionEvidenceOmissionReason.IDENTITY_VALIDATION_FAILURE,
+                MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE,
+                MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED
         );
     }
 

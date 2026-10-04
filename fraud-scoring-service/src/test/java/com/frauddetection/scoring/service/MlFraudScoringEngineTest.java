@@ -102,4 +102,29 @@ class MlFraudScoringEngineTest {
                 null
         )).hasMessageContaining("ML model identity must be entirely absent or complete");
     }
+
+    @Test
+    void missingMlOutputIdentityIsMarkedForDiagnosticClassification() {
+        MlFraudScoringEngine engine = new MlFraudScoringEngine(input -> new MlModelOutput(
+                true,
+                0.91d,
+                RiskLevel.CRITICAL,
+                null,
+                null,
+                null,
+                Instant.parse("2026-05-30T09:59:59Z"),
+                List.of(ReasonCode.MODEL_HIGH_RISK.wireValue()),
+                Map.of(),
+                Map.of(),
+                null
+        ), new ScoringMetrics(new SimpleMeterRegistry()));
+
+        var result = engine.score(FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build()));
+
+        assertThat(result.explanationMetadata())
+                .containsEntry("modelAvailable", false)
+                .containsEntry(MlFraudScoringEngine.MODEL_IDENTITY_VALIDATION_FAILED, true);
+        assertThat(result.fraudScore()).isNull();
+        assertThat(result.riskLevel()).isNull();
+    }
 }
