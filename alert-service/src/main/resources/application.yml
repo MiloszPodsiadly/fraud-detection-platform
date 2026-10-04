@@ -202,6 +202,7 @@ app:
       redrive-enabled: ${ML_PREDICTION_EVIDENCE_REDRIVE_ENABLED:false}
     consumer:
       ml-prediction-evidence-group-id: ${ML_PREDICTION_EVIDENCE_CONSUMER_GROUP_ID:${spring.application.name}-ml-prediction-evidence}
+      engine-intelligence-group-id: ${ENGINE_INTELLIGENCE_CONSUMER_GROUP_ID:${spring.application.name}-engine-intelligence}
       concurrency: 1
       retry-attempts: 3
       retry-backoff-millis: 1000

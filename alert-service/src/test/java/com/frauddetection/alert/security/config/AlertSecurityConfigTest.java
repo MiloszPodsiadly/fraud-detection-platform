@@ -75,6 +75,7 @@ import com.frauddetection.alert.outbox.OutboxBacklogResponse;
 import com.frauddetection.alert.outbox.OutboxRecoveryController;
 import com.frauddetection.alert.outbox.OutboxRecoveryRunResponse;
 import com.frauddetection.alert.outbox.OutboxRecoveryService;
+import com.frauddetection.alert.outbox.FraudAlertOutboxRecoveryService;
 import com.frauddetection.alert.outbox.OutboxRecordResponse;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
 import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
@@ -251,6 +252,9 @@ class AlertSecurityConfigTest {
 
     @MockitoBean
     private OutboxRecoveryService outboxRecoveryService;
+
+    @MockitoBean
+    private FraudAlertOutboxRecoveryService fraudAlertOutboxRecoveryService;
 
     @MockitoBean
     private TransactionalOutboxRuntimeReadiness outboxRuntimeReadiness;
@@ -953,6 +957,15 @@ class AlertSecurityConfigTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .header("X-Idempotency-Key", "outbox-confirm-event-1-denied")
                         .content("{\"resolution\":\"PUBLISHED\",\"reason\":\"broker offset verified\",\"evidence_reference\":{\"type\":\"BROKER_OFFSET\",\"reference\":\"topic=fraud-decisions,partition=0,offset=42\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/outbox/fraud-alerts/recovery/backlog")
+                        .with(authorities(AnalystAuthority.AUDIT_VERIFY)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/outbox/fraud-alerts/event-1/resolve-confirmation")
+                        .with(authorities(AnalystAuthority.OUTBOX_INSPECT))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Idempotency-Key", "fraud-alert-confirm-event-1-denied")
+                        .content("{\"resolution\":\"PUBLISHED\",\"reason\":\"broker offset verified\",\"evidence_reference\":{\"type\":\"BROKER_OFFSET\",\"reference\":\"topic=fraud.alerts,partition=0,offset=42\",\"verified_at\":\"2026-05-02T10:00:00Z\",\"verified_by\":\"ops-admin\"}}"))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/v1/trust/incidents").with(demoUser("FRAUD_OPS_ADMIN")))
                 .andExpect(status().isOk());

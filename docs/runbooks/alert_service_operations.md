@@ -85,6 +85,25 @@ cold and once warm. Record collection cardinalities, documents examined, index u
 and disk spill, and the configured budget. The run passes only when the complete scan finds the tail record, canonical
 data passes after its removal, and both runs finish with operational headroom inside the deployment budget.
 
+## Fraud Alert Publication Lifecycle
+
+`fraud_alert_outbox_records` is the durable source for publication to `fraud.alerts`. Alert creation and its
+deterministic publication intent commit in the same MongoDB transaction; Kafka delivery remains at-least-once.
+`PROCESSING` means the broker send has not started and an expired fenced lease may be reclaimed while attempts remain.
+`PUBLISH_ATTEMPTED` means the send started; an exception, acknowledgement timeout, worker loss, or failure to persist
+the acknowledgement becomes `PUBLISH_CONFIRMATION_UNKNOWN` and is never retried automatically. A pre-send record that
+uses its bounded attempt budget becomes `FAILED_TERMINAL` and is escalated instead of entering an infinite claim loop.
+
+The scheduled and direct publisher entrypoints both use `OUTBOX_PUBLISHER_ENABLED` and remain closed until the shared
+outbox startup readiness gate opens. Manual reconciliation also requires `OUTBOX_RECOVERY_ENABLED`, authenticated
+`outbox:resolve` authority, an idempotency key, a CAS-protected current record, and durable audit events. Resolve an
+ambiguous event as `PUBLISHED` only with `BROKER_OFFSET` evidence. A retry requires `BROKER_NON_DELIVERY` evidence from
+an authoritative broker administration check; absence from an incomplete topic scan is not evidence of non-delivery.
+Each accepted resolution is appended to `fraud_alert_outbox_resolutions` with its evidence and original response
+snapshot. Reusing the same idempotency key with the same request returns that snapshot; changed input is rejected.
+The backlog endpoint is `GET /api/v1/outbox/fraud-alerts/recovery/backlog`, and its gauges contain counts and age only,
+never event IDs, payloads, customer data, or exception text.
+
 ## Operator Matrix
 
 | Condition | Symptom | Impact | Safe action | Endpoint or control | Authority | Evidence | Retry or rollback guidance | Escalation |
@@ -92,6 +111,8 @@ data passes after its removal, and both runs finish with operational headroom in
 | `REGULATED_MUTATION_RECOVERY_REQUIRED` | Trust level reason code or recovery backlog | Mutation needs reconciliation | Inspect command and run bounded recovery | `POST /api/v1/regulated-mutations/recover` | `regulated-mutation:recover` | command id or idempotency hash | No manual business rollback claim | engineering |
 | `FINALIZE_RECOVERY_REQUIRED` | finalize recovery required count > 0 | Finalize outcome requires recovery | Inspect command and local evidence | inspection plus regulated recovery endpoints | ops admin | command snapshot and evidence ids | No finalized or externally confirmed claim | security |
 | `PUBLISH_CONFIRMATION_UNKNOWN` | outbox unknown count > 0 | Delivery confirmation ambiguous | Inspect outbox and resolve with evidence | `/api/v1/outbox/.../resolve-confirmation` | ops admin | broker evidence | Manual resolution requires idempotency and immutable dual-control evidence; its `MANUAL_*_ATTESTED` provenance is not independent broker verification | platform |
+| Fraud alert `PUBLISH_CONFIRMATION_UNKNOWN` | `fraud_alert_outbox_confirmation_unknown_count` > 0 | The `fraud.alerts` send may already have succeeded | Resolve as published from a durable broker offset, or retry only from verified broker non-delivery evidence | `POST /api/v1/outbox/fraud-alerts/{eventId}/resolve-confirmation` | `outbox:resolve` | `BROKER_OFFSET` or `BROKER_NON_DELIVERY` | Never infer non-delivery from absence in an incomplete Kafka scan | platform |
+| Fraud alert `FAILED_TERMINAL` | `fraud_alert_outbox_failed_terminal_count` > 0 | No further automatic pre-send claim is allowed | Repair the cause, verify non-delivery, then use governed reconciliation | fraud alert outbox recovery | `outbox:resolve` | verified broker non-delivery evidence and audit trail | The bounded retry budget is not reset automatically | platform |
 | `OUTBOX_FAILED_TERMINAL` | terminal delivery count > 0 | Outbox delivery stopped | Repair cause and resolve | outbox recovery | ops admin | event id | Do not silently republish with a new key | platform |
 | `RETRY_BUDGET_EXHAUSTED_BEFORE_PUBLISH_ATTEMPT` | terminal outbox record after an expired pre-publish claim or exhausted retryable record | Delivery was not attempted within the bounded retry budget | Inspect the authoritative record and repair the pre-publish failure before approved recovery | outbox recovery | ops admin | event id, attempts, claim generation | Do not classify this as broker-confirmation ambiguity or reset attempts in place | platform |
 | `OUTBOX_PROJECTION_MISMATCH` | projection mismatch count > 0 | Alert cache disagrees with outbox source | Run bounded recovery | `POST /api/v1/outbox/recovery/run` | ops admin | outbox record | Outbox record remains source of truth | engineering |
@@ -131,7 +152,8 @@ data passes after its removal, and both runs finish with operational headroom in
 
 ## Runtime Configuration
 
-Transactional outbox runtime tuning uses `OUTBOX_LEASE_DURATION`, `OUTBOX_MAX_ATTEMPTS`,
+Transactional and fraud-alert outbox runtime controls use `OUTBOX_PUBLISHER_ENABLED`, `OUTBOX_RECOVERY_ENABLED`,
+`OUTBOX_LEASE_DURATION`, `OUTBOX_MAX_ATTEMPTS`,
 `OUTBOX_STALE_THRESHOLD`, `OUTBOX_PUBLISHER_DELAY_MS`, and
 `OUTBOX_RECOVERY_STALE_PROCESSING_THRESHOLD`; startup scan time is bounded by
 `OUTBOX_PREFLIGHT_STARTUP_VALIDATION_BUDGET`. These map to the canonical `app.outbox.*` namespace. Object-store audit

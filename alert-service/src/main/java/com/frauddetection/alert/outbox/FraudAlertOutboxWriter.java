@@ -37,6 +37,7 @@ public class FraudAlertOutboxWriter implements FraudAlertEventPublisher {
         record.setTransactionId(event.transactionId());
         record.setPayload(event);
         record.setStatus(FraudAlertOutboxStatus.PENDING);
+        record.setRevision(0L);
         record.setCreatedAt(now);
         record.setUpdatedAt(now);
         try {

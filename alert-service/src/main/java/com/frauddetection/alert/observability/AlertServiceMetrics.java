@@ -10,6 +10,7 @@ import com.frauddetection.alert.engineintelligence.observability.EngineIntellige
 import com.frauddetection.alert.engineintelligence.observability.EngineIntelligenceProjectionMetricReason;
 import com.frauddetection.alert.engineintelligence.observability.MlPredictionEvidenceProjectionMetricReason;
 import com.frauddetection.alert.outbox.OutboxBacklogResponse;
+import com.frauddetection.alert.outbox.FraudAlertOutboxBacklogResponse;
 import com.frauddetection.alert.security.error.SecurityFailureClassifier;
 import com.frauddetection.alert.suspicious.SuspiciousTransactionStatus;
 import io.micrometer.core.instrument.Counter;
@@ -50,6 +51,12 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     private final AtomicLong outboxProjectionMismatch = new AtomicLong(0);
     private final AtomicLong outboxProjectionReconciliationPending = new AtomicLong(0);
     private final AtomicLong outboxOldestPendingAgeSeconds = new AtomicLong(0);
+    private final AtomicLong fraudAlertOutboxPending = new AtomicLong(0);
+    private final AtomicLong fraudAlertOutboxProcessing = new AtomicLong(0);
+    private final AtomicLong fraudAlertOutboxPublishAttempted = new AtomicLong(0);
+    private final AtomicLong fraudAlertOutboxConfirmationUnknown = new AtomicLong(0);
+    private final AtomicLong fraudAlertOutboxFailedTerminal = new AtomicLong(0);
+    private final AtomicLong fraudAlertOutboxOldestUnresolvedAgeSeconds = new AtomicLong(0);
     private final AtomicLong evidenceConfirmationPending = new AtomicLong(0);
     private final Map<AuditAction, AtomicInteger> evidenceGatedFinalizeEnabled = new EnumMap<>(AuditAction.class);
 
@@ -86,6 +93,12 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
                 AtomicLong::get
         ).register(meterRegistry);
         Gauge.builder("outbox_oldest_pending_age_seconds", outboxOldestPendingAgeSeconds, AtomicLong::get).register(meterRegistry);
+        Gauge.builder("fraud_alert_outbox_pending_count", fraudAlertOutboxPending, AtomicLong::get).register(meterRegistry);
+        Gauge.builder("fraud_alert_outbox_processing_count", fraudAlertOutboxProcessing, AtomicLong::get).register(meterRegistry);
+        Gauge.builder("fraud_alert_outbox_publish_attempted_count", fraudAlertOutboxPublishAttempted, AtomicLong::get).register(meterRegistry);
+        Gauge.builder("fraud_alert_outbox_confirmation_unknown_count", fraudAlertOutboxConfirmationUnknown, AtomicLong::get).register(meterRegistry);
+        Gauge.builder("fraud_alert_outbox_failed_terminal_count", fraudAlertOutboxFailedTerminal, AtomicLong::get).register(meterRegistry);
+        Gauge.builder("fraud_alert_outbox_oldest_unresolved_age_seconds", fraudAlertOutboxOldestUnresolvedAgeSeconds, AtomicLong::get).register(meterRegistry);
         Gauge.builder("evidence_confirmation_pending_count", evidenceConfirmationPending, AtomicLong::get).register(meterRegistry);
         registerEvidenceGatedFinalizeEnablementGauges();
     }
@@ -1006,6 +1019,33 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
                 .record(nonNegativeDuration(latency));
     }
 
+    public void recordFraudAlertOutboxBacklog(FraudAlertOutboxBacklogResponse response) {
+        fraudAlertOutboxPending.set(Math.max(0L, response.pendingCount()));
+        fraudAlertOutboxProcessing.set(Math.max(0L, response.processingCount()));
+        fraudAlertOutboxPublishAttempted.set(Math.max(0L, response.publishAttemptedCount()));
+        fraudAlertOutboxConfirmationUnknown.set(Math.max(0L, response.confirmationUnknownCount()));
+        fraudAlertOutboxFailedTerminal.set(Math.max(0L, response.failedTerminalCount()));
+        fraudAlertOutboxOldestUnresolvedAgeSeconds.set(
+                response.oldestUnresolvedAgeSeconds() == null
+                        ? 0L
+                        : Math.max(0L, response.oldestUnresolvedAgeSeconds())
+        );
+    }
+
+    public void recordFraudAlertOutboxPublishAttempt(String outcome) {
+        counter(
+                "fraud_alert_outbox_publish_attempt_total",
+                "outcome", normalizeFraudAlertOutboxPublishOutcome(outcome)
+        ).increment();
+    }
+
+    public void recordFraudAlertOutboxResolution(String resolution) {
+        counter(
+                "fraud_alert_outbox_resolution_total",
+                "resolution", normalizeFraudAlertOutboxResolution(resolution)
+        ).increment();
+    }
+
     public void recordMlPredictionEvidenceProjectionAttempt() {
         counter("ml_prediction_evidence_projection_attempt_total").increment();
     }
@@ -1409,6 +1449,20 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         };
     }
 
+    private String normalizeFraudAlertOutboxPublishOutcome(String outcome) {
+        return switch (outcome) {
+            case "PUBLISHED", "CONFIRMATION_UNKNOWN", "PRE_SEND_STATE_WRITE_FAILED", "PRE_SEND_TERMINAL" -> outcome;
+            default -> "UNKNOWN";
+        };
+    }
+
+    private String normalizeFraudAlertOutboxResolution(String resolution) {
+        return switch (resolution) {
+            case "PUBLISHED", "CONFIRMED_NOT_DELIVERED" -> resolution;
+            default -> "UNKNOWN";
+        };
+    }
+
     private String normalizeEvidenceConfirmationFailure(String reason) {
         return switch (reason) {
             case "OUTBOX_NOT_YET_PUBLISHED", "OUTBOX_RECORD_MISSING_AFTER_LOCAL_COMMIT", "SUCCESS_AUDIT_MISSING",
@@ -1471,7 +1525,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
 
     private String normalizeSuspiciousTransactionProjectionOutcome(String outcome) {
         return switch (outcome) {
-            case "created", "updated", "skipped", "error" -> outcome;
+            case "created", "updated", "removed", "skipped", "error" -> outcome;
             default -> "error";
         };
     }

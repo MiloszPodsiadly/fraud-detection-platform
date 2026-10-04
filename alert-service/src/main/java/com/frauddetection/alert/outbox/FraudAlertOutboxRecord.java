@@ -27,8 +27,23 @@ public class FraudAlertOutboxRecord {
     private Instant leaseExpiresAt;
     private Instant createdAt;
     private Instant updatedAt;
+    private Instant publishAttemptedAt;
     private Instant publishedAt;
+    private Instant confirmationUnknownAt;
+    private Instant terminalAt;
     private String lastError;
+    private long revision;
+    private String resolution;
+    private String resolutionIdempotencyHash;
+    private String resolutionRequestHash;
+    private String resolutionReason;
+    private String resolutionEvidenceType;
+    private String resolutionEvidenceReference;
+    private Instant resolutionEvidenceVerifiedAt;
+    private String resolutionEvidenceVerifiedBy;
+    private String resolvedBy;
+    private Instant resolvedAt;
+    private Integer resolutionPreviousAttempts;
 
     public String getEventId() { return eventId; }
     public void setEventId(String eventId) { this.eventId = eventId; }
@@ -52,8 +67,38 @@ public class FraudAlertOutboxRecord {
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+    public Instant getPublishAttemptedAt() { return publishAttemptedAt; }
+    public void setPublishAttemptedAt(Instant publishAttemptedAt) { this.publishAttemptedAt = publishAttemptedAt; }
     public Instant getPublishedAt() { return publishedAt; }
     public void setPublishedAt(Instant publishedAt) { this.publishedAt = publishedAt; }
+    public Instant getConfirmationUnknownAt() { return confirmationUnknownAt; }
+    public void setConfirmationUnknownAt(Instant confirmationUnknownAt) { this.confirmationUnknownAt = confirmationUnknownAt; }
+    public Instant getTerminalAt() { return terminalAt; }
+    public void setTerminalAt(Instant terminalAt) { this.terminalAt = terminalAt; }
     public String getLastError() { return lastError; }
     public void setLastError(String lastError) { this.lastError = lastError; }
+    public long getRevision() { return revision; }
+    public void setRevision(long revision) { this.revision = revision; }
+    public String getResolution() { return resolution; }
+    public void setResolution(String resolution) { this.resolution = resolution; }
+    public String getResolutionIdempotencyHash() { return resolutionIdempotencyHash; }
+    public void setResolutionIdempotencyHash(String resolutionIdempotencyHash) { this.resolutionIdempotencyHash = resolutionIdempotencyHash; }
+    public String getResolutionRequestHash() { return resolutionRequestHash; }
+    public void setResolutionRequestHash(String resolutionRequestHash) { this.resolutionRequestHash = resolutionRequestHash; }
+    public String getResolutionReason() { return resolutionReason; }
+    public void setResolutionReason(String resolutionReason) { this.resolutionReason = resolutionReason; }
+    public String getResolutionEvidenceType() { return resolutionEvidenceType; }
+    public void setResolutionEvidenceType(String resolutionEvidenceType) { this.resolutionEvidenceType = resolutionEvidenceType; }
+    public String getResolutionEvidenceReference() { return resolutionEvidenceReference; }
+    public void setResolutionEvidenceReference(String resolutionEvidenceReference) { this.resolutionEvidenceReference = resolutionEvidenceReference; }
+    public Instant getResolutionEvidenceVerifiedAt() { return resolutionEvidenceVerifiedAt; }
+    public void setResolutionEvidenceVerifiedAt(Instant resolutionEvidenceVerifiedAt) { this.resolutionEvidenceVerifiedAt = resolutionEvidenceVerifiedAt; }
+    public String getResolutionEvidenceVerifiedBy() { return resolutionEvidenceVerifiedBy; }
+    public void setResolutionEvidenceVerifiedBy(String resolutionEvidenceVerifiedBy) { this.resolutionEvidenceVerifiedBy = resolutionEvidenceVerifiedBy; }
+    public String getResolvedBy() { return resolvedBy; }
+    public void setResolvedBy(String resolvedBy) { this.resolvedBy = resolvedBy; }
+    public Instant getResolvedAt() { return resolvedAt; }
+    public void setResolvedAt(Instant resolvedAt) { this.resolvedAt = resolvedAt; }
+    public Integer getResolutionPreviousAttempts() { return resolutionPreviousAttempts; }
+    public void setResolutionPreviousAttempts(Integer resolutionPreviousAttempts) { this.resolutionPreviousAttempts = resolutionPreviousAttempts; }
 }
