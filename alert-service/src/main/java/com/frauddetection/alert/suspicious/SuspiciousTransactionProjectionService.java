@@ -52,21 +52,20 @@ public class SuspiciousTransactionProjectionService {
     }
 
     public Optional<SuspiciousTransactionDocument> projectOrUpdate(TransactionScoredEvent event, String linkedAlertId) {
-        if (!isAlertWorthy(event)) {
-            metrics.recordSuspiciousTransactionProjectionSkipped("non_alert_worthy");
-            return Optional.empty();
-        }
-        if (!hasText(event.transactionId()) || !hasText(event.eventId())) {
+        if (event == null || !hasText(event.transactionId()) || !hasText(event.eventId())) {
             metrics.recordSuspiciousTransactionProjectionSkipped("missing_required_lineage");
             log.atWarn()
                     .addKeyValue("reason", "missing_required_lineage")
-                    .addKeyValue("hasTransactionId", hasText(event.transactionId()))
-                    .addKeyValue("hasSourceEventId", hasText(event.eventId()))
+                    .addKeyValue("hasTransactionId", event != null && hasText(event.transactionId()))
+                    .addKeyValue("hasSourceEventId", event != null && hasText(event.eventId()))
                     .log("Skipped suspicious transaction read-model projection.");
             return Optional.empty();
         }
 
         try {
+            if (!isAlertWorthy(event)) {
+                return removeCurrentProjection(event.transactionId());
+            }
             Instant now = clock.instant();
             Optional<SuspiciousTransactionDocument> existing =
                     repository.findByTransactionId(event.transactionId());
@@ -86,6 +85,18 @@ public class SuspiciousTransactionProjectionService {
                     .log("Suspicious transaction read-model projection failed.");
             throw new SuspiciousTransactionProjectionException(exception);
         }
+    }
+
+    private Optional<SuspiciousTransactionDocument> removeCurrentProjection(String transactionId) {
+        Optional<SuspiciousTransactionDocument> existing = repository.findByTransactionId(transactionId);
+        if (existing.isEmpty()) {
+            metrics.recordSuspiciousTransactionProjectionSkipped("non_alert_worthy");
+            return Optional.empty();
+        }
+        SuspiciousTransactionDocument document = existing.orElseThrow();
+        repository.delete(document);
+        metrics.recordSuspiciousTransactionProjection("removed", document.getStatus());
+        return Optional.empty();
     }
 
     private SuspiciousTransactionDocument newDocument(TransactionScoredEvent event, Instant now) {

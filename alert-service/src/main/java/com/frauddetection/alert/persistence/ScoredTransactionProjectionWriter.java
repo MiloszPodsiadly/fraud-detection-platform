@@ -12,8 +12,6 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import java.time.Instant;
-
 import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.Outcome.APPLIED_NEW;
 import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.Outcome.APPLIED_NEWER;
 import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.Outcome.CONFLICT_REJECTED;
@@ -46,7 +44,8 @@ public class ScoredTransactionProjectionWriter {
                     ScoredTransactionDocument.class
             );
             if (current != null) {
-                if (isHistoricalUnknown(current)) {
+                ScoringOccurrenceOwnership currentOccurrence = persistedOwnership(current);
+                if (currentOccurrence.state() == ScoringOccurrenceOwnership.State.UNKNOWN_OCCURRENCE) {
                     if (updated(replaceHistoricalUnknown(candidate))) {
                         return new ScoringOccurrenceAdmissionResult(APPLIED_NEWER, HISTORICAL_OCCURRENCE_CLAIMED);
                     }
@@ -166,14 +165,6 @@ public class ScoredTransactionProjectionWriter {
         return null;
     }
 
-    private boolean isHistoricalUnknown(ScoredTransactionDocument current) {
-        return current.getSourceEventId() == null
-                && current.getSourceEventCreatedAt() == null
-                && current.getSourceEventCreatedAtEpochSecond() == null
-                && current.getSourceEventCreatedAtNano() == null
-                && current.getSourceEventFingerprint() == null;
-    }
-
     private int compareOccurrence(ScoredTransactionDocument candidate, ScoredTransactionDocument current) {
         if (current.getSourceEventCreatedAtEpochSecond() == null
                 || current.getSourceEventCreatedAtNano() == null
@@ -203,31 +194,36 @@ public class ScoredTransactionProjectionWriter {
     private void validate(ScoredTransactionDocument candidate) {
         if (candidate == null
                 || candidate.getTransactionId() == null
-                || candidate.getTransactionId().isBlank()
-                || candidate.getSourceEventId() == null
-                || candidate.getSourceEventId().isBlank()
-                || candidate.getSourceEventCreatedAt() == null
-                || candidate.getSourceEventCreatedAtEpochSecond() == null
-                || candidate.getSourceEventCreatedAtNano() == null
-                || candidate.getSourceEventFingerprint() == null
-                || !candidate.getSourceEventFingerprint().matches("[0-9a-f]{64}")) {
-            throw new IllegalArgumentException("AUTHORITATIVE_SCORING_OCCURRENCE_REQUIRED");
-        }
-        Instant sourceEventCreatedAt;
-        try {
-            sourceEventCreatedAt = Instant.parse(candidate.getSourceEventCreatedAt());
-        } catch (RuntimeException exception) {
+                || candidate.getTransactionId().isBlank()) {
             throw new IllegalArgumentException("AUTHORITATIVE_SCORING_OCCURRENCE_REQUIRED");
         }
         try {
-            ScoringOccurrenceOwnership.authoritative(candidate.getSourceEventId(), sourceEventCreatedAt);
+            ScoringOccurrenceOwnership occurrence = ScoringOccurrenceOwnership.fromPersistedIdentity(
+                    candidate.getSourceEventId(),
+                    candidate.getSourceEventCreatedAt(),
+                    candidate.getSourceEventCreatedAtEpochSecond(),
+                    candidate.getSourceEventCreatedAtNano(),
+                    candidate.getSourceEventFingerprint()
+            );
+            if (occurrence.state() != ScoringOccurrenceOwnership.State.AUTHORITATIVE) {
+                throw new IllegalArgumentException("AUTHORITATIVE_SCORING_OCCURRENCE_REQUIRED");
+            }
         } catch (IllegalArgumentException exception) {
             throw new IllegalArgumentException("AUTHORITATIVE_SCORING_OCCURRENCE_REQUIRED");
         }
-        if (sourceEventCreatedAt.getEpochSecond() != candidate.getSourceEventCreatedAtEpochSecond()
-                || sourceEventCreatedAt.getNano() != candidate.getSourceEventCreatedAtNano()
-                || !sourceEventCreatedAt.toString().equals(candidate.getSourceEventCreatedAt())) {
-            throw new IllegalArgumentException("AUTHORITATIVE_SCORING_OCCURRENCE_REQUIRED");
+    }
+
+    private ScoringOccurrenceOwnership persistedOwnership(ScoredTransactionDocument document) {
+        try {
+            return ScoringOccurrenceOwnership.fromPersistedIdentity(
+                    document.getSourceEventId(),
+                    document.getSourceEventCreatedAt(),
+                    document.getSourceEventCreatedAtEpochSecond(),
+                    document.getSourceEventCreatedAtNano(),
+                    document.getSourceEventFingerprint()
+            );
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalStateException("SCORING_OCCURRENCE_IDENTITY_INVALID", exception);
         }
     }
 }

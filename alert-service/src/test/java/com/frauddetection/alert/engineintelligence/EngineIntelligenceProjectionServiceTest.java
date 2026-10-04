@@ -3,7 +3,10 @@ package com.frauddetection.alert.engineintelligence;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.persistence.ScoredTransactionDocument;
+import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -39,10 +42,12 @@ class EngineIntelligenceProjectionServiceTest {
     );
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private final AlertServiceMetrics metrics = new AlertServiceMetrics(meterRegistry);
+    private final ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
     private final EngineIntelligenceProjectionService service = new EngineIntelligenceProjectionService(
             repository,
             mapper,
-            metrics
+            metrics,
+            scoredTransactionRepository
     );
 
     @Test
@@ -275,6 +280,61 @@ class EngineIntelligenceProjectionServiceTest {
     }
 
     @Test
+    void currentOccurrenceProjectionPersistsPrivateOccurrenceOwner() {
+        var event = EngineIntelligenceProjectionTestFixtures.event(
+                EngineIntelligenceProjectionTestFixtures.minimalSummary()
+        );
+        when(scoredTransactionRepository.findById(event.transactionId()))
+                .thenReturn(Optional.of(new ScoredTransactionDocumentMapper().toDocument(event)));
+        when(repository.findById(event.transactionId())).thenReturn(Optional.empty());
+
+        EngineIntelligenceProjection projection = service.projectCurrentOccurrence(event)
+                .projection()
+                .orElseThrow();
+
+        assertThat(projection.getSourceEventId()).isEqualTo(event.eventId());
+        verify(repository).save(projection);
+    }
+
+    @Test
+    void staleOccurrenceCannotOverwriteCurrentDiagnostics() {
+        var event = EngineIntelligenceProjectionTestFixtures.event(
+                EngineIntelligenceProjectionTestFixtures.minimalSummary()
+        );
+        Instant newerTime = event.createdAt().plusSeconds(1);
+        ScoredTransactionDocument current = new ScoredTransactionDocument();
+        current.setTransactionId(event.transactionId());
+        current.setSourceEventId("event-newer");
+        current.setSourceEventCreatedAt(newerTime.toString());
+        current.setSourceEventCreatedAtEpochSecond(newerTime.getEpochSecond());
+        current.setSourceEventCreatedAtNano(newerTime.getNano());
+        current.setSourceEventFingerprint("a".repeat(64));
+        when(scoredTransactionRepository.findById(event.transactionId())).thenReturn(Optional.of(current));
+
+        EngineIntelligenceProjectionResult result = service.projectCurrentOccurrence(event);
+
+        assertThat(result.omissionReason())
+                .contains(EngineIntelligenceProjectionOmissionReason.SCORING_OCCURRENCE_NOT_CURRENT);
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void currentOccurrenceStoreFailureEscapesForIndependentConsumerRecovery() {
+        var event = EngineIntelligenceProjectionTestFixtures.event(
+                EngineIntelligenceProjectionTestFixtures.minimalSummary()
+        );
+        when(scoredTransactionRepository.findById(event.transactionId()))
+                .thenReturn(Optional.of(new ScoredTransactionDocumentMapper().toDocument(event)));
+        when(repository.findById(event.transactionId())).thenReturn(Optional.empty());
+        when(repository.save(any())).thenThrow(new IllegalStateException("raw store failure"));
+
+        assertThat(catchThrowableOfType(
+                () -> service.projectCurrentOccurrence(event),
+                EngineIntelligenceProjectionService.ProjectionStoreUnavailableException.class
+        )).hasMessage("ENGINE_INTELLIGENCE_PROJECTION_STORE_UNAVAILABLE");
+    }
+
+    @Test
     void storeUnavailableRecordsProjectionLatencyExactlyOnce() {
         when(repository.findById("txn-fdp95-001")).thenReturn(Optional.empty());
         when(repository.save(any(EngineIntelligenceProjection.class)))
@@ -333,6 +393,7 @@ class EngineIntelligenceProjectionServiceTest {
                         Clock.fixed(instant, ZoneOffset.UTC)
                 ),
                 metrics,
+                scoredTransactionRepository,
                 Clock.fixed(instant, ZoneOffset.UTC)
         );
     }

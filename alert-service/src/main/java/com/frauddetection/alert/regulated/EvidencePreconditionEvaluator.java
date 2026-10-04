@@ -2,6 +2,7 @@ package com.frauddetection.alert.regulated;
 
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.persistence.AlertDocument;
+import com.frauddetection.alert.service.AnalystDecisionEvidencePolicy;
 import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditResourceType;
@@ -152,7 +153,7 @@ public class EvidencePreconditionEvaluator {
         if (alert == null) {
             return EvidencePreconditionResult.failedBusinessValidation(BUSINESS_VALIDATION_FAILED, checked, skipped);
         }
-        if (alert.getAnalystDecision() != null || alert.getDecidedAt() != null) {
+        if (AnalystDecisionEvidencePolicy.ownsHistoricalEvidence(alert)) {
             return EvidencePreconditionResult.failedBusinessValidation(BUSINESS_VALIDATION_FAILED, checked, skipped);
         }
         return null;

@@ -48,6 +48,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -88,7 +89,8 @@ class ScoredTransactionControllerDetailTest {
     @Test
     void detailEndpointReturnsScoredTransactionWithEngineIntelligence() throws Exception {
         when(transactionMonitoringUseCase.getScoredTransaction("txn-1")).thenReturn(scoredTransaction("txn-1"));
-        when(engineIntelligenceReadService.read("txn-1")).thenReturn(projectedReadModel("txn-1"));
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
+                .thenReturn(projectedReadModel("txn-1"));
 
         String response = mockMvc.perform(get("/api/v1/transactions/scored/txn-1"))
                 .andExpect(status().isOk())
@@ -125,7 +127,8 @@ class ScoredTransactionControllerDetailTest {
     void detailEndpointReturnsAbsentAnalystRecommendationForOldTransactionProjection() throws Exception {
         when(transactionMonitoringUseCase.getScoredTransaction("txn-old"))
                 .thenReturn(scoredTransactionWithoutRecommendation("txn-old"));
-        when(engineIntelligenceReadService.read("txn-old")).thenReturn(EngineIntelligenceReadModel.notProjected("txn-old"));
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-old"), any()))
+                .thenReturn(EngineIntelligenceReadModel.notProjected("txn-old"));
 
         String response = mockMvc.perform(get("/api/v1/transactions/scored/txn-old"))
                 .andExpect(status().isOk())
@@ -155,7 +158,8 @@ class ScoredTransactionControllerDetailTest {
     @Test
     void detailEndpointReturnsAbsentEngineIntelligenceForOldTransaction() throws Exception {
         when(transactionMonitoringUseCase.getScoredTransaction("txn-old")).thenReturn(scoredTransaction("txn-old"));
-        when(engineIntelligenceReadService.read("txn-old")).thenReturn(EngineIntelligenceReadModel.notProjected("txn-old"));
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-old"), any()))
+                .thenReturn(EngineIntelligenceReadModel.notProjected("txn-old"));
 
         String response = mockMvc.perform(get("/api/v1/transactions/scored/txn-old"))
                 .andExpect(status().isOk())
@@ -186,7 +190,7 @@ class ScoredTransactionControllerDetailTest {
     @Test
     void detailEndpointKeepsTransactionReadableWhenEngineIntelligenceProjectionIsUnavailable() throws Exception {
         when(transactionMonitoringUseCase.getScoredTransaction("txn-store-failure")).thenReturn(scoredTransaction("txn-store-failure"));
-        when(engineIntelligenceReadService.read("txn-store-failure"))
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-store-failure"), any()))
                 .thenThrow(new EngineIntelligenceProjectionReadUnavailableException());
 
         String response = mockMvc.perform(get("/api/v1/transactions/scored/txn-store-failure"))

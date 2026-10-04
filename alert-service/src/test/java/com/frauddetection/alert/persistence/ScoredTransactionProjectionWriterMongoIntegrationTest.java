@@ -338,6 +338,35 @@ class ScoredTransactionProjectionWriterMongoIntegrationTest {
     }
 
     @Test
+    void partiallyCorruptedCurrentOccurrenceCannotBeClaimedOrSilentlyRepaired() {
+        ScoredTransactionDocument corrupted = mapper.toDocument(event(
+                "txn-corrupted-current",
+                "event-corrupted",
+                BASE_TIME,
+                0.12d,
+                false,
+                "model-old"
+        ));
+        corrupted.setSourceEventFingerprint(null);
+        mongoTemplate.insert(corrupted);
+
+        ScoredTransactionDocument replacement = mapper.toDocument(event(
+                "txn-corrupted-current",
+                "event-newer",
+                BASE_TIME.plusSeconds(1),
+                0.91d,
+                true,
+                "model-new"
+        ));
+
+        assertThatThrownBy(() -> writer.write(replacement))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("SCORING_OCCURRENCE_IDENTITY_INVALID");
+        assertThat(stored("txn-corrupted-current").getSourceEventId()).isEqualTo("event-corrupted");
+        assertThat(stored("txn-corrupted-current").getSourceEventFingerprint()).isNull();
+    }
+
+    @Test
     void invalidOccurrenceIdentityIsRejectedBeforePersistence() {
         ScoredTransactionDocument candidate = mapper.toDocument(event(
                 "txn-invalid-identity",

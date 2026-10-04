@@ -84,7 +84,8 @@ class FraudFeedbackServiceTest {
         when(transactionRunner.runLocalCommit(any())).thenAnswer(invocation -> invocation.<Supplier<?>>getArgument(0).get());
         when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.OFF);
         when(transactionMonitoringUseCase.getScoredTransaction("txn-1")).thenReturn(scoredTransaction());
-        when(engineIntelligenceReadService.read("txn-1")).thenReturn(projectedEngineIntelligence());
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
+                .thenReturn(projectedEngineIntelligence());
         when(currentAnalystUser.get()).thenReturn(Optional.of(new com.frauddetection.alert.security.principal.AnalystPrincipal(
                 "analyst-1",
                 java.util.Set.of(),
@@ -144,7 +145,8 @@ class FraudFeedbackServiceTest {
 
     @Test
     void snapshotsMlIdentityFromPersistedEngineIntelligenceProjection() {
-        when(engineIntelligenceReadService.read("txn-1")).thenReturn(projectedEngineIntelligenceWithAvailableMl(
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
+                .thenReturn(projectedEngineIntelligenceWithAvailableMl(
                 "python-logistic-fraud-model",
                 "model-X",
                 "feature-contract-v2"
@@ -175,7 +177,8 @@ class FraudFeedbackServiceTest {
 
     @Test
     void missingHistoricalMlEngineDoesNotBackfillLineage() {
-        when(engineIntelligenceReadService.read("txn-1")).thenReturn(projectedEngineIntelligenceWithoutMl());
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
+                .thenReturn(projectedEngineIntelligenceWithoutMl());
 
         FraudFeedbackResponse response = service.create("txn-1", request());
 
@@ -472,7 +475,8 @@ class FraudFeedbackServiceTest {
 
     @Test
     void projectionReadFailureIsStoredAsUnavailable() {
-        when(engineIntelligenceReadService.read("txn-1")).thenThrow(new EngineIntelligenceProjectionReadUnavailableException());
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
+                .thenThrow(new EngineIntelligenceProjectionReadUnavailableException());
 
         FraudFeedbackResponse response = service.create("txn-1", request());
 
@@ -484,7 +488,7 @@ class FraudFeedbackServiceTest {
 
     @Test
     void unexpectedEngineIntelligenceReadFailureIsStoredAsUnavailableAndFeedbackStillPersists() {
-        when(engineIntelligenceReadService.read("txn-1"))
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
                 .thenThrow(new IllegalStateException("rawMlRequest Customer confirmed fraud"));
 
         FraudFeedbackResponse response = service.create("txn-1", request());

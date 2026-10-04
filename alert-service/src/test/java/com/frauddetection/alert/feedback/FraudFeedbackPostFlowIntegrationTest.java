@@ -119,7 +119,8 @@ class FraudFeedbackPostFlowIntegrationTest {
         when(transactionRunner.runLocalCommit(any())).thenAnswer(invocation -> invocation.<Supplier<?>>getArgument(0).get());
         when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.OFF);
         when(transactionMonitoringUseCase.getScoredTransaction("txn-1")).thenReturn(scoredTransaction());
-        when(engineIntelligenceReadService.read("txn-1")).thenReturn(projectedEngineIntelligence());
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
+                .thenReturn(projectedEngineIntelligence());
         when(currentAnalystUser.get()).thenReturn(Optional.of(new AnalystPrincipal(
                 "analyst-1",
                 Set.of(),
@@ -252,7 +253,8 @@ class FraudFeedbackPostFlowIntegrationTest {
 
     @Test
     void postEngineIntelligenceSnapshotFailureStillPersistsFeedbackAndOutbox() throws Exception {
-        when(engineIntelligenceReadService.read("txn-1")).thenThrow(new EngineIntelligenceProjectionReadUnavailableException());
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
+                .thenThrow(new EngineIntelligenceProjectionReadUnavailableException());
 
         mockMvc.perform(post("/api/v1/transactions/scored/txn-1/feedback")
                         .with(userWith(AnalystAuthority.FRAUD_FEEDBACK_WRITE))

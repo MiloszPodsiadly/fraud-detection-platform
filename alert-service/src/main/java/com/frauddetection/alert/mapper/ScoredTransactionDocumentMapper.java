@@ -62,35 +62,15 @@ public class ScoredTransactionDocumentMapper {
     }
 
     private ScoringOccurrenceOwnership occurrence(ScoredTransactionDocument document) {
-        boolean hasNoOccurrenceIdentity = document.getSourceEventId() == null
-                && document.getSourceEventCreatedAt() == null
-                && document.getSourceEventCreatedAtEpochSecond() == null
-                && document.getSourceEventCreatedAtNano() == null
-                && document.getSourceEventFingerprint() == null;
-        if (hasNoOccurrenceIdentity) {
-            return ScoringOccurrenceOwnership.unknown();
-        }
         try {
-            if (document.getSourceEventId() == null
-                    || document.getSourceEventCreatedAt() == null
-                    || document.getSourceEventCreatedAtEpochSecond() == null
-                    || document.getSourceEventCreatedAtNano() == null) {
-                throw new IllegalStateException("SCORING_OCCURRENCE_IDENTITY_INVALID");
-            }
-            Instant sourceEventCreatedAt = Instant.ofEpochSecond(
-                    document.getSourceEventCreatedAtEpochSecond(),
-                    document.getSourceEventCreatedAtNano()
-            );
-            if (!sourceEventCreatedAt.equals(Instant.parse(document.getSourceEventCreatedAt()))) {
-                throw new IllegalStateException("SCORING_OCCURRENCE_IDENTITY_INVALID");
-            }
-            return ScoringOccurrenceOwnership.authoritative(
+            return ScoringOccurrenceOwnership.fromPersistedIdentity(
                     document.getSourceEventId(),
-                    sourceEventCreatedAt
+                    document.getSourceEventCreatedAt(),
+                    document.getSourceEventCreatedAtEpochSecond(),
+                    document.getSourceEventCreatedAtNano(),
+                    document.getSourceEventFingerprint()
             );
-        } catch (IllegalStateException exception) {
-            throw exception;
-        } catch (RuntimeException exception) {
+        } catch (IllegalArgumentException exception) {
             throw new IllegalStateException("SCORING_OCCURRENCE_IDENTITY_INVALID", exception);
         }
     }

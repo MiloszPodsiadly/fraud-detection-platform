@@ -2,7 +2,6 @@ package com.frauddetection.alert.service;
 
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
-import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionService;
 import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
 import com.frauddetection.alert.persistence.ScoredTransactionProjectionWriter;
@@ -33,7 +32,6 @@ class TransactionMonitoringServiceDetailLookupTest {
             mapper,
             mongoTemplate,
             new ScoredTransactionSearchPolicy(),
-            mock(EngineIntelligenceProjectionService.class),
             mock(ScoredTransactionProjectionWriter.class)
     );
 

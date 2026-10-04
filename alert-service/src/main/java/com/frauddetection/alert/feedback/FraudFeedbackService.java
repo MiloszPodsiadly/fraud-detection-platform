@@ -152,7 +152,7 @@ public class FraudFeedbackService {
         record.setAlertRecommended(transaction.alertRecommended());
         record.setScoredAt(transaction.scoredAt());
         record.setTransactionTimestamp(transaction.transactionTimestamp());
-        snapshotEngineIntelligence(record, transaction.transactionId());
+        snapshotEngineIntelligence(record, transaction);
         snapshotAnalystRecommendation(record, transaction.analystRecommendation());
 
         try {
@@ -170,9 +170,12 @@ public class FraudFeedbackService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "FRAUD_FEEDBACK_NOT_FOUND"));
     }
 
-    private void snapshotEngineIntelligence(FraudFeedbackRecord record, String transactionId) {
+    private void snapshotEngineIntelligence(FraudFeedbackRecord record, ScoredTransaction transaction) {
         try {
-            EngineIntelligenceReadModel readModel = engineIntelligenceReadService.read(transactionId);
+            EngineIntelligenceReadModel readModel = engineIntelligenceReadService.readForOccurrence(
+                    transaction.transactionId(),
+                    transaction.scoringOccurrenceOwnership()
+            );
             EngineIntelligenceResponse response = engineIntelligenceResponseMapper.toResponse(readModel);
             record.setEngineIntelligenceStatus(response.status());
             if (response.comparison() != null) {

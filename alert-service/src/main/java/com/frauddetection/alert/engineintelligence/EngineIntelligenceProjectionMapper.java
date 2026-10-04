@@ -25,6 +25,7 @@ public class EngineIntelligenceProjectionMapper {
 
     public EngineIntelligenceProjectionResult map(
             String transactionId,
+            String sourceEventId,
             EngineIntelligenceSummary engineIntelligence,
             Instant existingCreatedAt
     ) {
@@ -40,6 +41,7 @@ public class EngineIntelligenceProjectionMapper {
             Instant now = clock.instant();
             return EngineIntelligenceProjectionResult.projected(new EngineIntelligenceProjection(
                     safeTransactionId,
+                    sourceEventId,
                     safe.contractVersion(),
                     safe.generatedAt(),
                     safe.comparison().comparisonType(),
@@ -82,5 +84,13 @@ public class EngineIntelligenceProjectionMapper {
                     EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_PROJECTION_FAILED
             );
         }
+    }
+
+    public EngineIntelligenceProjectionResult map(
+            String transactionId,
+            EngineIntelligenceSummary engineIntelligence,
+            Instant existingCreatedAt
+    ) {
+        return map(transactionId, null, engineIntelligence, existingCreatedAt);
     }
 }

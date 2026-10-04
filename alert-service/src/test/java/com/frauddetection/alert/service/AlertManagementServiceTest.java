@@ -236,6 +236,57 @@ class AlertManagementServiceTest {
     }
 
     @Test
+    void finalizedDecisionKeepsItsOriginalScoringEvidenceDuringReconciliation() {
+        AlertRepository repository = mock(AlertRepository.class);
+        FraudAlertEventPublisher alertPublisher = mock(FraudAlertEventPublisher.class);
+        FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        SubmitDecisionRegulatedMutationService submitDecisionService = mock(SubmitDecisionRegulatedMutationService.class);
+        SuspiciousTransactionProjectionService suspiciousProjection = mock(SuspiciousTransactionProjectionService.class);
+        AlertEvidenceSnapshotProjectionService evidenceProjection = mock(AlertEvidenceSnapshotProjectionService.class);
+        var service = service(
+                repository,
+                alertPublisher,
+                fraudCaseManagementService,
+                metrics,
+                submitDecisionService,
+                suspiciousProjection,
+                evidenceProjection
+        );
+        var occurrenceB = TransactionFixtures.scoredTransaction()
+                .withFraudScore(0.97d)
+                .build();
+        AlertDocument decidedForOccurrenceA = new AlertDocument();
+        decidedForOccurrenceA.setAlertId("alert-existing");
+        decidedForOccurrenceA.setTransactionId(occurrenceB.transactionId());
+        decidedForOccurrenceA.setSourceEventId("event-a");
+        decidedForOccurrenceA.setFraudScore(0.81d);
+        decidedForOccurrenceA.setRiskLevel(com.frauddetection.common.events.enums.RiskLevel.HIGH);
+        decidedForOccurrenceA.setReasonCodes(List.of("COUNTRY_MISMATCH"));
+        decidedForOccurrenceA.setScoreDetails(Map.of("modelVersion", "model-a"));
+        decidedForOccurrenceA.setFeatureSnapshot(Map.of("countryMismatch", true));
+        decidedForOccurrenceA.setEvidenceSnapshot(List.of(errorDiagnostic()));
+        decidedForOccurrenceA.setAnalystDecision(AnalystDecision.CONFIRMED_FRAUD);
+        decidedForOccurrenceA.setDecidedAt(Instant.parse("2026-05-18T10:02:00Z"));
+        when(repository.findByTransactionId(occurrenceB.transactionId()))
+                .thenReturn(java.util.Optional.of(decidedForOccurrenceA));
+
+        service.handleScoredTransaction(occurrenceB);
+
+        assertThat(decidedForOccurrenceA.getSourceEventId()).isEqualTo("event-a");
+        assertThat(decidedForOccurrenceA.getFraudScore()).isEqualTo(0.81d);
+        assertThat(decidedForOccurrenceA.getReasonCodes()).containsExactly("COUNTRY_MISMATCH");
+        assertThat(decidedForOccurrenceA.getScoreDetails()).containsEntry("modelVersion", "model-a");
+        assertThat(decidedForOccurrenceA.getFeatureSnapshot()).containsEntry("countryMismatch", true);
+        assertThat(decidedForOccurrenceA.getEvidenceSnapshot()).containsExactly(errorDiagnostic());
+        assertThat(decidedForOccurrenceA.getAnalystDecision()).isEqualTo(AnalystDecision.CONFIRMED_FRAUD);
+        verify(repository, never()).save(decidedForOccurrenceA);
+        verify(evidenceProjection, never()).projectOrDiagnostic(any());
+        verify(suspiciousProjection).projectOrUpdate(occurrenceB, "alert-existing");
+        verify(alertPublisher, never()).publish(any());
+    }
+
+    @Test
     void existingAlertReconciliationFailurePropagatesForTransactionalRedelivery() {
         AlertRepository repository = mock(AlertRepository.class);
         FraudAlertEventPublisher alertPublisher = mock(FraudAlertEventPublisher.class);
@@ -382,6 +433,29 @@ class AlertManagementServiceTest {
                         new AlertEvidenceSnapshotProperties(null),
                         metrics
                 )
+        );
+    }
+
+    private AlertManagementService service(
+            AlertRepository repository,
+            FraudAlertEventPublisher alertPublisher,
+            FraudCaseManagementService fraudCaseManagementService,
+            AlertServiceMetrics metrics,
+            SubmitDecisionRegulatedMutationService submitDecisionService,
+            SuspiciousTransactionProjectionService suspiciousProjection,
+            AlertEvidenceSnapshotProjectionService projectionService
+    ) {
+        return new AlertManagementService(
+                repository,
+                new AlertDocumentMapper(),
+                new FraudAlertEventMapper(),
+                new AlertCaseFactory(),
+                projectionService,
+                alertPublisher,
+                fraudCaseManagementService,
+                suspiciousProjection,
+                metrics,
+                submitDecisionService
         );
     }
 

@@ -103,6 +103,14 @@ public class AlertManagementService implements AlertManagementUseCase {
     }
 
     private void reconcileCurrentAlert(AlertDocument existing, TransactionScoredEvent event) {
+        if (AnalystDecisionEvidencePolicy.ownsHistoricalEvidence(existing)) {
+            log.atInfo()
+                    .addKeyValue("alertId", existing.getAlertId())
+                    .addKeyValue("transactionId", existing.getTransactionId())
+                    .addKeyValue("sourceEventId", existing.getSourceEventId())
+                    .log("Preserved finalized analyst decision evidence during scoring reconciliation.");
+            return;
+        }
         existing.setSourceEventId(event.eventId());
         existing.setCustomerId(event.customerId());
         existing.setCorrelationId(event.correlationId());

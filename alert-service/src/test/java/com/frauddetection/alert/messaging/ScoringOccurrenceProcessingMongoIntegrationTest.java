@@ -84,6 +84,7 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -95,6 +96,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 @Testcontainers
@@ -110,10 +112,12 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
     private MongoTemplate mongoTemplate;
     private TransactionTemplate transactionTemplate;
     private TransactionMonitoringService monitoringService;
+    private EngineIntelligenceProjectionService engineIntelligenceProjectionService;
     private AlertManagementService alertManagementService;
     private TransactionScoredEventListener listener;
     private MlPredictionEvidenceEventListener evidenceListener;
     private MlPredictionEvidenceProjectionRepository evidenceRepository;
+    private ScoredTransactionRepository scoredTransactionRepository;
     private EngineIntelligenceReadService engineIntelligenceReadService;
 
     @BeforeEach
@@ -127,7 +131,7 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
         createCurrentProjectionIndexes();
 
         MongoRepositoryFactory repositories = new MongoRepositoryFactory(mongoTemplate);
-        ScoredTransactionRepository scoredTransactions = repositories.getRepository(ScoredTransactionRepository.class);
+        scoredTransactionRepository = repositories.getRepository(ScoredTransactionRepository.class);
         EngineIntelligenceProjectionRepository engineIntelligence =
                 repositories.getRepository(EngineIntelligenceProjectionRepository.class);
         evidenceRepository = repositories.getRepository(MlPredictionEvidenceProjectionRepository.class);
@@ -138,20 +142,21 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
         AlertServiceMetrics metrics = new AlertServiceMetrics(new SimpleMeterRegistry());
 
         monitoringService = new TransactionMonitoringService(
-                scoredTransactions,
+                scoredTransactionRepository,
                 new ScoredTransactionDocumentMapper(),
                 mongoTemplate,
                 new ScoredTransactionSearchPolicy(),
-                new EngineIntelligenceProjectionService(
-                        engineIntelligence,
-                        new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy()),
-                        metrics
-                ),
                 new ScoredTransactionProjectionWriter(mongoTemplate)
+        );
+        engineIntelligenceProjectionService = new EngineIntelligenceProjectionService(
+                engineIntelligence,
+                new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy()),
+                metrics,
+                scoredTransactionRepository
         );
         FraudCaseManagementService fraudCaseManagement = new FraudCaseManagementService(
                 fraudCases,
-                scoredTransactions,
+                scoredTransactionRepository,
                 mock(AnalystActorResolver.class),
                 new FraudCaseUpdateMutationHandler(fraudCases, metrics),
                 mock(RegulatedMutationCoordinator.class),
@@ -194,7 +199,7 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
                 metrics
         ));
         engineIntelligenceReadService = new EngineIntelligenceReadService(
-                scoredTransactions,
+                scoredTransactionRepository,
                 engineIntelligence,
                 new EngineIntelligenceReadModelMapper()
         );
@@ -239,6 +244,227 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
         assertCurrentOccurrence("event-b", 0.96d, "model-b");
         assertHistoricalEvidence(earlier, newer);
         assertExactlyOneBusinessEffect();
+    }
+
+    @Test
+    void newerLowOccurrenceRemovesCurrentSuspiciousProjectionAndPreservesHistoricalWorkflow() {
+        TransactionScoredEvent earlierHigh = event("event-a", BASE_TIME, 0.81d, "model-a");
+        TransactionScoredEvent newerLow = event(
+                "event-b",
+                BASE_TIME.plusSeconds(1),
+                0.18d,
+                "model-b",
+                RiskLevel.LOW,
+                false,
+                null
+        );
+
+        process(earlierHigh);
+        AlertDocument historicalAlert = mongoTemplate.findOne(new Query(), AlertDocument.class);
+        FraudCaseDocument historicalCase = mongoTemplate.findOne(new Query(), FraudCaseDocument.class);
+        FraudAlertOutboxRecord historicalOutbox = mongoTemplate.findOne(new Query(), FraudAlertOutboxRecord.class);
+        assertThat(historicalAlert).isNotNull();
+        assertThat(historicalCase).isNotNull();
+        assertThat(historicalOutbox).isNotNull();
+
+        process(newerLow);
+        process(earlierHigh);
+
+        assertCurrentScoredOccurrence("event-b", RiskLevel.LOW, false);
+        assertThat(mongoTemplate.count(new Query(), SuspiciousTransactionDocument.class)).isZero();
+        assertThat(mongoTemplate.findOne(new Query(), AlertDocument.class))
+                .satisfies(alert -> {
+                    assertThat(alert).isNotNull();
+                    assertThat(alert.getAlertId()).isEqualTo(historicalAlert.getAlertId());
+                    assertThat(alert.getSourceEventId()).isEqualTo("event-a");
+                    assertThat(alert.getRiskLevel()).isEqualTo(RiskLevel.HIGH);
+                    assertThat(alert.getAnalystDecision()).isEqualTo(historicalAlert.getAnalystDecision());
+                    assertThat(alert.getDecidedAt()).isEqualTo(historicalAlert.getDecidedAt());
+                });
+        assertThat(mongoTemplate.findOne(new Query(), FraudCaseDocument.class))
+                .satisfies(fraudCase -> {
+                    assertThat(fraudCase).isNotNull();
+                    assertThat(fraudCase.getCaseId()).isEqualTo(historicalCase.getCaseId());
+                    assertThat(fraudCase.getStatus()).isEqualTo(historicalCase.getStatus());
+                    assertThat(fraudCase.getAnalystId()).isEqualTo(historicalCase.getAnalystId());
+                    assertThat(fraudCase.getClosedAt()).isEqualTo(historicalCase.getClosedAt());
+                    assertThat(fraudCase.getClosureReason()).isEqualTo(historicalCase.getClosureReason());
+                    assertThat(fraudCase.getDecidedAt()).isEqualTo(historicalCase.getDecidedAt());
+                });
+        assertThat(mongoTemplate.findOne(new Query(), FraudAlertOutboxRecord.class))
+                .satisfies(outbox -> {
+                    assertThat(outbox).isNotNull();
+                    assertThat(outbox.getEventId()).isEqualTo(historicalOutbox.getEventId());
+                    assertThat(outbox.getAlertId()).isEqualTo(historicalOutbox.getAlertId());
+                });
+        assertThat(mongoTemplate.count(new Query(), AlertDocument.class)).isEqualTo(1L);
+        assertThat(mongoTemplate.count(new Query(), FraudCaseDocument.class)).isEqualTo(1L);
+        assertThat(mongoTemplate.count(new Query(), FraudAlertOutboxRecord.class)).isEqualTo(1L);
+    }
+
+    @Test
+    void newerHighOccurrenceCreatesCurrentSuspiciousProjectionAfterLow() {
+        TransactionScoredEvent earlierLow = event(
+                "event-a", BASE_TIME, 0.18d, "model-a", RiskLevel.LOW, false, null
+        );
+        TransactionScoredEvent newerHigh = event("event-b", BASE_TIME.plusSeconds(1), 0.96d, "model-b");
+
+        process(earlierLow);
+        assertThat(mongoTemplate.count(new Query(), SuspiciousTransactionDocument.class)).isZero();
+        assertThat(mongoTemplate.count(new Query(), AlertDocument.class)).isZero();
+
+        process(newerHigh);
+
+        assertCurrentOccurrence("event-b", 0.96d, "model-b");
+        assertExactlyOneBusinessEffect();
+    }
+
+    @Test
+    void staleHighCannotRecreateProjectionRemovedByNewerLow() {
+        TransactionScoredEvent earlierHigh = event("event-a", BASE_TIME, 0.81d, "model-a");
+        TransactionScoredEvent newerLow = event(
+                "event-b", BASE_TIME.plusSeconds(1), 0.18d, "model-b", RiskLevel.LOW, false, null
+        );
+
+        process(earlierHigh);
+        process(newerLow);
+        process(earlierHigh);
+
+        assertCurrentScoredOccurrence("event-b", RiskLevel.LOW, false);
+        assertThat(mongoTemplate.count(new Query(), SuspiciousTransactionDocument.class)).isZero();
+        assertThat(mongoTemplate.count(new Query(), AlertDocument.class)).isEqualTo(1L);
+        assertThat(mongoTemplate.count(new Query(), FraudCaseDocument.class)).isEqualTo(1L);
+        assertThat(mongoTemplate.count(new Query(), FraudAlertOutboxRecord.class)).isEqualTo(1L);
+    }
+
+    @Test
+    void identicalHighReplayAfterLowDoesNotDuplicateBusinessEffects() {
+        TransactionScoredEvent earlierLow = event(
+                "event-a", BASE_TIME, 0.18d, "model-a", RiskLevel.LOW, false, null
+        );
+        TransactionScoredEvent newerHigh = event("event-b", BASE_TIME.plusSeconds(1), 0.96d, "model-b");
+
+        process(earlierLow);
+        process(newerHigh);
+        process(newerHigh);
+
+        assertCurrentOccurrence("event-b", 0.96d, "model-b");
+        assertExactlyOneBusinessEffect();
+    }
+
+    @Test
+    void identicalLowRedeliveryAfterListenerRestartKeepsProjectionAbsent() {
+        TransactionScoredEvent earlierHigh = event("event-a", BASE_TIME, 0.81d, "model-a");
+        TransactionScoredEvent newerLow = event(
+                "event-b", BASE_TIME.plusSeconds(1), 0.18d, "model-b", RiskLevel.LOW, false, null
+        );
+        process(earlierHigh);
+        process(newerLow);
+        TransactionScoredEventListener restartedListener = new TransactionScoredEventListener(
+                alertManagementService,
+                monitoringService,
+                new KafkaTopicProperties(
+                        "transactions.scored",
+                        "fraud.alerts",
+                        "fraud.decisions",
+                        "transactions.dead-letter"
+                )
+        );
+
+        transactionTemplate.executeWithoutResult(status -> restartedListener.onMessage(newerLow, null));
+
+        assertCurrentScoredOccurrence("event-b", RiskLevel.LOW, false);
+        assertThat(mongoTemplate.count(new Query(), SuspiciousTransactionDocument.class)).isZero();
+        assertThat(mongoTemplate.count(new Query(), AlertDocument.class)).isEqualTo(1L);
+        assertThat(mongoTemplate.count(new Query(), FraudAlertOutboxRecord.class)).isEqualTo(1L);
+    }
+
+    @Test
+    void newerOccurrenceWithoutDiagnosticsCannotInheritPreviousModelIdentity() {
+        TransactionScoredEvent earlier = event("event-a", BASE_TIME, 0.81d, "model-a");
+        TransactionScoredEvent newerWithoutDiagnostics = event(
+                "event-b",
+                BASE_TIME.plusSeconds(1),
+                0.42d,
+                "model-b",
+                null
+        );
+
+        process(earlier);
+        processEvidence(earlier);
+        process(newerWithoutDiagnostics);
+
+        ScoredTransactionDocument current = mongoTemplate.findById(TRANSACTION_ID, ScoredTransactionDocument.class);
+        EngineIntelligenceProjection retainedOlderProjection = mongoTemplate.findById(
+                TRANSACTION_ID,
+                EngineIntelligenceProjection.class
+        );
+        assertThat(current).isNotNull();
+        assertThat(current.getSourceEventId()).isEqualTo("event-b");
+        assertThat(retainedOlderProjection).isNotNull();
+        assertThat(retainedOlderProjection.getSourceEventId()).isEqualTo("event-a");
+        assertThat(engineIntelligenceReadService.read(TRANSACTION_ID).available()).isFalse();
+        assertHistoricalEvidence(earlier);
+    }
+
+    @Test
+    void newerOccurrenceWithInvalidDiagnosticsCannotInheritPreviousModelIdentity() {
+        TransactionScoredEvent earlier = event("event-a", BASE_TIME, 0.81d, "model-a");
+        EngineIntelligenceSummary invalidDiagnostics = spy(engineIntelligence(
+                BASE_TIME.plusSeconds(1),
+                "model-b",
+                0.42d
+        ));
+        when(invalidDiagnostics.contractVersion()).thenReturn(EngineIntelligenceSummary.CONTRACT_VERSION + 1);
+        TransactionScoredEvent newer = event(
+                "event-b",
+                BASE_TIME.plusSeconds(1),
+                0.42d,
+                "model-b",
+                invalidDiagnostics
+        );
+
+        process(earlier);
+        process(newer);
+
+        assertThat(mongoTemplate.findById(TRANSACTION_ID, ScoredTransactionDocument.class))
+                .extracting(ScoredTransactionDocument::getSourceEventId)
+                .isEqualTo("event-b");
+        assertThat(mongoTemplate.findById(TRANSACTION_ID, EngineIntelligenceProjection.class))
+                .extracting(EngineIntelligenceProjection::getSourceEventId)
+                .isEqualTo("event-a");
+        assertThat(engineIntelligenceReadService.read(TRANSACTION_ID).available()).isFalse();
+    }
+
+    @Test
+    void diagnosticWriteFailureCannotRollBackCommittedBaselineBusinessResult() {
+        TransactionScoredEvent event = event("event-b", BASE_TIME.plusSeconds(1), 0.96d, "model-b");
+        transactionTemplate.executeWithoutResult(status -> listener.onMessage(event, null));
+
+        EngineIntelligenceProjectionRepository unavailableRepository = mock(EngineIntelligenceProjectionRepository.class);
+        when(unavailableRepository.findById(TRANSACTION_ID)).thenReturn(Optional.empty());
+        when(unavailableRepository.save(any())).thenThrow(new IllegalStateException("diagnostic store unavailable"));
+        EngineIntelligenceProjectionService failingProjection = new EngineIntelligenceProjectionService(
+                unavailableRepository,
+                new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy()),
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                scoredTransactionRepository
+        );
+        EngineIntelligenceProjectionEventListener failingListener =
+                new EngineIntelligenceProjectionEventListener(failingProjection);
+
+        assertThatThrownBy(() -> failingListener.onMessage(event))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("ENGINE_INTELLIGENCE_PROJECTION_STORE_UNAVAILABLE");
+
+        assertThat(mongoTemplate.findById(TRANSACTION_ID, ScoredTransactionDocument.class))
+                .extracting(ScoredTransactionDocument::getSourceEventId)
+                .isEqualTo("event-b");
+        assertThat(mongoTemplate.count(new Query(), AlertDocument.class)).isEqualTo(1L);
+        assertThat(mongoTemplate.count(new Query(), SuspiciousTransactionDocument.class)).isEqualTo(1L);
+        assertThat(mongoTemplate.count(new Query(), FraudCaseDocument.class)).isEqualTo(1L);
+        assertThat(mongoTemplate.count(new Query(), FraudAlertOutboxRecord.class)).isEqualTo(1L);
+        assertThat(mongoTemplate.count(new Query(), EngineIntelligenceProjection.class)).isZero();
     }
 
     @Test
@@ -300,12 +526,49 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
 
             earlierResult.get(20, TimeUnit.SECONDS);
             newerResult.get(20, TimeUnit.SECONDS);
+            processEngineIntelligence(earlier);
+            processEngineIntelligence(newer);
             processEvidence(earlier);
             processEvidence(newer);
 
             assertCurrentOccurrence("event-b", 0.96d, "model-b");
             assertHistoricalEvidence(earlier, newer);
             assertExactlyOneBusinessEffect();
+        } finally {
+            resumeEarlier.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void concurrentNewerLowRemovesProjectionCreatedBySuspendedEarlierHigh() throws Exception {
+        TransactionScoredEvent earlierHigh = event("event-a", BASE_TIME, 0.81d, "model-a");
+        TransactionScoredEvent newerLow = event(
+                "event-b", BASE_TIME.plusSeconds(1), 0.18d, "model-b", RiskLevel.LOW, false, null
+        );
+        CountDownLatch earlierAdmitted = new CountDownLatch(1);
+        CountDownLatch resumeEarlier = new CountDownLatch(1);
+        CountDownLatch newerAttempted = new CountDownLatch(1);
+        TransactionScoredEventListener coordinatedListener = coordinatedListener(
+                earlierAdmitted,
+                resumeEarlier,
+                newerAttempted
+        );
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> earlierResult = executor.submit(() -> processWithTransientRetry(earlierHigh, coordinatedListener));
+            assertThat(earlierAdmitted.await(10, TimeUnit.SECONDS)).isTrue();
+            Future<?> newerResult = executor.submit(() -> processWithTransientRetry(newerLow, coordinatedListener));
+            assertThat(newerAttempted.await(10, TimeUnit.SECONDS)).isTrue();
+            resumeEarlier.countDown();
+
+            earlierResult.get(20, TimeUnit.SECONDS);
+            newerResult.get(20, TimeUnit.SECONDS);
+
+            assertCurrentScoredOccurrence("event-b", RiskLevel.LOW, false);
+            assertThat(mongoTemplate.count(new Query(), SuspiciousTransactionDocument.class)).isZero();
+            assertThat(mongoTemplate.count(new Query(), AlertDocument.class)).isEqualTo(1L);
+            assertThat(mongoTemplate.count(new Query(), FraudAlertOutboxRecord.class)).isEqualTo(1L);
         } finally {
             resumeEarlier.countDown();
             executor.shutdownNow();
@@ -344,6 +607,13 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
 
     private void process(TransactionScoredEvent event) {
         transactionTemplate.executeWithoutResult(status -> listener.onMessage(event, null));
+        processEngineIntelligence(event);
+    }
+
+    private void processEngineIntelligence(TransactionScoredEvent event) {
+        transactionTemplate.executeWithoutResult(status ->
+                engineIntelligenceProjectionService.projectCurrentOccurrence(event)
+        );
     }
 
     private void processWithTransientRetry(
@@ -422,6 +692,18 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
                         .doesNotContain("mlScore"));
     }
 
+    private void assertCurrentScoredOccurrence(
+            String eventId,
+            RiskLevel riskLevel,
+            boolean alertRecommended
+    ) {
+        ScoredTransactionDocument current = mongoTemplate.findById(TRANSACTION_ID, ScoredTransactionDocument.class);
+        assertThat(current).isNotNull();
+        assertThat(current.getSourceEventId()).isEqualTo(eventId);
+        assertThat(current.getRiskLevel()).isEqualTo(riskLevel);
+        assertThat(current.getAlertRecommended()).isEqualTo(alertRecommended);
+    }
+
     private void assertHistoricalEvidence(TransactionScoredEvent... events) {
         assertThat(evidenceRepository.findAll()).hasSize(events.length);
         for (TransactionScoredEvent event : events) {
@@ -466,6 +748,28 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
     }
 
     private TransactionScoredEvent event(String eventId, Instant createdAt, double score, String modelVersion) {
+        return event(eventId, createdAt, score, modelVersion, engineIntelligence(createdAt, modelVersion, score));
+    }
+
+    private TransactionScoredEvent event(
+            String eventId,
+            Instant createdAt,
+            double score,
+            String modelVersion,
+            EngineIntelligenceSummary engineIntelligence
+    ) {
+        return event(eventId, createdAt, score, modelVersion, RiskLevel.HIGH, true, engineIntelligence);
+    }
+
+    private TransactionScoredEvent event(
+            String eventId,
+            Instant createdAt,
+            double score,
+            String modelVersion,
+            RiskLevel riskLevel,
+            boolean alertRecommended,
+            EngineIntelligenceSummary engineIntelligence
+    ) {
         TransactionScoredEvent defaults = TransactionFixtures.scoredTransaction().build();
         return new TransactionScoredEvent(
                 eventId,
@@ -481,23 +785,25 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
                 defaults.locationInfo(),
                 defaults.customerContext(),
                 score,
-                RiskLevel.HIGH,
+                riskLevel,
                 "COMPARE",
                 "rules-v2-with-ml-diagnostic",
                 modelVersion,
                 createdAt,
-                List.of("HIGH_VELOCITY"),
+                riskLevel == RiskLevel.HIGH ? List.of("HIGH_VELOCITY") : List.of(),
                 Map.of("scoreDecisionId", "decision-" + eventId),
                 rapidTransferSnapshot(),
-                true,
+                alertRecommended,
                 List.of(),
-                engineIntelligence(createdAt, modelVersion, score),
-                new MlPredictionEvidenceV1(
-                        score,
-                        RiskLevel.HIGH,
-                        modelIdentity(modelVersion),
-                        createdAt.minusNanos(123_456_789L)
-                ),
+                engineIntelligence,
+                engineIntelligence == null
+                        ? null
+                        : new MlPredictionEvidenceV1(
+                                score,
+                                riskLevel,
+                                modelIdentity(modelVersion),
+                                createdAt.minusNanos(123_456_789L)
+                        ),
                 null
         );
     }

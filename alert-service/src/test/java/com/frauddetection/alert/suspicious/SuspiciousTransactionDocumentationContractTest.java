@@ -33,6 +33,9 @@ class SuspiciousTransactionDocumentationContractTest {
                 .contains("one current document per transactionId")
                 .contains("`sourceEventId` remains provenance")
                 .contains("authoritative scoring-occurrence admission")
+                .contains("newer authoritative occurrence is no longer alert-worthy")
+                .contains("current suspicious projection is removed")
+                .contains("historical alert, alert publication intent, and analyst-owned fraud-case lifecycle remain independently auditable")
                 .contains("does not add public API, UI, case lifecycle mutation, or new statuses");
     }
 

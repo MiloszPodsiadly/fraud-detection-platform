@@ -6,6 +6,7 @@ import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionP
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionRepository;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -22,7 +23,8 @@ class AlertServiceEngineIntelligenceProjectionFixtureTest {
     private final EngineIntelligenceProjectionService service = new EngineIntelligenceProjectionService(
             repository,
             new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy()),
-            new AlertServiceMetrics(new SimpleMeterRegistry())
+            new AlertServiceMetrics(new SimpleMeterRegistry()),
+            mock(ScoredTransactionRepository.class)
     );
 
     @Test

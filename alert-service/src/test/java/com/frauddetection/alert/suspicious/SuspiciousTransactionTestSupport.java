@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -55,6 +56,11 @@ final class SuspiciousTransactionTestSupport {
             rows.put(document.getTransactionId(), document);
             return document;
         });
+        doAnswer(invocation -> {
+            SuspiciousTransactionDocument document = invocation.getArgument(0);
+            rows.remove(document.getTransactionId());
+            return null;
+        }).when(repository).delete(any(SuspiciousTransactionDocument.class));
         return repository;
     }
 

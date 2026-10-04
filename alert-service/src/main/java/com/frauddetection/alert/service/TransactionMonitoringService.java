@@ -2,7 +2,6 @@ package com.frauddetection.alert.service;
 
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult;
-import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionService;
 import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
 import com.frauddetection.alert.persistence.ScoredTransactionProjectionWriter;
@@ -27,7 +26,6 @@ public class TransactionMonitoringService implements TransactionMonitoringUseCas
     private final ScoredTransactionDocumentMapper mapper;
     private final MongoTemplate mongoTemplate;
     private final ScoredTransactionSearchPolicy searchPolicy;
-    private final EngineIntelligenceProjectionService engineIntelligenceProjectionService;
     private final ScoredTransactionProjectionWriter projectionWriter;
 
     public TransactionMonitoringService(
@@ -35,14 +33,12 @@ public class TransactionMonitoringService implements TransactionMonitoringUseCas
             ScoredTransactionDocumentMapper mapper,
             MongoTemplate mongoTemplate,
             ScoredTransactionSearchPolicy searchPolicy,
-            EngineIntelligenceProjectionService engineIntelligenceProjectionService,
             ScoredTransactionProjectionWriter projectionWriter
     ) {
         this.repository = repository;
         this.mapper = mapper;
         this.mongoTemplate = mongoTemplate;
         this.searchPolicy = searchPolicy;
-        this.engineIntelligenceProjectionService = engineIntelligenceProjectionService;
         this.projectionWriter = projectionWriter;
     }
 
@@ -52,7 +48,6 @@ public class TransactionMonitoringService implements TransactionMonitoringUseCas
         if (!admission.isCurrentOccurrence()) {
             return admission;
         }
-        engineIntelligenceProjectionService.projectCurrentOccurrence(event);
         return admission;
     }
 
