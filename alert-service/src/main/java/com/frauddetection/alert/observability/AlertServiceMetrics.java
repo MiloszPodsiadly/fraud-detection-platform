@@ -1042,6 +1042,14 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
                 .record(nonNegativeDuration(latency));
     }
 
+    public void recordMlPredictionEvidenceRecovery(String stage, String outcome) {
+        counter(
+                "ml_prediction_evidence_recovery_total",
+                "stage", normalizeMlPredictionEvidenceRecoveryStage(stage),
+                "outcome", normalizeMlPredictionEvidenceRecoveryOutcome(outcome)
+        ).increment();
+    }
+
     public void recordEngineIntelligenceFeedbackSubmitAttempt() {
         counter("engine_intelligence_feedback_submit_attempt_total").increment();
     }
@@ -1267,6 +1275,17 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
                 : reason.name();
     }
 
+    private String normalizeMlPredictionEvidenceRecoveryStage(String stage) {
+        return "REDRIVE".equals(stage) ? stage : "UNKNOWN";
+    }
+
+    private String normalizeMlPredictionEvidenceRecoveryOutcome(String outcome) {
+        return switch (outcome) {
+            case "ATTEMPTED", "ACCEPTED", "TRANSIENT_FAILURE", "PERMANENT_FAILURE" -> outcome;
+            default -> "UNKNOWN";
+        };
+    }
+
     private String normalizeEngineIntelligenceFeedbackSubmitReason(EngineIntelligenceFeedbackSubmitMetricReason reason) {
         return reason == null ? EngineIntelligenceFeedbackSubmitMetricReason.UNKNOWN_FAILURE.name() : reason.name();
     }
@@ -1452,7 +1471,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
 
     private String normalizeSuspiciousTransactionProjectionOutcome(String outcome) {
         return switch (outcome) {
-            case "created", "updated", "skipped", "duplicate_retry", "error" -> outcome;
+            case "created", "updated", "skipped", "error" -> outcome;
             default -> "error";
         };
     }
@@ -1468,8 +1487,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
 
     private String normalizeSuspiciousTransactionProjectionReason(String reason) {
         return switch (reason) {
-            case "non_alert_worthy", "missing_required_lineage", "duplicate_retry", "duplicate_readback_missing",
-                 "duplicate_readback_failed", "projection_error" -> reason;
+            case "non_alert_worthy", "missing_required_lineage", "projection_error" -> reason;
             default -> "projection_error";
         };
     }

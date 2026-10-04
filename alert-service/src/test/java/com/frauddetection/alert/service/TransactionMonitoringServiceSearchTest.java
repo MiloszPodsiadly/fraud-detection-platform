@@ -1,6 +1,7 @@
 package com.frauddetection.alert.service;
 
 import com.frauddetection.alert.domain.ScoredTransaction;
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionService;
 import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
@@ -14,6 +15,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.stream.IntStream;
 
@@ -57,7 +59,11 @@ class TransactionMonitoringServiceSearchTest {
                 null,
                 null,
                 List.of(),
-                null
+                null,
+                ScoringOccurrenceOwnership.authoritative(
+                        "event-1",
+                        Instant.parse("2026-06-18T10:00:01Z")
+                )
         );
         List<ScoredTransactionDocument> countProbe = IntStream
                 .range(0, ScoredTransactionSearchPolicy.MAX_FILTERED_TOTAL_COUNT + 1)

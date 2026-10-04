@@ -8,8 +8,8 @@ import com.frauddetection.common.events.recommendation.AnalystRecommendationResu
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.Arrays;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -101,7 +101,11 @@ class ScoredTransactionResponseMapperTest {
                 RiskLevel.CRITICAL,
                 true,
                 List.of("HIGH_VELOCITY"),
-                analystRecommendation
+                analystRecommendation,
+                ScoringOccurrenceOwnership.authoritative(
+                        "event-1",
+                        Instant.parse("2026-06-18T10:00:01Z")
+                )
         );
     }
 }

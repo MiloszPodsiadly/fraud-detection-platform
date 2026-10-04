@@ -43,6 +43,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -65,7 +66,6 @@ class AlertManagementServiceTest {
         var service = service(repository, alertPublisher, fraudCaseManagementService, metrics, submitDecisionService);
         var event = TransactionFixtures.scoredTransaction().build();
 
-        when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
         when(repository.save(any(AlertDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.handleScoredTransaction(event);
@@ -110,7 +110,6 @@ class AlertManagementServiceTest {
         );
         ArgumentCaptor<AlertDocument> captor = ArgumentCaptor.forClass(AlertDocument.class);
 
-        when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
         when(repository.save(any(AlertDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.handleScoredTransaction(event);
@@ -135,7 +134,6 @@ class AlertManagementServiceTest {
         EvidenceSnapshotItem diagnostic = errorDiagnostic();
         ArgumentCaptor<AlertDocument> captor = ArgumentCaptor.forClass(AlertDocument.class);
 
-        when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
         when(projectionService.projectOrDiagnostic(event)).thenReturn(List.of(diagnostic));
         when(repository.save(any(AlertDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -160,7 +158,7 @@ class AlertManagementServiceTest {
     }
 
     @Test
-    void shouldIgnoreDuplicateAlertCreatedConcurrently() {
+    void concurrentDuplicateAlertWriteFailsForTransactionalRedelivery() {
         AlertRepository repository = mock(AlertRepository.class);
         FraudAlertEventPublisher alertPublisher = mock(FraudAlertEventPublisher.class);
         FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
@@ -169,10 +167,10 @@ class AlertManagementServiceTest {
         var service = service(repository, alertPublisher, fraudCaseManagementService, metrics, submitDecisionService);
         var event = TransactionFixtures.scoredTransaction().build();
 
-        when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
         when(repository.save(any(AlertDocument.class))).thenThrow(new DuplicateKeyException("duplicate transaction alert"));
 
-        service.handleScoredTransaction(event);
+        assertThatThrownBy(() -> service.handleScoredTransaction(event))
+                .isInstanceOf(DuplicateKeyException.class);
 
         verify(alertPublisher, never()).publish(any(FraudAlertEvent.class));
     }
@@ -188,7 +186,6 @@ class AlertManagementServiceTest {
         var service = service(repository, alertPublisher, fraudCaseManagementService, metrics, submitDecisionService, suspiciousProjection);
         var event = TransactionFixtures.scoredTransaction().build();
 
-        when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
         when(repository.save(any(AlertDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.handleScoredTransaction(event);
@@ -208,7 +205,6 @@ class AlertManagementServiceTest {
         var event = TransactionFixtures.scoredTransaction().build();
         ArgumentCaptor<AlertDocument> captor = ArgumentCaptor.forClass(AlertDocument.class);
 
-        when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
         when(repository.save(any(AlertDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.handleScoredTransaction(event);
@@ -230,17 +226,17 @@ class AlertManagementServiceTest {
         AlertDocument existing = new AlertDocument();
         existing.setAlertId("alert-existing");
 
-        when(repository.existsByTransactionId(event.transactionId())).thenReturn(true);
         when(repository.findByTransactionId(event.transactionId())).thenReturn(java.util.Optional.of(existing));
 
         service.handleScoredTransaction(event);
 
-        verify(repository, never()).save(any(AlertDocument.class));
+        verify(repository).save(existing);
+        assertThat(existing.getSourceEventId()).isEqualTo(event.eventId());
         verify(suspiciousProjection).projectOrUpdate(event, "alert-existing");
     }
 
     @Test
-    void duplicateAlertRaceDoesNotPreventSuspiciousTransactionReconciliation() {
+    void existingAlertReconciliationFailurePropagatesForTransactionalRedelivery() {
         AlertRepository repository = mock(AlertRepository.class);
         FraudAlertEventPublisher alertPublisher = mock(FraudAlertEventPublisher.class);
         FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
@@ -252,18 +248,18 @@ class AlertManagementServiceTest {
         AlertDocument existing = new AlertDocument();
         existing.setAlertId("alert-existing");
 
-        when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
         when(repository.save(any(AlertDocument.class))).thenThrow(new DuplicateKeyException("duplicate transaction alert"));
         when(repository.findByTransactionId(event.transactionId())).thenReturn(java.util.Optional.of(existing));
 
-        service.handleScoredTransaction(event);
+        assertThatThrownBy(() -> service.handleScoredTransaction(event))
+                .isInstanceOf(DuplicateKeyException.class);
 
         verify(alertPublisher, never()).publish(any(FraudAlertEvent.class));
-        verify(suspiciousProjection).projectOrUpdate(event, "alert-existing");
+        verify(suspiciousProjection, never()).projectOrUpdate(any(), any());
     }
 
     @Test
-    void suspiciousTransactionProjectionFailureDoesNotBreakAlertCreation() {
+    void suspiciousTransactionProjectionFailureAbortsAlertPublicationForRedelivery() {
         AlertRepository repository = mock(AlertRepository.class);
         FraudAlertEventPublisher alertPublisher = mock(FraudAlertEventPublisher.class);
         FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
@@ -273,18 +269,18 @@ class AlertManagementServiceTest {
         var service = service(repository, alertPublisher, fraudCaseManagementService, metrics, submitDecisionService, suspiciousProjection);
         var event = TransactionFixtures.scoredTransaction().build();
 
-        when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
         when(repository.save(any(AlertDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
         doThrow(new IllegalStateException("projection failed")).when(suspiciousProjection).projectOrUpdate(any(), any());
 
-        service.handleScoredTransaction(event);
+        assertThatThrownBy(() -> service.handleScoredTransaction(event))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("projection failed");
 
-        verify(alertPublisher).publish(any(FraudAlertEvent.class));
-        verify(metrics).recordSuspiciousTransactionProjectionError("projection_error");
+        verify(alertPublisher, never()).publish(any(FraudAlertEvent.class));
     }
 
     @Test
-    void duplicateKeyReadbackDoesNotBreakAlertCreation() {
+    void suspiciousTransactionDuplicateFailsBeforeAlertPublication() {
         AlertRepository repository = mock(AlertRepository.class);
         FraudAlertEventPublisher alertPublisher = mock(FraudAlertEventPublisher.class);
         FraudCaseManagementService fraudCaseManagementService = mock(FraudCaseManagementService.class);
@@ -301,20 +297,18 @@ class AlertManagementServiceTest {
         existing.setSourceEventId(event.eventId());
         existing.setStatus(SuspiciousTransactionStatus.NEW);
 
-        when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
         when(repository.save(any(AlertDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(suspiciousRepository.findByTransactionIdAndSourceEventId(event.transactionId(), event.eventId()))
-                .thenReturn(java.util.Optional.empty())
-                .thenReturn(java.util.Optional.of(existing));
+        when(suspiciousRepository.findByTransactionId(event.transactionId()))
+                .thenReturn(java.util.Optional.empty());
         when(suspiciousRepository.save(any(SuspiciousTransactionDocument.class)))
-                .thenThrow(new DuplicateKeyException("duplicate suspicious transaction"))
-                .thenAnswer(invocation -> invocation.getArgument(0));
+                .thenThrow(new DuplicateKeyException("duplicate suspicious transaction"));
 
-        service.handleScoredTransaction(event);
+        assertThatThrownBy(() -> service.handleScoredTransaction(event))
+                .isInstanceOf(com.frauddetection.alert.suspicious.SuspiciousTransactionProjectionException.class);
 
-        verify(alertPublisher).publish(any(FraudAlertEvent.class));
-        verify(suspiciousRepository, times(2)).findByTransactionIdAndSourceEventId(event.transactionId(), event.eventId());
-        verify(suspiciousRepository, times(2)).save(any(SuspiciousTransactionDocument.class));
+        verify(alertPublisher, never()).publish(any(FraudAlertEvent.class));
+        verify(suspiciousRepository).findByTransactionId(event.transactionId());
+        verify(suspiciousRepository).save(any(SuspiciousTransactionDocument.class));
     }
 
     @Test
@@ -328,7 +322,6 @@ class AlertManagementServiceTest {
         var service = service(repository, alertPublisher, fraudCaseManagementService, metrics, submitDecisionService, suspiciousProjection);
         var event = TransactionFixtures.scoredTransaction().build();
 
-        when(repository.existsByTransactionId(event.transactionId())).thenReturn(false);
         when(repository.save(any(AlertDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.handleScoredTransaction(event);

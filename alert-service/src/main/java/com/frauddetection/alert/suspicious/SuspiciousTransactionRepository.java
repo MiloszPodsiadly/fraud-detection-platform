@@ -9,7 +9,7 @@ import java.util.Optional;
 
 public interface SuspiciousTransactionRepository extends MongoRepository<SuspiciousTransactionDocument, String> {
 
-    Optional<SuspiciousTransactionDocument> findByTransactionIdAndSourceEventId(String transactionId, String sourceEventId);
+    Optional<SuspiciousTransactionDocument> findByTransactionId(String transactionId);
 
     Page<SuspiciousTransactionDocument> findByCustomerId(String customerId, Pageable pageable);
 

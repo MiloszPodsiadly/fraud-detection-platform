@@ -18,22 +18,6 @@ import static org.mockito.Mockito.when;
 class SuspiciousTransactionProjectionMetricsTest {
 
     @Test
-    void duplicateRetryMetricIsAllowedLowCardinalityOutcome() {
-        SimpleMeterRegistry registry = new SimpleMeterRegistry();
-        AlertServiceMetrics metrics = new AlertServiceMetrics(registry);
-
-        metrics.recordSuspiciousTransactionProjection("duplicate_retry", SuspiciousTransactionStatus.ALERT_CREATED);
-
-        assertThat(registry.get("fraud.suspicious_transaction.projection.duplicate_retry")
-                .tag("outcome", "duplicate_retry")
-                .tag("status", "ALERT_CREATED")
-                .counter()
-                .count()).isEqualTo(1.0d);
-        assertThat(registry.get("fraud.suspicious_transaction.projection.duplicate_retry").counter().getId().getTag("reason"))
-                .isNull();
-    }
-
-    @Test
     void createdUpdatedSkippedAndErrorMetricsUseLowCardinalityLabels() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         AlertServiceMetrics metrics = new AlertServiceMetrics(registry);
@@ -47,8 +31,10 @@ class SuspiciousTransactionProjectionMetricsTest {
         );
 
         SuspiciousTransactionRepository failingRepository = mock(SuspiciousTransactionRepository.class);
-        when(failingRepository.findByTransactionIdAndSourceEventId(any(), any())).thenThrow(new IllegalStateException("raw id"));
-        service(failingRepository, metrics).projectOrUpdate(alertWorthyEvent(), null);
+        when(failingRepository.findByTransactionId(any())).thenThrow(new IllegalStateException("raw id"));
+        org.assertj.core.api.Assertions.catchThrowable(
+                () -> service(failingRepository, metrics).projectOrUpdate(alertWorthyEvent(), null)
+        );
 
         assertThat(registry.get("fraud.suspicious_transaction.projection.created").tag("outcome", "created").counter().count())
                 .isEqualTo(1.0d);

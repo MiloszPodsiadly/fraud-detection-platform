@@ -1,6 +1,7 @@
 package com.frauddetection.alert.messaging;
 
 import com.frauddetection.alert.config.KafkaTopicProperties;
+import com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult;
 import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionReason;
 import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionResult;
 import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionService;
@@ -113,6 +114,10 @@ class MlPredictionEvidenceEventListenerTest {
                             "transactions.dead-letter"
                     )
             );
+            when(monitoring.recordScoredTransaction(event)).thenReturn(new ScoringOccurrenceAdmissionResult(
+                    ScoringOccurrenceAdmissionResult.Outcome.APPLIED_NEW,
+                    ScoringOccurrenceAdmissionResult.ReasonCode.FIRST_OCCURRENCE_ACCEPTED
+            ));
 
             assertTimeoutPreemptively(Duration.ofSeconds(1), () -> baseline.onMessage(event, null));
             verify(monitoring).recordScoredTransaction(event);

@@ -17,7 +17,6 @@ import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -78,28 +77,22 @@ public class AlertManagementService implements AlertManagementUseCase {
             return;
         }
 
-        if (alertRepository.existsByTransactionId(event.transactionId())) {
-            reconcileSuspiciousTransactionWithExistingAlert(event);
+        var existingAlert = alertRepository.findByTransactionId(event.transactionId());
+        if (existingAlert.isPresent()) {
+            AlertDocument existing = existingAlert.orElseThrow();
+            reconcileCurrentAlert(existing, event);
+            projectSuspiciousTransaction(event, existing.getAlertId());
             return;
         }
 
         AlertCase alertCase = alertCaseFactory.from(event);
 
-        AlertDocument saved;
-        try {
-            AlertDocument document = alertDocumentMapper.toDocument(alertCase);
-            // Evidence snapshot projection must not control case lifecycle. Projection failure is represented as ERROR
-            // diagnostic so alert creation can continue without creating fake AVAILABLE evidence.
-            document.setEvidenceSnapshot(evidenceSnapshotProjectionService.projectOrDiagnostic(event));
-            saved = alertRepository.save(document);
-        } catch (DuplicateKeyException exception) {
-            log.atInfo()
-                    .addKeyValue("transactionId", event.transactionId())
-                    .addKeyValue("correlationId", event.correlationId())
-                    .log("Skipped duplicate fraud alert.");
-            reconcileSuspiciousTransactionWithExistingAlert(event);
-            return;
-        }
+        AlertDocument document = alertDocumentMapper.toDocument(alertCase);
+        document.setSourceEventId(event.eventId());
+        // Evidence snapshot projection must not control case lifecycle. Projection failure is represented as ERROR
+        // diagnostic so alert creation can continue without creating fake AVAILABLE evidence.
+        document.setEvidenceSnapshot(evidenceSnapshotProjectionService.projectOrDiagnostic(event));
+        AlertDocument saved = alertRepository.save(document);
 
         projectSuspiciousTransaction(event, saved.getAlertId());
 
@@ -109,23 +102,26 @@ public class AlertManagementService implements AlertManagementUseCase {
         log.atInfo().addKeyValue("alertId", saved.getAlertId()).addKeyValue("transactionId", saved.getTransactionId()).log("Created fraud alert.");
     }
 
-    private void reconcileSuspiciousTransactionWithExistingAlert(TransactionScoredEvent event) {
-        String existingAlertId = alertRepository.findByTransactionId(event.transactionId())
-                .map(AlertDocument::getAlertId)
-                .orElse(null);
-        projectSuspiciousTransaction(event, existingAlertId);
+    private void reconcileCurrentAlert(AlertDocument existing, TransactionScoredEvent event) {
+        existing.setSourceEventId(event.eventId());
+        existing.setCustomerId(event.customerId());
+        existing.setCorrelationId(event.correlationId());
+        existing.setRiskLevel(event.riskLevel());
+        existing.setFraudScore(event.fraudScore());
+        existing.setReasonCodes(event.reasonCodes());
+        existing.setTransactionAmount(event.transactionAmount());
+        existing.setMerchantInfo(event.merchantInfo());
+        existing.setDeviceInfo(event.deviceInfo());
+        existing.setLocationInfo(event.locationInfo());
+        existing.setCustomerContext(event.customerContext());
+        existing.setScoreDetails(event.scoreDetails());
+        existing.setFeatureSnapshot(event.featureSnapshot());
+        existing.setEvidenceSnapshot(evidenceSnapshotProjectionService.projectOrDiagnostic(event));
+        alertRepository.save(existing);
     }
 
     private void projectSuspiciousTransaction(TransactionScoredEvent event, String linkedAlertId) {
-        try {
-            suspiciousTransactionProjectionService.projectOrUpdate(event, linkedAlertId);
-        } catch (RuntimeException exception) {
-            metrics.recordSuspiciousTransactionProjectionError("projection_error");
-            log.atWarn()
-                    .addKeyValue("reason", "projection_error")
-                    .addKeyValue("exceptionType", exception.getClass().getSimpleName())
-                    .log("Suspicious transaction read-model reconciliation failed during alert handling.");
-        }
+        suspiciousTransactionProjectionService.projectOrUpdate(event, linkedAlertId);
     }
 
     private boolean isAlertWorthy(TransactionScoredEvent event) {

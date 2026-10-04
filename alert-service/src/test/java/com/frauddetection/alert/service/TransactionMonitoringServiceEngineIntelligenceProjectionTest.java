@@ -1,8 +1,5 @@
 package com.frauddetection.alert.service;
 
-import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionMapper;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionOmissionReason;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionPolicy;
@@ -10,6 +7,7 @@ import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionR
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionResult;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionService;
 import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
+import com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
 import com.frauddetection.alert.persistence.ScoredTransactionProjectionWriter;
@@ -17,14 +15,15 @@ import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.slf4j.LoggerFactory;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.never;
@@ -48,16 +47,47 @@ class TransactionMonitoringServiceEngineIntelligenceProjectionTest {
             projectionWriter
     );
 
+    @BeforeEach
+    void acceptBaseProjectionByDefault() {
+        when(projectionWriter.write(any())).thenReturn(new ScoringOccurrenceAdmissionResult(
+                ScoringOccurrenceAdmissionResult.Outcome.APPLIED_NEW,
+                ScoringOccurrenceAdmissionResult.ReasonCode.FIRST_OCCURRENCE_ACCEPTED
+        ));
+    }
+
     @Test
     void eventStillInvokesInternalProjectionBoundaryAfterBaseProjectionWrite() {
         TransactionScoredEvent event = mock(TransactionScoredEvent.class);
         ScoredTransactionDocument document = new ScoredTransactionDocument();
+        ScoringOccurrenceAdmissionResult admission = new ScoringOccurrenceAdmissionResult(
+                ScoringOccurrenceAdmissionResult.Outcome.APPLIED_NEW,
+                ScoringOccurrenceAdmissionResult.ReasonCode.FIRST_OCCURRENCE_ACCEPTED
+        );
         when(mapper.toDocument(event)).thenReturn(document);
+        when(projectionWriter.write(document)).thenReturn(admission);
 
-        service.recordScoredTransaction(event);
+        ScoringOccurrenceAdmissionResult result = service.recordScoredTransaction(event);
 
+        assertThat(result).isSameAs(admission);
         verify(projectionWriter).write(same(document));
-        verify(projectionService).project(same(event));
+        verify(projectionService).projectCurrentOccurrence(same(event));
+    }
+
+    @Test
+    void rejectedOccurrenceCannotReachEngineIntelligenceProjection() {
+        TransactionScoredEvent event = mock(TransactionScoredEvent.class);
+        ScoredTransactionDocument document = new ScoredTransactionDocument();
+        ScoringOccurrenceAdmissionResult rejected = new ScoringOccurrenceAdmissionResult(
+                ScoringOccurrenceAdmissionResult.Outcome.STALE_REJECTED,
+                ScoringOccurrenceAdmissionResult.ReasonCode.OLDER_OCCURRENCE_REJECTED
+        );
+        when(mapper.toDocument(event)).thenReturn(document);
+        when(projectionWriter.write(document)).thenReturn(rejected);
+
+        ScoringOccurrenceAdmissionResult result = service.recordScoredTransaction(event);
+
+        assertThat(result).isSameAs(rejected);
+        verify(projectionService, never()).projectCurrentOccurrence(any());
     }
 
     @Test
@@ -101,7 +131,7 @@ class TransactionMonitoringServiceEngineIntelligenceProjectionTest {
         TransactionScoredEvent event = mock(TransactionScoredEvent.class);
         ScoredTransactionDocument document = new ScoredTransactionDocument();
         when(mapper.toDocument(event)).thenReturn(document);
-        when(projectionService.project(event)).thenReturn(EngineIntelligenceProjectionResult.omitted(
+        when(projectionService.projectCurrentOccurrence(event)).thenReturn(EngineIntelligenceProjectionResult.omitted(
                 EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE
         ));
 
@@ -111,39 +141,16 @@ class TransactionMonitoringServiceEngineIntelligenceProjectionTest {
     }
 
     @Test
-    void projectionExceptionDoesNotBreakBaseProjection() {
+    void projectionExceptionPropagatesForOccurrenceTransactionRollback() {
         TransactionScoredEvent event = mock(TransactionScoredEvent.class);
         ScoredTransactionDocument document = new ScoredTransactionDocument();
         when(mapper.toDocument(event)).thenReturn(document);
-        doThrow(new IllegalStateException("raw-secret-stacktrace")).when(projectionService).project(event);
+        doThrow(new IllegalStateException("raw-secret-stacktrace")).when(projectionService).projectCurrentOccurrence(event);
 
-        assertThatCode(() -> service.recordScoredTransaction(event)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> service.recordScoredTransaction(event))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("raw-secret-stacktrace");
 
         verify(projectionWriter).write(same(document));
-    }
-
-    @Test
-    void unexpectedProjectionRuntimeExceptionLogsBoundedMessageWithoutRawException() {
-        TransactionScoredEvent event = mock(TransactionScoredEvent.class);
-        when(mapper.toDocument(event)).thenReturn(new ScoredTransactionDocument());
-        doThrow(new IllegalStateException("raw-secret-stacktrace")).when(projectionService).project(event);
-        Logger logger = (Logger) LoggerFactory.getLogger(TransactionMonitoringService.class);
-        ListAppender<ILoggingEvent> appender = new ListAppender<>();
-        appender.start();
-        logger.addAppender(appender);
-
-        try {
-            service.recordScoredTransaction(event);
-        } finally {
-            logger.detachAppender(appender);
-        }
-
-        String logText = appender.list.stream()
-                .map(eventLog -> eventLog.getFormattedMessage() + " " + eventLog.getKeyValuePairs())
-                .reduce("", (left, right) -> left + "\n" + right);
-        assertThat(logText)
-                .contains("Engine intelligence internal projection omitted.")
-                .contains("ENGINE_INTELLIGENCE_PROJECTION_FAILED")
-                .doesNotContain("raw-secret-stacktrace");
     }
 }

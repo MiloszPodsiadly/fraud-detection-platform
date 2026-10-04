@@ -48,6 +48,7 @@ import com.frauddetection.alert.controller.AlertController;
 import com.frauddetection.alert.controller.FraudCaseController;
 import com.frauddetection.alert.controller.ScoredTransactionController;
 import com.frauddetection.alert.domain.FraudCaseStatus;
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackPage;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackReadController;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceFeedbackReadModel;
@@ -502,7 +503,12 @@ class AlertSecurityConfigTest {
                         0.5d,
                         com.frauddetection.common.events.enums.RiskLevel.MEDIUM,
                         false,
-                        List.of()
+                        List.of(),
+                        null,
+                        ScoringOccurrenceOwnership.authoritative(
+                                "event-txn-old",
+                                Instant.parse("2026-06-18T10:00:01Z")
+                        )
                 ));
         when(engineIntelligenceReadService.read("txn-old"))
                 .thenReturn(EngineIntelligenceReadModel.notProjected("txn-old"));

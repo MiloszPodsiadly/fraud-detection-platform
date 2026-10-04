@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
 import static com.frauddetection.alert.suspicious.SuspiciousTransactionIndexTestSupport.ALERT_INDEX;
 import static com.frauddetection.alert.suspicious.SuspiciousTransactionIndexTestSupport.CUSTOMER_INDEX;
 import static com.frauddetection.alert.suspicious.SuspiciousTransactionIndexTestSupport.CURSOR_INDEX;
-import static com.frauddetection.alert.suspicious.SuspiciousTransactionIndexTestSupport.IDEMPOTENCY_INDEX;
+import static com.frauddetection.alert.suspicious.SuspiciousTransactionIndexTestSupport.CURRENT_OWNERSHIP_INDEX;
 import static com.frauddetection.alert.suspicious.SuspiciousTransactionIndexTestSupport.RISK_INDEX;
 import static com.frauddetection.alert.suspicious.SuspiciousTransactionIndexTestSupport.STATUS_INDEX;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -63,7 +63,7 @@ class SuspiciousTransactionMongoIndexIntegrationTest {
                 RISK_INDEX,
                 CUSTOMER_INDEX,
                 ALERT_INDEX,
-                IDEMPOTENCY_INDEX
+                CURRENT_OWNERSHIP_INDEX
         );
         assertThat(keys(indexesByName.get(CURSOR_INDEX))).containsExactly(
                 entry("detectedAt", Sort.Direction.DESC),
@@ -89,11 +89,10 @@ class SuspiciousTransactionMongoIndexIntegrationTest {
                 entry("detectedAt", Sort.Direction.DESC),
                 entry("_id", Sort.Direction.DESC)
         );
-        assertThat(keys(indexesByName.get(IDEMPOTENCY_INDEX))).containsExactly(
-                entry("transactionId", Sort.Direction.ASC),
-                entry("sourceEventId", Sort.Direction.ASC)
+        assertThat(keys(indexesByName.get(CURRENT_OWNERSHIP_INDEX))).containsExactly(
+                entry("transactionId", Sort.Direction.ASC)
         );
-        assertThat(indexesByName.get(IDEMPOTENCY_INDEX).isUnique()).isTrue();
+        assertThat(indexesByName.get(CURRENT_OWNERSHIP_INDEX).isUnique()).isTrue();
     }
 
     @Test

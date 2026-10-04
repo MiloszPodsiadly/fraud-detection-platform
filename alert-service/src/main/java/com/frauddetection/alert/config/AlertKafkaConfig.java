@@ -2,6 +2,7 @@ package com.frauddetection.alert.config;
 
 import com.frauddetection.alert.messaging.AuthoritativeTransactionScoredEventDeserializer;
 import com.frauddetection.alert.messaging.MlPredictionEvidencePermanentProcessingException;
+import com.frauddetection.alert.messaging.ScoringOccurrenceConflictException;
 import com.frauddetection.common.events.contract.FraudAlertEvent;
 import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
@@ -46,6 +47,7 @@ import java.util.Map;
 @EnableConfigurationProperties({
         KafkaTopicProperties.class,
         KafkaConsumerProperties.class,
+        MlPredictionEvidenceRecoveryProperties.class,
         AssistantProperties.class
 })
 public class AlertKafkaConfig {
@@ -174,6 +176,26 @@ public class AlertKafkaConfig {
     }
 
     @Bean
+    public DeadLetterPublishingRecoverer mlPredictionEvidenceDeadLetterPublishingRecoverer(
+            KafkaOperations<Object, Object> deadLetterKafkaTemplate,
+            MlPredictionEvidenceRecoveryProperties recoveryProperties
+    ) {
+        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
+                deadLetterKafkaTemplate,
+                (record, exception) -> new TopicPartition(
+                        evidenceQuarantineRequired(exception)
+                                ? recoveryProperties.quarantineTopic()
+                                : recoveryProperties.deadLetterTopic(),
+                        record.partition()
+                )
+        );
+        recoverer.setFailIfSendResultIsError(true);
+        recoverer.setWaitForSendResultTimeout(Duration.ofSeconds(10));
+        recoverer.setLogRecoveryRecord(false);
+        return recoverer;
+    }
+
+    @Bean
     public DefaultErrorHandler kafkaErrorHandler(
             DeadLetterPublishingRecoverer deadLetterPublishingRecoverer,
             KafkaConsumerProperties kafkaConsumerProperties
@@ -181,6 +203,41 @@ public class AlertKafkaConfig {
         long retryAttempts = Math.max((kafkaConsumerProperties.retryAttempts() == null ? 3 : kafkaConsumerProperties.retryAttempts()) - 1L, 0L);
         long retryBackoffMillis = kafkaConsumerProperties.retryBackoffMillis() == null ? 1000L : kafkaConsumerProperties.retryBackoffMillis();
         DefaultErrorHandler errorHandler = new DefaultErrorHandler(deadLetterPublishingRecoverer, new FixedBackOff(retryBackoffMillis, retryAttempts));
+        errorHandler.addNotRetryableExceptions(
+                DeserializationException.class,
+                MlPredictionEvidencePermanentProcessingException.class,
+                ScoringOccurrenceConflictException.class
+        );
+        errorHandler.setAckAfterHandle(true);
+        errorHandler.setRetryListeners((ConsumerRecord<?, ?> record, Exception exception, int deliveryAttempt) ->
+                log.atWarn()
+                        .addKeyValue("service", "alert-service")
+                        .addKeyValue("topic", record.topic())
+                        .addKeyValue("partition", record.partition())
+                        .addKeyValue("offset", record.offset())
+                        .addKeyValue("deliveryAttempt", deliveryAttempt)
+                        .addKeyValue("exceptionType", exception.getClass().getSimpleName())
+                        .log("Retrying Kafka record processing before dead-letter handoff."));
+        return errorHandler;
+    }
+
+    @Bean
+    public DefaultErrorHandler mlPredictionEvidenceErrorHandler(
+            @Qualifier("mlPredictionEvidenceDeadLetterPublishingRecoverer")
+            DeadLetterPublishingRecoverer recoverer,
+            KafkaConsumerProperties kafkaConsumerProperties
+    ) {
+        long retryAttempts = Math.max(
+                (kafkaConsumerProperties.retryAttempts() == null ? 3 : kafkaConsumerProperties.retryAttempts()) - 1L,
+                0L
+        );
+        long retryBackoffMillis = kafkaConsumerProperties.retryBackoffMillis() == null
+                ? 1000L
+                : kafkaConsumerProperties.retryBackoffMillis();
+        DefaultErrorHandler errorHandler = new DefaultErrorHandler(
+                recoverer,
+                new FixedBackOff(retryBackoffMillis, retryAttempts)
+        );
         errorHandler.addNotRetryableExceptions(
                 DeserializationException.class,
                 MlPredictionEvidencePermanentProcessingException.class
@@ -194,7 +251,7 @@ public class AlertKafkaConfig {
                         .addKeyValue("offset", record.offset())
                         .addKeyValue("deliveryAttempt", deliveryAttempt)
                         .addKeyValue("exceptionType", exception.getClass().getSimpleName())
-                        .log("Retrying Kafka record processing before dead-letter handoff."));
+                        .log("Retrying ML prediction evidence processing before durable handoff."));
         return errorHandler;
     }
 
@@ -217,13 +274,13 @@ public class AlertKafkaConfig {
     public ConcurrentKafkaListenerContainerFactory<String, TransactionScoredEvent> mlPredictionEvidenceKafkaListenerContainerFactory(
             @Qualifier("mlPredictionEvidenceConsumerFactory")
             ConsumerFactory<String, TransactionScoredEvent> mlPredictionEvidenceConsumerFactory,
-            DefaultErrorHandler kafkaErrorHandler,
+            @Qualifier("mlPredictionEvidenceErrorHandler") DefaultErrorHandler evidenceErrorHandler,
             KafkaConsumerProperties kafkaConsumerProperties
     ) {
         ConcurrentKafkaListenerContainerFactory<String, TransactionScoredEvent> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(mlPredictionEvidenceConsumerFactory);
-        factory.setCommonErrorHandler(kafkaErrorHandler);
+        factory.setCommonErrorHandler(evidenceErrorHandler);
         factory.setConcurrency(kafkaConsumerProperties.concurrency() == null ? 1 : kafkaConsumerProperties.concurrency());
         factory.getContainerProperties().setAckMode(
                 org.springframework.kafka.listener.ContainerProperties.AckMode.RECORD
@@ -232,12 +289,28 @@ public class AlertKafkaConfig {
     }
 
     @Bean
-    public KafkaAdmin.NewTopics alertTopics(KafkaTopicProperties kafkaTopicProperties) {
+    public KafkaAdmin.NewTopics alertTopics(
+            KafkaTopicProperties kafkaTopicProperties,
+            MlPredictionEvidenceRecoveryProperties recoveryProperties
+    ) {
         return new KafkaAdmin.NewTopics(
                 new NewTopic(kafkaTopicProperties.transactionScored(), PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS),
                 new NewTopic(kafkaTopicProperties.fraudAlerts(), PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS),
                 new NewTopic(kafkaTopicProperties.fraudDecisions(), PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS),
-                new NewTopic(kafkaTopicProperties.transactionsDeadLetter(), PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS)
+                new NewTopic(kafkaTopicProperties.transactionsDeadLetter(), PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS),
+                new NewTopic(recoveryProperties.deadLetterTopic(), PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS),
+                new NewTopic(recoveryProperties.redriveTopic(), PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS),
+                new NewTopic(recoveryProperties.quarantineTopic(), PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS)
         );
+    }
+
+    private boolean evidenceQuarantineRequired(Throwable exception) {
+        for (Throwable current = exception; current != null; current = current.getCause()) {
+            if (current instanceof DeserializationException
+                    || current instanceof MlPredictionEvidencePermanentProcessingException) {
+                return true;
+            }
+        }
+        return false;
     }
 }

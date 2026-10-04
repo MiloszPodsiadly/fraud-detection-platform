@@ -46,6 +46,8 @@ class EngineIntelligenceAlertServiceProjectionDocsTest {
                 "insert-only persistence keyed by source",
                 "conflicting replay is observable and cannot overwrite accepted",
                 "Concurrent duplicate delivery produces one immutable document",
+                "temporary deployment compatibility",
+                "[Scoring Occurrence Ownership Migration](scoring_occurrence_ownership_migration.md)",
                 "No separate migration is required for this document-style projection unless deployment",
                 "Future hardening may add secondary indexes or retention/TTL",
                 "public projection does not add query-optimized secondary indexes.",
@@ -108,10 +110,32 @@ class EngineIntelligenceAlertServiceProjectionDocsTest {
         );
     }
 
+    @Test
+    void scoringOccurrenceMigrationDefinesClassificationProcedureAndRemovalGate() throws Exception {
+        assertThat(readArchitectureDoc("scoring_occurrence_ownership_migration.md")).contains(
+                "### RETAINED",
+                "### MODIFIED",
+                "### REMOVED",
+                "### MIGRATION_REQUIRED",
+                "unknown-set count is zero",
+                "partial-identity count is zero",
+                "Do not manufacture source identity",
+                "do not invoke current ML inference",
+                "effective Kafka retention period",
+                "suspicious_transaction_source_event_unique_idx",
+                "suspicious_transaction_current_unique_idx",
+                "quarantine the entire group"
+        );
+    }
+
     private String readDocs() throws IOException {
+        return readArchitectureDoc("engine_intelligence_alert_service_projection.md");
+    }
+
+    private String readArchitectureDoc(String fileName) throws IOException {
         Path current = Path.of(".").toAbsolutePath().normalize();
         for (Path candidate = current; candidate != null; candidate = candidate.getParent()) {
-            Path docs = candidate.resolve("docs/architecture/engine_intelligence_alert_service_projection.md");
+            Path docs = candidate.resolve("docs/architecture").resolve(fileName);
             if (Files.isRegularFile(docs)) {
                 return Files.readString(docs);
             }

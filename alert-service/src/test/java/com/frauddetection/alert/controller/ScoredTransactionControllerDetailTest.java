@@ -1,6 +1,7 @@
 package com.frauddetection.alert.controller;
 
 import com.frauddetection.alert.domain.ScoredTransaction;
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceComparisonReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceEngineReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
@@ -269,7 +270,11 @@ class ScoredTransactionControllerDetailTest {
                 RiskLevel.CRITICAL,
                 true,
                 List.of("HIGH_VELOCITY"),
-                analystRecommendation()
+                analystRecommendation(),
+                ScoringOccurrenceOwnership.authoritative(
+                        "event-" + transactionId,
+                        Instant.parse("2026-06-18T10:00:01Z")
+                )
         );
     }
 
@@ -286,7 +291,11 @@ class ScoredTransactionControllerDetailTest {
                 RiskLevel.CRITICAL,
                 true,
                 List.of("HIGH_VELOCITY"),
-                null
+                null,
+                ScoringOccurrenceOwnership.authoritative(
+                        "event-" + transactionId,
+                        Instant.parse("2026-06-18T10:00:01Z")
+                )
         );
     }
 

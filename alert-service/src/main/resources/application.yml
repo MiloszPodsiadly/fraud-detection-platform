@@ -194,6 +194,12 @@ app:
       fraud-alerts: fraud.alerts
       fraud-decisions: fraud.decisions
       transactions-dead-letter: transactions.dead-letter
+    evidence-recovery:
+      dead-letter-topic: ${ML_PREDICTION_EVIDENCE_DLT_TOPIC:ml.prediction-evidence.dead-letter}
+      redrive-topic: ${ML_PREDICTION_EVIDENCE_REDRIVE_TOPIC:ml.prediction-evidence.redrive}
+      quarantine-topic: ${ML_PREDICTION_EVIDENCE_QUARANTINE_TOPIC:ml.prediction-evidence.quarantine}
+      redrive-group-id: ${ML_PREDICTION_EVIDENCE_REDRIVE_GROUP_ID:${spring.application.name}-ml-prediction-evidence-redrive}
+      redrive-enabled: ${ML_PREDICTION_EVIDENCE_REDRIVE_ENABLED:false}
     consumer:
       ml-prediction-evidence-group-id: ${ML_PREDICTION_EVIDENCE_CONSUMER_GROUP_ID:${spring.application.name}-ml-prediction-evidence}
       concurrency: 1

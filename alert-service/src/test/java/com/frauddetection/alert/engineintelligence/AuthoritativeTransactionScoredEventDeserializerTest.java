@@ -1,6 +1,7 @@
 package com.frauddetection.alert.engineintelligence;
 
 import com.frauddetection.alert.config.KafkaTopicProperties;
+import com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult;
 import com.frauddetection.alert.messaging.AuthoritativeTransactionScoredEventDeserializer;
 import com.frauddetection.alert.messaging.TransactionScoredEventListener;
 import com.frauddetection.alert.service.AlertManagementUseCase;
@@ -19,6 +20,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class AuthoritativeTransactionScoredEventDeserializerTest {
 
@@ -91,6 +93,10 @@ class AuthoritativeTransactionScoredEventDeserializerTest {
                         "transactions.dead-letter"
                 )
         );
+        when(transactionMonitoring.recordScoredTransaction(baseline)).thenReturn(new ScoringOccurrenceAdmissionResult(
+                ScoringOccurrenceAdmissionResult.Outcome.APPLIED_NEW,
+                ScoringOccurrenceAdmissionResult.ReasonCode.FIRST_OCCURRENCE_ACCEPTED
+        ));
 
         listener.onMessage(baseline, "trace-baseline-processing");
 

@@ -20,6 +20,7 @@ public class MlPredictionEvidenceEventListener {
     }
 
     @KafkaListener(
+            id = "mlPredictionEvidenceSourceListener",
             topics = "${app.kafka.topics.transaction-scored}",
             groupId = "${app.kafka.consumer.ml-prediction-evidence-group-id}",
             containerFactory = "mlPredictionEvidenceKafkaListenerContainerFactory"

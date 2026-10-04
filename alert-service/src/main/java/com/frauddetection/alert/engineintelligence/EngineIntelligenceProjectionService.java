@@ -45,6 +45,14 @@ public class EngineIntelligenceProjectionService {
     }
 
     public EngineIntelligenceProjectionResult project(TransactionScoredEvent event) {
+        return project(event, false);
+    }
+
+    public EngineIntelligenceProjectionResult projectCurrentOccurrence(TransactionScoredEvent event) {
+        return project(event, true);
+    }
+
+    private EngineIntelligenceProjectionResult project(TransactionScoredEvent event, boolean storeRequired) {
         Instant startedAt = clock.instant();
         metrics.recordEngineIntelligenceProjectionAttempt();
         try {
@@ -84,17 +92,23 @@ public class EngineIntelligenceProjectionService {
             logOmission(result);
             return result;
         } catch (ProjectionStoreUnavailableException exception) {
+            metrics.recordEngineIntelligenceProjectionFailure(EngineIntelligenceProjectionMetricReason.STORE_UNAVAILABLE);
+            if (storeRequired) {
+                throw exception;
+            }
             EngineIntelligenceProjectionResult result = EngineIntelligenceProjectionResult.omitted(
                     EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_PROJECTION_FAILED
             );
-            metrics.recordEngineIntelligenceProjectionFailure(EngineIntelligenceProjectionMetricReason.STORE_UNAVAILABLE);
             logOmission(result);
             return result;
         } catch (RuntimeException exception) {
+            metrics.recordEngineIntelligenceProjectionFailure(EngineIntelligenceProjectionMetricReason.UNKNOWN_FAILURE);
+            if (storeRequired) {
+                throw exception;
+            }
             EngineIntelligenceProjectionResult result = EngineIntelligenceProjectionResult.omitted(
                     EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_PROJECTION_FAILED
             );
-            metrics.recordEngineIntelligenceProjectionFailure(EngineIntelligenceProjectionMetricReason.UNKNOWN_FAILURE);
             logOmission(result);
             return result;
         } finally {
@@ -134,10 +148,10 @@ public class EngineIntelligenceProjectionService {
         };
     }
 
-    private static final class ProjectionStoreUnavailableException extends RuntimeException {
+    static final class ProjectionStoreUnavailableException extends RuntimeException {
 
         private ProjectionStoreUnavailableException(RuntimeException cause) {
-            super(cause);
+            super("ENGINE_INTELLIGENCE_PROJECTION_STORE_UNAVAILABLE", cause);
         }
     }
 

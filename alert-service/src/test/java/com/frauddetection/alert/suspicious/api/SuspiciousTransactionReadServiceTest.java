@@ -43,7 +43,7 @@ class SuspiciousTransactionReadServiceTest {
         assertThat(response).isPresent();
         assertThat(response.get().suspiciousTransactionId()).isEqualTo("suspicious-1");
         assertThat(response.get().evidenceStatus()).isEqualTo(EvidenceStatus.PARTIAL);
-        verify(repository, never()).findByTransactionIdAndSourceEventId(any(), any());
+        verify(repository, never()).findByTransactionId(any());
     }
 
     @Test

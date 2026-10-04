@@ -61,6 +61,7 @@ class OutboxConfigurationNamespaceTest {
     @Test
     void runtimeConfigurationContainsOnlyCanonicalSelectors() throws IOException {
         String publisher = source("outbox/OutboxPublisherCoordinator.java");
+        String fraudAlertPublisher = source("outbox/FraudAlertOutboxPublisher.java");
         String scheduler = source("service/FraudDecisionOutboxPublisher.java");
         String trust = source("system/SystemTrustLevelController.java");
         String bankGuard = source("regulated/BankModeStartupGuard.java");
@@ -69,6 +70,12 @@ class OutboxConfigurationNamespaceTest {
         String compose = Files.readString(Path.of("..", "deployment", "docker-compose.yml"));
 
         assertThat(publisher).contains("${app.outbox.lease-duration:PT1M}", "${app.outbox.max-attempts:5}");
+        assertThat(fraudAlertPublisher)
+                .contains(
+                        "${app.outbox.lease-duration:PT1M}",
+                        "${app.outbox.max-attempts:5}",
+                        "${app.outbox.publisher.delay-ms:5000}"
+                );
         assertThat(scheduler).contains("${app.outbox.publisher.delay-ms:5000}");
         assertThat(trust).contains("${app.outbox.stale-threshold:PT10M}");
         assertThat(bankGuard).contains("${app.outbox.max-attempts:5}");
@@ -83,7 +90,7 @@ class OutboxConfigurationNamespaceTest {
         assertThat(compose)
                 .contains("OUTBOX_LEASE_DURATION", "OUTBOX_MAX_ATTEMPTS", "OUTBOX_STALE_THRESHOLD")
                 .contains("AUDIT_EXTERNAL_ANCHORING_OBJECT_STORE_STARTUP_CHECK_ENABLED");
-        assertThat(publisher + scheduler + trust + bankGuard + application + compose)
+        assertThat(publisher + fraudAlertPublisher + scheduler + trust + bankGuard + application + compose)
                 .doesNotContain("app.alert.decision-outbox", "APP_ALERT_DECISION_OUTBOX");
     }
 

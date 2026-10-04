@@ -2,6 +2,9 @@ package com.frauddetection.alert.config;
 
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.observability.TraceContext;
+import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionReason;
+import com.frauddetection.alert.messaging.MlPredictionEvidencePermanentProcessingException;
+import com.frauddetection.alert.messaging.MlPredictionEvidenceTransientProcessingException;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeader;
@@ -209,6 +212,98 @@ class AlertKafkaFailureHandlingTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void transientEvidenceFailureUsesDedicatedRecoverableDeadLetterTopic() {
+        KafkaOperations<Object, Object> kafkaOperations = mock(KafkaOperations.class);
+        when(kafkaOperations.send(any(ProducerRecord.class)))
+                .thenReturn(CompletableFuture.completedFuture(mock(SendResult.class)));
+        DeadLetterPublishingRecoverer recoverer = config.mlPredictionEvidenceDeadLetterPublishingRecoverer(
+                kafkaOperations,
+                evidenceRecoveryProperties()
+        );
+        ConsumerRecord<Object, Object> source = new ConsumerRecord<>(
+                "transactions.scored",
+                2,
+                41L,
+                "transaction-1",
+                mock(TransactionScoredEvent.class)
+        );
+
+        recoverer.accept(
+                source,
+                null,
+                new MlPredictionEvidenceTransientProcessingException(
+                        MlPredictionEvidenceProjectionReason.STORE_UNAVAILABLE
+                )
+        );
+
+        ArgumentCaptor<ProducerRecord<Object, Object>> published = ArgumentCaptor.forClass(ProducerRecord.class);
+        verify(kafkaOperations).send(published.capture());
+        assertThat(published.getValue().topic()).isEqualTo("ml.prediction-evidence.dead-letter");
+        assertThat(published.getValue().headers().lastHeader(KafkaHeaders.DLT_ORIGINAL_TOPIC)).isNotNull();
+        assertThat(published.getValue().headers().lastHeader(KafkaHeaders.DLT_ORIGINAL_PARTITION)).isNotNull();
+        assertThat(published.getValue().headers().lastHeader(KafkaHeaders.DLT_ORIGINAL_OFFSET)).isNotNull();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void permanentEvidenceFailureUsesTerminalQuarantineTopic() {
+        KafkaOperations<Object, Object> kafkaOperations = mock(KafkaOperations.class);
+        when(kafkaOperations.send(any(ProducerRecord.class)))
+                .thenReturn(CompletableFuture.completedFuture(mock(SendResult.class)));
+        DeadLetterPublishingRecoverer recoverer = config.mlPredictionEvidenceDeadLetterPublishingRecoverer(
+                kafkaOperations,
+                evidenceRecoveryProperties()
+        );
+        ConsumerRecord<Object, Object> source = new ConsumerRecord<>(
+                "ml.prediction-evidence.redrive",
+                0,
+                7L,
+                "transaction-1",
+                mock(TransactionScoredEvent.class)
+        );
+
+        recoverer.accept(
+                source,
+                null,
+                new MlPredictionEvidencePermanentProcessingException(
+                        MlPredictionEvidenceProjectionReason.REPLAY_CONFLICT
+                )
+        );
+
+        ArgumentCaptor<ProducerRecord<Object, Object>> published = ArgumentCaptor.forClass(ProducerRecord.class);
+        verify(kafkaOperations).send(published.capture());
+        assertThat(published.getValue().topic()).isEqualTo("ml.prediction-evidence.quarantine");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void failedEvidenceDeadLetterPublicationIsPropagated() {
+        KafkaOperations<Object, Object> kafkaOperations = mock(KafkaOperations.class);
+        when(kafkaOperations.send(any(ProducerRecord.class)))
+                .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("broker unavailable")));
+        DeadLetterPublishingRecoverer recoverer = config.mlPredictionEvidenceDeadLetterPublishingRecoverer(
+                kafkaOperations,
+                evidenceRecoveryProperties()
+        );
+        ConsumerRecord<Object, Object> source = new ConsumerRecord<>(
+                "transactions.scored",
+                0,
+                42L,
+                "transaction-1",
+                mock(TransactionScoredEvent.class)
+        );
+
+        assertThatThrownBy(() -> recoverer.accept(
+                source,
+                null,
+                new MlPredictionEvidenceTransientProcessingException(
+                        MlPredictionEvidenceProjectionReason.STORE_UNAVAILABLE
+                )
+        )).isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
     void evidenceConsumerUsesBoundedConcurrencyAndRecordAcknowledgement() {
         var factory = config.mlPredictionEvidenceKafkaListenerContainerFactory(
                 mock(ConsumerFactory.class),
@@ -220,5 +315,15 @@ class AlertKafkaFailureHandlingTest {
                 factory.createContainer("transactions.scored");
         assertThat(container.getConcurrency()).isEqualTo(1);
         assertThat(factory.getContainerProperties().getAckMode()).isEqualTo(ContainerProperties.AckMode.RECORD);
+    }
+
+    private MlPredictionEvidenceRecoveryProperties evidenceRecoveryProperties() {
+        return new MlPredictionEvidenceRecoveryProperties(
+                "ml.prediction-evidence.dead-letter",
+                "ml.prediction-evidence.redrive",
+                "ml.prediction-evidence.quarantine",
+                "alert-service-ml-prediction-evidence-redrive",
+                false
+        );
     }
 }

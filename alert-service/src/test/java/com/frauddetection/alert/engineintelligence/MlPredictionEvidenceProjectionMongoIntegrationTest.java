@@ -196,7 +196,7 @@ class MlPredictionEvidenceProjectionMongoIntegrationTest {
     }
 
     @Test
-    void transientEvidenceFailureSurvivesConsumerRestartAndRecoversExactOccurrence() {
+    void transientEvidenceFailureRemainsRetryableAndRecoversExactOccurrence() {
         var event = MlPredictionEvidenceProjectionTestSupport.event(
                 "evt-durable-recovery",
                 0.8123d,
@@ -213,20 +213,20 @@ class MlPredictionEvidenceProjectionMongoIntegrationTest {
                 .when(faultInjectedRepository)
                 .insert((MlPredictionEvidenceProjection) any(MlPredictionEvidenceProjection.class));
 
-        MlPredictionEvidenceEventListener interruptedConsumer = new MlPredictionEvidenceEventListener(
+        MlPredictionEvidenceEventListener firstAttempt = new MlPredictionEvidenceEventListener(
                 evidenceService(faultInjectedRepository)
         );
 
-        assertThatThrownBy(() -> interruptedConsumer.onMessage(event))
+        assertThatThrownBy(() -> firstAttempt.onMessage(event))
                 .isInstanceOf(MlPredictionEvidenceTransientProcessingException.class)
                 .hasMessage("ML_PREDICTION_EVIDENCE_PROJECTION_STORE_UNAVAILABLE");
         assertThat(repository.count()).isZero();
 
-        MlPredictionEvidenceEventListener restartedConsumer = new MlPredictionEvidenceEventListener(
+        MlPredictionEvidenceEventListener retryAttempt = new MlPredictionEvidenceEventListener(
                 evidenceService(faultInjectedRepository)
         );
-        assertThatCode(() -> restartedConsumer.onMessage(event)).doesNotThrowAnyException();
-        assertThatCode(() -> restartedConsumer.onMessage(event)).doesNotThrowAnyException();
+        assertThatCode(() -> retryAttempt.onMessage(event)).doesNotThrowAnyException();
+        assertThatCode(() -> retryAttempt.onMessage(event)).doesNotThrowAnyException();
 
         MlPredictionEvidenceProjection stored = repository.findById(event.eventId()).orElseThrow();
         assertThat(repository.count()).isEqualTo(1L);
