@@ -16,8 +16,11 @@ compatibility guidance.
 | --- | --- | --- |
 | Shared contract | `common-events` `TransactionScoredEvent` and contract tests | Shared current-absent, minimal, full-bounded, unknown-nested, and unknown-top-level fixtures |
 | Authoritative alert Kafka consumer | `AlertKafkaConfig` -> `AuthoritativeTransactionScoredEventDeserializer` -> `TransactionScoredEventListener` | Preserves strict deserialization for the authoritative event while deliberately removing only optional `mlPredictionEvidence`; alert and monitoring availability do not depend on diagnostic evidence projection |
+| Current Engine Intelligence projection consumer | `AlertKafkaConfig` -> `EngineIntelligenceProjectionEventListener` -> `EngineIntelligenceProjectionService` | Uses an independent consumer group and projects diagnostics only when the event still owns the current scoring occurrence; persistence failure is retried without rolling back the already committed baseline result |
 | ML prediction evidence consumer | `AlertKafkaConfig` -> `MlPredictionEvidenceEventListener` -> `MlPredictionEvidenceProjectionService` | Uses strict full-event deserialization in a separate Kafka consumer group, record acknowledgement, bounded retry, and dead-letter handling |
+| ML prediction evidence redrive | `AlertKafkaConfig` -> `MlPredictionEvidenceRedriveListener` -> `MlPredictionEvidenceProjectionService` | Disabled by default; the dedicated redrive topic and group recover only immutable private evidence, require original source coordinates, and route invalid input to terminal quarantine without replaying baseline business processing |
 | Alert monitoring projection | `TransactionMonitoringService` -> `ScoredTransactionDocumentMapper` -> `ScoredTransactionDocument` | Existing projection compared against the current shape without Engine Intelligence |
+| Scoring occurrence identity | `ScoredTransactionDocumentMapper` and `EngineIntelligenceProjectionService` -> `ScoringOccurrenceFingerprint` | One canonical fingerprint binds current-state admission and optional diagnostic projection to the same exact scored-event payload |
 | Alert creation path | `AlertManagementService` -> `AlertCaseFactory` -> `AlertDocument` | Historical inventory only; no FDP-93 engine-intelligence projection |
 | Fraud-case path | `FraudCaseManagementService` -> `FraudCaseDocument` and `FraudCaseTransactionDocument` | Historical inventory only; no FDP-93 engine-intelligence projection |
 | Suspicious transaction path | `SuspiciousTransactionProjectionService` -> `SuspiciousTransactionDocument` | Historical inventory only; no FDP-93 engine-intelligence projection |
@@ -28,12 +31,14 @@ compatibility guidance.
 | Replay and smoke scripts | Repository search found raw-transaction replay input only; no scored-event fixture reader was found | Shared FDP-93 fixtures are the scored-event compatibility source |
 | API/UI | Repository search found no direct `TransactionScoredEvent` deserializer in API or analyst console UI | Guarded against product exposure |
 
-The current topology gives authoritative alert processing and ML prediction evidence projection independent offsets and
-failure domains. The authoritative consumer remains strict for the base scored-event contract and omits only the optional
-evidence member before mapping. The evidence consumer validates the complete event and persists evidence independently;
-transient storage failures use bounded retry and permanent failures use dead-letter handling. A successfully consumed base
-event therefore cannot be replayed merely because the diagnostic evidence store is unavailable, while evidence failures
-remain observable and recoverable through their dedicated consumer path.
+The current topology gives authoritative alert processing, current Engine Intelligence projection, and immutable ML
+prediction evidence projection independent offsets and failure domains. The authoritative consumer remains strict for the
+base scored-event contract and omits only the optional evidence member before mapping. Diagnostic consumers validate the
+complete event and persist their projections independently; transient storage failures use bounded retry and permanent
+evidence failures use dead-letter handling. A successfully consumed base event therefore cannot be replayed merely because
+a diagnostic store is unavailable. Approved evidence recovery copies records from `ml.prediction-evidence.dead-letter` to
+`ml.prediction-evidence.redrive`; its separate, disabled-by-default listener writes only immutable evidence and sends
+malformed, conflicting, or coordinate-free records to `ml.prediction-evidence.quarantine`.
 
 The source-scan discovery test fails with `TRANSACTION_SCORED_EVENT_CONSUMER_INVENTORY_REVIEW_REQUIRED`
 when a production reference is added without inventory review.

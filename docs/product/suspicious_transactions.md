@@ -32,6 +32,11 @@ It owns one current projection per transactionId.
 It links to an alert through linkedAlertId when an alert exists or is created.
 It stores minimal evidence metadata only.
 
+When a newer authoritative occurrence is no longer alert-worthy, the current suspicious projection is removed in the
+same occurrence transaction. A transaction that has never been suspicious does not receive a placeholder document.
+The historical alert, alert publication intent, and analyst-owned fraud-case lifecycle remain independently auditable
+and are not closed, reopened, dismissed, or otherwise mutated by this reconciliation.
+
 ## Out Of Scope
 
 The read model does not add public API.
@@ -73,6 +78,11 @@ for the scored event represented by that document; it is not a second document i
 The authoritative scoring-occurrence admission completes before this projection is written. A newly admitted current
 occurrence updates the transaction-scoped read model and preserves its stable document ID. Replaying an occurrence
 that admission did not accept cannot independently create another suspicious-transaction document.
+
+A newer non-alert-worthy occurrence removes an existing current projection instead of retaining stale HIGH/CRITICAL
+classification. The newer occurrence remains authoritative in `scored_transactions`; historical alert and case records
+remain separate facts. An identical replay is a no-op after removal, while a stale alert-worthy replay is rejected by
+occurrence admission before it can recreate the projection.
 
 Projection persistence failures are surfaced as projection errors. The replaced duplicate-key readback path and its
 dedicated retry metrics are not part of the current contract.

@@ -7,9 +7,9 @@ consumption are separate read boundaries over that projection.
 
 ## Scope
 
-The `TransactionMonitoringService` writes the base scored-transaction projection and invokes an optional
-internal projection after that write succeeds. The projection reads the optional public `engineIntelligence` event
-field and writes a bounded Mongo read model. Internal evidence capture also routes optional validated
+The baseline scored-event consumer writes the authoritative scored transaction and alert state in its MongoDB
+transaction. A separate `engine-intelligence` Kafka consumer group reads the same event and projects the optional
+public `engineIntelligence` field into a bounded Mongo read model. Internal evidence capture also routes optional validated
 `mlPredictionEvidence` to a
 separate private evidence collection; it does not add that exact score to the public read model.
 
@@ -30,8 +30,9 @@ logic. Projection failure must not break base alert projection.
 
 ## Storage Model
 
-The `engine_intelligence_projections` Mongo collection stores one replacement document per transaction ID. The
-document contains the contract version, generated timestamp, explicit Rules-vs-ML comparison identity and summary, bounded engine results, bounded
+The `engine_intelligence_projections` Mongo collection stores at most one replacement document per transaction ID.
+The document privately records its authoritative `sourceEventId` owner together with the contract version, generated
+timestamp, explicit Rules-vs-ML comparison identity and summary, bounded engine results, bounded
 diagnostic signals, bounded warnings, counts, projection timestamps, and the bounded ML model identity when it is
 present on the `ml.python.primary` engine result.
 
@@ -87,6 +88,8 @@ enforced by `EngineIntelligenceProjectionPolicy`.
 ## Old Event Compatibility
 
 Old events without engineIntelligence remain compatible. They create no engine-intelligence projection document.
+A newer authoritative occurrence without diagnostics never inherits an older occurrence's projection: snapshot reads
+return `NOT_PROJECTED` unless the private projection owner matches the current scored transaction.
 Events without `mlPredictionEvidence` create no private evidence document and never erase accepted evidence.
 
 ## New Bounded Event Projection
@@ -125,10 +128,12 @@ The operational procedure and retention boundary are defined in
 
 ## Mongo projection identity and idempotency
 
-Engine-intelligence projection uses transactionId as Mongo `_id`.
-Mongo `_id` uniqueness is the idempotency boundary for the public projection.
-Reprocessing the same transaction replaces the projection state instead of appending duplicate
-engines/signals/warnings. No separate migration is required for this document-style projection unless deployment
+Engine-intelligence projection uses transactionId as Mongo `_id` and `sourceEventId` as its private occurrence fence.
+Mongo `_id` uniqueness prevents duplicate public projections, while the occurrence fence prevents stale replay from
+overwriting current diagnostics. Reprocessing the same occurrence replaces the projection state instead of appending
+duplicate engines/signals/warnings. Existing projection documents without `sourceEventId` remain readable from Mongo
+but fail closed as `NOT_PROJECTED` for current model-specific interpretation. No separate migration is required for
+this document-style projection unless deployment
 policy requires explicit collection/index creation. Future hardening may add secondary indexes or retention/TTL
 based on query and retention needs.
 
@@ -196,9 +201,20 @@ authorization.
 
 ## Failure Isolation Ownership
 
-`EngineIntelligenceProjectionService` owns normal projection failure isolation and returns bounded omission results.
-`TransactionMonitoringService` retains last-resort containment so unexpected projection wiring failures cannot break
-the base scored-transaction projection.
+The optional projection runs in its own Kafka consumer group and a separate MongoDB transaction. It validates the
+event against the authoritative scored transaction before writing diagnostics. A concurrent replacement may leave a
+physically stale optional document, but the read boundary fences it: read-only MongoDB snapshot reads return
+diagnostics only when both collections identify the same `sourceEventId`. Transaction-detail and fraud-feedback flows
+also bind that lookup to the occurrence already loaded for their baseline fields, so an occurrence replacement between
+the two service calls yields `NOT_PROJECTED` rather than mixed-occurrence model identity.
+
+Transient projection failures escape the diagnostic listener and use the existing bounded Kafka retry and durable
+`transactions.dead-letter` handoff. Authorized recovery republishes the original retained event to
+`transactions.scored`; baseline occurrence admission is idempotent and the diagnostic group retries only the matching
+current occurrence. Invalid optional diagnostic shapes are bounded omissions. No exception is swallowed inside an
+aborted MongoDB transaction, and diagnostic failure cannot roll back baseline scoring or alert processing. The
+operator procedure is defined in
+[Engine Intelligence Projection Recovery](../runbooks/engine_intelligence_projection_recovery.md).
 
 ## Operational Observability
 
