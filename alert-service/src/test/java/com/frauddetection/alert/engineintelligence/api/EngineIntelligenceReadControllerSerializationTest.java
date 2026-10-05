@@ -56,6 +56,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class EngineIntelligenceReadControllerSerializationTest {
 
     private static final Instant GENERATED_AT = Instant.parse("2026-06-02T13:00:00Z");
+    private static final String SOURCE_EVENT_FINGERPRINT = "a".repeat(64);
 
     @Autowired
     private MockMvc mockMvc;
@@ -123,6 +124,8 @@ class EngineIntelligenceReadControllerSerializationTest {
         return new EngineIntelligenceProjection(
                 "txn-full",
                 "event-full",
+                GENERATED_AT,
+                SOURCE_EVENT_FINGERPRINT,
                 1,
                 GENERATED_AT,
                 EngineIntelligenceComparisonType.RULES_VS_ML,
@@ -181,6 +184,8 @@ class EngineIntelligenceReadControllerSerializationTest {
         return new EngineIntelligenceProjection(
                 "txn-corrupted",
                 "event-corrupted",
+                GENERATED_AT,
+                SOURCE_EVENT_FINGERPRINT,
                 1,
                 GENERATED_AT,
                 null,
@@ -210,7 +215,7 @@ class EngineIntelligenceReadControllerSerializationTest {
         document.setSourceEventCreatedAt(GENERATED_AT.toString());
         document.setSourceEventCreatedAtEpochSecond(GENERATED_AT.getEpochSecond());
         document.setSourceEventCreatedAtNano(GENERATED_AT.getNano());
-        document.setSourceEventFingerprint("a".repeat(64));
+        document.setSourceEventFingerprint(SOURCE_EVENT_FINGERPRINT);
         return document;
     }
 }
