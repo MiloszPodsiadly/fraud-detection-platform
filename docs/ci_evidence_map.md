@@ -28,6 +28,49 @@ Candidate for consolidation:
 - No
 - Rationale: This is the broad backend regression baseline and should stay diagnosable.
 
+## Institutional Reliability Proof
+
+Job ID:
+- `institutional-reliability`
+
+Purpose:
+- Prove that scoring-occurrence ownership, Engine Intelligence recovery/read isolation, feedback lineage, and
+  broker-backed outbox reliability remain coherent under persistence, replay, and concurrency.
+
+Proves:
+- The named institutional reliability suite executes with non-zero JUnit evidence.
+- Exact scoring-occurrence identity, durable pending projection recovery, immutable feedback lineage, and outbox
+  publication verification retain their fail-closed boundaries.
+- The tested revision equals `GITHUB_SHA` before the suite runs.
+- Surefire reports are uploaded as `institutional-reliability-<TESTED_GIT_SHA>` with missing evidence treated as an
+  error.
+
+Does not prove:
+- Production infrastructure availability, external IAM, disaster recovery, legal non-repudiation, or correctness of
+  revisions other than the recorded tested SHA.
+
+Required for merge:
+- Yes
+
+Primary proof files:
+- `alert-service/src/test/java/com/frauddetection/alert/engineintelligence/EngineIntelligencePendingProjectionReliabilityIntegrationTest.java`
+- `alert-service/src/test/java/com/frauddetection/alert/messaging/ScoringOccurrenceProcessingMongoIntegrationTest.java`
+- `alert-service/src/test/java/com/frauddetection/alert/feedback/FraudFeedbackOccurrenceSnapshotMongoIntegrationTest.java`
+- `alert-service/src/test/java/com/frauddetection/alert/outbox/FraudAlertOutboxKafkaReliabilityIntegrationTest.java`
+- `alert-service/src/test/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceApiArchitectureGuardTest.java`
+- `alert-service/src/test/java/com/frauddetection/alert/engineintelligence/api/EngineIntelligenceReadControllerSerializationTest.java`
+- `alert-service/src/test/java/com/frauddetection/alert/observability/EngineIntelligenceOperationalMetricsCardinalityTest.java`
+- `scripts/ci/verify-junit-reports.mjs`
+- `.github/workflows/ci.yml`
+
+Failure meaning:
+- A required reliability invariant failed, the named suite did not execute completely, JUnit evidence is missing, or
+  the reports cannot be tied to the exact workflow revision.
+
+Candidate for consolidation:
+- No
+- Rationale: This is the bounded cross-cutting persistence and broker reliability proof for the alert service.
+
 ## FDP-42 Fraud Case Management
 
 Purpose:
