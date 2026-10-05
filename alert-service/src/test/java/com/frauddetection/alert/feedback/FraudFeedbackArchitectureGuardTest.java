@@ -105,6 +105,25 @@ class FraudFeedbackArchitectureGuardTest {
     }
 
     @Test
+    void feedbackOccurrenceLineageAndHistoricalMigrationRulesStayDocumented() throws IOException {
+        String feedbackLoop = Files.readString(architectureDoc("fraud_feedback_loop.md"));
+        String datasetBuilder = Files.readString(architectureDoc("feedback_dataset_builder.md"));
+
+        assertThat(feedbackLoop)
+                .contains("authoritative scoring occurrence identity")
+                .contains("one `REQUIRED` Mongo transaction")
+                .contains("immutable")
+                .contains("lineage unavailable")
+                .contains("quarantined and excluded")
+                .contains("must not be guessed or backfilled");
+        assertThat(datasetBuilder)
+                .contains("does not export the private scoring occurrence identity")
+                .contains("exact authoritative `sourceEventId`")
+                .contains("quarantined and excluded")
+                .contains("must never infer missing lineage");
+    }
+
+    @Test
     void feedbackDatasetGovernanceDoesNotAddExportOrPublicApi() throws IOException {
         String governance = source(Path.of("src/main/java/com/frauddetection/alert/feedback/governance"), path -> true);
 

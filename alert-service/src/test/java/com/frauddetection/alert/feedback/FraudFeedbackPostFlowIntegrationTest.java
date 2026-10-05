@@ -153,7 +153,17 @@ class FraudFeedbackPostFlowIntegrationTest {
         FraudFeedbackRecord saved = savedRecords.getFirst();
         assertThat(saved.getFeedbackId()).startsWith("ffb-");
         assertThat(saved.getNotes()).isEqualTo("Customer confirmed fraud");
-        assertThat(body).doesNotContain("Customer confirmed fraud", "rawMlRequest", "rawFeatureVector", "rawEvidence");
+        assertThat(saved.getSourceEventId()).isEqualTo("event-1");
+        assertThat(saved.getSourceEventCreatedAt()).isEqualTo(Instant.parse("2026-06-25T09:00:01Z"));
+        assertThat(saved.getSourceEventFingerprint()).isEqualTo("a".repeat(64));
+        assertThat(body).doesNotContain(
+                "Customer confirmed fraud",
+                "rawMlRequest",
+                "rawFeatureVector",
+                "rawEvidence",
+                "sourceEventId",
+                "sourceEventFingerprint"
+        );
 
         ArgumentCaptor<AuditEventMetadataSummary> metadata = ArgumentCaptor.forClass(AuditEventMetadataSummary.class);
         verify(auditOutboxService).createPendingAudit(
@@ -322,7 +332,8 @@ class FraudFeedbackPostFlowIntegrationTest {
                 ),
                 ScoringOccurrenceOwnership.authoritative(
                         "event-1",
-                        Instant.parse("2026-06-25T09:00:01Z")
+                        Instant.parse("2026-06-25T09:00:01Z"),
+                        "a".repeat(64)
                 )
         );
     }

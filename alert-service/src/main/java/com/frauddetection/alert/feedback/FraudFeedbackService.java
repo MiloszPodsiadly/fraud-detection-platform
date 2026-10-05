@@ -8,6 +8,7 @@ import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceEngineReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
@@ -124,11 +125,27 @@ public class FraudFeedbackService {
 
     public FraudFeedbackResponse create(String transactionId, CreateFraudFeedbackRequest request) {
         ValidatedFeedback validated = validate(request);
-        ScoredTransaction transaction = transactionMonitoringUseCase.getScoredTransaction(transactionId);
         String actor = currentAnalystUser.get()
                 .map(principal -> principal.userId())
                 .filter(userId -> !userId.isBlank())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "FRAUD_FEEDBACK_ACTOR_REQUIRED"));
+        try {
+            FraudFeedbackRecord saved = transactionRunner.runLocalCommit(
+                    () -> createWithAuthoritativeSnapshot(transactionId, validated, actor)
+            );
+            return mapper.toResponse(saved);
+        } catch (DuplicateKeyException exception) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "FRAUD_FEEDBACK_ALREADY_RECORDED", exception);
+        }
+    }
+
+    private FraudFeedbackRecord createWithAuthoritativeSnapshot(
+            String transactionId,
+            ValidatedFeedback validated,
+            String actor
+    ) {
+        ScoredTransaction transaction = transactionMonitoringUseCase.getScoredTransaction(transactionId);
+        ScoringOccurrenceOwnership ownership = requireAuthoritativeOccurrence(transaction);
         String boundedTransactionId = transaction.transactionId();
         if (repository.existsByTransactionId(boundedTransactionId)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "FRAUD_FEEDBACK_ALREADY_RECORDED");
@@ -137,6 +154,7 @@ public class FraudFeedbackService {
         FraudFeedbackRecord record = new FraudFeedbackRecord();
         record.setFeedbackId("ffb-" + UUID.randomUUID());
         record.setTransactionId(transaction.transactionId());
+        record.captureScoringOccurrence(ownership);
         record.setCustomerId(transaction.customerId());
         record.setCorrelationId(transaction.correlationId());
         record.setAnalystDecision(validated.analystDecision());
@@ -154,12 +172,20 @@ public class FraudFeedbackService {
         record.setTransactionTimestamp(transaction.transactionTimestamp());
         snapshotEngineIntelligence(record, transaction);
         snapshotAnalystRecommendation(record, transaction.analystRecommendation());
+        return persistFeedbackWithAuditIntent(record);
+    }
 
-        try {
-            return mapper.toResponse(transactionRunner.runLocalCommit(() -> persistFeedbackWithAuditIntent(record)));
-        } catch (DuplicateKeyException exception) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "FRAUD_FEEDBACK_ALREADY_RECORDED", exception);
+    private ScoringOccurrenceOwnership requireAuthoritativeOccurrence(ScoredTransaction transaction) {
+        ScoringOccurrenceOwnership ownership = transaction == null
+                ? null
+                : transaction.scoringOccurrenceOwnership();
+        if (ownership == null || ownership.state() != ScoringOccurrenceOwnership.State.AUTHORITATIVE) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "FRAUD_FEEDBACK_SCORING_OCCURRENCE_UNAVAILABLE"
+            );
         }
+        return ownership;
     }
 
     public FraudFeedbackResponse get(String transactionId) {
