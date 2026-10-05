@@ -3,7 +3,10 @@ package com.frauddetection.alert.engineintelligence;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.persistence.ScoredTransactionDocument;
+import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -32,14 +35,35 @@ class EngineIntelligenceProjectionServiceTest {
     private static final Instant NOW = Instant.parse("2026-06-02T08:00:00Z");
     private static final Instant LATER = Instant.parse("2026-06-02T08:05:00Z");
 
-    private final EngineIntelligenceProjectionRepository repository = mock(EngineIntelligenceProjectionRepository.class);
+    private final EngineIntelligenceProjectionWriteFence writeFence = mock(
+            EngineIntelligenceProjectionWriteFence.class,
+            invocation -> {
+                if ("write".equals(invocation.getMethod().getName())) {
+                    EngineIntelligenceProjection projection = invocation.getArgument(0);
+                    if (projection == null) {
+                        return null;
+                    }
+                    return new EngineIntelligenceProjectionWriteResult(
+                            EngineIntelligenceProjectionWriteResult.Status.ACCEPTED,
+                            projection
+                    );
+                }
+                return null;
+            }
+    );
     private final EngineIntelligenceProjectionMapper mapper = new EngineIntelligenceProjectionMapper(
             new EngineIntelligenceProjectionPolicy(),
             Clock.fixed(NOW, ZoneOffset.UTC)
     );
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private final AlertServiceMetrics metrics = new AlertServiceMetrics(meterRegistry);
-    private final EngineIntelligenceProjectionService service = new EngineIntelligenceProjectionService(repository, mapper, metrics);
+    private final ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+    private final EngineIntelligenceProjectionService service = new EngineIntelligenceProjectionService(
+            writeFence,
+            mapper,
+            metrics,
+            scoredTransactionRepository
+    );
 
     @Test
     void nullEventReturnsInvalidShape() {
@@ -49,7 +73,7 @@ class EngineIntelligenceProjectionServiceTest {
         assertThat(result.omissionReason()).contains(
                 EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE
         );
-        verify(repository, never()).save(any());
+        verify(writeFence, never()).write(any());
     }
 
     @Test
@@ -63,13 +87,14 @@ class EngineIntelligenceProjectionServiceTest {
 
     @Test
     void oldEventWithoutEngineIntelligenceKeepsProjectionUnchanged() {
-        EngineIntelligenceProjectionResult result = service.project(EngineIntelligenceProjectionTestFixtures.oldEvent());
+        var event = EngineIntelligenceProjectionTestFixtures.oldEvent();
+        EngineIntelligenceProjectionResult result = service.project(event);
 
         assertThat(result.projection()).isEmpty();
         assertThat(result.omissionReason()).contains(
                 EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_ABSENT
         );
-        verify(repository, never()).save(any());
+        verify(writeFence, never()).write(any());
     }
 
     @Test
@@ -99,22 +124,18 @@ class EngineIntelligenceProjectionServiceTest {
 
     @Test
     void minimalEngineIntelligenceEventProjectsInternally() {
-        when(repository.findById("txn-fdp95-001")).thenReturn(Optional.empty());
-
         EngineIntelligenceProjectionResult result =
                 service.project(EngineIntelligenceProjectionTestFixtures.event(
                         EngineIntelligenceProjectionTestFixtures.minimalSummary()
                 ));
 
         assertThat(result.projection()).isPresent();
-        verify(repository).save(any(EngineIntelligenceProjection.class));
+        verify(writeFence).write(any(EngineIntelligenceProjection.class));
         assertProjectionMetricShape(1.0d, 1L, 1.0d, 0.0d, 0.0d);
     }
 
     @Test
     void successfulProjectionRecordsLatencyExactlyOnce() {
-        when(repository.findById("txn-fdp95-001")).thenReturn(Optional.empty());
-
         service.project(EngineIntelligenceProjectionTestFixtures.event(
                 EngineIntelligenceProjectionTestFixtures.minimalSummary()
         ));
@@ -124,8 +145,6 @@ class EngineIntelligenceProjectionServiceTest {
 
     @Test
     void fullBoundedEngineIntelligenceEventProjectsInternally() {
-        when(repository.findById("txn-fdp95-001")).thenReturn(Optional.empty());
-
         EngineIntelligenceProjection projection = service.project(EngineIntelligenceProjectionTestFixtures.event(
                 EngineIntelligenceProjectionTestFixtures.fullSummary()
         )).projection().orElseThrow();
@@ -137,8 +156,6 @@ class EngineIntelligenceProjectionServiceTest {
 
     @Test
     void projectionUsesEngineIntelligenceMlIdentityNotTopLevelFinalScoreModelVersion() {
-        when(repository.findById("txn-fdp95-001")).thenReturn(Optional.empty());
-
         EngineIntelligenceProjection projection = service.project(EngineIntelligenceProjectionTestFixtures.event(
                 EngineIntelligenceProjectionTestFixtures.disagreementSummary()
         )).projection().orElseThrow();
@@ -154,11 +171,10 @@ class EngineIntelligenceProjectionServiceTest {
     @Test
     void sameEventProjectedTwiceDoesNotDuplicateEngineIntelligence() {
         AtomicReference<EngineIntelligenceProjection> state = new AtomicReference<>();
-        when(repository.findById("txn-fdp95-001")).thenAnswer(invocation -> Optional.ofNullable(state.get()));
-        when(repository.save(any(EngineIntelligenceProjection.class))).thenAnswer(invocation -> {
+        when(writeFence.write(any(EngineIntelligenceProjection.class))).thenAnswer(invocation -> {
             EngineIntelligenceProjection projection = invocation.getArgument(0);
             state.set(projection);
-            return projection;
+            return accepted(projection);
         });
 
         var event = EngineIntelligenceProjectionTestFixtures.event(EngineIntelligenceProjectionTestFixtures.fullSummary());
@@ -181,11 +197,13 @@ class EngineIntelligenceProjectionServiceTest {
     @Test
     void replayPreservesCreatedAtAndRefreshesUpdatedAt() {
         AtomicReference<EngineIntelligenceProjection> state = new AtomicReference<>();
-        when(repository.findById("txn-fdp95-001")).thenAnswer(invocation -> Optional.ofNullable(state.get()));
-        when(repository.save(any(EngineIntelligenceProjection.class))).thenAnswer(invocation -> {
+        when(writeFence.write(any(EngineIntelligenceProjection.class))).thenAnswer(invocation -> {
             EngineIntelligenceProjection projection = invocation.getArgument(0);
+            if (state.get() != null) {
+                projection = withCreatedAt(projection, state.get().getCreatedAt());
+            }
             state.set(projection);
-            return projection;
+            return accepted(projection);
         });
         EngineIntelligenceProjectionService first = serviceAt(NOW);
         EngineIntelligenceProjectionService second = serviceAt(LATER);
@@ -204,7 +222,6 @@ class EngineIntelligenceProjectionServiceTest {
 
     @Test
     void engineIntelligenceProjectionDoesNotChangeAlertDecisioning() {
-        when(repository.findById("txn-fdp95-001")).thenReturn(Optional.empty());
         var event = EngineIntelligenceProjectionTestFixtures.event(
                 EngineIntelligenceProjectionTestFixtures.disagreementSummary()
         );
@@ -220,8 +237,6 @@ class EngineIntelligenceProjectionServiceTest {
     void invalidEngineIntelligenceIsOmittedWithoutSave() {
         EngineIntelligenceSummary summary = mock(EngineIntelligenceSummary.class);
         when(summary.contractVersion()).thenReturn(2);
-        when(repository.findById("txn-fdp95-001")).thenReturn(Optional.empty());
-
         EngineIntelligenceProjectionResult result =
                 service.project(EngineIntelligenceProjectionTestFixtures.event(summary));
 
@@ -229,7 +244,7 @@ class EngineIntelligenceProjectionServiceTest {
         assertThat(result.omissionReason()).contains(
                 EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_UNSUPPORTED_CONTRACT_VERSION
         );
-        verify(repository, never()).save(any());
+        verify(writeFence, never()).write(any());
         assertThat(meterRegistry.get("engine_intelligence_projection_omitted_total")
                 .tag("reason", "INVALID_PROJECTION_SHAPE")
                 .counter()
@@ -240,8 +255,6 @@ class EngineIntelligenceProjectionServiceTest {
     void invalidProjectionShapeRecordsProjectionLatencyExactlyOnce() {
         EngineIntelligenceSummary summary = mock(EngineIntelligenceSummary.class);
         when(summary.contractVersion()).thenReturn(2);
-        when(repository.findById("txn-fdp95-001")).thenReturn(Optional.empty());
-
         service.project(EngineIntelligenceProjectionTestFixtures.event(summary));
 
         assertProjectionMetricShape(1.0d, 1L, 0.0d, 1.0d, 0.0d);
@@ -250,9 +263,8 @@ class EngineIntelligenceProjectionServiceTest {
     }
 
     @Test
-    void repositoryFailureIsOmittedBoundedly() {
-        when(repository.findById("txn-fdp95-001")).thenReturn(Optional.empty());
-        when(repository.save(any(EngineIntelligenceProjection.class)))
+    void projectionStoreFailureIsOmittedBoundedly() {
+        when(writeFence.write(any(EngineIntelligenceProjection.class)))
                 .thenThrow(new IllegalStateException("raw-secret-stacktrace"));
 
         EngineIntelligenceProjectionResult result = service.project(EngineIntelligenceProjectionTestFixtures.event(
@@ -270,9 +282,60 @@ class EngineIntelligenceProjectionServiceTest {
     }
 
     @Test
+    void currentOccurrenceProjectionPersistsPrivateOccurrenceOwner() {
+        var event = EngineIntelligenceProjectionTestFixtures.event(
+                EngineIntelligenceProjectionTestFixtures.minimalSummary()
+        );
+        when(scoredTransactionRepository.findById(event.transactionId()))
+                .thenReturn(Optional.of(new ScoredTransactionDocumentMapper().toDocument(event)));
+        EngineIntelligenceProjection projection = service.projectCurrentOccurrence(event)
+                .projection()
+                .orElseThrow();
+
+        assertThat(projection.getSourceEventId()).isEqualTo(event.eventId());
+        verify(writeFence).write(projection);
+    }
+
+    @Test
+    void staleOccurrenceCannotOverwriteCurrentDiagnostics() {
+        var event = EngineIntelligenceProjectionTestFixtures.event(
+                EngineIntelligenceProjectionTestFixtures.minimalSummary()
+        );
+        Instant newerTime = event.createdAt().plusSeconds(1);
+        ScoredTransactionDocument current = new ScoredTransactionDocument();
+        current.setTransactionId(event.transactionId());
+        current.setSourceEventId("event-newer");
+        current.setSourceEventCreatedAt(newerTime.toString());
+        current.setSourceEventCreatedAtEpochSecond(newerTime.getEpochSecond());
+        current.setSourceEventCreatedAtNano(newerTime.getNano());
+        current.setSourceEventFingerprint("a".repeat(64));
+        when(scoredTransactionRepository.findById(event.transactionId())).thenReturn(Optional.of(current));
+
+        EngineIntelligenceProjectionResult result = service.projectCurrentOccurrence(event);
+
+        assertThat(result.omissionReason())
+                .contains(EngineIntelligenceProjectionOmissionReason.SCORING_OCCURRENCE_NOT_CURRENT);
+        verify(writeFence, never()).write(any());
+    }
+
+    @Test
+    void currentOccurrenceStoreFailureEscapesForIndependentConsumerRecovery() {
+        var event = EngineIntelligenceProjectionTestFixtures.event(
+                EngineIntelligenceProjectionTestFixtures.minimalSummary()
+        );
+        when(scoredTransactionRepository.findById(event.transactionId()))
+                .thenReturn(Optional.of(new ScoredTransactionDocumentMapper().toDocument(event)));
+        when(writeFence.write(any())).thenThrow(new IllegalStateException("raw store failure"));
+
+        assertThat(catchThrowableOfType(
+                () -> service.projectCurrentOccurrence(event),
+                EngineIntelligenceProjectionService.ProjectionStoreUnavailableException.class
+        )).hasMessage("ENGINE_INTELLIGENCE_PROJECTION_STORE_UNAVAILABLE");
+    }
+
+    @Test
     void storeUnavailableRecordsProjectionLatencyExactlyOnce() {
-        when(repository.findById("txn-fdp95-001")).thenReturn(Optional.empty());
-        when(repository.save(any(EngineIntelligenceProjection.class)))
+        when(writeFence.write(any(EngineIntelligenceProjection.class)))
                 .thenThrow(new IllegalStateException("raw-secret-stacktrace"));
 
         service.project(EngineIntelligenceProjectionTestFixtures.event(
@@ -286,15 +349,14 @@ class EngineIntelligenceProjectionServiceTest {
 
     @Test
     void rawPayloadDoesNotAppearInExceptionMessageOrLogs() {
-        when(repository.findById("txn-fdp95-001")).thenReturn(Optional.empty());
-        when(repository.save(any(EngineIntelligenceProjection.class)))
+        when(writeFence.write(any(EngineIntelligenceProjection.class)))
                 .thenThrow(new IllegalStateException("rawPayload-secret-stacktrace-token-endpoint-payload"));
         Logger logger = (Logger) LoggerFactory.getLogger(EngineIntelligenceProjectionService.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
         logger.addAppender(appender);
         EngineIntelligenceProjectionValidationException validationException = catchThrowableOfType(
-                () -> new EngineIntelligenceProjectionPolicy().validatedTransactionId("txn-rawPayload-secret"),
+                () -> new EngineIntelligenceProjectionPolicy().validatedTransactionId("txn invalid rawPayload-secret"),
                 EngineIntelligenceProjectionValidationException.class
         );
 
@@ -322,12 +384,45 @@ class EngineIntelligenceProjectionServiceTest {
 
     private EngineIntelligenceProjectionService serviceAt(Instant instant) {
         return new EngineIntelligenceProjectionService(
-                repository,
+                writeFence,
                 new EngineIntelligenceProjectionMapper(
                         new EngineIntelligenceProjectionPolicy(),
                         Clock.fixed(instant, ZoneOffset.UTC)
                 ),
-                metrics
+                metrics,
+                scoredTransactionRepository,
+                Clock.fixed(instant, ZoneOffset.UTC)
+        );
+    }
+
+    private EngineIntelligenceProjectionWriteResult accepted(EngineIntelligenceProjection projection) {
+        return new EngineIntelligenceProjectionWriteResult(
+                EngineIntelligenceProjectionWriteResult.Status.ACCEPTED,
+                projection
+        );
+    }
+
+    private EngineIntelligenceProjection withCreatedAt(
+            EngineIntelligenceProjection projection,
+            Instant createdAt
+    ) {
+        return new EngineIntelligenceProjection(
+                projection.getTransactionId(),
+                projection.getSourceEventId(),
+                projection.getSourceEventCreatedAt(),
+                projection.getSourceEventFingerprint(),
+                projection.getContractVersion(),
+                projection.getGeneratedAt(),
+                projection.getComparisonType(),
+                projection.getComparedEngineIds(),
+                projection.getComparisonStatus(),
+                projection.getRiskMismatchStatus(),
+                projection.getScoreDeltaBucket(),
+                projection.getEngines(),
+                projection.getDiagnosticSignals(),
+                projection.getWarnings(),
+                createdAt,
+                projection.getUpdatedAt()
         );
     }
 

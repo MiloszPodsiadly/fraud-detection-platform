@@ -35,6 +35,7 @@ public class AlertDocument {
     @Indexed(unique = true)
     private String transactionId;
 
+    private String sourceEventId;
     private String customerId;
     private String correlationId;
     private Instant createdAt;
@@ -97,6 +98,8 @@ public class AlertDocument {
     public void setAlertId(String alertId) { this.alertId = alertId; }
     public String getTransactionId() { return transactionId; }
     public void setTransactionId(String transactionId) { this.transactionId = transactionId; }
+    public String getSourceEventId() { return sourceEventId; }
+    public void setSourceEventId(String sourceEventId) { this.sourceEventId = sourceEventId; }
     public String getCustomerId() { return customerId; }
     public void setCustomerId(String customerId) { this.customerId = customerId; }
     public String getCorrelationId() { return correlationId; }

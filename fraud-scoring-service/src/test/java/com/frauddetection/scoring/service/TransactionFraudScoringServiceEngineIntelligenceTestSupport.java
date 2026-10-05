@@ -15,6 +15,8 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMisma
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.intelligence.MlModelIdentity;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.config.ScoringProperties;
@@ -24,6 +26,8 @@ import com.frauddetection.scoring.mapper.TransactionScoredEventMapper;
 import com.frauddetection.scoring.messaging.TransactionScoredEventPublisher;
 import com.frauddetection.scoring.observability.ScoringMetrics;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEnrichmentResult;
+import com.frauddetection.scoring.orchestration.aggregation.MlPredictionEvidenceOmissionReason;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.mockito.ArgumentCaptor;
 
@@ -49,13 +53,26 @@ final class TransactionFraudScoringServiceEngineIntelligenceTestSupport {
         EngineIntelligenceEmissionService emissionService = mock(EngineIntelligenceEmissionService.class);
         TransactionEnrichedEvent input = TransactionFixtures.enrichedTransaction().build();
         FraudScoringRequest request = FraudScoringRequest.from(input);
-        when(emissionService.emitIfEnabled(request)).thenReturn(summary);
+        when(emissionService.emitIfEnabled(request)).thenReturn(
+                summary.map(value -> EngineIntelligenceEnrichmentResult.withoutEvidence(
+                        value,
+                        MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE
+                ))
+        );
         return harness(input, request, emissionService);
     }
 
     static Harness harness(EngineIntelligenceEmissionService emissionService) {
         TransactionEnrichedEvent input = TransactionFixtures.enrichedTransaction().build();
         FraudScoringRequest request = FraudScoringRequest.from(input);
+        return harness(input, request, emissionService);
+    }
+
+    static Harness harnessWithEnrichment(EngineIntelligenceEnrichmentResult enrichment) {
+        EngineIntelligenceEmissionService emissionService = mock(EngineIntelligenceEmissionService.class);
+        TransactionEnrichedEvent input = TransactionFixtures.enrichedTransaction().build();
+        FraudScoringRequest request = FraudScoringRequest.from(input);
+        when(emissionService.emitIfEnabled(request)).thenReturn(Optional.of(enrichment));
         return harness(input, request, emissionService);
     }
 
@@ -131,6 +148,53 @@ final class TransactionFraudScoringServiceEngineIntelligenceTestSupport {
                 ),
                 List.of(),
                 List.of()
+        );
+    }
+
+    static EngineIntelligenceSummary availableMlSummary() {
+        return new EngineIntelligenceSummary(
+                EngineIntelligenceSummary.CONTRACT_VERSION,
+                GENERATED_AT,
+                List.of(
+                        new EngineIntelligenceEngineResult(
+                                "rules.primary",
+                                FraudEngineType.RULES,
+                                FraudEngineStatus.AVAILABLE,
+                                RiskLevel.HIGH,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("HIGH_VELOCITY")
+                        ),
+                        new EngineIntelligenceEngineResult(
+                                "ml.python.primary",
+                                FraudEngineType.ML_MODEL,
+                                FraudEngineStatus.AVAILABLE,
+                                RiskLevel.HIGH,
+                                EngineIntelligenceScoreBucket.VERY_HIGH,
+                                List.of("MODEL_HIGH_RISK"),
+                                mlModelIdentity()
+                        )
+                ),
+                new EngineIntelligenceComparison(
+                        EngineIntelligenceComparisonType.RULES_VS_ML,
+                        List.of("rules.primary", "ml.python.primary"),
+                        EngineIntelligenceAgreementStatus.AGREEMENT,
+                        EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
+                        EngineIntelligenceScoreDeltaBucket.SMALL
+                ),
+                List.of(),
+                List.of()
+        );
+    }
+
+    static MlPredictionEvidenceV1 mlPredictionEvidence() {
+        return new MlPredictionEvidenceV1(0.8123d, RiskLevel.HIGH, mlModelIdentity(), GENERATED_AT);
+    }
+
+    private static MlModelIdentity mlModelIdentity() {
+        return new MlModelIdentity(
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                "2026-05-30.feature-contract.v1"
         );
     }
 

@@ -109,6 +109,11 @@ potentially using keyed HMAC or another approved pseudonymization mechanism.
 The output does not include customer id, correlation id, created-by actor, notes, raw notes, raw payloads, raw evidence,
 raw ML requests/responses, feature vectors, legal/final/payment decision fields, or secrets.
 
+The current dataset contract does not export the private scoring occurrence identity or join raw ML evidence. A future
+model-specific evidence evaluation must use the feedback record's exact authoritative `sourceEventId`; records whose
+lineage is unavailable must first be replayed or migrated from the exact retained event, or be quarantined and excluded.
+Consumers must never infer missing lineage from the current score, runtime, registry, model version, or timestamps.
+
 ## Result And Failure Semantics
 
 `FeedbackDatasetBuildResult` distinguishes:

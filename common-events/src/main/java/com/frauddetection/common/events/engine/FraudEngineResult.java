@@ -7,7 +7,6 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.ml.MlModelIdentityPolicy;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -31,16 +30,14 @@ public record FraudEngineResult(
         @JsonInclude(JsonInclude.Include.NON_NULL)
         String featureContractVersion,
         @JsonAlias("fallbackReason") String statusReason,
-        Instant generatedAt
+        Instant generatedAt,
+        @JsonIgnore Instant sourceInferenceTimestamp
 ) {
     public static final int REASON_CODES_MAX_SIZE = 10;
     public static final int CONTRIBUTIONS_MAX_SIZE = 10;
     public static final int EVIDENCE_MAX_SIZE = 10;
     public static final int LATENCY_MS_MAX = 300_000;
-    public static final int SCORE_SCALE_MAX = 4;
-
-    private static final BigDecimal MIN_SCORE = BigDecimal.ZERO;
-    private static final BigDecimal MAX_SCORE = BigDecimal.ONE;
+    public static final int SCORE_SCALE_MAX = FraudEngineScorePolicy.SCORE_SCALE_MAX;
     private static final Set<String> ENGINE_LANGUAGES = Set.of(
             "java",
             "python",
@@ -63,19 +60,7 @@ public record FraudEngineResult(
         confidence = normalizeConfidenceForStatus(status, confidence);
         Objects.requireNonNull(generatedAt, "generatedAt is required");
 
-        if (score != null) {
-            if (!Double.isFinite(score)) {
-                throw new IllegalArgumentException("score must be finite when present");
-            }
-            BigDecimal decimalScore = BigDecimal.valueOf(score);
-            if (decimalScore.compareTo(MIN_SCORE) < 0 || decimalScore.compareTo(MAX_SCORE) > 0) {
-                throw new IllegalArgumentException("score must be null or between 0.0000 and 1.0000");
-            }
-            double rounded = Math.rint(score * 10_000.0d) / 10_000.0d;
-            if (Math.abs(score - rounded) > 0.000000001d) {
-                throw new IllegalArgumentException("score scale must be less than or equal to 4");
-            }
-        }
+        score = FraudEngineScorePolicy.validateOptional(score, "score");
         if (latencyMs != null && (latencyMs < 0L || latencyMs > LATENCY_MS_MAX)) {
             throw new IllegalArgumentException("latencyMs must be null or between 0 and 300000");
         }
@@ -128,6 +113,45 @@ public record FraudEngineResult(
             Long latencyMs,
             String modelName,
             String modelVersion,
+            String featureContractVersion,
+            String statusReason,
+            Instant generatedAt
+    ) {
+        this(
+                engineId,
+                engineType,
+                engineLanguage,
+                status,
+                score,
+                riskLevel,
+                confidence,
+                reasonCodes,
+                contributions,
+                evidence,
+                latencyMs,
+                modelName,
+                modelVersion,
+                featureContractVersion,
+                statusReason,
+                generatedAt,
+                null
+        );
+    }
+
+    public FraudEngineResult(
+            String engineId,
+            FraudEngineType engineType,
+            String engineLanguage,
+            FraudEngineStatus status,
+            Double score,
+            RiskLevel riskLevel,
+            FraudEngineConfidence confidence,
+            List<String> reasonCodes,
+            List<FraudEngineContribution> contributions,
+            List<FraudEngineEvidence> evidence,
+            Long latencyMs,
+            String modelName,
+            String modelVersion,
             String statusReason,
             Instant generatedAt
     ) {
@@ -147,7 +171,8 @@ public record FraudEngineResult(
                 modelVersion,
                 null,
                 statusReason,
-                generatedAt
+                generatedAt,
+                null
         );
     }
 

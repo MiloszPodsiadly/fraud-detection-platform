@@ -12,6 +12,8 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMisma
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.intelligence.MlModelIdentity;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
@@ -36,7 +38,9 @@ class TransactionScoredEventMapperEngineIntelligenceTest {
         var event = mapper.toEvent(request(), scoreResult(), Optional.empty());
 
         assertThat(event.engineIntelligence()).isNull();
-        assertThat(objectMapper.writeValueAsString(event)).doesNotContain("\"engineIntelligence\"");
+        assertThat(event.mlPredictionEvidence()).isNull();
+        assertThat(objectMapper.writeValueAsString(event))
+                .doesNotContain("\"engineIntelligence\"", "\"mlPredictionEvidence\"");
     }
 
     @Test
@@ -45,6 +49,33 @@ class TransactionScoredEventMapperEngineIntelligenceTest {
 
         assertThat(event.engineIntelligence()).isEqualTo(summary());
         assertThat(objectMapper.writeValueAsString(event)).contains("\"engineIntelligence\"");
+    }
+
+    @Test
+    void mapperIncludesExactMlPredictionEvidenceFromSameEnrichment() throws Exception {
+        MlModelIdentity identity = new MlModelIdentity(
+                "python-logistic-fraud-model",
+                "model-X",
+                "2026-05-30.feature-contract.v1"
+        );
+        MlPredictionEvidenceV1 evidence = new MlPredictionEvidenceV1(
+                0.8123d,
+                RiskLevel.HIGH,
+                identity,
+                GENERATED_AT
+        );
+
+        var event = mapper.toEvent(
+                request(),
+                scoreResult(),
+                Optional.of(availableMlSummary("model-X")),
+                Optional.of(evidence),
+                null
+        );
+
+        assertThat(event.mlPredictionEvidence()).isEqualTo(evidence);
+        assertThat(objectMapper.writeValueAsString(event))
+                .contains("\"mlPredictionEvidence\"", "\"mlScore\":0.8123");
     }
 
     @Test
@@ -154,7 +185,7 @@ class TransactionScoredEventMapperEngineIntelligenceTest {
                                 FraudEngineType.ML_MODEL,
                                 FraudEngineStatus.AVAILABLE,
                                 RiskLevel.HIGH,
-                                EngineIntelligenceScoreBucket.HIGH,
+                                EngineIntelligenceScoreBucket.VERY_HIGH,
                                 List.of("MODEL_HIGH_RISK"),
                                 new com.frauddetection.common.events.intelligence.MlModelIdentity(
                                         "python-logistic-fraud-model",
@@ -168,7 +199,7 @@ class TransactionScoredEventMapperEngineIntelligenceTest {
                         List.of("rules.primary", "ml.python.primary"),
                         EngineIntelligenceAgreementStatus.AGREEMENT,
                         EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
-                        EngineIntelligenceScoreDeltaBucket.NONE
+                        EngineIntelligenceScoreDeltaBucket.SMALL
                 ),
                 List.of(),
                 List.of()

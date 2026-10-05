@@ -21,8 +21,16 @@ import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.audit.PersistentAuditEventPublisher;
 import com.frauddetection.alert.audit.RegulatedMutationLocalAuditPhaseWriter;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorPublisher;
+import com.frauddetection.alert.evidence.AlertEvidenceSnapshotProjectionService;
+import com.frauddetection.alert.evidence.EvidenceSeverity;
+import com.frauddetection.alert.evidence.EvidenceSnapshotItem;
+import com.frauddetection.alert.evidence.EvidenceSource;
+import com.frauddetection.alert.evidence.EvidenceStatus;
+import com.frauddetection.alert.evidence.EvidenceType;
 import com.frauddetection.alert.mapper.AlertDocumentMapper;
+import com.frauddetection.alert.mapper.FraudAlertEventMapper;
 import com.frauddetection.alert.mapper.FraudDecisionEventMapper;
+import com.frauddetection.alert.messaging.FraudAlertEventPublisher;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.outbox.OutboxConfirmationResolution;
 import com.frauddetection.alert.outbox.OutboxConfirmationResolutionRequest;
@@ -42,13 +50,20 @@ import com.frauddetection.alert.regulated.mutation.outbox.OutboxConfirmationReso
 import com.frauddetection.alert.regulated.mutation.outbox.TransactionalOutboxRecoveryStrategy;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.AnalystDecisionStatusMapper;
+import com.frauddetection.alert.service.AlertCaseFactory;
+import com.frauddetection.alert.service.AlertManagementService;
 import com.frauddetection.alert.service.DecisionOutboxStatus;
 import com.frauddetection.alert.service.DecisionOutboxWriter;
+import com.frauddetection.alert.service.FraudCaseManagementService;
+import com.frauddetection.alert.service.SubmitDecisionRegulatedMutationService;
+import com.frauddetection.alert.suspicious.SuspiciousTransactionProjectionService;
+import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.testsupport.base.AbstractIntegrationTest;
 import com.frauddetection.common.testsupport.container.FraudPlatformContainers;
+import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.mongodb.client.model.IndexOptions;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
@@ -80,6 +95,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -339,6 +355,180 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         assertThat(countAudit(command.getId(), RegulatedMutationAuditPhase.ATTEMPTED)).isEqualTo(1);
         assertThat(countAudit(command.getId(), RegulatedMutationAuditPhase.SUCCESS)).isEqualTo(1);
         assertThat(auditPublisher.successPublishCalls).isZero();
+    }
+
+    @Test
+    void finalizedDecisionEvidenceAndAuditRemainBoundToOriginalScoringOccurrence() {
+        String alertId = "alert-decision-evidence";
+        AlertDocument occurrenceA = alert(alertId);
+        occurrenceA.setSourceEventId("event-a");
+        occurrenceA.setReasonCodes(List.of("HIGH_VELOCITY"));
+        occurrenceA.setScoreDetails(Map.of("modelName", "rules-engine", "modelVersion", "model-a"));
+        EvidenceSnapshotItem evidenceA = new EvidenceSnapshotItem(
+                "HIGH_VELOCITY",
+                EvidenceType.VELOCITY_SIGNAL,
+                EvidenceSeverity.HIGH,
+                EvidenceSource.FRAUD_SCORING_SERVICE,
+                EvidenceStatus.AVAILABLE,
+                "High velocity",
+                "High transaction velocity was observed.",
+                "3",
+                "1",
+                Instant.parse("2026-05-03T00:00:00Z")
+        );
+        occurrenceA.setEvidenceSnapshot(List.of(evidenceA));
+        alertRepository.save(occurrenceA);
+        AtomicInteger businessMutations = new AtomicInteger();
+
+        coordinator.commit(command(
+                "idem-decision-evidence",
+                alertId,
+                businessMutations,
+                context -> submitDecisionHandler().applyDecision(
+                        alertId,
+                        request(),
+                        AlertStatus.RESOLVED,
+                        "principal-7",
+                        "idem-decision-evidence",
+                        "request-hash-idem-decision-evidence",
+                        context.commandId(),
+                        SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+                )
+        ));
+        RegulatedMutationCommandDocument decisionCommand = commandRepository
+                .findByIdempotencyKey("idem-decision-evidence")
+                .orElseThrow();
+        TransactionalOutboxRecordDocument decisionOutbox = outboxRepository
+                .findByMutationCommandId(decisionCommand.getId())
+                .orElseThrow();
+        TransactionScoredEvent occurrenceB = TransactionFixtures.scoredTransaction()
+                .withTransactionId(occurrenceA.getTransactionId())
+                .withFraudScore(0.42d)
+                .withReasonCodes(List.of("COUNTRY_MISMATCH"))
+                .withFeatureSnapshot(Map.of("countryMismatch", true))
+                .build();
+        AlertEvidenceSnapshotProjectionService evidenceProjection = mock(AlertEvidenceSnapshotProjectionService.class);
+        SuspiciousTransactionProjectionService suspiciousProjection = mock(SuspiciousTransactionProjectionService.class);
+        AlertManagementService alertManagement = alertManagement(evidenceProjection, suspiciousProjection);
+        TransactionTemplate transactions = new TransactionTemplate(new MongoTransactionManager(databaseFactory));
+
+        transactions.executeWithoutResult(status -> alertManagement.handleScoredTransaction(occurrenceB));
+        transactions.executeWithoutResult(status -> alertManagement.handleScoredTransaction(occurrenceB));
+
+        AlertDocument decided = alertRepository.findById(alertId).orElseThrow();
+        assertThat(decided.getSourceEventId()).isEqualTo("event-a");
+        assertThat(decided.getFraudScore()).isEqualTo(0.91d);
+        assertThat(decided.getReasonCodes()).containsExactly("HIGH_VELOCITY");
+        assertThat(decided.getScoreDetails()).containsEntry("modelVersion", "model-a");
+        assertThat(decided.getFeatureSnapshot()).containsEntry("velocity", 3);
+        assertThat(decided.getEvidenceSnapshot()).containsExactly(evidenceA);
+        assertThat(decided.getAnalystDecision()).isEqualTo(AnalystDecision.CONFIRMED_FRAUD);
+        assertThat(decided.getAlertStatus()).isEqualTo(AlertStatus.RESOLVED);
+        assertThat(outboxRepository.findByMutationCommandId(decisionCommand.getId()))
+                .get()
+                .satisfies(persistedOutbox -> {
+                    assertThat(persistedOutbox.getEventId()).isEqualTo(decisionOutbox.getEventId());
+                    assertThat(persistedOutbox.getPayloadHash()).isEqualTo(decisionOutbox.getPayloadHash());
+                });
+        assertThat(decisionOutbox.getPayload().decisionMetadata())
+                .containsEntry("modelScore", 0.91d)
+                .containsEntry("featureSnapshot", Map.of("velocity", 3));
+        assertThat(countAudit(decisionCommand.getId(), RegulatedMutationAuditPhase.ATTEMPTED)).isEqualTo(1);
+        assertThat(countAudit(decisionCommand.getId(), RegulatedMutationAuditPhase.SUCCESS)).isEqualTo(1);
+        assertThat(businessMutations).hasValue(1);
+        org.mockito.Mockito.verify(evidenceProjection, org.mockito.Mockito.never()).projectOrDiagnostic(org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.verify(suspiciousProjection, org.mockito.Mockito.times(2))
+                .projectOrUpdate(occurrenceB, alertId);
+    }
+
+    @Test
+    void concurrentStaleReconciliationRollsBackAndRedeliveryPreservesDecisionEvidence() throws Exception {
+        String alertId = "alert-concurrent-decision-evidence";
+        AlertDocument occurrenceA = alert(alertId);
+        occurrenceA.setSourceEventId("event-a");
+        occurrenceA.setReasonCodes(List.of("HIGH_VELOCITY"));
+        occurrenceA.setScoreDetails(Map.of("modelVersion", "model-a"));
+        alertRepository.save(occurrenceA);
+        TransactionScoredEvent occurrenceB = TransactionFixtures.scoredTransaction()
+                .withTransactionId(occurrenceA.getTransactionId())
+                .withFraudScore(0.42d)
+                .withReasonCodes(List.of("COUNTRY_MISMATCH"))
+                .build();
+        AlertManagementService staleWorker = alertManagement(
+                mock(AlertEvidenceSnapshotProjectionService.class),
+                mock(SuspiciousTransactionProjectionService.class)
+        );
+        TransactionTemplate transactions = new TransactionTemplate(new MongoTransactionManager(databaseFactory));
+        CountDownLatch staleSnapshotRead = new CountDownLatch(1);
+        CountDownLatch decisionCommitted = new CountDownLatch(1);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<Throwable> staleAttempt = executor.submit(() -> {
+                try {
+                    transactions.executeWithoutResult(status -> {
+                        AlertDocument staleSnapshot = alertRepository.findById(alertId).orElseThrow();
+                        assertThat(staleSnapshot.getAnalystDecision()).isNull();
+                        staleSnapshotRead.countDown();
+                        try {
+                            if (!decisionCommitted.await(10, TimeUnit.SECONDS)) {
+                                throw new IllegalStateException("decision commit was not released");
+                            }
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException("interrupted while awaiting decision commit", exception);
+                        }
+                        staleWorker.handleScoredTransaction(occurrenceB);
+                    });
+                    return null;
+                } catch (Throwable failure) {
+                    return failure;
+                }
+            });
+            assertThat(staleSnapshotRead.await(10, TimeUnit.SECONDS)).isTrue();
+
+            AtomicInteger businessMutations = new AtomicInteger();
+            coordinator.commit(command(
+                    "idem-concurrent-decision-evidence",
+                    alertId,
+                    businessMutations,
+                    context -> submitDecisionHandler().applyDecision(
+                            alertId,
+                            request(),
+                            AlertStatus.RESOLVED,
+                            "principal-7",
+                            "idem-concurrent-decision-evidence",
+                            "request-hash-idem-concurrent-decision-evidence",
+                            context.commandId(),
+                            SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL
+                    )
+            ));
+            decisionCommitted.countDown();
+
+            assertThat(staleAttempt.get(20, TimeUnit.SECONDS)).isNotNull();
+            AlertManagementService restartedWorker = alertManagement(
+                    mock(AlertEvidenceSnapshotProjectionService.class),
+                    mock(SuspiciousTransactionProjectionService.class)
+            );
+            transactions.executeWithoutResult(status -> restartedWorker.handleScoredTransaction(occurrenceB));
+
+            AlertDocument decided = alertRepository.findById(alertId).orElseThrow();
+            assertThat(decided.getSourceEventId()).isEqualTo("event-a");
+            assertThat(decided.getFraudScore()).isEqualTo(0.91d);
+            assertThat(decided.getReasonCodes()).containsExactly("HIGH_VELOCITY");
+            assertThat(decided.getScoreDetails()).containsEntry("modelVersion", "model-a");
+            assertThat(decided.getAnalystDecision()).isEqualTo(AnalystDecision.CONFIRMED_FRAUD);
+            assertThat(decided.getAlertStatus()).isEqualTo(AlertStatus.RESOLVED);
+            RegulatedMutationCommandDocument command = commandRepository
+                    .findByIdempotencyKey("idem-concurrent-decision-evidence")
+                    .orElseThrow();
+            assertThat(outboxRepository.findByMutationCommandId(command.getId())).isPresent();
+            assertThat(countAudit(command.getId(), RegulatedMutationAuditPhase.ATTEMPTED)).isEqualTo(1);
+            assertThat(countAudit(command.getId(), RegulatedMutationAuditPhase.SUCCESS)).isEqualTo(1);
+            assertThat(businessMutations).hasValue(1);
+        } finally {
+            decisionCommitted.countDown();
+            executor.shutdownNow();
+        }
     }
 
     @Test
@@ -934,6 +1124,24 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
                 new AlertDocumentMapper(),
                 new DecisionOutboxWriter(new FraudDecisionEventMapper(), outboxRepository,
                         mock(TransactionalOutboxRuntimeReadiness.class))
+        );
+    }
+
+    private AlertManagementService alertManagement(
+            AlertEvidenceSnapshotProjectionService evidenceProjection,
+            SuspiciousTransactionProjectionService suspiciousProjection
+    ) {
+        return new AlertManagementService(
+                alertRepository,
+                new AlertDocumentMapper(),
+                new FraudAlertEventMapper(),
+                new AlertCaseFactory(),
+                evidenceProjection,
+                mock(FraudAlertEventPublisher.class),
+                mock(FraudCaseManagementService.class),
+                suspiciousProjection,
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                mock(SubmitDecisionRegulatedMutationService.class)
         );
     }
 

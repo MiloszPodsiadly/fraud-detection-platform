@@ -30,6 +30,7 @@ class EngineIntelligenceProjectionArchitectureGuardTest {
     void engineIntelligenceProjectionDoesNotStoreRawOrInternalData() throws Exception {
         String declaredFields = Stream.of(
                         EngineIntelligenceProjection.class,
+                        MlPredictionEvidenceProjection.class,
                         EngineIntelligenceEngineProjection.class,
                         EngineIntelligenceDiagnosticSignalProjection.class,
                         EngineIntelligenceWarningProjection.class
@@ -96,6 +97,23 @@ class EngineIntelligenceProjectionArchitectureGuardTest {
                 "rulesVsMlComparisonEngineIds",
                 "normalizeComparisonIdentity",
                 "historicalComparisonIdentity"
+        );
+    }
+
+    @Test
+    void privateMlPredictionEvidenceDoesNotReachPublicApiFeedbackOrUiSources() throws Exception {
+        String externallyVisibleSources = sources(
+                "alert-service/src/main/java/com/frauddetection/alert/api",
+                "alert-service/src/main/java/com/frauddetection/alert/controller",
+                "alert-service/src/main/java/com/frauddetection/alert/feedback",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api",
+                "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/dataset",
+                "analyst-console-ui/src"
+        );
+
+        assertThat(externallyVisibleSources).doesNotContain(
+                "MlPredictionEvidence",
+                "mlPredictionEvidence"
         );
     }
 

@@ -26,18 +26,25 @@ import static org.mockito.Mockito.when;
 
 class EngineIntelligenceEnabledDiagnosticInvocationCountTest {
 
+    private static final Instant SOURCE_INFERENCE_AT = Instant.parse("2026-05-31T09:59:57Z");
+
     @Test
     void enabledFlagRunsAdditionalRulesAndMlDiagnosticWorkOnce() {
         enabledContextRunner().run(context -> {
             RuleBasedFraudScoringEngine rules = context.getBean(RuleBasedFraudScoringEngine.class);
             MlFraudScoringEngine ml = context.getBean(MlFraudScoringEngine.class);
             when(rules.scoreValidated(any())).thenReturn(result(0.15d, RiskLevel.LOW, Map.of()));
-            when(ml.score(any())).thenReturn(result(0.91d, RiskLevel.CRITICAL, Map.of("modelAvailable", true)));
+            when(ml.score(any())).thenReturn(mlResult());
 
-            var summary = context.getBean(EngineIntelligenceEmissionService.class)
+            var enrichment = context.getBean(EngineIntelligenceEmissionService.class)
                     .emitIfEnabled(FraudScoringRequest.from(validRulesInput()));
 
-            assertThat(summary).isPresent();
+            assertThat(enrichment).isPresent();
+            var value = enrichment.orElseThrow();
+            assertThat(value.mlPredictionEvidence()).isPresent();
+            assertThat(value.mlPredictionEvidence().orElseThrow().sourceExecutionTimestamp())
+                    .isEqualTo(SOURCE_INFERENCE_AT)
+                    .isNotEqualTo(value.engineIntelligenceSummary().orElseThrow().generatedAt());
             verify(rules, times(1)).scoreValidated(any());
             verify(ml, times(1)).score(any());
         });
@@ -87,6 +94,23 @@ class EngineIntelligenceEnabledDiagnosticInvocationCountTest {
                 Map.of(),
                 explanationMetadata,
                 false
+        );
+    }
+
+    private FraudScoreResult mlResult() {
+        return new FraudScoreResult(
+                0.91d,
+                RiskLevel.CRITICAL,
+                "ML",
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                "2026-05-30.feature-contract.v1",
+                SOURCE_INFERENCE_AT,
+                List.of(),
+                Map.of(),
+                Map.of(),
+                Map.of("modelAvailable", true),
+                true
         );
     }
 }

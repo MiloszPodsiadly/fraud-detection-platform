@@ -2,11 +2,13 @@ package com.frauddetection.alert.mapper;
 
 import com.frauddetection.alert.api.EngineIntelligenceResponse;
 import com.frauddetection.alert.domain.ScoredTransaction;
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -24,6 +26,37 @@ class ScoredTransactionResponseMapperTest {
         assertThat(response.fraudScore()).isEqualTo(0.91d);
         assertThat(response.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
         assertThat(response.reasonCodes()).containsExactly("HIGH_VELOCITY");
+    }
+
+    @Test
+    void privateScoringOccurrenceOwnershipDoesNotLeakIntoPublicResponses() {
+        var transaction = new ScoredTransaction(
+                "txn-1",
+                "customer-1",
+                "correlation-1",
+                Instant.parse("2026-06-18T10:00:00Z"),
+                Instant.parse("2026-06-18T10:00:01Z"),
+                null,
+                null,
+                0.91d,
+                RiskLevel.CRITICAL,
+                true,
+                List.of("HIGH_VELOCITY"),
+                null,
+                ScoringOccurrenceOwnership.authoritative(
+                        "private-source-event",
+                        Instant.parse("2026-06-18T10:00:02Z"),
+                        "a".repeat(64)
+                )
+        );
+
+        var listResponse = mapper.toResponse(transaction);
+        var detailResponse = mapper.toDetailResponse(transaction, EngineIntelligenceResponse.absent());
+
+        assertThat(Arrays.stream(listResponse.getClass().getRecordComponents()).map(component -> component.getName()))
+                .doesNotContain("sourceEventId", "sourceEventCreatedAt", "scoringOccurrenceOwnership");
+        assertThat(Arrays.stream(detailResponse.getClass().getRecordComponents()).map(component -> component.getName()))
+                .doesNotContain("sourceEventId", "sourceEventCreatedAt", "scoringOccurrenceOwnership");
     }
 
     @Test
@@ -69,7 +102,12 @@ class ScoredTransactionResponseMapperTest {
                 RiskLevel.CRITICAL,
                 true,
                 List.of("HIGH_VELOCITY"),
-                analystRecommendation
+                analystRecommendation,
+                ScoringOccurrenceOwnership.authoritative(
+                        "event-1",
+                        Instant.parse("2026-06-18T10:00:01Z"),
+                        "a".repeat(64)
+                )
         );
     }
 }

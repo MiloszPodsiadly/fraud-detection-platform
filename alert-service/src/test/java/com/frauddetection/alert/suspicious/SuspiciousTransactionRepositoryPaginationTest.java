@@ -14,7 +14,7 @@ class SuspiciousTransactionRepositoryPaginationTest {
     void everyMultiRowFinderRequiresPageable() {
         assertThat(Arrays.stream(SuspiciousTransactionRepository.class.getDeclaredMethods())
                 .filter(method -> method.getName().startsWith("findBy"))
-                .filter(method -> !method.getName().equals("findByTransactionIdAndSourceEventId"))
+                .filter(method -> !method.getName().equals("findByTransactionId"))
                 .allMatch(method -> List.of(method.getParameterTypes()).contains(Pageable.class)))
                 .isTrue();
     }

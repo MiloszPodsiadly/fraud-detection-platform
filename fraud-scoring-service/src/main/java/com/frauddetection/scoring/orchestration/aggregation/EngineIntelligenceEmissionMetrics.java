@@ -12,5 +12,7 @@ public interface EngineIntelligenceEmissionMetrics {
 
     void recordOmitted(EngineIntelligenceEmissionOmissionReason reason);
 
+    void recordEvidenceOmitted(MlPredictionEvidenceOmissionReason reason);
+
     void recordLatency(Duration latency);
 }

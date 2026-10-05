@@ -15,6 +15,8 @@ class RecoveryAuthorizationRules implements EndpointAuthorizationRuleGroup {
                 .requestMatchers(HttpMethod.GET, "/api/v1/regulated-mutations/by-idempotency-hash/{hash}").hasAnyAuthority(AnalystAuthority.REGULATED_MUTATION_RECOVER, AnalystAuthority.AUDIT_VERIFY)
                 .requestMatchers(HttpMethod.GET, "/api/v1/outbox/recovery/backlog").hasAuthority(AnalystAuthority.OUTBOX_INSPECT)
                 .requestMatchers(HttpMethod.POST, "/api/v1/outbox/recovery/run").hasAuthority(AnalystAuthority.OUTBOX_RECOVER)
-                .requestMatchers(HttpMethod.POST, "/api/v1/outbox/{eventId}/resolve-confirmation").hasAuthority(AnalystAuthority.OUTBOX_RESOLVE);
+                .requestMatchers(HttpMethod.POST, "/api/v1/outbox/{eventId}/resolve-confirmation").hasAuthority(AnalystAuthority.OUTBOX_RESOLVE)
+                .requestMatchers(HttpMethod.GET, "/api/v1/outbox/fraud-alerts/recovery/backlog").hasAuthority(AnalystAuthority.OUTBOX_INSPECT)
+                .requestMatchers(HttpMethod.POST, "/api/v1/outbox/fraud-alerts/{eventId}/resolve-confirmation").hasAuthority(AnalystAuthority.OUTBOX_RESOLVE);
     }
 }

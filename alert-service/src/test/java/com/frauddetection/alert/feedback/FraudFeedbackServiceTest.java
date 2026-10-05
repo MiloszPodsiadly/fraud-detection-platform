@@ -7,6 +7,7 @@ import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceComparisonReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceEngineReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
@@ -83,7 +84,8 @@ class FraudFeedbackServiceTest {
         when(transactionRunner.runLocalCommit(any())).thenAnswer(invocation -> invocation.<Supplier<?>>getArgument(0).get());
         when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.OFF);
         when(transactionMonitoringUseCase.getScoredTransaction("txn-1")).thenReturn(scoredTransaction());
-        when(engineIntelligenceReadService.read("txn-1")).thenReturn(projectedEngineIntelligence());
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
+                .thenReturn(projectedEngineIntelligence());
         when(currentAnalystUser.get()).thenReturn(Optional.of(new com.frauddetection.alert.security.principal.AnalystPrincipal(
                 "analyst-1",
                 java.util.Set.of(),
@@ -114,7 +116,14 @@ class FraudFeedbackServiceTest {
         assertThat(response.comparedEngineIds()).containsExactly("rules.primary", "ml.python.primary");
         assertThat(response.agreementStatus()).isEqualTo(EngineIntelligenceAgreementStatus.PARTIAL);
         assertThat(response.analystRecommendation()).isEqualTo(AnalystRecommendation.RECOMMEND_REVIEW);
-        assertThat(savedRecords).hasSize(1);
+        assertThat(savedRecords).singleElement().satisfies(record -> {
+            assertThat(record.getSourceEventId()).isEqualTo("event-1");
+            assertThat(record.getSourceEventCreatedAt())
+                    .isEqualTo(Instant.parse("2026-06-25T09:00:01Z"));
+            assertThat(record.getSourceEventFingerprint()).isEqualTo("a".repeat(64));
+            assertThat(record.scoringOccurrenceOwnership())
+                    .contains(scoredTransaction().scoringOccurrenceOwnership());
+        });
 
         ArgumentCaptor<AuditEventMetadataSummary> metadata = ArgumentCaptor.forClass(AuditEventMetadataSummary.class);
         verify(auditOutboxService).createPendingAudit(
@@ -143,7 +152,8 @@ class FraudFeedbackServiceTest {
 
     @Test
     void snapshotsMlIdentityFromPersistedEngineIntelligenceProjection() {
-        when(engineIntelligenceReadService.read("txn-1")).thenReturn(projectedEngineIntelligenceWithAvailableMl(
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
+                .thenReturn(projectedEngineIntelligenceWithAvailableMl(
                 "python-logistic-fraud-model",
                 "model-X",
                 "feature-contract-v2"
@@ -174,7 +184,8 @@ class FraudFeedbackServiceTest {
 
     @Test
     void missingHistoricalMlEngineDoesNotBackfillLineage() {
-        when(engineIntelligenceReadService.read("txn-1")).thenReturn(projectedEngineIntelligenceWithoutMl());
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
+                .thenReturn(projectedEngineIntelligenceWithoutMl());
 
         FraudFeedbackResponse response = service.create("txn-1", request());
 
@@ -184,6 +195,51 @@ class FraudFeedbackServiceTest {
             assertThat(record.getMlModelVersion()).isNull();
             assertThat(record.getMlFeatureContractVersion()).isNull();
         });
+    }
+
+    @Test
+    void absentEngineIntelligenceStillPersistsAuthoritativeOccurrenceIdentity() {
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
+                .thenReturn(EngineIntelligenceReadModel.notProjected("txn-1"));
+
+        service.create("txn-1", request());
+
+        assertThat(savedRecords).singleElement().satisfies(record -> {
+            assertThat(record.getSourceEventId()).isEqualTo("event-1");
+            assertThat(record.getSourceEventFingerprint()).isEqualTo("a".repeat(64));
+            assertThat(record.getMlModelVersion()).isNull();
+        });
+    }
+
+    @Test
+    void unknownHistoricalOccurrenceFailsClosedBeforeSnapshotOrPersistence() {
+        when(transactionMonitoringUseCase.getScoredTransaction("txn-1"))
+                .thenReturn(scoredTransaction(ScoringOccurrenceOwnership.unknown()));
+
+        assertThatThrownBy(() -> service.create("txn-1", request()))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException statusException = (ResponseStatusException) exception;
+                    assertThat(statusException.getStatusCode().value()).isEqualTo(409);
+                    assertThat(statusException.getReason())
+                            .isEqualTo("FRAUD_FEEDBACK_SCORING_OCCURRENCE_UNAVAILABLE");
+                });
+
+        verify(engineIntelligenceReadService, never()).readForOccurrence(any(), any());
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void partialPersistedOccurrenceIdentityFailsClosedBeforePersistence() {
+        when(transactionMonitoringUseCase.getScoredTransaction("txn-1"))
+                .thenThrow(new IllegalStateException("SCORING_OCCURRENCE_IDENTITY_INVALID"));
+
+        assertThatThrownBy(() -> service.create("txn-1", request()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("SCORING_OCCURRENCE_IDENTITY_INVALID");
+
+        verify(engineIntelligenceReadService, never()).readForOccurrence(any(), any());
+        verify(repository, never()).save(any());
     }
 
     @Test
@@ -471,7 +527,8 @@ class FraudFeedbackServiceTest {
 
     @Test
     void projectionReadFailureIsStoredAsUnavailable() {
-        when(engineIntelligenceReadService.read("txn-1")).thenThrow(new EngineIntelligenceProjectionReadUnavailableException());
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
+                .thenThrow(new EngineIntelligenceProjectionReadUnavailableException());
 
         FraudFeedbackResponse response = service.create("txn-1", request());
 
@@ -483,7 +540,7 @@ class FraudFeedbackServiceTest {
 
     @Test
     void unexpectedEngineIntelligenceReadFailureIsStoredAsUnavailableAndFeedbackStillPersists() {
-        when(engineIntelligenceReadService.read("txn-1"))
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
                 .thenThrow(new IllegalStateException("rawMlRequest Customer confirmed fraud"));
 
         FraudFeedbackResponse response = service.create("txn-1", request());
@@ -643,6 +700,14 @@ class FraudFeedbackServiceTest {
     }
 
     private ScoredTransaction scoredTransaction() {
+        return scoredTransaction(ScoringOccurrenceOwnership.authoritative(
+                "event-1",
+                Instant.parse("2026-06-25T09:00:01Z"),
+                "a".repeat(64)
+        ));
+    }
+
+    private ScoredTransaction scoredTransaction(ScoringOccurrenceOwnership ownership) {
         return new ScoredTransaction(
                 "txn-1",
                 "customer-1",
@@ -665,7 +730,8 @@ class FraudFeedbackServiceTest {
                         List.of("RULES_CRITICAL_RISK"),
                         List.of(),
                         AnalystRecommendationNonDecisioning.advisoryOnly()
-                )
+                ),
+                ownership
         );
     }
 

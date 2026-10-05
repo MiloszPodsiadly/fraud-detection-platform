@@ -30,36 +30,53 @@ class EngineIntelligenceAlertServiceProjectionDocsTest {
                 "## API/UI Boundary",
                 "## No Decisioning",
                 "## Failure Isolation Ownership",
-                "## Future Operational Hardening",
-                "## Historical FDP-96 API Read Model Gate",
+                "## Operational Observability",
+                "## API Read Model Gate",
                 "Alert-service projects bounded engine intelligence into a Mongo read model.",
-                "Historical FDP-95 introduced the",
+                "Bounded API and Analyst Console",
                 "The projection does not use engine intelligence for decisions.",
                 "Old events without engineIntelligence remain compatible.",
+                "Events without `mlPredictionEvidence` create no private evidence document",
                 "Projection failure must not break base alert projection.",
                 "Projection must be idempotent under replay.",
-                "Engine-intelligence projection uses transactionId as Mongo `_id`.",
-                "Mongo `_id` uniqueness is the idempotency boundary for FDP-95.",
-                "Reprocessing the same transaction replaces the projection state instead of appending duplicate",
-                "No separate migration is required for this document-style projection unless deployment",
+                "source event ID, exact creation time, and",
+                "canonical timestamp text plus epoch second and nanosecond components",
+                "Mongo `_id` uniqueness prevents duplicate public projections",
+                "complete occurrence fence prevents stale or conflicting replay",
+                "Reprocessing the same occurrence replaces the projection state instead of appending",
+                "private evidence projection has stricter occurrence semantics",
+                "insert-only persistence keyed by source",
+                "conflicting replay is observable and cannot overwrite accepted",
+                "Concurrent duplicate delivery produces one immutable document",
+                "temporary deployment compatibility",
+                "[Scoring Occurrence Ownership Migration](scoring_occurrence_ownership_migration.md)",
+                "Partially populated",
+                "identity is invalid and fails closed as projection unavailable",
                 "Future hardening may add secondary indexes or retention/TTL",
-                "FDP-95 does not add query-optimized secondary indexes.",
-                "FDP-95 does not add TTL or retention policy.",
+                "public projection does not add query-optimized secondary indexes.",
+                "It does not add TTL or retention policy.",
                 "Projection growth is expected to be roughly one document per scored transaction with engineIntelligence.",
-                "Before the FDP-96 API read model or broader producer rollout, define:",
+                "Before broader producer rollout, define:",
                 "whether retention matches scored transactions;",
                 "whether projection is cleaned up with scored transaction;",
-                "Only bounded public event contract fields may be stored.",
-                "Alert-service revalidates reason codes by reconstructing FDP-92 public DTOs rather than maintaining a second",
+                "public projection stores only bounded public event contract fields.",
+                "dedicated internal evidence collection stores",
+                "Alert-service revalidates reason codes by reconstructing public DTOs rather than maintaining a second",
                 "does not maintain a divergent second source of truth for public enum allowlists.",
                 "Storage-specific limits are",
-                "`EngineIntelligenceProjectionService` owns normal projection failure isolation",
-                "`TransactionMonitoringService` retains last-resort containment",
-                "Projection metrics are future operational hardening.",
-                "FDP-95 does not add production metrics backend.",
+                "optional projection runs in its own Kafka consumer group",
+                "separate MongoDB transaction",
+                "read boundary",
+                "independently requires the source event ID, exact creation time, and canonical fingerprint",
+                "bounded Kafka retry",
+                "dedicated `engine-intelligence.dead-letter` topic",
+                "diagnostic failure cannot roll back baseline scoring or alert processing",
+                "Both projection paths record low-cardinality counters and latency",
+                "Export and retention remain responsibilities of the configured Micrometer backend.",
                 "Metrics must never affect base projection.",
-                "Raw evidence, raw contributions, feature vectors,",
-                "endpoints, tokens, secrets, stack traces, exception messages, and internal aggregation objects must not be stored.",
+                "Raw model requests/responses, raw",
+                "features, raw contributions, arbitrary metadata",
+                "The exact evidence collection has no controller, public read DTO, feedback-record field, dataset-export",
                 "Bounded API/UI exposure exists through later scoped Engine Intelligence work.",
                 "API/UI layers consume",
                 "dedicated read DTOs and validators rather than the projection class directly.",
@@ -68,13 +85,14 @@ class EngineIntelligenceAlertServiceProjectionDocsTest {
     }
 
     @Test
-    void projectionMetricsAreFutureLowCardinalityHardening() throws Exception {
+    void projectionMetricsHaveAnImplementedLowCardinalityBoundary() throws Exception {
         assertThat(readDocs()).contains(
                 "`engine_intelligence_projection_attempt_total`",
                 "`engine_intelligence_projection_success_total`",
                 "`engine_intelligence_projection_omitted_total{reason=bounded_reason}`",
                 "`engine_intelligence_projection_latency_seconds`",
-                "Allowed labels are bounded `result`, `omission_reason`, and `projection_version`.",
+                "`ml_prediction_evidence_projection_*`",
+                "Allowed labels are bounded result/reason values owned by code.",
                 "Forbidden labels include",
                 "raw reason code if",
                 "unbounded. Metrics must never affect base projection."
@@ -82,11 +100,11 @@ class EngineIntelligenceAlertServiceProjectionDocsTest {
     }
 
     @Test
-    void historicalApiGateRemainsAsCurrentReadModelChecklist() throws Exception {
+    void apiGateRemainsAsCurrentReadModelChecklist() throws Exception {
         assertThat(readDocs()).contains(
-                "Historical FDP-95 required separate FDP-96/FDP-97 review before API/UI exposure.",
-                "That gate has been superseded by the",
-                "current bounded API, OpenAPI, and UI contracts.",
+                "The projection originally required separate review before API/UI exposure.",
+                "The current bounded API, OpenAPI, and UI",
+                "contracts satisfy that gate.",
                 "The guard remains useful as a checklist for any future read-model",
                 "change. API read-model tests must prove:",
                 "API read-model tests must prove:",
@@ -100,14 +118,36 @@ class EngineIntelligenceAlertServiceProjectionDocsTest {
         );
     }
 
+    @Test
+    void scoringOccurrenceMigrationDefinesClassificationProcedureAndRemovalGate() throws Exception {
+        assertThat(readArchitectureDoc("scoring_occurrence_ownership_migration.md")).contains(
+                "### RETAINED",
+                "### MODIFIED",
+                "### REMOVED",
+                "### MIGRATION_REQUIRED",
+                "unknown-set count is zero",
+                "partial-identity count is zero",
+                "Do not manufacture source identity",
+                "do not invoke current ML inference",
+                "effective Kafka retention period",
+                "suspicious_transaction_source_event_unique_idx",
+                "suspicious_transaction_current_unique_idx",
+                "quarantine the entire group"
+        );
+    }
+
     private String readDocs() throws IOException {
+        return readArchitectureDoc("engine_intelligence_alert_service_projection.md");
+    }
+
+    private String readArchitectureDoc(String fileName) throws IOException {
         Path current = Path.of(".").toAbsolutePath().normalize();
         for (Path candidate = current; candidate != null; candidate = candidate.getParent()) {
-            Path docs = candidate.resolve("docs/architecture/engine_intelligence_alert_service_projection.md");
+            Path docs = candidate.resolve("docs/architecture").resolve(fileName);
             if (Files.isRegularFile(docs)) {
                 return Files.readString(docs);
             }
         }
-        throw new IllegalStateException("FDP95_DOCS_MISSING");
+        throw new IllegalStateException("ENGINE_INTELLIGENCE_PROJECTION_DOCS_MISSING");
     }
 }

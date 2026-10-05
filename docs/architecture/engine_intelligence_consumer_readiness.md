@@ -15,8 +15,13 @@ compatibility guidance.
 | Area | Known consumer or usage path | FDP-93 treatment |
 | --- | --- | --- |
 | Shared contract | `common-events` `TransactionScoredEvent` and contract tests | Shared current-absent, minimal, full-bounded, unknown-nested, and unknown-top-level fixtures |
-| Alert Kafka consumer | `AlertKafkaConfig` -> `TransactionScoredEventListener` | Kafka `JsonDeserializer` compatibility proof |
+| Authoritative alert Kafka consumer | `AlertKafkaConfig` -> `AuthoritativeTransactionScoredEventDeserializer` -> `TransactionScoredEventListener` | Preserves strict deserialization for the authoritative event while deliberately removing only optional `mlPredictionEvidence`; alert and monitoring availability do not depend on diagnostic evidence projection |
+| Current Engine Intelligence projection consumer | `AlertKafkaConfig` -> `EngineIntelligenceProjectionEventListener` -> `EngineIntelligenceProjectionService` / `EngineIntelligencePendingProjectionService` | Uses an independent consumer group and error handler, projects diagnostics only when the event owns the current scoring occurrence, and durably defers a valid projection while baseline persistence is pending |
+| Engine Intelligence projection-only redrive | `AlertKafkaConfig` -> `EngineIntelligenceRedriveListener` -> `EngineIntelligencePendingProjectionService` -> `EngineIntelligenceProjectionService` | Disabled by default; accepts only dedicated-topic records with complete EI source provenance, uses the existing durable inbox and worker, and cannot invoke baseline business processing |
+| ML prediction evidence consumer | `AlertKafkaConfig` -> `MlPredictionEvidenceEventListener` -> `MlPredictionEvidenceProjectionService` | Uses strict full-event deserialization in a separate Kafka consumer group, record acknowledgement, bounded retry, and dead-letter handling |
+| ML prediction evidence redrive | `AlertKafkaConfig` -> `MlPredictionEvidenceRedriveListener` -> `MlPredictionEvidenceProjectionService` | Disabled by default; the dedicated redrive topic and group recover only immutable private evidence, require original source coordinates, and route invalid input to terminal quarantine without replaying baseline business processing |
 | Alert monitoring projection | `TransactionMonitoringService` -> `ScoredTransactionDocumentMapper` -> `ScoredTransactionDocument` | Existing projection compared against the current shape without Engine Intelligence |
+| Scoring occurrence identity | `ScoredTransactionDocumentMapper` and `EngineIntelligenceProjectionService` -> `ScoringOccurrenceFingerprint` | One canonical fingerprint binds current-state admission and optional diagnostic projection to the same exact scored-event payload |
 | Alert creation path | `AlertManagementService` -> `AlertCaseFactory` -> `AlertDocument` | Historical inventory only; no FDP-93 engine-intelligence projection |
 | Fraud-case path | `FraudCaseManagementService` -> `FraudCaseDocument` and `FraudCaseTransactionDocument` | Historical inventory only; no FDP-93 engine-intelligence projection |
 | Suspicious transaction path | `SuspiciousTransactionProjectionService` -> `SuspiciousTransactionDocument` | Historical inventory only; no FDP-93 engine-intelligence projection |
@@ -26,6 +31,23 @@ compatibility guidance.
 | Integration tests | `AlertServiceIntegrationTest`, `FraudDetectionPlatformEndToEndIntegrationTest`, and `FraudScoringIntegrationTest` | Existing scored-event integration coverage remains in place |
 | Replay and smoke scripts | Repository search found raw-transaction replay input only; no scored-event fixture reader was found | Shared FDP-93 fixtures are the scored-event compatibility source |
 | API/UI | Repository search found no direct `TransactionScoredEvent` deserializer in API or analyst console UI | Guarded against product exposure |
+
+The current topology gives authoritative alert processing, current Engine Intelligence projection, and immutable ML
+prediction evidence projection independent offsets and failure domains. The authoritative consumer remains strict for the
+base scored-event contract and omits only the optional evidence member before mapping. Diagnostic consumers validate the
+complete event and persist their projections independently; transient storage failures use bounded retry and permanent
+evidence failures use dead-letter handling. A successfully consumed base event therefore cannot be replayed merely because
+a diagnostic store is unavailable. Approved evidence recovery copies records from `ml.prediction-evidence.dead-letter` to
+`ml.prediction-evidence.redrive`; its separate, disabled-by-default listener writes only immutable evidence and sends
+malformed, conflicting, or coordinate-free records to `ml.prediction-evidence.quarantine`.
+
+The current Engine Intelligence consumer acknowledges an ordering-gap record only after its bounded projection envelope
+is durable in `engine_intelligence_pending_projections`. A lease-fenced worker retries after the authoritative baseline
+occurrence appears; stale records are completed as no-ops, payload conflicts fail closed, and bounded retry/age exhaustion
+becomes an observable `UNRESOLVED` state. EI failures use `engine-intelligence.dead-letter`, never the baseline DLT.
+Approved recovery copies retained records to `engine-intelligence.redrive`, never `transactions.scored`; a disabled-by-default
+listener validates source coordinates and admits them to the same inbox. Dedicated Kafka ACLs authorize that operation,
+while headers provide provenance consistency only. Invalid recovery records terminate in `engine-intelligence.quarantine`.
 
 The source-scan discovery test fails with `TRANSACTION_SCORED_EVENT_CONSUMER_INVENTORY_REVIEW_REQUIRED`
 when a production reference is added without inventory review.

@@ -1,6 +1,7 @@
 package com.frauddetection.alert.feedback;
 
 import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
@@ -16,6 +17,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 @Document(collection = "fraud_feedback_records")
 @CompoundIndexes({
@@ -32,6 +34,11 @@ public class FraudFeedbackRecord {
     @Indexed(unique = true)
     private String transactionId;
 
+    private String sourceEventId;
+    private String sourceEventCreatedAt;
+    private Long sourceEventCreatedAtEpochSecond;
+    private Integer sourceEventCreatedAtNano;
+    private String sourceEventFingerprint;
     private String customerId;
     private String correlationId;
     private AnalystDecision analystDecision;
@@ -66,6 +73,48 @@ public class FraudFeedbackRecord {
     public void setFeedbackId(String feedbackId) { this.feedbackId = feedbackId; }
     public String getTransactionId() { return transactionId; }
     public void setTransactionId(String transactionId) { this.transactionId = transactionId; }
+    public String getSourceEventId() { return sourceEventId; }
+    public Instant getSourceEventCreatedAt() {
+        return scoringOccurrenceOwnership().map(ScoringOccurrenceOwnership::sourceEventCreatedAt).orElse(null);
+    }
+    public String getSourceEventCreatedAtText() { return sourceEventCreatedAt; }
+    public Long getSourceEventCreatedAtEpochSecond() { return sourceEventCreatedAtEpochSecond; }
+    public Integer getSourceEventCreatedAtNano() { return sourceEventCreatedAtNano; }
+    public String getSourceEventFingerprint() { return sourceEventFingerprint; }
+    public Optional<ScoringOccurrenceOwnership> scoringOccurrenceOwnership() {
+        if (sourceEventId == null
+                && sourceEventCreatedAt == null
+                && sourceEventCreatedAtEpochSecond == null
+                && sourceEventCreatedAtNano == null
+                && sourceEventFingerprint == null) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(ScoringOccurrenceOwnership.fromPersistedIdentity(
+                    sourceEventId,
+                    sourceEventCreatedAt,
+                    sourceEventCreatedAtEpochSecond,
+                    sourceEventCreatedAtNano,
+                    sourceEventFingerprint
+            ));
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalStateException("FRAUD_FEEDBACK_SCORING_OCCURRENCE_IDENTITY_INVALID", exception);
+        }
+    }
+    void captureScoringOccurrence(ScoringOccurrenceOwnership ownership) {
+        if (ownership == null || ownership.state() != ScoringOccurrenceOwnership.State.AUTHORITATIVE) {
+            throw new IllegalArgumentException("FRAUD_FEEDBACK_AUTHORITATIVE_SCORING_OCCURRENCE_REQUIRED");
+        }
+        Optional<ScoringOccurrenceOwnership> existing = scoringOccurrenceOwnership();
+        if (existing.isPresent() && !existing.orElseThrow().equals(ownership)) {
+            throw new IllegalStateException("FRAUD_FEEDBACK_SCORING_OCCURRENCE_IMMUTABLE");
+        }
+        sourceEventId = ownership.sourceEventId();
+        sourceEventCreatedAt = ownership.sourceEventCreatedAt().toString();
+        sourceEventCreatedAtEpochSecond = ownership.sourceEventCreatedAt().getEpochSecond();
+        sourceEventCreatedAtNano = ownership.sourceEventCreatedAt().getNano();
+        sourceEventFingerprint = ownership.sourceEventFingerprint();
+    }
     public String getCustomerId() { return customerId; }
     public void setCustomerId(String customerId) { this.customerId = customerId; }
     public String getCorrelationId() { return correlationId; }

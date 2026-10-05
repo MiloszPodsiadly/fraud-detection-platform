@@ -19,6 +19,7 @@ class EngineIntelligenceDownstreamIsolationTest {
         assertThat(sourcesExcluding(
                 alertService,
                 alertService.resolve("engineintelligence"),
+                alertService.resolve("config/AlertKafkaConfig.java"),
                 alertService.resolve("service/TransactionMonitoringService.java"),
                 alertService.resolve("api/EngineIntelligenceComparisonResponse.java"),
                 alertService.resolve("api/EngineIntelligenceDiagnosticSignalResponse.java"),
@@ -32,7 +33,13 @@ class EngineIntelligenceDownstreamIsolationTest {
                 alertService.resolve("controller/ScoredTransactionController.java"),
                 alertService.resolve("feedback"),
                 alertService.resolve("mapper/EngineIntelligenceResponseMapper.java"),
-                alertService.resolve("mapper/ScoredTransactionResponseMapper.java")
+                alertService.resolve("mapper/ScoredTransactionResponseMapper.java"),
+                alertService.resolve("messaging/EngineIntelligenceProjectionEventListener.java"),
+                alertService.resolve("messaging/EngineIntelligenceRedriveListener.java"),
+                alertService.resolve("messaging/MlPredictionEvidenceEventListener.java"),
+                alertService.resolve("messaging/MlPredictionEvidenceRedriveListener.java"),
+                alertService.resolve("messaging/MlPredictionEvidencePermanentProcessingException.java"),
+                alertService.resolve("messaging/MlPredictionEvidenceTransientProcessingException.java")
         )).doesNotContain("EngineIntelligenceSummary", "engineIntelligence");
     }
 

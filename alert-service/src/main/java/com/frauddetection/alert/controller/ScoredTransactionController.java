@@ -86,13 +86,18 @@ public class ScoredTransactionController {
     @GetMapping("/scored/{transactionId}")
     public ScoredTransactionDetailResponse getScoredTransaction(@PathVariable String transactionId) {
         var scoredTransaction = transactionMonitoringUseCase.getScoredTransaction(transactionId);
-        var engineIntelligence = engineIntelligenceResponse(scoredTransaction.transactionId());
+        var engineIntelligence = engineIntelligenceResponse(scoredTransaction);
         return responseMapper.toDetailResponse(scoredTransaction, engineIntelligence);
     }
 
-    private com.frauddetection.alert.api.EngineIntelligenceResponse engineIntelligenceResponse(String transactionId) {
+    private com.frauddetection.alert.api.EngineIntelligenceResponse engineIntelligenceResponse(
+            com.frauddetection.alert.domain.ScoredTransaction scoredTransaction
+    ) {
         try {
-            return engineIntelligenceResponseMapper.toResponse(engineIntelligenceReadService.read(transactionId));
+            return engineIntelligenceResponseMapper.toResponse(engineIntelligenceReadService.readForOccurrence(
+                    scoredTransaction.transactionId(),
+                    scoredTransaction.scoringOccurrenceOwnership()
+            ));
         } catch (EngineIntelligenceProjectionReadUnavailableException exception) {
             return engineIntelligenceResponseMapper.unavailable();
         }

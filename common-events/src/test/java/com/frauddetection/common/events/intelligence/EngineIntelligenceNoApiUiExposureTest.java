@@ -26,7 +26,8 @@ class EngineIntelligenceNoApiUiExposureTest {
         List<String> apiExposure = EngineIntelligenceSourceScanSupport.filesContainingAny(
                 "alert-service/src/main/java/com/frauddetection/alert",
                 List.of("EngineIntelligenceSummary", "engineIntelligence", "diagnosticSignals",
-                        "agreementStatus", "riskMismatchStatus", "scoreDeltaBucket")
+                        "agreementStatus", "riskMismatchStatus", "scoreDeltaBucket",
+                        "mlPredictionEvidence", "MlPredictionEvidenceV1")
         ).stream()
                 .filter(file -> file.startsWith("alert-service/src/main/java/com/frauddetection/alert/api/")
                         || file.startsWith("alert-service/src/main/java/com/frauddetection/alert/controller/")
@@ -41,7 +42,7 @@ class EngineIntelligenceNoApiUiExposureTest {
         assertThat(EngineIntelligenceSourceScanSupport.filesContainingAny(
                 "analyst-console-ui/src",
                 List.of("engineIntelligence", "diagnosticSignals", "agreementStatus",
-                        "riskMismatchStatus", "scoreDeltaBucket")
+                        "riskMismatchStatus", "scoreDeltaBucket", "mlPredictionEvidence")
         )).isSubsetOf(
                 EngineIntelligenceSourceScanSupport.ANALYST_CONSOLE_ENGINE_INTELLIGENCE_ALLOWED_FILES
         );

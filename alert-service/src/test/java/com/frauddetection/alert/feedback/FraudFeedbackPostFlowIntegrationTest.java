@@ -6,6 +6,7 @@ import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceComparisonReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceEngineReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
@@ -118,7 +119,8 @@ class FraudFeedbackPostFlowIntegrationTest {
         when(transactionRunner.runLocalCommit(any())).thenAnswer(invocation -> invocation.<Supplier<?>>getArgument(0).get());
         when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.OFF);
         when(transactionMonitoringUseCase.getScoredTransaction("txn-1")).thenReturn(scoredTransaction());
-        when(engineIntelligenceReadService.read("txn-1")).thenReturn(projectedEngineIntelligence());
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
+                .thenReturn(projectedEngineIntelligence());
         when(currentAnalystUser.get()).thenReturn(Optional.of(new AnalystPrincipal(
                 "analyst-1",
                 Set.of(),
@@ -151,7 +153,17 @@ class FraudFeedbackPostFlowIntegrationTest {
         FraudFeedbackRecord saved = savedRecords.getFirst();
         assertThat(saved.getFeedbackId()).startsWith("ffb-");
         assertThat(saved.getNotes()).isEqualTo("Customer confirmed fraud");
-        assertThat(body).doesNotContain("Customer confirmed fraud", "rawMlRequest", "rawFeatureVector", "rawEvidence");
+        assertThat(saved.getSourceEventId()).isEqualTo("event-1");
+        assertThat(saved.getSourceEventCreatedAt()).isEqualTo(Instant.parse("2026-06-25T09:00:01Z"));
+        assertThat(saved.getSourceEventFingerprint()).isEqualTo("a".repeat(64));
+        assertThat(body).doesNotContain(
+                "Customer confirmed fraud",
+                "rawMlRequest",
+                "rawFeatureVector",
+                "rawEvidence",
+                "sourceEventId",
+                "sourceEventFingerprint"
+        );
 
         ArgumentCaptor<AuditEventMetadataSummary> metadata = ArgumentCaptor.forClass(AuditEventMetadataSummary.class);
         verify(auditOutboxService).createPendingAudit(
@@ -251,7 +263,8 @@ class FraudFeedbackPostFlowIntegrationTest {
 
     @Test
     void postEngineIntelligenceSnapshotFailureStillPersistsFeedbackAndOutbox() throws Exception {
-        when(engineIntelligenceReadService.read("txn-1")).thenThrow(new EngineIntelligenceProjectionReadUnavailableException());
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
+                .thenThrow(new EngineIntelligenceProjectionReadUnavailableException());
 
         mockMvc.perform(post("/api/v1/transactions/scored/txn-1/feedback")
                         .with(userWith(AnalystAuthority.FRAUD_FEEDBACK_WRITE))
@@ -316,6 +329,11 @@ class FraudFeedbackPostFlowIntegrationTest {
                         List.of("RULES_CRITICAL_RISK"),
                         List.of(),
                         AnalystRecommendationNonDecisioning.advisoryOnly()
+                ),
+                ScoringOccurrenceOwnership.authoritative(
+                        "event-1",
+                        Instant.parse("2026-06-25T09:00:01Z"),
+                        "a".repeat(64)
                 )
         );
     }

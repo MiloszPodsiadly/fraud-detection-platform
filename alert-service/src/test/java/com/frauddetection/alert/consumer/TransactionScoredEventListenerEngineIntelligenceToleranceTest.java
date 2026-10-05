@@ -1,6 +1,7 @@
 package com.frauddetection.alert.consumer;
 
 import com.frauddetection.alert.config.KafkaTopicProperties;
+import com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult;
 import com.frauddetection.alert.messaging.TransactionScoredEventListener;
 import com.frauddetection.alert.service.AlertManagementUseCase;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
@@ -41,7 +42,7 @@ class TransactionScoredEventListenerEngineIntelligenceToleranceTest {
 
         doAnswer(invocation -> {
             assertListenerTraceContext(event, traceId);
-            return null;
+            return accepted();
         }).when(transactionMonitoringUseCase).recordScoredTransaction(same(event));
         doAnswer(invocation -> {
             assertListenerTraceContext(event, traceId);
@@ -77,5 +78,12 @@ class TransactionScoredEventListenerEngineIntelligenceToleranceTest {
     private void assertListenerTraceContext(TransactionScoredEvent event, String traceId) {
         assertThat(TraceContext.currentCorrelationId()).isEqualTo(event.correlationId());
         assertThat(TraceContext.currentTraceId()).isEqualTo(traceId);
+    }
+
+    private ScoringOccurrenceAdmissionResult accepted() {
+        return new ScoringOccurrenceAdmissionResult(
+                ScoringOccurrenceAdmissionResult.Outcome.APPLIED_NEW,
+                ScoringOccurrenceAdmissionResult.ReasonCode.FIRST_OCCURRENCE_ACCEPTED
+        );
     }
 }

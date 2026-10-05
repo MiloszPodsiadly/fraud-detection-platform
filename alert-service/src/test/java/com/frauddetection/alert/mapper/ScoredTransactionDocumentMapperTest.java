@@ -5,7 +5,11 @@ import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.model.Money;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
+import com.frauddetection.alert.persistence.ScoredTransactionDocument;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -13,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ScoredTransactionDocumentMapperTest {
 
@@ -49,6 +54,11 @@ class ScoredTransactionDocumentMapperTest {
         assertThat(document.getCustomerIdSearch()).isEqualTo("customer-123");
         assertThat(document.getMerchantIdSearch()).isEqualTo("merchant-9");
         assertThat(document.getCurrencySearch()).isEqualTo("pln");
+        assertThat(document.getSourceEventId()).isEqualTo("event-1");
+        assertThat(document.getSourceEventCreatedAt()).isEqualTo("2026-01-01T00:00:00Z");
+        assertThat(document.getSourceEventFingerprint()).matches("[0-9a-f]{64}");
+        assertThat(mapper.toDomain(document).scoringOccurrenceOwnership().state())
+                .isEqualTo(ScoringOccurrenceOwnership.State.AUTHORITATIVE);
     }
 
     @Test
@@ -86,5 +96,91 @@ class ScoredTransactionDocumentMapperTest {
 
         assertThat(document.getAnalystRecommendation()).isSameAs(event.analystRecommendation());
         assertThat(domain.analystRecommendation()).isSameAs(event.analystRecommendation());
+    }
+
+    @Test
+    void shouldKeepHistoricalProjectionWithoutSourceIdentityExplicitlyUnknown() {
+        var historical = new com.frauddetection.alert.persistence.ScoredTransactionDocument();
+        historical.setTransactionId("txn-historical");
+
+        var domain = mapper.toDomain(historical);
+
+        assertThat(domain.scoringOccurrenceOwnership())
+                .isEqualTo(ScoringOccurrenceOwnership.unknown());
+    }
+
+    @Test
+    void shouldRejectPartiallyPersistedOccurrenceIdentityInsteadOfTreatingItAsHistorical() {
+        var corrupted = authoritativeDocument();
+        corrupted.setSourceEventFingerprint(null);
+
+        assertThatThrownBy(() -> mapper.toDomain(corrupted))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("SCORING_OCCURRENCE_IDENTITY_INVALID");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "sourceEventId",
+            "sourceEventCreatedAt",
+            "sourceEventCreatedAtEpochSecond",
+            "sourceEventCreatedAtNano",
+            "sourceEventFingerprint"
+    })
+    void shouldRejectEveryIndependentlyMissingOccurrenceIdentityField(String missingField) {
+        var corrupted = authoritativeDocument();
+        switch (missingField) {
+            case "sourceEventId" -> corrupted.setSourceEventId(null);
+            case "sourceEventCreatedAt" -> corrupted.setSourceEventCreatedAt(null);
+            case "sourceEventCreatedAtEpochSecond" -> corrupted.setSourceEventCreatedAtEpochSecond(null);
+            case "sourceEventCreatedAtNano" -> corrupted.setSourceEventCreatedAtNano(null);
+            case "sourceEventFingerprint" -> corrupted.setSourceEventFingerprint(null);
+            default -> throw new IllegalArgumentException("Unexpected field: " + missingField);
+        }
+
+        assertInvalidOccurrence(corrupted);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"not-a-fingerprint", "abc", "A234567890123456789012345678901234567890123456789012345678901234"})
+    void shouldRejectNonCanonicalSha256Fingerprints(String fingerprint) {
+        var corrupted = authoritativeDocument();
+        corrupted.setSourceEventFingerprint(fingerprint);
+
+        assertInvalidOccurrence(corrupted);
+    }
+
+    @Test
+    void shouldRejectMismatchedTimestampRepresentations() {
+        var corrupted = authoritativeDocument();
+        corrupted.setSourceEventCreatedAtEpochSecond(corrupted.getSourceEventCreatedAtEpochSecond() + 1);
+
+        assertInvalidOccurrence(corrupted);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {-1, 1_000_000_000})
+    void shouldRejectInvalidNanosecondComponent(int invalidNano) {
+        var corrupted = authoritativeDocument();
+        corrupted.setSourceEventCreatedAtNano(invalidNano);
+
+        assertInvalidOccurrence(corrupted);
+    }
+
+    private void assertInvalidOccurrence(ScoredTransactionDocument document) {
+        assertThatThrownBy(() -> mapper.toDomain(document))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("SCORING_OCCURRENCE_IDENTITY_INVALID");
+    }
+
+    private ScoredTransactionDocument authoritativeDocument() {
+        ScoredTransactionDocument document = new ScoredTransactionDocument();
+        document.setTransactionId("txn-authoritative");
+        document.setSourceEventId("event-1");
+        document.setSourceEventCreatedAt("2026-01-01T00:00:00.123456789Z");
+        document.setSourceEventCreatedAtEpochSecond(1_767_225_600L);
+        document.setSourceEventCreatedAtNano(123_456_789);
+        document.setSourceEventFingerprint("a".repeat(64));
+        return document;
     }
 }

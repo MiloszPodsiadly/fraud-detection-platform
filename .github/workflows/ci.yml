@@ -40,6 +40,54 @@ jobs:
       - name: Build and test backend modules
         run: mvn -B -U verify -Dproject.root=${{ github.workspace }} -Dtest=!ArtifactBackedShadowPerformanceSummaryProviderTest#deploymentDemoArtifactSetIsReadableByRealProvider -Dsurefire.failIfNoSpecifiedTests=false
 
+  institutional-reliability:
+    name: Institutional Reliability Proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Record exact tested revision
+        run: |
+          TESTED_GIT_SHA=$(git rev-parse HEAD)
+          test "$TESTED_GIT_SHA" = "$GITHUB_SHA"
+          echo "TESTED_GIT_SHA=$TESTED_GIT_SHA" >> "$GITHUB_ENV"
+          echo "Institutional reliability revision: $TESTED_GIT_SHA"
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Verify Docker is available for Testcontainers
+        run: docker version
+
+      - name: Run institutional reliability suite
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+        run: mvn -B -pl alert-service -am "-Dsurefire.failIfNoSpecifiedTests=false" "-Dtest=EngineIntelligencePendingProjectionReliabilityIntegrationTest,ScoringOccurrenceProcessingMongoIntegrationTest,FraudFeedbackOccurrenceSnapshotMongoIntegrationTest,FraudAlertOutboxKafkaReliabilityIntegrationTest,EngineIntelligenceApiArchitectureGuardTest,EngineIntelligenceReadControllerSerializationTest,EngineIntelligenceOperationalMetricsCardinalityTest" test
+
+      - name: Verify institutional reliability reports
+        if: always()
+        run: node scripts/ci/verify-junit-reports.mjs --suite institutionalReliability
+
+      - name: Upload institutional reliability reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: institutional-reliability-${{ env.TESTED_GIT_SHA }}
+          if-no-files-found: error
+          path: alert-service/target/surefire-reports/
+
   fdp42-fraud-case-management:
     name: FDP-42 Fraud Case Management
     runs-on: ubuntu-latest

@@ -22,9 +22,10 @@ class AlertServiceEngineIntelligencePayloadToleranceTest {
 
         assertThat(fixture.getBytes(java.nio.charset.StandardCharsets.UTF_8)).hasSizeLessThan(SAFE_FIXTURE_THRESHOLD_BYTES);
         assertThat(full.engineIntelligence()).isNotNull();
-        assertThat(mapper.toDocument(full))
-                .usingRecursiveComparison()
-                .isEqualTo(mapper.toDocument(AlertServiceTransactionScoredEventFixtureLoader.withoutEngineIntelligence()));
+        AlertServiceBaselineProjectionAssertions.assertUnaffectedByEngineIntelligence(
+                mapper,
+                full
+        );
         assertThat(full.engineIntelligence().toString())
                 .doesNotContainIgnoringCase("rawPayload", "rawEvidence", "finalDecision", "recommendedAction");
     }

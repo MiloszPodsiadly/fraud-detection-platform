@@ -25,6 +25,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -142,7 +143,12 @@ class EngineIntelligenceProjectionMongoIntegrationTest {
     void mongoDocumentWithUnsupportedComparisonTypeFailsClosedOnRead() {
         projectAndCorruptIdentity(update().set("comparisonType", "RULES_VS_RULES"));
         ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
-        when(scoredTransactionRepository.existsById("txn-fdp95-001")).thenReturn(true);
+        var event = EngineIntelligenceProjectionTestFixtures.event(
+                EngineIntelligenceProjectionTestFixtures.minimalSummary()
+        );
+        when(scoredTransactionRepository.findById("txn-fdp95-001")).thenReturn(Optional.of(
+                new com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper().toDocument(event)
+        ));
         EngineIntelligenceReadService readService = new EngineIntelligenceReadService(
                 scoredTransactionRepository,
                 repository,
@@ -170,12 +176,14 @@ class EngineIntelligenceProjectionMongoIntegrationTest {
 
     private EngineIntelligenceProjectionService serviceAt(Instant instant) {
         return new EngineIntelligenceProjectionService(
-                repository,
+                new EngineIntelligenceProjectionWriteFence(mongoTemplate),
                 new EngineIntelligenceProjectionMapper(
                         new EngineIntelligenceProjectionPolicy(),
                         Clock.fixed(instant, ZoneOffset.UTC)
                 ),
-                new AlertServiceMetrics(new SimpleMeterRegistry())
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                mock(com.frauddetection.alert.persistence.ScoredTransactionRepository.class),
+                Clock.fixed(instant, ZoneOffset.UTC)
         );
     }
 

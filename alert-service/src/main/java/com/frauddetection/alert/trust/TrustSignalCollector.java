@@ -3,6 +3,8 @@ package com.frauddetection.alert.trust;
 import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorCoverageResponse;
 import com.frauddetection.alert.audit.external.ExternalAuditIntegrityService;
+import com.frauddetection.alert.outbox.FraudAlertOutboxBacklogMonitor;
+import com.frauddetection.alert.outbox.FraudAlertOutboxBacklogResponse;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.regulated.RegulatedMutationRecoveryService;
@@ -19,22 +21,26 @@ public class TrustSignalCollector {
     private final RegulatedMutationRecoveryService recoveryService;
     private final AuditDegradationService auditDegradationService;
     private final ExternalAuditIntegrityService externalAuditIntegrityService;
+    private final FraudAlertOutboxBacklogMonitor fraudAlertOutboxBacklogMonitor;
 
     public TrustSignalCollector(
             ObjectProvider<TransactionalOutboxRecordRepository> outboxRepository,
             ObjectProvider<RegulatedMutationRecoveryService> recoveryService,
             ObjectProvider<AuditDegradationService> auditDegradationService,
-            ObjectProvider<ExternalAuditIntegrityService> externalAuditIntegrityService
+            ObjectProvider<ExternalAuditIntegrityService> externalAuditIntegrityService,
+            ObjectProvider<FraudAlertOutboxBacklogMonitor> fraudAlertOutboxBacklogMonitor
     ) {
         this.outboxRepository = outboxRepository.getIfAvailable();
         this.recoveryService = recoveryService.getIfAvailable();
         this.auditDegradationService = auditDegradationService.getIfAvailable();
         this.externalAuditIntegrityService = externalAuditIntegrityService.getIfAvailable();
+        this.fraudAlertOutboxBacklogMonitor = fraudAlertOutboxBacklogMonitor.getIfAvailable();
     }
 
     public List<TrustSignal> collect() {
         List<TrustSignal> signals = new ArrayList<>();
         collectOutbox(signals);
+        collectFraudAlertOutbox(signals);
         collectRegulatedMutation(signals);
         collectAuditDegradation(signals);
         collectCoverage(signals);
@@ -53,6 +59,23 @@ public class TrustSignalCollector {
         }
         if (outboxRepository.countByProjectionMismatchTrue() > 0) {
             signals.add(signal("OUTBOX_PROJECTION_MISMATCH", "transactional_outbox", "projection_mismatch=true"));
+        }
+    }
+
+    private void collectFraudAlertOutbox(List<TrustSignal> signals) {
+        if (fraudAlertOutboxBacklogMonitor == null) {
+            return;
+        }
+        FraudAlertOutboxBacklogResponse backlog = fraudAlertOutboxBacklogMonitor.snapshot();
+        if (backlog.failedTerminalCount() > 0) {
+            signals.add(signal("OUTBOX_TERMINAL_FAILURE", "fraud_alert_outbox", "status=FAILED_TERMINAL"));
+        }
+        if (backlog.confirmationUnknownCount() > 0) {
+            signals.add(signal(
+                    "OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN",
+                    "fraud_alert_outbox",
+                    "status=PUBLISH_CONFIRMATION_UNKNOWN"
+            ));
         }
     }
 

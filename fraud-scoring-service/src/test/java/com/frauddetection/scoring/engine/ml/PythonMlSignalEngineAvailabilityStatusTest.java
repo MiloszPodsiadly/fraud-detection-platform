@@ -5,6 +5,7 @@ import com.frauddetection.scoring.engine.FraudSignalEvaluation;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.scoring.domain.FraudScoreResult;
+import com.frauddetection.scoring.service.MlFraudScoringEngine;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.client.RestClientException;
 
@@ -162,6 +163,33 @@ class PythonMlSignalEngineAvailabilityStatusTest {
     }
 
     @Test
+    void modelAvailableTrueWithoutSourceInferenceTimestampReturnsDegraded() {
+        FraudScoreResult source = new FraudScoreResult(
+                0.82d,
+                RiskLevel.HIGH,
+                "ML",
+                "python-logistic-fraud-model",
+                "2026-05-30.v1",
+                PythonMlSignalEngineTestSupport.FEATURE_CONTRACT_VERSION,
+                null,
+                List.of(),
+                Map.of(),
+                Map.of(),
+                Map.of("modelAvailable", true),
+                true
+        );
+
+        FraudSignalEvaluation result = new PythonMlSignalEngine(sourceReturning(source)).evaluate(context());
+
+        assertFailure(
+                result,
+                FraudEngineStatus.DEGRADED,
+                PythonMlSignalReasonCode.ML_INFERENCE_TIMESTAMP_MISSING
+        );
+        assertThat(result.sourceInferenceTimestamp()).isNull();
+    }
+
+    @Test
     void nullResponseReturnsDegradedOrUnavailable() {
         FraudSignalEvaluation result = new PythonMlSignalEngine(sourceReturning(null)).evaluate(context());
 
@@ -211,6 +239,31 @@ class PythonMlSignalEngineAvailabilityStatusTest {
                 Map.of("modelAvailable", true),
                 true
         )).hasMessageContaining("ML model identity must be entirely absent or complete");
+    }
+
+    @Test
+    void sourceIdentityValidationFailureIsDistinctFromEngineUnavailable() {
+        FraudScoreResult source = new FraudScoreResult(
+                null,
+                null,
+                "ML",
+                null,
+                null,
+                null,
+                Instant.parse("2026-05-30T09:59:59Z"),
+                List.of(),
+                Map.of(),
+                Map.of(),
+                Map.of(
+                        "modelAvailable", false,
+                        MlFraudScoringEngine.MODEL_IDENTITY_VALIDATION_FAILED, true
+                ),
+                false
+        );
+
+        FraudSignalEvaluation result = new PythonMlSignalEngine(sourceReturning(source)).evaluate(context());
+
+        assertFailure(result, FraudEngineStatus.DEGRADED, PythonMlSignalReasonCode.ML_MODEL_METADATA_MISSING);
     }
 
     private void assertFailure(

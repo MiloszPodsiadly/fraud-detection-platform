@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -46,15 +47,20 @@ final class SuspiciousTransactionTestSupport {
     static SuspiciousTransactionRepository inMemoryRepository() {
         SuspiciousTransactionRepository repository = mock(SuspiciousTransactionRepository.class);
         Map<String, SuspiciousTransactionDocument> rows = new HashMap<>();
-        when(repository.findByTransactionIdAndSourceEventId(any(), any())).thenAnswer(invocation -> {
-            String key = key(invocation.getArgument(0), invocation.getArgument(1));
-            return Optional.ofNullable(rows.get(key));
+        when(repository.findByTransactionId(any())).thenAnswer(invocation -> {
+            String transactionId = invocation.getArgument(0);
+            return Optional.ofNullable(rows.get(transactionId));
         });
         when(repository.save(any(SuspiciousTransactionDocument.class))).thenAnswer(invocation -> {
             SuspiciousTransactionDocument document = invocation.getArgument(0);
-            rows.put(key(document.getTransactionId(), document.getSourceEventId()), document);
+            rows.put(document.getTransactionId(), document);
             return document;
         });
+        doAnswer(invocation -> {
+            SuspiciousTransactionDocument document = invocation.getArgument(0);
+            rows.remove(document.getTransactionId());
+            return null;
+        }).when(repository).delete(any(SuspiciousTransactionDocument.class));
         return repository;
     }
 
@@ -198,9 +204,5 @@ final class SuspiciousTransactionTestSupport {
                         : Map.of("diagnostic", true, "supportedEvidenceCreated", false, "reasonCodeApplicable", false),
                 Instant.parse("2026-05-18T09:59:00Z")
         );
-    }
-
-    private static String key(String transactionId, String sourceEventId) {
-        return transactionId + "|" + sourceEventId;
     }
 }

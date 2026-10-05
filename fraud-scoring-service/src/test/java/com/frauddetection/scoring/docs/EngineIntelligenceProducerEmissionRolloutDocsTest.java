@@ -16,13 +16,13 @@ class EngineIntelligenceProducerEmissionRolloutDocsTest {
         ));
 
         assertThat(docs).contains(
-                "FDP-94 disabled-by-default runtime producer emission",
+                "current disabled-by-default runtime producer emission",
                 "fraud.scoring.events.engine-intelligence.emit-enabled=false",
                 "Missing config means disabled",
                 "Explicit `false` means disabled",
                 "Explicit `true` enables producer-side diagnostic enrichment",
                 "omits the `engineIntelligence` JSON field",
-                "Disabled mode keeps the pre-FDP-94 serialized event shape.",
+                "Disabled mode keeps the evidence-free serialized event shape and emits neither Engine Intelligence nor ML prediction",
                 "It does not invoke orchestrator, aggregation, public mapper, rules, or ML diagnostic path.",
                 "It does not initialize the conditional diagnostic runtime graph.",
                 "Enabled mode performs shadow diagnostic orchestration after baseline scoring.",
@@ -39,7 +39,7 @@ class EngineIntelligenceProducerEmissionRolloutDocsTest {
                 "Verify latency, timeout, rejection, and enrichment-omission behavior",
                 "Set `fraud.scoring.events.engine-intelligence.emit-enabled=false` and redeploy",
                 "Operational Observability Boundary",
-                "FDP-94 includes a no-op metrics boundary",
+                "The producer includes a no-op metrics boundary",
                 "Metrics recording is best-effort and cannot block event publishing",
                 "Production metrics backend integration remains future scope",
                 "Before wider rollout",
@@ -55,7 +55,7 @@ class EngineIntelligenceProducerEmissionRolloutDocsTest {
                 "attempts record latency for success, empty result, missing pipeline, and failure",
                 "Disabled skips do",
                 "not record enrichment attempt latency",
-                "FDP-94 records `UNKNOWN_FAILURE` for runtime pipeline failures",
+                "The producer records `UNKNOWN_FAILURE` for runtime pipeline failures",
                 "Stage-specific omission reasons are",
                 "reserved for future pipeline instrumentation",
                 "Current omission reasons remain bounded and",
@@ -65,8 +65,12 @@ class EngineIntelligenceProducerEmissionRolloutDocsTest {
                 "Metrics must remain low-cardinality",
                 "Metrics must not include transaction IDs, customer IDs, account IDs, raw exception messages,",
                 "endpoint URLs, payloads, or feature vectors",
-                "No alert-service projection or persistence",
-                "No API or analyst-console UI exposure",
+                "same orchestrator execution used",
+                "never reconstructed from the public score bucket",
+                "The exact ML score may differ from the platform `fraudScore`",
+                "No public exposure of exact ML evidence through API or Analyst Console UI",
+                "Alert-service persistence is owned by the separate projection boundary",
+                "Future governed evaluation or promotion",
                 "No final decisioning",
                 "No raw or internal aggregation serialization"
         );

@@ -3,6 +3,7 @@ package com.frauddetection.scoring.service;
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
@@ -10,6 +11,7 @@ import com.frauddetection.scoring.config.ScoringProperties;
 import com.frauddetection.scoring.mapper.TransactionScoredEventMapper;
 import com.frauddetection.scoring.messaging.TransactionScoredEventPublisher;
 import com.frauddetection.scoring.observability.ScoringMetrics;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEnrichmentResult;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,6 +67,7 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
                     scoringRequest,
                     scoreResult,
                     engineIntelligence.summary(),
+                    engineIntelligence.mlPredictionEvidence(),
                     analystRecommendation
             );
             transactionScoredEventPublisher.publish(scoredEvent);
@@ -124,6 +127,16 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
         return Boolean.TRUE.equals(diagnostics.get("fallbackUsed"));
     }
 
-    private record EngineIntelligenceEmission(Optional<EngineIntelligenceSummary> summary, boolean unavailable) {
+    private record EngineIntelligenceEmission(
+            Optional<EngineIntelligenceEnrichmentResult> enrichment,
+            boolean unavailable
+    ) {
+        private Optional<EngineIntelligenceSummary> summary() {
+            return enrichment.flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary);
+        }
+
+        private Optional<MlPredictionEvidenceV1> mlPredictionEvidence() {
+            return enrichment.flatMap(EngineIntelligenceEnrichmentResult::mlPredictionEvidence);
+        }
     }
 }

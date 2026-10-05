@@ -70,6 +70,7 @@ class EngineIntelligenceEmissionServiceTest {
         when(mapper.map(aggregationResult)).thenReturn(summary);
 
         assertThat(service(true, pipeline(orchestrator, aggregation, mapper)).emitIfEnabled(request()))
+                .flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
                 .contains(summary);
         verify(orchestrator).evaluate(any());
         verify(aggregation).aggregate(orchestration);

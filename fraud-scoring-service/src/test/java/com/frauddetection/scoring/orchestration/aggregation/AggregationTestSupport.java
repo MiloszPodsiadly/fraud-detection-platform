@@ -16,6 +16,7 @@ import java.util.List;
 
 final class AggregationTestSupport {
     static final Instant GENERATED_AT = Instant.parse("2026-05-31T10:00:00Z");
+    static final Instant SOURCE_INFERENCE_AT = Instant.parse("2026-05-31T09:59:58Z");
 
     private AggregationTestSupport() {
     }
@@ -80,7 +81,8 @@ final class AggregationTestSupport {
                 modelVersion(engineType, status),
                 featureContractVersion(engineType, status),
                 status == FraudEngineStatus.AVAILABLE ? null : reasonCodes.getFirst(),
-                GENERATED_AT
+                GENERATED_AT,
+                isAvailableMl(engineType, status) ? SOURCE_INFERENCE_AT : null
         );
     }
 

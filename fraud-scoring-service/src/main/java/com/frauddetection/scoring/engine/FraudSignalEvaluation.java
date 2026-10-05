@@ -6,6 +6,7 @@ import com.frauddetection.common.events.engine.FraudEngineEvidence;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 
@@ -20,7 +21,8 @@ public record FraudSignalEvaluation(
         String modelName,
         String modelVersion,
         String featureContractVersion,
-        String statusReason
+        String statusReason,
+        Instant sourceInferenceTimestamp
 ) {
     public FraudSignalEvaluation {
         Objects.requireNonNull(status, "status is required");
@@ -28,6 +30,35 @@ public record FraudSignalEvaluation(
         reasonCodes = reasonCodes == null ? List.of() : List.copyOf(reasonCodes);
         contributions = contributions == null ? List.of() : List.copyOf(contributions);
         evidence = evidence == null ? List.of() : List.copyOf(evidence);
+    }
+
+    public FraudSignalEvaluation(
+            FraudEngineStatus status,
+            Double score,
+            RiskLevel riskLevel,
+            FraudEngineConfidence confidence,
+            List<String> reasonCodes,
+            List<FraudEngineContribution> contributions,
+            List<FraudEngineEvidence> evidence,
+            String modelName,
+            String modelVersion,
+            String featureContractVersion,
+            String statusReason
+    ) {
+        this(
+                status,
+                score,
+                riskLevel,
+                confidence,
+                reasonCodes,
+                contributions,
+                evidence,
+                modelName,
+                modelVersion,
+                featureContractVersion,
+                statusReason,
+                null
+        );
     }
 
     public FraudSignalEvaluation(
@@ -53,7 +84,8 @@ public record FraudSignalEvaluation(
                 modelName,
                 modelVersion,
                 null,
-                statusReason
+                statusReason,
+                null
         );
     }
 }

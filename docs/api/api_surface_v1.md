@@ -156,6 +156,11 @@ Platform Audit Integrity API:
 - The regulated mutation boundary is local Mongo ACID plus transactional outbox for supported operations. It is not distributed ACID across MongoDB, Kafka, trust-authority signing, and external witnesses; it is not exactly-once delivery, legal notarization, WORM storage, SIEM integration, or certified archive evidence.
 - Manual outbox confirmation resolution is operator-attested and not independently broker-verified. It requires `X-Idempotency-Key`, reason, actor identity, and structured evidence. In bank fail-closed mode it is dual-control: first request stores pending evidence and a distinct authenticated operator must approve/apply it. Outside bank mode the response explicitly identifies `SINGLE_CONTROL_OPERATOR_ATTESTED`.
 - Evidence confirmation status is explicit. Missing required external evidence or unknown outbox confirmation remains pending; invalid signature or terminal outbox failure requires recovery rather than confirmation. `/system/trust-level` exposes transaction capability, outbox counts, finalize-recovery count, evidence-confirmation pending/recovery counts, and oldest recovery age.
+- Fraud-alert outbox confirmation is broker-verified rather than operator-attested: `BROKER_OFFSET` is accepted only
+  when alert-service reads that exact retained `fraud.alerts` record and its key and complete canonical payload match
+  the authoritative outbox event. The deployment cannot prove non-delivery from absence, so
+  `CONFIRMED_NOT_DELIVERED` preserves `PUBLISH_CONFIRMATION_UNKNOWN` and cannot reset attempts. Client verification
+  timestamps, verifier names, free text, and retention-limited scans are not authoritative broker evidence.
 
 ### FDP-26B / FDP-27 - Pre-Commit Finalize Model
 

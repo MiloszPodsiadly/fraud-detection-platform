@@ -1,13 +1,16 @@
 package com.frauddetection.alert.service;
 
-import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionService;
+import com.frauddetection.alert.domain.ScoredTransaction;
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
+import com.frauddetection.alert.persistence.ScoredTransactionProjectionWriter;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -29,14 +32,14 @@ class TransactionMonitoringServiceDetailLookupTest {
             mapper,
             mongoTemplate,
             new ScoredTransactionSearchPolicy(),
-            mock(EngineIntelligenceProjectionService.class)
+            mock(ScoredTransactionProjectionWriter.class)
     );
 
     @Test
     void findsScoredTransactionByExactTransactionId() {
         ScoredTransactionDocument document = new ScoredTransactionDocument();
         document.setTransactionId("txn-1");
-        var domain = new com.frauddetection.alert.domain.ScoredTransaction(
+        var domain = new ScoredTransaction(
                 "txn-1",
                 "customer-1",
                 null,
@@ -47,7 +50,13 @@ class TransactionMonitoringServiceDetailLookupTest {
                 0.75d,
                 RiskLevel.HIGH,
                 true,
-                List.of("RULE_MATCH")
+                List.of("RULE_MATCH"),
+                null,
+                ScoringOccurrenceOwnership.authoritative(
+                        "event-1",
+                        Instant.parse("2026-06-18T10:00:01Z"),
+                        "a".repeat(64)
+                )
         );
         when(repository.findByTransactionId("txn-1")).thenReturn(Optional.of(document));
         when(mapper.toDomain(document)).thenReturn(domain);

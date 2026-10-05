@@ -24,7 +24,7 @@ class SuspiciousTransactionRepositoryMethodTest {
     @Test
     void multiResultFindersReturnPageAndAcceptPageable() {
         assertThat(Arrays.stream(SuspiciousTransactionRepository.class.getDeclaredMethods())
-                .filter(method -> !method.getName().equals("findByTransactionIdAndSourceEventId"))
+                .filter(method -> !method.getName().equals("findByTransactionId"))
                 .filter(method -> method.getName().startsWith("find"))
                 .allMatch(method -> method.getReturnType().equals(Page.class)
                         && List.of(method.getParameterTypes()).contains(Pageable.class)))
@@ -34,8 +34,7 @@ class SuspiciousTransactionRepositoryMethodTest {
     @Test
     void idempotencyLookupReturnsOptional() throws NoSuchMethodException {
         Method method = SuspiciousTransactionRepository.class.getDeclaredMethod(
-                "findByTransactionIdAndSourceEventId",
-                String.class,
+                "findByTransactionId",
                 String.class
         );
 

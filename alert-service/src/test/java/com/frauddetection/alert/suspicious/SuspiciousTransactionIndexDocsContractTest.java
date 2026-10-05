@@ -27,7 +27,7 @@ class SuspiciousTransactionIndexDocsContractTest {
                 .contains("idx_suspicious_tx_risk_cursor")
                 .contains("idx_suspicious_tx_customer_cursor")
                 .contains("idx_suspicious_tx_alert_cursor")
-                .contains("suspicious_transaction_source_event_unique_idx")
+                .contains("suspicious_transaction_current_unique_idx")
                 .contains("performance support only")
                 .contains("does not change API behavior")
                 .contains("runtime indexInfo inspection")

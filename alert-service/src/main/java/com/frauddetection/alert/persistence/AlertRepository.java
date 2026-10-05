@@ -7,8 +7,6 @@ import java.util.Optional;
 
 public interface AlertRepository extends MongoRepository<AlertDocument, String> {
 
-    boolean existsByTransactionId(String transactionId);
-
     Optional<AlertDocument> findByTransactionId(String transactionId);
 
     long countByDecisionOutboxStatus(String decisionOutboxStatus);

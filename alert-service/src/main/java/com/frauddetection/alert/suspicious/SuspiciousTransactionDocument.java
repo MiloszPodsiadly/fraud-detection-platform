@@ -18,8 +18,8 @@ import java.util.List;
         @CompoundIndex(name = "idx_suspicious_tx_customer_cursor", def = "{'customerId': 1, 'detectedAt': -1, '_id': -1}"),
         @CompoundIndex(name = "idx_suspicious_tx_alert_cursor", def = "{'linkedAlertId': 1, 'detectedAt': -1, '_id': -1}"),
         @CompoundIndex(
-                name = "suspicious_transaction_source_event_unique_idx",
-                def = "{'transactionId': 1, 'sourceEventId': 1}",
+                name = "suspicious_transaction_current_unique_idx",
+                def = "{'transactionId': 1}",
                 unique = true
         )
 })

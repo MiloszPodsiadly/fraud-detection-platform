@@ -1,7 +1,9 @@
 package com.frauddetection.alert.mapper;
 
 import com.frauddetection.alert.domain.ScoredTransaction;
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
+import com.frauddetection.alert.persistence.ScoringOccurrenceFingerprint;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import org.springframework.stereotype.Component;
 
@@ -12,8 +14,19 @@ import java.util.Locale;
 public class ScoredTransactionDocumentMapper {
 
     public ScoredTransactionDocument toDocument(TransactionScoredEvent event) {
+        String sourceEventFingerprint = ScoringOccurrenceFingerprint.from(event);
+        ScoringOccurrenceOwnership occurrence = ScoringOccurrenceOwnership.authoritative(
+                event.eventId(),
+                event.createdAt(),
+                sourceEventFingerprint
+        );
         ScoredTransactionDocument document = new ScoredTransactionDocument();
         document.setTransactionId(event.transactionId());
+        document.setSourceEventId(occurrence.sourceEventId());
+        document.setSourceEventCreatedAt(occurrence.sourceEventCreatedAt().toString());
+        document.setSourceEventCreatedAtEpochSecond(occurrence.sourceEventCreatedAt().getEpochSecond());
+        document.setSourceEventCreatedAtNano(occurrence.sourceEventCreatedAt().getNano());
+        document.setSourceEventFingerprint(occurrence.sourceEventFingerprint());
         document.setCustomerId(event.customerId());
         document.setCorrelationId(event.correlationId());
         document.setTransactionTimestamp(event.transactionTimestamp());
@@ -45,8 +58,23 @@ public class ScoredTransactionDocumentMapper {
                 document.getRiskLevel(),
                 document.getAlertRecommended(),
                 document.getReasonCodes(),
-                document.getAnalystRecommendation()
+                document.getAnalystRecommendation(),
+                occurrence(document)
         );
+    }
+
+    private ScoringOccurrenceOwnership occurrence(ScoredTransactionDocument document) {
+        try {
+            return ScoringOccurrenceOwnership.fromPersistedIdentity(
+                    document.getSourceEventId(),
+                    document.getSourceEventCreatedAt(),
+                    document.getSourceEventCreatedAtEpochSecond(),
+                    document.getSourceEventCreatedAtNano(),
+                    document.getSourceEventFingerprint()
+            );
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalStateException("SCORING_OCCURRENCE_IDENTITY_INVALID", exception);
+        }
     }
 
     private Instant resolveScoredAt(TransactionScoredEvent event) {

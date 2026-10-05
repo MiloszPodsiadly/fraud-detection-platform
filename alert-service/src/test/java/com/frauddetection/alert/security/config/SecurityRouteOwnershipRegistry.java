@@ -87,6 +87,8 @@ final class SecurityRouteOwnershipRegistry {
         route(routes, "GET", "/api/v1/outbox/recovery/backlog", "RecoveryAuthorizationRules");
         route(routes, "POST", "/api/v1/outbox/recovery/run", "RecoveryAuthorizationRules");
         route(routes, "POST", "/api/v1/outbox/{eventId}/resolve-confirmation", "RecoveryAuthorizationRules");
+        route(routes, "GET", "/api/v1/outbox/fraud-alerts/recovery/backlog", "RecoveryAuthorizationRules");
+        route(routes, "POST", "/api/v1/outbox/fraud-alerts/{eventId}/resolve-confirmation", "RecoveryAuthorizationRules");
         return List.copyOf(routes);
     }
 

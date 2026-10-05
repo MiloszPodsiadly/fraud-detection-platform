@@ -58,6 +58,20 @@ rejected.
 One active feedback record is allowed per transaction. A second POST returns `409 CONFLICT` and does not overwrite the
 existing record. Existing transactions without feedback return `404 NOT_FOUND` on the feedback read endpoint.
 
+Each new feedback record privately captures the authoritative scoring occurrence identity: `sourceEventId`, the exact
+source event creation time, and its canonical fingerprint. The occurrence identity, fraud-score snapshot, model
+lineage, feedback record, and audit intent are read and persisted in one `REQUIRED` Mongo transaction. This identity is
+immutable and is not exposed by the public feedback API. An unknown or partially populated occurrence identity fails
+closed; it is never reconstructed from the current runtime, model registry, latest score, or timestamps.
+
+The exact source event time is stored as canonical timestamp text plus epoch second and nanosecond components. This
+preserves feedback lineage when multiple scoring occurrences fall inside the same Mongo millisecond.
+
+Historical feedback records with every persisted occurrence identity component absent remain readable but are explicitly
+lineage unavailable. Before any future model-specific evidence evaluation, those rows must either be replayed or
+migrated from the exact retained authoritative event, or quarantined and excluded. Partial historical identities are
+invalid and must not be guessed or backfilled.
+
 ## Boundaries
 
 Analyst feedback labels are review outcomes and future evaluation signals, not certified legal ground truth.

@@ -1,5 +1,6 @@
 package com.frauddetection.alert.engineintelligence;
 
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
@@ -16,6 +17,11 @@ public class EngineIntelligenceProjection {
 
     @Id
     private final String transactionId;
+    private final String sourceEventId;
+    private final String sourceEventCreatedAt;
+    private final Long sourceEventCreatedAtEpochSecond;
+    private final Integer sourceEventCreatedAtNano;
+    private final String sourceEventFingerprint;
     private final int contractVersion;
     private final Instant generatedAt;
     private final EngineIntelligenceComparisonType comparisonType;
@@ -35,6 +41,11 @@ public class EngineIntelligenceProjection {
     @PersistenceCreator
     public EngineIntelligenceProjection(
             String transactionId,
+            String sourceEventId,
+            String sourceEventCreatedAt,
+            Long sourceEventCreatedAtEpochSecond,
+            Integer sourceEventCreatedAtNano,
+            String sourceEventFingerprint,
             int contractVersion,
             Instant generatedAt,
             EngineIntelligenceComparisonType comparisonType,
@@ -49,6 +60,11 @@ public class EngineIntelligenceProjection {
             Instant updatedAt
     ) {
         this.transactionId = transactionId;
+        this.sourceEventId = sourceEventId;
+        this.sourceEventCreatedAt = sourceEventCreatedAt;
+        this.sourceEventCreatedAtEpochSecond = sourceEventCreatedAtEpochSecond;
+        this.sourceEventCreatedAtNano = sourceEventCreatedAtNano;
+        this.sourceEventFingerprint = sourceEventFingerprint;
         this.contractVersion = contractVersion;
         this.generatedAt = generatedAt;
         this.comparisonType = comparisonType;
@@ -66,7 +82,139 @@ public class EngineIntelligenceProjection {
         this.updatedAt = updatedAt;
     }
 
+    public EngineIntelligenceProjection(
+            String transactionId,
+            String sourceEventId,
+            Instant sourceEventCreatedAt,
+            String sourceEventFingerprint,
+            int contractVersion,
+            Instant generatedAt,
+            EngineIntelligenceComparisonType comparisonType,
+            List<String> comparedEngineIds,
+            EngineIntelligenceAgreementStatus comparisonStatus,
+            EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
+            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket,
+            List<EngineIntelligenceEngineProjection> engines,
+            List<EngineIntelligenceDiagnosticSignalProjection> diagnosticSignals,
+            List<EngineIntelligenceWarningProjection> warnings,
+            Instant createdAt,
+            Instant updatedAt
+    ) {
+        this(
+                transactionId,
+                sourceEventId,
+                sourceEventCreatedAt == null ? null : sourceEventCreatedAt.toString(),
+                sourceEventCreatedAt == null ? null : sourceEventCreatedAt.getEpochSecond(),
+                sourceEventCreatedAt == null ? null : sourceEventCreatedAt.getNano(),
+                sourceEventFingerprint,
+                contractVersion,
+                generatedAt,
+                comparisonType,
+                comparedEngineIds,
+                comparisonStatus,
+                riskMismatchStatus,
+                scoreDeltaBucket,
+                engines,
+                diagnosticSignals,
+                warnings,
+                createdAt,
+                updatedAt
+        );
+    }
+
+    public EngineIntelligenceProjection(
+            String transactionId,
+            String sourceEventId,
+            int contractVersion,
+            Instant generatedAt,
+            EngineIntelligenceComparisonType comparisonType,
+            List<String> comparedEngineIds,
+            EngineIntelligenceAgreementStatus comparisonStatus,
+            EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
+            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket,
+            List<EngineIntelligenceEngineProjection> engines,
+            List<EngineIntelligenceDiagnosticSignalProjection> diagnosticSignals,
+            List<EngineIntelligenceWarningProjection> warnings,
+            Instant createdAt,
+            Instant updatedAt
+    ) {
+        this(
+                transactionId,
+                sourceEventId,
+                null,
+                null,
+                null,
+                null,
+                contractVersion,
+                generatedAt,
+                comparisonType,
+                comparedEngineIds,
+                comparisonStatus,
+                riskMismatchStatus,
+                scoreDeltaBucket,
+                engines,
+                diagnosticSignals,
+                warnings,
+                createdAt,
+                updatedAt
+        );
+    }
+
+    public EngineIntelligenceProjection(
+            String transactionId,
+            int contractVersion,
+            Instant generatedAt,
+            EngineIntelligenceComparisonType comparisonType,
+            List<String> comparedEngineIds,
+            EngineIntelligenceAgreementStatus comparisonStatus,
+            EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
+            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket,
+            List<EngineIntelligenceEngineProjection> engines,
+            List<EngineIntelligenceDiagnosticSignalProjection> diagnosticSignals,
+            List<EngineIntelligenceWarningProjection> warnings,
+            Instant createdAt,
+            Instant updatedAt
+    ) {
+        this(
+                transactionId,
+                null,
+                null,
+                null,
+                null,
+                null,
+                contractVersion,
+                generatedAt,
+                comparisonType,
+                comparedEngineIds,
+                comparisonStatus,
+                riskMismatchStatus,
+                scoreDeltaBucket,
+                engines,
+                diagnosticSignals,
+                warnings,
+                createdAt,
+                updatedAt
+        );
+    }
+
     public String getTransactionId() { return transactionId; }
+    public String getSourceEventId() { return sourceEventId; }
+    public Instant getSourceEventCreatedAt() {
+        return scoringOccurrenceOwnership().sourceEventCreatedAt();
+    }
+    public String getSourceEventCreatedAtText() { return sourceEventCreatedAt; }
+    public Long getSourceEventCreatedAtEpochSecond() { return sourceEventCreatedAtEpochSecond; }
+    public Integer getSourceEventCreatedAtNano() { return sourceEventCreatedAtNano; }
+    public String getSourceEventFingerprint() { return sourceEventFingerprint; }
+    public ScoringOccurrenceOwnership scoringOccurrenceOwnership() {
+        return ScoringOccurrenceOwnership.fromPersistedIdentity(
+                sourceEventId,
+                sourceEventCreatedAt,
+                sourceEventCreatedAtEpochSecond,
+                sourceEventCreatedAtNano,
+                sourceEventFingerprint
+        );
+    }
     public int getContractVersion() { return contractVersion; }
     public Instant getGeneratedAt() { return generatedAt; }
     public EngineIntelligenceComparisonType getComparisonType() { return comparisonType; }

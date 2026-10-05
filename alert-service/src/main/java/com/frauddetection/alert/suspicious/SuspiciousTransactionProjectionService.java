@@ -10,7 +10,6 @@ import com.frauddetection.common.events.evidence.ScoringEvidenceStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -53,24 +52,23 @@ public class SuspiciousTransactionProjectionService {
     }
 
     public Optional<SuspiciousTransactionDocument> projectOrUpdate(TransactionScoredEvent event, String linkedAlertId) {
-        if (!isAlertWorthy(event)) {
-            metrics.recordSuspiciousTransactionProjectionSkipped("non_alert_worthy");
-            return Optional.empty();
-        }
-        if (!hasText(event.transactionId()) || !hasText(event.eventId())) {
+        if (event == null || !hasText(event.transactionId()) || !hasText(event.eventId())) {
             metrics.recordSuspiciousTransactionProjectionSkipped("missing_required_lineage");
             log.atWarn()
                     .addKeyValue("reason", "missing_required_lineage")
-                    .addKeyValue("hasTransactionId", hasText(event.transactionId()))
-                    .addKeyValue("hasSourceEventId", hasText(event.eventId()))
+                    .addKeyValue("hasTransactionId", event != null && hasText(event.transactionId()))
+                    .addKeyValue("hasSourceEventId", event != null && hasText(event.eventId()))
                     .log("Skipped suspicious transaction read-model projection.");
             return Optional.empty();
         }
 
         try {
+            if (!isAlertWorthy(event)) {
+                return removeCurrentProjection(event.transactionId());
+            }
             Instant now = clock.instant();
             Optional<SuspiciousTransactionDocument> existing =
-                    repository.findByTransactionIdAndSourceEventId(event.transactionId(), event.eventId());
+                    repository.findByTransactionId(event.transactionId());
             SuspiciousTransactionDocument document = existing.orElseGet(() -> newDocument(event, now));
             applyEvent(document, event, linkedAlertId, now);
             SuspiciousTransactionDocument saved = repository.save(document);
@@ -79,68 +77,32 @@ public class SuspiciousTransactionProjectionService {
                     saved.getStatus()
             );
             return Optional.of(saved);
-        } catch (DuplicateKeyException exception) {
-            return readBackAfterDuplicateKey(event, linkedAlertId);
         } catch (RuntimeException exception) {
             metrics.recordSuspiciousTransactionProjectionError("projection_error");
             log.atWarn()
                     .addKeyValue("reason", "projection_error")
                     .addKeyValue("exceptionType", exception.getClass().getSimpleName())
                     .log("Suspicious transaction read-model projection failed.");
-            return Optional.empty();
+            throw new SuspiciousTransactionProjectionException(exception);
         }
     }
 
-    private Optional<SuspiciousTransactionDocument> readBackAfterDuplicateKey(
-            TransactionScoredEvent event,
-            String linkedAlertId
-    ) {
-        try {
-            Optional<SuspiciousTransactionDocument> existing =
-                    repository.findByTransactionIdAndSourceEventId(event.transactionId(), event.eventId());
-            if (existing.isEmpty()) {
-                metrics.recordSuspiciousTransactionProjectionError("duplicate_readback_missing");
-                log.atWarn()
-                        .addKeyValue("reason", "duplicate_readback_missing")
-                        .log("Suspicious transaction duplicate insert race could not be resolved by readback.");
-                return Optional.empty();
-            }
-
-            SuspiciousTransactionDocument document = existing.get();
-            if (hasText(linkedAlertId) && !hasText(document.getLinkedAlertId())) {
-                document.setLinkedAlertId(linkedAlertId);
-                document.setStatus(SuspiciousTransactionStatus.ALERT_CREATED);
-                document.setUpdatedAt(clock.instant());
-                SuspiciousTransactionDocument saved = repository.save(document);
-                metrics.recordSuspiciousTransactionProjection("duplicate_retry", saved.getStatus());
-                logDuplicateReadbackResolved();
-                return Optional.of(saved);
-            }
-
-            metrics.recordSuspiciousTransactionProjection("duplicate_retry", document.getStatus());
-            logDuplicateReadbackResolved();
-            return existing;
-        } catch (RuntimeException readbackException) {
-            metrics.recordSuspiciousTransactionProjectionError("duplicate_readback_failed");
-            log.atWarn()
-                    .addKeyValue("reason", "duplicate_readback_failed")
-                    .addKeyValue("exceptionType", readbackException.getClass().getSimpleName())
-                    .log("Suspicious transaction duplicate readback failed.");
+    private Optional<SuspiciousTransactionDocument> removeCurrentProjection(String transactionId) {
+        Optional<SuspiciousTransactionDocument> existing = repository.findByTransactionId(transactionId);
+        if (existing.isEmpty()) {
+            metrics.recordSuspiciousTransactionProjectionSkipped("non_alert_worthy");
             return Optional.empty();
         }
-    }
-
-    private void logDuplicateReadbackResolved() {
-        log.atInfo()
-                .addKeyValue("reason", "duplicate_retry")
-                .log("Suspicious transaction duplicate insert race resolved by readback.");
+        SuspiciousTransactionDocument document = existing.orElseThrow();
+        repository.delete(document);
+        metrics.recordSuspiciousTransactionProjection("removed", document.getStatus());
+        return Optional.empty();
     }
 
     private SuspiciousTransactionDocument newDocument(TransactionScoredEvent event, Instant now) {
         SuspiciousTransactionDocument document = new SuspiciousTransactionDocument();
-        document.setSuspiciousTransactionId(deterministicId(event.transactionId(), event.eventId()));
+        document.setSuspiciousTransactionId(deterministicId(event.transactionId()));
         document.setTransactionId(event.transactionId());
-        document.setSourceEventId(event.eventId());
         document.setCreatedAt(now);
         return document;
     }
@@ -151,6 +113,7 @@ public class SuspiciousTransactionProjectionService {
             String linkedAlertId,
             Instant now
     ) {
+        document.setSourceEventId(event.eventId());
         document.setCorrelationId(event.correlationId());
         document.setCustomerId(event.customerId());
         document.setAccountId(event.accountId());
@@ -290,10 +253,10 @@ public class SuspiciousTransactionProjectionService {
         return StringUtils.hasText(value);
     }
 
-    private String deterministicId(String transactionId, String sourceEventId) {
+    private String deterministicId(String transactionId) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest((transactionId + "|" + sourceEventId).getBytes(StandardCharsets.UTF_8));
+            byte[] hash = digest.digest(transactionId.getBytes(StandardCharsets.UTF_8));
             return "suspicious-transaction-" + HexFormat.of().formatHex(hash).substring(0, 32);
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is required for suspicious transaction idempotency", exception);

@@ -1,6 +1,5 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
-import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.scoring.config.ScoringProperties;
 import com.frauddetection.scoring.context.ScoringContextFactory;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
@@ -18,6 +17,7 @@ public final class OrchestratedEngineIntelligenceDiagnosticEnrichmentPipeline
     private final FraudScoringOrchestrator orchestrator;
     private final FraudEngineAggregationService aggregationService;
     private final PublicEngineIntelligenceMapper mapper;
+    private final MlPredictionEvidenceMapper evidenceMapper = new MlPredictionEvidenceMapper();
     private final Clock clock;
 
     public OrchestratedEngineIntelligenceDiagnosticEnrichmentPipeline(
@@ -37,10 +37,16 @@ public final class OrchestratedEngineIntelligenceDiagnosticEnrichmentPipeline
     }
 
     @Override
-    public Optional<EngineIntelligenceSummary> enrich(FraudScoringRequest scoringRequest) {
+    public Optional<EngineIntelligenceEnrichmentResult> enrich(FraudScoringRequest scoringRequest) {
         Objects.requireNonNull(scoringRequest, "scoringRequest is required");
-        return Optional.of(mapper.map(aggregationService.aggregate(orchestrator.evaluate(
+        var orchestrationResult = orchestrator.evaluate(
                 scoringContextFactory.from(scoringRequest, scoringProperties.mode(), clock.instant())
-        ))));
+        );
+        var aggregationResult = aggregationService.aggregate(orchestrationResult);
+        return Optional.of(evidenceMapper.map(
+                mapper.map(aggregationResult),
+                orchestrationResult,
+                aggregationResult
+        ));
     }
 }

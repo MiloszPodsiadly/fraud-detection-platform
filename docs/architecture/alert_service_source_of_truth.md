@@ -1,6 +1,6 @@
 # Alert Service Source of Truth
 
-FDP-27 treats the following stores as authoritative. API DTOs and trust-level views are projections; if a projection disagrees with its source of truth, the source of truth wins.
+The following stores are authoritative. API DTOs and trust-level views are projections; if a projection disagrees with its source of truth, the source of truth wins.
 
 ## Regulated Mutation Lifecycle
 
@@ -13,6 +13,12 @@ Projection: regulated mutation inspection DTOs.
 Authoritative source: business fields on `AlertDocument`.
 
 Projection: response snapshots and cached decision response views.
+
+Before an analyst decision, an alert may reconcile to a newer alert-worthy scoring occurrence. Once `analystDecision`
+or `decidedAt` is present, the alert owns historical decision evidence: its source occurrence, score, risk, reason codes,
+model metadata where captured, feature snapshot, and evidence snapshot are not rewritten by rescoring. Current transaction
+classification continues in `ScoredTransactionDocument` and current suspicious-transaction projections. Mongo transaction
+conflicts roll back a concurrent stale reconciliation; redelivery then observes the decision and preserves its evidence.
 
 ## Transactional Outbox
 
@@ -43,4 +49,4 @@ API DTOs are read models over those sources.
 
 ## Explicit Limitations
 
-FDP-27 does not provide distributed ACID, does not provide exactly-once Kafka delivery, does not provide WORM storage, does not provide legal notarization, and is not a regulator-certified archive.
+The platform does not provide distributed ACID, exactly-once Kafka delivery, WORM storage, legal notarization, or a regulator-certified archive.

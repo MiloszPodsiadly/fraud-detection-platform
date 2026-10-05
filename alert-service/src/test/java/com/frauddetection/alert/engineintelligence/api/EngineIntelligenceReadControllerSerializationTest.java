@@ -6,6 +6,7 @@ import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjection;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionRepository;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceWarningProjection;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
+import com.frauddetection.alert.persistence.ScoredTransactionDocument;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
@@ -55,6 +56,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class EngineIntelligenceReadControllerSerializationTest {
 
     private static final Instant GENERATED_AT = Instant.parse("2026-06-02T13:00:00Z");
+    private static final String SOURCE_EVENT_FINGERPRINT = "a".repeat(64);
 
     @Autowired
     private MockMvc mockMvc;
@@ -67,7 +69,8 @@ class EngineIntelligenceReadControllerSerializationTest {
 
     @Test
     void apiReturnsFullBoundedEngineIntelligenceWithoutRawInternalOrDecisioningFields() throws Exception {
-        when(scoredTransactionRepository.existsById("txn-full")).thenReturn(true);
+        when(scoredTransactionRepository.findById("txn-full"))
+                .thenReturn(Optional.of(authoritativeOccurrence("txn-full", "event-full")));
         when(projectionRepository.findById("txn-full")).thenReturn(Optional.of(fullProjection()));
 
         String response = mockMvc.perform(get("/api/v1/transactions/scored/txn-full/engine-intelligence"))
@@ -101,7 +104,8 @@ class EngineIntelligenceReadControllerSerializationTest {
 
     @Test
     void corruptedProjectionFailureReturnsStableUnavailableResponseWithoutRawValue() throws Exception {
-        when(scoredTransactionRepository.existsById("txn-corrupted")).thenReturn(true);
+        when(scoredTransactionRepository.findById("txn-corrupted"))
+                .thenReturn(Optional.of(authoritativeOccurrence("txn-corrupted", "event-corrupted")));
         when(projectionRepository.findById("txn-corrupted")).thenReturn(Optional.of(corruptedProjection()));
 
         String response = mockMvc.perform(get("/api/v1/transactions/scored/txn-corrupted/engine-intelligence"))
@@ -119,6 +123,9 @@ class EngineIntelligenceReadControllerSerializationTest {
     private EngineIntelligenceProjection fullProjection() {
         return new EngineIntelligenceProjection(
                 "txn-full",
+                "event-full",
+                GENERATED_AT,
+                SOURCE_EVENT_FINGERPRINT,
                 1,
                 GENERATED_AT,
                 EngineIntelligenceComparisonType.RULES_VS_ML,
@@ -176,6 +183,9 @@ class EngineIntelligenceReadControllerSerializationTest {
     private EngineIntelligenceProjection corruptedProjection() {
         return new EngineIntelligenceProjection(
                 "txn-corrupted",
+                "event-corrupted",
+                GENERATED_AT,
+                SOURCE_EVENT_FINGERPRINT,
                 1,
                 GENERATED_AT,
                 null,
@@ -196,5 +206,16 @@ class EngineIntelligenceReadControllerSerializationTest {
                 GENERATED_AT,
                 GENERATED_AT
         );
+    }
+
+    private ScoredTransactionDocument authoritativeOccurrence(String transactionId, String sourceEventId) {
+        ScoredTransactionDocument document = new ScoredTransactionDocument();
+        document.setTransactionId(transactionId);
+        document.setSourceEventId(sourceEventId);
+        document.setSourceEventCreatedAt(GENERATED_AT.toString());
+        document.setSourceEventCreatedAtEpochSecond(GENERATED_AT.getEpochSecond());
+        document.setSourceEventCreatedAtNano(GENERATED_AT.getNano());
+        document.setSourceEventFingerprint(SOURCE_EVENT_FINGERPRINT);
+        return document;
     }
 }

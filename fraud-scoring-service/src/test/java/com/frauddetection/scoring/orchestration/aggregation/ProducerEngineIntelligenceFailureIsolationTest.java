@@ -33,7 +33,11 @@ class ProducerEngineIntelligenceFailureIsolationTest {
                 orchestrator, mock(FraudEngineAggregationService.class), new PublicEngineIntelligenceMapper()
         ))
                 .emitIfEnabled(request());
-        var event = new TransactionScoredEventMapper().toEvent(request(), scoreResult(), intelligence);
+        var event = new TransactionScoredEventMapper().toEvent(
+                request(),
+                scoreResult(),
+                intelligence.flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
+        );
         String json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build().writeValueAsString(event);
 
         assertThat(intelligence).isEmpty();

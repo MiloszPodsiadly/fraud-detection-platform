@@ -13,6 +13,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCat
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningSummary;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -23,6 +24,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 @Component
 public class EngineIntelligenceProjectionPolicy {
@@ -32,6 +34,8 @@ public class EngineIntelligenceProjectionPolicy {
     public static final int MAX_WARNINGS = 10;
     public static final int MAX_REASON_CODES_PER_ENGINE = 5;
     public static final int MAX_STRING_LENGTH = 128;
+
+    private static final Pattern SOURCE_IDENTIFIER_PATTERN = Pattern.compile("[A-Za-z0-9._:-]+");
 
     private static final Set<String> FORBIDDEN_COMPACT_TEXT = Set.of(
             "rawevidence",
@@ -55,7 +59,15 @@ public class EngineIntelligenceProjectionPolicy {
     );
 
     public String validatedTransactionId(String transactionId) {
-        return boundedString(transactionId);
+        return validatedSourceIdentifier(transactionId);
+    }
+
+    public String validatedSourceEventId(String sourceEventId) {
+        return validatedSourceIdentifier(sourceEventId);
+    }
+
+    public String validatedCorrelationId(String correlationId) {
+        return validatedSourceIdentifier(correlationId);
     }
 
     public EngineIntelligenceSummary validatedCopy(EngineIntelligenceSummary source) {
@@ -78,6 +90,31 @@ public class EngineIntelligenceProjectionPolicy {
                 ),
                 copyBounded(source.warnings(), MAX_WARNINGS, this::validatedWarning)
         ));
+    }
+
+    public MlPredictionEvidenceV1 validatedEvidenceCopy(MlPredictionEvidenceV1 source) {
+        requireShape(source);
+        return publicContract(() -> new MlPredictionEvidenceV1(
+                source.contractVersion(),
+                source.sourceEngineId(),
+                source.engineStatus(),
+                source.mlScore(),
+                source.mlRiskLevel(),
+                source.modelName(),
+                source.modelVersion(),
+                source.featureContractVersion(),
+                source.sourceExecutionTimestamp()
+        ));
+    }
+
+    private String validatedSourceIdentifier(String value) {
+        if (value == null || value.isBlank()
+                || value.length() > MAX_STRING_LENGTH
+                || value.chars().anyMatch(Character::isISOControl)
+                || !SOURCE_IDENTIFIER_PATTERN.matcher(value).matches()) {
+            throw validation(EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE);
+        }
+        return value;
     }
 
     private EngineIntelligenceEngineResult validatedEngine(EngineIntelligenceEngineResult source) {

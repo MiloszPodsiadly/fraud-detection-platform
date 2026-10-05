@@ -20,7 +20,7 @@ final class SuspiciousTransactionIndexTestSupport {
     static final String RISK_INDEX = "idx_suspicious_tx_risk_cursor";
     static final String CUSTOMER_INDEX = "idx_suspicious_tx_customer_cursor";
     static final String ALERT_INDEX = "idx_suspicious_tx_alert_cursor";
-    static final String IDEMPOTENCY_INDEX = "suspicious_transaction_source_event_unique_idx";
+    static final String CURRENT_OWNERSHIP_INDEX = "suspicious_transaction_current_unique_idx";
 
     static final Set<String> EXPECTED_INDEX_NAMES = Set.of(
             CURSOR_INDEX,
@@ -28,7 +28,7 @@ final class SuspiciousTransactionIndexTestSupport {
             RISK_INDEX,
             CUSTOMER_INDEX,
             ALERT_INDEX,
-            IDEMPOTENCY_INDEX
+            CURRENT_OWNERSHIP_INDEX
     );
 
     private SuspiciousTransactionIndexTestSupport() {

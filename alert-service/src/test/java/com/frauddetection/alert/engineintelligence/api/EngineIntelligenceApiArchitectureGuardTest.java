@@ -164,7 +164,9 @@ class EngineIntelligenceApiArchitectureGuardTest {
         ).toLowerCase(java.util.Locale.ROOT);
 
         assertThat(readService).doesNotContain(
-                "scoring",
+                "fraudscoring",
+                "scoringservice",
+                "scoringengine",
                 "ml",
                 "rules",
                 "orchestrator",

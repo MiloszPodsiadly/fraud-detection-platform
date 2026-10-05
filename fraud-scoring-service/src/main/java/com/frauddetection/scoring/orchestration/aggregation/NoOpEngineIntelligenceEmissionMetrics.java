@@ -23,6 +23,11 @@ public final class NoOpEngineIntelligenceEmissionMetrics implements EngineIntell
     }
 
     @Override
+    public void recordEvidenceOmitted(MlPredictionEvidenceOmissionReason reason) {
+        Objects.requireNonNull(reason, "reason is required");
+    }
+
+    @Override
     public void recordLatency(Duration latency) {
         Objects.requireNonNull(latency, "latency is required");
         if (latency.isNegative()) {

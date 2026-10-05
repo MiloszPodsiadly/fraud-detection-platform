@@ -103,7 +103,8 @@ final class FraudEnginePublicationFactory {
                     source.modelVersion(),
                     source.featureContractVersion(),
                     source.statusReason(),
-                    generatedAt
+                    generatedAt,
+                    source.sourceInferenceTimestamp()
             );
         } catch (RuntimeException exception) {
             return failureResult(
