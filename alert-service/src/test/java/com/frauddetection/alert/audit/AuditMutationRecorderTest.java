@@ -1,5 +1,6 @@
 package com.frauddetection.alert.audit;
 
+import com.frauddetection.alert.observability.AlertServiceMetrics;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -159,5 +160,42 @@ class AuditMutationRecorderTest {
                 () -> "saved"
         )).isInstanceOfSatisfying(PostCommitAuditDegradedException.class, exception ->
                 assertThat(exception.<String>result()).isEqualTo("saved"));
+    }
+
+    @Test
+    void shouldMakePostCommitSuccessAuditFailureObservableAndRecoverable() {
+        AuditDegradationService degradationService = mock(AuditDegradationService.class);
+        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        AuditMutationRecorder durableRecorder = new AuditMutationRecorder(
+                auditService,
+                degradationService,
+                metrics
+        );
+        doThrow(new AuditPersistenceUnavailableException()).when(auditService).audit(
+                AuditAction.RESOLVE_FRAUD_ALERT_OUTBOX_CONFIRMATION,
+                AuditResourceType.FRAUD_ALERT_OUTBOX,
+                "event-1",
+                null,
+                "actor-1",
+                AuditOutcome.SUCCESS,
+                null
+        );
+
+        assertThatThrownBy(() -> durableRecorder.record(
+                AuditAction.RESOLVE_FRAUD_ALERT_OUTBOX_CONFIRMATION,
+                AuditResourceType.FRAUD_ALERT_OUTBOX,
+                "event-1",
+                null,
+                "actor-1",
+                () -> "committed"
+        )).isInstanceOf(PostCommitAuditDegradedException.class);
+
+        verify(degradationService).recordPostCommitDegraded(
+                AuditAction.RESOLVE_FRAUD_ALERT_OUTBOX_CONFIRMATION,
+                AuditResourceType.FRAUD_ALERT_OUTBOX,
+                "event-1",
+                "SUCCESS_AUDIT_PERSISTENCE_FAILED"
+        );
+        verify(metrics).recordPostCommitAuditDegraded("RESOLVE_FRAUD_ALERT_OUTBOX_CONFIRMATION");
     }
 }

@@ -1,10 +1,13 @@
 package com.frauddetection.alert.outbox;
 
 import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditEventMetadataSummary;
 import com.frauddetection.alert.audit.AuditMutationRecorder;
+import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.ResolutionEvidenceReference;
 import com.frauddetection.alert.audit.ResolutionEvidenceType;
+import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
@@ -20,6 +23,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
+import java.util.Objects;
 
 @Service
 public class FraudAlertOutboxRecoveryService {
@@ -30,6 +34,8 @@ public class FraudAlertOutboxRecoveryService {
     private final FraudAlertOutboxBacklogMonitor backlogMonitor;
     private final OutboxOperationalControls operationalControls;
     private final TransactionalOutboxRuntimeReadiness runtimeReadiness;
+    private final FraudAlertPublicationEvidenceVerifier publicationEvidenceVerifier;
+    private final WriteActionAuditOutboxService auditOutboxService;
     private final TransactionTemplate transactionTemplate;
 
     public FraudAlertOutboxRecoveryService(
@@ -39,6 +45,8 @@ public class FraudAlertOutboxRecoveryService {
             FraudAlertOutboxBacklogMonitor backlogMonitor,
             OutboxOperationalControls operationalControls,
             TransactionalOutboxRuntimeReadiness runtimeReadiness,
+            FraudAlertPublicationEvidenceVerifier publicationEvidenceVerifier,
+            WriteActionAuditOutboxService auditOutboxService,
             @Qualifier("mongoTransactionManager") PlatformTransactionManager transactionManager
     ) {
         this.mongoTemplate = mongoTemplate;
@@ -47,6 +55,11 @@ public class FraudAlertOutboxRecoveryService {
         this.backlogMonitor = backlogMonitor;
         this.operationalControls = operationalControls;
         this.runtimeReadiness = runtimeReadiness;
+        this.publicationEvidenceVerifier = Objects.requireNonNull(
+                publicationEvidenceVerifier,
+                "publicationEvidenceVerifier is required"
+        );
+        this.auditOutboxService = Objects.requireNonNull(auditOutboxService, "auditOutboxService is required");
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
@@ -64,26 +77,60 @@ public class FraudAlertOutboxRecoveryService {
         operationalControls.requireRecoveryEnabled();
         String actor = requireActor(actorId);
         String idempotencyHash = idempotencyHash(eventId, requireIdempotencyKey(idempotencyKey));
-        requireResolutionEvidence(request);
-        String requestHash = requestHash(eventId, request, actor);
-        return auditMutationRecorder.record(
+        return auditMutationRecorder.recordWithDurableSuccessIntent(
                 AuditAction.RESOLVE_FRAUD_ALERT_OUTBOX_CONFIRMATION,
                 AuditResourceType.FRAUD_ALERT_OUTBOX,
                 eventId,
                 null,
                 actor,
-                () -> transactionTemplate.execute(status ->
-                        resolveAuthoritativeRecord(eventId, request, actor, idempotencyHash, requestHash)
-                )
+                () -> resolveWithVerifiedEvidence(eventId, request, actor, idempotencyHash)
         );
+    }
+
+    private FraudAlertOutboxRecordResponse resolveWithVerifiedEvidence(
+            String eventId,
+            FraudAlertOutboxConfirmationResolutionRequest request,
+            String actor,
+            String idempotencyHash
+    ) {
+        requireRequestShape(request);
+        String requestHash = requestHash(eventId, request, actor);
+        FraudAlertOutboxResolutionRecord previousResolution = mongoTemplate.findById(
+                idempotencyHash,
+                FraudAlertOutboxResolutionRecord.class
+        );
+        if (previousResolution != null) {
+            return identicalReplay(previousResolution, requestHash, actor);
+        }
+        FraudAlertOutboxRecord candidate = mongoTemplate.findById(eventId, FraudAlertOutboxRecord.class);
+        if (candidate == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown fraud alert outbox event");
+        }
+        if (candidate.getStatus() != FraudAlertOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "fraud alert outbox event is not reconcilable");
+        }
+        ResolutionEvidenceReference verifiedEvidence = requireResolutionEvidence(request, candidate);
+        return transactionTemplate.execute(status -> resolveAuthoritativeRecord(
+                eventId,
+                request,
+                verifiedEvidence,
+                actor,
+                idempotencyHash,
+                requestHash,
+                candidate.getRevision(),
+                candidate.getUpdatedAt()
+        ));
     }
 
     private FraudAlertOutboxRecordResponse resolveAuthoritativeRecord(
             String eventId,
             FraudAlertOutboxConfirmationResolutionRequest request,
+            ResolutionEvidenceReference verifiedEvidence,
             String actor,
             String idempotencyHash,
-            String requestHash
+            String requestHash,
+            long verifiedRevision,
+            Instant verifiedUpdatedAt
     ) {
         FraudAlertOutboxRecord record = mongoTemplate.findById(eventId, FraudAlertOutboxRecord.class);
         if (record == null) {
@@ -96,24 +143,22 @@ public class FraudAlertOutboxRecoveryService {
         if (previousResolution != null) {
             return identicalReplay(previousResolution, requestHash, actor);
         }
-        boolean confirmationUnknown = record.getStatus() == FraudAlertOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN;
-        boolean terminalNonDelivery = record.getStatus() == FraudAlertOutboxStatus.FAILED_TERMINAL
-                && request.resolution() == FraudAlertOutboxConfirmationResolution.CONFIRMED_NOT_DELIVERED;
-        if (!confirmationUnknown && !terminalNonDelivery) {
+        if (record.getStatus() != FraudAlertOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN
+                || record.getRevision() != verifiedRevision
+                || !Objects.equals(record.getUpdatedAt(), verifiedUpdatedAt)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "fraud alert outbox event is not reconcilable");
         }
 
         Instant now = Instant.now();
-        ResolutionEvidenceReference evidence = request.evidenceReference();
         Update update = new Update()
                 .set("resolution", request.resolution().name())
                 .set("resolutionIdempotencyHash", idempotencyHash)
                 .set("resolutionRequestHash", requestHash)
                 .set("resolutionReason", request.reason())
-                .set("resolutionEvidenceType", evidence.type().name())
-                .set("resolutionEvidenceReference", evidence.reference())
-                .set("resolutionEvidenceVerifiedAt", evidence.verifiedAt())
-                .set("resolutionEvidenceVerifiedBy", evidence.verifiedBy())
+                .set("resolutionEvidenceType", verifiedEvidence.type().name())
+                .set("resolutionEvidenceReference", verifiedEvidence.reference())
+                .set("resolutionEvidenceVerifiedAt", verifiedEvidence.verifiedAt())
+                .set("resolutionEvidenceVerifiedBy", verifiedEvidence.verifiedBy())
                 .set("resolvedBy", actor)
                 .set("resolvedAt", now)
                 .set("resolutionPreviousAttempts", record.getAttempts())
@@ -122,19 +167,9 @@ public class FraudAlertOutboxRecoveryService {
                 .unset("leaseToken")
                 .unset("leaseExpiresAt")
                 .inc("revision", 1L);
-        if (request.resolution() == FraudAlertOutboxConfirmationResolution.PUBLISHED) {
-            update.set("status", FraudAlertOutboxStatus.PUBLISHED)
-                    .set("publishedAt", now)
-                    .unset("lastError");
-        } else {
-            update.set("status", FraudAlertOutboxStatus.PENDING)
-                    .set("attempts", 0)
-                    .unset("publishedAt")
-                    .unset("publishAttemptedAt")
-                    .unset("confirmationUnknownAt")
-                    .unset("terminalAt")
-                    .unset("lastError");
-        }
+        update.set("status", FraudAlertOutboxStatus.PUBLISHED)
+                .set("publishedAt", now)
+                .unset("lastError");
         Query compareAndSet = Query.query(new Criteria().andOperator(
                 Criteria.where("_id").is(record.getEventId()),
                 Criteria.where("status").is(record.getStatus()),
@@ -151,37 +186,57 @@ public class FraudAlertOutboxRecoveryService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "fraud alert outbox state changed concurrently");
         }
         FraudAlertOutboxRecordResponse response = FraudAlertOutboxRecordResponse.from(resolved);
-        persistResolutionEvidence(record, request, actor, idempotencyHash, requestHash, now, response);
+        persistResolutionEvidence(
+                record,
+                request,
+                verifiedEvidence,
+                actor,
+                idempotencyHash,
+                requestHash,
+                now,
+                response
+        );
+        persistSuccessAuditIntent(record, actor, idempotencyHash, response);
         metrics.recordFraudAlertOutboxResolution(request.resolution().name());
         backlogMonitor.snapshotAndRecord();
         return response;
     }
 
-    private void requireResolutionEvidence(FraudAlertOutboxConfirmationResolutionRequest request) {
+    private ResolutionEvidenceReference requireResolutionEvidence(
+            FraudAlertOutboxConfirmationResolutionRequest request,
+            FraudAlertOutboxRecord authoritativeRecord
+    ) {
+        requireRequestShape(request);
+        ResolutionEvidenceReference evidence = ResolutionEvidenceReference.require(
+                request.evidenceReference(),
+                "fraud alert outbox resolution evidence is required"
+        );
+        if (request.resolution() == FraudAlertOutboxConfirmationResolution.CONFIRMED_NOT_DELIVERED) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "broker non-delivery cannot be proven by this deployment; confirmation remains unknown"
+            );
+        }
+        if (evidence.type() != ResolutionEvidenceType.BROKER_OFFSET) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "broker offset evidence is required");
+        }
+        if (evidence.verifiedAt().isAfter(Instant.now())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "resolution evidence cannot be verified in the future");
+        }
+        return publicationEvidenceVerifier.verifyPublished(authoritativeRecord, evidence);
+    }
+
+    private void requireRequestShape(FraudAlertOutboxConfirmationResolutionRequest request) {
         if (request == null || request.resolution() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "fraud alert outbox resolution is required");
         }
         if (request.reason() == null || request.reason().isBlank() || request.reason().length() > 300) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "valid fraud alert outbox resolution reason is required");
         }
-        ResolutionEvidenceReference evidence = ResolutionEvidenceReference.require(
+        ResolutionEvidenceReference.require(
                 request.evidenceReference(),
                 "fraud alert outbox resolution evidence is required"
         );
-        ResolutionEvidenceType expected = request.resolution() == FraudAlertOutboxConfirmationResolution.PUBLISHED
-                ? ResolutionEvidenceType.BROKER_OFFSET
-                : ResolutionEvidenceType.BROKER_NON_DELIVERY;
-        if (evidence.type() != expected) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    expected == ResolutionEvidenceType.BROKER_OFFSET
-                            ? "broker offset evidence is required"
-                            : "verified broker non-delivery evidence is required"
-            );
-        }
-        if (evidence.verifiedAt().isAfter(Instant.now())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "resolution evidence cannot be verified in the future");
-        }
     }
 
     private String requireActor(String actorId) {
@@ -240,27 +295,55 @@ public class FraudAlertOutboxRecoveryService {
     private void persistResolutionEvidence(
             FraudAlertOutboxRecord record,
             FraudAlertOutboxConfirmationResolutionRequest request,
+            ResolutionEvidenceReference verifiedEvidence,
             String actor,
             String resolutionId,
             String requestHash,
             Instant resolvedAt,
             FraudAlertOutboxRecordResponse responseSnapshot
     ) {
-        ResolutionEvidenceReference evidence = request.evidenceReference();
         FraudAlertOutboxResolutionRecord resolution = new FraudAlertOutboxResolutionRecord();
         resolution.setResolutionId(resolutionId);
         resolution.setEventId(record.getEventId());
         resolution.setPreviousStatus(record.getStatus());
         resolution.setResolution(request.resolution());
         resolution.setReason(request.reason());
-        resolution.setEvidenceType(evidence.type().name());
-        resolution.setEvidenceReference(evidence.reference());
-        resolution.setEvidenceVerifiedAt(evidence.verifiedAt());
-        resolution.setEvidenceVerifiedBy(evidence.verifiedBy());
+        resolution.setEvidenceType(verifiedEvidence.type().name());
+        resolution.setEvidenceReference(verifiedEvidence.reference());
+        resolution.setEvidenceVerifiedAt(verifiedEvidence.verifiedAt());
+        resolution.setEvidenceVerifiedBy(verifiedEvidence.verifiedBy());
         resolution.setResolvedBy(actor);
         resolution.setResolvedAt(resolvedAt);
         resolution.setRequestHash(requestHash);
         resolution.setResponseSnapshot(responseSnapshot);
         mongoTemplate.insert(resolution);
+    }
+
+    private void persistSuccessAuditIntent(
+            FraudAlertOutboxRecord record,
+            String actor,
+            String resolutionId,
+            FraudAlertOutboxRecordResponse response
+    ) {
+        auditOutboxService.createPendingAudit(
+                "RESOLVE_FRAUD_ALERT_OUTBOX_CONFIRMATION:" + resolutionId,
+                AuditAction.RESOLVE_FRAUD_ALERT_OUTBOX_CONFIRMATION,
+                AuditResourceType.FRAUD_ALERT_OUTBOX,
+                record.getEventId(),
+                null,
+                actor,
+                AuditOutcome.SUCCESS,
+                new AuditEventMetadataSummary(
+                        null,
+                        null,
+                        "alert-service",
+                        "fraud-alert-outbox-resolution-v1",
+                        null,
+                        null,
+                        "POST /api/v1/outbox/fraud-alerts/{eventId}/resolve-confirmation",
+                        "status=" + response.status() + ";resolution=" + response.resolution(),
+                        1
+                )
+        );
     }
 }

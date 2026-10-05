@@ -1,12 +1,17 @@
 package com.frauddetection.alert.outbox;
 
 import com.frauddetection.alert.audit.AuditAction;
+import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.AuditMutationRecorder;
 import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.audit.ResolutionEvidenceReference;
 import com.frauddetection.alert.audit.ResolutionEvidenceType;
+import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxRecord;
+import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxRepository;
+import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
+import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxStatus;
 import com.frauddetection.alert.messaging.FraudAlertEventPublisher;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.common.events.contract.FraudAlertEvent;
@@ -24,6 +29,7 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.data.mongodb.MongoTransactionManager;
+import org.springframework.data.mongodb.repository.support.MongoRepositoryFactory;
 import org.testcontainers.containers.MongoDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -38,11 +44,14 @@ import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @Testcontainers
 class FraudAlertOutboxMongoIntegrationTest {
@@ -62,6 +71,7 @@ class FraudAlertOutboxMongoIntegrationTest {
         mongoTemplate = new MongoTemplate(mongoClient, "fraud_alert_outbox_test");
         mongoTemplate.dropCollection(FraudAlertOutboxRecord.class);
         mongoTemplate.dropCollection(FraudAlertOutboxResolutionRecord.class);
+        mongoTemplate.dropCollection(WriteActionAuditOutboxRecord.class);
         mongoTemplate.getCollection("fraud_alert_outbox_records").createIndex(
                 Indexes.ascending("alertId"),
                 new IndexOptions().unique(true)
@@ -366,6 +376,8 @@ class FraudAlertOutboxMongoIntegrationTest {
                     assertThat(resolution.getPreviousStatus())
                             .isEqualTo(FraudAlertOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
                     assertThat(resolution.getEvidenceType()).isEqualTo("BROKER_OFFSET");
+                    assertThat(resolution.getEvidenceVerifiedBy())
+                            .isEqualTo(KafkaFraudAlertPublicationEvidenceVerifier.VERIFIER_ID);
                     assertThat(resolution.getResolvedBy()).isEqualTo("ops-admin");
                 });
         verify(auditService, times(2)).audit(
@@ -377,7 +389,7 @@ class FraudAlertOutboxMongoIntegrationTest {
                 org.mockito.ArgumentMatchers.eq(AuditOutcome.ATTEMPTED),
                 org.mockito.ArgumentMatchers.isNull()
         );
-        verify(auditService, times(2)).audit(
+        verify(auditService, never()).audit(
                 org.mockito.ArgumentMatchers.eq(AuditAction.RESOLVE_FRAUD_ALERT_OUTBOX_CONFIRMATION),
                 org.mockito.ArgumentMatchers.eq(AuditResourceType.FRAUD_ALERT_OUTBOX),
                 org.mockito.ArgumentMatchers.eq(event.eventId()),
@@ -389,14 +401,14 @@ class FraudAlertOutboxMongoIntegrationTest {
     }
 
     @Test
-    void verifiedNonDeliveryCreatesOneNewBoundedPublicationCycle() {
+    void forgedNonDeliveryClaimCannotCreateAnotherPublicationCycle() {
         FraudAlertEventPublisher broker = mock(FraudAlertEventPublisher.class);
         FraudAlertEvent event = event("event-1", "alert-1", 0.91d);
         writer.publish(event);
         markConfirmationUnknown(event.eventId());
         FraudAlertOutboxRecoveryService recovery = recoveryService(mock(AuditService.class), true);
 
-        FraudAlertOutboxRecordResponse response = recovery.resolveConfirmation(
+        assertThatThrownBy(() -> recovery.resolveConfirmation(
                 event.eventId(),
                 resolution(
                         FraudAlertOutboxConfirmationResolution.CONFIRMED_NOT_DELIVERED,
@@ -405,36 +417,34 @@ class FraudAlertOutboxMongoIntegrationTest {
                 ),
                 "ops-admin",
                 "retry-event-1"
-        );
-        assertThat(response.status()).isEqualTo(FraudAlertOutboxStatus.PENDING);
-        assertThat(response.attempts()).isZero();
+        )).isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .hasMessageContaining("broker non-delivery cannot be proven");
 
-        assertThat(publisher(broker).publishPending(1)).isEqualTo(1);
-        verify(broker, times(1)).publish(event);
+        assertThat(publisher(broker).publishPending(1)).isZero();
+        verify(broker, times(0)).publish(event);
         assertThat(records()).singleElement().satisfies(record -> {
-            assertThat(record.getStatus()).isEqualTo(FraudAlertOutboxStatus.PUBLISHED);
+            assertThat(record.getStatus()).isEqualTo(FraudAlertOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
             assertThat(record.getAttempts()).isEqualTo(1);
-            assertThat(record.getResolutionPreviousAttempts()).isEqualTo(1);
+            assertThat(record.getResolutionPreviousAttempts()).isNull();
         });
     }
 
     @Test
-    void repeatedReconciliationPreservesAppendOnlyEvidenceAndOriginalReplayResponse() {
+    void competingResolutionCannotOverwritePublishedResultAndReplayRemainsStable() {
         FraudAlertEvent event = event("event-1", "alert-1", 0.91d);
         writer.publish(event);
         markConfirmationUnknown(event.eventId());
         FraudAlertOutboxRecoveryService recovery = recoveryService(mock(AuditService.class), true);
-        FraudAlertOutboxConfirmationResolutionRequest nonDelivery = resolution(
-                FraudAlertOutboxConfirmationResolution.CONFIRMED_NOT_DELIVERED,
-                ResolutionEvidenceType.BROKER_NON_DELIVERY,
-                "broker-admin-query=verified-no-record"
+        FraudAlertOutboxConfirmationResolutionRequest published = resolution(
+                FraudAlertOutboxConfirmationResolution.PUBLISHED,
+                ResolutionEvidenceType.BROKER_OFFSET,
+                "topic=fraud.alerts,partition=1,offset=42"
         );
         FraudAlertOutboxRecordResponse first = recovery.resolveConfirmation(
-                event.eventId(), nonDelivery, "ops-admin", "retry-event-1"
+                event.eventId(), published, "ops-admin", "resolve-event-1"
         );
-        markConfirmationUnknown(event.eventId());
 
-        FraudAlertOutboxRecordResponse second = recovery.resolveConfirmation(
+        assertThatThrownBy(() -> recovery.resolveConfirmation(
                 event.eventId(),
                 resolution(
                         FraudAlertOutboxConfirmationResolution.PUBLISHED,
@@ -442,22 +452,165 @@ class FraudAlertOutboxMongoIntegrationTest {
                         "topic=fraud.alerts,partition=1,offset=43"
                 ),
                 "ops-admin",
-                "resolve-event-1"
-        );
+                "competing-resolution"
+        )).isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .hasMessageContaining("not reconcilable");
         FraudAlertOutboxRecordResponse replay = recovery.resolveConfirmation(
-                event.eventId(), nonDelivery, "ops-admin", "retry-event-1"
+                event.eventId(), published, "ops-admin", "resolve-event-1"
         );
 
-        assertThat(first.status()).isEqualTo(FraudAlertOutboxStatus.PENDING);
-        assertThat(second.status()).isEqualTo(FraudAlertOutboxStatus.PUBLISHED);
+        assertThat(first.status()).isEqualTo(FraudAlertOutboxStatus.PUBLISHED);
         assertThat(replay).isEqualTo(first);
         assertThat(mongoTemplate.find(new Query(), FraudAlertOutboxResolutionRecord.class))
-                .hasSize(2)
+                .hasSize(1)
                 .allSatisfy(resolution -> {
                     assertThat(resolution.getPreviousStatus())
                             .isEqualTo(FraudAlertOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
                     assertThat(resolution.getResponseSnapshot()).isNotNull();
                 });
+    }
+
+    @Test
+    void reusedIdempotencyKeyWithDifferentRequestIsRejected() {
+        FraudAlertEvent event = event("event-1", "alert-1", 0.91d);
+        writer.publish(event);
+        markConfirmationUnknown(event.eventId());
+        FraudAlertOutboxRecoveryService recovery = recoveryService(mock(AuditService.class), true);
+        FraudAlertOutboxConfirmationResolutionRequest first = resolution(
+                FraudAlertOutboxConfirmationResolution.PUBLISHED,
+                ResolutionEvidenceType.BROKER_OFFSET,
+                "topic=fraud.alerts,partition=1,offset=42"
+        );
+        recovery.resolveConfirmation(event.eventId(), first, "ops-admin", "same-key");
+
+        assertThatThrownBy(() -> recovery.resolveConfirmation(
+                event.eventId(),
+                resolution(
+                        FraudAlertOutboxConfirmationResolution.PUBLISHED,
+                        ResolutionEvidenceType.BROKER_OFFSET,
+                        "topic=fraud.alerts,partition=1,offset=43"
+                ),
+                "ops-admin",
+                "same-key"
+        )).isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .hasMessageContaining("idempotency key was already used");
+    }
+
+    @Test
+    void futureDatedClientVerificationClaimIsRejectedBeforeBrokerLookup() {
+        FraudAlertEvent event = event("event-1", "alert-1", 0.91d);
+        writer.publish(event);
+        markConfirmationUnknown(event.eventId());
+        FraudAlertPublicationEvidenceVerifier verifier = mock(FraudAlertPublicationEvidenceVerifier.class);
+        FraudAlertOutboxRecoveryService recovery = recoveryService(
+                mock(AuditService.class),
+                true,
+                mock(AuditDegradationService.class),
+                verifier,
+                mock(WriteActionAuditOutboxService.class)
+        );
+        FraudAlertOutboxConfirmationResolutionRequest request = new FraudAlertOutboxConfirmationResolutionRequest(
+                FraudAlertOutboxConfirmationResolution.PUBLISHED,
+                "broker verification",
+                new ResolutionEvidenceReference(
+                        ResolutionEvidenceType.BROKER_OFFSET,
+                        "topic=fraud.alerts,partition=1,offset=42",
+                        Instant.now().plusSeconds(60),
+                        "client-claim"
+                )
+        );
+
+        assertThatThrownBy(() -> recovery.resolveConfirmation(
+                event.eventId(), request, "ops-admin", "future-evidence"
+        )).isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+                .hasMessageContaining("cannot be verified in the future");
+        verify(verifier, times(0)).verifyPublished(any(), any());
+        assertThat(records()).singleElement()
+                .extracting(FraudAlertOutboxRecord::getStatus)
+                .isEqualTo(FraudAlertOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
+    }
+
+    @Test
+    void successAuditIntentIsDurableBeforeBusinessCommitReturns() {
+        FraudAlertEvent event = event("event-1", "alert-1", 0.91d);
+        writer.publish(event);
+        markConfirmationUnknown(event.eventId());
+        AuditService auditService = mock(AuditService.class);
+        WriteActionAuditOutboxRepository auditOutboxRepository = new MongoRepositoryFactory(mongoTemplate)
+                .getRepository(WriteActionAuditOutboxRepository.class);
+        FraudAlertOutboxRecoveryService recovery = recoveryService(
+                auditService,
+                true,
+                mock(AuditDegradationService.class),
+                acceptingVerifier(),
+                new WriteActionAuditOutboxService(auditOutboxRepository)
+        );
+
+        FraudAlertOutboxRecordResponse response = recovery.resolveConfirmation(
+                event.eventId(),
+                resolution(
+                        FraudAlertOutboxConfirmationResolution.PUBLISHED,
+                        ResolutionEvidenceType.BROKER_OFFSET,
+                        "topic=fraud.alerts,partition=1,offset=42"
+                ),
+                "ops-admin",
+                "durable-success-audit-intent"
+        );
+
+        assertThat(response.status()).isEqualTo(FraudAlertOutboxStatus.PUBLISHED);
+        assertThat(records()).singleElement()
+                .extracting(FraudAlertOutboxRecord::getStatus)
+                .isEqualTo(FraudAlertOutboxStatus.PUBLISHED);
+        assertThat(mongoTemplate.find(new Query(), FraudAlertOutboxResolutionRecord.class)).hasSize(1);
+        assertThat(auditOutboxRepository.findAll()).singleElement().satisfies(intent -> {
+            assertThat(intent.getAction()).isEqualTo(AuditAction.RESOLVE_FRAUD_ALERT_OUTBOX_CONFIRMATION);
+            assertThat(intent.getResourceId()).isEqualTo(event.eventId());
+            assertThat(intent.getStatus()).isEqualTo(WriteActionAuditOutboxStatus.PENDING);
+        });
+        verify(auditService, never()).audit(
+                AuditAction.RESOLVE_FRAUD_ALERT_OUTBOX_CONFIRMATION,
+                AuditResourceType.FRAUD_ALERT_OUTBOX,
+                event.eventId(),
+                null,
+                "ops-admin",
+                AuditOutcome.SUCCESS,
+                null
+        );
+    }
+
+    @Test
+    void unavailableDurableSuccessAuditIntentRollsBackResolution() {
+        FraudAlertEvent event = event("event-1", "alert-1", 0.91d);
+        writer.publish(event);
+        markConfirmationUnknown(event.eventId());
+        WriteActionAuditOutboxService auditOutbox = mock(WriteActionAuditOutboxService.class);
+        doThrow(new IllegalStateException("audit intent unavailable"))
+                .when(auditOutbox)
+                .createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+        FraudAlertOutboxRecoveryService recovery = recoveryService(
+                mock(AuditService.class),
+                true,
+                mock(AuditDegradationService.class),
+                acceptingVerifier(),
+                auditOutbox
+        );
+
+        assertThatThrownBy(() -> recovery.resolveConfirmation(
+                event.eventId(),
+                resolution(
+                        FraudAlertOutboxConfirmationResolution.PUBLISHED,
+                        ResolutionEvidenceType.BROKER_OFFSET,
+                        "topic=fraud.alerts,partition=1,offset=42"
+                ),
+                "ops-admin",
+                "audit-intent-failure"
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessage("audit intent unavailable");
+
+        assertThat(records()).singleElement()
+                .extracting(FraudAlertOutboxRecord::getStatus)
+                .isEqualTo(FraudAlertOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
+        assertThat(mongoTemplate.find(new Query(), FraudAlertOutboxResolutionRecord.class)).isEmpty();
     }
 
     @Test
@@ -477,7 +630,7 @@ class FraudAlertOutboxMongoIntegrationTest {
                 "ops-admin",
                 "retry-event-1"
         )).isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
-                .hasMessageContaining("verified broker non-delivery evidence is required");
+                .hasMessageContaining("broker non-delivery cannot be proven");
         assertThatThrownBy(() -> recovery.resolveConfirmation(
                 event.eventId(),
                 resolution(
@@ -559,13 +712,45 @@ class FraudAlertOutboxMongoIntegrationTest {
     }
 
     private FraudAlertOutboxRecoveryService recoveryService(AuditService auditService, boolean recoveryEnabled) {
+        return recoveryService(
+                auditService,
+                recoveryEnabled,
+                mock(AuditDegradationService.class),
+                acceptingVerifier(),
+                mock(WriteActionAuditOutboxService.class)
+        );
+    }
+
+    private FraudAlertPublicationEvidenceVerifier acceptingVerifier() {
+        FraudAlertPublicationEvidenceVerifier verifier = mock(FraudAlertPublicationEvidenceVerifier.class);
+        when(verifier.verifyPublished(any(), any())).thenAnswer(invocation -> {
+            ResolutionEvidenceReference claimed = invocation.getArgument(1);
+            return new ResolutionEvidenceReference(
+                    ResolutionEvidenceType.BROKER_OFFSET,
+                    claimed.reference(),
+                    Instant.now(),
+                    KafkaFraudAlertPublicationEvidenceVerifier.VERIFIER_ID
+            );
+        });
+        return verifier;
+    }
+
+    private FraudAlertOutboxRecoveryService recoveryService(
+            AuditService auditService,
+            boolean recoveryEnabled,
+            AuditDegradationService degradationService,
+            FraudAlertPublicationEvidenceVerifier verifier,
+            WriteActionAuditOutboxService auditOutboxService
+    ) {
         return new FraudAlertOutboxRecoveryService(
                 mongoTemplate,
-                new AuditMutationRecorder(auditService),
+                new AuditMutationRecorder(auditService, degradationService, metrics),
                 metrics,
                 backlogMonitor,
                 new OutboxOperationalControls(true, recoveryEnabled),
                 readyReadiness(),
+                verifier,
+                auditOutboxService,
                 new MongoTransactionManager(mongoTemplate.getMongoDatabaseFactory())
         );
     }
