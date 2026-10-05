@@ -317,6 +317,20 @@ class AlertKafkaFailureHandlingTest {
         assertThat(factory.getContainerProperties().getAckMode()).isEqualTo(ContainerProperties.AckMode.RECORD);
     }
 
+    @Test
+    void engineIntelligenceConsumerHasIndependentRecordAcknowledgementFactory() {
+        var factory = config.engineIntelligenceKafkaListenerContainerFactory(
+                mock(ConsumerFactory.class),
+                mock(DefaultErrorHandler.class),
+                new KafkaConsumerProperties(1, 3, 1000L)
+        );
+
+        var container = (ConcurrentMessageListenerContainer<String, TransactionScoredEvent>)
+                factory.createContainer("transactions.scored");
+        assertThat(container.getConcurrency()).isEqualTo(1);
+        assertThat(factory.getContainerProperties().getAckMode()).isEqualTo(ContainerProperties.AckMode.RECORD);
+    }
+
     private MlPredictionEvidenceRecoveryProperties evidenceRecoveryProperties() {
         return new MlPredictionEvidenceRecoveryProperties(
                 "ml.prediction-evidence.dead-letter",

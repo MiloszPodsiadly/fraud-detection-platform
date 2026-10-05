@@ -511,7 +511,8 @@ class AlertSecurityConfigTest {
                         null,
                         ScoringOccurrenceOwnership.authoritative(
                                 "event-txn-old",
-                                Instant.parse("2026-06-18T10:00:01Z")
+                                Instant.parse("2026-06-18T10:00:01Z"),
+                                "a".repeat(64)
                         )
                 ));
         when(engineIntelligenceReadService.read("txn-old"))

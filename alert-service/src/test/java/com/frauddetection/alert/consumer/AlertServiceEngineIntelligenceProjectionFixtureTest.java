@@ -3,25 +3,32 @@ package com.frauddetection.alert.consumer;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjection;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionMapper;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionPolicy;
-import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionRepository;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionService;
+import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionWriteFence;
+import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionWriteResult;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.ScoredTransactionRepository;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
-import java.util.Optional;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 class AlertServiceEngineIntelligenceProjectionFixtureTest {
 
-    private final EngineIntelligenceProjectionRepository repository = mock(EngineIntelligenceProjectionRepository.class);
+    private final EngineIntelligenceProjectionWriteFence writeFence = mock(
+            EngineIntelligenceProjectionWriteFence.class,
+            invocation -> {
+                EngineIntelligenceProjection projection = invocation.getArgument(0);
+                return new EngineIntelligenceProjectionWriteResult(
+                        EngineIntelligenceProjectionWriteResult.Status.ACCEPTED,
+                        projection
+                );
+            }
+    );
     private final EngineIntelligenceProjectionService service = new EngineIntelligenceProjectionService(
-            repository,
+            writeFence,
             new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy()),
             new AlertServiceMetrics(new SimpleMeterRegistry()),
             mock(ScoredTransactionRepository.class)
@@ -92,7 +99,6 @@ class AlertServiceEngineIntelligenceProjectionFixtureTest {
     }
 
     private EngineIntelligenceProjection project(com.frauddetection.common.events.contract.TransactionScoredEvent event) {
-        when(repository.findById(event.transactionId())).thenReturn(Optional.empty());
         return service.project(event).projection().orElseThrow();
     }
 }

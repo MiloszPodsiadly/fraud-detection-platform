@@ -33,6 +33,8 @@ public class TransactionScoredEventListener {
     }
 
     @KafkaListener(
+            id = "authoritativeTransactionScoredListener",
+            idIsGroup = false,
             topics = "${app.kafka.topics.transaction-scored}",
             containerFactory = "transactionScoredKafkaListenerContainerFactory"
     )

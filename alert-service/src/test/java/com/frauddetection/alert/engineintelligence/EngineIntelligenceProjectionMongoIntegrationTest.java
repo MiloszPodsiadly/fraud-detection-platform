@@ -176,7 +176,7 @@ class EngineIntelligenceProjectionMongoIntegrationTest {
 
     private EngineIntelligenceProjectionService serviceAt(Instant instant) {
         return new EngineIntelligenceProjectionService(
-                repository,
+                new EngineIntelligenceProjectionWriteFence(mongoTemplate),
                 new EngineIntelligenceProjectionMapper(
                         new EngineIntelligenceProjectionPolicy(),
                         Clock.fixed(instant, ZoneOffset.UTC)

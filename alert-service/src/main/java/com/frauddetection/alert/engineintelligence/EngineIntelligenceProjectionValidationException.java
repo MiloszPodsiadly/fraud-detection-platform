@@ -2,7 +2,7 @@ package com.frauddetection.alert.engineintelligence;
 
 import java.util.Objects;
 
-final class EngineIntelligenceProjectionValidationException extends IllegalArgumentException {
+public final class EngineIntelligenceProjectionValidationException extends IllegalArgumentException {
 
     private final EngineIntelligenceProjectionOmissionReason reason;
 

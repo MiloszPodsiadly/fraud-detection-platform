@@ -128,12 +128,13 @@ The operational procedure and retention boundary are defined in
 
 ## Mongo projection identity and idempotency
 
-Engine-intelligence projection uses transactionId as Mongo `_id` and `sourceEventId` as its private occurrence fence.
-Mongo `_id` uniqueness prevents duplicate public projections, while the occurrence fence prevents stale replay from
-overwriting current diagnostics. Reprocessing the same occurrence replaces the projection state instead of appending
-duplicate engines/signals/warnings. Existing projection documents without `sourceEventId` remain readable from Mongo
-but fail closed as `NOT_PROJECTED` for current model-specific interpretation. No separate migration is required for
-this document-style projection unless deployment
+Engine-intelligence projection uses transactionId as Mongo `_id` and the source event ID, exact creation time, and
+canonical fingerprint as its private occurrence fence. Mongo `_id` uniqueness prevents duplicate public projections,
+while the complete occurrence fence prevents stale or conflicting replay from overwriting current diagnostics.
+Reprocessing the same occurrence replaces the projection state instead of appending duplicate
+engines/signals/warnings. Existing projection documents without the complete occurrence identity remain readable from
+Mongo but fail closed as `NOT_PROJECTED` for current model-specific interpretation. No separate migration is required
+for this document-style projection unless deployment
 policy requires explicit collection/index creation. Future hardening may add secondary indexes or retention/TTL
 based on query and retention needs.
 
@@ -202,18 +203,22 @@ authorization.
 ## Failure Isolation Ownership
 
 The optional projection runs in its own Kafka consumer group and a separate MongoDB transaction. It validates the
-event against the authoritative scored transaction before writing diagnostics. A concurrent replacement may leave a
-physically stale optional document, but the read boundary fences it: read-only MongoDB snapshot reads return
-diagnostics only when both collections identify the same `sourceEventId`. Transaction-detail and fraud-feedback flows
-also bind that lookup to the occurrence already loaded for their baseline fields, so an occurrence replacement between
-the two service calls yields `NOT_PROJECTED` rather than mixed-occurrence model identity.
+event against the authoritative scored transaction before writing diagnostics. The write boundary also applies an
+atomic Mongo occurrence fence ordered by source event timestamp and event ID, with exact fingerprint equality required
+for same-event replay. A delayed older worker therefore cannot replace a newer accepted projection. The read boundary
+independently requires the source event ID, exact creation time, and canonical fingerprint to match and returns
+`NOT_PROJECTED` rather than mixed-occurrence model identity.
 
-Transient projection failures escape the diagnostic listener and use the existing bounded Kafka retry and durable
-`transactions.dead-letter` handoff. Authorized recovery republishes the original retained event to
-`transactions.scored`; baseline occurrence admission is idempotent and the diagnostic group retries only the matching
-current occurrence. Invalid optional diagnostic shapes are bounded omissions. No exception is swallowed inside an
-aborted MongoDB transaction, and diagnostic failure cannot roll back baseline scoring or alert processing. The
-operator procedure is defined in
+When the baseline occurrence is not committed yet, the diagnostic listener durably stores a bounded projection-only
+envelope before acknowledging Kafka. A scheduled lease-fenced worker completes the projection after the authoritative
+occurrence appears. Retry and age limits move unresolved work to an observable terminal state. Other transient EI
+consumer failures use bounded Kafka retry and the dedicated `engine-intelligence.dead-letter` topic; they are never
+mixed with baseline `transactions.dead-letter`. A disabled-by-default `engine-intelligence.redrive` consumer admits
+validated records to the same durable inbox and invokes no baseline business service; terminal redrive failures use
+`engine-intelligence.quarantine`. Invalid
+optional diagnostic shapes are bounded omissions or permanent EI failures. No exception is swallowed inside an aborted
+MongoDB transaction, and diagnostic failure cannot roll back baseline scoring or alert processing. The operator
+procedure is defined in
 [Engine Intelligence Projection Recovery](../runbooks/engine_intelligence_projection_recovery.md).
 
 ## Operational Observability
@@ -226,6 +231,11 @@ records:
 - `engine_intelligence_projection_success_total`
 - `engine_intelligence_projection_omitted_total{reason=bounded_reason}`
 - `engine_intelligence_projection_latency_seconds`
+- `engine_intelligence_projection_disposition_total{disposition=bounded_disposition}`
+- `engine_intelligence_recovery_total{outcome=bounded_outcome}`
+- `engine_intelligence_pending_projection_count`
+- `engine_intelligence_unresolved_projection_count`
+- `engine_intelligence_oldest_pending_projection_age_seconds`
 
 The private evidence projection records corresponding
 `ml_prediction_evidence_projection_*` attempts, successes, idempotent replays, bounded omissions/failures, and

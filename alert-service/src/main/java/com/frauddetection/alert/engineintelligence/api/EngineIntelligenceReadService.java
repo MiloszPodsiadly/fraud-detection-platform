@@ -82,6 +82,14 @@ public class EngineIntelligenceReadService {
         return projection
                 .filter(candidate -> ownership.state() == ScoringOccurrenceOwnership.State.AUTHORITATIVE)
                 .filter(candidate -> Objects.equals(candidate.getSourceEventId(), ownership.sourceEventId()))
+                .filter(candidate -> Objects.equals(
+                        candidate.getSourceEventCreatedAt(),
+                        ownership.sourceEventCreatedAt()
+                ))
+                .filter(candidate -> Objects.equals(
+                        candidate.getSourceEventFingerprint(),
+                        ownership.sourceEventFingerprint()
+                ))
                 .map(mapper::map)
                 .orElseGet(() -> EngineIntelligenceReadModel.notProjected(boundedTransactionId));
     }

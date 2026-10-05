@@ -17,6 +17,8 @@ public class EngineIntelligenceProjection {
     @Id
     private final String transactionId;
     private final String sourceEventId;
+    private final Instant sourceEventCreatedAt;
+    private final String sourceEventFingerprint;
     private final int contractVersion;
     private final Instant generatedAt;
     private final EngineIntelligenceComparisonType comparisonType;
@@ -37,6 +39,8 @@ public class EngineIntelligenceProjection {
     public EngineIntelligenceProjection(
             String transactionId,
             String sourceEventId,
+            Instant sourceEventCreatedAt,
+            String sourceEventFingerprint,
             int contractVersion,
             Instant generatedAt,
             EngineIntelligenceComparisonType comparisonType,
@@ -52,6 +56,8 @@ public class EngineIntelligenceProjection {
     ) {
         this.transactionId = transactionId;
         this.sourceEventId = sourceEventId;
+        this.sourceEventCreatedAt = sourceEventCreatedAt;
+        this.sourceEventFingerprint = sourceEventFingerprint;
         this.contractVersion = contractVersion;
         this.generatedAt = generatedAt;
         this.comparisonType = comparisonType;
@@ -67,6 +73,42 @@ public class EngineIntelligenceProjection {
         this.warningCount = this.warnings.size();
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
+    }
+
+    public EngineIntelligenceProjection(
+            String transactionId,
+            String sourceEventId,
+            int contractVersion,
+            Instant generatedAt,
+            EngineIntelligenceComparisonType comparisonType,
+            List<String> comparedEngineIds,
+            EngineIntelligenceAgreementStatus comparisonStatus,
+            EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
+            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket,
+            List<EngineIntelligenceEngineProjection> engines,
+            List<EngineIntelligenceDiagnosticSignalProjection> diagnosticSignals,
+            List<EngineIntelligenceWarningProjection> warnings,
+            Instant createdAt,
+            Instant updatedAt
+    ) {
+        this(
+                transactionId,
+                sourceEventId,
+                null,
+                null,
+                contractVersion,
+                generatedAt,
+                comparisonType,
+                comparedEngineIds,
+                comparisonStatus,
+                riskMismatchStatus,
+                scoreDeltaBucket,
+                engines,
+                diagnosticSignals,
+                warnings,
+                createdAt,
+                updatedAt
+        );
     }
 
     public EngineIntelligenceProjection(
@@ -87,6 +129,8 @@ public class EngineIntelligenceProjection {
         this(
                 transactionId,
                 null,
+                null,
+                null,
                 contractVersion,
                 generatedAt,
                 comparisonType,
@@ -104,6 +148,8 @@ public class EngineIntelligenceProjection {
 
     public String getTransactionId() { return transactionId; }
     public String getSourceEventId() { return sourceEventId; }
+    public Instant getSourceEventCreatedAt() { return sourceEventCreatedAt; }
+    public String getSourceEventFingerprint() { return sourceEventFingerprint; }
     public int getContractVersion() { return contractVersion; }
     public Instant getGeneratedAt() { return generatedAt; }
     public EngineIntelligenceComparisonType getComparisonType() { return comparisonType; }

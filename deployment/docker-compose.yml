@@ -270,6 +270,7 @@ services:
       SPRING_PROFILES_ACTIVE: docker
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       ML_PREDICTION_EVIDENCE_REDRIVE_ENABLED: ${ML_PREDICTION_EVIDENCE_REDRIVE_ENABLED:-false}
+      ENGINE_INTELLIGENCE_REDRIVE_ENABLED: ${ENGINE_INTELLIGENCE_REDRIVE_ENABLED:-false}
       MONGODB_URI: mongodb://mongodb:27017/fraud_alerts?replicaSet=rs0&serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
       SPRING_MONGODB_URI: mongodb://mongodb:27017/fraud_alerts?replicaSet=rs0&serverSelectionTimeoutMS=5000&connectTimeoutMS=3000&socketTimeoutMS=5000
       REDIS_HOST: redis

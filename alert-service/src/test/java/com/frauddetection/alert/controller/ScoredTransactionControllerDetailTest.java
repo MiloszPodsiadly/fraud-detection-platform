@@ -277,7 +277,8 @@ class ScoredTransactionControllerDetailTest {
                 analystRecommendation(),
                 ScoringOccurrenceOwnership.authoritative(
                         "event-" + transactionId,
-                        Instant.parse("2026-06-18T10:00:01Z")
+                        Instant.parse("2026-06-18T10:00:01Z"),
+                        "a".repeat(64)
                 )
         );
     }
@@ -298,7 +299,8 @@ class ScoredTransactionControllerDetailTest {
                 null,
                 ScoringOccurrenceOwnership.authoritative(
                         "event-" + transactionId,
-                        Instant.parse("2026-06-18T10:00:01Z")
+                        Instant.parse("2026-06-18T10:00:01Z"),
+                        "a".repeat(64)
                 )
         );
     }

@@ -36,6 +36,9 @@ class EngineIntelligenceReadServiceTest {
         when(scoredTransactionRepository.findById("txn-1")).thenReturn(Optional.of(current("txn-1", "event-1")));
         when(projectionRepository.findById("txn-1")).thenReturn(Optional.of(projection));
         when(projection.getSourceEventId()).thenReturn("event-1");
+        when(projection.getSourceEventCreatedAt())
+                .thenReturn(Instant.parse("2026-10-04T10:00:00.123456789Z"));
+        when(projection.getSourceEventFingerprint()).thenReturn("a".repeat(64));
         when(mapper.map(projection)).thenReturn(expected);
 
         assertThat(service.read("txn-1")).isSameAs(expected);
@@ -169,6 +172,23 @@ class EngineIntelligenceReadServiceTest {
     }
 
     @Test
+    void projectionWithMatchingEventIdButDifferentFingerprintIsNotReturned() {
+        EngineIntelligenceProjection projection = mock(EngineIntelligenceProjection.class);
+        when(scoredTransactionRepository.findById("txn-current"))
+                .thenReturn(Optional.of(current("txn-current", "event-current")));
+        when(projectionRepository.findById("txn-current")).thenReturn(Optional.of(projection));
+        when(projection.getSourceEventId()).thenReturn("event-current");
+        when(projection.getSourceEventCreatedAt())
+                .thenReturn(Instant.parse("2026-10-04T10:00:00.123456789Z"));
+        when(projection.getSourceEventFingerprint()).thenReturn("b".repeat(64));
+
+        assertThat(service.read("txn-current"))
+                .isEqualTo(EngineIntelligenceReadModel.notProjected("txn-current"));
+
+        verify(mapper, never()).map(projection);
+    }
+
+    @Test
     void occurrenceReplacementBetweenBaselineAndDiagnosticReadFailsClosed() {
         Instant occurrenceTime = Instant.parse("2026-10-04T10:00:00.123456789Z");
         when(scoredTransactionRepository.findById("txn-current"))
@@ -176,7 +196,7 @@ class EngineIntelligenceReadServiceTest {
 
         assertThat(service.readForOccurrence(
                 "txn-current",
-                ScoringOccurrenceOwnership.authoritative("event-a", occurrenceTime)
+                ScoringOccurrenceOwnership.authoritative("event-a", occurrenceTime, "a".repeat(64))
         )).isEqualTo(EngineIntelligenceReadModel.notProjected("txn-current"));
 
         verifyNoInteractions(projectionRepository, mapper);

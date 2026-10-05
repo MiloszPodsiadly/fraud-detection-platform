@@ -12,6 +12,7 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
 
     private static final List<String> REVIEWED_PRODUCTION_REFERENCES = List.of(
             "alert-service/src/main/java/com/frauddetection/alert/config/AlertKafkaConfig.java",
+            "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/EngineIntelligencePendingProjectionService.java",
             "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/EngineIntelligenceProjectionService.java",
             "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/MlPredictionEvidenceProjectionService.java",
             "alert-service/src/main/java/com/frauddetection/alert/evidence/AlertEvidenceSnapshotProjectionService.java",
@@ -19,6 +20,7 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
             "alert-service/src/main/java/com/frauddetection/alert/mapper/ScoredTransactionDocumentMapper.java",
             "alert-service/src/main/java/com/frauddetection/alert/messaging/AuthoritativeTransactionScoredEventDeserializer.java",
             "alert-service/src/main/java/com/frauddetection/alert/messaging/EngineIntelligenceProjectionEventListener.java",
+            "alert-service/src/main/java/com/frauddetection/alert/messaging/EngineIntelligenceRedriveListener.java",
             "alert-service/src/main/java/com/frauddetection/alert/messaging/MlPredictionEvidenceEventListener.java",
             "alert-service/src/main/java/com/frauddetection/alert/messaging/MlPredictionEvidenceRedriveListener.java",
             "alert-service/src/main/java/com/frauddetection/alert/messaging/TransactionScoredEventListener.java",
@@ -71,6 +73,8 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
                 "AuthoritativeTransactionScoredEventDeserializer",
                 "TransactionScoredEventListener",
                 "EngineIntelligenceProjectionEventListener",
+                "EngineIntelligencePendingProjectionService",
+                "EngineIntelligenceRedriveListener",
                 "MlPredictionEvidenceEventListener",
                 "MlPredictionEvidenceRedriveListener",
                 "MlPredictionEvidenceProjectionService",

@@ -45,7 +45,8 @@ class ScoredTransactionResponseMapperTest {
                 null,
                 ScoringOccurrenceOwnership.authoritative(
                         "private-source-event",
-                        Instant.parse("2026-06-18T10:00:02Z")
+                        Instant.parse("2026-06-18T10:00:02Z"),
+                        "a".repeat(64)
                 )
         );
 
@@ -104,7 +105,8 @@ class ScoredTransactionResponseMapperTest {
                 analystRecommendation,
                 ScoringOccurrenceOwnership.authoritative(
                         "event-1",
-                        Instant.parse("2026-06-18T10:00:01Z")
+                        Instant.parse("2026-06-18T10:00:01Z"),
+                        "a".repeat(64)
                 )
         );
     }

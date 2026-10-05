@@ -1,6 +1,7 @@
 package com.frauddetection.alert.engineintelligence;
 
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.engineintelligence.observability.EngineIntelligenceProjectionMetricReason;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
@@ -24,7 +25,7 @@ public class EngineIntelligenceProjectionService {
 
     private static final Logger log = LoggerFactory.getLogger(EngineIntelligenceProjectionService.class);
 
-    private final EngineIntelligenceProjectionRepository repository;
+    private final EngineIntelligenceProjectionWriteFence writeFence;
     private final ScoredTransactionRepository scoredTransactionRepository;
     private final EngineIntelligenceProjectionMapper mapper;
     private final AlertServiceMetrics metrics;
@@ -32,22 +33,22 @@ public class EngineIntelligenceProjectionService {
 
     @Autowired
     public EngineIntelligenceProjectionService(
-            EngineIntelligenceProjectionRepository repository,
+            EngineIntelligenceProjectionWriteFence writeFence,
             EngineIntelligenceProjectionMapper mapper,
             AlertServiceMetrics metrics,
             ScoredTransactionRepository scoredTransactionRepository
     ) {
-        this(repository, mapper, metrics, scoredTransactionRepository, Clock.systemUTC());
+        this(writeFence, mapper, metrics, scoredTransactionRepository, Clock.systemUTC());
     }
 
     EngineIntelligenceProjectionService(
-            EngineIntelligenceProjectionRepository repository,
+            EngineIntelligenceProjectionWriteFence writeFence,
             EngineIntelligenceProjectionMapper mapper,
             AlertServiceMetrics metrics,
             ScoredTransactionRepository scoredTransactionRepository,
             Clock clock
     ) {
-        this.repository = Objects.requireNonNull(repository, "repository is required");
+        this.writeFence = Objects.requireNonNull(writeFence, "writeFence is required");
         this.mapper = Objects.requireNonNull(mapper, "mapper is required");
         this.metrics = Objects.requireNonNull(metrics, "metrics is required");
         this.scoredTransactionRepository = Objects.requireNonNull(
@@ -58,23 +59,71 @@ public class EngineIntelligenceProjectionService {
     }
 
     public EngineIntelligenceProjectionResult project(TransactionScoredEvent event) {
-        return project(event, false, false);
+        if (event == null) {
+            return project(null, null, null, null, null, false, false);
+        }
+        return project(
+                event.transactionId(),
+                event.eventId(),
+                event.createdAt(),
+                event.engineIntelligence() == null ? null : ScoringOccurrenceFingerprint.from(event),
+                event.engineIntelligence(),
+                false,
+                false
+        );
     }
 
     @Transactional(transactionManager = "mongoTransactionManager", propagation = Propagation.REQUIRES_NEW)
     public EngineIntelligenceProjectionResult projectCurrentOccurrence(TransactionScoredEvent event) {
-        return project(event, true, true);
+        if (event == null) {
+            return project(null, null, null, null, null, true, true);
+        }
+        String sourceEventFingerprint = event.engineIntelligence() == null
+                ? null
+                : ScoringOccurrenceFingerprint.from(event);
+        return project(
+                event.transactionId(),
+                event.eventId(),
+                event.createdAt(),
+                sourceEventFingerprint,
+                event.engineIntelligence(),
+                true,
+                true
+        );
+    }
+
+    @Transactional(transactionManager = "mongoTransactionManager", propagation = Propagation.REQUIRES_NEW)
+    public EngineIntelligenceProjectionResult projectDeferredOccurrence(
+            String transactionId,
+            String sourceEventId,
+            Instant sourceEventCreatedAt,
+            String sourceEventFingerprint,
+            EngineIntelligenceSummary engineIntelligence
+    ) {
+        return project(
+                transactionId,
+                sourceEventId,
+                sourceEventCreatedAt,
+                sourceEventFingerprint,
+                engineIntelligence,
+                true,
+                true
+        );
     }
 
     private EngineIntelligenceProjectionResult project(
-            TransactionScoredEvent event,
+            String transactionId,
+            String sourceEventId,
+            Instant sourceEventCreatedAt,
+            String sourceEventFingerprint,
+            EngineIntelligenceSummary engineIntelligence,
             boolean storeRequired,
             boolean requireCurrentOccurrence
     ) {
         Instant startedAt = clock.instant();
         metrics.recordEngineIntelligenceProjectionAttempt();
         try {
-            if (event == null) {
+            if (transactionId == null || sourceEventId == null || sourceEventCreatedAt == null) {
                 EngineIntelligenceProjectionResult result = EngineIntelligenceProjectionResult.omitted(
                         EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE
                 );
@@ -82,36 +131,81 @@ public class EngineIntelligenceProjectionService {
                 logOmission(result);
                 return result;
             }
-            if (event.engineIntelligence() == null) {
+            if (engineIntelligence == null) {
                 EngineIntelligenceProjectionResult result = EngineIntelligenceProjectionResult.omitted(
                         EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_ABSENT
                 );
                 metrics.recordEngineIntelligenceProjectionOmitted(EngineIntelligenceProjectionMetricReason.ENGINE_INTELLIGENCE_ABSENT);
+                if (requireCurrentOccurrence) {
+                    metrics.recordDiagnosticProjectionDisposition(
+                            EngineIntelligenceProjectionDisposition.OPTIONAL_DIAGNOSTICS_ABSENT
+                    );
+                }
                 return result;
             }
 
-            if (requireCurrentOccurrence && !isCurrentOccurrence(event)) {
+            if (requireCurrentOccurrence && !isCurrentOccurrence(
+                    transactionId,
+                    sourceEventId,
+                    sourceEventCreatedAt,
+                    sourceEventFingerprint
+            )) {
                 EngineIntelligenceProjectionResult result = EngineIntelligenceProjectionResult.omitted(
                         EngineIntelligenceProjectionOmissionReason.SCORING_OCCURRENCE_NOT_CURRENT
                 );
                 metrics.recordEngineIntelligenceProjectionOmitted(
                         EngineIntelligenceProjectionMetricReason.STALE_OCCURRENCE
                 );
+                metrics.recordDiagnosticProjectionDisposition(
+                        EngineIntelligenceProjectionDisposition.STALE_OCCURRENCE
+                );
                 return result;
             }
 
-            Instant createdAt = existingCreatedAt(event.transactionId(), event.eventId());
             EngineIntelligenceProjectionResult result = mapper.map(
-                    event.transactionId(),
-                    event.eventId(),
-                    event.engineIntelligence(),
-                    createdAt
+                    transactionId,
+                    sourceEventId,
+                    sourceEventCreatedAt,
+                    sourceEventFingerprint,
+                    engineIntelligence,
+                    null
             );
             if (result.projection().isPresent()) {
-                save(result.projection().orElseThrow());
+                EngineIntelligenceProjectionWriteResult writeResult = saveFenced(
+                        result.projection().orElseThrow()
+                );
+                if (writeResult.status() == EngineIntelligenceProjectionWriteResult.Status.STALE) {
+                    EngineIntelligenceProjectionResult stale = EngineIntelligenceProjectionResult.omitted(
+                            EngineIntelligenceProjectionOmissionReason.SCORING_OCCURRENCE_NOT_CURRENT
+                    );
+                    metrics.recordEngineIntelligenceProjectionOmitted(
+                            EngineIntelligenceProjectionMetricReason.STALE_OCCURRENCE
+                    );
+                    if (requireCurrentOccurrence) {
+                        metrics.recordDiagnosticProjectionDisposition(
+                                EngineIntelligenceProjectionDisposition.STALE_OCCURRENCE
+                        );
+                    }
+                    return stale;
+                }
+                if (writeResult.status()
+                        == EngineIntelligenceProjectionWriteResult.Status.SOURCE_PAYLOAD_CONFLICT) {
+                    throw new SourceOccurrencePayloadConflictException();
+                }
+                result = EngineIntelligenceProjectionResult.projected(writeResult.projection());
                 metrics.recordEngineIntelligenceProjectionSuccess();
+                if (requireCurrentOccurrence) {
+                    metrics.recordDiagnosticProjectionDisposition(
+                            EngineIntelligenceProjectionDisposition.AUTHORITATIVE_OCCURRENCE_READY
+                    );
+                }
             } else {
                 metrics.recordEngineIntelligenceProjectionOmitted(metricReason(result.omissionReason().orElse(null)));
+                if (requireCurrentOccurrence) {
+                    metrics.recordDiagnosticProjectionDisposition(
+                            EngineIntelligenceProjectionDisposition.PERMANENT_INVALID_DIAGNOSTICS
+                    );
+                }
             }
             logOmission(result);
             return result;
@@ -119,9 +213,29 @@ public class EngineIntelligenceProjectionService {
             EngineIntelligenceProjectionResult result = EngineIntelligenceProjectionResult.omitted(exception.reason());
             metrics.recordEngineIntelligenceProjectionOmitted(metricReason(exception.reason()));
             logOmission(result);
+            if (requireCurrentOccurrence) {
+                metrics.recordDiagnosticProjectionDisposition(
+                        EngineIntelligenceProjectionDisposition.PERMANENT_INVALID_DIAGNOSTICS
+                );
+            }
             return result;
+        } catch (CurrentScoringOccurrencePendingException exception) {
+            metrics.recordDiagnosticProjectionDisposition(
+                    EngineIntelligenceProjectionDisposition.BASELINE_OCCURRENCE_PENDING
+            );
+            throw exception;
+        } catch (SourceOccurrencePayloadConflictException exception) {
+            metrics.recordDiagnosticProjectionDisposition(
+                    EngineIntelligenceProjectionDisposition.SOURCE_OCCURRENCE_PAYLOAD_CONFLICT
+            );
+            throw exception;
         } catch (ProjectionStoreUnavailableException exception) {
             metrics.recordEngineIntelligenceProjectionFailure(EngineIntelligenceProjectionMetricReason.STORE_UNAVAILABLE);
+            if (requireCurrentOccurrence) {
+                metrics.recordDiagnosticProjectionDisposition(
+                        EngineIntelligenceProjectionDisposition.TRANSIENT_STORAGE_UNAVAILABLE
+                );
+            }
             if (storeRequired) {
                 throw exception;
             }
@@ -145,10 +259,13 @@ public class EngineIntelligenceProjectionService {
         }
     }
 
-    private void save(EngineIntelligenceProjection projection) {
+    private EngineIntelligenceProjectionWriteResult saveFenced(EngineIntelligenceProjection projection) {
         try {
-            repository.save(projection);
+            return writeFence.write(projection);
         } catch (RuntimeException exception) {
+            if (exception instanceof SourceOccurrencePayloadConflictException) {
+                throw exception;
+            }
             throw new ProjectionStoreUnavailableException(exception);
         }
     }
@@ -168,10 +285,15 @@ public class EngineIntelligenceProjectionService {
         };
     }
 
-    private boolean isCurrentOccurrence(TransactionScoredEvent event) {
+    private boolean isCurrentOccurrence(
+            String transactionId,
+            String sourceEventId,
+            Instant sourceEventCreatedAt,
+            String sourceEventFingerprint
+    ) {
         ScoredTransactionDocument current;
         try {
-            current = scoredTransactionRepository.findById(event.transactionId()).orElse(null);
+            current = scoredTransactionRepository.findById(transactionId).orElse(null);
         } catch (RuntimeException exception) {
             throw new ProjectionStoreUnavailableException(exception);
         }
@@ -193,44 +315,40 @@ public class EngineIntelligenceProjectionService {
         if (ownership.state() != ScoringOccurrenceOwnership.State.AUTHORITATIVE) {
             throw new CurrentScoringOccurrencePendingException();
         }
-        if (ownership.sourceEventId().equals(event.eventId())) {
-            if (!Objects.equals(current.getSourceEventFingerprint(), ScoringOccurrenceFingerprint.from(event))) {
-                throw new IllegalStateException("SCORING_OCCURRENCE_PAYLOAD_CONFLICT");
+        if (ownership.sourceEventId().equals(sourceEventId)) {
+            if (!Objects.equals(current.getSourceEventFingerprint(), sourceEventFingerprint)) {
+                throw new SourceOccurrencePayloadConflictException();
             }
             return true;
         }
-        int timestampOrder = event.createdAt().compareTo(ownership.sourceEventCreatedAt());
+        int timestampOrder = sourceEventCreatedAt.compareTo(ownership.sourceEventCreatedAt());
         int occurrenceOrder = timestampOrder != 0
                 ? timestampOrder
-                : event.eventId().compareTo(ownership.sourceEventId());
+                : sourceEventId.compareTo(ownership.sourceEventId());
         if (occurrenceOrder > 0) {
             throw new CurrentScoringOccurrencePendingException();
         }
         return false;
     }
 
-    private Instant existingCreatedAt(String transactionId, String sourceEventId) {
-        try {
-            return repository.findById(transactionId)
-                    .filter(existing -> Objects.equals(existing.getSourceEventId(), sourceEventId))
-                    .map(EngineIntelligenceProjection::getCreatedAt)
-                    .orElse(null);
-        } catch (RuntimeException exception) {
-            throw new ProjectionStoreUnavailableException(exception);
-        }
-    }
-
-    static final class ProjectionStoreUnavailableException extends RuntimeException {
+    public static final class ProjectionStoreUnavailableException extends RuntimeException {
 
         private ProjectionStoreUnavailableException(RuntimeException cause) {
             super("ENGINE_INTELLIGENCE_PROJECTION_STORE_UNAVAILABLE", cause);
         }
     }
 
-    static final class CurrentScoringOccurrencePendingException extends RuntimeException {
+    public static final class CurrentScoringOccurrencePendingException extends RuntimeException {
 
-        private CurrentScoringOccurrencePendingException() {
+        public CurrentScoringOccurrencePendingException() {
             super("CURRENT_SCORING_OCCURRENCE_PENDING");
+        }
+    }
+
+    public static final class SourceOccurrencePayloadConflictException extends RuntimeException {
+
+        public SourceOccurrencePayloadConflictException() {
+            super("SOURCE_OCCURRENCE_PAYLOAD_CONFLICT");
         }
     }
 

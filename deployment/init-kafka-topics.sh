@@ -27,3 +27,6 @@ create_topic "transactions.dead-letter" 3 1
 create_topic "ml.prediction-evidence.dead-letter" 3 1
 create_topic "ml.prediction-evidence.redrive" 3 1
 create_topic "ml.prediction-evidence.quarantine" 3 1
+create_topic "engine-intelligence.dead-letter" 3 1
+create_topic "engine-intelligence.redrive" 3 1
+create_topic "engine-intelligence.quarantine" 3 1

@@ -16,7 +16,8 @@ compatibility guidance.
 | --- | --- | --- |
 | Shared contract | `common-events` `TransactionScoredEvent` and contract tests | Shared current-absent, minimal, full-bounded, unknown-nested, and unknown-top-level fixtures |
 | Authoritative alert Kafka consumer | `AlertKafkaConfig` -> `AuthoritativeTransactionScoredEventDeserializer` -> `TransactionScoredEventListener` | Preserves strict deserialization for the authoritative event while deliberately removing only optional `mlPredictionEvidence`; alert and monitoring availability do not depend on diagnostic evidence projection |
-| Current Engine Intelligence projection consumer | `AlertKafkaConfig` -> `EngineIntelligenceProjectionEventListener` -> `EngineIntelligenceProjectionService` | Uses an independent consumer group and projects diagnostics only when the event still owns the current scoring occurrence; persistence failure is retried without rolling back the already committed baseline result |
+| Current Engine Intelligence projection consumer | `AlertKafkaConfig` -> `EngineIntelligenceProjectionEventListener` -> `EngineIntelligenceProjectionService` / `EngineIntelligencePendingProjectionService` | Uses an independent consumer group and error handler, projects diagnostics only when the event owns the current scoring occurrence, and durably defers a valid projection while baseline persistence is pending |
+| Engine Intelligence projection-only redrive | `AlertKafkaConfig` -> `EngineIntelligenceRedriveListener` -> `EngineIntelligencePendingProjectionService` -> `EngineIntelligenceProjectionService` | Disabled by default; accepts only dedicated-topic records with complete EI source provenance, uses the existing durable inbox and worker, and cannot invoke baseline business processing |
 | ML prediction evidence consumer | `AlertKafkaConfig` -> `MlPredictionEvidenceEventListener` -> `MlPredictionEvidenceProjectionService` | Uses strict full-event deserialization in a separate Kafka consumer group, record acknowledgement, bounded retry, and dead-letter handling |
 | ML prediction evidence redrive | `AlertKafkaConfig` -> `MlPredictionEvidenceRedriveListener` -> `MlPredictionEvidenceProjectionService` | Disabled by default; the dedicated redrive topic and group recover only immutable private evidence, require original source coordinates, and route invalid input to terminal quarantine without replaying baseline business processing |
 | Alert monitoring projection | `TransactionMonitoringService` -> `ScoredTransactionDocumentMapper` -> `ScoredTransactionDocument` | Existing projection compared against the current shape without Engine Intelligence |
@@ -39,6 +40,14 @@ evidence failures use dead-letter handling. A successfully consumed base event t
 a diagnostic store is unavailable. Approved evidence recovery copies records from `ml.prediction-evidence.dead-letter` to
 `ml.prediction-evidence.redrive`; its separate, disabled-by-default listener writes only immutable evidence and sends
 malformed, conflicting, or coordinate-free records to `ml.prediction-evidence.quarantine`.
+
+The current Engine Intelligence consumer acknowledges an ordering-gap record only after its bounded projection envelope
+is durable in `engine_intelligence_pending_projections`. A lease-fenced worker retries after the authoritative baseline
+occurrence appears; stale records are completed as no-ops, payload conflicts fail closed, and bounded retry/age exhaustion
+becomes an observable `UNRESOLVED` state. EI failures use `engine-intelligence.dead-letter`, never the baseline DLT.
+Approved recovery copies retained records to `engine-intelligence.redrive`, never `transactions.scored`; a disabled-by-default
+listener validates source coordinates and admits them to the same inbox. Dedicated Kafka ACLs authorize that operation,
+while headers provide provenance consistency only. Invalid recovery records terminate in `engine-intelligence.quarantine`.
 
 The source-scan discovery test fails with `TRANSACTION_SCORED_EVENT_CONSUMER_INVENTORY_REVIEW_REQUIRED`
 when a production reference is added without inventory review.

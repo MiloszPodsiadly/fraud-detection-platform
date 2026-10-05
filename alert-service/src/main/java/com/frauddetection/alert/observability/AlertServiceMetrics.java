@@ -8,6 +8,8 @@ import com.frauddetection.alert.evidence.EvidenceProjectionState;
 import com.frauddetection.alert.engineintelligence.observability.EngineIntelligenceFeedbackReadMetricReason;
 import com.frauddetection.alert.engineintelligence.observability.EngineIntelligenceFeedbackSubmitMetricReason;
 import com.frauddetection.alert.engineintelligence.observability.EngineIntelligenceProjectionMetricReason;
+import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionDisposition;
+import com.frauddetection.alert.engineintelligence.EngineIntelligenceRecoveryOutcome;
 import com.frauddetection.alert.engineintelligence.observability.MlPredictionEvidenceProjectionMetricReason;
 import com.frauddetection.alert.outbox.OutboxBacklogResponse;
 import com.frauddetection.alert.outbox.FraudAlertOutboxBacklogResponse;
@@ -58,6 +60,9 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     private final AtomicLong fraudAlertOutboxFailedTerminal = new AtomicLong(0);
     private final AtomicLong fraudAlertOutboxOldestUnresolvedAgeSeconds = new AtomicLong(0);
     private final AtomicLong evidenceConfirmationPending = new AtomicLong(0);
+    private final AtomicLong diagnosticPendingProjection = new AtomicLong(0);
+    private final AtomicLong diagnosticUnresolvedProjection = new AtomicLong(0);
+    private final AtomicLong diagnosticOldestPendingAgeSeconds = new AtomicLong(0);
     private final Map<AuditAction, AtomicInteger> evidenceGatedFinalizeEnabled = new EnumMap<>(AuditAction.class);
 
     public AlertServiceMetrics(MeterRegistry meterRegistry) {
@@ -100,6 +105,15 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         Gauge.builder("fraud_alert_outbox_failed_terminal_count", fraudAlertOutboxFailedTerminal, AtomicLong::get).register(meterRegistry);
         Gauge.builder("fraud_alert_outbox_oldest_unresolved_age_seconds", fraudAlertOutboxOldestUnresolvedAgeSeconds, AtomicLong::get).register(meterRegistry);
         Gauge.builder("evidence_confirmation_pending_count", evidenceConfirmationPending, AtomicLong::get).register(meterRegistry);
+        Gauge.builder("engine_intelligence_pending_projection_count", diagnosticPendingProjection, AtomicLong::get)
+                .register(meterRegistry);
+        Gauge.builder("engine_intelligence_unresolved_projection_count", diagnosticUnresolvedProjection, AtomicLong::get)
+                .register(meterRegistry);
+        Gauge.builder(
+                "engine_intelligence_oldest_pending_projection_age_seconds",
+                diagnosticOldestPendingAgeSeconds,
+                AtomicLong::get
+        ).register(meterRegistry);
         registerEvidenceGatedFinalizeEnablementGauges();
     }
 
@@ -1017,6 +1031,30 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         Timer.builder("engine_intelligence_projection_latency_seconds")
                 .register(meterRegistry)
                 .record(nonNegativeDuration(latency));
+    }
+
+    public void recordDiagnosticProjectionDisposition(EngineIntelligenceProjectionDisposition disposition) {
+        counter(
+                "engine_intelligence_projection_disposition_total",
+                "disposition", disposition.name()
+        ).increment();
+    }
+
+    public void recordDiagnosticRecovery(EngineIntelligenceRecoveryOutcome outcome) {
+        counter(
+                "engine_intelligence_recovery_total",
+                "outcome", outcome.name()
+        ).increment();
+    }
+
+    public void recordDiagnosticPendingProjectionBacklog(
+            long pendingCount,
+            long unresolvedCount,
+            long oldestPendingAgeSeconds
+    ) {
+        diagnosticPendingProjection.set(Math.max(0L, pendingCount));
+        diagnosticUnresolvedProjection.set(Math.max(0L, unresolvedCount));
+        diagnosticOldestPendingAgeSeconds.set(Math.max(0L, oldestPendingAgeSeconds));
     }
 
     public void recordFraudAlertOutboxBacklog(FraudAlertOutboxBacklogResponse response) {

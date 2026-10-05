@@ -54,7 +54,8 @@ class TransactionMonitoringServiceDetailLookupTest {
                 null,
                 ScoringOccurrenceOwnership.authoritative(
                         "event-1",
-                        Instant.parse("2026-06-18T10:00:01Z")
+                        Instant.parse("2026-06-18T10:00:01Z"),
+                        "a".repeat(64)
                 )
         );
         when(repository.findByTransactionId("txn-1")).thenReturn(Optional.of(document));

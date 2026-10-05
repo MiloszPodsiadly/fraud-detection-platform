@@ -14,9 +14,11 @@ import java.util.Locale;
 public class ScoredTransactionDocumentMapper {
 
     public ScoredTransactionDocument toDocument(TransactionScoredEvent event) {
+        String sourceEventFingerprint = ScoringOccurrenceFingerprint.from(event);
         ScoringOccurrenceOwnership occurrence = ScoringOccurrenceOwnership.authoritative(
                 event.eventId(),
-                event.createdAt()
+                event.createdAt(),
+                sourceEventFingerprint
         );
         ScoredTransactionDocument document = new ScoredTransactionDocument();
         document.setTransactionId(event.transactionId());
@@ -24,7 +26,7 @@ public class ScoredTransactionDocumentMapper {
         document.setSourceEventCreatedAt(occurrence.sourceEventCreatedAt().toString());
         document.setSourceEventCreatedAtEpochSecond(occurrence.sourceEventCreatedAt().getEpochSecond());
         document.setSourceEventCreatedAtNano(occurrence.sourceEventCreatedAt().getNano());
-        document.setSourceEventFingerprint(ScoringOccurrenceFingerprint.from(event));
+        document.setSourceEventFingerprint(occurrence.sourceEventFingerprint());
         document.setCustomerId(event.customerId());
         document.setCorrelationId(event.correlationId());
         document.setTransactionTimestamp(event.transactionTimestamp());

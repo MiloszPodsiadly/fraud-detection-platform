@@ -200,12 +200,28 @@ app:
       quarantine-topic: ${ML_PREDICTION_EVIDENCE_QUARANTINE_TOPIC:ml.prediction-evidence.quarantine}
       redrive-group-id: ${ML_PREDICTION_EVIDENCE_REDRIVE_GROUP_ID:${spring.application.name}-ml-prediction-evidence-redrive}
       redrive-enabled: ${ML_PREDICTION_EVIDENCE_REDRIVE_ENABLED:false}
+    engine-intelligence-recovery:
+      dead-letter-topic: ${ENGINE_INTELLIGENCE_DLT_TOPIC:engine-intelligence.dead-letter}
+      redrive-topic: ${ENGINE_INTELLIGENCE_REDRIVE_TOPIC:engine-intelligence.redrive}
+      quarantine-topic: ${ENGINE_INTELLIGENCE_QUARANTINE_TOPIC:engine-intelligence.quarantine}
+      redrive-group-id: ${ENGINE_INTELLIGENCE_REDRIVE_GROUP_ID:${spring.application.name}-engine-intelligence-redrive}
+      source-consumer-group: ${ENGINE_INTELLIGENCE_CONSUMER_GROUP_ID:${spring.application.name}-engine-intelligence}
+      redrive-enabled: ${ENGINE_INTELLIGENCE_REDRIVE_ENABLED:false}
     consumer:
       ml-prediction-evidence-group-id: ${ML_PREDICTION_EVIDENCE_CONSUMER_GROUP_ID:${spring.application.name}-ml-prediction-evidence}
       engine-intelligence-group-id: ${ENGINE_INTELLIGENCE_CONSUMER_GROUP_ID:${spring.application.name}-engine-intelligence}
       concurrency: 1
       retry-attempts: 3
       retry-backoff-millis: 1000
+  engine-intelligence:
+    pending-projection:
+      enabled: ${ENGINE_INTELLIGENCE_PENDING_PROJECTION_ENABLED:true}
+      fixed-delay: ${ENGINE_INTELLIGENCE_PENDING_PROJECTION_FIXED_DELAY:PT5S}
+      batch-size: ${ENGINE_INTELLIGENCE_PENDING_PROJECTION_BATCH_SIZE:50}
+      max-attempts: ${ENGINE_INTELLIGENCE_PENDING_PROJECTION_MAX_ATTEMPTS:120}
+      retry-delay: ${ENGINE_INTELLIGENCE_PENDING_PROJECTION_RETRY_DELAY:PT5S}
+      lease-duration: ${ENGINE_INTELLIGENCE_PENDING_PROJECTION_LEASE_DURATION:PT30S}
+      max-age: ${ENGINE_INTELLIGENCE_PENDING_PROJECTION_MAX_AGE:PT1H}
   assistant:
     mode: ${ASSISTANT_MODE:DETERMINISTIC}
     ollama-base-url: ${OLLAMA_BASE_URL:http://localhost:11434}

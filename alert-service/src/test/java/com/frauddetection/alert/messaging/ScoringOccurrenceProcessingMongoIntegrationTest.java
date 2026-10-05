@@ -6,6 +6,8 @@ import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionM
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionPolicy;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionRepository;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionService;
+import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionWriteFence;
+import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionWriteResult;
 import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjection;
 import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionRepository;
 import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionService;
@@ -149,7 +151,7 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
                 new ScoredTransactionProjectionWriter(mongoTemplate)
         );
         engineIntelligenceProjectionService = new EngineIntelligenceProjectionService(
-                engineIntelligence,
+                new com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionWriteFence(mongoTemplate),
                 new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy()),
                 metrics,
                 scoredTransactionRepository
@@ -441,17 +443,20 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
         TransactionScoredEvent event = event("event-b", BASE_TIME.plusSeconds(1), 0.96d, "model-b");
         transactionTemplate.executeWithoutResult(status -> listener.onMessage(event, null));
 
-        EngineIntelligenceProjectionRepository unavailableRepository = mock(EngineIntelligenceProjectionRepository.class);
-        when(unavailableRepository.findById(TRANSACTION_ID)).thenReturn(Optional.empty());
-        when(unavailableRepository.save(any())).thenThrow(new IllegalStateException("diagnostic store unavailable"));
+        com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionWriteFence unavailableWriteFence =
+                mock(com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionWriteFence.class);
+        when(unavailableWriteFence.write(any())).thenThrow(new IllegalStateException("diagnostic store unavailable"));
         EngineIntelligenceProjectionService failingProjection = new EngineIntelligenceProjectionService(
-                unavailableRepository,
+                unavailableWriteFence,
                 new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy()),
                 new AlertServiceMetrics(new SimpleMeterRegistry()),
                 scoredTransactionRepository
         );
         EngineIntelligenceProjectionEventListener failingListener =
-                new EngineIntelligenceProjectionEventListener(failingProjection);
+                new EngineIntelligenceProjectionEventListener(
+                        failingProjection,
+                        mock(com.frauddetection.alert.engineintelligence.EngineIntelligencePendingProjectionService.class)
+                );
 
         assertThatThrownBy(() -> failingListener.onMessage(event))
                 .isInstanceOf(RuntimeException.class)
@@ -569,6 +574,56 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
             assertThat(mongoTemplate.count(new Query(), SuspiciousTransactionDocument.class)).isZero();
             assertThat(mongoTemplate.count(new Query(), AlertDocument.class)).isEqualTo(1L);
             assertThat(mongoTemplate.count(new Query(), FraudAlertOutboxRecord.class)).isEqualTo(1L);
+        } finally {
+            resumeEarlier.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void delayedValidatedDiagnosticsCannotOverwriteNewerProjection() throws Exception {
+        TransactionScoredEvent earlier = event("event-a", BASE_TIME, 0.81d, "model-a");
+        TransactionScoredEvent newer = event("event-b", BASE_TIME.plusSeconds(1), 0.96d, "model-b");
+        transactionTemplate.executeWithoutResult(status -> listener.onMessage(earlier, null));
+
+        CountDownLatch earlierReachedWriteFence = new CountDownLatch(1);
+        CountDownLatch resumeEarlier = new CountDownLatch(1);
+        EngineIntelligenceProjectionWriteFence coordinatedFence = new EngineIntelligenceProjectionWriteFence(
+                mongoTemplate
+        ) {
+            @Override
+            public EngineIntelligenceProjectionWriteResult write(EngineIntelligenceProjection candidate) {
+                if (earlier.eventId().equals(candidate.getSourceEventId())) {
+                    earlierReachedWriteFence.countDown();
+                    await(resumeEarlier);
+                }
+                return super.write(candidate);
+            }
+        };
+        EngineIntelligenceProjectionService coordinatedProjectionService = new EngineIntelligenceProjectionService(
+                coordinatedFence,
+                new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy()),
+                new AlertServiceMetrics(new SimpleMeterRegistry()),
+                scoredTransactionRepository
+        );
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> earlierProjection = executor.submit(() ->
+                    coordinatedProjectionService.projectCurrentOccurrence(earlier)
+            );
+            assertThat(earlierReachedWriteFence.await(10, TimeUnit.SECONDS)).isTrue();
+
+            transactionTemplate.executeWithoutResult(status -> listener.onMessage(newer, null));
+            assertThat(engineIntelligenceProjectionService.projectCurrentOccurrence(newer).projection()).isPresent();
+            resumeEarlier.countDown();
+            earlierProjection.get(20, TimeUnit.SECONDS);
+
+            EngineIntelligenceProjection stored = mongoTemplate.findById(
+                    TRANSACTION_ID,
+                    EngineIntelligenceProjection.class
+            );
+            assertThat(stored).isNotNull();
+            assertThat(stored.getSourceEventId()).isEqualTo(newer.eventId());
         } finally {
             resumeEarlier.countDown();
             executor.shutdownNow();
