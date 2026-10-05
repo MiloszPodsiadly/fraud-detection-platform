@@ -283,6 +283,19 @@ export const ciSuites = {
       }
     ]
   },
+  institutionalReliability: {
+    label: "Institutional reliability",
+    reports: "alert-service/target/surefire-reports",
+    junitRequired: [
+      "EngineIntelligencePendingProjectionReliabilityIntegrationTest",
+      "ScoringOccurrenceProcessingMongoIntegrationTest",
+      "FraudFeedbackOccurrenceSnapshotMongoIntegrationTest",
+      "FraudAlertOutboxKafkaReliabilityIntegrationTest",
+      "EngineIntelligenceApiArchitectureGuardTest",
+      "EngineIntelligenceReadControllerSerializationTest",
+      "EngineIntelligenceOperationalMetricsCardinalityTest"
+    ]
+  },
   "frontend-architecture": {
     label: "Frontend architecture",
     activationGroups: [
