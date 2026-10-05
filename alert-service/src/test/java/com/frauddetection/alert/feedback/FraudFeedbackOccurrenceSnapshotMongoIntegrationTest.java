@@ -73,8 +73,8 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
     private static final String EVENT_B = "event-feedback-b";
     private static final String FINGERPRINT_A = "a".repeat(64);
     private static final String FINGERPRINT_B = "b".repeat(64);
-    private static final Instant CREATED_A = Instant.parse("2026-10-05T10:00:00Z");
-    private static final Instant CREATED_B = CREATED_A.plusSeconds(1);
+    private static final Instant CREATED_A = Instant.parse("2026-10-05T10:00:00.000000100Z");
+    private static final Instant CREATED_B = Instant.parse("2026-10-05T10:00:00.000000200Z");
 
     @Container
     static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0");
@@ -135,6 +135,9 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
         FraudFeedbackRecord saved = feedback.findByTransactionId(TRANSACTION_ID).orElseThrow();
         assertThat(saved.getSourceEventId()).isEqualTo(EVENT_A);
         assertThat(saved.getSourceEventCreatedAt()).isEqualTo(CREATED_A);
+        assertThat(saved.getSourceEventCreatedAtText()).isEqualTo(CREATED_A.toString());
+        assertThat(saved.getSourceEventCreatedAtEpochSecond()).isEqualTo(CREATED_A.getEpochSecond());
+        assertThat(saved.getSourceEventCreatedAtNano()).isEqualTo(CREATED_A.getNano());
         assertThat(saved.getSourceEventFingerprint()).isEqualTo(FINGERPRINT_A);
         assertThat(saved.getFraudScore()).isEqualTo(0.81d);
         assertThat(saved.getMlModelVersion()).isEqualTo("model-a");

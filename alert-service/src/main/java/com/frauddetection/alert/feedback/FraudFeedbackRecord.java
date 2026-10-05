@@ -35,7 +35,9 @@ public class FraudFeedbackRecord {
     private String transactionId;
 
     private String sourceEventId;
-    private Instant sourceEventCreatedAt;
+    private String sourceEventCreatedAt;
+    private Long sourceEventCreatedAtEpochSecond;
+    private Integer sourceEventCreatedAtNano;
     private String sourceEventFingerprint;
     private String customerId;
     private String correlationId;
@@ -72,16 +74,27 @@ public class FraudFeedbackRecord {
     public String getTransactionId() { return transactionId; }
     public void setTransactionId(String transactionId) { this.transactionId = transactionId; }
     public String getSourceEventId() { return sourceEventId; }
-    public Instant getSourceEventCreatedAt() { return sourceEventCreatedAt; }
+    public Instant getSourceEventCreatedAt() {
+        return scoringOccurrenceOwnership().map(ScoringOccurrenceOwnership::sourceEventCreatedAt).orElse(null);
+    }
+    public String getSourceEventCreatedAtText() { return sourceEventCreatedAt; }
+    public Long getSourceEventCreatedAtEpochSecond() { return sourceEventCreatedAtEpochSecond; }
+    public Integer getSourceEventCreatedAtNano() { return sourceEventCreatedAtNano; }
     public String getSourceEventFingerprint() { return sourceEventFingerprint; }
     public Optional<ScoringOccurrenceOwnership> scoringOccurrenceOwnership() {
-        if (sourceEventId == null && sourceEventCreatedAt == null && sourceEventFingerprint == null) {
+        if (sourceEventId == null
+                && sourceEventCreatedAt == null
+                && sourceEventCreatedAtEpochSecond == null
+                && sourceEventCreatedAtNano == null
+                && sourceEventFingerprint == null) {
             return Optional.empty();
         }
         try {
-            return Optional.of(ScoringOccurrenceOwnership.authoritative(
+            return Optional.of(ScoringOccurrenceOwnership.fromPersistedIdentity(
                     sourceEventId,
                     sourceEventCreatedAt,
+                    sourceEventCreatedAtEpochSecond,
+                    sourceEventCreatedAtNano,
                     sourceEventFingerprint
             ));
         } catch (IllegalArgumentException exception) {
@@ -97,7 +110,9 @@ public class FraudFeedbackRecord {
             throw new IllegalStateException("FRAUD_FEEDBACK_SCORING_OCCURRENCE_IMMUTABLE");
         }
         sourceEventId = ownership.sourceEventId();
-        sourceEventCreatedAt = ownership.sourceEventCreatedAt();
+        sourceEventCreatedAt = ownership.sourceEventCreatedAt().toString();
+        sourceEventCreatedAtEpochSecond = ownership.sourceEventCreatedAt().getEpochSecond();
+        sourceEventCreatedAtNano = ownership.sourceEventCreatedAt().getNano();
         sourceEventFingerprint = ownership.sourceEventFingerprint();
     }
     public String getCustomerId() { return customerId; }

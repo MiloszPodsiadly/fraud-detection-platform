@@ -1,5 +1,6 @@
 package com.frauddetection.alert.engineintelligence;
 
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
@@ -15,7 +16,9 @@ public class EngineIntelligencePendingProjection {
     @Id
     private String sourceEventId;
     private String transactionId;
-    private Instant sourceEventCreatedAt;
+    private String sourceEventCreatedAt;
+    private Long sourceEventCreatedAtEpochSecond;
+    private Integer sourceEventCreatedAtNano;
     private String sourceEventFingerprint;
     private EngineIntelligenceSummary engineIntelligence;
     private EngineIntelligenceRecoveryProvenance recoveryProvenance;
@@ -32,8 +35,24 @@ public class EngineIntelligencePendingProjection {
     public void setSourceEventId(String sourceEventId) { this.sourceEventId = sourceEventId; }
     public String getTransactionId() { return transactionId; }
     public void setTransactionId(String transactionId) { this.transactionId = transactionId; }
-    public Instant getSourceEventCreatedAt() { return sourceEventCreatedAt; }
-    public void setSourceEventCreatedAt(Instant sourceEventCreatedAt) { this.sourceEventCreatedAt = sourceEventCreatedAt; }
+    public Instant getSourceEventCreatedAt() { return scoringOccurrenceOwnership().sourceEventCreatedAt(); }
+    public String getSourceEventCreatedAtText() { return sourceEventCreatedAt; }
+    public Long getSourceEventCreatedAtEpochSecond() { return sourceEventCreatedAtEpochSecond; }
+    public Integer getSourceEventCreatedAtNano() { return sourceEventCreatedAtNano; }
+    public void setSourceEventCreatedAt(Instant sourceEventCreatedAt) {
+        this.sourceEventCreatedAt = sourceEventCreatedAt == null ? null : sourceEventCreatedAt.toString();
+        this.sourceEventCreatedAtEpochSecond = sourceEventCreatedAt == null ? null : sourceEventCreatedAt.getEpochSecond();
+        this.sourceEventCreatedAtNano = sourceEventCreatedAt == null ? null : sourceEventCreatedAt.getNano();
+    }
+    public ScoringOccurrenceOwnership scoringOccurrenceOwnership() {
+        return ScoringOccurrenceOwnership.fromPersistedIdentity(
+                sourceEventId,
+                sourceEventCreatedAt,
+                sourceEventCreatedAtEpochSecond,
+                sourceEventCreatedAtNano,
+                sourceEventFingerprint
+        );
+    }
     public String getSourceEventFingerprint() { return sourceEventFingerprint; }
     public void setSourceEventFingerprint(String sourceEventFingerprint) { this.sourceEventFingerprint = sourceEventFingerprint; }
     public EngineIntelligenceSummary getEngineIntelligence() { return engineIntelligence; }

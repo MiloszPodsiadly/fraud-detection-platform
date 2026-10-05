@@ -197,8 +197,12 @@ class EngineIntelligencePendingProjectionReliabilityIntegrationTest {
 
     @Test
     void durableDeferralSurvivesWorkerRestartUntilBaselineBecomesAuthoritative() throws Exception {
-        TransactionScoredEvent event = EngineIntelligenceProjectionTestFixtures.event(
-                EngineIntelligenceProjectionTestFixtures.minimalSummary()
+        Instant occurrenceCreatedAt = Instant.parse("2026-10-04T19:10:00.000000100Z");
+        TransactionScoredEvent event = event(
+                "engine-intelligence-pending-precision-event",
+                "engine-intelligence-pending-precision-transaction",
+                "engine-intelligence-pending-precision-correlation",
+                occurrenceCreatedAt
         );
         mongoTemplate.remove(Query.query(Criteria.where("_id").is(event.eventId())),
                 EngineIntelligencePendingProjection.class);
@@ -232,6 +236,11 @@ class EngineIntelligencePendingProjectionReliabilityIntegrationTest {
             );
             assertThat(deferred).isNotNull();
             assertThat(deferred.getStatus()).isEqualTo(EngineIntelligencePendingProjectionStatus.PENDING);
+            assertThat(deferred.getSourceEventCreatedAt()).isEqualTo(occurrenceCreatedAt);
+            assertThat(deferred.getSourceEventCreatedAtText()).isEqualTo(occurrenceCreatedAt.toString());
+            assertThat(deferred.getSourceEventCreatedAtEpochSecond())
+                    .isEqualTo(occurrenceCreatedAt.getEpochSecond());
+            assertThat(deferred.getSourceEventCreatedAtNano()).isEqualTo(occurrenceCreatedAt.getNano());
 
             baseline.resume();
             await(() -> mongoTemplate.exists(

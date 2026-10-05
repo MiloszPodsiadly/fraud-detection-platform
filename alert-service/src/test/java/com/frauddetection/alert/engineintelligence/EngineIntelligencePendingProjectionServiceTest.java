@@ -39,6 +39,9 @@ class EngineIntelligencePendingProjectionServiceTest {
         assertThat(stored.getSourceEventId()).isEqualTo(event.eventId());
         assertThat(stored.getTransactionId()).isEqualTo(event.transactionId());
         assertThat(stored.getSourceEventCreatedAt()).isEqualTo(event.createdAt());
+        assertThat(stored.getSourceEventCreatedAtText()).isEqualTo(event.createdAt().toString());
+        assertThat(stored.getSourceEventCreatedAtEpochSecond()).isEqualTo(event.createdAt().getEpochSecond());
+        assertThat(stored.getSourceEventCreatedAtNano()).isEqualTo(event.createdAt().getNano());
         assertThat(stored.getSourceEventFingerprint()).isEqualTo(ScoringOccurrenceFingerprint.from(event));
         assertThat(stored.getEngineIntelligence()).isEqualTo(event.engineIntelligence());
         assertThat(stored.getStatus()).isEqualTo(EngineIntelligencePendingProjectionStatus.PENDING);

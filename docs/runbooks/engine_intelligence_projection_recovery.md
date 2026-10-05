@@ -6,6 +6,8 @@ The Engine Intelligence consumer uses a projection-only Mongo inbox when its mat
 has not been committed yet. Kafka acknowledgement follows successful insertion of the validated envelope; the envelope
 contains only occurrence identifiers, the canonical fingerprint, event time, and bounded `EngineIntelligenceSummary`.
 It never contains raw customer data, feature vectors, private ML evidence, or arbitrary exception text.
+The event time round-trips as canonical timestamp text, epoch second, and nanosecond; missing only part of that
+precision metadata is invalid and must be quarantined or repaired from the exact retained source event, never guessed.
 
 The scheduled worker claims due entries with a lease token, retries with bounded delay, and removes an entry only through
 the active lease fence after a successful projection or a confirmed stale no-op. Exhausted or over-age entries become

@@ -35,10 +35,7 @@ class EngineIntelligenceReadServiceTest {
         EngineIntelligenceReadModel expected = EngineIntelligenceReadModel.notProjected("placeholder");
         when(scoredTransactionRepository.findById("txn-1")).thenReturn(Optional.of(current("txn-1", "event-1")));
         when(projectionRepository.findById("txn-1")).thenReturn(Optional.of(projection));
-        when(projection.getSourceEventId()).thenReturn("event-1");
-        when(projection.getSourceEventCreatedAt())
-                .thenReturn(Instant.parse("2026-10-04T10:00:00.123456789Z"));
-        when(projection.getSourceEventFingerprint()).thenReturn("a".repeat(64));
+        stubProjectionOwnership(projection, "event-1", "a".repeat(64));
         when(mapper.map(projection)).thenReturn(expected);
 
         assertThat(service.read("txn-1")).isSameAs(expected);
@@ -163,7 +160,7 @@ class EngineIntelligenceReadServiceTest {
         when(scoredTransactionRepository.findById("txn-current"))
                 .thenReturn(Optional.of(current("txn-current", "event-b")));
         when(projectionRepository.findById("txn-current")).thenReturn(Optional.of(projection));
-        when(projection.getSourceEventId()).thenReturn("event-a");
+        stubProjectionOwnership(projection, "event-a", "a".repeat(64));
 
         assertThat(service.read("txn-current"))
                 .isEqualTo(EngineIntelligenceReadModel.notProjected("txn-current"));
@@ -177,10 +174,7 @@ class EngineIntelligenceReadServiceTest {
         when(scoredTransactionRepository.findById("txn-current"))
                 .thenReturn(Optional.of(current("txn-current", "event-current")));
         when(projectionRepository.findById("txn-current")).thenReturn(Optional.of(projection));
-        when(projection.getSourceEventId()).thenReturn("event-current");
-        when(projection.getSourceEventCreatedAt())
-                .thenReturn(Instant.parse("2026-10-04T10:00:00.123456789Z"));
-        when(projection.getSourceEventFingerprint()).thenReturn("b".repeat(64));
+        stubProjectionOwnership(projection, "event-current", "b".repeat(64));
 
         assertThat(service.read("txn-current"))
                 .isEqualTo(EngineIntelligenceReadModel.notProjected("txn-current"));
@@ -208,6 +202,8 @@ class EngineIntelligenceReadServiceTest {
         when(scoredTransactionRepository.findById("txn-legacy"))
                 .thenReturn(Optional.of(current("txn-legacy", "event-current")));
         when(projectionRepository.findById("txn-legacy")).thenReturn(Optional.of(projection));
+        when(projection.getSourceEventCreatedAtEpochSecond()).thenReturn(null);
+        when(projection.getSourceEventCreatedAtNano()).thenReturn(null);
 
         assertThat(service.read("txn-legacy"))
                 .isEqualTo(EngineIntelligenceReadModel.notProjected("txn-legacy"));
@@ -215,8 +211,26 @@ class EngineIntelligenceReadServiceTest {
         verify(mapper, never()).map(projection);
     }
 
+    @Test
+    void projectionWithPartialPrecisionMetadataFailsClosed() {
+        EngineIntelligenceProjection projection = mock(EngineIntelligenceProjection.class);
+        Instant sourceEventCreatedAt = occurrenceTime();
+        when(scoredTransactionRepository.findById("txn-partial"))
+                .thenReturn(Optional.of(current("txn-partial", "event-current")));
+        when(projectionRepository.findById("txn-partial")).thenReturn(Optional.of(projection));
+        when(projection.getSourceEventId()).thenReturn("event-current");
+        when(projection.getSourceEventCreatedAtText()).thenReturn(sourceEventCreatedAt.toString());
+        when(projection.getSourceEventCreatedAtEpochSecond()).thenReturn(sourceEventCreatedAt.getEpochSecond());
+        when(projection.getSourceEventFingerprint()).thenReturn("a".repeat(64));
+
+        assertThatThrownBy(() -> service.read("txn-partial"))
+                .isInstanceOf(EngineIntelligenceProjectionReadUnavailableException.class);
+
+        verify(mapper, never()).map(projection);
+    }
+
     private ScoredTransactionDocument current(String transactionId, String sourceEventId) {
-        Instant sourceEventCreatedAt = Instant.parse("2026-10-04T10:00:00.123456789Z");
+        Instant sourceEventCreatedAt = occurrenceTime();
         ScoredTransactionDocument document = new ScoredTransactionDocument();
         document.setTransactionId(transactionId);
         document.setSourceEventId(sourceEventId);
@@ -225,6 +239,23 @@ class EngineIntelligenceReadServiceTest {
         document.setSourceEventCreatedAtNano(sourceEventCreatedAt.getNano());
         document.setSourceEventFingerprint("a".repeat(64));
         return document;
+    }
+
+    private void stubProjectionOwnership(
+            EngineIntelligenceProjection projection,
+            String sourceEventId,
+            String fingerprint
+    ) {
+        Instant sourceEventCreatedAt = occurrenceTime();
+        when(projection.getSourceEventId()).thenReturn(sourceEventId);
+        when(projection.getSourceEventCreatedAtText()).thenReturn(sourceEventCreatedAt.toString());
+        when(projection.getSourceEventCreatedAtEpochSecond()).thenReturn(sourceEventCreatedAt.getEpochSecond());
+        when(projection.getSourceEventCreatedAtNano()).thenReturn(sourceEventCreatedAt.getNano());
+        when(projection.getSourceEventFingerprint()).thenReturn(fingerprint);
+    }
+
+    private Instant occurrenceTime() {
+        return Instant.parse("2026-10-04T10:00:00.123456789Z");
     }
 
     private void assertInvalidTransactionId(String transactionId) {

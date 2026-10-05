@@ -581,9 +581,11 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
     }
 
     @Test
-    void delayedValidatedDiagnosticsCannotOverwriteNewerProjection() throws Exception {
-        TransactionScoredEvent earlier = event("event-a", BASE_TIME, 0.81d, "model-a");
-        TransactionScoredEvent newer = event("event-b", BASE_TIME.plusSeconds(1), 0.96d, "model-b");
+    void delayedValidatedDiagnosticsUseNanosecondOrderWithinSameMillisecond() throws Exception {
+        Instant earlierCreatedAt = BASE_TIME.plusNanos(100);
+        Instant newerCreatedAt = BASE_TIME.plusNanos(200);
+        TransactionScoredEvent earlier = event("z-event", earlierCreatedAt, 0.81d, "model-a");
+        TransactionScoredEvent newer = event("a-event", newerCreatedAt, 0.96d, "model-b");
         transactionTemplate.executeWithoutResult(status -> listener.onMessage(earlier, null));
 
         CountDownLatch earlierReachedWriteFence = new CountDownLatch(1);
@@ -624,6 +626,10 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
             );
             assertThat(stored).isNotNull();
             assertThat(stored.getSourceEventId()).isEqualTo(newer.eventId());
+            assertThat(stored.getSourceEventCreatedAt()).isEqualTo(newerCreatedAt);
+            assertThat(scoredTransactionRepository.findById(TRANSACTION_ID).orElseThrow().getSourceEventId())
+                    .isEqualTo(newer.eventId());
+            assertThat(engineIntelligenceReadService.read(TRANSACTION_ID).available()).isTrue();
         } finally {
             resumeEarlier.countDown();
             executor.shutdownNow();

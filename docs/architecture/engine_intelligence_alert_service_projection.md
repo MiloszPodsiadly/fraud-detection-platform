@@ -131,10 +131,13 @@ The operational procedure and retention boundary are defined in
 Engine-intelligence projection uses transactionId as Mongo `_id` and the source event ID, exact creation time, and
 canonical fingerprint as its private occurrence fence. Mongo `_id` uniqueness prevents duplicate public projections,
 while the complete occurrence fence prevents stale or conflicting replay from overwriting current diagnostics.
+The exact creation time is persisted as canonical timestamp text plus epoch second and nanosecond components, so two
+occurrences inside one Mongo millisecond retain their producer order.
 Reprocessing the same occurrence replaces the projection state instead of appending duplicate
-engines/signals/warnings. Existing projection documents without the complete occurrence identity remain readable from
-Mongo but fail closed as `NOT_PROJECTED` for current model-specific interpretation. No separate migration is required
-for this document-style projection unless deployment
+engines/signals/warnings. Existing projection documents with all occurrence identity components absent remain
+readable from Mongo but fail closed as `NOT_PROJECTED` for current model-specific interpretation. Partially populated
+identity is invalid and fails closed as projection unavailable; no timestamp precision is fabricated. No separate
+migration is required for this document-style projection unless deployment
 policy requires explicit collection/index creation. Future hardening may add secondary indexes or retention/TTL
 based on query and retention needs.
 
@@ -205,7 +208,8 @@ authorization.
 The optional projection runs in its own Kafka consumer group and a separate MongoDB transaction. It validates the
 event against the authoritative scored transaction before writing diagnostics. The write boundary also applies an
 atomic Mongo occurrence fence ordered by source event timestamp and event ID, with exact fingerprint equality required
-for same-event replay. A delayed older worker therefore cannot replace a newer accepted projection. The read boundary
+for same-event replay. Timestamp comparison uses the persisted epoch second and nanosecond before the event-ID tie
+breaker. A delayed older worker therefore cannot replace a newer accepted projection. The read boundary
 independently requires the source event ID, exact creation time, and canonical fingerprint to match and returns
 `NOT_PROJECTED` rather than mixed-occurrence model identity.
 

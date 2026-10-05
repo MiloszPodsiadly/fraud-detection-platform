@@ -16,9 +16,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.Date;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Testcontainers
 class EngineIntelligenceProjectionWriteFenceMongoIntegrationTest {
@@ -97,6 +97,26 @@ class EngineIntelligenceProjectionWriteFenceMongoIntegrationTest {
     }
 
     @Test
+    void nanosecondOrderWinsWithinSameMillisecondDespiteReversedEventIds() {
+        Instant earlierNanosecond = Instant.parse("2026-10-04T18:00:00.000000100Z");
+        Instant laterNanosecond = Instant.parse("2026-10-04T18:00:00.000000200Z");
+        EngineIntelligenceProjection earlier = projection("z-event", earlierNanosecond, "a".repeat(64));
+        EngineIntelligenceProjection later = projection("a-event", laterNanosecond, "b".repeat(64));
+
+        assertThat(writeFence.write(later).status())
+                .isEqualTo(EngineIntelligenceProjectionWriteResult.Status.ACCEPTED);
+        assertThat(writeFence.write(earlier).status())
+                .isEqualTo(EngineIntelligenceProjectionWriteResult.Status.STALE);
+
+        EngineIntelligenceProjection stored = stored();
+        assertThat(stored.getSourceEventId()).isEqualTo("a-event");
+        assertThat(stored.getSourceEventCreatedAt()).isEqualTo(laterNanosecond);
+        assertThat(stored.getSourceEventCreatedAtText()).isEqualTo(laterNanosecond.toString());
+        assertThat(stored.getSourceEventCreatedAtEpochSecond()).isEqualTo(laterNanosecond.getEpochSecond());
+        assertThat(stored.getSourceEventCreatedAtNano()).isEqualTo(laterNanosecond.getNano());
+    }
+
+    @Test
     void sameSourceEventWithDifferentFingerprintFailsClosed() {
         EngineIntelligenceProjection accepted = projection("event-current", LATER, "a".repeat(64));
         EngineIntelligenceProjection conflicting = projection("event-current", LATER, "b".repeat(64));
@@ -110,10 +130,30 @@ class EngineIntelligenceProjectionWriteFenceMongoIntegrationTest {
     }
 
     @Test
-    void historicalProjectionWithPartialFenceMetadataCanBeReplacedOnce() {
-        mongoTemplate.getCollection("engine_intelligence_projections").insertOne(new Document()
-                .append("_id", "transaction-current")
-                .append("sourceEventCreatedAt", Date.from(EARLIER)));
+    void sameSourceEventWithDifferentTimestampFailsClosedBeforeReplacement() {
+        EngineIntelligenceProjection accepted = projection("event-current", EARLIER, "a".repeat(64));
+        EngineIntelligenceProjection conflicting = projection("event-current", LATER, "a".repeat(64));
+
+        assertThat(writeFence.write(accepted).status())
+                .isEqualTo(EngineIntelligenceProjectionWriteResult.Status.ACCEPTED);
+        assertThat(writeFence.write(conflicting).status())
+                .isEqualTo(EngineIntelligenceProjectionWriteResult.Status.SOURCE_PAYLOAD_CONFLICT);
+
+        assertThat(stored().getSourceEventCreatedAt()).isEqualTo(EARLIER);
+    }
+
+    @Test
+    void historicalProjectionWithoutOccurrenceIdentityCanBeReplacedOnce() {
+        mongoTemplate.insert(projection("historical-event", EARLIER, "f".repeat(64)));
+        mongoTemplate.getCollection("engine_intelligence_projections").updateOne(
+                new Document("_id", "transaction-current"),
+                new Document("$unset", new Document()
+                        .append("sourceEventId", "")
+                        .append("sourceEventCreatedAt", "")
+                        .append("sourceEventCreatedAtEpochSecond", "")
+                        .append("sourceEventCreatedAtNano", "")
+                        .append("sourceEventFingerprint", ""))
+        );
 
         EngineIntelligenceProjection current = projection("event-current", LATER, "a".repeat(64));
 
@@ -121,6 +161,26 @@ class EngineIntelligenceProjectionWriteFenceMongoIntegrationTest {
                 .isEqualTo(EngineIntelligenceProjectionWriteResult.Status.ACCEPTED);
         assertThat(stored().getSourceEventId()).isEqualTo("event-current");
         assertThat(stored().getSourceEventFingerprint()).isEqualTo("a".repeat(64));
+    }
+
+    @Test
+    void partialPersistedOccurrenceIdentityFailsClosed() {
+        mongoTemplate.insert(projection("event-partial", EARLIER, "a".repeat(64)));
+        mongoTemplate.getCollection("engine_intelligence_projections").updateOne(
+                new Document("_id", "transaction-current"),
+                new Document("$unset", new Document("sourceEventCreatedAtNano", ""))
+        );
+
+        EngineIntelligenceProjection current = projection("event-current", LATER, "b".repeat(64));
+
+        assertThatThrownBy(() -> writeFence.write(current))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("ENGINE_INTELLIGENCE_PROJECTION_OCCURRENCE_IDENTITY_INVALID");
+        Document persisted = mongoTemplate.getCollection("engine_intelligence_projections")
+                .find(new Document("_id", "transaction-current"))
+                .first();
+        assertThat(persisted).isNotNull();
+        assertThat(persisted.getString("sourceEventId")).isEqualTo("event-partial");
     }
 
     private EngineIntelligenceProjection projection(String eventId, Instant sourceCreatedAt, String fingerprint) {

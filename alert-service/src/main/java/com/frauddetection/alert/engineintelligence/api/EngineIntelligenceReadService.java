@@ -81,16 +81,27 @@ public class EngineIntelligenceReadService {
         }
         return projection
                 .filter(candidate -> ownership.state() == ScoringOccurrenceOwnership.State.AUTHORITATIVE)
-                .filter(candidate -> Objects.equals(candidate.getSourceEventId(), ownership.sourceEventId()))
-                .filter(candidate -> Objects.equals(
-                        candidate.getSourceEventCreatedAt(),
-                        ownership.sourceEventCreatedAt()
-                ))
-                .filter(candidate -> Objects.equals(
-                        candidate.getSourceEventFingerprint(),
-                        ownership.sourceEventFingerprint()
-                ))
+                .filter(candidate -> matchesOccurrence(candidate, ownership))
                 .map(mapper::map)
                 .orElseGet(() -> EngineIntelligenceReadModel.notProjected(boundedTransactionId));
+    }
+
+    private boolean matchesOccurrence(
+            EngineIntelligenceProjection projection,
+            ScoringOccurrenceOwnership ownership
+    ) {
+        try {
+            ScoringOccurrenceOwnership projectionOwnership = ScoringOccurrenceOwnership.fromPersistedIdentity(
+                    projection.getSourceEventId(),
+                    projection.getSourceEventCreatedAtText(),
+                    projection.getSourceEventCreatedAtEpochSecond(),
+                    projection.getSourceEventCreatedAtNano(),
+                    projection.getSourceEventFingerprint()
+            );
+            return projectionOwnership.state() == ScoringOccurrenceOwnership.State.AUTHORITATIVE
+                    && Objects.equals(projectionOwnership, ownership);
+        } catch (IllegalArgumentException exception) {
+            throw new EngineIntelligenceProjectionReadUnavailableException();
+        }
     }
 }

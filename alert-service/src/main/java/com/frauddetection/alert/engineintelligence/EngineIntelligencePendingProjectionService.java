@@ -75,7 +75,12 @@ public class EngineIntelligencePendingProjectionService {
     ) {
         return existing != null
                 && Objects.equals(existing.getTransactionId(), candidate.getTransactionId())
-                && Objects.equals(existing.getSourceEventCreatedAt(), candidate.getSourceEventCreatedAt())
+                && Objects.equals(existing.getSourceEventCreatedAtText(), candidate.getSourceEventCreatedAtText())
+                && Objects.equals(
+                        existing.getSourceEventCreatedAtEpochSecond(),
+                        candidate.getSourceEventCreatedAtEpochSecond()
+                )
+                && Objects.equals(existing.getSourceEventCreatedAtNano(), candidate.getSourceEventCreatedAtNano())
                 && Objects.equals(existing.getSourceEventFingerprint(), candidate.getSourceEventFingerprint())
                 && Objects.equals(existing.getEngineIntelligence(), candidate.getEngineIntelligence())
                 && Objects.equals(existing.getRecoveryProvenance(), candidate.getRecoveryProvenance());

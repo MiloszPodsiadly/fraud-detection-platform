@@ -64,7 +64,10 @@ lineage, feedback record, and audit intent are read and persisted in one `REQUIR
 immutable and is not exposed by the public feedback API. An unknown or partially populated occurrence identity fails
 closed; it is never reconstructed from the current runtime, model registry, latest score, or timestamps.
 
-Historical feedback records with all three occurrence identity fields absent remain readable but are explicitly
+The exact source event time is stored as canonical timestamp text plus epoch second and nanosecond components. This
+preserves feedback lineage when multiple scoring occurrences fall inside the same Mongo millisecond.
+
+Historical feedback records with every persisted occurrence identity component absent remain readable but are explicitly
 lineage unavailable. Before any future model-specific evidence evaluation, those rows must either be replayed or
 migrated from the exact retained authoritative event, or quarantined and excluded. Partial historical identities are
 invalid and must not be guessed or backfilled.
