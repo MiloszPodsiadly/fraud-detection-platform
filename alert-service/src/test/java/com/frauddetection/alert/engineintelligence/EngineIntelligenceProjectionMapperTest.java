@@ -46,7 +46,11 @@ class EngineIntelligenceProjectionMapperTest {
     @Test
     void invalidShapeUsesTypedOmissionReason() {
         assertOmitted(
-                mapper.map("txn-token-secret", EngineIntelligenceProjectionTestFixtures.minimalSummary(), null),
+                mapper.map(
+                        "txn invalid",
+                        EngineIntelligenceProjectionTestFixtures.minimalSummary(),
+                        null
+                ),
                 EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE
         );
     }

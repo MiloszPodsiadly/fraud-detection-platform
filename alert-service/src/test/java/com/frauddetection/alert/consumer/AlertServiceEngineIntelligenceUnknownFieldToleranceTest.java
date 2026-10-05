@@ -26,8 +26,9 @@ class AlertServiceEngineIntelligenceUnknownFieldToleranceTest {
     void consumerKeepsExistingProjectionUnchangedWhenUnknownFieldsPresent() {
         TransactionScoredEvent unknownNested = AlertServiceTransactionScoredEventFixtureLoader.unknownNestedEngineIntelligenceFields();
 
-        assertThat(mapper.toDocument(unknownNested))
-                .usingRecursiveComparison()
-                .isEqualTo(mapper.toDocument(AlertServiceTransactionScoredEventFixtureLoader.withoutEngineIntelligence()));
+        AlertServiceBaselineProjectionAssertions.assertUnaffectedByEngineIntelligence(
+                mapper,
+                unknownNested
+        );
     }
 }
