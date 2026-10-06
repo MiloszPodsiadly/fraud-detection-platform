@@ -32,8 +32,8 @@ The only supported active input is feedback dataset JSONL:
 ```
 
 The first non-empty line must be `DATASET_METADATA`. Metadata is required, dataset records must follow metadata,
-unknown line types are rejected, malformed JSONL is rejected, and multiple metadata lines are rejected. Safe unknown
-optional metadata or record fields are ignored. Invalid known fields fail validation.
+unknown line types and fields are rejected, malformed JSONL is rejected, and multiple metadata lines are rejected.
+Metadata population counters must reconcile with returned, excluded, skipped, and truncation-sentinel rows.
 
 Failed feedback dataset builds abort evaluation. A metadata line with `failureReason != null` represents a failed
 dataset build and must not be treated as an empty successful dataset.
@@ -74,9 +74,11 @@ Feedback Dataset Evaluation treats `engineStatus` as the source of truth for ope
 risk and score bucket fields must be absent. `UNAVAILABLE`, `TIMEOUT`, `SKIPPED`, `DEGRADED`, and `FALLBACK_USED`
 are not ranked and are not high/low signals.
 
-The feedback dataset currently supplies risk and score buckets rather than raw numeric ML scores. The evaluator therefore uses documented
-bucket-based ordering for ranking diagnostics: higher ML risk or score buckets first, then deterministic
-`evaluationRecordId` tie-break. It does not invent raw scores.
+Feedback dataset v2 supplies an exact bounded `mlPredictionScore`, `mlPredictionRiskLevel`, and
+`mlPredictionExecutedAt` only when `mlPredictionEvidenceStatus = AVAILABLE`. `LEGITIMATELY_ABSENT` requires those
+values and the model identity to be null. Platform recommendation diagnostics continue to use their existing platform
+fields; model-specific evaluation must use only the direct ML evidence fields and must not substitute platform score,
+risk, or recommendation values.
 
 The evaluator accepts feedback dataset pseudonymous input references only for parsing and deterministic ordering. Reports are
 aggregate-only and must not emit `evaluationRecordId`, `transactionReference`, `eval-`, or `txnref-` values.
@@ -94,9 +96,19 @@ approval criteria.
 The offline package also supports an optional aggregate-only ML model evaluation summary for an exact requested
 `modelName`, `modelVersion`, and `featureContractVersion`. This is separate from Platform Recommendation Evaluation:
 platform reports keep `subjectType = PLATFORM_RECOMMENDATION` and `modelIdentity = NOT_AVAILABLE`, while model-specific
-reports use `subjectType = ML_MODEL` and exclude records with missing or mismatched lineage. Direct ML prediction
-metrics remain unavailable unless the dataset carries direct ML output evidence. See
+reports use `subjectType = ML_MODEL` and exclude records with missing or mismatched lineage. Dataset v2 now carries
+direct ML output evidence for the exact scoring occurrence; model-specific metric calculation is a separate bounded
+step. The model evaluator classifies direct ML `HIGH`/`CRITICAL` risk as positive and `LOW`/`MEDIUM` as negative,
+publishes a reconciled aggregate confusion matrix and rates, and never substitutes platform recommendation fields.
+Missing or invalid prediction evidence and lineage mismatches remain explicit exclusion counts. Rates with zero
+denominators are unavailable with bounded reasons instead of fake numeric values. Model ranking reuses the platform
+ranking implementation but supplies exact `mlPredictionScore`, isolates the requested model identity, and orders ties
+by pseudonymous evaluation record ID. Ranking does not claim score calibration. See
 [ML Model Specific Evaluation](ml_model_specific_evaluation.md).
+
+Its aggregate Rules-vs-ML breakdown uses the Rules snapshot captured from the same scoring occurrence as the direct
+ML evidence. Missing Rules evidence is counted as unavailable, never converted to low risk, and no current/latest
+Engine Intelligence projection is consulted during dataset evaluation.
 
 ## Model Runtime Readiness
 
@@ -150,7 +162,7 @@ consumers may rely on this one-directory, one-run invariant.
 
 Platform Evaluation writers and readers use only `FEEDBACK_DATASET_OFFLINE_EVALUATION_V1` with
 `feedback-dataset-evaluation-report-artifact-set-v1` and
-`identityCompleteness = NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE`. Unsupported or mixed identities fail
+`identityCompleteness = PLATFORM_RECOMMENDATION_NOT_MODEL_ARTIFACT_SCOPED`. Unsupported or mixed identities fail
 closed.
 
 Platform Evaluation report artifacts are not external exports and do not expose raw source identifiers, raw notes, raw payloads,

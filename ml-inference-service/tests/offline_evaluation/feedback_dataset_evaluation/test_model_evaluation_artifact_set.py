@@ -194,9 +194,12 @@ class ModelEvaluationArtifactSetReaderTest(unittest.TestCase):
             summary = self._summary(artifact_dir)
             summary["population"] = {
                 "recordsConsidered": MAX_DATASET_RECORDS + 1,
+                "recordsWithPredictionEvidence": MAX_DATASET_RECORDS + 1,
                 "recordsEvaluated": MAX_DATASET_RECORDS + 1,
                 "recordsExcludedMissingLineage": 0,
                 "recordsExcludedIdentityMismatch": 0,
+                "recordsExcludedMissingPredictionEvidence": 0,
+                "recordsExcludedInvalidPredictionEvidence": 0,
             }
             summary["classBalance"] = {
                 "positiveClassCount": MAX_DATASET_RECORDS,

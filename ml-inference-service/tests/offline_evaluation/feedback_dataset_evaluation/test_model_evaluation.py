@@ -1,6 +1,8 @@
 import json
 import unittest
+from dataclasses import replace
 
+from offline_evaluation.feedback_dataset_evaluation.classification_policy import RISK_CLASSIFICATION_POLICY
 from offline_evaluation.feedback_dataset_evaluation.dataset_reader import read_feedback_dataset_jsonl
 from offline_evaluation.feedback_dataset_evaluation.dataset_schema import (
     MAX_DATASET_RECORDS,
@@ -11,9 +13,17 @@ from offline_evaluation.feedback_dataset_evaluation.model_evaluation import (
     INSUFFICIENT_MODEL_LINEAGE_RECORDS,
     MODEL_EVALUATION_REPORT_TYPE,
     MODEL_PREDICTION_SIGNAL_UNAVAILABLE,
+    ML_SCORE_RANKING_POLICY,
+    RULES_SIGNAL_UNAVAILABLE,
     SINGLE_CLASS_MODEL_LINEAGE_RECORDS,
     ModelEvaluationIdentity,
+    build_model_specific_evaluation_summary,
     validate_model_evaluation_summary,
+)
+from offline_evaluation.feedback_dataset_evaluation.metrics import (
+    DEFAULT_TOP_K_VALUES,
+    build_binary_classification_metrics_from_counts,
+    build_ranked_metric_rows,
 )
 from offline_evaluation.feedback_dataset_evaluation.report_writer import report_json
 
@@ -74,7 +84,8 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
         summary = self._model_summary(record(), self._model_record("eval_22222222222222222222222222222222", MODEL_X))
 
         self.assertEqual(1, summary["population"]["recordsEvaluated"])
-        self.assertEqual(1, summary["population"]["recordsExcludedMissingLineage"])
+        self.assertEqual(1, summary["population"]["recordsExcludedMissingPredictionEvidence"])
+        self.assertEqual(0, summary["population"]["recordsExcludedMissingLineage"])
         self.assertEqual("MODEL_LINEAGE_UNAVAILABLE", summary["lineagePolicy"]["missingLineageReason"])
 
     def test_partialLineageFailsInsteadOfBecomingUnavailableLineage(self):
@@ -85,7 +96,7 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
             with self.assertRaises(FeedbackDatasetValidationError):
                 read_feedback_dataset_jsonl(path)
 
-    def test_legacyDatasetRemainsValidForPlatformEvaluation(self):
+    def test_absentMlEvidenceRecordRemainsValidForPlatformEvaluation(self):
         reports = self._reports(record())
 
         self.assertNotIn("modelEvaluationSummary", reports)
@@ -156,9 +167,12 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
         summary = self._model_summary(self._model_record("eval_11111111111111111111111111111111", MODEL_X))
 
         self.assertEqual(
-            [MODEL_PREDICTION_SIGNAL_UNAVAILABLE, SINGLE_CLASS_MODEL_LINEAGE_RECORDS],
+            [SINGLE_CLASS_MODEL_LINEAGE_RECORDS],
             summary["warnings"],
         )
+        metrics = summary["supportedMetrics"]["mlPredictionMetrics"]
+        self.assertFalse(metrics["falsePositiveRate"]["available"])
+        self.assertEqual("NO_ACTUAL_NEGATIVES", metrics["falsePositiveRate"]["reason"])
         self.assertIs(summary, validate_model_evaluation_summary(summary))
 
         summary["warnings"].remove(SINGLE_CLASS_MODEL_LINEAGE_RECORDS)
@@ -174,16 +188,20 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
         ))
 
         self.assertEqual(
-            [MODEL_PREDICTION_SIGNAL_UNAVAILABLE, SINGLE_CLASS_MODEL_LINEAGE_RECORDS],
+            [SINGLE_CLASS_MODEL_LINEAGE_RECORDS],
             summary["warnings"],
         )
+        metrics = summary["supportedMetrics"]["mlPredictionMetrics"]
+        self.assertFalse(metrics["recall"]["available"])
+        self.assertFalse(metrics["truePositiveRate"]["available"])
+        self.assertFalse(metrics["falseNegativeRate"]["available"])
         self.assertIs(summary, validate_model_evaluation_summary(summary))
 
         summary["warnings"].remove(SINGLE_CLASS_MODEL_LINEAGE_RECORDS)
         with self.assertRaisesRegex(ValueError, "warnings must match evaluated population"):
             validate_model_evaluation_summary(summary)
 
-    def test_bothClassesRequireOnlyPredictionSignalWarning(self):
+    def test_bothClassesWithPredictionSignalRequireNoWarning(self):
         summary = self._model_summary(
             self._model_record("eval_11111111111111111111111111111111", MODEL_X),
             self._model_record(
@@ -194,7 +212,7 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
             ),
         )
 
-        self.assertEqual([MODEL_PREDICTION_SIGNAL_UNAVAILABLE], summary["warnings"])
+        self.assertEqual([], summary["warnings"])
         self.assertIs(summary, validate_model_evaluation_summary(summary))
 
         summary["warnings"].append(SINGLE_CLASS_MODEL_LINEAGE_RECORDS)
@@ -307,14 +325,261 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(json.loads(first)["generatedAt"], GENERATED_AT)
 
-    def test_mlPredictionMetricsAreExplicitlyUnavailable(self):
-        summary = self._model_summary(self._model_record("eval_11111111111111111111111111111111", MODEL_X))
+    def test_mlPredictionMetricsAreExplicitlyUnavailableWithoutExactEvidence(self):
+        summary = self._model_summary(record())
 
         self.assertFalse(summary["supportedMetrics"]["mlPredictionMetrics"]["available"])
         self.assertEqual(
             "MODEL_PREDICTION_SIGNAL_UNAVAILABLE",
             summary["supportedMetrics"]["mlPredictionMetrics"]["reason"],
         )
+
+    def test_balancedPredictionMetricsUseExactMlRiskAndMatchHandCalculatedMatrix(self):
+        summary = self._model_summary(
+            self._model_record("eval_11111111111111111111111111111111", MODEL_X, mlPredictionRiskLevel="HIGH"),
+            self._model_record(
+                "eval_22222222222222222222222222222222",
+                MODEL_X,
+                feedbackLabel="CONFIRMED_LEGITIMATE",
+                evaluationLabel="NEGATIVE_LEGITIMATE",
+                mlPredictionRiskLevel="CRITICAL",
+            ),
+            self._model_record(
+                "eval_33333333333333333333333333333333",
+                MODEL_X,
+                feedbackLabel="CONFIRMED_LEGITIMATE",
+                evaluationLabel="NEGATIVE_LEGITIMATE",
+                mlPredictionRiskLevel="LOW",
+            ),
+            self._model_record("eval_44444444444444444444444444444444", MODEL_X, mlPredictionRiskLevel="MEDIUM"),
+        )
+
+        metrics = summary["supportedMetrics"]["mlPredictionMetrics"]
+        self.assertTrue(metrics["available"])
+        self.assertEqual(RISK_CLASSIFICATION_POLICY, metrics["classificationPolicy"])
+        self.assertEqual(
+            {"truePositive": 1, "falsePositive": 1, "trueNegative": 1, "falseNegative": 1},
+            {field: metrics[field] for field in ("truePositive", "falsePositive", "trueNegative", "falseNegative")},
+        )
+        for field in ("precision", "recall", "truePositiveRate", "falsePositiveRate", "falseNegativeRate"):
+            self.assertEqual({"available": True, "reason": None, "value": 0.5}, metrics[field])
+
+    def test_allPredictionsCorrect(self):
+        summary = self._model_summary(
+            self._model_record("eval_11111111111111111111111111111111", MODEL_X, mlPredictionRiskLevel="CRITICAL"),
+            self._model_record(
+                "eval_22222222222222222222222222222222",
+                MODEL_X,
+                feedbackLabel="CONFIRMED_LEGITIMATE",
+                evaluationLabel="NEGATIVE_LEGITIMATE",
+                mlPredictionRiskLevel="LOW",
+            ),
+        )
+
+        metrics = summary["supportedMetrics"]["mlPredictionMetrics"]
+        self.assertEqual((1, 0, 1, 0), self._confusion_counts(metrics))
+        self.assertEqual(1.0, metrics["precision"]["value"])
+        self.assertEqual(1.0, metrics["recall"]["value"])
+
+    def test_allPredictionsWrong(self):
+        summary = self._model_summary(
+            self._model_record("eval_11111111111111111111111111111111", MODEL_X, mlPredictionRiskLevel="LOW"),
+            self._model_record(
+                "eval_22222222222222222222222222222222",
+                MODEL_X,
+                feedbackLabel="CONFIRMED_LEGITIMATE",
+                evaluationLabel="NEGATIVE_LEGITIMATE",
+                mlPredictionRiskLevel="HIGH",
+            ),
+        )
+
+        metrics = summary["supportedMetrics"]["mlPredictionMetrics"]
+        self.assertEqual((0, 1, 0, 1), self._confusion_counts(metrics))
+        self.assertEqual(0.0, metrics["precision"]["value"])
+        self.assertEqual(0.0, metrics["recall"]["value"])
+
+    def test_modelMetricsIgnorePlatformDecisionFields(self):
+        summary = self._model_summary(self._model_record(
+            "eval_11111111111111111111111111111111",
+            MODEL_X,
+            mlPredictionRiskLevel="HIGH",
+            fraudScore=0.0,
+            riskLevel="LOW",
+            alertRecommended=False,
+        ))
+
+        metrics = summary["supportedMetrics"]["mlPredictionMetrics"]
+        self.assertEqual((1, 0, 0, 0), self._confusion_counts(metrics))
+
+    def test_directEvaluatorAccountsForMissingLineageDefensively(self):
+        dataset = self._dataset(self._model_record("eval_11111111111111111111111111111111", MODEL_X))
+        without_lineage = replace(
+            dataset.records[0],
+            ml_model_name=None,
+            ml_model_version=None,
+            ml_feature_contract_version=None,
+        )
+
+        summary = build_model_specific_evaluation_summary(
+            replace(dataset, records=(without_lineage,)),
+            MODEL_X,
+            GENERATED_AT,
+        )
+
+        self.assertEqual(1, summary["population"]["recordsWithPredictionEvidence"])
+        self.assertEqual(1, summary["population"]["recordsExcludedMissingLineage"])
+        self.assertEqual(0, summary["population"]["recordsEvaluated"])
+
+    def test_directEvaluatorAccountsForInvalidPredictionEvidenceDefensively(self):
+        dataset = self._dataset(self._model_record("eval_11111111111111111111111111111111", MODEL_X))
+        partial_evidence = replace(dataset.records[0], ml_prediction_score=None)
+
+        summary = build_model_specific_evaluation_summary(
+            replace(dataset, records=(partial_evidence,)),
+            MODEL_X,
+            GENERATED_AT,
+        )
+
+        self.assertEqual(1, summary["population"]["recordsExcludedInvalidPredictionEvidence"])
+        self.assertEqual(0, summary["population"]["recordsWithPredictionEvidence"])
+        self.assertEqual(0, summary["population"]["recordsEvaluated"])
+
+    def test_directEvaluatorRejectsPartialOrUnsafeModelIdentityDefensively(self):
+        dataset = self._dataset(self._model_record("eval_11111111111111111111111111111111", MODEL_X))
+        invalid_records = (
+            replace(dataset.records[0], ml_model_version=None),
+            replace(dataset.records[0], ml_model_version="token-secret"),
+        )
+
+        for invalid_record in invalid_records:
+            with self.subTest(model_version=invalid_record.ml_model_version):
+                summary = build_model_specific_evaluation_summary(
+                    replace(dataset, records=(invalid_record,)),
+                    MODEL_X,
+                    GENERATED_AT,
+                )
+
+                self.assertEqual(1, summary["population"]["recordsExcludedInvalidPredictionEvidence"])
+                self.assertEqual(0, summary["population"]["recordsExcludedMissingLineage"])
+                self.assertEqual(0, summary["population"]["recordsWithPredictionEvidence"])
+
+    def test_directEvaluatorRejectsNoncanonicalPredictionScoreScaleDefensively(self):
+        dataset = self._dataset(self._model_record("eval_11111111111111111111111111111111", MODEL_X))
+        excessive_scale = replace(dataset.records[0], ml_prediction_score=0.12345)
+
+        summary = build_model_specific_evaluation_summary(
+            replace(dataset, records=(excessive_scale,)),
+            MODEL_X,
+            GENERATED_AT,
+        )
+
+        self.assertEqual(1, summary["population"]["recordsExcludedInvalidPredictionEvidence"])
+        self.assertEqual(0, summary["population"]["recordsWithPredictionEvidence"])
+
+    def test_mlScoreRankingMatchesHandCalculatedPrecisionAndRecall(self):
+        summary = self._ranked_summary(
+            (
+                self._model_record(
+                    "eval_11111111111111111111111111111111",
+                    MODEL_X,
+                    mlPredictionScore=0.9,
+                    fraudScore=0.1,
+                ),
+                self._model_record(
+                    "eval_22222222222222222222222222222222",
+                    MODEL_X,
+                    feedbackLabel="CONFIRMED_LEGITIMATE",
+                    evaluationLabel="NEGATIVE_LEGITIMATE",
+                    mlPredictionScore=0.8,
+                    fraudScore=0.95,
+                ),
+                self._model_record(
+                    "eval_33333333333333333333333333333333",
+                    MODEL_X,
+                    mlPredictionScore=0.7,
+                    fraudScore=0.05,
+                ),
+                self._model_record(
+                    "eval_44444444444444444444444444444444",
+                    MODEL_X,
+                    feedbackLabel="CONFIRMED_LEGITIMATE",
+                    evaluationLabel="NEGATIVE_LEGITIMATE",
+                    mlPredictionScore=0.6,
+                    fraudScore=1.0,
+                ),
+            ),
+            (1, 2, 3, 10),
+        )
+
+        metrics = summary["supportedMetrics"]["mlPredictionMetrics"]
+        self.assertEqual(1.0, metrics["precisionAtK"]["1"]["value"]["value"])
+        self.assertEqual(0.5, metrics["recallAtK"]["1"]["value"]["value"])
+        self.assertEqual(0.5, metrics["precisionAtK"]["2"]["value"]["value"])
+        self.assertEqual(0.5, metrics["recallAtK"]["2"]["value"]["value"])
+        self.assertEqual(0.666667, metrics["precisionAtK"]["3"]["value"]["value"])
+        self.assertEqual(1.0, metrics["recallAtK"]["3"]["value"]["value"])
+        self.assertEqual(4, metrics["precisionAtK"]["10"]["actualK"])
+        self.assertEqual(0.5, metrics["precisionAtK"]["10"]["value"]["value"])
+
+    def test_mlScoreRankingTieBreakIsDeterministicByEvaluationRecordId(self):
+        negative = self._model_record(
+            "eval_11111111111111111111111111111111",
+            MODEL_X,
+            feedbackLabel="CONFIRMED_LEGITIMATE",
+            evaluationLabel="NEGATIVE_LEGITIMATE",
+            mlPredictionScore=0.5,
+        )
+        positive = self._model_record(
+            "eval_22222222222222222222222222222222",
+            MODEL_X,
+            mlPredictionScore=0.5,
+        )
+
+        first = self._ranked_summary((positive, negative), (1,))
+        second = self._ranked_summary((negative, positive), (1,))
+
+        self.assertEqual(first["supportedMetrics"]["mlPredictionMetrics"], second["supportedMetrics"]["mlPredictionMetrics"])
+        self.assertEqual(0.0, first["supportedMetrics"]["mlPredictionMetrics"]["precisionAtK"]["1"]["value"]["value"])
+
+    def test_mlScoreRankingRejectsInvalidOrUnboundedK(self):
+        records = (self._model_record("eval_11111111111111111111111111111111", MODEL_X),)
+        for top_k_values in ((), (0,), (-1,), (MAX_DATASET_RECORDS + 1,), (1, 1), (True,)):
+            with self.subTest(top_k_values=top_k_values):
+                with self.assertRaises(ValueError):
+                    self._ranked_summary(records, top_k_values)
+
+    def test_mlScoreRankingIsUnavailableWithoutUsablePredictionEvidence(self):
+        summary = self._ranked_summary((record(),), (1,))
+
+        ranking = summary["supportedMetrics"]["mlPredictionMetrics"]
+        self.assertEqual(1, summary["population"]["recordsExcludedMissingPredictionEvidence"])
+        self.assertEqual(0, ranking["precisionAtK"]["1"]["actualK"])
+        self.assertEqual("NO_SCORED_RECORDS", ranking["precisionAtK"]["1"]["value"]["reason"])
+        self.assertEqual("NO_SCORED_RECORDS", ranking["recallAtK"]["1"]["value"]["reason"])
+
+    def test_mlScoreRankingExcludesOtherModelIdentityEvenWithHigherScore(self):
+        summary = self._ranked_summary(
+            (
+                self._model_record(
+                    "eval_11111111111111111111111111111111",
+                    MODEL_X,
+                    feedbackLabel="CONFIRMED_LEGITIMATE",
+                    evaluationLabel="NEGATIVE_LEGITIMATE",
+                    mlPredictionScore=0.1,
+                ),
+                self._model_record(
+                    "eval_22222222222222222222222222222222",
+                    MODEL_Y,
+                    mlPredictionScore=0.99,
+                ),
+            ),
+            (1,),
+        )
+
+        ranking = summary["supportedMetrics"]["mlPredictionMetrics"]
+        self.assertEqual(1, summary["population"]["recordsExcludedIdentityMismatch"])
+        self.assertEqual(1, ranking["precisionAtK"]["1"]["actualK"])
+        self.assertEqual(0.0, ranking["precisionAtK"]["1"]["value"]["value"])
 
     def test_modelEvaluationSummaryValidatorRejectsRootContractDrift(self):
         summary = self._model_summary(self._model_record("eval_11111111111111111111111111111111", MODEL_X))
@@ -361,9 +626,12 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
     def test_modelEvaluationSummaryValidatorRejectsEveryOutOfRangeCount(self):
         locations = (
             ("population", "recordsConsidered"),
+            ("population", "recordsWithPredictionEvidence"),
             ("population", "recordsEvaluated"),
             ("population", "recordsExcludedMissingLineage"),
             ("population", "recordsExcludedIdentityMismatch"),
+            ("population", "recordsExcludedMissingPredictionEvidence"),
+            ("population", "recordsExcludedInvalidPredictionEvidence"),
             ("classBalance", "positiveClassCount"),
             ("classBalance", "negativeClassCount"),
         )
@@ -401,6 +669,98 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, f"between 0 and {MAX_DATASET_RECORDS}"):
             validate_model_evaluation_summary(summary)
 
+    def test_rulesVsMlDisagreementClassifiesAllFourSameOccurrenceOutcomes(self):
+        summary = self._model_summary(
+            self._model_record(
+                "eval_11111111111111111111111111111111",
+                MODEL_X,
+                mlPredictionRiskLevel="HIGH",
+                rulesRiskLevel="LOW",
+            ),
+            self._model_record(
+                "eval_22222222222222222222222222222222",
+                MODEL_X,
+                mlPredictionRiskLevel="LOW",
+                mlPredictionScore=0.2,
+                rulesRiskLevel="HIGH",
+            ),
+            self._model_record(
+                "eval_33333333333333333333333333333333",
+                MODEL_X,
+                mlPredictionRiskLevel="CRITICAL",
+                rulesRiskLevel="HIGH",
+            ),
+            self._model_record(
+                "eval_44444444444444444444444444444444",
+                MODEL_X,
+                mlPredictionRiskLevel="MEDIUM",
+                mlPredictionScore=0.4,
+                rulesRiskLevel="LOW",
+            ),
+        )
+
+        disagreement = summary["supportedMetrics"]["rulesVsMlDisagreement"]
+        self.assertEqual(4, disagreement["recordsCompared"])
+        self.assertEqual({
+            "BOTH_HIGH": 1,
+            "BOTH_LOW": 1,
+            "ML_HIGH_RULES_LOW": 1,
+            "RULES_HIGH_ML_LOW": 1,
+        }, disagreement["categoryCounts"])
+
+    def test_rulesVsMlDisagreementKeepsUnavailableSignalsOutOfLowRisk(self):
+        summary = self._model_summary(
+            self._model_record(
+                "eval_11111111111111111111111111111111",
+                MODEL_X,
+                rulesEvidenceStatus="UNAVAILABLE",
+                rulesRiskLevel=None,
+            ),
+            record(
+                evaluationRecordId="eval_22222222222222222222222222222222",
+                transactionReference="txnref_22222222222222222222222222222222",
+                rulesEvidenceStatus="AVAILABLE",
+                rulesRiskLevel="LOW",
+            ),
+        )
+
+        disagreement = summary["supportedMetrics"]["rulesVsMlDisagreement"]
+        self.assertFalse(disagreement["available"])
+        self.assertEqual(RULES_SIGNAL_UNAVAILABLE, disagreement["reason"])
+        self.assertEqual(1, disagreement["recordsWithExactMlEvidence"])
+        self.assertEqual(0, disagreement["recordsCompared"])
+        self.assertEqual(1, disagreement["recordsExcludedRulesEvidenceUnavailable"])
+        self.assertEqual(0, sum(disagreement["categoryCounts"].values()))
+
+    def test_rulesVsMlDisagreementDoesNotCombineRulesSignalFromAnotherModelOccurrence(self):
+        summary = self._model_summary(
+            self._model_record(
+                "eval_11111111111111111111111111111111",
+                MODEL_X,
+                rulesEvidenceStatus="UNAVAILABLE",
+                rulesRiskLevel=None,
+            ),
+            self._model_record(
+                "eval_22222222222222222222222222222222",
+                MODEL_Y,
+                rulesRiskLevel="LOW",
+            ),
+        )
+
+        disagreement = summary["supportedMetrics"]["rulesVsMlDisagreement"]
+        self.assertEqual(1, summary["population"]["recordsExcludedIdentityMismatch"])
+        self.assertEqual(0, disagreement["recordsCompared"])
+        self.assertEqual(1, disagreement["recordsExcludedRulesEvidenceUnavailable"])
+
+    def test_rulesVsMlDisagreementValidatorRejectsNonBooleanAvailability(self):
+        summary = self._model_summary(
+            self._model_record("eval_11111111111111111111111111111111", MODEL_X)
+        )
+        summary["supportedMetrics"]["rulesVsMlDisagreement"]["available"] = 1
+
+        with self.assertRaisesRegex(ValueError, "available must be boolean"):
+            validate_model_evaluation_summary(summary)
+
     def test_requestedModelIdentityRejectsSecretLikeValues(self):
         with self.assertRaises(ValueError):
             ModelEvaluationIdentity("python-logistic-fraud-model", "tokenized-model-version", "feature-contract-v2")
@@ -420,13 +780,25 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
     def _model_summary(self, *records, requested=MODEL_X):
         return self._reports(*records, model_identity=requested)["modelEvaluationSummary"]
 
+    def _ranked_summary(self, records, top_k_values):
+        return build_model_specific_evaluation_summary(
+            self._dataset(*records),
+            MODEL_X,
+            GENERATED_AT,
+            top_k_values=top_k_values,
+        )
+
     @staticmethod
     def _set_accounting(summary, considered, evaluated, missing, mismatch, positives, negatives):
+        missing_prediction = considered - evaluated - missing - mismatch
         summary["population"] = {
             "recordsConsidered": considered,
+            "recordsWithPredictionEvidence": evaluated + missing + mismatch,
             "recordsEvaluated": evaluated,
             "recordsExcludedMissingLineage": missing,
             "recordsExcludedIdentityMismatch": mismatch,
+            "recordsExcludedMissingPredictionEvidence": missing_prediction,
+            "recordsExcludedInvalidPredictionEvidence": 0,
         }
         summary["classBalance"] = {
             "positiveClassCount": positives,
@@ -436,12 +808,58 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
             "available": bool(evaluated),
             "reason": None if evaluated else INSUFFICIENT_MODEL_LINEAGE_RECORDS,
         }
-        warnings = [MODEL_PREDICTION_SIGNAL_UNAVAILABLE]
+        prediction_metrics = build_binary_classification_metrics_from_counts(positives, 0, negatives, 0)
+        precision_at_k = {}
+        recall_at_k = {}
+        for top_k in DEFAULT_TOP_K_VALUES:
+            actual_k = min(top_k, evaluated)
+            precision_row, recall_row = build_ranked_metric_rows(
+                min(positives, actual_k),
+                positives,
+                top_k,
+                actual_k,
+                evaluated > 0,
+            )
+            precision_at_k[str(top_k)] = precision_row
+            recall_at_k[str(top_k)] = recall_row
+        prediction_metrics.update({
+            "available": bool(evaluated),
+            "reason": None if evaluated else MODEL_PREDICTION_SIGNAL_UNAVAILABLE,
+            "classificationPolicy": RISK_CLASSIFICATION_POLICY,
+            "rankingPolicy": ML_SCORE_RANKING_POLICY,
+            "precisionAtK": precision_at_k,
+            "recallAtK": recall_at_k,
+        })
+        summary["supportedMetrics"]["mlPredictionMetrics"] = prediction_metrics
+        summary["supportedMetrics"]["rulesVsMlDisagreement"] = {
+            "available": bool(evaluated),
+            "reason": None if evaluated else RULES_SIGNAL_UNAVAILABLE,
+            "classificationPolicy": RISK_CLASSIFICATION_POLICY,
+            "recordsWithExactMlEvidence": evaluated,
+            "recordsCompared": evaluated,
+            "recordsExcludedRulesEvidenceUnavailable": 0,
+            "categoryCounts": {
+                "BOTH_HIGH": evaluated,
+                "BOTH_LOW": 0,
+                "ML_HIGH_RULES_LOW": 0,
+                "RULES_HIGH_ML_LOW": 0,
+            },
+        }
+        warnings = []
         if evaluated == 0:
-            warnings.append(INSUFFICIENT_MODEL_LINEAGE_RECORDS)
+            warnings.extend((INSUFFICIENT_MODEL_LINEAGE_RECORDS, MODEL_PREDICTION_SIGNAL_UNAVAILABLE))
         elif positives == 0 or negatives == 0:
             warnings.append(SINGLE_CLASS_MODEL_LINEAGE_RECORDS)
         summary["warnings"] = sorted(warnings)
+
+    @staticmethod
+    def _confusion_counts(metrics):
+        return tuple(metrics[field] for field in (
+            "truePositive",
+            "falsePositive",
+            "trueNegative",
+            "falseNegative",
+        ))
 
     def _reports(self, *records, model_identity=None):
         return build_feedback_dataset_evaluation_reports(
