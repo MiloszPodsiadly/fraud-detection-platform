@@ -51,10 +51,11 @@ same feedback scoring occurrence. It counts ML-high/Rules-low, Rules-high/ML-low
 Rows without Rules evidence are reported separately and never become low risk; rows excluded by exact model identity
 cannot contribute a Rules signal. The aggregate contains counts only, not record or transaction identifiers.
 
-The model summary reconciles every considered row as evaluated, missing prediction evidence, invalid prediction
-evidence, missing lineage, or exact-identity mismatch. Its aggregate confusion matrix reports TP, FP, TN, and FN plus
-precision, recall, true-positive rate, false-positive rate, and false-negative rate. A zero denominator is an explicit
-unavailable metric with a machine-code reason; it is never emitted as NaN, infinity, or an invented zero.
+The model summary reconciles every considered row as evaluated, legitimately missing prediction evidence,
+unexpectedly missing prediction evidence, invalid prediction evidence, missing lineage, or exact-identity mismatch.
+Its aggregate confusion matrix reports TP, FP, TN, and FN plus precision, recall, true-positive rate,
+false-positive rate, and false-negative rate. A zero denominator is an explicit unavailable metric with a
+machine-code reason; it is never emitted as NaN, infinity, or an invented zero.
 
 Model-specific `precisionAtK` and `recallAtK` rank only the requested exact model population by
 `mlPredictionScore DESC`, with `evaluationRecordId ASC` as the deterministic tie-break. K is bounded to the dataset

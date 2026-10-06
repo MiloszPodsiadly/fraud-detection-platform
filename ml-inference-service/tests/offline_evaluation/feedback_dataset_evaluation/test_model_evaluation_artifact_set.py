@@ -199,6 +199,7 @@ class ModelEvaluationArtifactSetReaderTest(unittest.TestCase):
                 "recordsExcludedMissingLineage": 0,
                 "recordsExcludedIdentityMismatch": 0,
                 "recordsExcludedMissingPredictionEvidence": 0,
+                "recordsExcludedUnexpectedMissingPredictionEvidence": 0,
                 "recordsExcludedInvalidPredictionEvidence": 0,
             }
             summary["classBalance"] = {

@@ -73,6 +73,7 @@ POPULATION_FIELDS = {
     "recordsExcludedMissingLineage",
     "recordsExcludedIdentityMismatch",
     "recordsExcludedMissingPredictionEvidence",
+    "recordsExcludedUnexpectedMissingPredictionEvidence",
     "recordsExcludedInvalidPredictionEvidence",
 }
 CLASS_BALANCE_FIELDS = {"positiveClassCount", "negativeClassCount"}
@@ -165,6 +166,7 @@ class _ModelEvaluationPopulation:
     records_excluded_missing_lineage: int
     records_excluded_identity_mismatch: int
     records_excluded_missing_prediction_evidence: int
+    records_excluded_unexpected_missing_prediction_evidence: int
     records_excluded_invalid_prediction_evidence: int
 
 
@@ -215,6 +217,9 @@ def build_model_specific_evaluation_summary(
             "recordsExcludedMissingLineage": population.records_excluded_missing_lineage,
             "recordsExcludedIdentityMismatch": population.records_excluded_identity_mismatch,
             "recordsExcludedMissingPredictionEvidence": population.records_excluded_missing_prediction_evidence,
+            "recordsExcludedUnexpectedMissingPredictionEvidence": (
+                population.records_excluded_unexpected_missing_prediction_evidence
+            ),
             "recordsExcludedInvalidPredictionEvidence": population.records_excluded_invalid_prediction_evidence,
         },
         "classBalance": {
@@ -266,6 +271,7 @@ def validate_model_evaluation_summary(summary: dict[str, Any]) -> dict[str, Any]
             + population["recordsExcludedMissingLineage"]
             + population["recordsExcludedIdentityMismatch"]
             + population["recordsExcludedMissingPredictionEvidence"]
+            + population["recordsExcludedUnexpectedMissingPredictionEvidence"]
             + population["recordsExcludedInvalidPredictionEvidence"]
     ):
         raise ValueError("model evaluation population counts must reconcile")
@@ -643,11 +649,19 @@ def _partition_records(
     missing_lineage = 0
     identity_mismatch = 0
     missing_prediction_evidence = 0
+    unexpected_missing_prediction_evidence = 0
     invalid_prediction_evidence = 0
     for record in records:
         evidence_state = _prediction_evidence_state(record)
-        if evidence_state == "MISSING":
+        if evidence_state == "LEGITIMATELY_ABSENT":
             missing_prediction_evidence += 1
+            continue
+        if evidence_state == "MISSING_UNEXPECTEDLY":
+            unexpected_missing_prediction_evidence += 1
+            continue
+        if evidence_state == "IDENTITY_MISMATCH":
+            with_prediction_evidence += 1
+            identity_mismatch += 1
             continue
         if evidence_state == "INVALID":
             invalid_prediction_evidence += 1
@@ -669,6 +683,7 @@ def _partition_records(
         records_excluded_missing_lineage=missing_lineage,
         records_excluded_identity_mismatch=identity_mismatch,
         records_excluded_missing_prediction_evidence=missing_prediction_evidence,
+        records_excluded_unexpected_missing_prediction_evidence=unexpected_missing_prediction_evidence,
         records_excluded_invalid_prediction_evidence=invalid_prediction_evidence,
     )
 
@@ -684,8 +699,20 @@ def _prediction_evidence_state(record: FeedbackDatasetRecord) -> str:
         record.ml_model_version,
         record.ml_feature_contract_version,
     )
-    if record.ml_prediction_evidence_status == "LEGITIMATELY_ABSENT":
-        return "MISSING" if all(value is None for value in direct_values + identity_values) else "INVALID"
+    if record.ml_prediction_evidence_status in {
+        "LEGITIMATELY_ABSENT",
+        "MISSING_UNEXPECTEDLY",
+        "MALFORMED",
+        "IDENTITY_MISMATCH",
+    }:
+        if any(value is not None for value in direct_values + identity_values):
+            return "INVALID"
+        return {
+            "LEGITIMATELY_ABSENT": "LEGITIMATELY_ABSENT",
+            "MISSING_UNEXPECTEDLY": "MISSING_UNEXPECTEDLY",
+            "MALFORMED": "INVALID",
+            "IDENTITY_MISMATCH": "IDENTITY_MISMATCH",
+        }[record.ml_prediction_evidence_status]
     if record.ml_prediction_evidence_status != "AVAILABLE" or any(value is None for value in direct_values):
         return "INVALID"
     try:

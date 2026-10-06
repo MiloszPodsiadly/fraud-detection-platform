@@ -204,6 +204,7 @@ class FeedbackEvaluationCrossChainRegressionTest(unittest.TestCase):
                     "recordsExcludedMissingLineage": 0,
                     "recordsExcludedIdentityMismatch": 1,
                     "recordsExcludedMissingPredictionEvidence": 1,
+                    "recordsExcludedUnexpectedMissingPredictionEvidence": 0,
                     "recordsExcludedInvalidPredictionEvidence": 0,
                 },
                 dict(model_summary["population"]),

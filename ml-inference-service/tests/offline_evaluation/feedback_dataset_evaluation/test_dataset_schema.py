@@ -233,8 +233,37 @@ class FeedbackDatasetSchemaTest(unittest.TestCase):
             with self.subTest(values=values):
                 self._assert_rejected(record(mlPredictionEvidenceStatus="LEGITIMATELY_ABSENT", **values))
 
-    def test_rejectsUnsupportedEvidenceStatusRiskAndScore(self):
-        self._assert_rejected(record(mlPredictionEvidenceStatus="MISSING_UNEXPECTEDLY"))
+    def test_acceptsBoundedNonAvailableEvidenceStatuses(self):
+        cases = (
+            ("MISSING_UNEXPECTEDLY", "ML_ENGINE_UNAVAILABLE"),
+            ("MALFORMED", "INVALID_SCORE"),
+            ("IDENTITY_MISMATCH", "IDENTITY_VALIDATION_FAILURE"),
+        )
+        for status, reason in cases:
+            with self.subTest(status=status):
+                parsed = self._parse(record(
+                    mlPredictionEvidenceStatus=status,
+                    mlPredictionEvidenceOmissionReason=reason,
+                ))
+
+                self.assertEqual(status, parsed.records[0].ml_prediction_evidence_status)
+                self.assertEqual(reason, parsed.records[0].ml_prediction_evidence_omission_reason)
+
+    def test_rejectsEvidenceStatusReasonContradictions(self):
+        self._assert_rejected(record(mlPredictionEvidenceOmissionReason=None))
+        self._assert_rejected(record(
+            mlPredictionEvidenceStatus="MISSING_UNEXPECTEDLY",
+            mlPredictionEvidenceOmissionReason="INVALID_SCORE",
+        ))
+        self._assert_rejected(record(
+            mlPredictionEvidenceStatus="AVAILABLE",
+            mlPredictionEvidenceOmissionReason="LEGITIMATE_ABSENCE",
+            mlModelName="python-logistic-fraud-model",
+            mlModelVersion="2026-06-25.v1",
+            mlFeatureContractVersion="feature-contract-v2",
+        ))
+
+    def test_rejectsUnsupportedRiskAndScore(self):
         self._assert_rejected(record(
             mlModelName="python-logistic-fraud-model",
             mlModelVersion="2026-06-25.v1",

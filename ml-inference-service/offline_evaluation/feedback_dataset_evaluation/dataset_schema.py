@@ -43,11 +43,27 @@ MACHINE_CODE_PATTERN = re.compile(r"^[A-Z0-9_]{1,64}$")
 ML_MODEL_IDENTITY_FIELDS = ("mlModelName", "mlModelVersion", "mlFeatureContractVersion")
 ML_PREDICTION_EVIDENCE_FIELDS = (
     "mlPredictionEvidenceStatus",
+    "mlPredictionEvidenceOmissionReason",
     "mlPredictionScore",
     "mlPredictionRiskLevel",
     "mlPredictionExecutedAt",
 )
-ALLOWED_ML_PREDICTION_EVIDENCE_STATUSES = {"AVAILABLE", "LEGITIMATELY_ABSENT"}
+ALLOWED_ML_PREDICTION_EVIDENCE_STATUSES = {
+    "AVAILABLE",
+    "LEGITIMATELY_ABSENT",
+    "MISSING_UNEXPECTEDLY",
+    "MALFORMED",
+    "IDENTITY_MISMATCH",
+}
+ML_PREDICTION_OMISSION_STATUS = {
+    "DIAGNOSTIC_EMISSION_DISABLED": "LEGITIMATELY_ABSENT",
+    "ML_ENGINE_UNAVAILABLE": "MISSING_UNEXPECTEDLY",
+    "SOURCE_TIMESTAMP_MISSING": "MALFORMED",
+    "INVALID_SCORE": "MALFORMED",
+    "IDENTITY_VALIDATION_FAILURE": "IDENTITY_MISMATCH",
+    "LEGITIMATE_ABSENCE": "LEGITIMATELY_ABSENT",
+    "PREDICTION_NOT_ACCEPTED": "MALFORMED",
+}
 ALLOWED_RISK_LEVELS = set(SUPPORTED_RISK_LEVELS)
 ALLOWED_RULES_EVIDENCE_STATUSES = {"AVAILABLE", "UNAVAILABLE"}
 ALLOWED_ENGINE_INTELLIGENCE_STATUSES = {"AVAILABLE", "ABSENT", "UNAVAILABLE", "DEGRADED"}
@@ -103,6 +119,8 @@ ALLOWED_FAILURE_REASONS = {
     "NONE",
     "INVALID_REQUEST",
     "FEEDBACK_STORE_UNAVAILABLE",
+    "ML_PREDICTION_EVIDENCE_STORE_UNAVAILABLE",
+    "ML_PREDICTION_EVIDENCE_INTEGRITY_FAILURE",
     "DATASET_SERIALIZATION_FAILED",
 }
 
@@ -125,6 +143,7 @@ ALLOWED_RECORD_FIELDS = {
     "rulesEvidenceStatus",
     "rulesRiskLevel",
     "mlPredictionEvidenceStatus",
+    "mlPredictionEvidenceOmissionReason",
     "mlPredictionScore",
     "mlPredictionRiskLevel",
     "mlPredictionExecutedAt",
@@ -320,6 +339,11 @@ def validate_record(raw: dict[str, Any]) -> FeedbackDatasetRecord:
         "mlPredictionEvidenceStatus",
         ALLOWED_ML_PREDICTION_EVIDENCE_STATUSES,
     )
+    ml_prediction_evidence_omission_reason = _optional_enum(
+        raw,
+        "mlPredictionEvidenceOmissionReason",
+        set(ML_PREDICTION_OMISSION_STATUS),
+    )
     ml_prediction_score = _optional_ml_prediction_score(raw, "mlPredictionScore")
     ml_prediction_risk_level = _optional_enum(
         raw,
@@ -329,6 +353,7 @@ def validate_record(raw: dict[str, Any]) -> FeedbackDatasetRecord:
     ml_prediction_executed_at = _optional_datetime_string(raw, "mlPredictionExecutedAt")
     _validate_ml_prediction_evidence(
         ml_prediction_evidence_status,
+        ml_prediction_evidence_omission_reason,
         ml_prediction_score,
         ml_prediction_risk_level,
         ml_prediction_executed_at,
@@ -362,6 +387,7 @@ def validate_record(raw: dict[str, Any]) -> FeedbackDatasetRecord:
         rules_evidence_status=rules_evidence_status,
         rules_risk_level=rules_risk_level,
         ml_prediction_evidence_status=ml_prediction_evidence_status,
+        ml_prediction_evidence_omission_reason=ml_prediction_evidence_omission_reason,
         ml_prediction_score=ml_prediction_score,
         ml_prediction_risk_level=ml_prediction_risk_level,
         ml_prediction_executed_at=ml_prediction_executed_at,
@@ -538,6 +564,7 @@ def _optional_safe_identifier(raw: dict[str, Any], field: str) -> str | None:
 
 def _validate_ml_prediction_evidence(
         status: str,
+        omission_reason: str | None,
         score: float | None,
         risk_level: str | None,
         executed_at: str | None,
@@ -551,7 +578,7 @@ def _validate_ml_prediction_evidence(
         for value in (model_name, model_version, feature_contract_version)
     )
     if status == "AVAILABLE":
-        if not values_complete or not identity_complete:
+        if not values_complete or not identity_complete or omission_reason is not None:
             raise FeedbackDatasetValidationError("available ML prediction evidence must be complete")
         return
     if any(value is not None for value in (
@@ -562,7 +589,11 @@ def _validate_ml_prediction_evidence(
         model_version,
         feature_contract_version,
     )):
-        raise FeedbackDatasetValidationError("absent ML prediction evidence must not carry prediction values")
+        raise FeedbackDatasetValidationError("unavailable ML prediction evidence must not carry prediction values")
+    if status == "LEGITIMATELY_ABSENT" and omission_reason is None:
+        raise FeedbackDatasetValidationError("legitimate absence requires authoritative omission proof")
+    if omission_reason is not None and ML_PREDICTION_OMISSION_STATUS[omission_reason] != status:
+        raise FeedbackDatasetValidationError("ML prediction omission reason contradicts evidence status")
 
 
 def _required_datetime_string(raw: dict[str, Any], field: str) -> str:

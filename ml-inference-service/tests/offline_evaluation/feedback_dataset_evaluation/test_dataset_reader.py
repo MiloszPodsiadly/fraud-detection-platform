@@ -94,9 +94,23 @@ class FeedbackDatasetReaderTest(unittest.TestCase):
             with self.assertRaises(FeedbackDatasetValidationError):
                 read_feedback_dataset_jsonl(path)
 
-    def test_rejectsFailedDatasetMetadata(self):
-        with jsonl_file(jsonl(metadata_overrides={"failureReason": "FEEDBACK_STORE_UNAVAILABLE"})) as path:
-            with self.assertRaises(FeedbackDatasetFailedDatasetError):
+    def test_rejectsEveryCanonicalFailedDatasetMetadataReason(self):
+        reasons = (
+            "INVALID_REQUEST",
+            "FEEDBACK_STORE_UNAVAILABLE",
+            "ML_PREDICTION_EVIDENCE_STORE_UNAVAILABLE",
+            "ML_PREDICTION_EVIDENCE_INTEGRITY_FAILURE",
+            "DATASET_SERIALIZATION_FAILED",
+        )
+        for reason in reasons:
+            with self.subTest(reason=reason):
+                with jsonl_file(jsonl(metadata_overrides={"failureReason": reason})) as path:
+                    with self.assertRaisesRegex(FeedbackDatasetFailedDatasetError, reason):
+                        read_feedback_dataset_jsonl(path)
+
+    def test_rejectsUnknownDatasetFailureReason(self):
+        with jsonl_file(jsonl(metadata_overrides={"failureReason": "UNKNOWN_FAILURE"})) as path:
+            with self.assertRaises(FeedbackDatasetValidationError):
                 read_feedback_dataset_jsonl(path)
 
     def test_onlyDatasetRecordLinesBecomeRecords(self):

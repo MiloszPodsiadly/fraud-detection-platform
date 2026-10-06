@@ -111,6 +111,43 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
 
         self.assertEqual(platform_only["evaluationSummary"], with_model["evaluationSummary"])
 
+    def test_fullEvidenceOutcomePopulationIsRetainedAndReconciled(self):
+        records = (
+            *(self._model_record(f"eval_{index:032d}", MODEL_X) for index in range(1, 5)),
+            *(record(
+                evaluationRecordId=f"eval_{index:032d}",
+                transactionReference=f"txnref_{index:032d}",
+                mlPredictionEvidenceStatus="MISSING_UNEXPECTEDLY",
+                mlPredictionEvidenceOmissionReason="ML_ENGINE_UNAVAILABLE",
+            ) for index in range(5, 8)),
+            *(record(
+                evaluationRecordId=f"eval_{index:032d}",
+                transactionReference=f"txnref_{index:032d}",
+                mlPredictionEvidenceStatus="IDENTITY_MISMATCH",
+                mlPredictionEvidenceOmissionReason="IDENTITY_VALIDATION_FAILURE",
+            ) for index in range(8, 10)),
+            record(
+                evaluationRecordId="eval_00000000000000000000000000000010",
+                transactionReference="txnref_00000000000000000000000000000010",
+                mlPredictionEvidenceStatus="MALFORMED",
+                mlPredictionEvidenceOmissionReason="INVALID_SCORE",
+            ),
+        )
+
+        reports = self._reports(*records, model_identity=MODEL_X)
+
+        self.assertEqual(10, reports["evaluationSummary"]["qualityMetrics"]["datasetSummary"]["recordsEvaluated"])
+        self.assertEqual({
+            "recordsConsidered": 10,
+            "recordsWithPredictionEvidence": 6,
+            "recordsEvaluated": 4,
+            "recordsExcludedMissingLineage": 0,
+            "recordsExcludedIdentityMismatch": 2,
+            "recordsExcludedMissingPredictionEvidence": 0,
+            "recordsExcludedUnexpectedMissingPredictionEvidence": 3,
+            "recordsExcludedInvalidPredictionEvidence": 1,
+        }, reports["modelEvaluationSummary"]["population"])
+
     def test_shadowMlIdentityVersionRemainsTheModelSpecificEvaluationSubject(self):
         summary = self._model_summary(
             self._model_record("eval_11111111111111111111111111111111", SHADOW_MODEL),
@@ -631,6 +668,7 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
             ("population", "recordsExcludedMissingLineage"),
             ("population", "recordsExcludedIdentityMismatch"),
             ("population", "recordsExcludedMissingPredictionEvidence"),
+            ("population", "recordsExcludedUnexpectedMissingPredictionEvidence"),
             ("population", "recordsExcludedInvalidPredictionEvidence"),
             ("classBalance", "positiveClassCount"),
             ("classBalance", "negativeClassCount"),
@@ -798,6 +836,7 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
             "recordsExcludedMissingLineage": missing,
             "recordsExcludedIdentityMismatch": mismatch,
             "recordsExcludedMissingPredictionEvidence": missing_prediction,
+            "recordsExcludedUnexpectedMissingPredictionEvidence": 0,
             "recordsExcludedInvalidPredictionEvidence": 0,
         }
         summary["classBalance"] = {
