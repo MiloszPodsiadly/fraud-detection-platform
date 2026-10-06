@@ -1,6 +1,7 @@
 package com.frauddetection.alert.feedback.dataset;
 
 import com.frauddetection.alert.feedback.FraudFeedbackLabel;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.networknt.schema.Error;
 import com.networknt.schema.InputFormat;
 import com.networknt.schema.Schema;
@@ -13,6 +14,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -118,6 +120,21 @@ class FeedbackDatasetSchemaContractTest {
         for (String[] state : partialStates) {
             assertSchemaInvalid(datasetRecordLine(state[0], state[1], state[2], true));
         }
+    }
+
+    @Test
+    void schemaFailureReasonsExactlyMatchJavaContract() throws Exception {
+        JsonNode root = objectMapper.readTree(Files.readString(SCHEMA));
+        JsonNode values = root.get("oneOf").get(0)
+                .get("properties").get("failureReason").get("enum");
+        List<String> schemaReasons = new ArrayList<>();
+        values.forEach(value -> schemaReasons.add(value.asString()));
+
+        assertThat(schemaReasons).containsExactlyInAnyOrderElementsOf(
+                java.util.Arrays.stream(FeedbackDatasetBuildFailureReason.values())
+                        .map(Enum::name)
+                        .toList()
+        );
     }
 
     @Test
@@ -451,6 +468,7 @@ class FeedbackDatasetSchemaContractTest {
                 FeedbackDatasetRulesEvidenceStatus.UNAVAILABLE,
                 null,
                 FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT,
+                MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE,
                 null,
                 null,
                 null,
@@ -525,6 +543,7 @@ class FeedbackDatasetSchemaContractTest {
         if (includeIdentityFields) {
             boolean available = modelName != null || modelVersion != null || featureContractVersion != null;
             record.put("mlPredictionEvidenceStatus", available ? "AVAILABLE" : "LEGITIMATELY_ABSENT");
+            record.put("mlPredictionEvidenceOmissionReason", available ? null : "LEGITIMATE_ABSENCE");
             record.put("mlPredictionScore", available ? 0.8123 : null);
             record.put("mlPredictionRiskLevel", available ? "HIGH" : null);
             record.put("mlPredictionExecutedAt", available ? "2026-06-01T00:00:01Z" : null);

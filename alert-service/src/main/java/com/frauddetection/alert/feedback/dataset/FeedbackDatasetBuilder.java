@@ -6,8 +6,12 @@ import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectio
 import com.frauddetection.alert.feedback.FraudFeedbackRecord;
 import com.frauddetection.alert.feedback.governance.FeedbackDatasetEligibility;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -27,18 +31,22 @@ public class FeedbackDatasetBuilder {
 
     public static final String DATASET_VERSION = "feedback-dataset-v2";
 
+    private static final Logger log = LoggerFactory.getLogger(FeedbackDatasetBuilder.class);
+
     private final FeedbackDatasetCandidateStore candidateStore;
     private final FeedbackDatasetMappingPolicy mappingPolicy;
     private final MlPredictionEvidenceProjectionRepository evidenceRepository;
+    private final FeedbackDatasetMetricsRecorder metricsRecorder;
     private final Clock clock;
 
     @Autowired
     public FeedbackDatasetBuilder(
             FeedbackDatasetCandidateStore candidateStore,
             FeedbackDatasetMappingPolicy mappingPolicy,
-            MlPredictionEvidenceProjectionRepository evidenceRepository
+            MlPredictionEvidenceProjectionRepository evidenceRepository,
+            FeedbackDatasetMetricsRecorder metricsRecorder
     ) {
-        this(candidateStore, mappingPolicy, evidenceRepository, Clock.systemUTC());
+        this(candidateStore, mappingPolicy, evidenceRepository, metricsRecorder, Clock.systemUTC());
     }
 
     FeedbackDatasetBuilder(
@@ -47,31 +55,43 @@ public class FeedbackDatasetBuilder {
             MlPredictionEvidenceProjectionRepository evidenceRepository,
             Clock clock
     ) {
+        this(candidateStore, mappingPolicy, evidenceRepository, FeedbackDatasetMetricsRecorder.noOp(), clock);
+    }
+
+    FeedbackDatasetBuilder(
+            FeedbackDatasetCandidateStore candidateStore,
+            FeedbackDatasetMappingPolicy mappingPolicy,
+            MlPredictionEvidenceProjectionRepository evidenceRepository,
+            FeedbackDatasetMetricsRecorder metricsRecorder,
+            Clock clock
+    ) {
         this.candidateStore = Objects.requireNonNull(candidateStore, "candidateStore is required");
         this.mappingPolicy = Objects.requireNonNull(mappingPolicy, "mappingPolicy is required");
         this.evidenceRepository = Objects.requireNonNull(evidenceRepository, "evidenceRepository is required");
+        this.metricsRecorder = Objects.requireNonNull(metricsRecorder, "metricsRecorder is required");
         this.clock = Objects.requireNonNull(clock, "clock is required");
     }
 
     public FeedbackDatasetBuildResult build(FeedbackDatasetBuildRequest request) {
         Instant builtAt = Instant.now(clock);
         if (!valid(request)) {
-            return FeedbackDatasetBuildResult.failed(
+            return finish(FeedbackDatasetBuildResult.failed(
                     request,
                     builtAt,
                     FeedbackDatasetBuildFailureReason.INVALID_REQUEST
-            );
+            ));
         }
         int maxRecords = request.effectiveMaxRecords();
         List<FraudFeedbackRecord> rawRows;
         try {
             rawRows = candidateStore.findBoundedByCreatedAt(request.fromInclusive(), request.toInclusive(), maxRecords);
         } catch (RuntimeException exception) {
-            return FeedbackDatasetBuildResult.failed(
+            log.warn("Feedback dataset candidate lookup failed. reason=FEEDBACK_STORE_UNAVAILABLE");
+            return finish(FeedbackDatasetBuildResult.failed(
                     request,
                     builtAt,
                     FeedbackDatasetBuildFailureReason.FEEDBACK_STORE_UNAVAILABLE
-            );
+            ));
         }
 
         boolean truncated = rawRows.size() > maxRecords;
@@ -104,19 +124,23 @@ public class FeedbackDatasetBuilder {
         List<ResolvedSource> resolvedSources;
         try {
             resolvedSources = resolveMlPredictionEvidence(eligibleSources);
-        } catch (RuntimeException exception) {
-            return FeedbackDatasetBuildResult.failed(
+        } catch (DataAccessException exception) {
+            log.warn("ML prediction evidence dataset lookup failed. reason=STORE_UNAVAILABLE");
+            return finish(FeedbackDatasetBuildResult.failed(
                     request,
                     builtAt,
-                    FeedbackDatasetBuildFailureReason.FEEDBACK_STORE_UNAVAILABLE
-            );
+                    FeedbackDatasetBuildFailureReason.ML_PREDICTION_EVIDENCE_STORE_UNAVAILABLE
+            ));
+        } catch (RuntimeException exception) {
+            log.warn("ML prediction evidence dataset lookup failed. reason=INTEGRITY_FAILURE");
+            return finish(FeedbackDatasetBuildResult.failed(
+                    request,
+                    builtAt,
+                    FeedbackDatasetBuildFailureReason.ML_PREDICTION_EVIDENCE_INTEGRITY_FAILURE
+            ));
         }
 
         for (ResolvedSource resolved : resolvedSources) {
-            if (!resolved.evidence().mayEnterDataset()) {
-                skippedInvalidSource++;
-                continue;
-            }
             try {
                 FraudFeedbackRecord source = resolved.source().source();
                 records.add(record(
@@ -132,7 +156,7 @@ public class FeedbackDatasetBuilder {
             }
         }
 
-        return FeedbackDatasetBuildResult.succeeded(
+        return finish(FeedbackDatasetBuildResult.succeeded(
                 request,
                 builtAt,
                 rawRows.size(),
@@ -143,7 +167,12 @@ public class FeedbackDatasetBuilder {
                 skippedInvalidSource,
                 truncated,
                 records
-        );
+        ));
+    }
+
+    private FeedbackDatasetBuildResult finish(FeedbackDatasetBuildResult result) {
+        metricsRecorder.record(result);
+        return result;
     }
 
     private boolean valid(FeedbackDatasetBuildRequest request) {
@@ -187,6 +216,7 @@ public class FeedbackDatasetBuilder {
                         ? source.getRulesRiskLevel()
                         : null,
                 evidence.status(),
+                evidence.omissionReason().orElse(null),
                 projection == null ? null : projection.getMlScore(),
                 projection == null ? null : projection.getMlRiskLevel(),
                 projection == null ? null : projection.getSourceExecutionTimestamp(),
@@ -277,14 +307,22 @@ public class FeedbackDatasetBuilder {
             );
         }
         if (ownership.isEmpty()) {
-            return FeedbackDatasetMlPredictionEvidence.unavailable(feedbackIdentityParts == 0
-                    ? FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT
-                    : FeedbackDatasetMlPredictionEvidenceStatus.MISSING_UNEXPECTEDLY);
+            return FeedbackDatasetMlPredictionEvidence.unavailable(
+                    FeedbackDatasetMlPredictionEvidenceStatus.MISSING_UNEXPECTEDLY
+            );
         }
         if (projection == null) {
-            return FeedbackDatasetMlPredictionEvidence.unavailable(feedbackIdentityParts == 0
-                    ? FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT
-                    : FeedbackDatasetMlPredictionEvidenceStatus.MISSING_UNEXPECTEDLY);
+            MlPredictionEvidenceOmissionReason omissionReason = source.getMlPredictionEvidenceOmissionReason();
+            return omissionReason == null
+                    ? FeedbackDatasetMlPredictionEvidence.unavailable(
+                            FeedbackDatasetMlPredictionEvidenceStatus.MISSING_UNEXPECTEDLY
+                    )
+                    : FeedbackDatasetMlPredictionEvidence.omitted(omissionReason);
+        }
+        if (source.getMlPredictionEvidenceOmissionReason() != null) {
+            return FeedbackDatasetMlPredictionEvidence.unavailable(
+                    FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
+            );
         }
 
         try {
@@ -321,7 +359,7 @@ public class FeedbackDatasetBuilder {
                 );
             }
             return FeedbackDatasetMlPredictionEvidence.available(projection);
-        } catch (RuntimeException exception) {
+        } catch (IllegalArgumentException exception) {
             return FeedbackDatasetMlPredictionEvidence.unavailable(
                     FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
             );

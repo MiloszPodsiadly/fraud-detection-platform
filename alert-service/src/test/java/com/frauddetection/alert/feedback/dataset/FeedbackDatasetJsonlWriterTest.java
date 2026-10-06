@@ -2,6 +2,7 @@ package com.frauddetection.alert.feedback.dataset;
 
 import com.frauddetection.alert.feedback.FraudFeedbackLabel;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -265,6 +266,7 @@ class FeedbackDatasetJsonlWriterTest {
                 FeedbackDatasetRulesEvidenceStatus.UNAVAILABLE,
                 null,
                 FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT,
+                MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE,
                 null,
                 null,
                 null,
@@ -300,6 +302,7 @@ class FeedbackDatasetJsonlWriterTest {
                 FeedbackDatasetRulesEvidenceStatus.AVAILABLE,
                 RiskLevel.LOW,
                 FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE,
+                null,
                 0.8123,
                 RiskLevel.HIGH,
                 Instant.parse("2026-06-01T00:00:01Z"),

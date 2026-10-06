@@ -11,8 +11,10 @@ import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Clock;
@@ -373,7 +375,7 @@ class FeedbackDatasetBuilderTest {
     }
 
     @Test
-    void partialMlModelIdentitySnapshotIsSkippedAsInvalidSource() {
+    void partialMlModelIdentitySnapshotRemainsAsMalformedEvidence() {
         FraudFeedbackRecord source = feedback("feedback-1", "txn-1", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
         source.setMlModelName("python-logistic-fraud-model");
         source.setMlFeatureContractVersion("feature-contract-v2");
@@ -381,8 +383,15 @@ class FeedbackDatasetBuilderTest {
 
         FeedbackDatasetBuildResult result = builder.build(request(10));
 
-        assertThat(result.records()).isEmpty();
-        assertThat(result.skippedInvalidSourceRecordCount()).isEqualTo(1);
+        assertThat(result.records()).singleElement().satisfies(record -> {
+            assertThat(record.mlPredictionEvidenceStatus())
+                    .isEqualTo(FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED);
+            assertThat(record.mlPredictionEvidenceOmissionReason()).isNull();
+            assertThat(record.mlModelName()).isNull();
+            assertThat(record.mlModelVersion()).isNull();
+            assertThat(record.mlFeatureContractVersion()).isNull();
+        });
+        assertThat(result.skippedInvalidSourceRecordCount()).isZero();
         assertThat(result.skippedMissingRequiredFieldCount()).isZero();
     }
 
@@ -492,7 +501,7 @@ class FeedbackDatasetBuilderTest {
     }
 
     @Test
-    void absentEvidenceWithoutMlIdentityRemainsExplicitlyEligible() {
+    void missingProjectionWithoutFeedbackIdentityIsUnexpectedRatherThanLegitimateAbsence() {
         FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
         captureOccurrence(source, "event-a", FROM.minusSeconds(1));
         when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
@@ -501,6 +510,9 @@ class FeedbackDatasetBuilderTest {
         FeedbackDatasetBuildResult result = builder.build(request(10));
 
         assertThat(result.records()).singleElement().satisfies(record -> {
+            assertThat(record.mlPredictionEvidenceStatus())
+                    .isEqualTo(FeedbackDatasetMlPredictionEvidenceStatus.MISSING_UNEXPECTEDLY);
+            assertThat(record.mlPredictionEvidenceOmissionReason()).isNull();
             assertThat(record.mlModelName()).isNull();
             assertThat(record.mlModelVersion()).isNull();
             assertThat(record.mlFeatureContractVersion()).isNull();
@@ -509,7 +521,74 @@ class FeedbackDatasetBuilderTest {
     }
 
     @Test
-    void missingEvidenceWithCapturedMlIdentityFailsClosed() {
+    void authoritativeOmissionReasonsMapToBoundedDatasetStatuses() {
+        List<MlPredictionEvidenceOmissionReason> reasons = List.of(
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE,
+                MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING,
+                MlPredictionEvidenceOmissionReason.INVALID_SCORE,
+                MlPredictionEvidenceOmissionReason.IDENTITY_VALIDATION_FAILURE,
+                MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE,
+                MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED
+        );
+        List<FraudFeedbackRecord> sources = new java.util.ArrayList<>();
+        for (int index = 0; index < reasons.size(); index++) {
+            FraudFeedbackRecord source = feedback(
+                    "feedback-" + index,
+                    "txn-" + index,
+                    FraudFeedbackLabel.CONFIRMED_FRAUD,
+                    FROM.plusSeconds(index)
+            );
+            captureOccurrence(source, "event-" + index, FROM.minusSeconds(index + 1L));
+            source.setMlPredictionEvidenceOmissionReason(reasons.get(index));
+            sources.add(source);
+        }
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(sources);
+        when(evidenceRepository.findAllById(any())).thenReturn(List.of());
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.records()).extracting(FeedbackDatasetRecord::mlPredictionEvidenceStatus)
+                .containsExactly(
+                        FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT,
+                        FeedbackDatasetMlPredictionEvidenceStatus.MISSING_UNEXPECTEDLY,
+                        FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED,
+                        FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED,
+                        FeedbackDatasetMlPredictionEvidenceStatus.IDENTITY_MISMATCH,
+                        FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT,
+                        FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
+                );
+        assertThat(result.records()).extracting(FeedbackDatasetRecord::mlPredictionEvidenceOmissionReason)
+                .containsExactlyElementsOf(reasons);
+        assertThat(result.skippedInvalidSourceRecordCount()).isZero();
+    }
+
+    @Test
+    void recoveredExactEvidenceChangesUnexpectedMissingToAvailableWithoutRewritingEarlierBuild() {
+        FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        captureOccurrence(source, "event-a", FROM.minusSeconds(1));
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+        when(evidenceRepository.findAllById(any()))
+                .thenReturn(List.of())
+                .thenReturn(List.of(evidence("event-a", "txn-a", FROM.minusSeconds(1), "model-a", 0.91)));
+
+        FeedbackDatasetBuildResult beforeRecovery = builder.build(request(10));
+        FeedbackDatasetBuildResult afterRecovery = builder.build(request(10));
+
+        assertThat(beforeRecovery.records()).singleElement().satisfies(record -> {
+            assertThat(record.mlPredictionEvidenceStatus())
+                    .isEqualTo(FeedbackDatasetMlPredictionEvidenceStatus.MISSING_UNEXPECTEDLY);
+            assertThat(record.mlPredictionEvidenceOmissionReason()).isNull();
+        });
+        assertThat(afterRecovery.records()).singleElement().satisfies(record -> {
+            assertThat(record.mlPredictionEvidenceStatus())
+                    .isEqualTo(FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE);
+            assertThat(record.mlModelVersion()).isEqualTo("model-a");
+        });
+    }
+
+    @Test
+    void missingEvidenceWithCapturedMlIdentityRemainsExplicitlyRepresented() {
         FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
         captureOccurrence(source, "event-a", FROM.minusSeconds(1));
         setModelIdentity(source, "model-a");
@@ -518,12 +597,13 @@ class FeedbackDatasetBuilderTest {
 
         FeedbackDatasetBuildResult result = builder.build(request(10));
 
-        assertThat(result.records()).isEmpty();
-        assertThat(result.skippedInvalidSourceRecordCount()).isEqualTo(1);
+        assertThat(result.records()).singleElement().extracting(FeedbackDatasetRecord::mlPredictionEvidenceStatus)
+                .isEqualTo(FeedbackDatasetMlPredictionEvidenceStatus.MISSING_UNEXPECTEDLY);
+        assertThat(result.skippedInvalidSourceRecordCount()).isZero();
     }
 
     @Test
-    void modelIdentityMismatchFailsClosedWithoutMergingSources() {
+    void modelIdentityMismatchRemainsExplicitWithoutMergingSources() {
         FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
         captureOccurrence(source, "event-a", FROM.minusSeconds(1));
         setModelIdentity(source, "model-a");
@@ -534,12 +614,13 @@ class FeedbackDatasetBuilderTest {
 
         FeedbackDatasetBuildResult result = builder.build(request(10));
 
-        assertThat(result.records()).isEmpty();
-        assertThat(result.skippedInvalidSourceRecordCount()).isEqualTo(1);
+        assertThat(result.records()).singleElement().extracting(FeedbackDatasetRecord::mlPredictionEvidenceStatus)
+                .isEqualTo(FeedbackDatasetMlPredictionEvidenceStatus.IDENTITY_MISMATCH);
+        assertThat(result.skippedInvalidSourceRecordCount()).isZero();
     }
 
     @Test
-    void transactionOwnershipMismatchFailsClosed() {
+    void transactionOwnershipMismatchRemainsExplicit() {
         FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
         captureOccurrence(source, "event-a", FROM.minusSeconds(1));
         when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
@@ -549,23 +630,62 @@ class FeedbackDatasetBuilderTest {
 
         FeedbackDatasetBuildResult result = builder.build(request(10));
 
-        assertThat(result.records()).isEmpty();
-        assertThat(result.skippedInvalidSourceRecordCount()).isEqualTo(1);
+        assertThat(result.records()).singleElement().extracting(FeedbackDatasetRecord::mlPredictionEvidenceStatus)
+                .isEqualTo(FeedbackDatasetMlPredictionEvidenceStatus.IDENTITY_MISMATCH);
+        assertThat(result.skippedInvalidSourceRecordCount()).isZero();
     }
 
     @Test
-    void evidenceStoreFailureReturnsBoundedFailureWithoutPartialRecords() {
+    void evidenceStoreFailureReturnsEvidenceStoreFailureWithoutPartialRecords() {
         FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
         captureOccurrence(source, "event-a", FROM.minusSeconds(1));
         when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
-        when(evidenceRepository.findAllById(any())).thenThrow(new RuntimeException("raw database detail"));
+        when(evidenceRepository.findAllById(any()))
+                .thenThrow(new DataAccessResourceFailureException("raw database detail"));
 
         FeedbackDatasetBuildResult result = builder.build(request(10));
 
         assertThat(result.failed()).isTrue();
-        assertThat(result.failureReason()).isEqualTo(FeedbackDatasetBuildFailureReason.FEEDBACK_STORE_UNAVAILABLE);
+        assertThat(result.failureReason())
+                .isEqualTo(FeedbackDatasetBuildFailureReason.ML_PREDICTION_EVIDENCE_STORE_UNAVAILABLE);
         assertThat(result.records()).isEmpty();
         assertThat(result.toString()).doesNotContain("raw database detail");
+    }
+
+    @Test
+    void evidenceInvariantFailureReturnsIntegrityFailureWithoutPartialRecords() {
+        FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        captureOccurrence(source, "event-a", FROM.minusSeconds(1));
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+        when(evidenceRepository.findAllById(any())).thenThrow(new IllegalStateException("raw invariant detail"));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.failureReason())
+                .isEqualTo(FeedbackDatasetBuildFailureReason.ML_PREDICTION_EVIDENCE_INTEGRITY_FAILURE);
+        assertThat(result.records()).isEmpty();
+        assertThat(result.toString()).doesNotContain("raw invariant detail");
+    }
+
+    @Test
+    void duplicateExactEvidenceReturnsIntegrityFailure() {
+        FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        captureOccurrence(source, "event-a", FROM.minusSeconds(1));
+        MlPredictionEvidenceProjection projection = evidence(
+                "event-a",
+                "txn-a",
+                FROM.minusSeconds(1),
+                "model-a",
+                0.91
+        );
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+        when(evidenceRepository.findAllById(any())).thenReturn(List.of(projection, projection));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.failureReason())
+                .isEqualTo(FeedbackDatasetBuildFailureReason.ML_PREDICTION_EVIDENCE_INTEGRITY_FAILURE);
+        assertThat(result.records()).isEmpty();
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.frauddetection.alert.feedback.dataset;
 
 import com.frauddetection.alert.feedback.FraudFeedbackLabel;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.RecordComponent;
@@ -60,6 +61,7 @@ class FeedbackDatasetRecordContractTest {
                         "rulesEvidenceStatus",
                         "rulesRiskLevel",
                         "mlPredictionEvidenceStatus",
+                        "mlPredictionEvidenceOmissionReason",
                         "mlPredictionScore",
                         "mlPredictionRiskLevel",
                         "mlPredictionExecutedAt",
@@ -305,9 +307,34 @@ class FeedbackDatasetRecordContractTest {
     }
 
     @Test
-    void invalidResolutionStatusesCannotEnterDatasetContract() {
-        assertThatThrownBy(() -> recordWithMlEvidence(
+    void boundedNonAvailableResolutionStatusesEnterDatasetWithoutPredictionValues() {
+        assertThatCode(() -> recordWithMlEvidence(
                 FeedbackDatasetMlPredictionEvidenceStatus.MISSING_UNEXPECTEDLY,
+                MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+        )).doesNotThrowAnyException();
+        assertThatCode(() -> recordWithMlEvidence(
+                FeedbackDatasetMlPredictionEvidenceStatus.IDENTITY_MISMATCH,
+                MlPredictionEvidenceOmissionReason.IDENTITY_VALIDATION_FAILURE,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+        )).doesNotThrowAnyException();
+    }
+
+    @Test
+    void legitimateAbsenceRequiresAuthoritativeProofAndStatusesMustMatchReasons() {
+        assertThatThrownBy(() -> recordWithMlEvidence(
+                FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT,
+                null,
                 null,
                 null,
                 null,
@@ -316,7 +343,8 @@ class FeedbackDatasetRecordContractTest {
                 null
         )).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> recordWithMlEvidence(
-                FeedbackDatasetMlPredictionEvidenceStatus.IDENTITY_MISMATCH,
+                FeedbackDatasetMlPredictionEvidenceStatus.MISSING_UNEXPECTEDLY,
+                MlPredictionEvidenceOmissionReason.INVALID_SCORE,
                 null,
                 null,
                 null,
@@ -416,6 +444,7 @@ class FeedbackDatasetRecordContractTest {
                 FeedbackDatasetRulesEvidenceStatus.UNAVAILABLE,
                 null,
                 FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT,
+                MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE,
                 null,
                 null,
                 null,
@@ -460,6 +489,30 @@ class FeedbackDatasetRecordContractTest {
             String mlModelVersion,
             String mlFeatureContractVersion
     ) {
+        return recordWithMlEvidence(
+                status,
+                status == FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT
+                        ? MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE
+                        : null,
+                score,
+                riskLevel,
+                executedAt,
+                mlModelName,
+                mlModelVersion,
+                mlFeatureContractVersion
+        );
+    }
+
+    private FeedbackDatasetRecord recordWithMlEvidence(
+            FeedbackDatasetMlPredictionEvidenceStatus status,
+            MlPredictionEvidenceOmissionReason omissionReason,
+            Double score,
+            RiskLevel riskLevel,
+            Instant executedAt,
+            String mlModelName,
+            String mlModelVersion,
+            String mlFeatureContractVersion
+    ) {
         return new FeedbackDatasetRecord(
                 FeedbackDatasetBuilder.DATASET_VERSION,
                 FeedbackDatasetIdentifierHasher.evaluationRecordId("feedback-1"),
@@ -478,6 +531,7 @@ class FeedbackDatasetRecordContractTest {
                 FeedbackDatasetRulesEvidenceStatus.UNAVAILABLE,
                 null,
                 status,
+                omissionReason,
                 score,
                 riskLevel,
                 executedAt,

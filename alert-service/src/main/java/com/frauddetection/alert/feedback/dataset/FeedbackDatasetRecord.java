@@ -7,6 +7,7 @@ import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationStatus;
 
@@ -32,6 +33,7 @@ public record FeedbackDatasetRecord(
         FeedbackDatasetRulesEvidenceStatus rulesEvidenceStatus,
         RiskLevel rulesRiskLevel,
         FeedbackDatasetMlPredictionEvidenceStatus mlPredictionEvidenceStatus,
+        MlPredictionEvidenceOmissionReason mlPredictionEvidenceOmissionReason,
         Double mlPredictionScore,
         RiskLevel mlPredictionRiskLevel,
         Instant mlPredictionExecutedAt,
@@ -86,6 +88,7 @@ public record FeedbackDatasetRecord(
         );
         validateMlPredictionEvidence(
                 mlPredictionEvidenceStatus,
+                mlPredictionEvidenceOmissionReason,
                 mlPredictionScore,
                 mlPredictionRiskLevel,
                 mlPredictionExecutedAt,
@@ -129,6 +132,7 @@ public record FeedbackDatasetRecord(
 
     private static void validateMlPredictionEvidence(
             FeedbackDatasetMlPredictionEvidenceStatus status,
+            MlPredictionEvidenceOmissionReason omissionReason,
             Double score,
             RiskLevel riskLevel,
             Instant executedAt,
@@ -140,16 +144,21 @@ public record FeedbackDatasetRecord(
         boolean directEvidenceComplete = score != null && riskLevel != null && executedAt != null;
         boolean modelIdentityComplete = modelName != null && modelVersion != null && featureContractVersion != null;
         if (status == FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE) {
-            if (!directEvidenceComplete || !modelIdentityComplete) {
+            if (!directEvidenceComplete || !modelIdentityComplete || omissionReason != null) {
                 throw new IllegalArgumentException("available ML prediction evidence must be complete");
             }
             return;
         }
-        if (status != FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT) {
-            throw new IllegalArgumentException("invalid ML prediction evidence cannot enter the dataset");
-        }
         if (score != null || riskLevel != null || executedAt != null || modelIdentityComplete) {
-            throw new IllegalArgumentException("absent ML prediction evidence must not carry prediction values");
+            throw new IllegalArgumentException("unavailable ML prediction evidence must not carry prediction values");
+        }
+        if (status == FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT
+                && omissionReason == null) {
+            throw new IllegalArgumentException("legitimate absence requires authoritative omission proof");
+        }
+        if (omissionReason != null
+                && status != FeedbackDatasetMlPredictionEvidenceStatus.fromAuthoritativeOmission(omissionReason)) {
+            throw new IllegalArgumentException("ML prediction omission reason contradicts evidence status");
         }
     }
 }
