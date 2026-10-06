@@ -1,14 +1,86 @@
 package com.frauddetection.alert.feedback.dataset;
 
 import com.frauddetection.alert.feedback.FraudFeedbackLabel;
+import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class FeedbackDatasetJsonlWriterTest {
+
+    @Test
+    void buildResultRejectsUnsupportedDatasetVersion() {
+        assertThatThrownBy(() -> result("feedback-dataset-v1", List.of()))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void buildResultRejectsUnreconciledPopulationCounts() {
+        assertThatThrownBy(() -> new FeedbackDatasetBuildResult(
+                FeedbackDatasetBuilder.DATASET_VERSION,
+                BUILT_AT,
+                FeedbackDatasetTimeBasis.FEEDBACK_CREATED_AT,
+                FROM,
+                TO,
+                2,
+                1,
+                0,
+                0,
+                0,
+                0,
+                false,
+                FeedbackDatasetBuildFailureReason.NONE,
+                List.of(record())
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("dataset population counts must reconcile");
+    }
+
+    @Test
+    void buildResultAcceptsSingleTruncationSentinelRow() {
+        FeedbackDatasetBuildResult result = new FeedbackDatasetBuildResult(
+                FeedbackDatasetBuilder.DATASET_VERSION,
+                BUILT_AT,
+                FeedbackDatasetTimeBasis.FEEDBACK_CREATED_AT,
+                FROM,
+                TO,
+                2,
+                1,
+                0,
+                0,
+                0,
+                0,
+                true,
+                FeedbackDatasetBuildFailureReason.NONE,
+                List.of(record())
+        );
+
+        assertThat(result.truncated()).isTrue();
+    }
+
+    @Test
+    void buildResultRejectsPopulationBeyondHardLimit() {
+        assertThatThrownBy(() -> new FeedbackDatasetBuildResult(
+                FeedbackDatasetBuilder.DATASET_VERSION,
+                BUILT_AT,
+                FeedbackDatasetTimeBasis.FEEDBACK_CREATED_AT,
+                FROM,
+                TO,
+                1001,
+                0,
+                1001,
+                0,
+                0,
+                0,
+                false,
+                FeedbackDatasetBuildFailureReason.NONE,
+                List.of()
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("dataset population exceeds the bounded record limit");
+    }
 
     private static final Instant FROM = Instant.parse("2026-06-01T00:00:00Z");
     private static final Instant TO = Instant.parse("2026-06-02T00:00:00Z");
@@ -20,7 +92,7 @@ class FeedbackDatasetJsonlWriterTest {
 
         assertThat(jsonl.lines().findFirst().orElseThrow())
                 .contains("\"type\":\"DATASET_METADATA\"")
-                .contains("\"datasetVersion\":\"feedback-dataset-v1\"")
+                .contains("\"datasetVersion\":\"feedback-dataset-v2\"")
                 .contains("\"timeBasis\":\"FEEDBACK_CREATED_AT\"")
                 .contains("\"skippedInvalidSourceRecordCount\":0");
     }
@@ -121,14 +193,24 @@ class FeedbackDatasetJsonlWriterTest {
         String jsonl = new FeedbackDatasetJsonlWriter().writeJsonl(result(List.of(recordWithMlIdentity())));
 
         assertThat(jsonl)
+                .contains("\"rulesEvidenceStatus\":\"AVAILABLE\"")
+                .contains("\"rulesRiskLevel\":\"LOW\"")
+                .contains("\"mlPredictionEvidenceStatus\":\"AVAILABLE\"")
+                .contains("\"mlPredictionScore\":0.8123")
+                .contains("\"mlPredictionRiskLevel\":\"HIGH\"")
+                .contains("\"mlPredictionExecutedAt\":\"2026-06-01T00:00:01Z\"")
                 .contains("\"mlModelName\":\"python-logistic-fraud-model\"")
                 .contains("\"mlModelVersion\":\"2026-06-25.v1\"")
                 .contains("\"mlFeatureContractVersion\":\"feature-contract-v2\"");
     }
 
     private FeedbackDatasetBuildResult result(List<FeedbackDatasetRecord> records) {
+        return result(FeedbackDatasetBuilder.DATASET_VERSION, records);
+    }
+
+    private FeedbackDatasetBuildResult result(String datasetVersion, List<FeedbackDatasetRecord> records) {
         return new FeedbackDatasetBuildResult(
-                FeedbackDatasetBuilder.DATASET_VERSION,
+                datasetVersion,
                 BUILT_AT,
                 FeedbackDatasetTimeBasis.FEEDBACK_CREATED_AT,
                 FROM,
@@ -180,6 +262,15 @@ class FeedbackDatasetJsonlWriterTest {
                 null,
                 null,
                 null,
+                FeedbackDatasetRulesEvidenceStatus.UNAVAILABLE,
+                null,
+                FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
                 null,
                 null,
                 null,
@@ -206,6 +297,12 @@ class FeedbackDatasetJsonlWriterTest {
                 null,
                 null,
                 null,
+                FeedbackDatasetRulesEvidenceStatus.AVAILABLE,
+                RiskLevel.LOW,
+                FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE,
+                0.8123,
+                RiskLevel.HIGH,
+                Instant.parse("2026-06-01T00:00:01Z"),
                 "python-logistic-fraud-model",
                 "2026-06-25.v1",
                 "feature-contract-v2",

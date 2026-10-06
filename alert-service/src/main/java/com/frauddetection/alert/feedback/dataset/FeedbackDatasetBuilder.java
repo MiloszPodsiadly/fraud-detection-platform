@@ -1,7 +1,12 @@
 package com.frauddetection.alert.feedback.dataset;
 
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
+import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjection;
+import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionRepository;
 import com.frauddetection.alert.feedback.FraudFeedbackRecord;
 import com.frauddetection.alert.feedback.governance.FeedbackDatasetEligibility;
+import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -9,33 +14,42 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 
 @Service
 public class FeedbackDatasetBuilder {
 
-    public static final String DATASET_VERSION = "feedback-dataset-v1";
+    public static final String DATASET_VERSION = "feedback-dataset-v2";
 
     private final FeedbackDatasetCandidateStore candidateStore;
     private final FeedbackDatasetMappingPolicy mappingPolicy;
+    private final MlPredictionEvidenceProjectionRepository evidenceRepository;
     private final Clock clock;
 
     @Autowired
     public FeedbackDatasetBuilder(
             FeedbackDatasetCandidateStore candidateStore,
-            FeedbackDatasetMappingPolicy mappingPolicy
+            FeedbackDatasetMappingPolicy mappingPolicy,
+            MlPredictionEvidenceProjectionRepository evidenceRepository
     ) {
-        this(candidateStore, mappingPolicy, Clock.systemUTC());
+        this(candidateStore, mappingPolicy, evidenceRepository, Clock.systemUTC());
     }
 
     FeedbackDatasetBuilder(
             FeedbackDatasetCandidateStore candidateStore,
             FeedbackDatasetMappingPolicy mappingPolicy,
+            MlPredictionEvidenceProjectionRepository evidenceRepository,
             Clock clock
     ) {
         this.candidateStore = Objects.requireNonNull(candidateStore, "candidateStore is required");
         this.mappingPolicy = Objects.requireNonNull(mappingPolicy, "mappingPolicy is required");
+        this.evidenceRepository = Objects.requireNonNull(evidenceRepository, "evidenceRepository is required");
         this.clock = Objects.requireNonNull(clock, "clock is required");
     }
 
@@ -67,6 +81,7 @@ public class FeedbackDatasetBuilder {
         int skippedMissingRequired = 0;
         int skippedInvalidSource = 0;
         List<FeedbackDatasetRecord> records = new ArrayList<>();
+        List<EligibleSource> eligibleSources = new ArrayList<>();
 
         for (FraudFeedbackRecord source : boundedRows) {
             FeedbackDatasetEligibility eligibility = mappingPolicy.eligibilityFor(source.getFeedbackLabel());
@@ -78,10 +93,38 @@ public class FeedbackDatasetBuilder {
                 excludedGovernanceReview++;
                 continue;
             }
+            Optional<FeedbackEvaluationLabel> evaluationLabel = mappingPolicy.evaluationLabel(source.getFeedbackLabel());
+            if (evaluationLabel.isEmpty()) {
+                excludedGovernanceReview++;
+                continue;
+            }
+            eligibleSources.add(new EligibleSource(source, evaluationLabel.orElseThrow()));
+        }
+
+        List<ResolvedSource> resolvedSources;
+        try {
+            resolvedSources = resolveMlPredictionEvidence(eligibleSources);
+        } catch (RuntimeException exception) {
+            return FeedbackDatasetBuildResult.failed(
+                    request,
+                    builtAt,
+                    FeedbackDatasetBuildFailureReason.FEEDBACK_STORE_UNAVAILABLE
+            );
+        }
+
+        for (ResolvedSource resolved : resolvedSources) {
+            if (!resolved.evidence().mayEnterDataset()) {
+                skippedInvalidSource++;
+                continue;
+            }
             try {
-                mappingPolicy.evaluationLabel(source.getFeedbackLabel())
-                        .map(label -> record(source, label, validatedDecisionReasonCodes(source)))
-                        .ifPresent(records::add);
+                FraudFeedbackRecord source = resolved.source().source();
+                records.add(record(
+                        source,
+                        resolved.source().evaluationLabel(),
+                        validatedDecisionReasonCodes(source),
+                        resolved.evidence()
+                ));
             } catch (MissingRequiredSourceFieldException exception) {
                 skippedMissingRequired++;
             } catch (IllegalArgumentException exception) {
@@ -120,8 +163,10 @@ public class FeedbackDatasetBuilder {
     private FeedbackDatasetRecord record(
             FraudFeedbackRecord source,
             FeedbackEvaluationLabel evaluationLabel,
-            List<String> validatedDecisionReasonCodes
+            List<String> validatedDecisionReasonCodes,
+            FeedbackDatasetMlPredictionEvidence evidence
     ) {
+        MlPredictionEvidenceProjection projection = evidence.projection().orElse(null);
         return new FeedbackDatasetRecord(
                 DATASET_VERSION,
                 FeedbackDatasetIdentifierHasher.evaluationRecordId(requireSourceText(source.getFeedbackId(), "feedbackId")),
@@ -137,9 +182,17 @@ public class FeedbackDatasetBuilder {
                 source.getAgreementStatus(),
                 source.getRiskMismatchStatus(),
                 source.getScoreDeltaBucket(),
-                source.getMlModelName(),
-                source.getMlModelVersion(),
-                source.getMlFeatureContractVersion(),
+                rulesEvidenceStatus(source),
+                source.getRulesEngineStatus() == FraudEngineStatus.AVAILABLE
+                        ? source.getRulesRiskLevel()
+                        : null,
+                evidence.status(),
+                projection == null ? null : projection.getMlScore(),
+                projection == null ? null : projection.getMlRiskLevel(),
+                projection == null ? null : projection.getSourceExecutionTimestamp(),
+                projection == null ? null : projection.getModelName(),
+                projection == null ? null : projection.getModelVersion(),
+                projection == null ? null : projection.getFeatureContractVersion(),
                 source.getAnalystRecommendationStatus(),
                 source.getAnalystRecommendation(),
                 source.getAnalystRecommendationVersion(),
@@ -148,6 +201,139 @@ public class FeedbackDatasetBuilder {
                 source.getScoredAt(),
                 source.getTransactionTimestamp()
         );
+    }
+
+    private FeedbackDatasetRulesEvidenceStatus rulesEvidenceStatus(FraudFeedbackRecord source) {
+        if (source.getRulesEngineStatus() == FraudEngineStatus.AVAILABLE) {
+            if (source.getRulesRiskLevel() == null) {
+                throw new IllegalArgumentException("available Rules evidence requires rulesRiskLevel");
+            }
+            return FeedbackDatasetRulesEvidenceStatus.AVAILABLE;
+        }
+        if (source.getRulesRiskLevel() != null) {
+            throw new IllegalArgumentException("unavailable Rules evidence must not carry rulesRiskLevel");
+        }
+        return FeedbackDatasetRulesEvidenceStatus.UNAVAILABLE;
+    }
+
+    private List<ResolvedSource> resolveMlPredictionEvidence(List<EligibleSource> eligibleSources) {
+        Map<FraudFeedbackRecord, OccurrenceResolution> ownershipBySource = new LinkedHashMap<>();
+        Set<String> sourceEventIds = new LinkedHashSet<>();
+        for (EligibleSource eligible : eligibleSources) {
+            Optional<ScoringOccurrenceOwnership> ownership;
+            try {
+                ownership = eligible.source().scoringOccurrenceOwnership();
+            } catch (RuntimeException exception) {
+                ownershipBySource.put(eligible.source(), OccurrenceResolution.invalid());
+                continue;
+            }
+            ownershipBySource.put(eligible.source(), OccurrenceResolution.valid(ownership));
+            ownership.map(ScoringOccurrenceOwnership::sourceEventId).ifPresent(sourceEventIds::add);
+        }
+
+        Map<String, MlPredictionEvidenceProjection> projectionBySourceEventId = new LinkedHashMap<>();
+        if (!sourceEventIds.isEmpty()) {
+            for (MlPredictionEvidenceProjection projection : evidenceRepository.findAllById(sourceEventIds)) {
+                if (projection == null || !sourceEventIds.contains(projection.getSourceEventId())) {
+                    throw new IllegalStateException("ML prediction evidence lookup returned an invalid projection");
+                }
+                if (projectionBySourceEventId.putIfAbsent(projection.getSourceEventId(), projection) != null) {
+                    throw new IllegalStateException("ML prediction evidence lookup returned duplicate projections");
+                }
+            }
+        }
+
+        List<ResolvedSource> resolved = new ArrayList<>(eligibleSources.size());
+        for (EligibleSource eligible : eligibleSources) {
+            OccurrenceResolution occurrence = ownershipBySource.get(eligible.source());
+            if (occurrence.malformed()) {
+                resolved.add(new ResolvedSource(
+                        eligible,
+                        FeedbackDatasetMlPredictionEvidence.unavailable(
+                                FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
+                        )
+                ));
+                continue;
+            }
+            Optional<ScoringOccurrenceOwnership> ownership = occurrence.ownership();
+            MlPredictionEvidenceProjection projection = ownership
+                    .map(ScoringOccurrenceOwnership::sourceEventId)
+                    .map(projectionBySourceEventId::get)
+                    .orElse(null);
+            resolved.add(new ResolvedSource(eligible, classifyEvidence(eligible.source(), ownership, projection)));
+        }
+        return resolved;
+    }
+
+    private FeedbackDatasetMlPredictionEvidence classifyEvidence(
+            FraudFeedbackRecord source,
+            Optional<ScoringOccurrenceOwnership> ownership,
+            MlPredictionEvidenceProjection projection
+    ) {
+        int feedbackIdentityParts = presentIdentityParts(source);
+        if (feedbackIdentityParts != 0 && feedbackIdentityParts != 3) {
+            return FeedbackDatasetMlPredictionEvidence.unavailable(
+                    FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
+            );
+        }
+        if (ownership.isEmpty()) {
+            return FeedbackDatasetMlPredictionEvidence.unavailable(feedbackIdentityParts == 0
+                    ? FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT
+                    : FeedbackDatasetMlPredictionEvidenceStatus.MISSING_UNEXPECTEDLY);
+        }
+        if (projection == null) {
+            return FeedbackDatasetMlPredictionEvidence.unavailable(feedbackIdentityParts == 0
+                    ? FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT
+                    : FeedbackDatasetMlPredictionEvidenceStatus.MISSING_UNEXPECTEDLY);
+        }
+
+        try {
+            ScoringOccurrenceOwnership exactOccurrence = ownership.orElseThrow();
+            new MlPredictionEvidenceV1(
+                    projection.getContractVersion(),
+                    projection.getSourceEngineId(),
+                    projection.getEngineStatus(),
+                    projection.getMlScore(),
+                    projection.getMlRiskLevel(),
+                    projection.getModelName(),
+                    projection.getModelVersion(),
+                    projection.getFeatureContractVersion(),
+                    projection.getSourceExecutionTimestamp()
+            );
+            if (!exactOccurrence.sourceEventId().equals(projection.getSourceEventId())
+                    || !exactOccurrence.sourceEventCreatedAt().equals(projection.getSourceEventCreatedAt())
+                    || !Objects.equals(source.getTransactionId(), projection.getTransactionId())
+                    || (source.getCorrelationId() != null
+                    && !Objects.equals(source.getCorrelationId(), projection.getCorrelationId()))) {
+                return FeedbackDatasetMlPredictionEvidence.unavailable(
+                        FeedbackDatasetMlPredictionEvidenceStatus.IDENTITY_MISMATCH
+                );
+            }
+            if (feedbackIdentityParts == 3
+                    && (!Objects.equals(source.getMlModelName(), projection.getModelName())
+                    || !Objects.equals(source.getMlModelVersion(), projection.getModelVersion())
+                    || !Objects.equals(
+                            source.getMlFeatureContractVersion(),
+                            projection.getFeatureContractVersion()
+                    ))) {
+                return FeedbackDatasetMlPredictionEvidence.unavailable(
+                        FeedbackDatasetMlPredictionEvidenceStatus.IDENTITY_MISMATCH
+                );
+            }
+            return FeedbackDatasetMlPredictionEvidence.available(projection);
+        } catch (RuntimeException exception) {
+            return FeedbackDatasetMlPredictionEvidence.unavailable(
+                    FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
+            );
+        }
+    }
+
+    private int presentIdentityParts(FraudFeedbackRecord source) {
+        int present = 0;
+        present += source.getMlModelName() == null ? 0 : 1;
+        present += source.getMlModelVersion() == null ? 0 : 1;
+        present += source.getMlFeatureContractVersion() == null ? 0 : 1;
+        return present;
     }
 
     private List<String> validatedDecisionReasonCodes(FraudFeedbackRecord source) {
@@ -178,5 +364,28 @@ public class FeedbackDatasetBuilder {
     }
 
     private static class MissingRequiredSourceFieldException extends RuntimeException {
+    }
+
+    private record EligibleSource(FraudFeedbackRecord source, FeedbackEvaluationLabel evaluationLabel) {
+    }
+
+    private record ResolvedSource(
+            EligibleSource source,
+            FeedbackDatasetMlPredictionEvidence evidence
+    ) {
+    }
+
+    private record OccurrenceResolution(
+            Optional<ScoringOccurrenceOwnership> ownership,
+            boolean malformed
+    ) {
+
+        private static OccurrenceResolution valid(Optional<ScoringOccurrenceOwnership> ownership) {
+            return new OccurrenceResolution(ownership, false);
+        }
+
+        private static OccurrenceResolution invalid() {
+            return new OccurrenceResolution(Optional.empty(), true);
+        }
     }
 }

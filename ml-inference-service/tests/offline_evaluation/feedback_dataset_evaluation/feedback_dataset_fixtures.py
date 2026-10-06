@@ -12,7 +12,7 @@ GENERATED_AT = "2026-06-10T00:00:00Z"
 def metadata(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
         "type": "DATASET_METADATA",
-        "datasetVersion": "feedback-dataset-v1",
+        "datasetVersion": "feedback-dataset-v2",
         "builtAt": "2026-06-10T00:00:00Z",
         "timeBasis": "FEEDBACK_CREATED_AT",
         "fromInclusive": "2026-06-01T00:00:00Z",
@@ -32,7 +32,7 @@ def metadata(**overrides: object) -> dict[str, object]:
 
 def record(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
-        "datasetVersion": "feedback-dataset-v1",
+        "datasetVersion": "feedback-dataset-v2",
         "evaluationRecordId": "eval_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "transactionReference": "txnref_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "feedbackLabel": "CONFIRMED_FRAUD",
@@ -43,11 +43,20 @@ def record(**overrides: object) -> dict[str, object]:
         "riskLevel": "HIGH",
         "alertRecommended": True,
         "engineIntelligenceStatus": "AVAILABLE",
-        "agreementStatus": "ENGINES_AGREE",
-        "riskMismatchStatus": "NONE",
-        "scoreDeltaBucket": "SMALL_DELTA",
-        "analystRecommendationStatus": "GENERATED",
-        "analystRecommendation": "REVIEW_TRANSACTION",
+        "agreementStatus": "AGREEMENT",
+        "riskMismatchStatus": "SAME_RISK_LEVEL",
+        "scoreDeltaBucket": "SMALL",
+        "rulesEvidenceStatus": "AVAILABLE",
+        "rulesRiskLevel": "HIGH",
+        "mlPredictionEvidenceStatus": "LEGITIMATELY_ABSENT",
+        "mlPredictionScore": None,
+        "mlPredictionRiskLevel": None,
+        "mlPredictionExecutedAt": None,
+        "mlModelName": None,
+        "mlModelVersion": None,
+        "mlFeatureContractVersion": None,
+        "analystRecommendationStatus": "AVAILABLE",
+        "analystRecommendation": "RECOMMEND_REVIEW",
         "analystRecommendationVersion": "v1",
         "analystRecommendationGeneratedAt": "2026-06-03T12:00:01Z",
         "analystRecommendationReasonCodes": ["MODEL_SIGNAL"],
@@ -55,6 +64,17 @@ def record(**overrides: object) -> dict[str, object]:
         "transactionTimestamp": "2026-06-03T11:58:00Z",
     }
     payload.update(overrides)
+    identity_fields = ("mlModelName", "mlModelVersion", "mlFeatureContractVersion")
+    if "mlPredictionEvidenceStatus" not in overrides and any(payload[field] is not None for field in identity_fields):
+        payload["mlPredictionEvidenceStatus"] = "AVAILABLE"
+        evidence_defaults = {
+            "mlPredictionScore": 0.8123,
+            "mlPredictionRiskLevel": "HIGH",
+            "mlPredictionExecutedAt": "2026-06-03T11:59:00Z",
+        }
+        for field, value in evidence_defaults.items():
+            if field not in overrides:
+                payload[field] = value
     if "decisionReasonCodes" not in overrides and payload["feedbackLabel"] == "CONFIRMED_LEGITIMATE":
         payload["decisionReasonCodes"] = ["CUSTOMER_CONFIRMED_LEGITIMATE"]
     return payload

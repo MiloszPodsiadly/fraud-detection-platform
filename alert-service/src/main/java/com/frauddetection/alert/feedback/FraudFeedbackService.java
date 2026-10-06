@@ -211,6 +211,7 @@ public class FraudFeedbackService {
                 record.setRiskMismatchStatus(response.comparison().riskMismatchStatus());
                 record.setScoreDeltaBucket(response.comparison().scoreDeltaBucket());
             }
+            snapshotRulesEvidence(record, readModel);
             snapshotMlModelIdentity(record, readModel);
         } catch (EngineIntelligenceProjectionReadUnavailableException exception) {
             record.setEngineIntelligenceStatus(EngineIntelligenceResponseStatus.UNAVAILABLE);
@@ -218,6 +219,20 @@ public class FraudFeedbackService {
             log.warn("Fraud feedback engine intelligence snapshot unavailable.");
             record.setEngineIntelligenceStatus(EngineIntelligenceResponseStatus.UNAVAILABLE);
         }
+    }
+
+    private void snapshotRulesEvidence(FraudFeedbackRecord record, EngineIntelligenceReadModel readModel) {
+        if (readModel == null || !readModel.available() || readModel.engines() == null) {
+            return;
+        }
+        readModel.engines().stream()
+                .filter(engine -> FraudEngineIdentityContract.RULES_PRIMARY_ENGINE_ID.equals(engine.engineId()))
+                .filter(engine -> engine.engineType() == FraudEngineType.RULES)
+                .findFirst()
+                .ifPresent(engine -> {
+                    record.setRulesEngineStatus(engine.status());
+                    record.setRulesRiskLevel(engine.riskLevel());
+                });
     }
 
     private void snapshotMlModelIdentity(FraudFeedbackRecord record, EngineIntelligenceReadModel readModel) {

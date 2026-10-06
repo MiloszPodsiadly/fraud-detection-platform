@@ -19,7 +19,7 @@ class FeedbackDatasetReaderTest(unittest.TestCase):
             parsed = read_feedback_dataset_jsonl(path)
 
         self.assertEqual(1, len(parsed.records))
-        self.assertEqual("feedback-dataset-v1", parsed.metadata.dataset_version)
+        self.assertEqual("feedback-dataset-v2", parsed.metadata.dataset_version)
         self.assertEqual("POSITIVE_FRAUD", parsed.records[0].evaluation_label)
 
     def test_metadataIsNotCountedAsRecord(self):
@@ -86,6 +86,11 @@ class FeedbackDatasetReaderTest(unittest.TestCase):
 
     def test_rejectsUnsupportedDatasetVersion(self):
         with jsonl_file(jsonl(record(), metadata_overrides={"datasetVersion": "other"})) as path:
+            with self.assertRaises(FeedbackDatasetValidationError):
+                read_feedback_dataset_jsonl(path)
+
+    def test_rejectsRetiredFeedbackDatasetV1(self):
+        with jsonl_file(jsonl(record(), metadata_overrides={"datasetVersion": "feedback-dataset-v1"})) as path:
             with self.assertRaises(FeedbackDatasetValidationError):
                 read_feedback_dataset_jsonl(path)
 

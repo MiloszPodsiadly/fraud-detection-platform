@@ -117,6 +117,8 @@ class FraudFeedbackServiceTest {
         assertThat(response.agreementStatus()).isEqualTo(EngineIntelligenceAgreementStatus.PARTIAL);
         assertThat(response.analystRecommendation()).isEqualTo(AnalystRecommendation.RECOMMEND_REVIEW);
         assertThat(savedRecords).singleElement().satisfies(record -> {
+            assertThat(record.getRulesEngineStatus()).isEqualTo(FraudEngineStatus.AVAILABLE);
+            assertThat(record.getRulesRiskLevel()).isEqualTo(RiskLevel.CRITICAL);
             assertThat(record.getSourceEventId()).isEqualTo("event-1");
             assertThat(record.getSourceEventCreatedAt())
                     .isEqualTo(Instant.parse("2026-06-25T09:00:01Z"));
@@ -163,6 +165,8 @@ class FraudFeedbackServiceTest {
 
         assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
         assertThat(savedRecords).singleElement().satisfies(record -> {
+            assertThat(record.getRulesEngineStatus()).isEqualTo(FraudEngineStatus.AVAILABLE);
+            assertThat(record.getRulesRiskLevel()).isEqualTo(RiskLevel.CRITICAL);
             assertThat(record.getMlModelName()).isEqualTo("python-logistic-fraud-model");
             assertThat(record.getMlModelVersion()).isEqualTo("model-X");
             assertThat(record.getMlFeatureContractVersion()).isEqualTo("feature-contract-v2");
@@ -176,6 +180,8 @@ class FraudFeedbackServiceTest {
         assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
         assertThat(response.comparisonType()).isEqualTo(EngineIntelligenceComparisonType.RULES_VS_ML);
         assertThat(savedRecords).singleElement().satisfies(record -> {
+            assertThat(record.getRulesEngineStatus()).isEqualTo(FraudEngineStatus.AVAILABLE);
+            assertThat(record.getRulesRiskLevel()).isEqualTo(RiskLevel.CRITICAL);
             assertThat(record.getMlModelName()).isNull();
             assertThat(record.getMlModelVersion()).isNull();
             assertThat(record.getMlFeatureContractVersion()).isNull();
@@ -533,6 +539,10 @@ class FraudFeedbackServiceTest {
         FraudFeedbackResponse response = service.create("txn-1", request());
 
         assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.UNAVAILABLE);
+        assertThat(savedRecords).singleElement().satisfies(saved -> {
+            assertThat(saved.getRulesEngineStatus()).isNull();
+            assertThat(saved.getRulesRiskLevel()).isNull();
+        });
         assertThat(response.comparisonType()).isNull();
         assertThat(response.comparedEngineIds()).isEmpty();
         assertThat(response.agreementStatus()).isNull();

@@ -47,6 +47,9 @@ range cap is 31 days.
 of matching records in the database. When `truncated=true`, more matching records may exist beyond the bounded read
 window.
 
+Successful metadata reconciles every bounded row as returned, excluded, or skipped. A truncated read contains exactly
+one additional sentinel row fetched only to prove that more candidates exist.
+
 ## Eligibility And Labels
 
 The builder does not duplicate eligibility rules. It calls `FeedbackDatasetEligibilityPolicy` first:
@@ -57,7 +60,7 @@ The builder does not duplicate eligibility rules. It calls `FeedbackDatasetEligi
 - `NEEDS_MORE_INFO` -> excluded
 - null or governance-review labels -> excluded
 
-Unresolved labels are not written to JSONL v1.
+Unresolved labels are not written to JSONL v2.
 
 `FeedbackDatasetRecord` also enforces the record-level invariant. Only these pairs can be represented:
 
@@ -86,11 +89,23 @@ Optional nullable fields are limited to bounded feedback diagnostics already pre
 agreement/mismatch/score-delta buckets, Analyst Recommendation status/value/version/generated-at/reason codes,
 `scoredAt`, and `transactionTimestamp`.
 
-The record shape includes optional ML diagnostic lineage snapshot fields:
-`mlModelName`, `mlModelVersion`, and `mlFeatureContractVersion`. They are copied from `FraudFeedbackRecord`, which
-captures them at feedback creation from the persisted Engine Intelligence projection for the reviewed transaction. Old
-feedback rows and old JSONL records can omit these fields or carry nulls; consumers must not backfill missing lineage
-from the current runtime, registry, or latest artifact.
+The v2 record shape carries bounded direct ML evidence through `mlPredictionEvidenceStatus`, `mlPredictionScore`,
+`mlPredictionRiskLevel`, and `mlPredictionExecutedAt`, together with `mlModelName`, `mlModelVersion`, and
+`mlFeatureContractVersion`. `AVAILABLE` requires the complete signal and model identity. `LEGITIMATELY_ABSENT`
+requires every direct prediction and model identity field to be null; absence is never represented as score zero or
+low risk.
+
+The same record carries only the bounded Rules-side snapshot needed for comparison: `rulesEvidenceStatus` and
+`rulesRiskLevel`. These values are captured on `FraudFeedbackRecord` from the occurrence-validated Engine Intelligence
+read during feedback creation. Dataset construction never looks up a current Rules projection. `UNAVAILABLE` requires
+a null risk level and is not interpreted as `LOW`, so a later rescore cannot replace the historical Rules signal.
+
+The builder resolves this evidence only through the feedback record's exact authoritative `sourceEventId` and the
+immutable `MlPredictionEvidenceProjection` keyed by that event. It validates occurrence timestamp, transaction
+ownership, optional correlation ownership, and any captured feedback model identity. Contradictions fail closed and
+are counted as invalid source rows. The lookup is one bounded `findAllById` batch after the dataset row limit is
+applied; there is no transaction-to-latest, current projection, registry, runtime-model, or timestamp-proximity
+fallback.
 
 The builder never serializes `FraudFeedbackRecord` directly.
 
@@ -109,10 +124,9 @@ potentially using keyed HMAC or another approved pseudonymization mechanism.
 The output does not include customer id, correlation id, created-by actor, notes, raw notes, raw payloads, raw evidence,
 raw ML requests/responses, feature vectors, legal/final/payment decision fields, or secrets.
 
-The current dataset contract does not export the private scoring occurrence identity or join raw ML evidence. A future
-model-specific evidence evaluation must use the feedback record's exact authoritative `sourceEventId`; records whose
-lineage is unavailable must first be replayed or migrated from the exact retained event, or be quarantined and excluded.
-Consumers must never infer missing lineage from the current score, runtime, registry, model version, or timestamps.
+The dataset does not export the private scoring occurrence identity used for the internal join. It exports only the
+bounded direct prediction fields required by offline evaluation. Consumers must never infer missing evidence or
+lineage from the platform score, current runtime, registry, model version, latest projection, or timestamps.
 
 ## Result And Failure Semantics
 

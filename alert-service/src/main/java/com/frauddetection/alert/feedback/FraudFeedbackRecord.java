@@ -2,6 +2,7 @@ package com.frauddetection.alert.feedback;
 
 import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
+import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
@@ -60,6 +61,8 @@ public class FraudFeedbackRecord {
     private EngineIntelligenceAgreementStatus agreementStatus;
     private EngineIntelligenceRiskMismatchStatus riskMismatchStatus;
     private EngineIntelligenceScoreDeltaBucket scoreDeltaBucket;
+    private FraudEngineStatus rulesEngineStatus;
+    private RiskLevel rulesRiskLevel;
     private String mlModelName;
     private String mlModelVersion;
     private String mlFeatureContractVersion;
@@ -161,6 +164,10 @@ public class FraudFeedbackRecord {
     public void setRiskMismatchStatus(EngineIntelligenceRiskMismatchStatus riskMismatchStatus) { this.riskMismatchStatus = riskMismatchStatus; }
     public EngineIntelligenceScoreDeltaBucket getScoreDeltaBucket() { return scoreDeltaBucket; }
     public void setScoreDeltaBucket(EngineIntelligenceScoreDeltaBucket scoreDeltaBucket) { this.scoreDeltaBucket = scoreDeltaBucket; }
+    public FraudEngineStatus getRulesEngineStatus() { return rulesEngineStatus; }
+    public void setRulesEngineStatus(FraudEngineStatus rulesEngineStatus) { this.rulesEngineStatus = rulesEngineStatus; }
+    public RiskLevel getRulesRiskLevel() { return rulesRiskLevel; }
+    public void setRulesRiskLevel(RiskLevel rulesRiskLevel) { this.rulesRiskLevel = rulesRiskLevel; }
     public String getMlModelName() { return mlModelName; }
     public void setMlModelName(String mlModelName) { this.mlModelName = mlModelName; }
     public String getMlModelVersion() { return mlModelVersion; }

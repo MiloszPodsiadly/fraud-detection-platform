@@ -1,22 +1,30 @@
 package com.frauddetection.alert.feedback.dataset;
 
 import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
+import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjection;
+import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionRepository;
 import com.frauddetection.alert.feedback.FraudFeedbackLabel;
 import com.frauddetection.alert.feedback.FraudFeedbackRecord;
 import com.frauddetection.alert.feedback.governance.FeedbackDatasetEligibilityPolicy;
+import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.stream.StreamSupport;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -25,11 +33,17 @@ class FeedbackDatasetBuilderTest {
     private static final Instant FROM = Instant.parse("2026-06-01T00:00:00Z");
     private static final Instant TO = Instant.parse("2026-06-30T00:00:00Z");
     private static final Instant BUILT_AT = Instant.parse("2026-06-30T12:00:00Z");
+    private static final Instant EXECUTED_AT = Instant.parse("2026-06-01T00:00:00.500Z");
+    private static final String MODEL_NAME = "python-logistic-fraud-model";
+    private static final String FEATURE_CONTRACT_VERSION = "feature-contract-v2";
 
     private final FeedbackDatasetCandidateStore store = mock(FeedbackDatasetCandidateStore.class);
+    private final MlPredictionEvidenceProjectionRepository evidenceRepository =
+            mock(MlPredictionEvidenceProjectionRepository.class);
     private final FeedbackDatasetBuilder builder = new FeedbackDatasetBuilder(
             store,
             new FeedbackDatasetMappingPolicy(new FeedbackDatasetEligibilityPolicy()),
+            evidenceRepository,
             Clock.fixed(BUILT_AT, ZoneOffset.UTC)
     );
 
@@ -302,12 +316,20 @@ class FeedbackDatasetBuilderTest {
     }
 
     @Test
-    void preservesExactMlModelIdentitySnapshotFromFeedbackRecord() {
+    void exportsModelIdentityOnlyAfterExactEvidenceAgreement() {
         FraudFeedbackRecord source = feedback("feedback-1", "txn-1", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
-        source.setMlModelName("python-logistic-fraud-model");
+        captureOccurrence(source, "event-1", FROM.minusSeconds(1));
+        source.setMlModelName(MODEL_NAME);
         source.setMlModelVersion("2026-06-25.v1");
-        source.setMlFeatureContractVersion("feature-contract-v2");
+        source.setMlFeatureContractVersion(FEATURE_CONTRACT_VERSION);
         when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+        when(evidenceRepository.findAllById(any())).thenReturn(List.of(evidence(
+                "event-1",
+                "txn-1",
+                FROM.minusSeconds(1),
+                "2026-06-25.v1",
+                0.81
+        )));
 
         FeedbackDatasetRecord record = builder.build(request(10)).records().getFirst();
 
@@ -367,19 +389,244 @@ class FeedbackDatasetBuilderTest {
     @Test
     void mixedTransactionsRetainDifferentMlModelVersions() {
         FraudFeedbackRecord first = feedback("feedback-1", "txn-1", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
-        first.setMlModelName("python-logistic-fraud-model");
+        captureOccurrence(first, "event-1", FROM.minusSeconds(2));
+        first.setMlModelName(MODEL_NAME);
         first.setMlModelVersion("2026-06-25.v1");
-        first.setMlFeatureContractVersion("feature-contract-v2");
+        first.setMlFeatureContractVersion(FEATURE_CONTRACT_VERSION);
         FraudFeedbackRecord second = feedback("feedback-2", "txn-2", FraudFeedbackLabel.CONFIRMED_LEGITIMATE, FROM.plusSeconds(1));
-        second.setMlModelName("python-logistic-fraud-model");
+        captureOccurrence(second, "event-2", FROM.minusSeconds(1));
+        second.setMlModelName(MODEL_NAME);
         second.setMlModelVersion("2026-06-26.v1");
-        second.setMlFeatureContractVersion("feature-contract-v2");
+        second.setMlFeatureContractVersion(FEATURE_CONTRACT_VERSION);
         when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(first, second));
+        when(evidenceRepository.findAllById(any())).thenReturn(List.of(
+                evidence("event-1", "txn-1", FROM.minusSeconds(2), "2026-06-25.v1", 0.81),
+                evidence("event-2", "txn-2", FROM.minusSeconds(1), "2026-06-26.v1", 0.72)
+        ));
 
         FeedbackDatasetBuildResult result = builder.build(request(10));
 
         assertThat(result.records()).extracting(FeedbackDatasetRecord::mlModelVersion)
                 .containsExactly("2026-06-25.v1", "2026-06-26.v1");
+    }
+
+    @Test
+    void exactOccurrenceAUsesEvidenceAAndNeverLaterOccurrenceB() {
+        FraudFeedbackRecord source = feedback("feedback-a", "txn-shared", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        captureOccurrence(source, "event-a", FROM.minusSeconds(2));
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+        when(evidenceRepository.findAllById(any())).thenReturn(List.of(
+                evidence("event-a", "txn-shared", FROM.minusSeconds(2), "model-a", 0.91)
+        ));
+
+        FeedbackDatasetRecord record = builder.build(request(10)).records().getFirst();
+
+        assertThat(record.mlModelVersion()).isEqualTo("model-a");
+        assertThat(requestedEvidenceIds()).containsExactly("event-a").doesNotContain("event-b");
+    }
+
+    @Test
+    void exportsPersistedSameOccurrenceRulesEvidenceWithoutUsingPlatformRiskAsFallback() {
+        FraudFeedbackRecord source = feedback("feedback-a", "txn-shared", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        captureOccurrence(source, "event-a", FROM.minusSeconds(2));
+        source.setRiskLevel(RiskLevel.CRITICAL);
+        source.setRulesEngineStatus(FraudEngineStatus.AVAILABLE);
+        source.setRulesRiskLevel(RiskLevel.LOW);
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+        when(evidenceRepository.findAllById(any())).thenReturn(List.of(
+                evidence("event-a", "txn-shared", FROM.minusSeconds(2), "model-a", 0.91)
+        ));
+
+        FeedbackDatasetRecord record = builder.build(request(10)).records().getFirst();
+
+        assertThat(record.rulesEvidenceStatus()).isEqualTo(FeedbackDatasetRulesEvidenceStatus.AVAILABLE);
+        assertThat(record.rulesRiskLevel()).isEqualTo(RiskLevel.LOW);
+        assertThat(record.riskLevel()).isEqualTo(RiskLevel.CRITICAL);
+    }
+
+    @Test
+    void missingHistoricalRulesEvidenceRemainsUnavailableInsteadOfBecomingLowRisk() {
+        FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        captureOccurrence(source, "event-a", FROM.minusSeconds(1));
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+        when(evidenceRepository.findAllById(any())).thenReturn(List.of(
+                evidence("event-a", "txn-a", FROM.minusSeconds(1), "model-a", 0.91)
+        ));
+
+        FeedbackDatasetRecord record = builder.build(request(10)).records().getFirst();
+
+        assertThat(record.rulesEvidenceStatus()).isEqualTo(FeedbackDatasetRulesEvidenceStatus.UNAVAILABLE);
+        assertThat(record.rulesRiskLevel()).isNull();
+    }
+
+    @Test
+    void malformedRulesEvidenceIsRejectedInsteadOfBecomingUnavailableOrLowRisk() {
+        FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        captureOccurrence(source, "event-a", FROM.minusSeconds(1));
+        source.setRulesEngineStatus(FraudEngineStatus.AVAILABLE);
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+        when(evidenceRepository.findAllById(any())).thenReturn(List.of(
+                evidence("event-a", "txn-a", FROM.minusSeconds(1), "model-a", 0.91)
+        ));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.records()).isEmpty();
+        assertThat(result.skippedInvalidSourceRecordCount()).isEqualTo(1);
+    }
+
+    @Test
+    void exactReplayResolvesDeterministically() {
+        FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        captureOccurrence(source, "event-a", FROM.minusSeconds(1));
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+        when(evidenceRepository.findAllById(any())).thenReturn(List.of(
+                evidence("event-a", "txn-a", FROM.minusSeconds(1), "model-a", 0.91)
+        ));
+
+        FeedbackDatasetBuildResult first = builder.build(request(10));
+        FeedbackDatasetBuildResult replay = builder.build(request(10));
+
+        assertThat(replay.records()).isEqualTo(first.records());
+        verify(evidenceRepository, times(2)).findAllById(any());
+    }
+
+    @Test
+    void absentEvidenceWithoutMlIdentityRemainsExplicitlyEligible() {
+        FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        captureOccurrence(source, "event-a", FROM.minusSeconds(1));
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+        when(evidenceRepository.findAllById(any())).thenReturn(List.of());
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.records()).singleElement().satisfies(record -> {
+            assertThat(record.mlModelName()).isNull();
+            assertThat(record.mlModelVersion()).isNull();
+            assertThat(record.mlFeatureContractVersion()).isNull();
+        });
+        assertThat(result.skippedInvalidSourceRecordCount()).isZero();
+    }
+
+    @Test
+    void missingEvidenceWithCapturedMlIdentityFailsClosed() {
+        FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        captureOccurrence(source, "event-a", FROM.minusSeconds(1));
+        setModelIdentity(source, "model-a");
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+        when(evidenceRepository.findAllById(any())).thenReturn(List.of());
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.records()).isEmpty();
+        assertThat(result.skippedInvalidSourceRecordCount()).isEqualTo(1);
+    }
+
+    @Test
+    void modelIdentityMismatchFailsClosedWithoutMergingSources() {
+        FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        captureOccurrence(source, "event-a", FROM.minusSeconds(1));
+        setModelIdentity(source, "model-a");
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+        when(evidenceRepository.findAllById(any())).thenReturn(List.of(
+                evidence("event-a", "txn-a", FROM.minusSeconds(1), "model-b", 0.91)
+        ));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.records()).isEmpty();
+        assertThat(result.skippedInvalidSourceRecordCount()).isEqualTo(1);
+    }
+
+    @Test
+    void transactionOwnershipMismatchFailsClosed() {
+        FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        captureOccurrence(source, "event-a", FROM.minusSeconds(1));
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+        when(evidenceRepository.findAllById(any())).thenReturn(List.of(
+                evidence("event-a", "txn-other", FROM.minusSeconds(1), "model-a", 0.91)
+        ));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.records()).isEmpty();
+        assertThat(result.skippedInvalidSourceRecordCount()).isEqualTo(1);
+    }
+
+    @Test
+    void evidenceStoreFailureReturnsBoundedFailureWithoutPartialRecords() {
+        FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        captureOccurrence(source, "event-a", FROM.minusSeconds(1));
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+        when(evidenceRepository.findAllById(any())).thenThrow(new RuntimeException("raw database detail"));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.failed()).isTrue();
+        assertThat(result.failureReason()).isEqualTo(FeedbackDatasetBuildFailureReason.FEEDBACK_STORE_UNAVAILABLE);
+        assertThat(result.records()).isEmpty();
+        assertThat(result.toString()).doesNotContain("raw database detail");
+    }
+
+    @Test
+    void sameTransactionOccurrencesStaySeparatedBySourceEventId() {
+        FraudFeedbackRecord first = feedback("feedback-a", "txn-shared", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        FraudFeedbackRecord second = feedback(
+                "feedback-b",
+                "txn-shared",
+                FraudFeedbackLabel.CONFIRMED_LEGITIMATE,
+                FROM.plusSeconds(1)
+        );
+        captureOccurrence(first, "event-a", FROM.minusSeconds(2));
+        captureOccurrence(second, "event-b", FROM.minusSeconds(1));
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(first, second));
+        when(evidenceRepository.findAllById(any())).thenReturn(List.of(
+                evidence("event-a", "txn-shared", FROM.minusSeconds(2), "model-a", 0.91),
+                evidence("event-b", "txn-shared", FROM.minusSeconds(1), "model-b", 0.21)
+        ));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.records()).extracting(FeedbackDatasetRecord::mlModelVersion)
+                .containsExactly("model-a", "model-b");
+        assertThat(requestedEvidenceIds()).containsExactly("event-a", "event-b");
+    }
+
+    @Test
+    void evidenceLookupIsOneBoundedBatchAfterDatasetLimit() {
+        FraudFeedbackRecord first = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        FraudFeedbackRecord beyondLimit = feedback("feedback-b", "txn-b", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM.plusSeconds(1));
+        captureOccurrence(first, "event-a", FROM.minusSeconds(2));
+        captureOccurrence(beyondLimit, "event-b", FROM.minusSeconds(1));
+        when(store.findBoundedByCreatedAt(FROM, TO, 1)).thenReturn(List.of(first, beyondLimit));
+        when(evidenceRepository.findAllById(any())).thenReturn(List.of(
+                evidence("event-a", "txn-a", FROM.minusSeconds(2), "model-a", 0.91)
+        ));
+
+        FeedbackDatasetBuildResult result = builder.build(request(1));
+
+        assertThat(result.records()).hasSize(1);
+        assertThat(requestedEvidenceIds()).containsExactly("event-a");
+    }
+
+    @Test
+    void internalOccurrenceIdentifiersDoNotLeakIntoJsonl() {
+        FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        source.setCorrelationId("correlation-secret");
+        captureOccurrence(source, "source-event-secret", FROM.minusSeconds(1));
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+        when(evidenceRepository.findAllById(any())).thenReturn(List.of(evidence(
+                "source-event-secret",
+                "txn-a",
+                "correlation-secret",
+                FROM.minusSeconds(1),
+                "model-a",
+                0.91
+        )));
+
+        String jsonl = new FeedbackDatasetJsonlWriter().writeJsonl(builder.build(request(10)));
+
+        assertThat(jsonl).doesNotContain("source-event-secret", "correlation-secret", "sourceEventId");
     }
 
     private FeedbackDatasetBuildRequest request(int maxRecords) {
@@ -401,6 +648,63 @@ class FeedbackDatasetBuilderTest {
         record.setFraudScore(0.91);
         record.setRiskLevel(RiskLevel.HIGH);
         return record;
+    }
+
+    private void captureOccurrence(FraudFeedbackRecord record, String sourceEventId, Instant sourceEventCreatedAt) {
+        ReflectionTestUtils.setField(record, "sourceEventId", sourceEventId);
+        ReflectionTestUtils.setField(record, "sourceEventCreatedAt", sourceEventCreatedAt.toString());
+        ReflectionTestUtils.setField(record, "sourceEventCreatedAtEpochSecond", sourceEventCreatedAt.getEpochSecond());
+        ReflectionTestUtils.setField(record, "sourceEventCreatedAtNano", sourceEventCreatedAt.getNano());
+        ReflectionTestUtils.setField(record, "sourceEventFingerprint", "a".repeat(64));
+    }
+
+    private void setModelIdentity(FraudFeedbackRecord record, String modelVersion) {
+        record.setMlModelName(MODEL_NAME);
+        record.setMlModelVersion(modelVersion);
+        record.setMlFeatureContractVersion(FEATURE_CONTRACT_VERSION);
+    }
+
+    private MlPredictionEvidenceProjection evidence(
+            String sourceEventId,
+            String transactionId,
+            Instant sourceEventCreatedAt,
+            String modelVersion,
+            double score
+    ) {
+        return evidence(sourceEventId, transactionId, null, sourceEventCreatedAt, modelVersion, score);
+    }
+
+    private MlPredictionEvidenceProjection evidence(
+            String sourceEventId,
+            String transactionId,
+            String correlationId,
+            Instant sourceEventCreatedAt,
+            String modelVersion,
+            double score
+    ) {
+        return new MlPredictionEvidenceProjection(
+                sourceEventId,
+                transactionId,
+                correlationId == null ? "correlation-" + sourceEventId : correlationId,
+                sourceEventCreatedAt.toString(),
+                1,
+                "ml.python.primary",
+                FraudEngineStatus.AVAILABLE,
+                score,
+                score >= 0.8 ? RiskLevel.HIGH : RiskLevel.LOW,
+                MODEL_NAME,
+                modelVersion,
+                FEATURE_CONTRACT_VERSION,
+                EXECUTED_AT.toString(),
+                BUILT_AT
+        );
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> requestedEvidenceIds() {
+        ArgumentCaptor<Iterable<String>> captor = ArgumentCaptor.forClass(Iterable.class);
+        verify(evidenceRepository).findAllById(captor.capture());
+        return StreamSupport.stream(captor.getValue().spliterator(), false).toList();
     }
 
     private List<String> defaultReasonCodes(FraudFeedbackLabel label) {

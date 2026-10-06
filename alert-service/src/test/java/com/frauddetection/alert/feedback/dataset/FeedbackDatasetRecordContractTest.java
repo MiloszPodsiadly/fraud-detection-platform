@@ -1,6 +1,7 @@
 package com.frauddetection.alert.feedback.dataset;
 
 import com.frauddetection.alert.feedback.FraudFeedbackLabel;
+import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.RecordComponent;
@@ -12,6 +13,30 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class FeedbackDatasetRecordContractTest {
+
+    @Test
+    void datasetRecordRejectsUnsupportedDatasetVersion() {
+        assertThatThrownBy(() -> record(
+                "feedback-dataset-v1",
+                null,
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                FeedbackEvaluationLabel.POSITIVE_FRAUD,
+                List.of("ANALYST_CONFIRMED_FRAUD")
+        )).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void datasetRecordRejectsInvalidPlatformScore() {
+        for (double invalid : new double[]{Double.NaN, Double.POSITIVE_INFINITY, -0.1, 1.1, 0.12345}) {
+            assertThatThrownBy(() -> record(
+                    FeedbackDatasetBuilder.DATASET_VERSION,
+                    invalid,
+                    FraudFeedbackLabel.CONFIRMED_FRAUD,
+                    FeedbackEvaluationLabel.POSITIVE_FRAUD,
+                    List.of("ANALYST_CONFIRMED_FRAUD")
+            )).isInstanceOf(IllegalArgumentException.class);
+        }
+    }
 
     @Test
     void datasetRecordContainsOnlyAllowedFieldNames() {
@@ -32,6 +57,12 @@ class FeedbackDatasetRecordContractTest {
                         "agreementStatus",
                         "riskMismatchStatus",
                         "scoreDeltaBucket",
+                        "rulesEvidenceStatus",
+                        "rulesRiskLevel",
+                        "mlPredictionEvidenceStatus",
+                        "mlPredictionScore",
+                        "mlPredictionRiskLevel",
+                        "mlPredictionExecutedAt",
                         "mlModelName",
                         "mlModelVersion",
                         "mlFeatureContractVersion",
@@ -212,6 +243,90 @@ class FeedbackDatasetRecordContractTest {
     }
 
     @Test
+    void availableMlPredictionEvidenceRequiresCompleteDirectSignal() {
+        assertThatCode(() -> recordWithMlEvidence(
+                FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE,
+                0.8123,
+                RiskLevel.HIGH,
+                Instant.parse("2026-06-01T00:00:01Z"),
+                "python-logistic-fraud-model",
+                "2026-06-25.v1",
+                "feature-contract-v2"
+        )).doesNotThrowAnyException();
+
+        Object[][] incomplete = {
+                {null, RiskLevel.HIGH, Instant.parse("2026-06-01T00:00:01Z")},
+                {0.8123, null, Instant.parse("2026-06-01T00:00:01Z")},
+                {0.8123, RiskLevel.HIGH, null}
+        };
+        for (Object[] values : incomplete) {
+            assertThatThrownBy(() -> recordWithMlEvidence(
+                    FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE,
+                    (Double) values[0],
+                    (RiskLevel) values[1],
+                    (Instant) values[2],
+                    "python-logistic-fraud-model",
+                    "2026-06-25.v1",
+                    "feature-contract-v2"
+            )).isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    void absentMlPredictionEvidenceRejectsPredictionValuesAndIdentity() {
+        assertThatCode(() -> recordWithMlEvidence(
+                FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+        )).doesNotThrowAnyException();
+
+        assertThatThrownBy(() -> recordWithMlEvidence(
+                FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT,
+                0.0,
+                null,
+                null,
+                null,
+                null,
+                null
+        )).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> recordWithMlEvidence(
+                FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT,
+                null,
+                null,
+                null,
+                "python-logistic-fraud-model",
+                "2026-06-25.v1",
+                "feature-contract-v2"
+        )).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void invalidResolutionStatusesCannotEnterDatasetContract() {
+        assertThatThrownBy(() -> recordWithMlEvidence(
+                FeedbackDatasetMlPredictionEvidenceStatus.MISSING_UNEXPECTEDLY,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+        )).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> recordWithMlEvidence(
+                FeedbackDatasetMlPredictionEvidenceStatus.IDENTITY_MISMATCH,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+        )).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void rejectsPartialMlModelIdentitySnapshotFields() {
         String[][] partialIdentities = {
                 {"python-logistic-fraud-model", null, null},
@@ -267,15 +382,40 @@ class FeedbackDatasetRecordContractTest {
             FeedbackEvaluationLabel evaluationLabel,
             List<String> decisionReasonCodes
     ) {
-        return new FeedbackDatasetRecord(
+        return record(
                 FeedbackDatasetBuilder.DATASET_VERSION,
+                null,
+                feedbackLabel,
+                evaluationLabel,
+                decisionReasonCodes
+        );
+    }
+
+    private FeedbackDatasetRecord record(
+            String datasetVersion,
+            Double fraudScore,
+            FraudFeedbackLabel feedbackLabel,
+            FeedbackEvaluationLabel evaluationLabel,
+            List<String> decisionReasonCodes
+    ) {
+        return new FeedbackDatasetRecord(
+                datasetVersion,
                 FeedbackDatasetIdentifierHasher.evaluationRecordId("feedback-1"),
                 FeedbackDatasetIdentifierHasher.transactionReference("txn-1"),
                 feedbackLabel,
                 evaluationLabel,
                 decisionReasonCodes,
                 Instant.parse("2026-06-01T00:00:00Z"),
+                fraudScore,
                 null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                FeedbackDatasetRulesEvidenceStatus.UNAVAILABLE,
+                null,
+                FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT,
                 null,
                 null,
                 null,
@@ -297,6 +437,29 @@ class FeedbackDatasetRecordContractTest {
             String mlModelVersion,
             String mlFeatureContractVersion
     ) {
+        boolean absent = mlModelName == null && mlModelVersion == null && mlFeatureContractVersion == null;
+        return recordWithMlEvidence(
+                absent
+                        ? FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT
+                        : FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE,
+                absent ? null : 0.8123,
+                absent ? null : RiskLevel.HIGH,
+                absent ? null : Instant.parse("2026-06-01T00:00:01Z"),
+                mlModelName,
+                mlModelVersion,
+                mlFeatureContractVersion
+        );
+    }
+
+    private FeedbackDatasetRecord recordWithMlEvidence(
+            FeedbackDatasetMlPredictionEvidenceStatus status,
+            Double score,
+            RiskLevel riskLevel,
+            Instant executedAt,
+            String mlModelName,
+            String mlModelVersion,
+            String mlFeatureContractVersion
+    ) {
         return new FeedbackDatasetRecord(
                 FeedbackDatasetBuilder.DATASET_VERSION,
                 FeedbackDatasetIdentifierHasher.evaluationRecordId("feedback-1"),
@@ -312,6 +475,12 @@ class FeedbackDatasetRecordContractTest {
                 null,
                 null,
                 null,
+                FeedbackDatasetRulesEvidenceStatus.UNAVAILABLE,
+                null,
+                status,
+                score,
+                riskLevel,
+                executedAt,
                 mlModelName,
                 mlModelVersion,
                 mlFeatureContractVersion,

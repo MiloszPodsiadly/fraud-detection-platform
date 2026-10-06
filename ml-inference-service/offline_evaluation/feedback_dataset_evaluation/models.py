@@ -53,6 +53,12 @@ class FeedbackDatasetRecord:
     agreement_status: str | None
     risk_mismatch_status: str | None
     score_delta_bucket: str | None
+    rules_evidence_status: str
+    rules_risk_level: str | None
+    ml_prediction_evidence_status: str
+    ml_prediction_score: float | None
+    ml_prediction_risk_level: str | None
+    ml_prediction_executed_at: str | None
     ml_model_name: str | None
     ml_model_version: str | None
     ml_feature_contract_version: str | None

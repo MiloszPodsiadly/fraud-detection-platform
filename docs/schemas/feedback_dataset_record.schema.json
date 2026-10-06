@@ -28,11 +28,12 @@
           "const": "DATASET_METADATA"
         },
         "datasetVersion": {
-          "type": "string"
+          "const": "feedback-dataset-v2"
         },
         "builtAt": {
           "type": "string",
-          "format": "date-time"
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
         },
         "timeBasis": {
           "const": "FEEDBACK_CREATED_AT"
@@ -42,38 +43,46 @@
             "string",
             "null"
           ],
-          "format": "date-time"
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
         },
         "toInclusive": {
           "type": [
             "string",
             "null"
           ],
-          "format": "date-time"
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
         },
         "rawRowsRead": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 1001
         },
         "recordsReturned": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 1000
         },
         "excludedUnresolvedCount": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 1000
         },
         "excludedGovernanceReviewCount": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 1000
         },
         "skippedMissingRequiredFieldCount": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 1000
         },
         "skippedInvalidSourceRecordCount": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 1000
         },
         "truncated": {
           "type": "boolean"
@@ -144,7 +153,28 @@
             {
               "oneOf": [
                 {
+                  "required": [
+                    "mlPredictionEvidenceStatus",
+                    "mlPredictionScore",
+                    "mlPredictionRiskLevel",
+                    "mlPredictionExecutedAt",
+                    "mlModelName",
+                    "mlModelVersion",
+                    "mlFeatureContractVersion"
+                  ],
                   "properties": {
+                    "mlPredictionEvidenceStatus": {
+                      "const": "LEGITIMATELY_ABSENT"
+                    },
+                    "mlPredictionScore": {
+                      "type": "null"
+                    },
+                    "mlPredictionRiskLevel": {
+                      "type": "null"
+                    },
+                    "mlPredictionExecutedAt": {
+                      "type": "null"
+                    },
                     "mlModelName": {
                       "type": "null"
                     },
@@ -158,11 +188,27 @@
                 },
                 {
                   "required": [
+                    "mlPredictionEvidenceStatus",
+                    "mlPredictionScore",
+                    "mlPredictionRiskLevel",
+                    "mlPredictionExecutedAt",
                     "mlModelName",
                     "mlModelVersion",
                     "mlFeatureContractVersion"
                   ],
                   "properties": {
+                    "mlPredictionEvidenceStatus": {
+                      "const": "AVAILABLE"
+                    },
+                    "mlPredictionScore": {
+                      "type": "number"
+                    },
+                    "mlPredictionRiskLevel": {
+                      "type": "string"
+                    },
+                    "mlPredictionExecutedAt": {
+                      "type": "string"
+                    },
                     "mlModelName": {
                       "type": "string"
                     },
@@ -175,6 +221,26 @@
                   }
                 }
               ]
+            },
+            {
+              "oneOf": [
+                {
+                  "required": ["rulesEvidenceStatus", "rulesRiskLevel"],
+                  "properties": {
+                    "rulesEvidenceStatus": {"const": "AVAILABLE"},
+                    "rulesRiskLevel": {
+                      "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+                    }
+                  }
+                },
+                {
+                  "required": ["rulesEvidenceStatus", "rulesRiskLevel"],
+                  "properties": {
+                    "rulesEvidenceStatus": {"const": "UNAVAILABLE"},
+                    "rulesRiskLevel": {"type": "null"}
+                  }
+                }
+              ]
             }
           ],
           "required": [
@@ -184,11 +250,20 @@
             "feedbackLabel",
             "evaluationLabel",
             "decisionReasonCodes",
-            "feedbackCreatedAt"
+            "feedbackCreatedAt",
+            "rulesEvidenceStatus",
+            "rulesRiskLevel",
+            "mlPredictionEvidenceStatus",
+            "mlPredictionScore",
+            "mlPredictionRiskLevel",
+            "mlPredictionExecutedAt",
+            "mlModelName",
+            "mlModelVersion",
+            "mlFeatureContractVersion"
           ],
           "properties": {
             "datasetVersion": {
-              "type": "string"
+              "const": "feedback-dataset-v2"
             },
             "evaluationRecordId": {
               "type": "string",
@@ -221,18 +296,25 @@
             },
             "feedbackCreatedAt": {
               "type": "string",
-              "format": "date-time"
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
             },
             "fraudScore": {
               "type": [
                 "number",
                 "null"
-              ]
+              ],
+              "minimum": 0.0,
+              "maximum": 1.0,
+              "multipleOf": 0.0001
             },
             "riskLevel": {
-              "type": [
-                "string",
-                "null"
+              "enum": [
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL",
+                null
               ]
             },
             "alertRecommended": {
@@ -242,28 +324,81 @@
               ]
             },
             "engineIntelligenceStatus": {
-              "type": [
-                "string",
-                "null"
+              "enum": [
+                "AVAILABLE",
+                "ABSENT",
+                "UNAVAILABLE",
+                "DEGRADED",
+                null
               ]
             },
             "agreementStatus": {
-              "type": [
-                "string",
-                "null"
+              "enum": [
+                "AGREEMENT",
+                "ADJACENT_RISK_VARIANCE",
+                "DISAGREEMENT",
+                "PARTIAL",
+                "INSUFFICIENT_DATA",
+                "REQUIRED_ENGINE_NOT_COMPARABLE",
+                null
               ]
             },
             "riskMismatchStatus": {
-              "type": [
-                "string",
-                "null"
+              "enum": [
+                "SAME_RISK_LEVEL",
+                "ADJACENT_RISK_LEVEL",
+                "MATERIAL_RISK_MISMATCH",
+                "NOT_COMPARABLE",
+                null
               ]
             },
             "scoreDeltaBucket": {
+              "enum": [
+                "NONE",
+                "SMALL",
+                "MEDIUM",
+                "LARGE",
+                "UNAVAILABLE",
+                null
+              ]
+            },
+            "rulesEvidenceStatus": {
+              "enum": ["AVAILABLE", "UNAVAILABLE"]
+            },
+            "rulesRiskLevel": {
+              "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL", null]
+            },
+            "mlPredictionEvidenceStatus": {
+              "enum": [
+                "AVAILABLE",
+                "LEGITIMATELY_ABSENT"
+              ]
+            },
+            "mlPredictionScore": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0.0,
+              "maximum": 1.0,
+              "multipleOf": 0.0001
+            },
+            "mlPredictionRiskLevel": {
+              "enum": [
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL",
+                null
+              ]
+            },
+            "mlPredictionExecutedAt": {
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
             },
             "mlModelName": {
               "type": [
@@ -293,29 +428,42 @@
               "pattern": "^[A-Za-z0-9._-]+$"
             },
             "analystRecommendationStatus": {
-              "type": [
-                "string",
-                "null"
+              "enum": [
+                "AVAILABLE",
+                "ABSENT",
+                "NOT_APPLICABLE",
+                "INSUFFICIENT_DATA",
+                "UNAVAILABLE",
+                "DEGRADED",
+                null
               ]
             },
             "analystRecommendation": {
-              "type": [
-                "string",
-                "null"
+              "enum": [
+                "RECOMMEND_REVIEW",
+                "RECOMMEND_CASE_CREATION",
+                "RECOMMEND_STEP_UP_REVIEW",
+                "RECOMMEND_MONITOR",
+                "RECOMMEND_NO_ACTION",
+                null
               ]
             },
             "analystRecommendationVersion": {
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[^/\\\\\\u0000-\\u001F]+$"
             },
             "analystRecommendationGeneratedAt": {
               "type": [
                 "string",
                 "null"
               ],
-              "format": "date-time"
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
             },
             "analystRecommendationReasonCodes": {
               "type": "array",
@@ -330,14 +478,16 @@
                 "string",
                 "null"
               ],
-              "format": "date-time"
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
             },
             "transactionTimestamp": {
               "type": [
                 "string",
                 "null"
               ],
-              "format": "date-time"
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
             }
           }
         }
