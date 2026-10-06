@@ -61,7 +61,7 @@ final class TransactionFraudScoringServiceEngineIntelligenceTestSupport {
         when(emissionService.emitIfEnabled(request)).thenReturn(
                 summary.map(value -> EngineIntelligenceEnrichmentResult.withoutEvidence(
                         value,
-                        MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE
+                        MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE
                 ))
         );
         return harness(input, request, emissionService);

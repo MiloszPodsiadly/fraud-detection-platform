@@ -102,6 +102,24 @@ omission reason; missing projection or identity data alone never proves legitima
 malformed evidence, and identity mismatch remain explicit dataset records rather than disappearing from the bounded
 population. Absence is never represented as score zero or low risk.
 
+The authoritative omission mapping is:
+
+| Scored-event omission reason | Dataset status | Meaning |
+| --- | --- | --- |
+| `DIAGNOSTIC_EMISSION_DISABLED` | `LEGITIMATELY_ABSENT` | Direct evaluation evidence was intentionally not emitted; this does not assert that ML inference never executed. |
+| `LEGITIMATE_ABSENCE` | `LEGITIMATELY_ABSENT` | Direct evidence absence was positively established, not inferred from missing data. |
+| `ML_ENGINE_UNAVAILABLE` | `MISSING_UNEXPECTEDLY` | The expected ML engine did not provide usable evidence. |
+| `SOURCE_TIMESTAMP_MISSING` | `MALFORMED` | Required source execution time was absent. |
+| `INVALID_SCORE` | `MALFORMED` | The direct score was absent or outside its contract. |
+| `IDENTITY_VALIDATION_FAILURE` | `MALFORMED` | Model identity could not be validated; this is not an exact mismatch. |
+| `EVIDENCE_SOURCE_INTEGRITY_FAILURE` | `MALFORMED` | The expected ML source result was missing or used the wrong engine type. |
+| `PREDICTION_NOT_ACCEPTED` | `MALFORMED` | The prediction did not survive the bounded acceptance contract. |
+
+`IDENTITY_MISMATCH` is reserved for two complete, structurally valid authoritative identities or ownership tuples
+that demonstrably disagree. It is never inferred from missing model metadata. Model-evaluation
+`recordsWithPredictionEvidence` counts only usable direct prediction evidence; upstream source identity conflicts are
+reported separately and do not increment that count.
+
 The same record carries only the bounded Rules-side snapshot needed for comparison: `rulesEvidenceStatus` and
 `rulesRiskLevel`. These values are captured on `FraudFeedbackRecord` from the occurrence-validated Engine Intelligence
 read during feedback creation. Dataset construction never looks up a current Rules projection. `UNAVAILABLE` requires

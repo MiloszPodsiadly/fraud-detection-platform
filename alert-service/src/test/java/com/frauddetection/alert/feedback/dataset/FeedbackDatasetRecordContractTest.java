@@ -319,8 +319,18 @@ class FeedbackDatasetRecordContractTest {
                 null
         )).doesNotThrowAnyException();
         assertThatCode(() -> recordWithMlEvidence(
-                FeedbackDatasetMlPredictionEvidenceStatus.IDENTITY_MISMATCH,
+                FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED,
                 MlPredictionEvidenceOmissionReason.IDENTITY_VALIDATION_FAILURE,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+        )).doesNotThrowAnyException();
+        assertThatCode(() -> recordWithMlEvidence(
+                FeedbackDatasetMlPredictionEvidenceStatus.IDENTITY_MISMATCH,
+                null,
                 null,
                 null,
                 null,

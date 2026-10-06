@@ -40,8 +40,9 @@ be complete and explicit regardless of the outer event `modelVersion`. Historica
 comparison identity, summaries missing Rules or ML, incorrect engine ordering, unsupported IDs, and malformed current
 canonical values are rejected or fail closed; the read boundary does not repair them.
 
-`TransactionScoredEvent.mlPredictionEvidence` is a separate optional internal field. Valid
-events may omit it, so current events without evidence remain compatible and consumers must not backfill evidence.
+`TransactionScoredEvent.mlPredictionEvidence` is a separate optional internal field. Historical events may omit both
+it and `mlPredictionEvidenceOmissionReason` for replay compatibility, and consumers must not backfill evidence. The
+current producer API requires exactly one of those fields and cannot intentionally emit a fresh event with neither.
 When present, it requires a matching `AVAILABLE` `ml.python.primary` entry in `engineIntelligence`, complete identical
 model identity, matching risk level and status, canonical engine identity, supported evidence version, finite exact
 score, matching forward-derived public score bucket, and source execution timestamp. This check maps the exact score

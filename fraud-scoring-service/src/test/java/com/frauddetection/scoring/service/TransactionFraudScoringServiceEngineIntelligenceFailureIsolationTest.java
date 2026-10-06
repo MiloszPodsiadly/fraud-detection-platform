@@ -84,7 +84,13 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
         var request = FraudScoringRequest.from(input);
         var scoreResult = scoreResult();
         var recommendation = analystRecommendationService().unavailable();
-        var baseEvent = new TransactionScoredEventMapper().toEvent(request, scoreResult, Optional.empty(), recommendation);
+        var baseEvent = new TransactionScoredEventMapper().toEvent(
+                request,
+                scoreResult,
+                Optional.empty(),
+                MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE,
+                recommendation
+        );
         FraudScoringEngine scoringEngine = mock(FraudScoringEngine.class);
         EngineIntelligenceEmissionService emissionService = mock(EngineIntelligenceEmissionService.class);
         TransactionScoredEventMapper mapper = mock(TransactionScoredEventMapper.class);

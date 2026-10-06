@@ -54,7 +54,7 @@ final class MlPredictionEvidenceMapper {
 
     private MlPredictionEvidenceOmissionReason omissionReason(FraudEngineResult result) {
         if (result == null || result.engineType() != FraudEngineType.ML_MODEL) {
-            return MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE;
+            return MlPredictionEvidenceOmissionReason.EVIDENCE_SOURCE_INTEGRITY_FAILURE;
         }
         if (PythonMlSignalReasonCode.ML_INFERENCE_TIMESTAMP_MISSING.wireValue().equals(result.statusReason())) {
             return MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING;

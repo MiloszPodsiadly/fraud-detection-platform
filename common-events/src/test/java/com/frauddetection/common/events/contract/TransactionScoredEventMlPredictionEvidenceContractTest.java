@@ -96,6 +96,32 @@ class TransactionScoredEventMlPredictionEvidenceContractTest {
     }
 
     @Test
+    void availableMlEngineContradictsLegitimateAbsenceAndEngineUnavailable() throws Exception {
+        for (MlPredictionEvidenceOmissionReason reason : List.of(
+                MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE,
+                MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE
+        )) {
+            ObjectNode json = eventWithSummary();
+            json.put("mlPredictionEvidenceOmissionReason", reason.name());
+
+            assertThatThrownBy(() -> objectMapper.readValue(json.toString(), TransactionScoredEvent.class))
+                    .hasRootCauseMessage("ML_PREDICTION_EVIDENCE_OMISSION_CONTRADICTS_ENGINE_INTELLIGENCE");
+        }
+    }
+
+    @Test
+    void emittedEngineIntelligenceContradictsDiagnosticEmissionDisabled() throws Exception {
+        ObjectNode json = eventWithSummary(summaryWithUnavailableMl());
+        json.put(
+                "mlPredictionEvidenceOmissionReason",
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED.name()
+        );
+
+        assertThatThrownBy(() -> objectMapper.readValue(json.toString(), TransactionScoredEvent.class))
+                .hasRootCauseMessage("ML_PREDICTION_EVIDENCE_OMISSION_CONTRADICTS_ENGINE_INTELLIGENCE");
+    }
+
+    @Test
     void evidenceWithoutEngineIntelligenceFailsClosed() throws Exception {
         ObjectNode json = eventJson();
         json.set("mlPredictionEvidence", objectMapper.valueToTree(evidence(0.8123d, RiskLevel.HIGH, MODEL_IDENTITY)));

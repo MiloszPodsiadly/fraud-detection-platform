@@ -2,6 +2,7 @@ package com.frauddetection.scoring.orchestration.aggregation;
 
 import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.mapper.TransactionScoredEventMapper;
@@ -36,7 +37,9 @@ class ProducerEngineIntelligenceFailureIsolationTest {
         var event = new TransactionScoredEventMapper().toEvent(
                 request(),
                 scoreResult(),
-                intelligence.flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
+                intelligence.flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary),
+                MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE,
+                null
         );
         String json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build().writeValueAsString(event);
 

@@ -3,6 +3,7 @@ package com.frauddetection.scoring.mapper;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
@@ -61,7 +62,10 @@ class ProducerEngineIntelligenceDefaultOutputCompatibilityTest {
     }
 
     private String serializedDefaultEvent() throws Exception {
-        return objectMapper.writeValueAsString(mapper.toEvent(request(), scoreResult(), Optional.empty()));
+        return objectMapper.writeValueAsString(mapper.toEvent(
+                request(), scoreResult(), Optional.empty(),
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED, null
+        ));
     }
 
     private FraudScoringRequest request() {

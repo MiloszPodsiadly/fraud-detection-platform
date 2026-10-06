@@ -90,7 +90,13 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
         var scoreResult = scoreResult();
         var summary = summary();
         var recommendation = analystRecommendationService().recommend(scoreResult, Optional.of(summary));
-        var scoredEvent = new TransactionScoredEventMapper().toEvent(request, scoreResult, Optional.of(summary), recommendation);
+        var scoredEvent = new TransactionScoredEventMapper().toEvent(
+                request,
+                scoreResult,
+                Optional.of(summary),
+                MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED,
+                recommendation
+        );
         FraudScoringEngine scoringEngine = mock(FraudScoringEngine.class);
         EngineIntelligenceEmissionService emissionService = mock(EngineIntelligenceEmissionService.class);
         TransactionScoredEventMapper mapper = mock(TransactionScoredEventMapper.class);
@@ -100,7 +106,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
         when(emissionService.emitIfEnabled(request)).thenReturn(Optional.of(
                 EngineIntelligenceEnrichmentResult.withoutEvidence(
                         summary,
-                        MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE
+                        MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED
                 )
         ));
         when(mapper.toEvent(
@@ -108,7 +114,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
                 scoreResult,
                 Optional.of(summary),
                 Optional.empty(),
-                Optional.of(MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE),
+                Optional.of(MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED),
                 recommendation
         )).thenReturn(scoredEvent);
         var service = new TransactionFraudScoringService(
@@ -130,7 +136,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
                 scoreResult,
                 Optional.of(summary),
                 Optional.empty(),
-                Optional.of(MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE),
+                Optional.of(MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED),
                 recommendation
         );
         verify(publisher).publish(scoredEvent);
@@ -184,7 +190,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
                 )
                 .isEqualTo(disabled);
         assertThat(enabled.mlPredictionEvidenceOmissionReason())
-                .isEqualTo(MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE);
+                .isEqualTo(MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE);
         assertThat(disabled.mlPredictionEvidenceOmissionReason())
                 .isEqualTo(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED);
     }

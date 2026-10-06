@@ -58,6 +58,52 @@ class OrchestratedEngineIntelligenceMlPredictionEvidenceTest {
         verify(orchestrator, times(1)).evaluate(any());
     }
 
+    @Test
+    void missingExpectedMlResultIsEvidenceSourceIntegrityFailure() {
+        FraudScoringOrchestrationResult orchestration = AggregationTestSupport.orchestration(
+                AggregationTestSupport.available("rules.primary", 0.1111d, RiskLevel.LOW, "HIGH_VELOCITY")
+        );
+        FraudEngineAggregationResult aggregation = mock(FraudEngineAggregationResult.class);
+        when(aggregation.normalizedEngineResults()).thenReturn(List.of());
+
+        EngineIntelligenceEnrichmentResult enrichment = new MlPredictionEvidenceMapper().map(
+                mock(com.frauddetection.common.events.intelligence.EngineIntelligenceSummary.class),
+                orchestration,
+                aggregation
+        );
+
+        assertThat(enrichment.mlPredictionEvidence()).isEmpty();
+        assertThat(enrichment.mlPredictionEvidenceOmissionReason()).contains(
+                MlPredictionEvidenceOmissionReason.EVIDENCE_SOURCE_INTEGRITY_FAILURE
+        );
+    }
+
+    @Test
+    void expectedMlEngineIdWithWrongTypeIsEvidenceSourceIntegrityFailure() {
+        FraudEngineResult wrongType = mock(FraudEngineResult.class);
+        when(wrongType.engineId()).thenReturn("ml.python.primary");
+        when(wrongType.engineType()).thenReturn(FraudEngineType.RULES);
+        FraudScoringOrchestrationResult orchestration = new FraudScoringOrchestrationResult(
+                FraudScoringOrchestrationStatus.COMPLETE,
+                List.of(wrongType),
+                List.of(),
+                AggregationTestSupport.GENERATED_AT
+        );
+        FraudEngineAggregationResult aggregation = mock(FraudEngineAggregationResult.class);
+        when(aggregation.normalizedEngineResults()).thenReturn(List.of());
+
+        EngineIntelligenceEnrichmentResult enrichment = new MlPredictionEvidenceMapper().map(
+                mock(com.frauddetection.common.events.intelligence.EngineIntelligenceSummary.class),
+                orchestration,
+                aggregation
+        );
+
+        assertThat(enrichment.mlPredictionEvidence()).isEmpty();
+        assertThat(enrichment.mlPredictionEvidenceOmissionReason()).contains(
+                MlPredictionEvidenceOmissionReason.EVIDENCE_SOURCE_INTEGRITY_FAILURE
+        );
+    }
+
     @ParameterizedTest
     @EnumSource(value = FraudEngineStatus.class, names = "AVAILABLE", mode = EnumSource.Mode.EXCLUDE)
     void nonAvailableMlKeepsPublicSummaryWithoutManufacturingPredictionEvidence(FraudEngineStatus status) {

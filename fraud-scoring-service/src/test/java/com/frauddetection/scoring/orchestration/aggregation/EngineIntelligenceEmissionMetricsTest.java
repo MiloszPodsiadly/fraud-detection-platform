@@ -60,7 +60,7 @@ class EngineIntelligenceEmissionMetricsTest {
         when(pipeline.enrich(any())).thenReturn(Optional.of(
                 EngineIntelligenceEnrichmentResult.withoutEvidence(
                         summary,
-                        MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE
+                        MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED
                 )
         ));
 
@@ -70,7 +70,7 @@ class EngineIntelligenceEmissionMetricsTest {
         verify(metrics).recordAttempt();
         verify(metrics).recordSuccess();
         verify(metrics, never()).recordOmitted(any());
-        verify(metrics).recordEvidenceOmitted(MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE);
+        verify(metrics).recordEvidenceOmitted(MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED);
         verify(metrics).recordLatency(any(Duration.class));
     }
 
@@ -142,7 +142,7 @@ class EngineIntelligenceEmissionMetricsTest {
         when(pipeline.enrich(any())).thenReturn(Optional.of(
                 EngineIntelligenceEnrichmentResult.withoutEvidence(
                         summary,
-                        MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE
+                        MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED
                 )
         ));
 
@@ -186,6 +186,7 @@ class EngineIntelligenceEmissionMetricsTest {
                 MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING,
                 MlPredictionEvidenceOmissionReason.INVALID_SCORE,
                 MlPredictionEvidenceOmissionReason.IDENTITY_VALIDATION_FAILURE,
+                MlPredictionEvidenceOmissionReason.EVIDENCE_SOURCE_INTEGRITY_FAILURE,
                 MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE,
                 MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED
         );

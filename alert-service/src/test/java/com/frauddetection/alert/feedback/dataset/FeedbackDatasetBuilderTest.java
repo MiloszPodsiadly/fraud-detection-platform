@@ -528,6 +528,7 @@ class FeedbackDatasetBuilderTest {
                 MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING,
                 MlPredictionEvidenceOmissionReason.INVALID_SCORE,
                 MlPredictionEvidenceOmissionReason.IDENTITY_VALIDATION_FAILURE,
+                MlPredictionEvidenceOmissionReason.EVIDENCE_SOURCE_INTEGRITY_FAILURE,
                 MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE,
                 MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED
         );
@@ -554,7 +555,8 @@ class FeedbackDatasetBuilderTest {
                         FeedbackDatasetMlPredictionEvidenceStatus.MISSING_UNEXPECTEDLY,
                         FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED,
                         FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED,
-                        FeedbackDatasetMlPredictionEvidenceStatus.IDENTITY_MISMATCH,
+                        FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED,
+                        FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED,
                         FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT,
                         FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
                 );

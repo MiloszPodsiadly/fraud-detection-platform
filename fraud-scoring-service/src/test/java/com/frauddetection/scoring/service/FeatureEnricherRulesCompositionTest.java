@@ -6,6 +6,7 @@ import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
 import com.frauddetection.common.events.kafka.JacksonKafkaSerializer;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
@@ -27,6 +28,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
@@ -141,7 +143,13 @@ class FeatureEnricherRulesCompositionTest {
         FraudScoringRequest request = FraudScoringRequest.from(enriched);
 
         FraudScoreResult result = rules.score(request);
-        TransactionScoredEvent scored = scoredMapper.toEvent(request, result);
+        TransactionScoredEvent scored = scoredMapper.toEvent(
+                request,
+                result,
+                Optional.empty(),
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                null
+        );
         TransactionScoredEvent replayed = scoredKafkaReplay(scored);
 
         assertThat(enriched.featureSnapshot().get(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS))

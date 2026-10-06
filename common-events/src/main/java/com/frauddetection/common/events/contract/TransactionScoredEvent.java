@@ -6,6 +6,7 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.frauddetection.common.events.evidence.ScoringEvidenceItem;
 import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
+import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.features.FeatureSnapshotWireValueDeserializer;
 import com.frauddetection.common.events.features.FeatureSnapshotWireValueNormalizer;
@@ -423,6 +424,7 @@ public record TransactionScoredEvent(
             throw new IllegalArgumentException("ML_PREDICTION_EVIDENCE_REQUIRES_EXACTLY_ONE_OUTCOME");
         }
         if (mlPredictionEvidence == null) {
+            validateMlPredictionEvidenceOmission(engineIntelligence, omissionReason);
             return;
         }
         if (engineIntelligence == null) {
@@ -440,6 +442,31 @@ public record TransactionScoredEvent(
                 )
                 || !mlPredictionEvidence.modelIdentity().equals(sourceEngine.modelIdentity())) {
             throw new IllegalArgumentException("ML_PREDICTION_EVIDENCE_SOURCE_ENGINE_INCONSISTENT");
+        }
+    }
+
+    private static void validateMlPredictionEvidenceOmission(
+            EngineIntelligenceSummary engineIntelligence,
+            MlPredictionEvidenceOmissionReason omissionReason
+    ) {
+        if (omissionReason == null || engineIntelligence == null) {
+            return;
+        }
+        if (omissionReason == MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED) {
+            throw new IllegalArgumentException("ML_PREDICTION_EVIDENCE_OMISSION_CONTRADICTS_ENGINE_INTELLIGENCE");
+        }
+        EngineIntelligenceEngineResult sourceEngine = engineIntelligence.engines().stream()
+                .filter(engine -> FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID.equals(engine.engineId()))
+                .findFirst()
+                .orElse(null);
+        if (omissionReason == MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE) {
+            throw new IllegalArgumentException("ML_PREDICTION_EVIDENCE_OMISSION_CONTRADICTS_ENGINE_INTELLIGENCE");
+        }
+        if (sourceEngine != null
+                && sourceEngine.status() == FraudEngineStatus.AVAILABLE
+                && (omissionReason == MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE
+                || omissionReason == MlPredictionEvidenceOmissionReason.IDENTITY_VALIDATION_FAILURE)) {
+            throw new IllegalArgumentException("ML_PREDICTION_EVIDENCE_OMISSION_CONTRADICTS_ENGINE_INTELLIGENCE");
         }
     }
 }

@@ -234,7 +234,14 @@
                       "const": "MALFORMED"
                     },
                     "mlPredictionEvidenceOmissionReason": {
-                      "enum": ["SOURCE_TIMESTAMP_MISSING", "INVALID_SCORE", "PREDICTION_NOT_ACCEPTED", null]
+                      "enum": [
+                        "SOURCE_TIMESTAMP_MISSING",
+                        "INVALID_SCORE",
+                        "IDENTITY_VALIDATION_FAILURE",
+                        "EVIDENCE_SOURCE_INTEGRITY_FAILURE",
+                        "PREDICTION_NOT_ACCEPTED",
+                        null
+                      ]
                     },
                     "mlPredictionScore": {"type": "null"},
                     "mlPredictionRiskLevel": {"type": "null"},
@@ -260,7 +267,7 @@
                       "const": "IDENTITY_MISMATCH"
                     },
                     "mlPredictionEvidenceOmissionReason": {
-                      "enum": ["IDENTITY_VALIDATION_FAILURE", null]
+                      "type": "null"
                     },
                     "mlPredictionScore": {"type": "null"},
                     "mlPredictionRiskLevel": {"type": "null"},
@@ -473,6 +480,7 @@
                 "SOURCE_TIMESTAMP_MISSING",
                 "INVALID_SCORE",
                 "IDENTITY_VALIDATION_FAILURE",
+                "EVIDENCE_SOURCE_INTEGRITY_FAILURE",
                 "LEGITIMATE_ABSENCE",
                 "PREDICTION_NOT_ACCEPTED",
                 null

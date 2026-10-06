@@ -13,6 +13,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMisma
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
@@ -34,8 +35,14 @@ class ProducerEngineIntelligenceBaseEventStabilityTest {
         var mapper = new TransactionScoredEventMapper();
         var request = FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build());
         var result = scoreResult();
-        ObjectNode disabled = reviewedBaseFields(mapper.toEvent(request, result, Optional.empty()));
-        ObjectNode enabled = reviewedBaseFields(mapper.toEvent(request, result, Optional.of(summary())));
+        ObjectNode disabled = reviewedBaseFields(mapper.toEvent(
+                request, result, Optional.empty(),
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED, null
+        ));
+        ObjectNode enabled = reviewedBaseFields(mapper.toEvent(
+                request, result, Optional.of(summary()),
+                MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE, null
+        ));
 
         assertThat(enabled).isEqualTo(disabled);
     }
@@ -45,6 +52,7 @@ class ProducerEngineIntelligenceBaseEventStabilityTest {
         json.remove("eventId");
         json.remove("createdAt");
         json.remove("engineIntelligence");
+        json.remove("mlPredictionEvidenceOmissionReason");
         return json;
     }
 
