@@ -88,4 +88,5 @@ class FeedbackDatasetRecord:
 class FeedbackDataset:
     metadata: FeedbackDatasetMetadata
     records: tuple[FeedbackDatasetRecord, ...]
+    source_sha256: str
 

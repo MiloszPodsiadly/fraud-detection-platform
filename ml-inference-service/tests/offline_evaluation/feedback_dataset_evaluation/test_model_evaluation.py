@@ -11,11 +11,14 @@ from offline_evaluation.feedback_dataset_evaluation.dataset_schema import (
 from offline_evaluation.feedback_dataset_evaluation.evaluation_runner import build_feedback_dataset_evaluation_reports
 from offline_evaluation.feedback_dataset_evaluation.model_evaluation import (
     INSUFFICIENT_MODEL_LINEAGE_RECORDS,
+    INVALID_ML_EVIDENCE_PRESENT,
     MODEL_EVALUATION_REPORT_TYPE,
+    MODEL_EVALUATION_PARTIAL_COVERAGE,
     MODEL_PREDICTION_SIGNAL_UNAVAILABLE,
     ML_SCORE_RANKING_POLICY,
     RULES_SIGNAL_UNAVAILABLE,
     SINGLE_CLASS_MODEL_LINEAGE_RECORDS,
+    UNEXPECTED_ML_EVIDENCE_LOSS,
     ModelEvaluationIdentity,
     build_model_specific_evaluation_summary,
     validate_model_evaluation_summary,
@@ -124,7 +127,7 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
                 evaluationRecordId=f"eval_{index:032d}",
                 transactionReference=f"txnref_{index:032d}",
                 mlPredictionEvidenceStatus="IDENTITY_MISMATCH",
-                mlPredictionEvidenceOmissionReason="IDENTITY_VALIDATION_FAILURE",
+                mlPredictionEvidenceOmissionReason=None,
             ) for index in range(8, 10)),
             record(
                 evaluationRecordId="eval_00000000000000000000000000000010",
@@ -139,14 +142,154 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
         self.assertEqual(10, reports["evaluationSummary"]["qualityMetrics"]["datasetSummary"]["recordsEvaluated"])
         self.assertEqual({
             "recordsConsidered": 10,
-            "recordsWithPredictionEvidence": 6,
+            "recordsWithPredictionEvidence": 4,
             "recordsEvaluated": 4,
             "recordsExcludedMissingLineage": 0,
-            "recordsExcludedIdentityMismatch": 2,
+            "recordsExcludedIdentityMismatch": 0,
+            "recordsExcludedSourceIdentityMismatch": 2,
             "recordsExcludedMissingPredictionEvidence": 0,
             "recordsExcludedUnexpectedMissingPredictionEvidence": 3,
             "recordsExcludedInvalidPredictionEvidence": 1,
         }, reports["modelEvaluationSummary"]["population"])
+        self.assertEqual([
+            INVALID_ML_EVIDENCE_PRESENT,
+            MODEL_EVALUATION_PARTIAL_COVERAGE,
+            SINGLE_CLASS_MODEL_LINEAGE_RECORDS,
+            UNEXPECTED_ML_EVIDENCE_LOSS,
+        ], reports["modelEvaluationSummary"]["warnings"])
+
+    def test_sourceAndModelPopulationsRemainFullyReconciledWithDerivedWarnings(self):
+        records = (
+            self._model_record("eval_00000000000000000000000000000001", MODEL_X),
+            self._model_record(
+                "eval_00000000000000000000000000000002",
+                MODEL_X,
+                feedbackLabel="CONFIRMED_LEGITIMATE",
+                evaluationLabel="NEGATIVE_LEGITIMATE",
+            ),
+            self._model_record("eval_00000000000000000000000000000003", MODEL_X),
+            self._model_record(
+                "eval_00000000000000000000000000000004",
+                MODEL_X,
+                feedbackLabel="CONFIRMED_LEGITIMATE",
+                evaluationLabel="NEGATIVE_LEGITIMATE",
+            ),
+            *(record(
+                evaluationRecordId=f"eval_{index:032d}",
+                transactionReference=f"txnref_{index:032d}",
+                mlPredictionEvidenceStatus="MISSING_UNEXPECTEDLY",
+                mlPredictionEvidenceOmissionReason="ML_ENGINE_UNAVAILABLE",
+            ) for index in range(5, 8)),
+            record(
+                evaluationRecordId="eval_00000000000000000000000000000008",
+                transactionReference="txnref_00000000000000000000000000000008",
+                mlPredictionEvidenceStatus="MALFORMED",
+                mlPredictionEvidenceOmissionReason="INVALID_SCORE",
+            ),
+            record(
+                evaluationRecordId="eval_00000000000000000000000000000009",
+                transactionReference="txnref_00000000000000000000000000000009",
+                mlPredictionEvidenceStatus="MALFORMED",
+                mlPredictionEvidenceOmissionReason="IDENTITY_VALIDATION_FAILURE",
+            ),
+            record(
+                evaluationRecordId="eval_00000000000000000000000000000010",
+                transactionReference="txnref_00000000000000000000000000000010",
+                mlPredictionEvidenceStatus="IDENTITY_MISMATCH",
+                mlPredictionEvidenceOmissionReason=None,
+            ),
+        )
+        payload = jsonl(*records, metadata_overrides={
+            "rawRowsRead": 12,
+            "recordsReturned": 10,
+            "excludedUnresolvedCount": 1,
+            "excludedGovernanceReviewCount": 1,
+        })
+        with jsonl_file(payload) as path:
+            dataset = read_feedback_dataset_jsonl(path)
+
+        summary = build_model_specific_evaluation_summary(dataset, MODEL_X, GENERATED_AT)
+
+        self.assertEqual(12, summary["sourceDataset"]["rawRowsRead"])
+        self.assertEqual(10, summary["sourceDataset"]["recordsReturned"])
+        self.assertEqual(1, summary["sourceDataset"]["excludedUnresolvedCount"])
+        self.assertEqual(1, summary["sourceDataset"]["excludedGovernanceReviewCount"])
+        self.assertEqual({
+            "recordsConsidered": 10,
+            "recordsWithPredictionEvidence": 4,
+            "recordsEvaluated": 4,
+            "recordsExcludedMissingLineage": 0,
+            "recordsExcludedIdentityMismatch": 0,
+            "recordsExcludedSourceIdentityMismatch": 1,
+            "recordsExcludedMissingPredictionEvidence": 0,
+            "recordsExcludedUnexpectedMissingPredictionEvidence": 3,
+            "recordsExcludedInvalidPredictionEvidence": 2,
+        }, summary["population"])
+        self.assertEqual([
+            INVALID_ML_EVIDENCE_PRESENT,
+            MODEL_EVALUATION_PARTIAL_COVERAGE,
+            UNEXPECTED_ML_EVIDENCE_LOSS,
+        ], summary["warnings"])
+
+        summary["warnings"].remove(UNEXPECTED_ML_EVIDENCE_LOSS)
+        with self.assertRaisesRegex(ValueError, "warnings must match evaluated population"):
+            validate_model_evaluation_summary(summary)
+
+    def test_identityValidationFailureIsMalformedWithoutPredictionEvidenceOrMismatch(self):
+        summary = self._model_summary(record(
+            mlPredictionEvidenceStatus="MALFORMED",
+            mlPredictionEvidenceOmissionReason="IDENTITY_VALIDATION_FAILURE",
+        ))
+
+        self.assertEqual(0, summary["population"]["recordsWithPredictionEvidence"])
+        self.assertEqual(0, summary["population"]["recordsExcludedIdentityMismatch"])
+        self.assertEqual(0, summary["population"]["recordsExcludedSourceIdentityMismatch"])
+        self.assertEqual(1, summary["population"]["recordsExcludedInvalidPredictionEvidence"])
+
+    def test_sourceDatasetPreservesExactIdentityAndUpstreamPopulationAccounting(self):
+        records = (
+            self._model_record("eval_11111111111111111111111111111111", MODEL_X),
+            self._model_record("eval_22222222222222222222222222222222", MODEL_X),
+        )
+        payload = jsonl(*records, metadata_overrides={
+            "rawRowsRead": 7,
+            "recordsReturned": 2,
+            "excludedUnresolvedCount": 1,
+            "excludedGovernanceReviewCount": 1,
+            "skippedMissingRequiredFieldCount": 1,
+            "skippedInvalidSourceRecordCount": 1,
+            "truncated": True,
+        })
+        with jsonl_file(payload) as path:
+            dataset = read_feedback_dataset_jsonl(path)
+
+        summary = build_model_specific_evaluation_summary(dataset, MODEL_X, GENERATED_AT)
+
+        self.assertEqual({
+            "datasetVersion": "feedback-dataset-v2",
+            "sha256": dataset.source_sha256,
+            "rawRowsRead": 7,
+            "recordsReturned": 2,
+            "excludedUnresolvedCount": 1,
+            "excludedGovernanceReviewCount": 1,
+            "skippedMissingRequiredFieldCount": 1,
+            "skippedInvalidSourceRecordCount": 1,
+            "truncated": True,
+        }, summary["sourceDataset"])
+        self.assertEqual(
+            summary["sourceDataset"]["recordsReturned"],
+            summary["population"]["recordsConsidered"],
+        )
+        serialized_lineage = json.dumps(summary["sourceDataset"], sort_keys=True).lower()
+        for forbidden in (
+            "feedbackid",
+            "transactionid",
+            "sourceeventid",
+            "correlationid",
+            "customerid",
+            "accountid",
+        ):
+            self.assertNotIn(forbidden, serialized_lineage)
 
     def test_shadowMlIdentityVersionRemainsTheModelSpecificEvaluationSubject(self):
         summary = self._model_summary(
@@ -186,13 +329,21 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
         self.assertFalse(summary["supportedMetrics"]["classBalance"]["available"])
         self.assertEqual(INSUFFICIENT_MODEL_LINEAGE_RECORDS, summary["supportedMetrics"]["classBalance"]["reason"])
         self.assertEqual(
-            [INSUFFICIENT_MODEL_LINEAGE_RECORDS, MODEL_PREDICTION_SIGNAL_UNAVAILABLE],
+            [
+                INSUFFICIENT_MODEL_LINEAGE_RECORDS,
+                MODEL_EVALUATION_PARTIAL_COVERAGE,
+                MODEL_PREDICTION_SIGNAL_UNAVAILABLE,
+            ],
             summary["warnings"],
         )
         self.assertIs(summary, validate_model_evaluation_summary(summary))
 
     def test_zeroEligibleRecordsMissingRequiredWarningIsRejected(self):
-        for missing_warning in (INSUFFICIENT_MODEL_LINEAGE_RECORDS, MODEL_PREDICTION_SIGNAL_UNAVAILABLE):
+        for missing_warning in (
+                INSUFFICIENT_MODEL_LINEAGE_RECORDS,
+                MODEL_EVALUATION_PARTIAL_COVERAGE,
+                MODEL_PREDICTION_SIGNAL_UNAVAILABLE,
+        ):
             with self.subTest(missing_warning=missing_warning):
                 summary = self._model_summary(record())
                 summary["warnings"].remove(missing_warning)
@@ -625,6 +776,43 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unsupported fields"):
             validate_model_evaluation_summary(summary)
 
+    def test_modelEvaluationSummaryValidatorRejectsRetiredSourceDatasetVersionField(self):
+        summary = self._model_summary(self._model_record("eval_11111111111111111111111111111111", MODEL_X))
+        del summary["sourceDataset"]
+        summary["sourceDatasetVersion"] = "feedback-dataset-v2"
+
+        with self.assertRaisesRegex(ValueError, "sourceDatasetVersion"):
+            validate_model_evaluation_summary(summary)
+
+    def test_modelEvaluationSummaryValidatorRejectsInvalidSourceDatasetIdentity(self):
+        summary = self._model_summary(self._model_record("eval_11111111111111111111111111111111", MODEL_X))
+        summary["sourceDataset"]["sha256"] = "A" * 64
+
+        with self.assertRaisesRegex(ValueError, "sourceDataset sha256 must be lowercase hex"):
+            validate_model_evaluation_summary(summary)
+
+    def test_modelEvaluationSummaryValidatorRejectsUnknownSourceDatasetField(self):
+        summary = self._model_summary(self._model_record("eval_11111111111111111111111111111111", MODEL_X))
+        summary["sourceDataset"]["unexpected"] = "value"
+
+        with self.assertRaisesRegex(ValueError, "sourceDataset contains unsupported fields"):
+            validate_model_evaluation_summary(summary)
+
+    def test_modelEvaluationSummaryValidatorRejectsBrokenSourcePopulationAccounting(self):
+        summary = self._model_summary(self._model_record("eval_11111111111111111111111111111111", MODEL_X))
+        summary["sourceDataset"]["excludedUnresolvedCount"] = 1
+
+        with self.assertRaisesRegex(ValueError, "sourceDataset population counts must reconcile"):
+            validate_model_evaluation_summary(summary)
+
+    def test_modelEvaluationSummaryValidatorReconcilesSourceAndModelPopulations(self):
+        summary = self._model_summary(self._model_record("eval_11111111111111111111111111111111", MODEL_X))
+        summary["sourceDataset"]["recordsReturned"] = 0
+        summary["sourceDataset"]["rawRowsRead"] = 0
+
+        with self.assertRaisesRegex(ValueError, "recordsConsidered must match source dataset recordsReturned"):
+            validate_model_evaluation_summary(summary)
+
     def test_modelEvaluationSummaryValidatorRejectsBrokenPopulationAccounting(self):
         summary = self._model_summary(
             self._model_record("eval_11111111111111111111111111111111", MODEL_X),
@@ -667,6 +855,7 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
             ("population", "recordsEvaluated"),
             ("population", "recordsExcludedMissingLineage"),
             ("population", "recordsExcludedIdentityMismatch"),
+            ("population", "recordsExcludedSourceIdentityMismatch"),
             ("population", "recordsExcludedMissingPredictionEvidence"),
             ("population", "recordsExcludedUnexpectedMissingPredictionEvidence"),
             ("population", "recordsExcludedInvalidPredictionEvidence"),
@@ -835,6 +1024,7 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
             "recordsEvaluated": evaluated,
             "recordsExcludedMissingLineage": missing,
             "recordsExcludedIdentityMismatch": mismatch,
+            "recordsExcludedSourceIdentityMismatch": 0,
             "recordsExcludedMissingPredictionEvidence": missing_prediction,
             "recordsExcludedUnexpectedMissingPredictionEvidence": 0,
             "recordsExcludedInvalidPredictionEvidence": 0,
@@ -843,6 +1033,15 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
             "positiveClassCount": positives,
             "negativeClassCount": negatives,
         }
+        summary["sourceDataset"].update({
+            "rawRowsRead": considered,
+            "recordsReturned": considered,
+            "excludedUnresolvedCount": 0,
+            "excludedGovernanceReviewCount": 0,
+            "skippedMissingRequiredFieldCount": 0,
+            "skippedInvalidSourceRecordCount": 0,
+            "truncated": False,
+        })
         summary["supportedMetrics"]["classBalance"] = {
             "available": bool(evaluated),
             "reason": None if evaluated else INSUFFICIENT_MODEL_LINEAGE_RECORDS,
@@ -889,6 +1088,8 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
             warnings.extend((INSUFFICIENT_MODEL_LINEAGE_RECORDS, MODEL_PREDICTION_SIGNAL_UNAVAILABLE))
         elif positives == 0 or negatives == 0:
             warnings.append(SINGLE_CLASS_MODEL_LINEAGE_RECORDS)
+        if evaluated < considered:
+            warnings.append(MODEL_EVALUATION_PARTIAL_COVERAGE)
         summary["warnings"] = sorted(warnings)
 
     @staticmethod

@@ -203,6 +203,7 @@ class FeedbackEvaluationCrossChainRegressionTest(unittest.TestCase):
                     "recordsEvaluated": 2,
                     "recordsExcludedMissingLineage": 0,
                     "recordsExcludedIdentityMismatch": 1,
+                    "recordsExcludedSourceIdentityMismatch": 0,
                     "recordsExcludedMissingPredictionEvidence": 1,
                     "recordsExcludedUnexpectedMissingPredictionEvidence": 0,
                     "recordsExcludedInvalidPredictionEvidence": 0,
@@ -213,7 +214,7 @@ class FeedbackEvaluationCrossChainRegressionTest(unittest.TestCase):
                 {"positiveClassCount": 1, "negativeClassCount": 1},
                 dict(model_summary["classBalance"]),
             )
-            self.assertEqual((), model_summary["warnings"])
+            self.assertEqual(("MODEL_EVALUATION_PARTIAL_COVERAGE",), model_summary["warnings"])
             self.assertTrue(model_summary["supportedMetrics"]["classBalance"]["available"])
             self.assertTrue(model_summary["supportedMetrics"]["mlPredictionMetrics"]["available"])
             self.assertIsNone(model_summary["supportedMetrics"]["mlPredictionMetrics"]["reason"])

@@ -8,6 +8,7 @@ from offline_evaluation.feedback_dataset_evaluation.classification_policy import
     RISK_CLASSIFICATION_POLICY,
     is_positive_risk,
 )
+from offline_evaluation.feedback_dataset_evaluation.artifact_integrity import is_lowercase_sha256
 from offline_evaluation.feedback_dataset_evaluation.dataset_schema import (
     DATASET_VERSION,
     MAX_DATASET_RECORDS,
@@ -42,12 +43,15 @@ RULES_SIGNAL_UNAVAILABLE = "RULES_SIGNAL_UNAVAILABLE"
 ML_SCORE_RANKING_POLICY = "EXACT_ML_PREDICTION_SCORE_DESC_EVALUATION_RECORD_ID_ASC_V1"
 INSUFFICIENT_MODEL_LINEAGE_RECORDS = "INSUFFICIENT_MODEL_LINEAGE_RECORDS"
 SINGLE_CLASS_MODEL_LINEAGE_RECORDS = "SINGLE_CLASS_MODEL_LINEAGE_RECORDS"
+UNEXPECTED_ML_EVIDENCE_LOSS = "UNEXPECTED_ML_EVIDENCE_LOSS"
+INVALID_ML_EVIDENCE_PRESENT = "INVALID_ML_EVIDENCE_PRESENT"
+MODEL_EVALUATION_PARTIAL_COVERAGE = "MODEL_EVALUATION_PARTIAL_COVERAGE"
 SOURCE_DATASET_VERSION = DATASET_VERSION
 EVALUATION_TIME_BASIS = "FEEDBACK_CREATED_AT"
 ROOT_FIELDS = {
     "reportType",
     "generatedAt",
-    "sourceDatasetVersion",
+    "sourceDataset",
     "metricBasis",
     "evaluationSubject",
     "evaluationWindow",
@@ -72,9 +76,21 @@ POPULATION_FIELDS = {
     "recordsEvaluated",
     "recordsExcludedMissingLineage",
     "recordsExcludedIdentityMismatch",
+    "recordsExcludedSourceIdentityMismatch",
     "recordsExcludedMissingPredictionEvidence",
     "recordsExcludedUnexpectedMissingPredictionEvidence",
     "recordsExcludedInvalidPredictionEvidence",
+}
+SOURCE_DATASET_FIELDS = {
+    "datasetVersion",
+    "sha256",
+    "rawRowsRead",
+    "recordsReturned",
+    "excludedUnresolvedCount",
+    "excludedGovernanceReviewCount",
+    "skippedMissingRequiredFieldCount",
+    "skippedInvalidSourceRecordCount",
+    "truncated",
 }
 CLASS_BALANCE_FIELDS = {"positiveClassCount", "negativeClassCount"}
 LINEAGE_POLICY_FIELDS = {
@@ -131,6 +147,9 @@ ALLOWED_WARNINGS = {
     INSUFFICIENT_MODEL_LINEAGE_RECORDS,
     SINGLE_CLASS_MODEL_LINEAGE_RECORDS,
     MODEL_PREDICTION_SIGNAL_UNAVAILABLE,
+    UNEXPECTED_ML_EVIDENCE_LOSS,
+    INVALID_ML_EVIDENCE_PRESENT,
+    MODEL_EVALUATION_PARTIAL_COVERAGE,
 }
 
 
@@ -165,6 +184,7 @@ class _ModelEvaluationPopulation:
     records_evaluated: list[FeedbackDatasetRecord]
     records_excluded_missing_lineage: int
     records_excluded_identity_mismatch: int
+    records_excluded_source_identity_mismatch: int
     records_excluded_missing_prediction_evidence: int
     records_excluded_unexpected_missing_prediction_evidence: int
     records_excluded_invalid_prediction_evidence: int
@@ -198,11 +218,18 @@ def build_model_specific_evaluation_summary(
         **ranking_metrics,
     })
     disagreement = _build_rules_vs_ml_disagreement(evaluated)
-    warnings = _expected_warnings(len(evaluated), len(positives), len(negatives))
+    warnings = _expected_warnings(
+        len(records),
+        len(evaluated),
+        len(positives),
+        len(negatives),
+        population.records_excluded_unexpected_missing_prediction_evidence,
+        population.records_excluded_invalid_prediction_evidence,
+    )
     summary = {
         "reportType": MODEL_EVALUATION_REPORT_TYPE,
         "generatedAt": generated_at,
-        "sourceDatasetVersion": dataset.metadata.dataset_version,
+        "sourceDataset": build_source_dataset_identity(dataset),
         "metricBasis": MODEL_EVALUATION_METRIC_BASIS,
         "evaluationSubject": requested_identity.as_subject(),
         "evaluationWindow": {
@@ -216,6 +243,7 @@ def build_model_specific_evaluation_summary(
             "recordsEvaluated": len(evaluated),
             "recordsExcludedMissingLineage": population.records_excluded_missing_lineage,
             "recordsExcludedIdentityMismatch": population.records_excluded_identity_mismatch,
+            "recordsExcludedSourceIdentityMismatch": population.records_excluded_source_identity_mismatch,
             "recordsExcludedMissingPredictionEvidence": population.records_excluded_missing_prediction_evidence,
             "recordsExcludedUnexpectedMissingPredictionEvidence": (
                 population.records_excluded_unexpected_missing_prediction_evidence
@@ -254,14 +282,13 @@ def validate_model_evaluation_summary(summary: dict[str, Any]) -> dict[str, Any]
     _reject_unknown_or_missing(summary, ROOT_FIELDS, "model evaluation summary")
     if summary.get("reportType") != MODEL_EVALUATION_REPORT_TYPE:
         raise ValueError("model evaluation summary reportType unsupported")
-    if summary.get("sourceDatasetVersion") != SOURCE_DATASET_VERSION:
-        raise ValueError("model evaluation summary sourceDatasetVersion unsupported")
     if summary.get("metricBasis") != MODEL_EVALUATION_METRIC_BASIS:
         raise ValueError("model evaluation summary metricBasis unsupported")
     if normalize_rfc3339_timestamp(summary.get("generatedAt"), "generatedAt") != summary.get("generatedAt"):
         raise ValueError("model evaluation summary generatedAt must be canonical")
     _validate_subject(summary.get("evaluationSubject"))
     _validate_window(summary.get("evaluationWindow"))
+    source_dataset = _validate_source_dataset(summary.get("sourceDataset"))
     population = _validate_population(summary.get("population"))
     class_balance = _validate_class_balance(summary.get("classBalance"))
     if population["recordsEvaluated"] != class_balance["positiveClassCount"] + class_balance["negativeClassCount"]:
@@ -270,6 +297,7 @@ def validate_model_evaluation_summary(summary: dict[str, Any]) -> dict[str, Any]
             population["recordsEvaluated"]
             + population["recordsExcludedMissingLineage"]
             + population["recordsExcludedIdentityMismatch"]
+            + population["recordsExcludedSourceIdentityMismatch"]
             + population["recordsExcludedMissingPredictionEvidence"]
             + population["recordsExcludedUnexpectedMissingPredictionEvidence"]
             + population["recordsExcludedInvalidPredictionEvidence"]
@@ -281,6 +309,8 @@ def validate_model_evaluation_summary(summary: dict[str, Any]) -> dict[str, Any]
             + population["recordsExcludedIdentityMismatch"]
     ):
         raise ValueError("model evaluation prediction evidence counts must reconcile")
+    if population["recordsConsidered"] != source_dataset["recordsReturned"]:
+        raise ValueError("model evaluation recordsConsidered must match source dataset recordsReturned")
     _validate_lineage_policy(summary.get("lineagePolicy"))
     _validate_supported_metrics(
         summary.get("supportedMetrics"),
@@ -290,13 +320,66 @@ def validate_model_evaluation_summary(summary: dict[str, Any]) -> dict[str, Any]
     _validate_machine_code_set(summary.get("limitations"), REQUIRED_LIMITATIONS, "limitations", exact=True)
     _validate_machine_code_set(summary.get("warnings"), ALLOWED_WARNINGS, "warnings", exact=False)
     expected_warnings = _expected_warnings(
+        population["recordsConsidered"],
         population["recordsEvaluated"],
         class_balance["positiveClassCount"],
         class_balance["negativeClassCount"],
+        population["recordsExcludedUnexpectedMissingPredictionEvidence"],
+        population["recordsExcludedInvalidPredictionEvidence"],
     )
     if summary["warnings"] != expected_warnings:
         raise ValueError("warnings must match evaluated population and class balance")
     return summary
+
+
+def build_source_dataset_identity(dataset: FeedbackDataset) -> dict[str, Any]:
+    if dataset.metadata.records_returned != len(dataset.records):
+        raise ValueError("source dataset recordsReturned must match parsed records")
+    source_dataset = {
+        "datasetVersion": dataset.metadata.dataset_version,
+        "sha256": dataset.source_sha256,
+        "rawRowsRead": dataset.metadata.raw_rows_read,
+        "recordsReturned": dataset.metadata.records_returned,
+        "excludedUnresolvedCount": dataset.metadata.excluded_unresolved_count,
+        "excludedGovernanceReviewCount": dataset.metadata.excluded_governance_review_count,
+        "skippedMissingRequiredFieldCount": dataset.metadata.skipped_missing_required_field_count,
+        "skippedInvalidSourceRecordCount": dataset.metadata.skipped_invalid_source_record_count,
+        "truncated": dataset.metadata.truncated,
+    }
+    _validate_source_dataset(source_dataset)
+    return source_dataset
+
+
+def _validate_source_dataset(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("sourceDataset must be an object")
+    _reject_unknown_or_missing(value, SOURCE_DATASET_FIELDS, "sourceDataset")
+    if value.get("datasetVersion") != SOURCE_DATASET_VERSION:
+        raise ValueError("sourceDataset datasetVersion unsupported")
+    if not is_lowercase_sha256(value.get("sha256")):
+        raise ValueError("sourceDataset sha256 must be lowercase hex")
+    counts = {
+        field: _bounded_count(
+            value.get(field),
+            f"sourceDataset.{field}",
+            MAX_DATASET_RECORDS + 1 if field == "rawRowsRead" else MAX_DATASET_RECORDS,
+        )
+        for field in SOURCE_DATASET_FIELDS
+        if field.endswith("Count") or field in {"rawRowsRead", "recordsReturned"}
+    }
+    truncated = value.get("truncated")
+    if not isinstance(truncated, bool):
+        raise ValueError("sourceDataset.truncated must be boolean")
+    accounted_rows = (
+        counts["recordsReturned"]
+        + counts["excludedUnresolvedCount"]
+        + counts["excludedGovernanceReviewCount"]
+        + counts["skippedMissingRequiredFieldCount"]
+        + counts["skippedInvalidSourceRecordCount"]
+    )
+    if counts["rawRowsRead"] != accounted_rows + (1 if truncated else 0):
+        raise ValueError("sourceDataset population counts must reconcile")
+    return value
 
 
 def _validate_subject(value: Any) -> None:
@@ -616,27 +699,36 @@ def _reject_unknown_or_missing(value: dict[str, Any], allowed: set[str], locatio
         raise ValueError(f"{location} missing required fields: {', '.join(missing)}")
 
 
-def _bounded_count(value: Any, location: str) -> int:
+def _bounded_count(value: Any, location: str, maximum: int = MAX_DATASET_RECORDS) -> int:
     if (
             not isinstance(value, int)
             or isinstance(value, bool)
             or value < 0
-            or value > MAX_DATASET_RECORDS
+            or value > maximum
     ):
-        raise ValueError(f"{location} must be an integer between 0 and {MAX_DATASET_RECORDS}")
+        raise ValueError(f"{location} must be an integer between 0 and {maximum}")
     return value
 
 
 def _expected_warnings(
+        records_considered: int,
         records_evaluated: int,
         positive_class_count: int,
         negative_class_count: int,
+        unexpected_missing_prediction_evidence: int,
+        invalid_prediction_evidence: int,
 ) -> list[str]:
     warnings = []
     if records_evaluated == 0:
         warnings.extend((INSUFFICIENT_MODEL_LINEAGE_RECORDS, MODEL_PREDICTION_SIGNAL_UNAVAILABLE))
     elif positive_class_count == 0 or negative_class_count == 0:
         warnings.append(SINGLE_CLASS_MODEL_LINEAGE_RECORDS)
+    if unexpected_missing_prediction_evidence > 0:
+        warnings.append(UNEXPECTED_ML_EVIDENCE_LOSS)
+    if invalid_prediction_evidence > 0:
+        warnings.append(INVALID_ML_EVIDENCE_PRESENT)
+    if records_evaluated < records_considered:
+        warnings.append(MODEL_EVALUATION_PARTIAL_COVERAGE)
     return sorted(warnings)
 
 
@@ -648,6 +740,7 @@ def _partition_records(
     evaluated: list[FeedbackDatasetRecord] = []
     missing_lineage = 0
     identity_mismatch = 0
+    source_identity_mismatch = 0
     missing_prediction_evidence = 0
     unexpected_missing_prediction_evidence = 0
     invalid_prediction_evidence = 0
@@ -660,8 +753,7 @@ def _partition_records(
             unexpected_missing_prediction_evidence += 1
             continue
         if evidence_state == "IDENTITY_MISMATCH":
-            with_prediction_evidence += 1
-            identity_mismatch += 1
+            source_identity_mismatch += 1
             continue
         if evidence_state == "INVALID":
             invalid_prediction_evidence += 1
@@ -682,6 +774,7 @@ def _partition_records(
         records_evaluated=evaluated,
         records_excluded_missing_lineage=missing_lineage,
         records_excluded_identity_mismatch=identity_mismatch,
+        records_excluded_source_identity_mismatch=source_identity_mismatch,
         records_excluded_missing_prediction_evidence=missing_prediction_evidence,
         records_excluded_unexpected_missing_prediction_evidence=unexpected_missing_prediction_evidence,
         records_excluded_invalid_prediction_evidence=invalid_prediction_evidence,

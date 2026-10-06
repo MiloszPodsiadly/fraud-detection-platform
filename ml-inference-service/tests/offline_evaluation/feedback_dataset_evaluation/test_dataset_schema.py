@@ -237,7 +237,8 @@ class FeedbackDatasetSchemaTest(unittest.TestCase):
         cases = (
             ("MISSING_UNEXPECTEDLY", "ML_ENGINE_UNAVAILABLE"),
             ("MALFORMED", "INVALID_SCORE"),
-            ("IDENTITY_MISMATCH", "IDENTITY_VALIDATION_FAILURE"),
+            ("MALFORMED", "IDENTITY_VALIDATION_FAILURE"),
+            ("MALFORMED", "EVIDENCE_SOURCE_INTEGRITY_FAILURE"),
         )
         for status, reason in cases:
             with self.subTest(status=status):

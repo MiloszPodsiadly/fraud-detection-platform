@@ -76,9 +76,12 @@ are not ranked and are not high/low signals.
 
 Feedback dataset v2 supplies an exact bounded `mlPredictionScore`, `mlPredictionRiskLevel`, and
 `mlPredictionExecutedAt` only when `mlPredictionEvidenceStatus = AVAILABLE`. `LEGITIMATELY_ABSENT` requires those
-values and the model identity to be null. Platform recommendation diagnostics continue to use their existing platform
-fields; model-specific evaluation must use only the direct ML evidence fields and must not substitute platform score,
-risk, or recommendation values.
+values and the model identity to be null and means only that direct evaluation evidence is legitimately absent.
+`DIAGNOSTIC_EMISSION_DISABLED` does not prove that the primary or shadow ML runtime never executed. Identity validation
+failure and source integrity failure are `MALFORMED`, while `IDENTITY_MISMATCH` is reserved for complete authoritative
+identities or ownership tuples that demonstrably disagree. Platform recommendation diagnostics continue to use their
+existing platform fields; model-specific evaluation must use only the direct ML evidence fields and must not
+substitute platform score, risk, or recommendation values.
 
 The evaluator accepts feedback dataset pseudonymous input references only for parsing and deterministic ordering. Reports are
 aggregate-only and must not emit `evaluationRecordId`, `transactionReference`, `eval-`, or `txnref-` values.
@@ -105,6 +108,11 @@ denominators are unavailable with bounded reasons instead of fake numeric values
 ranking implementation but supplies exact `mlPredictionScore`, isolates the requested model identity, and orders ties
 by pseudonymous evaluation record ID. Ranking does not claim score calibration. See
 [ML Model Specific Evaluation](ml_model_specific_evaluation.md).
+
+The model summary binds that evaluation to the exact source JSONL bytes through its canonical `sourceDataset` SHA-256
+and reconciled source counters. Its manifest protects the summary and therefore that embedded identity; a trusted
+reader can additionally verify it against supplied source bytes, while a standalone artifact read cannot establish
+that external byte-level comparison.
 
 Its aggregate Rules-vs-ML breakdown uses the Rules snapshot captured from the same scoring occurrence as the direct
 ML evidence. Missing Rules evidence is counted as unavailable, never converted to low risk, and no current/latest

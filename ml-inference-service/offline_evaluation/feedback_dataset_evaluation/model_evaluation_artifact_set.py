@@ -1,16 +1,24 @@
 from __future__ import annotations
 
-import hashlib
 import json
-import os
-import stat
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import MappingProxyType
 from typing import Any
 
-from offline_evaluation.feedback_dataset_evaluation.model_evaluation import validate_model_evaluation_summary
+from offline_evaluation.feedback_dataset_evaluation.artifact_integrity import (
+    BoundedArtifactReadError,
+    is_lowercase_sha256,
+    read_bounded_regular_file,
+    reject_symlink_path,
+    sha256_hex,
+)
+from offline_evaluation.feedback_dataset_evaluation.dataset_reader import read_feedback_dataset_jsonl
+from offline_evaluation.feedback_dataset_evaluation.model_evaluation import (
+    build_source_dataset_identity,
+    validate_model_evaluation_summary,
+)
 from offline_evaluation.feedback_dataset_evaluation.report_contract import (
     MODEL_EVALUATION_ARTIFACT_SET_VERSION,
     MODEL_EVALUATION_REPORT_TYPE,
@@ -29,7 +37,6 @@ MAX_MANIFEST_BYTES = 65_536
 EXPECTED_DIRECTORY_ENTRIES = {SUMMARY_FILENAME, MANIFEST_FILENAME}
 MANIFEST_FIELDS = {"artifactSetVersion", "files", "generatedAt", "reportType"}
 MANIFEST_FILE_FIELDS = {"name", "sha256", "sizeBytes"}
-SHA256_HEX_LENGTH = 64
 
 
 class ModelEvaluationArtifactSetError(ValueError):
@@ -44,20 +51,21 @@ class ValidatedModelEvaluationArtifactSet:
 
 def read_validated_model_evaluation_artifact_set(
         artifact_dir: str | Path,
+        source_dataset_path: str | Path | None = None,
 ) -> ValidatedModelEvaluationArtifactSet:
     directory = Path(artifact_dir)
     _validate_artifact_directory(directory)
 
     manifest_path = directory / MANIFEST_FILENAME
     summary_path = directory / SUMMARY_FILENAME
-    manifest_bytes = _read_required_bytes(manifest_path, "model evaluation manifest", MAX_MANIFEST_BYTES)
+    manifest_bytes = _read_artifact_bytes(manifest_path, "model evaluation manifest", MAX_MANIFEST_BYTES)
     manifest = _load_json_object(manifest_bytes, "model evaluation manifest")
     file_entry = _validate_manifest(manifest)
 
-    summary_bytes = _read_required_bytes(summary_path, "model evaluation summary", MAX_SUMMARY_BYTES)
+    summary_bytes = _read_artifact_bytes(summary_path, "model evaluation summary", MAX_SUMMARY_BYTES)
     if file_entry["sizeBytes"] != len(summary_bytes):
         raise ModelEvaluationArtifactSetError("model evaluation summary size does not match manifest")
-    if file_entry["sha256"] != hashlib.sha256(summary_bytes).hexdigest():
+    if file_entry["sha256"] != sha256_hex(summary_bytes):
         raise ModelEvaluationArtifactSetError("model evaluation summary sha256 does not match manifest")
 
     summary = _load_json_object(summary_bytes, "model evaluation summary")
@@ -69,14 +77,30 @@ def read_validated_model_evaluation_artifact_set(
         raise ModelEvaluationArtifactSetError(
             "model evaluation manifest generatedAt must match summary generatedAt"
         )
+    if source_dataset_path is not None:
+        try:
+            actual_source = build_source_dataset_identity(
+                read_feedback_dataset_jsonl(source_dataset_path)
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            raise ModelEvaluationArtifactSetError(
+                "source feedback dataset cannot be validated"
+            ) from exc
+        if validated_summary["sourceDataset"] != actual_source:
+            raise ModelEvaluationArtifactSetError(
+                "model evaluation source dataset identity does not match actual source bytes"
+            )
     return ValidatedModelEvaluationArtifactSet(
         summary=_freeze_json(validated_summary),
-        manifest_sha256=hashlib.sha256(manifest_bytes).hexdigest(),
+        manifest_sha256=sha256_hex(manifest_bytes),
     )
 
 
 def _validate_artifact_directory(directory: Path) -> None:
-    _reject_symlink_path(directory, "model evaluation artifact directory")
+    try:
+        reject_symlink_path(directory, "model evaluation artifact directory")
+    except BoundedArtifactReadError as exc:
+        raise ModelEvaluationArtifactSetError(str(exc)) from exc
     if not directory.exists():
         raise ModelEvaluationArtifactSetError("model evaluation artifact directory is missing")
     if not directory.is_dir():
@@ -153,45 +177,15 @@ def _validate_manifest_file_metadata(entry: dict[str, Any]) -> None:
             "model evaluation manifest sizeBytes must be a non-negative integer"
         )
     sha256 = entry["sha256"]
-    if (
-            not isinstance(sha256, str)
-            or len(sha256) != SHA256_HEX_LENGTH
-            or not all(character in "0123456789abcdef" for character in sha256)
-    ):
+    if not is_lowercase_sha256(sha256):
         raise ModelEvaluationArtifactSetError("model evaluation manifest sha256 must be lowercase hex")
 
 
-def _read_required_bytes(path: Path, label: str, max_bytes: int) -> bytes:
-    _reject_symlink_path(path, label)
-    if not path.is_file():
-        raise ModelEvaluationArtifactSetError(f"{label} is missing")
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+def _read_artifact_bytes(path: Path, label: str, max_bytes: int) -> bytes:
     try:
-        descriptor = os.open(path, flags)
-    except OSError as exc:
-        raise ModelEvaluationArtifactSetError(f"{label} cannot be read") from exc
-    try:
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            raise ModelEvaluationArtifactSetError(f"{label} must be a regular file")
-        with os.fdopen(descriptor, "rb") as handle:
-            descriptor = -1
-            payload = handle.read(max_bytes + 1)
-    finally:
-        if descriptor >= 0:
-            os.close(descriptor)
-    if len(payload) > max_bytes:
-        raise ModelEvaluationArtifactSetError(f"{label} exceeds maximum byte size")
-    return payload
-
-
-def _reject_symlink_path(path: Path, label: str) -> None:
-    if path.is_symlink():
-        raise ModelEvaluationArtifactSetError(f"{label} must not be a symlink")
-    parent = path.parent
-    while parent != parent.parent:
-        if parent.is_symlink():
-            raise ModelEvaluationArtifactSetError(f"{label} parent must not be a symlink")
-        parent = parent.parent
+        return read_bounded_regular_file(path, label, max_bytes)
+    except BoundedArtifactReadError as exc:
+        raise ModelEvaluationArtifactSetError(str(exc)) from exc
 
 
 def _load_json_object(payload: bytes, label: str) -> dict[str, Any]:

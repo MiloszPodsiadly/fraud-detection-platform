@@ -1,3 +1,4 @@
+import hashlib
 import json
 import unittest
 
@@ -21,6 +22,41 @@ class FeedbackDatasetReaderTest(unittest.TestCase):
         self.assertEqual(1, len(parsed.records))
         self.assertEqual("feedback-dataset-v2", parsed.metadata.dataset_version)
         self.assertEqual("POSITIVE_FRAUD", parsed.records[0].evaluation_label)
+
+    def test_sourceSha256UsesExactDatasetBytesDeterministically(self):
+        payload = jsonl(record())
+        with jsonl_file(payload) as path:
+            source_bytes = path.read_bytes()
+            first = read_feedback_dataset_jsonl(path)
+            second = read_feedback_dataset_jsonl(path)
+
+        expected = hashlib.sha256(source_bytes).hexdigest()
+        self.assertEqual(expected, first.source_sha256)
+        self.assertEqual(first.source_sha256, second.source_sha256)
+
+    def test_oneSourceByteChangesDatasetIdentityWithoutChangingParsedPopulation(self):
+        with jsonl_file(jsonl(record())) as path:
+            before = read_feedback_dataset_jsonl(path)
+            path.write_bytes(path.read_bytes() + b" ")
+            after = read_feedback_dataset_jsonl(path)
+
+        self.assertEqual(before.metadata, after.metadata)
+        self.assertEqual(before.records, after.records)
+        self.assertNotEqual(before.source_sha256, after.source_sha256)
+
+    def test_sameWindowVersionAndRecordCountDoNotCollapseDifferentSourceBytes(self):
+        first_payload = jsonl(record(fraudScore=0.91))
+        second_payload = jsonl(record(fraudScore=0.92))
+        with jsonl_file(first_payload) as path:
+            first = read_feedback_dataset_jsonl(path)
+        with jsonl_file(second_payload) as path:
+            second = read_feedback_dataset_jsonl(path)
+
+        self.assertEqual(first.metadata.dataset_version, second.metadata.dataset_version)
+        self.assertEqual(first.metadata.from_inclusive, second.metadata.from_inclusive)
+        self.assertEqual(first.metadata.to_inclusive, second.metadata.to_inclusive)
+        self.assertEqual(len(first.records), len(second.records))
+        self.assertNotEqual(first.source_sha256, second.source_sha256)
 
     def test_metadataIsNotCountedAsRecord(self):
         with jsonl_file(jsonl(record(), record(

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import os
-import hashlib
 from pathlib import Path
 from typing import Any
 
 from offline_evaluation.json_contract import dumps_strict_json
+from offline_evaluation.feedback_dataset_evaluation.artifact_integrity import sha256_hex
 from offline_evaluation.feedback_dataset_evaluation.model_evaluation import validate_model_evaluation_summary
 from offline_evaluation.feedback_dataset_evaluation.report_contract import (
     ARTIFACT_SET_VERSION,
@@ -180,7 +180,7 @@ def build_artifact_manifest(
         encoded = payload.encode("utf-8")
         files.append({
             "name": path.name,
-            "sha256": hashlib.sha256(encoded).hexdigest(),
+            "sha256": sha256_hex(encoded),
             "sizeBytes": len(encoded),
         })
     manifest = {
