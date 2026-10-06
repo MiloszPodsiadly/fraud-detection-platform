@@ -26,13 +26,13 @@ const REQUIRED_EVALUATION = {
   evaluationCardVersion: "platform-recommendation-evaluation-card-v1",
   evaluationPurpose: "OFFLINE_DIAGNOSTIC",
   evaluationReportVersion: "feedback-dataset-evaluation-v1",
-  datasetVersion: "feedback-dataset-v1",
+  datasetVersion: "feedback-dataset-v2",
   datasetTimeBasis: "FEEDBACK_CREATED_AT"
 };
 const CURRENT_PLATFORM_EVALUATION_IDENTITY = {
   evaluationReportType: "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
   evaluationArtifactSetVersion: "feedback-dataset-evaluation-report-artifact-set-v1",
-  identityCompleteness: "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
+  identityCompleteness: "PLATFORM_RECOMMENDATION_NOT_MODEL_ARTIFACT_SCOPED"
 };
 const REQUIRED_LIMITATIONS = new Set([
   "ANALYST_FEEDBACK_LABELS_ARE_NOT_LEGAL_GROUND_TRUTH",

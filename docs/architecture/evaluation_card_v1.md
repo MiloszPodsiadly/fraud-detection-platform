@@ -50,7 +50,7 @@ Platform Evaluation `evaluation_summary.json` is the only source of evaluation i
 - `featureContractVersion = NOT_APPLICABLE`
 - `modelIdentity = NOT_AVAILABLE`
 - `modelArtifactSha256 = NOT_AVAILABLE`
-- `identityCompleteness = NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE`
+- `identityCompleteness = PLATFORM_RECOMMENDATION_NOT_MODEL_ARTIFACT_SCOPED`
 
 Evaluation evidence must use the canonical report type, artifact-set version, and identity-completeness marker.
 Unsupported or mixed identities fail closed.

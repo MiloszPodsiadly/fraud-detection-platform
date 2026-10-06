@@ -5574,7 +5574,7 @@ components:
           maxLength: 128
         identityCompleteness:
           type: string
-          enum: [NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE]
+          enum: [PLATFORM_RECOMMENDATION_NOT_MODEL_ARTIFACT_SCOPED]
     ShadowPerformanceGovernanceResponse:
       type: object
       additionalProperties: false
@@ -5632,7 +5632,7 @@ components:
           description: Canonical Platform Evaluation artifact-set version.
         datasetVersion:
           type: string
-          enum: [feedback-dataset-v1]
+          enum: [feedback-dataset-v2]
         datasetTimeBasis:
           type: string
           enum: [FEEDBACK_CREATED_AT]

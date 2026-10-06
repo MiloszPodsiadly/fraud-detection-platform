@@ -118,9 +118,9 @@ class ShadowPerformanceSummaryValidatorTest {
     void rejectsUnsupportedLineageVersions() {
         ShadowPerformanceSummary base = validSummary();
         for (ShadowPerformanceSummary.ShadowPerformanceEvaluation evaluation : List.of(
-                replaceEvaluationLineage(base.evaluation(), "other-artifact-format-v99", "feedback-dataset-v1", "FEEDBACK_CREATED_AT"),
+                replaceEvaluationLineage(base.evaluation(), "other-artifact-format-v99", "feedback-dataset-v2", "FEEDBACK_CREATED_AT"),
                 replaceEvaluationLineage(base.evaluation(), "feedback-dataset-evaluation-report-artifact-set-v1", "unknown-dataset-v77", "FEEDBACK_CREATED_AT"),
-                replaceEvaluationLineage(base.evaluation(), "feedback-dataset-evaluation-report-artifact-set-v1", "feedback-dataset-v1", "TRANSACTION_CREATED_AT")
+                replaceEvaluationLineage(base.evaluation(), "feedback-dataset-evaluation-report-artifact-set-v1", "feedback-dataset-v2", "TRANSACTION_CREATED_AT")
         )) {
             ShadowPerformanceSummary summary = new ShadowPerformanceSummary(
                     base.reportType(),
@@ -149,7 +149,7 @@ class ShadowPerformanceSummaryValidatorTest {
                 base.evaluation(),
                 "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
                 "feedback-dataset-evaluation-report-artifact-set-v1",
-                "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
+                "PLATFORM_RECOMMENDATION_NOT_MODEL_ARTIFACT_SCOPED"
         ))).doesNotThrowAnyException();
     }
 
@@ -169,13 +169,13 @@ class ShadowPerformanceSummaryValidatorTest {
                         base.evaluation(),
                         "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
                         "unsupported-artifact-set-v1",
-                        "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
+                        "PLATFORM_RECOMMENDATION_NOT_MODEL_ARTIFACT_SCOPED"
                 ),
                 withEvaluationProvenance(
                         base.evaluation(),
                         "UNSUPPORTED_PLATFORM_EVALUATION",
                         "feedback-dataset-evaluation-report-artifact-set-v1",
-                        "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
+                        "PLATFORM_RECOMMENDATION_NOT_MODEL_ARTIFACT_SCOPED"
                 ),
                 withEvaluationProvenance(
                         base.evaluation(),

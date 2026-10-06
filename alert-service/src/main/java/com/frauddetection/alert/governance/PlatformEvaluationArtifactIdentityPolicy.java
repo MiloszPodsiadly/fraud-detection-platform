@@ -5,7 +5,7 @@ public final class PlatformEvaluationArtifactIdentityPolicy {
     public static final String CURRENT_REPORT_TYPE = "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1";
     public static final String CURRENT_ARTIFACT_SET_VERSION = "feedback-dataset-evaluation-report-artifact-set-v1";
     public static final String CURRENT_IDENTITY_COMPLETENESS =
-            "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE";
+            "PLATFORM_RECOMMENDATION_NOT_MODEL_ARTIFACT_SCOPED";
 
     private PlatformEvaluationArtifactIdentityPolicy() {
     }

@@ -19,7 +19,7 @@ final class ShadowPerformanceSummaryTestFixtures {
                         "NOT_APPLICABLE",
                         "NOT_AVAILABLE",
                         "NOT_AVAILABLE",
-                        "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
+                        "PLATFORM_RECOMMENDATION_NOT_MODEL_ARTIFACT_SCOPED"
                 ),
                 "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK",
                 new ShadowPerformanceSummary.ShadowPerformanceGovernance(
@@ -40,7 +40,7 @@ final class ShadowPerformanceSummaryTestFixtures {
                         "2026-06-10T00:00:00Z",
                         "2026-06-12T00:00:00Z",
                         "feedback-dataset-evaluation-report-artifact-set-v1",
-                        "feedback-dataset-v1",
+                        "feedback-dataset-v2",
                         "FEEDBACK_CREATED_AT",
                         "a".repeat(64),
                         "b".repeat(64)
