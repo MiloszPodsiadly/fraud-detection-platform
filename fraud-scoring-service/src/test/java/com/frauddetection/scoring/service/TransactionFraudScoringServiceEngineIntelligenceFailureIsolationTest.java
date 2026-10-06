@@ -2,6 +2,7 @@ package com.frauddetection.scoring.service;
 
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.features.FraudFeatureContract;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.EngineIntelligenceEmissionProperties;
 import com.frauddetection.scoring.config.ScoringMode;
@@ -96,6 +97,7 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
                 scoreResult,
                 Optional.empty(),
                 Optional.empty(),
+                Optional.of(MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE),
                 recommendation
         )).thenReturn(baseEvent);
         var service = new TransactionFraudScoringService(
@@ -115,6 +117,7 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
                 scoreResult,
                 Optional.empty(),
                 Optional.empty(),
+                Optional.of(MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE),
                 recommendation
         );
         verify(publisher).publish(baseEvent);

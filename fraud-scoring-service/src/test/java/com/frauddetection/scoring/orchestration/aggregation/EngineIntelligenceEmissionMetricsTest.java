@@ -1,5 +1,7 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
+
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;

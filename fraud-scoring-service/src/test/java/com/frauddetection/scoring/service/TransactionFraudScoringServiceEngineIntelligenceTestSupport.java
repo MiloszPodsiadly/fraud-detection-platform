@@ -27,7 +27,7 @@ import com.frauddetection.scoring.messaging.TransactionScoredEventPublisher;
 import com.frauddetection.scoring.observability.ScoringMetrics;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEnrichmentResult;
-import com.frauddetection.scoring.orchestration.aggregation.MlPredictionEvidenceOmissionReason;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.mockito.ArgumentCaptor;
 
@@ -50,9 +50,14 @@ final class TransactionFraudScoringServiceEngineIntelligenceTestSupport {
     }
 
     static Harness harness(Optional<EngineIntelligenceSummary> summary) {
+        return harness(summary.isPresent(), summary);
+    }
+
+    static Harness harness(boolean emitEnabled, Optional<EngineIntelligenceSummary> summary) {
         EngineIntelligenceEmissionService emissionService = mock(EngineIntelligenceEmissionService.class);
         TransactionEnrichedEvent input = TransactionFixtures.enrichedTransaction().build();
         FraudScoringRequest request = FraudScoringRequest.from(input);
+        when(emissionService.emitEnabled()).thenReturn(emitEnabled);
         when(emissionService.emitIfEnabled(request)).thenReturn(
                 summary.map(value -> EngineIntelligenceEnrichmentResult.withoutEvidence(
                         value,
@@ -72,6 +77,7 @@ final class TransactionFraudScoringServiceEngineIntelligenceTestSupport {
         EngineIntelligenceEmissionService emissionService = mock(EngineIntelligenceEmissionService.class);
         TransactionEnrichedEvent input = TransactionFixtures.enrichedTransaction().build();
         FraudScoringRequest request = FraudScoringRequest.from(input);
+        when(emissionService.emitEnabled()).thenReturn(true);
         when(emissionService.emitIfEnabled(request)).thenReturn(Optional.of(enrichment));
         return harness(input, request, emissionService);
     }

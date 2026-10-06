@@ -27,6 +27,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMisma
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationConfidence;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationNonDecisioning;
@@ -549,6 +550,31 @@ class FraudFeedbackServiceTest {
     }
 
     @Test
+    void projectionReadFailureDoesNotEraseAuthoritativeOccurrenceOmission() {
+        ScoringOccurrenceOwnership ownership = ScoringOccurrenceOwnership.authoritative(
+                "event-1",
+                Instant.parse("2026-06-25T09:00:01Z"),
+                "a".repeat(64)
+        );
+        when(transactionMonitoringUseCase.getScoredTransaction("txn-1")).thenReturn(scoredTransaction(
+                ownership,
+                MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE
+        ));
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
+                .thenThrow(new EngineIntelligenceProjectionReadUnavailableException());
+
+        service.create("txn-1", request());
+
+        assertThat(savedRecords).singleElement().satisfies(saved -> {
+            assertThat(saved.getMlPredictionEvidenceOmissionReason())
+                    .isEqualTo(MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE);
+            assertThat(saved.getMlModelName()).isNull();
+            assertThat(saved.getMlModelVersion()).isNull();
+            assertThat(saved.getMlFeatureContractVersion()).isNull();
+        });
+    }
+
+    @Test
     void unexpectedEngineIntelligenceReadFailureIsStoredAsUnavailableAndFeedbackStillPersists() {
         when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
                 .thenThrow(new IllegalStateException("rawMlRequest Customer confirmed fraud"));
@@ -718,6 +744,13 @@ class FraudFeedbackServiceTest {
     }
 
     private ScoredTransaction scoredTransaction(ScoringOccurrenceOwnership ownership) {
+        return scoredTransaction(ownership, null);
+    }
+
+    private ScoredTransaction scoredTransaction(
+            ScoringOccurrenceOwnership ownership,
+            MlPredictionEvidenceOmissionReason omissionReason
+    ) {
         return new ScoredTransaction(
                 "txn-1",
                 "customer-1",
@@ -741,7 +774,8 @@ class FraudFeedbackServiceTest {
                         List.of(),
                         AnalystRecommendationNonDecisioning.advisoryOnly()
                 ),
-                ownership
+                ownership,
+                omissionReason
         );
     }
 

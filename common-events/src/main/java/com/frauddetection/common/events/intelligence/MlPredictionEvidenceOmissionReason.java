@@ -1,4 +1,4 @@
-package com.frauddetection.scoring.orchestration.aggregation;
+package com.frauddetection.common.events.intelligence;
 
 public enum MlPredictionEvidenceOmissionReason {
     DIAGNOSTIC_EMISSION_DISABLED,

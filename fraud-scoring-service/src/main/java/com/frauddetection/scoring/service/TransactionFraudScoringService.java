@@ -3,6 +3,7 @@ package com.frauddetection.scoring.service;
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import com.frauddetection.scoring.domain.FraudScoreResult;
@@ -68,6 +69,7 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
                     scoreResult,
                     engineIntelligence.summary(),
                     engineIntelligence.mlPredictionEvidence(),
+                    engineIntelligence.mlPredictionEvidenceOmissionReason(),
                     analystRecommendation
             );
             transactionScoredEventPublisher.publish(scoredEvent);
@@ -112,10 +114,21 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
 
     private EngineIntelligenceEmission engineIntelligence(FraudScoringRequest scoringRequest) {
         try {
-            return new EngineIntelligenceEmission(engineIntelligenceEmissionService.emitIfEnabled(scoringRequest), false);
+            Optional<EngineIntelligenceEnrichmentResult> enrichment =
+                    engineIntelligenceEmissionService.emitIfEnabled(scoringRequest);
+            Optional<MlPredictionEvidenceOmissionReason> fallbackReason = enrichment.isPresent()
+                    ? Optional.empty()
+                    : Optional.of(engineIntelligenceEmissionService.emitEnabled()
+                            ? MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE
+                            : MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED);
+            return new EngineIntelligenceEmission(enrichment, false, fallbackReason);
         } catch (RuntimeException exception) {
             log.warn("Engine intelligence enrichment omitted.");
-            return new EngineIntelligenceEmission(Optional.empty(), true);
+            return new EngineIntelligenceEmission(
+                    Optional.empty(),
+                    true,
+                    Optional.of(MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE)
+            );
         }
     }
 
@@ -129,7 +142,8 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
 
     private record EngineIntelligenceEmission(
             Optional<EngineIntelligenceEnrichmentResult> enrichment,
-            boolean unavailable
+            boolean unavailable,
+            Optional<MlPredictionEvidenceOmissionReason> fallbackOmissionReason
     ) {
         private Optional<EngineIntelligenceSummary> summary() {
             return enrichment.flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary);
@@ -137,6 +151,19 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
 
         private Optional<MlPredictionEvidenceV1> mlPredictionEvidence() {
             return enrichment.flatMap(EngineIntelligenceEnrichmentResult::mlPredictionEvidence);
+        }
+
+        private Optional<MlPredictionEvidenceOmissionReason> mlPredictionEvidenceOmissionReason() {
+            Optional<MlPredictionEvidenceOmissionReason> authoritative = enrichment.flatMap(
+                    EngineIntelligenceEnrichmentResult::mlPredictionEvidenceOmissionReason
+            );
+            if (authoritative.isPresent()) {
+                return authoritative;
+            }
+            if (mlPredictionEvidence().isPresent()) {
+                return Optional.empty();
+            }
+            return fallbackOmissionReason;
         }
     }
 }

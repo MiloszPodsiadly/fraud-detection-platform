@@ -170,6 +170,7 @@ public class FraudFeedbackService {
         record.setAlertRecommended(transaction.alertRecommended());
         record.setScoredAt(transaction.scoredAt());
         record.setTransactionTimestamp(transaction.transactionTimestamp());
+        record.setMlPredictionEvidenceOmissionReason(transaction.mlPredictionEvidenceOmissionReason());
         snapshotEngineIntelligence(record, transaction);
         snapshotAnalystRecommendation(record, transaction.analystRecommendation());
         return persistFeedbackWithAuditIntent(record);

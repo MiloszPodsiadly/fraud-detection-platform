@@ -8,6 +8,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreement
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationStatus;
 import org.springframework.data.annotation.Id;
@@ -66,6 +67,7 @@ public class FraudFeedbackRecord {
     private String mlModelName;
     private String mlModelVersion;
     private String mlFeatureContractVersion;
+    private MlPredictionEvidenceOmissionReason mlPredictionEvidenceOmissionReason;
     private AnalystRecommendationStatus analystRecommendationStatus;
     private AnalystRecommendation analystRecommendation;
     private String analystRecommendationVersion;
@@ -174,6 +176,8 @@ public class FraudFeedbackRecord {
     public void setMlModelVersion(String mlModelVersion) { this.mlModelVersion = mlModelVersion; }
     public String getMlFeatureContractVersion() { return mlFeatureContractVersion; }
     public void setMlFeatureContractVersion(String mlFeatureContractVersion) { this.mlFeatureContractVersion = mlFeatureContractVersion; }
+    public MlPredictionEvidenceOmissionReason getMlPredictionEvidenceOmissionReason() { return mlPredictionEvidenceOmissionReason; }
+    public void setMlPredictionEvidenceOmissionReason(MlPredictionEvidenceOmissionReason reason) { this.mlPredictionEvidenceOmissionReason = reason; }
     public AnalystRecommendationStatus getAnalystRecommendationStatus() { return analystRecommendationStatus; }
     public void setAnalystRecommendationStatus(AnalystRecommendationStatus analystRecommendationStatus) { this.analystRecommendationStatus = analystRecommendationStatus; }
     public AnalystRecommendation getAnalystRecommendation() { return analystRecommendation; }

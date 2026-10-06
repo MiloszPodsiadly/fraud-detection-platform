@@ -3,6 +3,7 @@ package com.frauddetection.scoring.mapper;
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import com.frauddetection.scoring.domain.FraudScoreResult;
@@ -50,6 +51,24 @@ public class TransactionScoredEventMapper {
             Optional<MlPredictionEvidenceV1> mlPredictionEvidence,
             AnalystRecommendationResult analystRecommendation
     ) {
+        return toEvent(
+                scoringRequest,
+                scoreResult,
+                engineIntelligence,
+                mlPredictionEvidence,
+                Optional.empty(),
+                analystRecommendation
+        );
+    }
+
+    public TransactionScoredEvent toEvent(
+            FraudScoringRequest scoringRequest,
+            FraudScoreResult scoreResult,
+            Optional<EngineIntelligenceSummary> engineIntelligence,
+            Optional<MlPredictionEvidenceV1> mlPredictionEvidence,
+            Optional<MlPredictionEvidenceOmissionReason> mlPredictionEvidenceOmissionReason,
+            AnalystRecommendationResult analystRecommendation
+    ) {
         TransactionEnrichedEvent event = scoringRequest.event();
         return new TransactionScoredEvent(
                 UUID.randomUUID().toString(),
@@ -77,6 +96,7 @@ public class TransactionScoredEventMapper {
                 scoreResult.scoringEvidence(),
                 engineIntelligence.orElse(null),
                 mlPredictionEvidence.orElse(null),
+                mlPredictionEvidenceOmissionReason.orElse(null),
                 analystRecommendation
         );
     }

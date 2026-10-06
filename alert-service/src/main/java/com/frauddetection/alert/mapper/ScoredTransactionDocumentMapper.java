@@ -42,6 +42,7 @@ public class ScoredTransactionDocumentMapper {
         document.setAlertRecommended(event.alertRecommended());
         document.setReasonCodes(event.reasonCodes());
         document.setAnalystRecommendation(event.analystRecommendation());
+        document.setMlPredictionEvidenceOmissionReason(event.mlPredictionEvidenceOmissionReason());
         return document;
     }
 
@@ -59,7 +60,8 @@ public class ScoredTransactionDocumentMapper {
                 document.getAlertRecommended(),
                 document.getReasonCodes(),
                 document.getAnalystRecommendation(),
-                occurrence(document)
+                occurrence(document),
+                document.getMlPredictionEvidenceOmissionReason()
         );
     }
 

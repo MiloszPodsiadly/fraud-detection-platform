@@ -2,6 +2,7 @@ package com.frauddetection.scoring.service;
 
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.config.ScoringProperties;
@@ -72,6 +73,7 @@ class TransactionFraudScoringServiceTest {
                 scoreResult,
                 Optional.empty(),
                 Optional.empty(),
+                Optional.of(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED),
                 com.frauddetection.common.events.recommendation.AnalystRecommendationResult.absent(GENERATED_AT)
         )).thenReturn(scoredEvent);
 
@@ -85,6 +87,7 @@ class TransactionFraudScoringServiceTest {
                 scoreResult,
                 Optional.empty(),
                 Optional.empty(),
+                Optional.of(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED),
                 com.frauddetection.common.events.recommendation.AnalystRecommendationResult.absent(GENERATED_AT)
         );
         inOrder.verify(publisher).publish(scoredEvent);

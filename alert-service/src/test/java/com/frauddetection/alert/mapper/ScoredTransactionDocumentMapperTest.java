@@ -2,6 +2,7 @@ package com.frauddetection.alert.mapper;
 
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.model.Money;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
@@ -96,6 +97,47 @@ class ScoredTransactionDocumentMapperTest {
 
         assertThat(document.getAnalystRecommendation()).isSameAs(event.analystRecommendation());
         assertThat(domain.analystRecommendation()).isSameAs(event.analystRecommendation());
+    }
+
+    @Test
+    void shouldRoundTripAuthoritativeMlPredictionEvidenceOmission() {
+        var event = new TransactionScoredEvent(
+                "event-omission",
+                "txn-omission",
+                "correlation-1",
+                "customer-1",
+                "account-1",
+                Instant.parse("2026-01-01T00:00:00Z"),
+                Instant.parse("2026-01-01T00:00:00Z"),
+                new Money(BigDecimal.TEN, "PLN"),
+                new MerchantInfo("merchant-9", "Merchant", "5411", "GROCERY", "PL", "ECOMMERCE", false, Map.of()),
+                null,
+                null,
+                null,
+                0.91,
+                RiskLevel.CRITICAL,
+                "strategy",
+                "model",
+                "v1",
+                Instant.parse("2026-01-01T00:00:01Z"),
+                List.of("DEVICE_NOVELTY"),
+                Map.of(),
+                Map.of(),
+                true,
+                List.of(),
+                null,
+                null,
+                MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE,
+                AnalystRecommendationResult.absent()
+        );
+
+        var document = mapper.toDocument(event);
+        var domain = mapper.toDomain(document);
+
+        assertThat(document.getMlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE);
+        assertThat(domain.mlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE);
     }
 
     @Test

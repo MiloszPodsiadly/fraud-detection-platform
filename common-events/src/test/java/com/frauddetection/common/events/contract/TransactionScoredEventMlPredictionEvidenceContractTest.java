@@ -12,6 +12,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBuck
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
 import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
 import org.apache.kafka.common.errors.SerializationException;
@@ -63,7 +64,35 @@ class TransactionScoredEventMlPredictionEvidenceContractTest {
         TransactionScoredEvent event = objectMapper.readValue(eventJson().toString(), TransactionScoredEvent.class);
 
         assertThat(event.mlPredictionEvidence()).isNull();
-        assertThat(objectMapper.writeValueAsString(event)).doesNotContain("mlPredictionEvidence");
+        assertThat(event.mlPredictionEvidenceOmissionReason()).isNull();
+        assertThat(objectMapper.writeValueAsString(event))
+                .doesNotContain("mlPredictionEvidence", "mlPredictionEvidenceOmissionReason");
+    }
+
+    @Test
+    void authoritativeOmissionReasonRoundTripsWithoutPredictionEvidence() throws Exception {
+        ObjectNode json = eventJson();
+        json.put("mlPredictionEvidenceOmissionReason", "ML_ENGINE_UNAVAILABLE");
+
+        TransactionScoredEvent event = objectMapper.readValue(json.toString(), TransactionScoredEvent.class);
+
+        assertThat(event.mlPredictionEvidence()).isNull();
+        assertThat(event.mlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE);
+        assertThat(objectMapper.writeValueAsString(event))
+                .contains("\"mlPredictionEvidenceOmissionReason\":\"ML_ENGINE_UNAVAILABLE\"");
+    }
+
+    @Test
+    void predictionEvidenceAndOmissionReasonTogetherFailClosed() throws Exception {
+        ObjectNode json = eventWithSummary();
+        json.set("mlPredictionEvidence", objectMapper.valueToTree(
+                evidence(0.8123d, RiskLevel.HIGH, MODEL_IDENTITY)
+        ));
+        json.put("mlPredictionEvidenceOmissionReason", "LEGITIMATE_ABSENCE");
+
+        assertThatThrownBy(() -> objectMapper.readValue(json.toString(), TransactionScoredEvent.class))
+                .hasRootCauseMessage("ML_PREDICTION_EVIDENCE_REQUIRES_EXACTLY_ONE_OUTCOME");
     }
 
     @Test

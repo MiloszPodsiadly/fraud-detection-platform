@@ -10,7 +10,7 @@ import com.frauddetection.scoring.messaging.TransactionScoredEventPublisher;
 import com.frauddetection.scoring.observability.ScoringMetrics;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEnrichmentResult;
-import com.frauddetection.scoring.orchestration.aggregation.MlPredictionEvidenceOmissionReason;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
@@ -108,6 +108,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
                 scoreResult,
                 Optional.of(summary),
                 Optional.empty(),
+                Optional.of(MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE),
                 recommendation
         )).thenReturn(scoredEvent);
         var service = new TransactionFraudScoringService(
@@ -129,6 +130,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
                 scoreResult,
                 Optional.of(summary),
                 Optional.empty(),
+                Optional.of(MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE),
                 recommendation
         );
         verify(publisher).publish(scoredEvent);
@@ -157,9 +159,11 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
 
     @Test
     void enabledEmissionFailurePublishesBaseEvent() throws Exception {
-        TransactionScoredEvent event = harness(Optional.empty()).scoreAndCapture();
+        TransactionScoredEvent event = harness(true, Optional.empty()).scoreAndCapture();
         assertThat(event.engineIntelligence()).isNull();
         assertThat(event.mlPredictionEvidence()).isNull();
+        assertThat(event.mlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE);
         assertThat(event.analystRecommendation().status().name()).isEqualTo("ABSENT");
         assertThat(json(event)).doesNotContain("\"engineIntelligence\"", "\"mlPredictionEvidence\"", "raw-secret");
     }
@@ -171,7 +175,17 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
 
         assertThat(enabled)
                 .usingRecursiveComparison()
-                .ignoringFields("eventId", "createdAt", "engineIntelligence", "analystRecommendation")
+                .ignoringFields(
+                        "eventId",
+                        "createdAt",
+                        "engineIntelligence",
+                        "mlPredictionEvidenceOmissionReason",
+                        "analystRecommendation"
+                )
                 .isEqualTo(disabled);
+        assertThat(enabled.mlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE);
+        assertThat(disabled.mlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED);
     }
 }
