@@ -5,6 +5,8 @@ import com.frauddetection.alert.api.EngineIntelligenceResponse;
 import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModelMapper;
 import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
+import com.frauddetection.alert.persistence.ScoringOccurrenceFingerprint;
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
@@ -436,7 +438,16 @@ class EngineIntelligenceFullPathCompositionTest {
     private EngineIntelligenceResponse responseFor(TransactionScoredEvent event) {
         EngineIntelligenceProjection projection = new EngineIntelligenceProjectionMapper(
                 new EngineIntelligenceProjectionPolicy()
-        ).map(event.transactionId(), event.engineIntelligence(), null).projection().orElseThrow();
+        ).map(
+                event.transactionId(),
+                new ScoringOccurrenceOwnership(
+                        event.eventId(),
+                        event.createdAt(),
+                        ScoringOccurrenceFingerprint.from(event)
+                ),
+                event.engineIntelligence(),
+                null
+        ).projection().orElseThrow();
         return new EngineIntelligenceResponseMapper().toResponse(
                 new EngineIntelligenceReadModelMapper().map(projection)
         );

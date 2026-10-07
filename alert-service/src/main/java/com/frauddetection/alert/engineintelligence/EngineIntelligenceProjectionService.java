@@ -162,11 +162,14 @@ public class EngineIntelligenceProjectionService {
                 return result;
             }
 
-            EngineIntelligenceProjectionResult result = mapper.map(
-                    transactionId,
+            ScoringOccurrenceOwnership ownership = new ScoringOccurrenceOwnership(
                     sourceEventId,
                     sourceEventCreatedAt,
-                    sourceEventFingerprint,
+                    sourceEventFingerprint
+            );
+            EngineIntelligenceProjectionResult result = mapper.map(
+                    transactionId,
+                    ownership,
                     engineIntelligence,
                     null
             );

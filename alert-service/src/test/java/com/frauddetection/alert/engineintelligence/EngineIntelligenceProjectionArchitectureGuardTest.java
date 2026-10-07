@@ -52,7 +52,12 @@ class EngineIntelligenceProjectionArchitectureGuardTest {
                 .reduce("", String::concat);
         String serialized = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build()
                 .writeValueAsString(new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy())
-                        .map("txn-guard", EngineIntelligenceProjectionTestFixtures.fullSummary(), null)
+                        .map(
+                                "txn-guard",
+                                EngineIntelligenceProjectionTestFixtures.occurrence(),
+                                EngineIntelligenceProjectionTestFixtures.fullSummary(),
+                                null
+                        )
                         .projection()
                         .orElseThrow());
 

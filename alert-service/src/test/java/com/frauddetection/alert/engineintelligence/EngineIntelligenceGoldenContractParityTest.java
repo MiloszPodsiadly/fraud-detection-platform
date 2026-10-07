@@ -95,7 +95,12 @@ class EngineIntelligenceGoldenContractParityTest {
                 Files.readString(fixturePath(fixtureName)),
                 EngineIntelligenceSummary.class
         );
-        EngineIntelligenceProjection projection = projectionMapper.map("txn-golden", summary, null)
+        EngineIntelligenceProjection projection = projectionMapper.map(
+                        "txn-golden",
+                        EngineIntelligenceProjectionTestFixtures.occurrence(),
+                        summary,
+                        null
+                )
                 .projection()
                 .orElseThrow();
         EngineIntelligenceReadModel readModel = readModelMapper.map(projection);

@@ -1,5 +1,6 @@
 package com.frauddetection.alert.feedback;
 
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceEngineProjection;
@@ -290,9 +291,7 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
     ) {
         return new EngineIntelligenceProjection(
                 TRANSACTION_ID,
-                eventId,
-                createdAt,
-                fingerprint,
+                new ScoringOccurrenceOwnership(eventId, createdAt, fingerprint),
                 1,
                 createdAt,
                 EngineIntelligenceComparisonType.RULES_VS_ML,

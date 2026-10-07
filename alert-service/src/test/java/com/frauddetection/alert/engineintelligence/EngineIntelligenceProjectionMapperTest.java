@@ -1,5 +1,6 @@
 package com.frauddetection.alert.engineintelligence;
 
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -38,9 +39,36 @@ class EngineIntelligenceProjectionMapperTest {
     @Test
     void nullEngineIntelligenceReturnsEmptyProjection() {
         assertOmitted(
-                mapper.map("txn-1", null, null),
+                mapper.map("txn-1", EngineIntelligenceProjectionTestFixtures.occurrence(), null, null),
                 EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_ABSENT
         );
+    }
+
+    @Test
+    void missingOccurrenceIdentityFailsClosed() {
+        assertOmitted(
+                mapper.map("txn-1", null, EngineIntelligenceProjectionTestFixtures.minimalSummary(), null),
+                EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE
+        );
+    }
+
+    @Test
+    void canonicalMapperPreservesExactOccurrenceOwnership() {
+        ScoringOccurrenceOwnership ownership = new ScoringOccurrenceOwnership(
+                "event-exact",
+                Instant.parse("2026-06-02T07:59:59.123456Z"),
+                "b".repeat(64)
+        );
+
+        EngineIntelligenceProjection projection = mapper.map(
+                "txn-1",
+                ownership,
+                EngineIntelligenceProjectionTestFixtures.minimalSummary(),
+                null
+        ).projection().orElseThrow();
+
+        assertThat(projection.scoringOccurrenceOwnership()).isEqualTo(ownership);
+        assertThat(projection.getSourceEventFingerprint()).isEqualTo(ownership.sourceEventFingerprint());
     }
 
     @Test
@@ -48,6 +76,7 @@ class EngineIntelligenceProjectionMapperTest {
         assertOmitted(
                 mapper.map(
                         "txn invalid",
+                        EngineIntelligenceProjectionTestFixtures.occurrence(),
                         EngineIntelligenceProjectionTestFixtures.minimalSummary(),
                         null
                 ),
@@ -95,7 +124,7 @@ class EngineIntelligenceProjectionMapperTest {
         when(summary.contractVersion()).thenReturn(2);
 
         assertOmitted(
-                mapper.map("txn-1", summary, null),
+                mapper.map("txn-1", EngineIntelligenceProjectionTestFixtures.occurrence(), summary, null),
                 EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_UNSUPPORTED_CONTRACT_VERSION
         );
     }
@@ -106,7 +135,7 @@ class EngineIntelligenceProjectionMapperTest {
         when(summary.engines()).thenReturn(Collections.nCopies(4, EngineIntelligenceProjectionTestFixtures.timeoutMl()));
 
         assertOmitted(
-                mapper.map("txn-1", summary, null),
+                mapper.map("txn-1", EngineIntelligenceProjectionTestFixtures.occurrence(), summary, null),
                 EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_OVERSIZED
         );
     }
@@ -124,7 +153,7 @@ class EngineIntelligenceProjectionMapperTest {
         when(summary.engines()).thenReturn(List.of(engine));
 
         assertOmitted(
-                mapper.map("txn-1", summary, null),
+                mapper.map("txn-1", EngineIntelligenceProjectionTestFixtures.occurrence(), summary, null),
                 EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_REASON_CODE_NOT_ALLOWED
         );
     }
@@ -142,7 +171,7 @@ class EngineIntelligenceProjectionMapperTest {
         when(summary.engines()).thenReturn(List.of(engine));
 
         assertOmitted(
-                mapper.map("txn-1", summary, null),
+                mapper.map("txn-1", EngineIntelligenceProjectionTestFixtures.occurrence(), summary, null),
                 EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE
         );
     }
@@ -199,7 +228,12 @@ class EngineIntelligenceProjectionMapperTest {
     }
 
     private EngineIntelligenceProjection mapped(EngineIntelligenceSummary summary) {
-        return mapper.map("txn-1", summary, null).projection().orElseThrow();
+        return mapper.map(
+                "txn-1",
+                EngineIntelligenceProjectionTestFixtures.occurrence(),
+                summary,
+                null
+        ).projection().orElseThrow();
     }
 
     private EngineIntelligenceSummary summaryMock() {

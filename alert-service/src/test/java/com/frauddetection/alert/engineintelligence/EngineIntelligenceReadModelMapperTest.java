@@ -90,6 +90,7 @@ class EngineIntelligenceReadModelMapperTest {
                 new EngineIntelligenceProjectionPolicy()
         ).map(
                 "txn-ml-identity",
+                EngineIntelligenceProjectionTestFixtures.occurrence(),
                 EngineIntelligenceProjectionTestFixtures.disagreementSummary(),
                 null
         ).projection().orElseThrow();
@@ -107,8 +108,9 @@ class EngineIntelligenceReadModelMapperTest {
     void availableMlProjectionWithoutModelIdentityFailsClosed() {
         EngineIntelligenceProjection source = fullProjection();
         EngineIntelligenceEngineProjection ml = source.getEngines().get(1);
-        EngineIntelligenceProjection identityFree = new EngineIntelligenceProjection(
+        EngineIntelligenceProjection modelIdentityFree = new EngineIntelligenceProjection(
                 source.getTransactionId(),
+                source.scoringOccurrenceOwnership(),
                 source.getContractVersion(),
                 source.getGeneratedAt(),
                 source.getComparisonType(),
@@ -133,7 +135,7 @@ class EngineIntelligenceReadModelMapperTest {
                 source.getUpdatedAt()
         );
 
-        assertThatThrownBy(() -> mapper.map(identityFree))
+        assertThatThrownBy(() -> mapper.map(modelIdentityFree))
                 .isInstanceOf(EngineIntelligenceProjectionReadUnavailableException.class)
                 .hasMessage("Engine intelligence projection is temporarily unavailable.");
     }
@@ -167,6 +169,7 @@ class EngineIntelligenceReadModelMapperTest {
                 new EngineIntelligenceProjectionPolicy()
         ).map(
                 "txn-disagreement",
+                EngineIntelligenceProjectionTestFixtures.occurrence(),
                 EngineIntelligenceProjectionTestFixtures.disagreementSummary(),
                 null
         ).projection().orElseThrow();
@@ -191,6 +194,7 @@ class EngineIntelligenceReadModelMapperTest {
         );
         EngineIntelligenceProjection oversized = new EngineIntelligenceProjection(
                 "txn-oversized",
+                EngineIntelligenceProjectionTestFixtures.occurrence(),
                 1,
                 now,
                 EngineIntelligenceComparisonType.RULES_VS_ML,
@@ -301,7 +305,12 @@ class EngineIntelligenceReadModelMapperTest {
 
     private EngineIntelligenceProjection fullProjection() {
         return new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy())
-                .map("txn-fdp96-001", EngineIntelligenceProjectionTestFixtures.fullSummary(), null)
+                .map(
+                        "txn-fdp96-001",
+                        EngineIntelligenceProjectionTestFixtures.occurrence(),
+                        EngineIntelligenceProjectionTestFixtures.fullSummary(),
+                        null
+                )
                 .projection()
                 .orElseThrow();
     }
@@ -310,6 +319,7 @@ class EngineIntelligenceReadModelMapperTest {
         Instant now = EngineIntelligenceProjectionTestFixtures.GENERATED_AT;
         return new EngineIntelligenceProjection(
                 "txn-fdp96-operational",
+                EngineIntelligenceProjectionTestFixtures.occurrence(),
                 1,
                 now,
                 EngineIntelligenceComparisonType.RULES_VS_ML,
@@ -372,6 +382,7 @@ class EngineIntelligenceReadModelMapperTest {
         Instant now = EngineIntelligenceProjectionTestFixtures.GENERATED_AT;
         return new EngineIntelligenceProjection(
                 "txn-corrupted",
+                EngineIntelligenceProjectionTestFixtures.occurrence(),
                 1,
                 now,
                 null,
@@ -394,6 +405,7 @@ class EngineIntelligenceReadModelMapperTest {
         Instant now = EngineIntelligenceProjectionTestFixtures.GENERATED_AT;
         return new EngineIntelligenceProjection(
                 "txn-corrupted-comparison",
+                EngineIntelligenceProjectionTestFixtures.occurrence(),
                 1,
                 now,
                 comparisonType,
@@ -420,6 +432,7 @@ class EngineIntelligenceReadModelMapperTest {
         Instant now = EngineIntelligenceProjectionTestFixtures.GENERATED_AT;
         return new EngineIntelligenceProjection(
                 "txn-corrupted-available-bucket",
+                EngineIntelligenceProjectionTestFixtures.occurrence(),
                 1,
                 now,
                 EngineIntelligenceComparisonType.RULES_VS_ML,

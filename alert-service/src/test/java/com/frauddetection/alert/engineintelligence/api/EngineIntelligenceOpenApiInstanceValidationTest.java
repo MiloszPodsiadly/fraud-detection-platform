@@ -1,5 +1,6 @@
 package com.frauddetection.alert.engineintelligence.api;
 
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.api.EngineIntelligenceComparisonResponse;
 import com.frauddetection.alert.api.EngineIntelligenceDiagnosticSignalResponse;
 import com.frauddetection.alert.api.EngineIntelligenceEngineResponse;
@@ -67,6 +68,11 @@ class EngineIntelligenceOpenApiInstanceValidationTest {
     void instanceValidationAcceptsIncompleteProjectionAsUnavailableAfterMapping() {
         EngineIntelligenceProjection incompleteProjection = new EngineIntelligenceProjection(
                 "txn-incomplete",
+                new ScoringOccurrenceOwnership(
+                        "event-incomplete",
+                        Instant.parse("2026-06-18T10:00:01Z"),
+                        "a".repeat(64)
+                ),
                 1,
                 Instant.parse("2026-06-18T10:00:02Z"),
                 null,

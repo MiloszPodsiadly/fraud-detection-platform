@@ -1,5 +1,6 @@
 package com.frauddetection.alert.engineintelligence;
 
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
@@ -27,6 +28,14 @@ final class EngineIntelligenceProjectionTestFixtures {
     static final Instant GENERATED_AT = Instant.parse("2026-06-01T06:00:01Z");
 
     private EngineIntelligenceProjectionTestFixtures() {
+    }
+
+    static ScoringOccurrenceOwnership occurrence() {
+        return new ScoringOccurrenceOwnership(
+                "event-engine-intelligence-fixture",
+                GENERATED_AT.minusSeconds(1),
+                "a".repeat(64)
+        );
     }
 
     static EngineIntelligenceSummary minimalSummary() {

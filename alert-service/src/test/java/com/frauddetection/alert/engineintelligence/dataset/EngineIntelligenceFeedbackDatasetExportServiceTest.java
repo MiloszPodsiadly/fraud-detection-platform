@@ -1,5 +1,6 @@
 package com.frauddetection.alert.engineintelligence.dataset;
 
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceDiagnosticSignalProjection;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceEngineProjection;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjection;
@@ -485,6 +486,7 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
     void corruptedProjectionFailsClosed() {
         EngineIntelligenceProjection corrupted = new EngineIntelligenceProjection(
                 null,
+                occurrence(),
                 1,
                 FROM,
                 null,
@@ -831,6 +833,7 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
     ) {
         return new EngineIntelligenceProjection(
                 transactionId,
+                occurrence(),
                 contractVersion,
                 FROM,
                 EngineIntelligenceComparisonType.RULES_VS_ML,
@@ -852,6 +855,10 @@ class EngineIntelligenceFeedbackDatasetExportServiceTest {
                 FROM,
                 FROM
         );
+    }
+
+    private ScoringOccurrenceOwnership occurrence() {
+        return new ScoringOccurrenceOwnership("event-dataset", FROM, "a".repeat(64));
     }
 
     private EngineIntelligenceEngineProjection engine(FraudEngineType engineType, String engineId) {

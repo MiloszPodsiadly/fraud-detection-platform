@@ -1,10 +1,16 @@
 package com.frauddetection.alert.architecture;
 
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
+import com.frauddetection.alert.engineintelligence.CanonicalTransactionScoredEventDeserializationTest;
+import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjection;
+import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionMapper;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -12,6 +18,36 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ExactEvidenceHardCutArchitectureGuardTest {
 
     private static final Path ROOT = repositoryRoot();
+    private final CanonicalTransactionScoredEventDeserializationTest canonicalEventContract =
+            new CanonicalTransactionScoredEventDeserializationTest();
+
+    @Test
+    void everyCurrentConsumerPreservesBothCanonicalEvidenceOutcomes() throws Exception {
+        canonicalEventContract.everyCurrentConsumerPreservesCanonicalExactEvidence();
+        canonicalEventContract.everyCurrentConsumerPreservesCanonicalExplicitOmission();
+    }
+
+    @Test
+    void everyCurrentConsumerRejectsMalformedCanonicalEvidence() throws Exception {
+        canonicalEventContract.everyCurrentConsumerRejectsMalformedCanonicalEvidence();
+        canonicalEventContract.malformedJsonFailsEveryCurrentConsumerBoundary();
+    }
+
+    @Test
+    void currentProjectionConstructionRequiresOccurrenceOwnership() {
+        assertThat(Arrays.asList(EngineIntelligenceProjection.class.getConstructors()))
+                .singleElement()
+                .satisfies(constructor -> assertThat(constructor.getParameterTypes())
+                        .contains(ScoringOccurrenceOwnership.class));
+
+        assertThat(Arrays.stream(EngineIntelligenceProjectionMapper.class.getDeclaredMethods())
+                .filter(method -> Modifier.isPublic(method.getModifiers()))
+                .filter(method -> method.getName().equals("map"))
+                .toList())
+                .isNotEmpty()
+                .allSatisfy(method -> assertThat(method.getParameterTypes())
+                        .contains(ScoringOccurrenceOwnership.class));
+    }
 
     @Test
     void productionSourceDoesNotRestoreRemovedOccurrenceOrEvidenceFallbacks() throws IOException {

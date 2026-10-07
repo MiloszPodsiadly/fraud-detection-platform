@@ -1,11 +1,14 @@
 package com.frauddetection.alert.engineintelligence;
 
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.annotation.PersistenceCreator;
 
+import java.lang.reflect.Modifier;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -66,6 +69,22 @@ class EngineIntelligenceProjectionModelTest {
         assertThatCode(() -> projection(null, null, null)).doesNotThrowAnyException();
     }
 
+    @Test
+    void publicBusinessConstructionRequiresExactOccurrenceOwnership() {
+        assertThat(EngineIntelligenceProjection.class.getConstructors())
+                .singleElement()
+                .satisfies(constructor -> assertThat(constructor.getParameterTypes()[1])
+                        .isEqualTo(ScoringOccurrenceOwnership.class));
+    }
+
+    @Test
+    void persistenceConstructorIsPrivateAndDedicatedToMongoReconstruction() {
+        assertThat(List.of(EngineIntelligenceProjection.class.getDeclaredConstructors()))
+                .filteredOn(constructor -> constructor.isAnnotationPresent(PersistenceCreator.class))
+                .singleElement()
+                .satisfies(constructor -> assertThat(Modifier.isPrivate(constructor.getModifiers())).isTrue());
+    }
+
     private EngineIntelligenceProjection projection(
             List<EngineIntelligenceEngineProjection> engines,
             List<EngineIntelligenceDiagnosticSignalProjection> signals,
@@ -73,6 +92,7 @@ class EngineIntelligenceProjectionModelTest {
     ) {
         return new EngineIntelligenceProjection(
                 "txn-fdp95-model",
+                EngineIntelligenceProjectionTestFixtures.occurrence(),
                 1,
                 NOW,
                 EngineIntelligenceComparisonType.RULES_VS_ML,
@@ -90,7 +110,12 @@ class EngineIntelligenceProjectionModelTest {
 
     private EngineIntelligenceEngineProjection engine() {
         return new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy())
-                .map("txn-fdp95-model", EngineIntelligenceProjectionTestFixtures.minimalSummary(), null)
+                .map(
+                        "txn-fdp95-model",
+                        EngineIntelligenceProjectionTestFixtures.occurrence(),
+                        EngineIntelligenceProjectionTestFixtures.minimalSummary(),
+                        null
+                )
                 .projection()
                 .orElseThrow()
                 .getEngines()
@@ -99,7 +124,12 @@ class EngineIntelligenceProjectionModelTest {
 
     private EngineIntelligenceDiagnosticSignalProjection signal() {
         return new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy())
-                .map("txn-fdp95-model", EngineIntelligenceProjectionTestFixtures.fullSummary(), null)
+                .map(
+                        "txn-fdp95-model",
+                        EngineIntelligenceProjectionTestFixtures.occurrence(),
+                        EngineIntelligenceProjectionTestFixtures.fullSummary(),
+                        null
+                )
                 .projection()
                 .orElseThrow()
                 .getDiagnosticSignals()
@@ -108,7 +138,12 @@ class EngineIntelligenceProjectionModelTest {
 
     private EngineIntelligenceWarningProjection warning() {
         return new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy())
-                .map("txn-fdp95-model", EngineIntelligenceProjectionTestFixtures.fullSummary(), null)
+                .map(
+                        "txn-fdp95-model",
+                        EngineIntelligenceProjectionTestFixtures.occurrence(),
+                        EngineIntelligenceProjectionTestFixtures.fullSummary(),
+                        null
+                )
                 .projection()
                 .orElseThrow()
                 .getWarnings()

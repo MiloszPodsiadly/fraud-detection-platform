@@ -408,9 +408,7 @@ class EngineIntelligenceProjectionServiceTest {
     ) {
         return new EngineIntelligenceProjection(
                 projection.getTransactionId(),
-                projection.getSourceEventId(),
-                projection.getSourceEventCreatedAt(),
-                projection.getSourceEventFingerprint(),
+                projection.scoringOccurrenceOwnership(),
                 projection.getContractVersion(),
                 projection.getGeneratedAt(),
                 projection.getComparisonType(),

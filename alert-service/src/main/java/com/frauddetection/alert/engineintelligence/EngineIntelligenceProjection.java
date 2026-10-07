@@ -39,7 +39,7 @@ public class EngineIntelligenceProjection {
     private final Instant updatedAt;
 
     @PersistenceCreator
-    public EngineIntelligenceProjection(
+    private EngineIntelligenceProjection(
             String transactionId,
             String sourceEventId,
             String sourceEventCreatedAt,
@@ -59,12 +59,19 @@ public class EngineIntelligenceProjection {
             Instant createdAt,
             Instant updatedAt
     ) {
+        ScoringOccurrenceOwnership ownership = ScoringOccurrenceOwnership.fromPersistedIdentity(
+                sourceEventId,
+                sourceEventCreatedAt,
+                sourceEventCreatedAtEpochSecond,
+                sourceEventCreatedAtNano,
+                sourceEventFingerprint
+        );
         this.transactionId = transactionId;
-        this.sourceEventId = sourceEventId;
-        this.sourceEventCreatedAt = sourceEventCreatedAt;
-        this.sourceEventCreatedAtEpochSecond = sourceEventCreatedAtEpochSecond;
-        this.sourceEventCreatedAtNano = sourceEventCreatedAtNano;
-        this.sourceEventFingerprint = sourceEventFingerprint;
+        this.sourceEventId = ownership.sourceEventId();
+        this.sourceEventCreatedAt = ownership.sourceEventCreatedAt().toString();
+        this.sourceEventCreatedAtEpochSecond = ownership.sourceEventCreatedAt().getEpochSecond();
+        this.sourceEventCreatedAtNano = ownership.sourceEventCreatedAt().getNano();
+        this.sourceEventFingerprint = ownership.sourceEventFingerprint();
         this.contractVersion = contractVersion;
         this.generatedAt = generatedAt;
         this.comparisonType = comparisonType;
@@ -84,9 +91,7 @@ public class EngineIntelligenceProjection {
 
     public EngineIntelligenceProjection(
             String transactionId,
-            String sourceEventId,
-            Instant sourceEventCreatedAt,
-            String sourceEventFingerprint,
+            ScoringOccurrenceOwnership ownership,
             int contractVersion,
             Instant generatedAt,
             EngineIntelligenceComparisonType comparisonType,
@@ -102,11 +107,11 @@ public class EngineIntelligenceProjection {
     ) {
         this(
                 transactionId,
-                sourceEventId,
-                sourceEventCreatedAt == null ? null : sourceEventCreatedAt.toString(),
-                sourceEventCreatedAt == null ? null : sourceEventCreatedAt.getEpochSecond(),
-                sourceEventCreatedAt == null ? null : sourceEventCreatedAt.getNano(),
-                sourceEventFingerprint,
+                requiredOwnership(ownership).sourceEventId(),
+                requiredOwnership(ownership).sourceEventCreatedAt().toString(),
+                requiredOwnership(ownership).sourceEventCreatedAt().getEpochSecond(),
+                requiredOwnership(ownership).sourceEventCreatedAt().getNano(),
+                requiredOwnership(ownership).sourceEventFingerprint(),
                 contractVersion,
                 generatedAt,
                 comparisonType,
@@ -122,79 +127,11 @@ public class EngineIntelligenceProjection {
         );
     }
 
-    public EngineIntelligenceProjection(
-            String transactionId,
-            String sourceEventId,
-            int contractVersion,
-            Instant generatedAt,
-            EngineIntelligenceComparisonType comparisonType,
-            List<String> comparedEngineIds,
-            EngineIntelligenceAgreementStatus comparisonStatus,
-            EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
-            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket,
-            List<EngineIntelligenceEngineProjection> engines,
-            List<EngineIntelligenceDiagnosticSignalProjection> diagnosticSignals,
-            List<EngineIntelligenceWarningProjection> warnings,
-            Instant createdAt,
-            Instant updatedAt
-    ) {
-        this(
-                transactionId,
-                sourceEventId,
-                null,
-                null,
-                null,
-                null,
-                contractVersion,
-                generatedAt,
-                comparisonType,
-                comparedEngineIds,
-                comparisonStatus,
-                riskMismatchStatus,
-                scoreDeltaBucket,
-                engines,
-                diagnosticSignals,
-                warnings,
-                createdAt,
-                updatedAt
-        );
-    }
-
-    public EngineIntelligenceProjection(
-            String transactionId,
-            int contractVersion,
-            Instant generatedAt,
-            EngineIntelligenceComparisonType comparisonType,
-            List<String> comparedEngineIds,
-            EngineIntelligenceAgreementStatus comparisonStatus,
-            EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
-            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket,
-            List<EngineIntelligenceEngineProjection> engines,
-            List<EngineIntelligenceDiagnosticSignalProjection> diagnosticSignals,
-            List<EngineIntelligenceWarningProjection> warnings,
-            Instant createdAt,
-            Instant updatedAt
-    ) {
-        this(
-                transactionId,
-                null,
-                null,
-                null,
-                null,
-                null,
-                contractVersion,
-                generatedAt,
-                comparisonType,
-                comparedEngineIds,
-                comparisonStatus,
-                riskMismatchStatus,
-                scoreDeltaBucket,
-                engines,
-                diagnosticSignals,
-                warnings,
-                createdAt,
-                updatedAt
-        );
+    private static ScoringOccurrenceOwnership requiredOwnership(ScoringOccurrenceOwnership ownership) {
+        if (ownership == null) {
+            throw new IllegalArgumentException("ENGINE_INTELLIGENCE_PROJECTION_OCCURRENCE_IDENTITY_REQUIRED");
+        }
+        return ownership;
     }
 
     public String getTransactionId() { return transactionId; }
