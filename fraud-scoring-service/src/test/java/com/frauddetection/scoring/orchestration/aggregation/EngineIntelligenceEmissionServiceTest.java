@@ -1,6 +1,8 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrationResult;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrator;
@@ -75,7 +77,7 @@ class EngineIntelligenceEmissionServiceTest {
 
         assertThat(service(true, pipeline(orchestrator, aggregation, mapper))
                 .emitIfEnabled(request()).enrichment())
-                .flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
+                .map(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
                 .contains(summary);
         verify(orchestrator).evaluate(any());
         verify(aggregation).aggregate(orchestration);
@@ -159,6 +161,47 @@ class EngineIntelligenceEmissionServiceTest {
         ))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("ENGINE_INTELLIGENCE_EMISSION_REQUIRES_EXACTLY_ONE_OUTCOME");
+    }
+
+    @Test
+    void enrichmentRequiresSummaryAndExactlyOneEvidenceOutcome() {
+        EngineIntelligenceSummary summary = mock(EngineIntelligenceSummary.class);
+
+        assertThatThrownBy(() -> new EngineIntelligenceEnrichmentResult(
+                null,
+                Optional.empty(),
+                Optional.of(MlPredictionEvidenceOmissionReason.INVALID_SCORE)
+        ))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("engineIntelligenceSummary is required");
+        assertThatThrownBy(() -> new EngineIntelligenceEnrichmentResult(
+                summary,
+                Optional.empty(),
+                Optional.empty()
+        ))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("ML_PREDICTION_EVIDENCE_REQUIRES_EXACTLY_ONE_OUTCOME");
+    }
+
+    @Test
+    void enrichmentFactoriesPreserveSummaryAndExactlyOneOutcome() {
+        EngineIntelligenceSummary summary = mock(EngineIntelligenceSummary.class);
+        MlPredictionEvidenceV1 evidence = mock(MlPredictionEvidenceV1.class);
+
+        EngineIntelligenceEnrichmentResult withEvidence =
+                EngineIntelligenceEnrichmentResult.withEvidence(summary, evidence);
+        EngineIntelligenceEnrichmentResult withoutEvidence = EngineIntelligenceEnrichmentResult.withoutEvidence(
+                summary,
+                MlPredictionEvidenceOmissionReason.INVALID_SCORE
+        );
+
+        assertThat(withEvidence.engineIntelligenceSummary()).isSameAs(summary);
+        assertThat(withEvidence.mlPredictionEvidence()).contains(evidence);
+        assertThat(withEvidence.mlPredictionEvidenceOmissionReason()).isEmpty();
+        assertThat(withoutEvidence.engineIntelligenceSummary()).isSameAs(summary);
+        assertThat(withoutEvidence.mlPredictionEvidence()).isEmpty();
+        assertThat(withoutEvidence.mlPredictionEvidenceOmissionReason())
+                .contains(MlPredictionEvidenceOmissionReason.INVALID_SCORE);
     }
 
     @Test

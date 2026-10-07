@@ -106,7 +106,7 @@ class EngineIntelligenceEmissionServiceSpringWiringTest {
                 FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build())
         );
         assertThat(emission.enrichment())
-                .flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
+                .map(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
                 .contains(summary);
         verify(mapper).map(aggregation);
     }

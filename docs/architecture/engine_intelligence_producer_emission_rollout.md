@@ -96,7 +96,12 @@ private evidence remain governed by their retention policy; rollback does not de
 The producer includes a no-op metrics boundary for disabled skips, enrichment attempts, successes,
 omissions, and latency. Metrics recording is best-effort and cannot block event publishing.
 Production metrics backend integration remains future scope. Before wider rollout, projection and API owners
-must connect the low-cardinality metrics boundary to production telemetry for:
+must connect the low-cardinality metrics boundary to production telemetry. In particular,
+`engine_intelligence_emission_omitted_total` answers why the diagnostic emission layer did not produce enrichment,
+while `ml_prediction_evidence_omitted_total` records the authoritative durable evidence-omission reason emitted for
+the scoring occurrence. The metrics are related but intentionally describe different boundaries.
+
+The boundary also covers:
 
 - `enrichment_attempt_total`
 - `enrichment_success_total`
@@ -109,9 +114,9 @@ diagnostic pipeline that returns empty is recorded as a bounded omission. Enable
 attempts record latency for success, empty result, missing pipeline, and failure. Disabled skips do
 not record enrichment attempt latency.
 
-The producer records `UNKNOWN_FAILURE` for runtime pipeline failures. Stage-specific omission reasons are
-reserved for future pipeline instrumentation. Current omission reasons remain bounded and
-low-cardinality. Raw exception messages are not used as omission reasons.
+The producer records `UNKNOWN_FAILURE` for runtime pipeline failures. Current omission reasons remain bounded and
+low-cardinality; the runtime does not claim stage-specific failure precision it cannot prove.
+Raw exception messages are not used as omission reasons.
 
 Metrics are best-effort and must not affect event publishing. Metrics must remain low-cardinality.
 Metrics must not include transaction IDs, customer IDs, account IDs, raw exception messages,

@@ -109,7 +109,7 @@ class EngineIntelligenceFullPathCompositionTest {
         TransactionScoredEvent event = scoredKafkaRoundTrip(new TransactionScoredEventMapper().toEvent(
                 request,
                 baselineResult,
-                enrichment.engineIntelligenceSummary(),
+                Optional.of(enrichment.engineIntelligenceSummary()),
                 enrichment.mlPredictionEvidence(),
                 enrichment.mlPredictionEvidenceOmissionReason(),
                 null

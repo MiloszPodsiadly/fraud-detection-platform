@@ -53,7 +53,7 @@ class OrchestratedEngineIntelligenceMlPredictionEvidenceTest {
         assertThat(evidence.sourceExecutionTimestamp())
                 .isEqualTo(AggregationTestSupport.SOURCE_INFERENCE_AT)
                 .isNotEqualTo(AggregationTestSupport.GENERATED_AT);
-        assertThat(enrichment.engineIntelligenceSummary()).isPresent();
+        assertThat(enrichment.engineIntelligenceSummary()).isNotNull();
         assertThat(enrichment.mlPredictionEvidenceOmissionReason()).isEmpty();
         verify(orchestrator, times(1)).evaluate(any());
     }
@@ -125,7 +125,7 @@ class OrchestratedEngineIntelligenceMlPredictionEvidenceTest {
                 new PublicEngineIntelligenceMapper()
         )).emitIfEnabled(request()).enrichment().orElseThrow();
 
-        assertThat(enrichment.engineIntelligenceSummary()).isPresent();
+        assertThat(enrichment.engineIntelligenceSummary()).isNotNull();
         assertThat(enrichment.mlPredictionEvidence()).isEmpty();
         MlPredictionEvidenceOmissionReason expectedReason = switch (status) {
             case UNAVAILABLE, TIMEOUT, SKIPPED -> MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE;
@@ -168,7 +168,7 @@ class OrchestratedEngineIntelligenceMlPredictionEvidenceTest {
                 new PublicEngineIntelligenceMapper()
         )).emitIfEnabled(request()).enrichment().orElseThrow();
 
-        assertThat(enrichment.engineIntelligenceSummary()).isPresent();
+        assertThat(enrichment.engineIntelligenceSummary()).isNotNull();
         assertThat(enrichment.mlPredictionEvidence()).isEmpty();
         assertThat(enrichment.mlPredictionEvidenceOmissionReason()).contains(
                 MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING

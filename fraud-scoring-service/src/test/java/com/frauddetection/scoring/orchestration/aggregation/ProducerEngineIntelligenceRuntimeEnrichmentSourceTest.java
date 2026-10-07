@@ -65,7 +65,7 @@ class ProducerEngineIntelligenceRuntimeEnrichmentSourceTest {
     void enabledFlagMapsAggregationToPublicSummary() {
         stubSuccessfulEnrichment();
         assertThat(service(true).emitIfEnabled(request).enrichment())
-                .flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
+                .map(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
                 .contains(summary);
         verify(mapper).map(aggregation);
     }

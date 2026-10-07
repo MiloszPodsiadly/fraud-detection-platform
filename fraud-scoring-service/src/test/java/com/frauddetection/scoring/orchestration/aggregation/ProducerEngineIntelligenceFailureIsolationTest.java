@@ -37,7 +37,7 @@ class ProducerEngineIntelligenceFailureIsolationTest {
         var event = new TransactionScoredEventMapper().toEvent(
                 request(),
                 scoreResult(),
-                intelligence.enrichment().flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary),
+                intelligence.enrichment().map(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary),
                 MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE,
                 null
         );

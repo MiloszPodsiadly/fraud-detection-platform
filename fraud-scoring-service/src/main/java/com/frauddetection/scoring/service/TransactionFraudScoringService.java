@@ -131,7 +131,7 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
     }
 
     private Optional<EngineIntelligenceSummary> summary(EngineIntelligenceEmissionResult emission) {
-        return emission.enrichment().flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary);
+        return emission.enrichment().map(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary);
     }
 
     private Optional<MlPredictionEvidenceV1> mlPredictionEvidence(EngineIntelligenceEmissionResult emission) {
@@ -144,12 +144,8 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
         if (emission.enrichment().isPresent()) {
             return emission.enrichment().orElseThrow().mlPredictionEvidenceOmissionReason();
         }
-        return Optional.of(switch (emission.omissionReason().orElseThrow()) {
-            case DISABLED -> MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED;
-            case EMPTY_RESULT -> MlPredictionEvidenceOmissionReason.EVIDENCE_SOURCE_INTEGRITY_FAILURE;
-            case PIPELINE_UNAVAILABLE, ORCHESTRATOR_FAILURE, AGGREGATION_FAILURE, MAPPER_FAILURE, UNKNOWN_FAILURE ->
-                    MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE;
-        });
+        return emission.omissionReason()
+                .map(EngineIntelligenceEmissionOmissionReason::toMlPredictionEvidenceOmissionReason);
     }
 
     private boolean fallbackUsed(FraudScoreResult result) {

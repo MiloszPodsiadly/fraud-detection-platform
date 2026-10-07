@@ -1,6 +1,5 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.scoring.config.EngineIntelligenceEmissionProperties;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import org.slf4j.Logger;
@@ -32,21 +31,17 @@ public class EngineIntelligenceEmissionService {
         Objects.requireNonNull(scoringRequest, "scoringRequest is required");
         if (!properties.emitEnabled()) {
             recordMetrics(metrics::recordSkippedDisabled);
-            recordMetrics(() -> metrics.recordEvidenceOmitted(
-                    MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED
-            ));
-            return EngineIntelligenceEmissionResult.omitted(EngineIntelligenceEmissionOmissionReason.DISABLED);
+            EngineIntelligenceEmissionOmissionReason reason = EngineIntelligenceEmissionOmissionReason.DISABLED;
+            recordMetrics(() -> metrics.recordEvidenceOmitted(reason.toMlPredictionEvidenceOmissionReason()));
+            return EngineIntelligenceEmissionResult.omitted(reason);
         }
         recordMetrics(metrics::recordAttempt);
         long startedAtNanos = System.nanoTime();
         try {
             EngineIntelligenceDiagnosticEnrichmentPipeline pipeline = diagnosticPipeline.getIfAvailable();
             if (pipeline == null) {
-                recordMetrics(() -> metrics.recordOmitted(EngineIntelligenceEmissionOmissionReason.PIPELINE_UNAVAILABLE));
                 log.warn("Engine intelligence enrichment omitted.");
-                return EngineIntelligenceEmissionResult.omitted(
-                        EngineIntelligenceEmissionOmissionReason.PIPELINE_UNAVAILABLE
-                );
+                return omitted(EngineIntelligenceEmissionOmissionReason.PIPELINE_UNAVAILABLE);
             }
             var result = pipeline.enrich(scoringRequest);
             if (result.isPresent()) {
@@ -55,16 +50,20 @@ public class EngineIntelligenceEmissionService {
                         .ifPresent(reason -> recordMetrics(() -> metrics.recordEvidenceOmitted(reason)));
                 return EngineIntelligenceEmissionResult.emitted(result.orElseThrow());
             } else {
-                recordMetrics(() -> metrics.recordOmitted(EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT));
-                return EngineIntelligenceEmissionResult.omitted(EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT);
+                return omitted(EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT);
             }
         } catch (RuntimeException exception) {
-            recordMetrics(() -> metrics.recordOmitted(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE));
             log.warn("Engine intelligence enrichment omitted.");
-            return EngineIntelligenceEmissionResult.omitted(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
+            return omitted(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
         } finally {
             recordMetrics(() -> metrics.recordLatency(Duration.ofNanos(elapsedNanos(startedAtNanos))));
         }
+    }
+
+    private EngineIntelligenceEmissionResult omitted(EngineIntelligenceEmissionOmissionReason reason) {
+        recordMetrics(() -> metrics.recordOmitted(reason));
+        recordMetrics(() -> metrics.recordEvidenceOmitted(reason.toMlPredictionEvidenceOmissionReason()));
+        return EngineIntelligenceEmissionResult.omitted(reason);
     }
 
     private long elapsedNanos(long startedAtNanos) {

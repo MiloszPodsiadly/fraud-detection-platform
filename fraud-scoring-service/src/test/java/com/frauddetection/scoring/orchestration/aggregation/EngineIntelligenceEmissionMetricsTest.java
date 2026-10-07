@@ -66,7 +66,7 @@ class EngineIntelligenceEmissionMetricsTest {
         ));
 
         assertThat(service(true, pipeline, metrics).emitIfEnabled(request()).enrichment())
-                .flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
+                .map(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
                 .contains(summary);
         verify(metrics).recordAttempt();
         verify(metrics).recordSuccess();
@@ -86,6 +86,9 @@ class EngineIntelligenceEmissionMetricsTest {
                 .contains(EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT);
         verify(metrics).recordAttempt();
         verify(metrics).recordOmitted(EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT);
+        verify(metrics).recordEvidenceOmitted(
+                MlPredictionEvidenceOmissionReason.EVIDENCE_SOURCE_INTEGRITY_FAILURE
+        );
         verify(metrics, never()).recordSuccess();
         verify(metrics).recordLatency(any(Duration.class));
     }
@@ -117,6 +120,9 @@ class EngineIntelligenceEmissionMetricsTest {
                 .contains(EngineIntelligenceEmissionOmissionReason.PIPELINE_UNAVAILABLE);
         verify(metrics).recordAttempt();
         verify(metrics).recordOmitted(EngineIntelligenceEmissionOmissionReason.PIPELINE_UNAVAILABLE);
+        verify(metrics).recordEvidenceOmitted(
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE
+        );
         verify(metrics, never()).recordSuccess();
         verify(metrics).recordLatency(any(Duration.class));
     }
@@ -132,6 +138,9 @@ class EngineIntelligenceEmissionMetricsTest {
                 .contains(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
         verify(metrics).recordAttempt();
         verify(metrics).recordOmitted(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
+        verify(metrics).recordEvidenceOmitted(
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE
+        );
         verify(metrics, never()).recordSuccess();
         verify(metrics).recordLatency(any(Duration.class));
     }
@@ -151,7 +160,7 @@ class EngineIntelligenceEmissionMetricsTest {
         ));
 
         assertThat(service(true, pipeline, metrics).emitIfEnabled(request()).enrichment())
-                .flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
+                .map(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
                 .contains(summary);
     }
 
@@ -179,9 +188,6 @@ class EngineIntelligenceEmissionMetricsTest {
                 EngineIntelligenceEmissionOmissionReason.DISABLED,
                 EngineIntelligenceEmissionOmissionReason.PIPELINE_UNAVAILABLE,
                 EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT,
-                EngineIntelligenceEmissionOmissionReason.ORCHESTRATOR_FAILURE,
-                EngineIntelligenceEmissionOmissionReason.AGGREGATION_FAILURE,
-                EngineIntelligenceEmissionOmissionReason.MAPPER_FAILURE,
                 EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE
         );
         assertThat(Arrays.asList(MlPredictionEvidenceOmissionReason.values())).containsExactly(

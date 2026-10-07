@@ -44,7 +44,7 @@ class EngineIntelligenceEnabledDiagnosticInvocationCountTest {
             assertThat(value.mlPredictionEvidence()).isPresent();
             assertThat(value.mlPredictionEvidence().orElseThrow().sourceExecutionTimestamp())
                     .isEqualTo(SOURCE_INFERENCE_AT)
-                    .isNotEqualTo(value.engineIntelligenceSummary().orElseThrow().generatedAt());
+                    .isNotEqualTo(value.engineIntelligenceSummary().generatedAt());
             verify(rules, times(1)).scoreValidated(any());
             verify(ml, times(1)).score(any());
         });
