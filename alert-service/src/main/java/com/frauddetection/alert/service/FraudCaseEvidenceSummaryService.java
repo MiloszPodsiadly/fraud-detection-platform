@@ -56,7 +56,7 @@ public class FraudCaseEvidenceSummaryService {
         FraudCaseDocument fraudCase = fraudCaseRepository.findById(caseId)
                 .orElseThrow(() -> new FraudCaseNotFoundException(caseId));
         List<String> linkedAlertIds = normalizedLinkedAlertIds(fraudCase);
-        boolean legacy = linkedAlertIds.isEmpty();
+        boolean linkedAlertContextUnavailable = linkedAlertIds.isEmpty();
         boolean truncated = linkedAlertIds.size() > MAX_LINKED_ALERTS_FOR_EVIDENCE_SUMMARY;
         List<String> includedAlertIds = truncated
                 ? linkedAlertIds.subList(0, MAX_LINKED_ALERTS_FOR_EVIDENCE_SUMMARY)
@@ -64,9 +64,13 @@ public class FraudCaseEvidenceSummaryService {
         EvidenceReadResult readResult = evidenceItems(includedAlertIds);
         List<EvidenceSnapshotItem> evidenceItems = readResult.items();
         boolean missingLinkedAlerts = includedAlertIds.size() > readResult.alertCount();
-        boolean incompleteSourceCoverage = truncated || missingLinkedAlerts;
+        boolean incompleteSourceCoverage = linkedAlertContextUnavailable || truncated || missingLinkedAlerts;
         boolean partial = incompleteSourceCoverage || containsPartialStatus(evidenceItems);
-        EvidenceStatus aggregateStatus = aggregateStatus(evidenceItems, legacy, incompleteSourceCoverage);
+        EvidenceStatus aggregateStatus = aggregateStatus(
+                evidenceItems,
+                linkedAlertContextUnavailable,
+                incompleteSourceCoverage
+        );
         if (aggregateStatus == EvidenceStatus.PARTIAL) {
             partial = true;
         }
@@ -80,7 +84,6 @@ public class FraudCaseEvidenceSummaryService {
                 linkedAlertIds.size(),
                 evidenceItems.size(),
                 partial,
-                legacy,
                 truncated,
                 truncated ? LINKED_ALERT_LIMIT_EXCEEDED : null,
                 Instant.now(clock)
@@ -124,12 +127,12 @@ public class FraudCaseEvidenceSummaryService {
 
     private EvidenceStatus aggregateStatus(
             List<EvidenceSnapshotItem> evidenceItems,
-            boolean legacy,
+            boolean linkedAlertContextUnavailable,
             boolean incompleteSourceCoverage
     ) {
         if (evidenceItems.isEmpty()) {
-            if (legacy) {
-                return EvidenceStatus.LEGACY;
+            if (linkedAlertContextUnavailable) {
+                return EvidenceStatus.UNAVAILABLE;
             }
             return incompleteSourceCoverage ? EvidenceStatus.PARTIAL : EvidenceStatus.UNAVAILABLE;
         }

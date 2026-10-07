@@ -62,7 +62,6 @@ class FraudCaseEvidenceSummaryServiceTest {
         assertThat(response.evidenceBySource()).hasSize(1);
         assertThat(response.evidenceByStatus()).hasSize(1);
         assertThat(response.partial()).isFalse();
-        assertThat(response.legacy()).isFalse();
     }
 
     @Test
@@ -74,20 +73,20 @@ class FraudCaseEvidenceSummaryServiceTest {
         var response = service.summary("case-1");
 
         assertThat(response.aggregateEvidenceStatus()).isEqualTo(EvidenceStatus.UNAVAILABLE);
-        assertThat(response.legacy()).isFalse();
         assertThat(response.evidenceItemCount()).isZero();
     }
 
     @Test
-    void FraudCaseEvidenceSummaryLegacyCaseTest() {
+    void FraudCaseEvidenceSummaryMissingLinkedAlertContextIsUnavailableTest() {
         FraudCaseEvidenceSummaryService service = service();
         when(fraudCaseRepository.findById("case-1")).thenReturn(Optional.of(caseWithAlerts("case-1")));
 
         var response = service.summary("case-1");
 
-        assertThat(response.aggregateEvidenceStatus()).isEqualTo(EvidenceStatus.LEGACY);
-        assertThat(response.legacy()).isTrue();
+        assertThat(response.aggregateEvidenceStatus()).isEqualTo(EvidenceStatus.UNAVAILABLE);
+        assertThat(response.partial()).isTrue();
         assertThat(response.linkedAlertCount()).isZero();
+        verify(alertRepository, never()).findAllById(any());
     }
 
     @Test
@@ -374,7 +373,6 @@ class FraudCaseEvidenceSummaryServiceTest {
         assertThat(response.aggregateEvidenceStatus()).isEqualTo(EvidenceStatus.UNAVAILABLE);
         assertThat(response.evidenceItemCount()).isZero();
         assertThat(response.partial()).isFalse();
-        assertThat(response.legacy()).isFalse();
     }
 
     @Test
@@ -500,17 +498,28 @@ class FraudCaseEvidenceSummaryServiceTest {
     }
 
     private EvidenceSnapshotItem evidence(String reasonCode, EvidenceStatus status, EvidenceSeverity severity) {
+        Instant observedAt = Instant.parse("2026-05-21T10:00:00Z");
         return new EvidenceSnapshotItem(
+                reasonCode == null ? "summary-evidence-unknown" : "summary-evidence-" + reasonCode,
+                "summary-source-event",
+                "summary-transaction",
+                "summary-correlation",
                 reasonCode,
                 EvidenceType.RULE_MATCH,
-                severity,
                 EvidenceSource.ALERT_SERVICE,
                 status,
+                severity,
                 "Evidence title",
                 "Evidence description",
                 "value",
                 "baseline",
-                Instant.parse("2026-05-21T10:00:00Z")
+                Map.of(),
+                observedAt,
+                observedAt.plusSeconds(1),
+                null,
+                null,
+                null,
+                null
         );
     }
 

@@ -7,7 +7,6 @@ import { formatCount, normalizeEvidenceCode, safeArray, safeTruncationReason, to
 export const EVIDENCE_SUMMARY_HELPER_TEXT = "Evidence summary is read-only investigation context. It is not confirmed fraud, not an analyst decision, not a final outcome, and not legal proof.";
 
 const UNAVAILABLE_MESSAGE = "Evidence summary unavailable.";
-const LEGACY_MESSAGE = "Legacy context. This case may not have structured evidence summary data.";
 const PARTIAL_MESSAGE = "Partial summary. Some linked evidence context is incomplete or unavailable.";
 const TRUNCATED_MESSAGE = "Truncated summary. Only the first bounded set of linked alert evidence was included.";
 
@@ -78,14 +77,9 @@ function EvidenceSummaryContent({ summary }) {
   const sourceCounts = safeArray(summary.evidenceBySource);
   const statusCounts = safeArray(summary.evidenceByStatus);
   const evidenceItems = safeArray(summary.highestSeverityEvidence).map(toEvidenceItem);
-  const isLegacy = summary.legacy === true || status === "LEGACY";
   const isTruncated = summary.truncated === true;
   const isPartial = summary.partial === true || status === "PARTIAL";
   const isUnavailable = ["UNAVAILABLE", "ERROR", "STALE", "NOT_APPLICABLE"].includes(status);
-
-  if (isLegacy) {
-    return <EvidenceSummaryNotice message={LEGACY_MESSAGE} />;
-  }
 
   if (isUnavailable && evidenceItems.length === 0 && sourceCounts.length === 0 && statusCounts.length === 0) {
     return <EvidenceSummaryNotice message={UNAVAILABLE_MESSAGE} />;

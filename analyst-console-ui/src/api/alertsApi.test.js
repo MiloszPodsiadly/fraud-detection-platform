@@ -2110,7 +2110,6 @@ function evidenceSummary() {
     linkedAlertCount: 0,
     evidenceItemCount: 0,
     partial: false,
-    legacy: false,
     truncated: false,
     truncationReason: null
   };
@@ -2122,7 +2121,6 @@ function evidenceTimeline() {
     generatedAt: "2026-05-23T10:00:00Z",
     events: [],
     partial: false,
-    legacy: false,
     truncated: false,
     truncationReason: null
   };

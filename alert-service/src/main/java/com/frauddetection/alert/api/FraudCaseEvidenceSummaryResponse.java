@@ -15,7 +15,6 @@ public record FraudCaseEvidenceSummaryResponse(
         int linkedAlertCount,
         int evidenceItemCount,
         boolean partial,
-        boolean legacy,
         boolean truncated,
         String truncationReason,
         Instant generatedAt

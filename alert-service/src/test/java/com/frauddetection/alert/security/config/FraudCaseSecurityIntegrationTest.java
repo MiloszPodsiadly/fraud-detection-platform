@@ -323,7 +323,6 @@ class FraudCaseSecurityIntegrationTest {
                 1,
                 false,
                 false,
-                false,
                 null,
                 Instant.parse("2026-05-12T10:00:00Z")
         );
@@ -343,7 +342,6 @@ class FraudCaseSecurityIntegrationTest {
                         FraudCaseTimelineLinkedEntityType.FRAUD_CASE,
                         false
                 )),
-                false,
                 false,
                 false,
                 null,

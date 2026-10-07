@@ -55,8 +55,8 @@ public class FraudCaseEvidenceTimelineService {
         List<String> linkedAlertIds = allLinkedAlertIds.stream()
                 .limit(MAX_LINKED_ALERTS_FOR_TIMELINE)
                 .toList();
-        boolean legacy = allLinkedAlertIds.isEmpty();
-        boolean partial = false;
+        boolean linkedAlertContextUnavailable = allLinkedAlertIds.isEmpty();
+        boolean partial = linkedAlertContextUnavailable;
         List<EventDraft> drafts = new ArrayList<>();
         int sequence = 0;
 
@@ -64,9 +64,12 @@ public class FraudCaseEvidenceTimelineService {
             drafts.add(EventDraft.fraudCaseCreated(++sequence, fraudCase.getCreatedAt()));
         }
 
-        if (legacy) {
-            drafts.add(EventDraft.legacy(++sequence, fraudCase.getCreatedAt(), fraudCase.getCreatedAt() == null));
-            partial = fraudCase.getCreatedAt() == null;
+        if (linkedAlertContextUnavailable) {
+            drafts.add(EventDraft.linkedAlertContextUnavailable(
+                    ++sequence,
+                    fraudCase.getCreatedAt(),
+                    fraudCase.getCreatedAt() == null
+            ));
         } else {
             Map<String, AlertDocument> alertsById = alertsById(linkedAlertIds);
             partial = linkedAlertInputTruncated || alertsById.size() < linkedAlertIds.size();
@@ -99,7 +102,6 @@ public class FraudCaseEvidenceTimelineService {
                 fraudCase.getCaseId(),
                 events,
                 partial,
-                legacy,
                 truncated,
                 truncated ? TIMELINE_EVENT_LIMIT_EXCEEDED : null,
                 Instant.now(clock)
@@ -219,7 +221,7 @@ public class FraudCaseEvidenceTimelineService {
             case ALERT_EVIDENCE_SNAPSHOT_AVAILABLE -> 20;
             case ALERT_EVIDENCE_SNAPSHOT_PARTIAL -> 21;
             case ALERT_EVIDENCE_SNAPSHOT_UNAVAILABLE -> 22;
-            case LEGACY_CONTEXT -> 90;
+            case LINKED_ALERT_CONTEXT_UNAVAILABLE -> 11;
         };
     }
 
@@ -253,7 +255,7 @@ public class FraudCaseEvidenceTimelineService {
             case ALERT_EVIDENCE_SNAPSHOT_AVAILABLE -> "Alert evidence snapshot available";
             case ALERT_EVIDENCE_SNAPSHOT_PARTIAL -> "Alert evidence snapshot partial";
             case ALERT_EVIDENCE_SNAPSHOT_UNAVAILABLE -> "Alert evidence snapshot unavailable";
-            case LEGACY_CONTEXT -> "Legacy case context";
+            case LINKED_ALERT_CONTEXT_UNAVAILABLE -> "Linked alert context unavailable";
         };
     }
 
@@ -265,8 +267,8 @@ public class FraudCaseEvidenceTimelineService {
                     "Bounded evidence snapshot context derived from linked alert data.";
             case ALERT_EVIDENCE_SNAPSHOT_UNAVAILABLE ->
                     "Structured evidence snapshot was unavailable for this linked alert.";
-            case LEGACY_CONTEXT ->
-                    "Legacy case may not have structured evidence timeline data.";
+            case LINKED_ALERT_CONTEXT_UNAVAILABLE ->
+                    "No linked alert context was available for this fraud case.";
         };
     }
 
@@ -338,16 +340,16 @@ public class FraudCaseEvidenceTimelineService {
             );
         }
 
-        static EventDraft legacy(int sequence, Instant occurredAt, boolean approximateTime) {
+        static EventDraft linkedAlertContextUnavailable(int sequence, Instant occurredAt, boolean approximateTime) {
             return new EventDraft(
                     sequence,
-                    FraudCaseTimelineEventType.LEGACY_CONTEXT,
+                    FraudCaseTimelineEventType.LINKED_ALERT_CONTEXT_UNAVAILABLE,
                     occurredAt,
                     EvidenceSource.ALERT_SERVICE,
-                    EvidenceStatus.LEGACY,
-                    FraudCaseEvidenceTimelineService.title(FraudCaseTimelineEventType.LEGACY_CONTEXT),
-                    FraudCaseEvidenceTimelineService.description(FraudCaseTimelineEventType.LEGACY_CONTEXT),
-                    FraudCaseTimelineLinkedEntityType.LEGACY_CONTEXT,
+                    EvidenceStatus.UNAVAILABLE,
+                    FraudCaseEvidenceTimelineService.title(FraudCaseTimelineEventType.LINKED_ALERT_CONTEXT_UNAVAILABLE),
+                    FraudCaseEvidenceTimelineService.description(FraudCaseTimelineEventType.LINKED_ALERT_CONTEXT_UNAVAILABLE),
+                    FraudCaseTimelineLinkedEntityType.FRAUD_CASE,
                     approximateTime
             );
         }

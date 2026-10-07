@@ -20,7 +20,6 @@ class FraudCaseReadModelMetricsContractTest {
     private static final Set<String> ALLOWED_OUTCOMES = Set.of(
             "available",
             "partial",
-            "legacy",
             "truncated",
             "empty",
             "not_found",
@@ -73,7 +72,6 @@ class FraudCaseReadModelMetricsContractTest {
                 .collect(Collectors.toMap(Enum::name, FraudCaseReadModelOutcome::label)))
                 .containsEntry("AVAILABLE", "available")
                 .containsEntry("PARTIAL", "partial")
-                .containsEntry("LEGACY", "legacy")
                 .containsEntry("TRUNCATED", "truncated")
                 .containsEntry("EMPTY", "empty")
                 .containsEntry("NOT_FOUND", "not_found")

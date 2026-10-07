@@ -18,33 +18,29 @@ class FraudCaseReadModelOutcomeClassifierTest {
 
     @Test
     void evidenceSummaryOutcomePrecedenceIsBoundedAndExplicit() {
-        assertThat(FraudCaseReadModelOutcomeClassifier.classifySummary(summary(true, true, true, 1)))
+        assertThat(FraudCaseReadModelOutcomeClassifier.classifySummary(summary(true, true, 1)))
                 .isEqualTo(FraudCaseReadModelOutcome.TRUNCATED);
-        assertThat(FraudCaseReadModelOutcomeClassifier.classifySummary(summary(false, true, true, 1)))
-                .isEqualTo(FraudCaseReadModelOutcome.LEGACY);
-        assertThat(FraudCaseReadModelOutcomeClassifier.classifySummary(summary(false, false, true, 1)))
+        assertThat(FraudCaseReadModelOutcomeClassifier.classifySummary(summary(false, true, 1)))
                 .isEqualTo(FraudCaseReadModelOutcome.PARTIAL);
-        assertThat(FraudCaseReadModelOutcomeClassifier.classifySummary(summary(false, false, false, 0)))
+        assertThat(FraudCaseReadModelOutcomeClassifier.classifySummary(summary(false, false, 0)))
                 .isEqualTo(FraudCaseReadModelOutcome.EMPTY);
-        assertThat(FraudCaseReadModelOutcomeClassifier.classifySummary(summary(false, false, false, 1)))
+        assertThat(FraudCaseReadModelOutcomeClassifier.classifySummary(summary(false, false, 1)))
                 .isEqualTo(FraudCaseReadModelOutcome.AVAILABLE);
     }
 
     @Test
     void evidenceTimelineOutcomePrecedenceIsBoundedAndExplicit() {
-        assertThat(FraudCaseReadModelOutcomeClassifier.classifyTimeline(timeline(true, true, true, true)))
+        assertThat(FraudCaseReadModelOutcomeClassifier.classifyTimeline(timeline(true, true, true)))
                 .isEqualTo(FraudCaseReadModelOutcome.TRUNCATED);
-        assertThat(FraudCaseReadModelOutcomeClassifier.classifyTimeline(timeline(false, true, true, true)))
-                .isEqualTo(FraudCaseReadModelOutcome.LEGACY);
-        assertThat(FraudCaseReadModelOutcomeClassifier.classifyTimeline(timeline(false, false, true, true)))
+        assertThat(FraudCaseReadModelOutcomeClassifier.classifyTimeline(timeline(false, true, true)))
                 .isEqualTo(FraudCaseReadModelOutcome.PARTIAL);
-        assertThat(FraudCaseReadModelOutcomeClassifier.classifyTimeline(timeline(false, false, false, false)))
+        assertThat(FraudCaseReadModelOutcomeClassifier.classifyTimeline(timeline(false, false, false)))
                 .isEqualTo(FraudCaseReadModelOutcome.EMPTY);
-        assertThat(FraudCaseReadModelOutcomeClassifier.classifyTimeline(timeline(false, false, false, true)))
+        assertThat(FraudCaseReadModelOutcomeClassifier.classifyTimeline(timeline(false, false, true)))
                 .isEqualTo(FraudCaseReadModelOutcome.AVAILABLE);
     }
 
-    private FraudCaseEvidenceSummaryResponse summary(boolean truncated, boolean legacy, boolean partial, int evidenceItemCount) {
+    private FraudCaseEvidenceSummaryResponse summary(boolean truncated, boolean partial, int evidenceItemCount) {
         return new FraudCaseEvidenceSummaryResponse(
                 "case-1",
                 EvidenceStatus.AVAILABLE,
@@ -55,19 +51,17 @@ class FraudCaseReadModelOutcomeClassifierTest {
                 1,
                 evidenceItemCount,
                 partial,
-                legacy,
                 truncated,
                 null,
                 Instant.parse("2026-05-24T10:00:00Z")
         );
     }
 
-    private FraudCaseEvidenceTimelineResponse timeline(boolean truncated, boolean legacy, boolean partial, boolean hasEvents) {
+    private FraudCaseEvidenceTimelineResponse timeline(boolean truncated, boolean partial, boolean hasEvents) {
         return new FraudCaseEvidenceTimelineResponse(
                 "case-1",
                 hasEvents ? List.of(event()) : List.of(),
                 partial,
-                legacy,
                 truncated,
                 null,
                 Instant.parse("2026-05-24T10:00:00Z")

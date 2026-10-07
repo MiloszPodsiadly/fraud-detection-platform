@@ -235,7 +235,6 @@ class FraudCaseEvidenceSummaryControllerTest {
                 1,
                 false,
                 false,
-                false,
                 null,
                 Instant.parse("2026-05-22T10:00:00Z")
         );

@@ -110,7 +110,7 @@ class FraudCaseEvidenceSummaryDocsContractTest {
         assertThat(docs)
                 .contains("Because this endpoint is under `/api/v1`")
                 .contains("internal product API contract")
-                .contains("avoid changing the meaning of `aggregateEvidenceStatus`, `partial`, `legacy`")
+                .contains("avoid changing the meaning of `aggregateEvidenceStatus`, `partial`")
                 .contains("without a documented migration");
     }
 

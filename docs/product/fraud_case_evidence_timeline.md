@@ -36,7 +36,7 @@ suspicious transaction id, transaction id, customer id, or account id.
 - deterministic ordering
 - missing timestamp handling
 - `approximateTime`
-- partial, legacy, and truncated states
+- partial, unavailable, and truncated states
 - sensitive-read audit
 - docs and tests
 
@@ -80,7 +80,7 @@ It is a derived read projection. It must not be used as source-of-truth history 
 - `ALERT_EVIDENCE_SNAPSHOT_AVAILABLE`
 - `ALERT_EVIDENCE_SNAPSHOT_PARTIAL`
 - `ALERT_EVIDENCE_SNAPSHOT_UNAVAILABLE`
-- `LEGACY_CONTEXT`
+- `LINKED_ALERT_CONTEXT_UNAVAILABLE`
 
 Deferred:
 
@@ -139,7 +139,8 @@ If the derived timeline exceeds the limit:
 Missing linked alerts set `partial=true`, do not create fake events, and do not expose missing alert identifiers.
 Missing linked alerts are represented through `partial=true` only. FDP-76 v1 does not return missing alert IDs or a
 missing alert count; consumers must treat `partial=true` as the bounded signal that source coverage is incomplete.
-Legacy cases return bounded legacy context when no structured linked-alert evidence timeline data exists.
+An empty normalized linked-alert relationship is not evidence of historical origin. It produces a bounded
+`LINKED_ALERT_CONTEXT_UNAVAILABLE` event with `evidenceStatus=UNAVAILABLE` and sets `partial=true`.
 
 `LINKED_ALERT_CONTEXT` uses the best available linked alert read timestamp as context time. It is not proof of the time when the alert was linked to the fraud case. Do not add `linkedAt` semantics unless a real timestamped link source exists.
 
@@ -207,7 +208,7 @@ decision IDs, raw payloads, and raw exception messages are not used as audit res
 - Truncation sets `truncated=true`, `partial=true`, and `truncationReason=TIMELINE_EVENT_LIMIT_EXCEEDED`.
 - Missing linked alerts set `partial=true`.
 - Missing linked alerts do not create fake events.
-- Legacy cases are safe.
+- Missing linked-alert context is represented as unavailable, never inferred as legacy.
 - Success, missing case, and unexpected failure are audited.
 - Audit resource is `FRAUD_CASE` with `caseId`.
 - No linked alert IDs as audit resource IDs.

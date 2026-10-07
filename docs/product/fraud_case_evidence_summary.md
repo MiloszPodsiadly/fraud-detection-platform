@@ -53,7 +53,7 @@ authorized, audited relationship to suspicious transactions.
 `GET /api/v1/fraud-cases/{caseId}/evidence-summary`
 
 Because this endpoint is under `/api/v1`, response fields are treated as an internal product API contract. Future
-changes should preserve non-claims and avoid changing the meaning of `aggregateEvidenceStatus`, `partial`, `legacy`,
+changes should preserve non-claims and avoid changing the meaning of `aggregateEvidenceStatus`, `partial`,
 `truncated`, and `truncationReason` without a documented migration.
 
 The endpoint requires `fraud-case:read`. Alert read authority and SuspiciousTransaction read authority are not
@@ -83,8 +83,9 @@ result counts, reason codes, evidence statuses, principal data, or exception det
   read model slice. A future hardening branch may add explicit `missingLinkedAlertCount` if operationally needed.
 - If any linked alert in the included source window is missing, or the source window is truncated, the aggregate
   evidence status is `PARTIAL` unless an `ERROR` evidence status dominates.
-- Empty linked-alert context is treated as legacy case context and returns aggregate status `LEGACY`.
-- Non-legacy linked-alert context with no evidence returns aggregate status `UNAVAILABLE`.
+- Empty linked-alert context is not evidence of historical origin. It returns aggregate status `UNAVAILABLE` and
+  `partial=true` because linked evidence context cannot be established.
+- Linked-alert context with no evidence returns aggregate status `UNAVAILABLE`.
 - `ERROR` evidence status dominates the aggregate status.
 - Any `PARTIAL`, `LEGACY`, `STALE`, `UNAVAILABLE`, or `NOT_APPLICABLE` evidence status makes the aggregate status
   `PARTIAL` unless an `ERROR` is present.

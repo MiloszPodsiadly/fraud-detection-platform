@@ -61,7 +61,6 @@ class ReadAccessResultCountExtractorTest {
                         )),
                         false,
                         false,
-                        false,
                         null,
                         Instant.parse("2026-05-12T10:00:00Z")
                 ),
