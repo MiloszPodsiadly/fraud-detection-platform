@@ -187,8 +187,8 @@ final class SuspiciousTransactionTestSupport {
         return evidence(ScoringEvidenceStatus.ERROR, ScoringEvidenceSource.RULE_BASED_SCORING);
     }
 
-    static ScoringEvidenceItem legacyEvidence() {
-        return evidence(ScoringEvidenceStatus.LEGACY, ScoringEvidenceSource.LEGACY_SCORING);
+    static ScoringEvidenceItem legacyStatusEvidence() {
+        return evidence(ScoringEvidenceStatus.LEGACY, ScoringEvidenceSource.RULE_BASED_SCORING);
     }
 
     static ScoringEvidenceItem notApplicableEvidence() {

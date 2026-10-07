@@ -9,7 +9,7 @@ import java.util.List;
 import static com.frauddetection.alert.suspicious.SuspiciousTransactionTestSupport.availableEvidence;
 import static com.frauddetection.alert.suspicious.SuspiciousTransactionTestSupport.errorEvidence;
 import static com.frauddetection.alert.suspicious.SuspiciousTransactionTestSupport.inMemoryRepository;
-import static com.frauddetection.alert.suspicious.SuspiciousTransactionTestSupport.legacyEvidence;
+import static com.frauddetection.alert.suspicious.SuspiciousTransactionTestSupport.legacyStatusEvidence;
 import static com.frauddetection.alert.suspicious.SuspiciousTransactionTestSupport.metrics;
 import static com.frauddetection.alert.suspicious.SuspiciousTransactionTestSupport.notApplicableEvidence;
 import static com.frauddetection.alert.suspicious.SuspiciousTransactionTestSupport.partialEvidence;
@@ -46,7 +46,7 @@ class SuspiciousTransactionEvidenceStatusSemanticsTest {
 
     @Test
     void mixedAvailableAndLegacyDoesNotProduceAvailableMetadataStatus() {
-        var document = project(List.of(availableEvidence(), legacyEvidence()));
+        var document = project(List.of(availableEvidence(), legacyStatusEvidence()));
 
         assertThat(document.getEvidenceStatus()).isEqualTo(EvidenceStatus.PARTIAL);
         assertThat(document.getEvidenceProjectionState()).isEqualTo("PARTIAL_METADATA");

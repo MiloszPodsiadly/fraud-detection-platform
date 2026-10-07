@@ -1573,7 +1573,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
             return "UNKNOWN";
         }
         return switch (status) {
-            case NEW, ALERT_CREATED, LEGACY_IMPORTED -> status.name();
+            case NEW, ALERT_CREATED -> status.name();
         };
     }
 
@@ -1593,7 +1593,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
 
     private String normalizeSuspiciousTransactionApiStatus(String status) {
         return switch (status) {
-            case "NEW", "ALERT_CREATED", "LEGACY_IMPORTED", "ANY" -> status;
+            case "NEW", "ALERT_CREATED", "ANY" -> status;
             default -> "ANY";
         };
     }

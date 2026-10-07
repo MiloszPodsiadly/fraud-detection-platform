@@ -93,6 +93,5 @@ This projection does not add public API, UI, case lifecycle mutation, or new sta
 
 NEW means a suspicious signal was captured and no alert link is set.
 ALERT_CREATED means the suspicious signal is linked to an alert.
-LEGACY_IMPORTED means a legacy or incomplete imported signal if such migration is explicitly supported later.
 
 There are no dismissed, confirmed, fraud-verdict, analyst-disposition, or final statuses in this read model.

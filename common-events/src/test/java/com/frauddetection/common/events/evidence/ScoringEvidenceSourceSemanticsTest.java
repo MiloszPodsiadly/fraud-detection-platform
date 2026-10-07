@@ -16,8 +16,7 @@ class ScoringEvidenceSourceSemanticsTest {
                         "ML_MODEL",
                         "ML_RUNTIME",
                         "FEATURE_SNAPSHOT",
-                        "SCORING_FALLBACK",
-                        "LEGACY_SCORING"
+                        "SCORING_FALLBACK"
                 );
     }
 

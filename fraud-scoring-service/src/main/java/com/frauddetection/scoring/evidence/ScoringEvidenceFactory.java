@@ -206,7 +206,7 @@ public class ScoringEvidenceFactory {
     public ScoringEvidenceItem decisionFallbackDiagnostic(Instant observedAt, int index) {
         return diagnostic(
                 ScoringEvidenceSource.SCORING_FALLBACK,
-                ScoringEvidenceStatus.LEGACY,
+                ScoringEvidenceStatus.PARTIAL,
                 ScoringEvidenceSeverity.LOW,
                 "ml_decision_fallback_used",
                 "Fallback scoring path was used and recorded as diagnostic scoring evidence.",

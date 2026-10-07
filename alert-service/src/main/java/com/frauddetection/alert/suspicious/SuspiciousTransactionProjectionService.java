@@ -216,9 +216,6 @@ public class SuspiciousTransactionProjectionService {
         if (hasMlEvidence || contains(event.scoringStrategy(), "ML")) {
             return DetectionSource.ML_MODEL;
         }
-        if (hasEvidenceSource(event.scoringEvidence(), ScoringEvidenceSource.LEGACY_SCORING)) {
-            return DetectionSource.LEGACY_SCORING;
-        }
         return DetectionSource.RULE_ENGINE;
     }
 

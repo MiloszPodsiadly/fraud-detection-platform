@@ -65,6 +65,19 @@ class AlertEvidenceSnapshotProjectionServiceTest {
     }
 
     @Test
+    void currentScoringFallbackProjectsAsPartialFraudScoringEvidence() {
+        EvidenceSnapshotItem projected = first(project(diagnostic(
+                ScoringEvidenceStatus.PARTIAL,
+                ScoringEvidenceSource.SCORING_FALLBACK
+        )));
+
+        assertThat(projected.status()).isEqualTo(EvidenceStatus.PARTIAL);
+        assertThat(projected.source()).isEqualTo(EvidenceSource.FRAUD_SCORING_SERVICE);
+        assertThat(projected.attributes())
+                .doesNotContainEntry("evidenceProjectionState", EvidenceProjectionState.LEGACY_PROJECTED.name());
+    }
+
+    @Test
     void upstreamErrorStatusUsesErrorProjectedState() {
         assertThat(first(project(diagnostic(ScoringEvidenceStatus.ERROR))).attributes())
                 .containsEntry("evidenceProjectionState", EvidenceProjectionState.ERROR_PROJECTED.name());
@@ -497,11 +510,18 @@ class AlertEvidenceSnapshotProjectionServiceTest {
     }
 
     private ScoringEvidenceItem diagnostic(ScoringEvidenceStatus status) {
+        return diagnostic(status, ScoringEvidenceSource.ML_RUNTIME);
+    }
+
+    private ScoringEvidenceItem diagnostic(
+            ScoringEvidenceStatus status,
+            ScoringEvidenceSource source
+    ) {
         return new ScoringEvidenceItem(
                 "diagnostic-" + status.name(),
                 null,
                 ScoringEvidenceType.DIAGNOSTIC,
-                ScoringEvidenceSource.ML_RUNTIME,
+                source,
                 status,
                 ScoringEvidenceSeverity.LOW,
                 "Diagnostic",

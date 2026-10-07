@@ -54,7 +54,7 @@ class MlFallbackScoringEvidenceTest {
         assertThat(result.scoringEvidence())
                 .anySatisfy(item -> {
                     assertThat(item.source()).isEqualTo(ScoringEvidenceSource.SCORING_FALLBACK);
-                    assertThat(item.status()).isEqualTo(ScoringEvidenceStatus.LEGACY);
+                    assertThat(item.status()).isEqualTo(ScoringEvidenceStatus.PARTIAL);
                     assertThat(item.reasonCode()).isNull();
                     assertThat(item.attributes()).containsEntry("scoringEvidenceState", "ml_decision_fallback_used");
                 })
@@ -69,6 +69,7 @@ class MlFallbackScoringEvidenceTest {
                 });
         assertThat(result.scoringEvidence()).noneMatch(item ->
                 item.source() == ScoringEvidenceSource.ML_MODEL && item.status() == ScoringEvidenceStatus.AVAILABLE);
+        assertThat(result.scoringEvidence()).noneMatch(item -> item.status() == ScoringEvidenceStatus.LEGACY);
     }
 
     @Test

@@ -13,8 +13,7 @@ class SuspiciousTransactionStatusSemanticsTest {
         assertThat(SuspiciousTransactionStatus.values())
                 .containsExactly(
                         SuspiciousTransactionStatus.NEW,
-                        SuspiciousTransactionStatus.ALERT_CREATED,
-                        SuspiciousTransactionStatus.LEGACY_IMPORTED
+                        SuspiciousTransactionStatus.ALERT_CREATED
                 );
     }
 

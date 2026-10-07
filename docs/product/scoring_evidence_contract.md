@@ -28,11 +28,11 @@ ScoringEvidence severity is not final risk level.
 | Status | Meaning |
 | --- | --- |
 | `AVAILABLE` | A supported reason code produced a typed scoring evidence item. |
-| `PARTIAL` | Diagnostic context exists, but supported scoring evidence was incomplete. |
+| `PARTIAL` | Diagnostic context exists, but supported scoring evidence was incomplete, including a current fallback-path diagnostic. |
 | `UNAVAILABLE` | The scoring source or runtime could not provide supported evidence. |
 | `ERROR` | Diagnostic evidence represents an explicit scoring-evidence creation error. |
 | `NOT_APPLICABLE` | The evidence category was not applicable to the scoring path. |
-| `LEGACY` | Evidence describes a legacy or fallback scoring path. |
+| `LEGACY` | Evidence describes genuinely historical scoring semantics retained for persisted or replayed data. |
 
 `PARTIAL`, `UNAVAILABLE`, and `ERROR` are intentionally distinct. `STALE` is not part of this contract.
 
@@ -45,7 +45,6 @@ ScoringEvidence severity is not final risk level.
 | `ML_RUNTIME` | Evidence describing model runtime unavailability or runtime diagnostics. |
 | `FEATURE_SNAPSHOT` | Evidence derived from bounded feature-snapshot context. |
 | `SCORING_FALLBACK` | Evidence describing fallback scoring behavior. |
-| `LEGACY_SCORING` | Evidence describing legacy scoring compatibility behavior. |
 
 ## Relationship To ReasonCode
 
@@ -135,6 +134,8 @@ High or critical scoring output without supported reason codes must create expli
 diagnostic evidence instead of silently succeeding with an empty supported-evidence set.
 
 ML fallback is represented through runtime or fallback evidence. It must not appear as `ML_MODEL` `AVAILABLE`.
+Current fallback-path evidence uses `SCORING_FALLBACK` with `PARTIAL`; ML runtime unavailability remains a separate
+`ML_RUNTIME` item with `UNAVAILABLE`. A current fallback must never be labeled `LEGACY`.
 
 ## Out Of Scope
 
