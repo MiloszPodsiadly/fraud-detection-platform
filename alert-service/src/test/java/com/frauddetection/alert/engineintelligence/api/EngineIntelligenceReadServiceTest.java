@@ -197,7 +197,7 @@ class EngineIntelligenceReadServiceTest {
     }
 
     @Test
-    void legacyProjectionWithoutOccurrenceOwnerFailsClosed() {
+    void identityFreeProjectionFailsClosed() {
         EngineIntelligenceProjection projection = mock(EngineIntelligenceProjection.class);
         when(scoredTransactionRepository.findById("txn-legacy"))
                 .thenReturn(Optional.of(current("txn-legacy", "event-current")));
@@ -205,8 +205,8 @@ class EngineIntelligenceReadServiceTest {
         when(projection.getSourceEventCreatedAtEpochSecond()).thenReturn(null);
         when(projection.getSourceEventCreatedAtNano()).thenReturn(null);
 
-        assertThat(service.read("txn-legacy"))
-                .isEqualTo(EngineIntelligenceReadModel.notProjected("txn-legacy"));
+        assertThatThrownBy(() -> service.read("txn-legacy"))
+                .isInstanceOf(EngineIntelligenceProjectionReadUnavailableException.class);
 
         verify(mapper, never()).map(projection);
     }

@@ -64,19 +64,6 @@ class TransactionScoredEventMapperEngineIntelligenceTest {
     }
 
     @Test
-    void currentMapperRejectsUnsubstantiatedLegitimateAbsence() {
-        assertThatThrownBy(() -> mapper.toEvent(
-                request(),
-                scoreResult(),
-                Optional.empty(),
-                MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE,
-                null
-        ))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("CURRENT_ML_PREDICTION_EVIDENCE_LEGITIMATE_ABSENCE_UNSUPPORTED");
-    }
-
-    @Test
     void mapperIncludesEngineIntelligenceWhenProvided() throws Exception {
         var event = mapper.toEvent(
                 request(), scoreResult(), Optional.of(summary()),

@@ -3,6 +3,7 @@ package com.frauddetection.common.events.contract;
 import tools.jackson.databind.ObjectMapper;
 
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.RecordComponent;
@@ -17,9 +18,13 @@ class TransactionScoredEventCompatibilityTest {
 
     @Test
     void currentTransactionScoredEventJsonWithoutEngineIntelligenceDeserializes() throws Exception {
-        assertThat(objectMapper().readValue(currentJson(), TransactionScoredEvent.class).engineIntelligence()).isNull();
-        assertThat(objectMapper().readValue(currentJson(), TransactionScoredEvent.class).mlPredictionEvidence()).isNull();
-        assertThat(objectMapper().readValue(currentJson(), TransactionScoredEvent.class).analystRecommendation()).isNull();
+        TransactionScoredEvent event = objectMapper().readValue(currentJson(), TransactionScoredEvent.class);
+
+        assertThat(event.engineIntelligence()).isNull();
+        assertThat(event.mlPredictionEvidence()).isNull();
+        assertThat(event.mlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED);
+        assertThat(event.analystRecommendation()).isNull();
     }
 
     @Test
@@ -103,32 +108,34 @@ class TransactionScoredEventCompatibilityTest {
     }
 
     @Test
-    void existingScoredEventSerializationWithoutEngineIntelligenceRemainsStable() throws Exception {
-        assertThat(objectMapper().writeValueAsString(oldConstructorEvent()))
-                .doesNotContain("engineIntelligence", "mlPredictionEvidence", "analystRecommendation");
+    void currentScoredEventSerializationWithoutEngineIntelligenceIncludesEvidenceOutcome() throws Exception {
+        assertThat(objectMapper().writeValueAsString(currentEvent()))
+                .contains("\"mlPredictionEvidenceOmissionReason\":\"DIAGNOSTIC_EMISSION_DISABLED\"")
+                .doesNotContain("engineIntelligence", "\"mlPredictionEvidence\":", "analystRecommendation");
     }
 
     @Test
     void newEngineIntelligenceFieldIsOptional() {
-        assertThat(oldConstructorEvent().engineIntelligence()).isNull();
+        assertThat(currentEvent().engineIntelligence()).isNull();
     }
 
     @Test
     void newMlPredictionEvidenceFieldIsOptional() {
-        assertThat(oldConstructorEvent().mlPredictionEvidence()).isNull();
+        assertThat(currentEvent().mlPredictionEvidence()).isNull();
     }
 
     @Test
     void newAnalystRecommendationFieldIsOptional() {
-        assertThat(oldConstructorEvent().analystRecommendation()).isNull();
+        assertThat(currentEvent().analystRecommendation()).isNull();
     }
 
-    private TransactionScoredEvent oldConstructorEvent() {
+    private TransactionScoredEvent currentEvent() {
         return new TransactionScoredEvent(
                 "evt-1", "txn-1", "corr-1", "cust-1", "acct-1",
                 Instant.parse("2026-06-01T06:00:00Z"), Instant.parse("2026-06-01T06:00:00Z"),
                 null, null, null, null, null, 0.82d, RiskLevel.HIGH, "RULE_BASED", "rule-based-engine", "v2",
-                Instant.parse("2026-06-01T06:00:01Z"), List.of("HIGH_VELOCITY"), Map.of(), Map.of(), true
+                Instant.parse("2026-06-01T06:00:01Z"), List.of("HIGH_VELOCITY"), Map.of(), Map.of(), true,
+                List.of(), null, null, MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED, null
         );
     }
 
@@ -155,14 +162,15 @@ class TransactionScoredEventCompatibilityTest {
                   "reasonCodes": ["HIGH_VELOCITY"],
                   "scoreDetails": {},
                   "featureSnapshot": {},
-                  "alertRecommended": true
+                  "alertRecommended": true,
+                  "mlPredictionEvidenceOmissionReason": "DIAGNOSTIC_EMISSION_DISABLED"
                 }
                 """;
     }
 
     private String newJson(String futureField) {
         return currentJson().replace(
-                "\"alertRecommended\": true",
+                "\"alertRecommended\": true,\n  \"mlPredictionEvidenceOmissionReason\": \"DIAGNOSTIC_EMISSION_DISABLED\"",
                 """
                 "alertRecommended": true,
                 "engineIntelligence": {
@@ -195,14 +203,15 @@ class TransactionScoredEventCompatibilityTest {
                   "diagnosticSignals": [],
                   "warnings": []
                   %s
-                }
+                },
+                "mlPredictionEvidenceOmissionReason": "ML_ENGINE_UNAVAILABLE"
                 """.formatted(futureField)
         );
     }
 
     private String newJsonWithAnalystRecommendation() {
         return currentJson().replace(
-                "\"alertRecommended\": true",
+                "\"alertRecommended\": true,\n  \"mlPredictionEvidenceOmissionReason\": \"DIAGNOSTIC_EMISSION_DISABLED\"",
                 """
                 "alertRecommended": true,
                 "analystRecommendation": {
@@ -222,7 +231,8 @@ class TransactionScoredEventCompatibilityTest {
                     "notModelPromotion": true,
                     "notThresholdRecommendation": true
                   }
-                }
+                },
+                "mlPredictionEvidenceOmissionReason": "DIAGNOSTIC_EMISSION_DISABLED"
                 """
         );
     }
@@ -231,7 +241,7 @@ class TransactionScoredEventCompatibilityTest {
         return currentJson()
                 .replace("\"modelVersion\": \"v2\"", "\"modelVersion\": \"final-score-v2\"")
                 .replace(
-                "\"alertRecommended\": true",
+                "\"alertRecommended\": true,\n  \"mlPredictionEvidenceOmissionReason\": \"DIAGNOSTIC_EMISSION_DISABLED\"",
                 """
                 "alertRecommended": true,
                 "engineIntelligence": {
@@ -269,7 +279,8 @@ class TransactionScoredEventCompatibilityTest {
                   },
                   "diagnosticSignals": [],
                   "warnings": []
-                }
+                },
+                "mlPredictionEvidenceOmissionReason": "PREDICTION_NOT_ACCEPTED"
                 """
         );
     }

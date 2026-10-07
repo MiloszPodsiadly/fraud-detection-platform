@@ -62,6 +62,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDelt
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.mongodb.MongoException;
 import com.mongodb.client.model.IndexOptions;
@@ -865,6 +866,9 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
                                 modelIdentity(modelVersion),
                                 createdAt.minusNanos(123_456_789L)
                         ),
+                engineIntelligence == null
+                        ? MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED
+                        : null,
                 null
         );
     }

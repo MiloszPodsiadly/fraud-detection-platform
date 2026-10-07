@@ -266,7 +266,7 @@ class FeedbackDatasetJsonlWriterTest {
                 FeedbackDatasetRulesEvidenceStatus.UNAVAILABLE,
                 null,
                 FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT,
-                MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE,
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
                 null,
                 null,
                 null,

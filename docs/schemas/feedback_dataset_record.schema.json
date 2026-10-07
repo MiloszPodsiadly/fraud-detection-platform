@@ -170,7 +170,7 @@
                       "const": "LEGITIMATELY_ABSENT"
                     },
                     "mlPredictionEvidenceOmissionReason": {
-                      "enum": ["DIAGNOSTIC_EMISSION_DISABLED", "LEGITIMATE_ABSENCE"]
+                      "const": "DIAGNOSTIC_EMISSION_DISABLED"
                     },
                     "mlPredictionScore": {
                       "type": "null"
@@ -482,7 +482,6 @@
                 "INVALID_SCORE",
                 "IDENTITY_VALIDATION_FAILURE",
                 "EVIDENCE_SOURCE_INTEGRITY_FAILURE",
-                "LEGITIMATE_ABSENCE",
                 "PREDICTION_NOT_ACCEPTED",
                 null
               ]

@@ -80,7 +80,6 @@ public class EngineIntelligenceReadService {
             throw new EngineIntelligenceProjectionReadUnavailableException();
         }
         return projection
-                .filter(candidate -> ownership.state() == ScoringOccurrenceOwnership.State.AUTHORITATIVE)
                 .filter(candidate -> matchesOccurrence(candidate, ownership))
                 .map(mapper::map)
                 .orElseGet(() -> EngineIntelligenceReadModel.notProjected(boundedTransactionId));
@@ -98,8 +97,7 @@ public class EngineIntelligenceReadService {
                     projection.getSourceEventCreatedAtNano(),
                     projection.getSourceEventFingerprint()
             );
-            return projectionOwnership.state() == ScoringOccurrenceOwnership.State.AUTHORITATIVE
-                    && Objects.equals(projectionOwnership, ownership);
+            return Objects.equals(projectionOwnership, ownership);
         } catch (IllegalArgumentException exception) {
             throw new EngineIntelligenceProjectionReadUnavailableException();
         }

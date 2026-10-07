@@ -219,18 +219,13 @@ class FraudFeedbackServiceTest {
     }
 
     @Test
-    void unknownHistoricalOccurrenceFailsClosedBeforeSnapshotOrPersistence() {
+    void missingPersistedOccurrenceIdentityFailsClosedBeforeSnapshotOrPersistence() {
         when(transactionMonitoringUseCase.getScoredTransaction("txn-1"))
-                .thenReturn(scoredTransaction(ScoringOccurrenceOwnership.unknown()));
+                .thenThrow(new IllegalStateException("SCORING_OCCURRENCE_IDENTITY_INVALID"));
 
         assertThatThrownBy(() -> service.create("txn-1", request()))
-                .isInstanceOf(ResponseStatusException.class)
-                .satisfies(exception -> {
-                    ResponseStatusException statusException = (ResponseStatusException) exception;
-                    assertThat(statusException.getStatusCode().value()).isEqualTo(409);
-                    assertThat(statusException.getReason())
-                            .isEqualTo("FRAUD_FEEDBACK_SCORING_OCCURRENCE_UNAVAILABLE");
-                });
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("SCORING_OCCURRENCE_IDENTITY_INVALID");
 
         verify(engineIntelligenceReadService, never()).readForOccurrence(any(), any());
         verify(repository, never()).save(any());
@@ -558,7 +553,7 @@ class FraudFeedbackServiceTest {
         );
         when(transactionMonitoringUseCase.getScoredTransaction("txn-1")).thenReturn(scoredTransaction(
                 ownership,
-                MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED
         ));
         when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
                 .thenThrow(new EngineIntelligenceProjectionReadUnavailableException());
@@ -567,7 +562,7 @@ class FraudFeedbackServiceTest {
 
         assertThat(savedRecords).singleElement().satisfies(saved -> {
             assertThat(saved.getMlPredictionEvidenceOmissionReason())
-                    .isEqualTo(MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE);
+                    .isEqualTo(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED);
             assertThat(saved.getMlModelName()).isNull();
             assertThat(saved.getMlModelVersion()).isNull();
             assertThat(saved.getMlFeatureContractVersion()).isNull();

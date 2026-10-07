@@ -13,6 +13,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBuck
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
 
 import java.time.Instant;
@@ -58,6 +59,8 @@ final class MlPredictionEvidenceProjectionTestSupport {
                 source.alertRecommended(),
                 source.scoringEvidence(),
                 source.engineIntelligence(),
+                null,
+                MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED,
                 source.analystRecommendation()
         );
     }
@@ -139,6 +142,7 @@ final class MlPredictionEvidenceProjectionTestSupport {
                 List.of(),
                 summary,
                 evidence,
+                null,
                 null
         );
     }

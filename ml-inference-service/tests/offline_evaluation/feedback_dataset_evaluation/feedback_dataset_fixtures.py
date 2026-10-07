@@ -49,7 +49,7 @@ def record(**overrides: object) -> dict[str, object]:
         "rulesEvidenceStatus": "AVAILABLE",
         "rulesRiskLevel": "HIGH",
         "mlPredictionEvidenceStatus": "LEGITIMATELY_ABSENT",
-        "mlPredictionEvidenceOmissionReason": "LEGITIMATE_ABSENCE",
+        "mlPredictionEvidenceOmissionReason": "DIAGNOSTIC_EMISSION_DISABLED",
         "mlPredictionScore": None,
         "mlPredictionRiskLevel": None,
         "mlPredictionExecutedAt": None,
@@ -78,7 +78,7 @@ def record(**overrides: object) -> dict[str, object]:
                 payload[field] = value
     if "mlPredictionEvidenceOmissionReason" not in overrides:
         payload["mlPredictionEvidenceOmissionReason"] = (
-            "LEGITIMATE_ABSENCE"
+            "DIAGNOSTIC_EMISSION_DISABLED"
             if payload["mlPredictionEvidenceStatus"] == "LEGITIMATELY_ABSENT"
             else None
         )

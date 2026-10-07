@@ -58,7 +58,12 @@ class ScoredTransactionDocumentMapperTest {
                 List.of("DEVICE_NOVELTY"),
                 Map.of(),
                 Map.of(),
-                true
+                true,
+                List.of(),
+                null,
+                null,
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                null
         ));
 
         assertThat(document.getTransactionIdSearch()).isEqualTo("txn-abc-123");
@@ -68,8 +73,12 @@ class ScoredTransactionDocumentMapperTest {
         assertThat(document.getSourceEventId()).isEqualTo("event-1");
         assertThat(document.getSourceEventCreatedAt()).isEqualTo("2026-01-01T00:00:00Z");
         assertThat(document.getSourceEventFingerprint()).matches("[0-9a-f]{64}");
-        assertThat(mapper.toDomain(document).scoringOccurrenceOwnership().state())
-                .isEqualTo(ScoringOccurrenceOwnership.State.AUTHORITATIVE);
+        assertThat(mapper.toDomain(document).scoringOccurrenceOwnership())
+                .isEqualTo(ScoringOccurrenceOwnership.authoritative(
+                        "event-1",
+                        Instant.parse("2026-01-01T00:00:00Z"),
+                        document.getSourceEventFingerprint()
+                ));
     }
 
     @Test
@@ -99,6 +108,8 @@ class ScoredTransactionDocumentMapperTest {
                 true,
                 List.of(),
                 null,
+                null,
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
                 AnalystRecommendationResult.absent()
         );
 
@@ -185,14 +196,11 @@ class ScoredTransactionDocumentMapperTest {
     }
 
     @Test
-    void shouldKeepHistoricalProjectionWithoutSourceIdentityExplicitlyUnknown() {
+    void shouldRejectIdentityFreeHistoricalProjection() {
         var historical = new com.frauddetection.alert.persistence.ScoredTransactionDocument();
         historical.setTransactionId("txn-historical");
 
-        var domain = mapper.toDomain(historical);
-
-        assertThat(domain.scoringOccurrenceOwnership())
-                .isEqualTo(ScoringOccurrenceOwnership.unknown());
+        assertInvalidOccurrence(historical);
     }
 
     @Test

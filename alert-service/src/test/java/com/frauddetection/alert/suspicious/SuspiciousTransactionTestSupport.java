@@ -99,7 +99,11 @@ final class SuspiciousTransactionTestSupport {
                 base.scoreDetails(),
                 base.featureSnapshot(),
                 alertRecommended,
-                scoringEvidence
+                scoringEvidence,
+                base.engineIntelligence(),
+                base.mlPredictionEvidence(),
+                base.mlPredictionEvidenceOmissionReason(),
+                base.analystRecommendation()
         );
     }
 
@@ -127,7 +131,11 @@ final class SuspiciousTransactionTestSupport {
                 scoreDetails,
                 base.featureSnapshot(),
                 base.alertRecommended(),
-                base.scoringEvidence()
+                base.scoringEvidence(),
+                base.engineIntelligence(),
+                base.mlPredictionEvidence(),
+                base.mlPredictionEvidenceOmissionReason(),
+                base.analystRecommendation()
         );
     }
 
@@ -155,7 +163,11 @@ final class SuspiciousTransactionTestSupport {
                 base.scoreDetails(),
                 base.featureSnapshot(),
                 base.alertRecommended(),
-                base.scoringEvidence()
+                base.scoringEvidence(),
+                base.engineIntelligence(),
+                base.mlPredictionEvidence(),
+                base.mlPredictionEvidenceOmissionReason(),
+                base.analystRecommendation()
         );
     }
 

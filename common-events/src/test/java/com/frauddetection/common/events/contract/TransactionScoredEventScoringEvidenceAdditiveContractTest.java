@@ -6,6 +6,7 @@ import com.frauddetection.common.events.evidence.ScoringEvidenceSource;
 import com.frauddetection.common.events.evidence.ScoringEvidenceStatus;
 import com.frauddetection.common.events.evidence.ScoringEvidenceType;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import tools.jackson.databind.ObjectMapper;
 
 import org.junit.jupiter.api.Test;
@@ -43,7 +44,11 @@ class TransactionScoredEventScoringEvidenceAdditiveContractTest {
                 Map.of("modelAvailable", true),
                 Map.of("featureFlagCount", 1),
                 true,
-                List.of(evidence())
+                List.of(evidence()),
+                null,
+                null,
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                null
         );
 
         String json = objectMapper().writeValueAsString(event);
@@ -82,6 +87,10 @@ class TransactionScoredEventScoringEvidenceAdditiveContractTest {
                 Map.of("modelAvailable", true),
                 Map.of(),
                 false,
+                null,
+                null,
+                null,
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
                 null
         );
 

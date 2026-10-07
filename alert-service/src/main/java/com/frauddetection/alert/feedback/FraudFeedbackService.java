@@ -180,7 +180,7 @@ public class FraudFeedbackService {
         ScoringOccurrenceOwnership ownership = transaction == null
                 ? null
                 : transaction.scoringOccurrenceOwnership();
-        if (ownership == null || ownership.state() != ScoringOccurrenceOwnership.State.AUTHORITATIVE) {
+        if (ownership == null) {
             throw new ResponseStatusException(
                     HttpStatus.CONFLICT,
                     "FRAUD_FEEDBACK_SCORING_OCCURRENCE_UNAVAILABLE"

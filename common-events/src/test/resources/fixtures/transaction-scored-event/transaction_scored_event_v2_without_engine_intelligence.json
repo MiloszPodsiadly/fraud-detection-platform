@@ -32,5 +32,6 @@
   "scoreDetails": {},
   "featureSnapshot": {},
   "alertRecommended": true,
-  "scoringEvidence": []
+  "scoringEvidence": [],
+  "mlPredictionEvidenceOmissionReason": "DIAGNOSTIC_EMISSION_DISABLED"
 }

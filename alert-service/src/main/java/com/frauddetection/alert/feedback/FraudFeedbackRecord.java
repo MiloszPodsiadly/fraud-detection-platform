@@ -107,7 +107,7 @@ public class FraudFeedbackRecord {
         }
     }
     void captureScoringOccurrence(ScoringOccurrenceOwnership ownership) {
-        if (ownership == null || ownership.state() != ScoringOccurrenceOwnership.State.AUTHORITATIVE) {
+        if (ownership == null) {
             throw new IllegalArgumentException("FRAUD_FEEDBACK_AUTHORITATIVE_SCORING_OCCURRENCE_REQUIRED");
         }
         Optional<ScoringOccurrenceOwnership> existing = scoringOccurrenceOwnership();

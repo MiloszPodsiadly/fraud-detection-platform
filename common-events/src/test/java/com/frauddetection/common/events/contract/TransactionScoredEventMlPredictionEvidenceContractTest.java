@@ -45,6 +45,7 @@ class TransactionScoredEventMlPredictionEvidenceContractTest {
     @Test
     void exactMlPredictionEvidenceRoundTripsWithAssociatedPublicEngineSummary() throws Exception {
         ObjectNode json = eventJson();
+        json.remove("mlPredictionEvidenceOmissionReason");
         json.set("engineIntelligence", objectMapper.valueToTree(summary()));
         json.set("mlPredictionEvidence", objectMapper.valueToTree(evidence(0.8123d, RiskLevel.HIGH, MODEL_IDENTITY)));
 
@@ -60,13 +61,12 @@ class TransactionScoredEventMlPredictionEvidenceContractTest {
     }
 
     @Test
-    void priorEventShapeWithoutEvidenceRemainsAcceptedAndNullFieldIsOmitted() throws Exception {
-        TransactionScoredEvent event = objectMapper.readValue(eventJson().toString(), TransactionScoredEvent.class);
+    void priorEventShapeWithoutEvidenceOutcomeFailsClosed() throws Exception {
+        ObjectNode json = eventJson();
+        json.remove("mlPredictionEvidenceOmissionReason");
 
-        assertThat(event.mlPredictionEvidence()).isNull();
-        assertThat(event.mlPredictionEvidenceOmissionReason()).isNull();
-        assertThat(objectMapper.writeValueAsString(event))
-                .doesNotContain("mlPredictionEvidence", "mlPredictionEvidenceOmissionReason");
+        assertThatThrownBy(() -> objectMapper.readValue(json.toString(), TransactionScoredEvent.class))
+                .hasRootCauseMessage("ML_PREDICTION_EVIDENCE_REQUIRES_EXACTLY_ONE_OUTCOME");
     }
 
     @Test
@@ -101,7 +101,7 @@ class TransactionScoredEventMlPredictionEvidenceContractTest {
         json.set("mlPredictionEvidence", objectMapper.valueToTree(
                 evidence(0.8123d, RiskLevel.HIGH, MODEL_IDENTITY)
         ));
-        json.put("mlPredictionEvidenceOmissionReason", "LEGITIMATE_ABSENCE");
+        json.put("mlPredictionEvidenceOmissionReason", "PREDICTION_NOT_ACCEPTED");
 
         assertThatThrownBy(() -> objectMapper.readValue(json.toString(), TransactionScoredEvent.class))
                 .hasRootCauseMessage("ML_PREDICTION_EVIDENCE_REQUIRES_EXACTLY_ONE_OUTCOME");
@@ -139,8 +139,7 @@ class TransactionScoredEventMlPredictionEvidenceContractTest {
     void emittedEngineIntelligenceContradictsPipelineLevelOmission() throws Exception {
         for (MlPredictionEvidenceOmissionReason reason : List.of(
                 MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
-                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE,
-                MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE
         )) {
             ObjectNode json = eventWithSummary(summaryWithUnavailableMl());
             json.put("mlPredictionEvidenceOmissionReason", reason.name());
@@ -170,6 +169,7 @@ class TransactionScoredEventMlPredictionEvidenceContractTest {
     @Test
     void evidenceWithoutEngineIntelligenceFailsClosed() throws Exception {
         ObjectNode json = eventJson();
+        json.remove("mlPredictionEvidenceOmissionReason");
         json.set("mlPredictionEvidence", objectMapper.valueToTree(evidence(0.8123d, RiskLevel.HIGH, MODEL_IDENTITY)));
 
         assertThatThrownBy(() -> objectMapper.readValue(json.toString(), TransactionScoredEvent.class))
@@ -230,6 +230,7 @@ class TransactionScoredEventMlPredictionEvidenceContractTest {
 
     private ObjectNode eventWithSummary(EngineIntelligenceSummary summary) throws Exception {
         ObjectNode json = eventJson();
+        json.remove("mlPredictionEvidenceOmissionReason");
         json.set("engineIntelligence", objectMapper.valueToTree(summary));
         return json;
     }
@@ -257,7 +258,12 @@ class TransactionScoredEventMlPredictionEvidenceContractTest {
                 List.of("HIGH_VELOCITY"),
                 Map.of(),
                 Map.of(),
-                true
+                true,
+                List.of(),
+                null,
+                null,
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                null
         )));
     }
 

@@ -198,7 +198,6 @@ class EngineIntelligenceEmissionMetricsTest {
                 MlPredictionEvidenceOmissionReason.INVALID_SCORE,
                 MlPredictionEvidenceOmissionReason.IDENTITY_VALIDATION_FAILURE,
                 MlPredictionEvidenceOmissionReason.EVIDENCE_SOURCE_INTEGRITY_FAILURE,
-                MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE,
                 MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED
         );
     }

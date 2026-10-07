@@ -468,7 +468,7 @@ class FeedbackDatasetSchemaContractTest {
                 FeedbackDatasetRulesEvidenceStatus.UNAVAILABLE,
                 null,
                 FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT,
-                MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE,
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
                 null,
                 null,
                 null,
@@ -543,7 +543,7 @@ class FeedbackDatasetSchemaContractTest {
         if (includeIdentityFields) {
             boolean available = modelName != null || modelVersion != null || featureContractVersion != null;
             record.put("mlPredictionEvidenceStatus", available ? "AVAILABLE" : "LEGITIMATELY_ABSENT");
-            record.put("mlPredictionEvidenceOmissionReason", available ? null : "LEGITIMATE_ABSENCE");
+            record.put("mlPredictionEvidenceOmissionReason", available ? null : "DIAGNOSTIC_EMISSION_DISABLED");
             record.put("mlPredictionScore", available ? 0.8123 : null);
             record.put("mlPredictionRiskLevel", available ? "HIGH" : null);
             record.put("mlPredictionExecutedAt", available ? "2026-06-01T00:00:01Z" : null);

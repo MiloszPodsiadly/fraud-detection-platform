@@ -47,7 +47,8 @@ class ScoredTransactionResponseMapperTest {
                         "private-source-event",
                         Instant.parse("2026-06-18T10:00:02Z"),
                         "a".repeat(64)
-                )
+                ),
+                com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED
         );
 
         var listResponse = mapper.toResponse(transaction);
@@ -107,7 +108,8 @@ class ScoredTransactionResponseMapperTest {
                         "event-1",
                         Instant.parse("2026-06-18T10:00:01Z"),
                         "a".repeat(64)
-                )
+                ),
+                com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED
         );
     }
 }

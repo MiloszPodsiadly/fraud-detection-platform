@@ -28,6 +28,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class FeedbackDatasetBuilderTest {
@@ -341,7 +342,7 @@ class FeedbackDatasetBuilderTest {
     }
 
     @Test
-    void exportsHistoricalAvailableMlSnapshotWithoutLineageAsValidJsonl() {
+    void historicalAvailableMlSnapshotWithoutLineageIsNotCurrentDatasetObservation() {
         FraudFeedbackRecord source = feedback(
                 "feedback-historical",
                 "txn-historical",
@@ -352,26 +353,39 @@ class FeedbackDatasetBuilderTest {
         source.setAgreementStatus(EngineIntelligenceAgreementStatus.DISAGREEMENT);
         source.setRiskMismatchStatus(EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH);
         source.setScoreDeltaBucket(EngineIntelligenceScoreDeltaBucket.LARGE);
+        clearOccurrence(source);
         when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
 
         FeedbackDatasetBuildResult result = builder.build(request(10));
 
         assertThat(result.failed()).isFalse();
-        assertThat(result.records()).singleElement().satisfies(record -> {
-            assertThat(record.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
-            assertThat(record.agreementStatus()).isEqualTo(EngineIntelligenceAgreementStatus.DISAGREEMENT);
-            assertThat(record.riskMismatchStatus()).isEqualTo(EngineIntelligenceRiskMismatchStatus.MATERIAL_RISK_MISMATCH);
-            assertThat(record.scoreDeltaBucket()).isEqualTo(EngineIntelligenceScoreDeltaBucket.LARGE);
-            assertThat(record.mlModelName()).isNull();
-            assertThat(record.mlModelVersion()).isNull();
-            assertThat(record.mlFeatureContractVersion()).isNull();
-        });
+        assertThat(result.rawRowsRead()).isEqualTo(1);
+        assertThat(result.records()).isEmpty();
+        assertThat(result.skippedMissingRequiredFieldCount()).isEqualTo(1);
+        assertThat(result.skippedInvalidSourceRecordCount()).isZero();
         assertThat(new FeedbackDatasetJsonlWriter().writeJsonl(result))
-                .contains("\"type\":\"DATASET_RECORD\"")
-                .contains("\"engineIntelligenceStatus\":\"AVAILABLE\"")
-                .contains("\"mlModelName\":null")
-                .contains("\"mlModelVersion\":null")
-                .contains("\"mlFeatureContractVersion\":null");
+                .doesNotContain("\"type\":\"DATASET_RECORD\"");
+        verifyNoInteractions(evidenceRepository);
+    }
+
+    @Test
+    void partialOccurrenceLineageIsCountedAsInvalidSource() {
+        FraudFeedbackRecord source = feedback(
+                "feedback-partial",
+                "txn-partial",
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                FROM
+        );
+        ReflectionTestUtils.setField(source, "sourceEventFingerprint", null);
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.rawRowsRead()).isEqualTo(1);
+        assertThat(result.records()).isEmpty();
+        assertThat(result.skippedMissingRequiredFieldCount()).isZero();
+        assertThat(result.skippedInvalidSourceRecordCount()).isEqualTo(1);
+        verifyNoInteractions(evidenceRepository);
     }
 
     @Test
@@ -530,7 +544,6 @@ class FeedbackDatasetBuilderTest {
                 MlPredictionEvidenceOmissionReason.INVALID_SCORE,
                 MlPredictionEvidenceOmissionReason.IDENTITY_VALIDATION_FAILURE,
                 MlPredictionEvidenceOmissionReason.EVIDENCE_SOURCE_INTEGRITY_FAILURE,
-                MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE,
                 MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED
         );
         List<FraudFeedbackRecord> sources = new java.util.ArrayList<>();
@@ -559,7 +572,6 @@ class FeedbackDatasetBuilderTest {
                         FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED,
                         FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED,
                         FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED,
-                        FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT,
                         FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
                 );
         assertThat(result.records()).extracting(FeedbackDatasetRecord::mlPredictionEvidenceOmissionReason)
@@ -734,6 +746,43 @@ class FeedbackDatasetBuilderTest {
     }
 
     @Test
+    void evidenceLookupIncludesOnlyExactOccurrenceEligibleRows() {
+        FraudFeedbackRecord eligible = feedback(
+                "feedback-eligible",
+                "txn-eligible",
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                FROM
+        );
+        captureOccurrence(eligible, "event-eligible", FROM.minusSeconds(1));
+        FraudFeedbackRecord missing = feedback(
+                "feedback-missing",
+                "txn-missing",
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                FROM.plusSeconds(1)
+        );
+        clearOccurrence(missing);
+        FraudFeedbackRecord invalid = feedback(
+                "feedback-invalid",
+                "txn-invalid",
+                FraudFeedbackLabel.CONFIRMED_FRAUD,
+                FROM.plusSeconds(2)
+        );
+        ReflectionTestUtils.setField(invalid, "sourceEventCreatedAtNano", null);
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(eligible, missing, invalid));
+        when(evidenceRepository.findAllById(any())).thenReturn(List.of(evidence(
+                "event-eligible", "txn-eligible", FROM.minusSeconds(1), "model-a", 0.91
+        )));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.rawRowsRead()).isEqualTo(3);
+        assertThat(result.recordsReturned()).isEqualTo(1);
+        assertThat(result.skippedMissingRequiredFieldCount()).isEqualTo(1);
+        assertThat(result.skippedInvalidSourceRecordCount()).isEqualTo(1);
+        assertThat(requestedEvidenceIds()).containsExactly("event-eligible");
+    }
+
+    @Test
     void internalOccurrenceIdentifiersDoNotLeakIntoJsonl() {
         FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
         source.setCorrelationId("correlation-secret");
@@ -771,7 +820,16 @@ class FeedbackDatasetBuilderTest {
         record.setDecisionReasonCodes(defaultReasonCodes(label));
         record.setFraudScore(0.91);
         record.setRiskLevel(RiskLevel.HIGH);
+        captureOccurrence(record, "event-" + feedbackId, createdAt.minusSeconds(1));
         return record;
+    }
+
+    private void clearOccurrence(FraudFeedbackRecord record) {
+        ReflectionTestUtils.setField(record, "sourceEventId", null);
+        ReflectionTestUtils.setField(record, "sourceEventCreatedAt", null);
+        ReflectionTestUtils.setField(record, "sourceEventCreatedAtEpochSecond", null);
+        ReflectionTestUtils.setField(record, "sourceEventCreatedAtNano", null);
+        ReflectionTestUtils.setField(record, "sourceEventFingerprint", null);
     }
 
     private void captureOccurrence(FraudFeedbackRecord record, String sourceEventId, Instant sourceEventCreatedAt) {

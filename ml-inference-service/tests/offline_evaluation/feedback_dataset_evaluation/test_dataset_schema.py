@@ -259,7 +259,7 @@ class FeedbackDatasetSchemaTest(unittest.TestCase):
         ))
         self._assert_rejected(record(
             mlPredictionEvidenceStatus="AVAILABLE",
-            mlPredictionEvidenceOmissionReason="LEGITIMATE_ABSENCE",
+            mlPredictionEvidenceOmissionReason="DIAGNOSTIC_EMISSION_DISABLED",
             mlModelName="python-logistic-fraud-model",
             mlModelVersion="2026-06-25.v1",
             mlFeatureContractVersion="feature-contract-v2",

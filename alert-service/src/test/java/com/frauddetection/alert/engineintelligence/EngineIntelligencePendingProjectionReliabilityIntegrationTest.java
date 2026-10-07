@@ -457,6 +457,7 @@ class EngineIntelligencePendingProjectionReliabilityIntegrationTest {
                 source.scoringEvidence(),
                 source.engineIntelligence(),
                 source.mlPredictionEvidence(),
+                source.mlPredictionEvidenceOmissionReason(),
                 source.analystRecommendation()
         );
     }

@@ -8,6 +8,7 @@ import com.frauddetection.common.events.evidence.ScoringEvidenceSeverity;
 import com.frauddetection.common.events.evidence.ScoringEvidenceSource;
 import com.frauddetection.common.events.evidence.ScoringEvidenceStatus;
 import com.frauddetection.common.events.evidence.ScoringEvidenceType;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
@@ -466,7 +467,11 @@ class AlertEvidenceSnapshotProjectionServiceTest {
                 Map.of(),
                 Map.of(),
                 alertRecommended,
-                scoringEvidence
+                scoringEvidence,
+                null,
+                null,
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                null
         );
     }
 

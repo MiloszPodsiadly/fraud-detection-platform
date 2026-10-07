@@ -18,7 +18,6 @@ import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.O
 import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.Outcome.IDEMPOTENT_REPLAY;
 import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.Outcome.STALE_REJECTED;
 import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.ReasonCode.FIRST_OCCURRENCE_ACCEPTED;
-import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.ReasonCode.HISTORICAL_OCCURRENCE_CLAIMED;
 import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.ReasonCode.IDENTICAL_OCCURRENCE_REPLAYED;
 import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.ReasonCode.NEWER_OCCURRENCE_ACCEPTED;
 import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.ReasonCode.OCCURRENCE_FINGERPRINT_MISSING;
@@ -44,13 +43,7 @@ public class ScoredTransactionProjectionWriter {
                     ScoredTransactionDocument.class
             );
             if (current != null) {
-                ScoringOccurrenceOwnership currentOccurrence = persistedOwnership(current);
-                if (currentOccurrence.state() == ScoringOccurrenceOwnership.State.UNKNOWN_OCCURRENCE) {
-                    if (updated(replaceHistoricalUnknown(candidate))) {
-                        return new ScoringOccurrenceAdmissionResult(APPLIED_NEWER, HISTORICAL_OCCURRENCE_CLAIMED);
-                    }
-                    continue;
-                }
+                persistedOwnership(current);
                 ScoringOccurrenceAdmissionResult classified = classify(candidate, current);
                 if (classified != null) {
                     return classified;
@@ -72,34 +65,12 @@ public class ScoredTransactionProjectionWriter {
         throw new IllegalStateException("SCORING_OCCURRENCE_ADMISSION_INDETERMINATE");
     }
 
-    private UpdateResult replaceHistoricalUnknown(ScoredTransactionDocument candidate) {
-        return mongoTemplate.updateFirst(
-                historicalUnknownQuery(candidate),
-                replacementUpdate(candidate),
-                ScoredTransactionDocument.class
-        );
-    }
-
     private UpdateResult replaceOlder(ScoredTransactionDocument candidate) {
         return mongoTemplate.updateFirst(
                 olderOccurrenceQuery(candidate),
                 replacementUpdate(candidate),
                 ScoredTransactionDocument.class
         );
-    }
-
-    private Query historicalUnknownQuery(ScoredTransactionDocument candidate) {
-        Criteria unknownOccurrence = new Criteria().andOperator(
-                Criteria.where("sourceEventId").is(null),
-                Criteria.where("sourceEventCreatedAt").is(null),
-                Criteria.where("sourceEventCreatedAtEpochSecond").is(null),
-                Criteria.where("sourceEventCreatedAtNano").is(null),
-                Criteria.where("sourceEventFingerprint").is(null)
-        );
-        return new Query(new Criteria().andOperator(
-                Criteria.where("_id").is(candidate.getTransactionId()),
-                unknownOccurrence
-        ));
     }
 
     private Query olderOccurrenceQuery(ScoredTransactionDocument candidate) {
@@ -198,16 +169,13 @@ public class ScoredTransactionProjectionWriter {
             throw new IllegalArgumentException("AUTHORITATIVE_SCORING_OCCURRENCE_REQUIRED");
         }
         try {
-            ScoringOccurrenceOwnership occurrence = ScoringOccurrenceOwnership.fromPersistedIdentity(
+            ScoringOccurrenceOwnership.fromPersistedIdentity(
                     candidate.getSourceEventId(),
                     candidate.getSourceEventCreatedAt(),
                     candidate.getSourceEventCreatedAtEpochSecond(),
                     candidate.getSourceEventCreatedAtNano(),
                     candidate.getSourceEventFingerprint()
             );
-            if (occurrence.state() != ScoringOccurrenceOwnership.State.AUTHORITATIVE) {
-                throw new IllegalArgumentException("AUTHORITATIVE_SCORING_OCCURRENCE_REQUIRED");
-            }
         } catch (IllegalArgumentException exception) {
             throw new IllegalArgumentException("AUTHORITATIVE_SCORING_OCCURRENCE_REQUIRED");
         }

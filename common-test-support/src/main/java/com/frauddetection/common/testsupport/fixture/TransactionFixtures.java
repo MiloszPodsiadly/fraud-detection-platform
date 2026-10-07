@@ -5,6 +5,7 @@ import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.features.FraudFeatureContract;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.model.CustomerContext;
 import com.frauddetection.common.events.model.DeviceInfo;
 import com.frauddetection.common.events.model.LocationInfo;
@@ -272,7 +273,12 @@ public final class TransactionFixtures {
                     reasonCodes,
                     Map.of("baseScore", 0.72d, "velocityBoost", 0.12d, "deviceBoost", 0.10d),
                     featureSnapshot,
-                    true
+                    true,
+                    List.of(),
+                    null,
+                    null,
+                    MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                    null
             );
         }
     }

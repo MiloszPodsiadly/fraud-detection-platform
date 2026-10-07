@@ -60,7 +60,8 @@ class TransactionMonitoringServiceSearchTest {
                         "event-1",
                         Instant.parse("2026-06-18T10:00:01Z"),
                         "a".repeat(64)
-                )
+                ),
+                com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED
         );
         List<ScoredTransactionDocument> countProbe = IntStream
                 .range(0, ScoredTransactionSearchPolicy.MAX_FILTERED_TOTAL_COUNT + 1)

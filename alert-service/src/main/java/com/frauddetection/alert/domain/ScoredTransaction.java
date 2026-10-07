@@ -25,36 +25,4 @@ public record ScoredTransaction(
         ScoringOccurrenceOwnership scoringOccurrenceOwnership,
         MlPredictionEvidenceOmissionReason mlPredictionEvidenceOmissionReason
 ) {
-    public ScoredTransaction(
-            String transactionId,
-            String customerId,
-            String correlationId,
-            Instant transactionTimestamp,
-            Instant scoredAt,
-            Money transactionAmount,
-            MerchantInfo merchantInfo,
-            Double fraudScore,
-            RiskLevel riskLevel,
-            Boolean alertRecommended,
-            List<String> reasonCodes,
-            AnalystRecommendationResult analystRecommendation,
-            ScoringOccurrenceOwnership scoringOccurrenceOwnership
-    ) {
-        this(
-                transactionId,
-                customerId,
-                correlationId,
-                transactionTimestamp,
-                scoredAt,
-                transactionAmount,
-                merchantInfo,
-                fraudScore,
-                riskLevel,
-                alertRecommended,
-                reasonCodes,
-                analystRecommendation,
-                scoringOccurrenceOwnership,
-                null
-        );
-    }
 }

@@ -118,7 +118,22 @@ public class FeedbackDatasetBuilder {
                 excludedGovernanceReview++;
                 continue;
             }
-            eligibleSources.add(new EligibleSource(source, evaluationLabel.orElseThrow()));
+            Optional<ScoringOccurrenceOwnership> ownership;
+            try {
+                ownership = source.scoringOccurrenceOwnership();
+            } catch (IllegalStateException exception) {
+                skippedInvalidSource++;
+                continue;
+            }
+            if (ownership.isEmpty()) {
+                skippedMissingRequired++;
+                continue;
+            }
+            eligibleSources.add(new EligibleSource(
+                    source,
+                    evaluationLabel.orElseThrow(),
+                    ownership.orElseThrow()
+            ));
         }
 
         List<ResolvedSource> resolvedSources;
@@ -247,18 +262,9 @@ public class FeedbackDatasetBuilder {
     }
 
     private List<ResolvedSource> resolveMlPredictionEvidence(List<EligibleSource> eligibleSources) {
-        Map<FraudFeedbackRecord, OccurrenceResolution> ownershipBySource = new LinkedHashMap<>();
         Set<String> sourceEventIds = new LinkedHashSet<>();
         for (EligibleSource eligible : eligibleSources) {
-            Optional<ScoringOccurrenceOwnership> ownership;
-            try {
-                ownership = eligible.source().scoringOccurrenceOwnership();
-            } catch (RuntimeException exception) {
-                ownershipBySource.put(eligible.source(), OccurrenceResolution.invalid());
-                continue;
-            }
-            ownershipBySource.put(eligible.source(), OccurrenceResolution.valid(ownership));
-            ownership.map(ScoringOccurrenceOwnership::sourceEventId).ifPresent(sourceEventIds::add);
+            sourceEventIds.add(eligible.ownership().sourceEventId());
         }
 
         Map<String, MlPredictionEvidenceProjection> projectionBySourceEventId = new LinkedHashMap<>();
@@ -275,40 +281,27 @@ public class FeedbackDatasetBuilder {
 
         List<ResolvedSource> resolved = new ArrayList<>(eligibleSources.size());
         for (EligibleSource eligible : eligibleSources) {
-            OccurrenceResolution occurrence = ownershipBySource.get(eligible.source());
-            if (occurrence.malformed()) {
-                resolved.add(new ResolvedSource(
-                        eligible,
-                        FeedbackDatasetMlPredictionEvidence.unavailable(
-                                FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
-                        )
-                ));
-                continue;
-            }
-            Optional<ScoringOccurrenceOwnership> ownership = occurrence.ownership();
-            MlPredictionEvidenceProjection projection = ownership
-                    .map(ScoringOccurrenceOwnership::sourceEventId)
-                    .map(projectionBySourceEventId::get)
-                    .orElse(null);
-            resolved.add(new ResolvedSource(eligible, classifyEvidence(eligible.source(), ownership, projection)));
+            MlPredictionEvidenceProjection projection = projectionBySourceEventId.get(
+                    eligible.ownership().sourceEventId()
+            );
+            resolved.add(new ResolvedSource(eligible, classifyEvidence(
+                    eligible.source(),
+                    eligible.ownership(),
+                    projection
+            )));
         }
         return resolved;
     }
 
     private FeedbackDatasetMlPredictionEvidence classifyEvidence(
             FraudFeedbackRecord source,
-            Optional<ScoringOccurrenceOwnership> ownership,
+            ScoringOccurrenceOwnership ownership,
             MlPredictionEvidenceProjection projection
     ) {
         int feedbackIdentityParts = presentIdentityParts(source);
         if (feedbackIdentityParts != 0 && feedbackIdentityParts != 3) {
             return FeedbackDatasetMlPredictionEvidence.unavailable(
                     FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
-            );
-        }
-        if (ownership.isEmpty()) {
-            return FeedbackDatasetMlPredictionEvidence.unavailable(
-                    FeedbackDatasetMlPredictionEvidenceStatus.MISSING_UNEXPECTEDLY
             );
         }
         if (projection == null) {
@@ -326,7 +319,6 @@ public class FeedbackDatasetBuilder {
         }
 
         try {
-            ScoringOccurrenceOwnership exactOccurrence = ownership.orElseThrow();
             new MlPredictionEvidenceV1(
                     projection.getContractVersion(),
                     projection.getSourceEngineId(),
@@ -338,8 +330,8 @@ public class FeedbackDatasetBuilder {
                     projection.getFeatureContractVersion(),
                     projection.getSourceExecutionTimestamp()
             );
-            if (!exactOccurrence.sourceEventId().equals(projection.getSourceEventId())
-                    || !exactOccurrence.sourceEventCreatedAt().equals(projection.getSourceEventCreatedAt())
+            if (!ownership.sourceEventId().equals(projection.getSourceEventId())
+                    || !ownership.sourceEventCreatedAt().equals(projection.getSourceEventCreatedAt())
                     || !Objects.equals(source.getTransactionId(), projection.getTransactionId())
                     || (source.getCorrelationId() != null
                     && !Objects.equals(source.getCorrelationId(), projection.getCorrelationId()))) {
@@ -404,7 +396,11 @@ public class FeedbackDatasetBuilder {
     private static class MissingRequiredSourceFieldException extends RuntimeException {
     }
 
-    private record EligibleSource(FraudFeedbackRecord source, FeedbackEvaluationLabel evaluationLabel) {
+    private record EligibleSource(
+            FraudFeedbackRecord source,
+            FeedbackEvaluationLabel evaluationLabel,
+            ScoringOccurrenceOwnership ownership
+    ) {
     }
 
     private record ResolvedSource(
@@ -413,17 +409,4 @@ public class FeedbackDatasetBuilder {
     ) {
     }
 
-    private record OccurrenceResolution(
-            Optional<ScoringOccurrenceOwnership> ownership,
-            boolean malformed
-    ) {
-
-        private static OccurrenceResolution valid(Optional<ScoringOccurrenceOwnership> ownership) {
-            return new OccurrenceResolution(ownership, false);
-        }
-
-        private static OccurrenceResolution invalid() {
-            return new OccurrenceResolution(Optional.empty(), true);
-        }
-    }
 }

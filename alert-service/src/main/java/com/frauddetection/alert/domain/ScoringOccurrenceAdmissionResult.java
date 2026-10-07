@@ -29,7 +29,6 @@ public record ScoringOccurrenceAdmissionResult(
     public enum ReasonCode {
         FIRST_OCCURRENCE_ACCEPTED,
         NEWER_OCCURRENCE_ACCEPTED,
-        HISTORICAL_OCCURRENCE_CLAIMED,
         IDENTICAL_OCCURRENCE_REPLAYED,
         OLDER_OCCURRENCE_REJECTED,
         OCCURRENCE_PAYLOAD_CONFLICT,

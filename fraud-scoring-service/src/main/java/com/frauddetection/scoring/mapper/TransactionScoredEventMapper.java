@@ -52,10 +52,6 @@ public class TransactionScoredEventMapper {
         if (mlPredictionEvidence.isPresent() == mlPredictionEvidenceOmissionReason.isPresent()) {
             throw new IllegalArgumentException("ML_PREDICTION_EVIDENCE_REQUIRES_EXACTLY_ONE_OUTCOME");
         }
-        if (mlPredictionEvidenceOmissionReason.orElse(null)
-                == MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE) {
-            throw new IllegalArgumentException("CURRENT_ML_PREDICTION_EVIDENCE_LEGITIMATE_ABSENCE_UNSUPPORTED");
-        }
         TransactionEnrichedEvent event = scoringRequest.event();
         return new TransactionScoredEvent(
                 UUID.randomUUID().toString(),
