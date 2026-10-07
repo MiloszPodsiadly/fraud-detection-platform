@@ -95,21 +95,20 @@ evidence remain governed by their retention policy; rollback does not delete or 
 
 ## Operational Observability Boundary
 
-The producer includes a no-op metrics boundary for disabled skips, enrichment attempts, successes,
-omissions, and latency. Metrics recording is best-effort and cannot block event publishing.
-Production metrics backend integration remains future scope. Before wider rollout, projection and API owners
-must connect the low-cardinality metrics boundary to production telemetry. In particular,
+The producer integrates low-cardinality runtime metrics through `MeterRegistry` and
+`MicrometerEngineIntelligenceEmissionMetrics`. Runtime contexts without a registry use the no-op implementation.
+Metrics recording is best-effort and cannot block event publishing. Dashboards, alert thresholds, SLO policy, and
+operational alerting policy remain future operational scope. In particular,
 `engine_intelligence_emission_omitted_total` answers why the diagnostic emission layer did not produce enrichment,
 while `ml_prediction_evidence_omitted_total` records the authoritative durable evidence-omission reason emitted for
 the scoring occurrence. The metrics are related but intentionally describe different boundaries.
 
-The boundary also covers:
+The integrated instruments are:
 
-- `enrichment_attempt_total`
-- `enrichment_success_total`
-- `enrichment_omitted_total`
-- `enrichment_latency_seconds`
-- `enrichment_timeout_total` if applicable
+- `engine_intelligence_emission_total`, with bounded outcomes `SKIPPED_DISABLED`, `ATTEMPTED`, and `SUCCEEDED`
+- `engine_intelligence_emission_omitted_total`, with a bounded omission-reason label
+- `ml_prediction_evidence_omitted_total`, with a bounded evidence-omission-reason label
+- `engine_intelligence_emission_latency_seconds`
 
 `recordSuccess` means a public `EngineIntelligenceSummary` was actually produced. A completed
 diagnostic pipeline that returns empty is recorded as a bounded omission. Enabled enrichment

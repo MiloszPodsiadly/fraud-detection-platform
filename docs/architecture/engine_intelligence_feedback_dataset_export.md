@@ -1,6 +1,6 @@
 # Engine Intelligence Feedback Dataset Export
 
-Status: FDP-102 internal service foundation.
+Status: retained internal Engine Intelligence analyst-feedback export bounded context.
 
 ## Purpose
 
@@ -10,6 +10,18 @@ intelligence. It does not evaluate models, train models, promote models, change 
 produce recommendations, authorize payments, or mutate alerts, fraud cases, Kafka events, OpenAPI, or UI.
 FDP-102 introduces an internal service foundation only. It is not an approved export surface. The presence of a Spring
 service does not authorize public, operator-triggered, scheduled, CLI, or external export.
+
+## Bounded Context Boundary
+
+`EngineIntelligenceFeedbackDataset*` owns a bounded analyst usefulness/accuracy feedback export assembled from
+Engine Intelligence feedback, current alert decision state, and the transaction-scoped Engine Intelligence
+projection. It remains valid for that independent diagnostic context.
+
+It is not the source of exact model prediction evidence for `feedback-dataset-v2` model evaluation. That evaluation
+uses `FraudFeedbackRecord` with exact scoring-occurrence ownership and the immutable
+`MlPredictionEvidenceProjection` selected by exact source event. It must not use
+`EngineIntelligenceFeedbackDatasetExport`, a current Engine Intelligence projection selected by transaction ID, or a
+latest/current diagnostic projection as a substitute for exact model prediction evidence.
 
 ## Labels
 
@@ -120,11 +132,14 @@ count the file as an evaluation input.
 
 ## Scope
 
-FDP-102 adds no public API, OpenAPI path, UI, scheduled job, CLI job, Python evaluation runner, Kafka change,
+The historical FDP-102 delivery added no public API, OpenAPI path, UI, scheduled job, CLI job, Python evaluation
+runner, Kafka change,
 `TransactionScoredEvent` change, model retraining, model promotion, threshold switching, automatic decisioning,
 recommendation service, payment authorization, alert severity mutation, or fraud-case status mutation.
 
 Any future public/operator/scheduled/external export requires a separate scoped PR with authorization, sensitive-read
 audit, rate limits, privacy review, retention policy, access controls, operational monitoring, and an approved
 privacy-reviewed identifier strategy. Public or operator-triggered export is a separate future scope. The Python ML
-Evaluation Suite is also separate future scope after this internal dataset-export foundation is merged.
+Evaluation Suite was future scope for that historical delivery. The current offline suite is now implemented in the
+separate `feedback-dataset-v2` exact-occurrence bounded context and does not consume this export as exact model
+prediction evidence.

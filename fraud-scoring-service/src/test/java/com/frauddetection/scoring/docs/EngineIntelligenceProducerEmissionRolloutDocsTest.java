@@ -41,15 +41,18 @@ class EngineIntelligenceProducerEmissionRolloutDocsTest {
                 "Set `fraud.scoring.events.engine-intelligence.emit-enabled=false` and redeploy",
                 "Rollback never restores historical null/null evidence semantics",
                 "Operational Observability Boundary",
-                "The producer includes a no-op metrics boundary",
+                "integrates low-cardinality runtime metrics",
+                "`MeterRegistry`",
+                "`MicrometerEngineIntelligenceEmissionMetrics`",
+                "Runtime contexts without a registry use the no-op implementation",
                 "Metrics recording is best-effort and cannot block event publishing",
-                "Production metrics backend integration remains future scope",
-                "Before wider rollout",
-                "`enrichment_attempt_total`",
-                "`enrichment_success_total`",
-                "`enrichment_omitted_total`",
-                "`enrichment_latency_seconds`",
-                "`enrichment_timeout_total` if applicable",
+                "Dashboards, alert thresholds, SLO policy, and",
+                "operational alerting policy remain future operational scope",
+                "`engine_intelligence_emission_total`",
+                "`SKIPPED_DISABLED`, `ATTEMPTED`, and `SUCCEEDED`",
+                "`engine_intelligence_emission_omitted_total`",
+                "`ml_prediction_evidence_omitted_total`",
+                "`engine_intelligence_emission_latency_seconds`",
                 "`recordSuccess` means a public `EngineIntelligenceSummary` was actually produced",
                 "A completed",
                 "diagnostic pipeline that returns empty is recorded as a bounded omission",
@@ -76,6 +79,15 @@ class EngineIntelligenceProducerEmissionRolloutDocsTest {
                 "Future governed evaluation or promotion",
                 "No final decisioning",
                 "No raw or internal aggregation serialization"
+        );
+
+        assertThat(docs).doesNotContain(
+                "Production metrics backend integration remains future scope",
+                "`enrichment_attempt_total`",
+                "`enrichment_success_total`",
+                "`enrichment_omitted_total`",
+                "`enrichment_latency_seconds`",
+                "`enrichment_timeout_total`"
         );
     }
 

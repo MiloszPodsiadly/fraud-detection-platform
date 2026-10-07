@@ -37,9 +37,15 @@ and archived or quarantined under the retention policy; archive does not mean de
 rewrites historical lineage. Source ingestion accounting keeps every excluded source row visible without exporting
 private occurrence identifiers.
 
-This is separate from the Engine Intelligence Feedback Dataset Export bounded context. The feedback dataset does not replace that export contract,
-does not use `alert-service/src/main/java/com/frauddetection/alert/engineintelligence/dataset` as source of truth, and
-does not use the removed competing `app.feedback.feedback_dataset` local training-store path as source of truth.
+This is separate from the Engine Intelligence analyst usefulness/accuracy feedback bounded context owned by
+`EngineIntelligenceFeedbackDataset*`. The feedback dataset does not replace that export contract, does not use
+`EngineIntelligenceFeedbackDatasetExport`, a current Engine Intelligence projection selected by transaction ID, or
+a latest/current diagnostic projection as the source of exact model prediction evidence. It does not use
+`alert-service/src/main/java/com/frauddetection/alert/engineintelligence/dataset` as source of truth and does not use
+the removed competing `app.feedback.feedback_dataset` local training-store path as source of truth.
+
+This exact-evidence evaluation scope does not implement a Model Card, Promotion Workflow, retraining, model
+activation, threshold automation, Device Risk, Merchant Risk, Graph Risk, or recommendation automation.
 
 ## Request And Query
 
