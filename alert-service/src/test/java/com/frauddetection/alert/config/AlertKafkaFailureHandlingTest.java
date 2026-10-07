@@ -59,7 +59,7 @@ class AlertKafkaFailureHandlingTest {
     }
 
     @Test
-    void baselineConsumerIsolatesInvalidOptionalEvidenceWhileStrictConsumerQuarantinesIt() {
+    void everyCurrentConsumerFactoryRejectsInvalidCanonicalEvidence() {
         byte[] payload = ("{"
                 + "\"eventId\":\"event-1\","
                 + "\"transactionId\":\"transaction-1\","
@@ -76,14 +76,13 @@ class AlertKafkaFailureHandlingTest {
         RecordHeaders baselineHeaders = new RecordHeaders();
         RecordHeaders evidenceHeaders = new RecordHeaders();
 
-        TransactionScoredEvent baseline = baselineFactory.getValueDeserializer()
+        TransactionScoredEvent rejectedBaseline = baselineFactory.getValueDeserializer()
                 .deserialize("transactions.scored", baselineHeaders, payload);
         TransactionScoredEvent rejectedEvidence = evidenceFactory.getValueDeserializer()
                 .deserialize("transactions.scored", evidenceHeaders, payload);
 
-        assertThat(baseline).isNotNull();
-        assertThat(baseline.mlPredictionEvidence()).isNull();
-        assertThat(baselineHeaders).isEmpty();
+        assertThat(rejectedBaseline).isNull();
+        assertThat(baselineHeaders).isNotEmpty();
         assertThat(rejectedEvidence).isNull();
         assertThat(evidenceHeaders).isNotEmpty();
     }
@@ -136,7 +135,7 @@ class AlertKafkaFailureHandlingTest {
         );
 
         recoverer.accept(source, null, new DeserializationException(
-                "invalid optional evidence",
+                "invalid canonical event",
                 invalidEvidence,
                 false,
                 new IllegalArgumentException("bounded evidence rejection")

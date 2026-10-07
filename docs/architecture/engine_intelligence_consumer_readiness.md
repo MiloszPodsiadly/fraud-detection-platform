@@ -15,27 +15,27 @@ compatibility guidance.
 | Area | Known consumer or usage path | FDP-93 treatment |
 | --- | --- | --- |
 | Shared contract | `common-events` `TransactionScoredEvent` and contract tests | Shared current-absent, minimal, full-bounded, unknown-nested, and unknown-top-level fixtures |
-| Authoritative alert Kafka consumer | `AlertKafkaConfig` -> `AuthoritativeTransactionScoredEventDeserializer` -> `TransactionScoredEventListener` | Preserves strict deserialization for the authoritative event while deliberately removing only optional `mlPredictionEvidence`; alert and monitoring availability do not depend on diagnostic evidence projection |
+| Authoritative alert Kafka consumer | `AlertKafkaConfig` -> `JacksonKafkaDeserializer<TransactionScoredEvent>` -> `TransactionScoredEventListener` | Uses the same strict full-event contract as every current scored-event consumer; baseline decisioning does not depend on diagnostic projection storage, but the consumer never removes or repairs canonical evidence |
 | Current Engine Intelligence projection consumer | `AlertKafkaConfig` -> `EngineIntelligenceProjectionEventListener` -> `EngineIntelligenceProjectionService` / `EngineIntelligencePendingProjectionService` | Uses an independent consumer group and error handler, projects diagnostics only when the event owns the current scoring occurrence, and durably defers a valid projection while baseline persistence is pending |
 | Engine Intelligence projection-only redrive | `AlertKafkaConfig` -> `EngineIntelligenceRedriveListener` -> `EngineIntelligencePendingProjectionService` -> `EngineIntelligenceProjectionService` | Disabled by default; accepts only dedicated-topic records with complete EI source provenance, uses the existing durable inbox and worker, and cannot invoke baseline business processing |
 | ML prediction evidence consumer | `AlertKafkaConfig` -> `MlPredictionEvidenceEventListener` -> `MlPredictionEvidenceProjectionService` | Uses strict full-event deserialization in a separate Kafka consumer group, record acknowledgement, bounded retry, and dead-letter handling |
 | ML prediction evidence redrive | `AlertKafkaConfig` -> `MlPredictionEvidenceRedriveListener` -> `MlPredictionEvidenceProjectionService` | Disabled by default; the dedicated redrive topic and group recover only immutable private evidence, require original source coordinates, and route invalid input to terminal quarantine without replaying baseline business processing |
-| Alert monitoring projection | `TransactionMonitoringService` -> `ScoredTransactionDocumentMapper` -> `ScoredTransactionDocument` | Existing projection compared against the current shape without Engine Intelligence |
+| Alert monitoring projection | `TransactionMonitoringService` -> `ScoredTransactionDocumentMapper` -> `ScoredTransactionDocument` | Persists baseline business fields, exact scoring-occurrence ownership, and the canonical ML evidence omission outcome without persisting raw Engine Intelligence |
 | Scoring occurrence identity | `ScoredTransactionDocumentMapper` and `EngineIntelligenceProjectionService` -> `ScoringOccurrenceFingerprint` | One canonical fingerprint binds current-state admission and optional diagnostic projection to the same exact scored-event payload |
 | Alert creation path | `AlertManagementService` -> `AlertCaseFactory` -> `AlertDocument` | Historical inventory only; no FDP-93 engine-intelligence projection |
 | Fraud-case path | `FraudCaseManagementService` -> `FraudCaseDocument` and `FraudCaseTransactionDocument` | Historical inventory only; no FDP-93 engine-intelligence projection |
 | Suspicious transaction path | `SuspiciousTransactionProjectionService` -> `SuspiciousTransactionDocument` | Historical inventory only; no FDP-93 engine-intelligence projection |
 | Evidence paths | `EvidenceProjectionService` and `AlertEvidenceSnapshotProjectionService` | Historical inventory only; no FDP-93 engine-intelligence projection |
-| Producer boundary | `TransactionFraudScoringService` -> `TransactionScoredEventMapper` -> `KafkaTransactionScoredEventPublisher` | FDP-94 adds a controlled optional public mapper capability while the live service remains mechanically guarded to keep the old emitted shape |
+| Producer boundary | `TransactionFraudScoringService` -> `TransactionScoredEventMapper` -> `KafkaTransactionScoredEventPublisher` | Disabled diagnostics omit diagnostic payloads but emit the current canonical `DIAGNOSTIC_EMISSION_DISABLED` evidence outcome |
 | Test fixture helper | `common-test-support` `TransactionFixtures` | Existing test-only builder remains documented separately |
 | Integration tests | `AlertServiceIntegrationTest`, `FraudDetectionPlatformEndToEndIntegrationTest`, and `FraudScoringIntegrationTest` | Existing scored-event integration coverage remains in place |
 | Replay and smoke scripts | Repository search found raw-transaction replay input only; no scored-event fixture reader was found | Shared FDP-93 fixtures are the scored-event compatibility source |
 | API/UI | Repository search found no direct `TransactionScoredEvent` deserializer in API or analyst console UI | Guarded against product exposure |
 
 The current topology gives authoritative alert processing, current Engine Intelligence projection, and immutable ML
-prediction evidence projection independent offsets and failure domains. The authoritative consumer remains strict for the
-base scored-event contract and omits only the optional evidence member before mapping. Diagnostic consumers validate the
-complete event and persist their projections independently; transient storage failures use bounded retry and permanent
+prediction evidence projection independent offsets and failure domains. Every current consumer strictly deserializes the
+same complete canonical event without removing, repairing, or fabricating evidence fields. After successful deserialization,
+diagnostic consumers persist their projections independently; transient storage failures use bounded retry and permanent
 evidence failures use dead-letter handling. A successfully consumed base event therefore cannot be replayed merely because
 a diagnostic store is unavailable. Approved evidence recovery copies records from `ml.prediction-evidence.dead-letter` to
 `ml.prediction-evidence.redrive`; its separate, disabled-by-default listener writes only immutable evidence and sends
@@ -71,9 +71,9 @@ Identity-free historical comparison payloads are not fixtures and are rejected r
 
 ## Alert-service Readiness
 
-Alert-service may prove deserialization readiness only. Its tests use the Spring Kafka
-`JsonDeserializer` used by the listener boundary and verify that existing projection output remains
-unchanged.
+Current alert-service tests exercise every configured `TransactionScoredEvent` deserialization path. They prove exact
+evidence and explicit omission outcomes survive unchanged, malformed outcomes fail closed, baseline decision fields are
+unchanged by diagnostics, and occurrence identity remains bound to the exact consumed event.
 
 ## Unknown-field Tolerance
 
@@ -127,8 +127,9 @@ Producer emission must not hide projection/API/UI changes unless they are explic
 ## Merge Gates
 
 - Shared fixtures deserialize in `common-events`.
-- Alert-service deserializes current absent and present fixture shapes through its Kafka deserializer boundary.
-- Alert-service projection remains unchanged for the new and forward-compatible fixture shapes.
+- Alert-service deserializes current summary-absent and summary-present fixtures through every current Kafka boundary.
+- Alert-service preserves the exact canonical evidence outcome and occurrence identity while baseline decision fields
+  remain unchanged by diagnostics.
 - Source scans remain green for consumer inventory, producer isolation, persistence isolation, and API/UI isolation.
 - FDP-93 did not expose engineIntelligence through API/UI.
 - FDP-93 does not add final decisioning.

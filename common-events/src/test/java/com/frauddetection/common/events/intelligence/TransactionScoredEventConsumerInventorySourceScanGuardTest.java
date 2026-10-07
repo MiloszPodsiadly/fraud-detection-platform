@@ -18,7 +18,6 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
             "alert-service/src/main/java/com/frauddetection/alert/evidence/AlertEvidenceSnapshotProjectionService.java",
             "alert-service/src/main/java/com/frauddetection/alert/evidence/EvidenceProjectionService.java",
             "alert-service/src/main/java/com/frauddetection/alert/mapper/ScoredTransactionDocumentMapper.java",
-            "alert-service/src/main/java/com/frauddetection/alert/messaging/AuthoritativeTransactionScoredEventDeserializer.java",
             "alert-service/src/main/java/com/frauddetection/alert/messaging/EngineIntelligenceProjectionEventListener.java",
             "alert-service/src/main/java/com/frauddetection/alert/messaging/EngineIntelligenceRedriveListener.java",
             "alert-service/src/main/java/com/frauddetection/alert/messaging/MlPredictionEvidenceEventListener.java",
@@ -70,7 +69,7 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
                 "docs/architecture/engine_intelligence_consumer_readiness.md"
         )).contains(
                 "AlertKafkaConfig",
-                "AuthoritativeTransactionScoredEventDeserializer",
+                "JacksonKafkaDeserializer",
                 "TransactionScoredEventListener",
                 "EngineIntelligenceProjectionEventListener",
                 "EngineIntelligencePendingProjectionService",

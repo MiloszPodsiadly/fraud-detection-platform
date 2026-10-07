@@ -1,6 +1,5 @@
 package com.frauddetection.alert.config;
 
-import com.frauddetection.alert.messaging.AuthoritativeTransactionScoredEventDeserializer;
 import com.frauddetection.alert.messaging.EngineIntelligenceRecoveryValidationException;
 import com.frauddetection.alert.messaging.MlPredictionEvidencePermanentProcessingException;
 import com.frauddetection.alert.messaging.ScoringOccurrenceConflictException;
@@ -70,7 +69,7 @@ public class AlertKafkaConfig {
         return new DefaultKafkaConsumerFactory<>(
                 properties,
                 new StringDeserializer(),
-                new ErrorHandlingDeserializer<>(new AuthoritativeTransactionScoredEventDeserializer())
+                new ErrorHandlingDeserializer<>(new JacksonKafkaDeserializer<>(TransactionScoredEvent.class))
         );
     }
 
