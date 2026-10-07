@@ -1,5 +1,6 @@
 package com.frauddetection.scoring.service;
 
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import org.junit.jupiter.api.Test;
 
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceJoinedTestSupport.harness;
@@ -10,12 +11,15 @@ import static org.mockito.Mockito.verifyNoInteractions;
 class TransactionFraudScoringServiceEngineIntelligenceDisabledPathTest {
 
     @Test
-    void defaultDisabledPublishesOldShapeEventWithoutDiagnosticWork() {
+    void defaultDisabledPublishesCanonicalEvidenceOutcomeWithoutDiagnosticWork() {
         var harness = harness(false);
 
         var event = harness.scoreAndCapture();
 
         assertThat(event.engineIntelligence()).isNull();
+        assertThat(event.mlPredictionEvidence()).isNull();
+        assertThat(event.mlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED);
         assertThat(json(event)).doesNotContain("\"engineIntelligence\"");
         verifyNoInteractions(harness.orchestrator(), harness.aggregation(), harness.mapper());
     }

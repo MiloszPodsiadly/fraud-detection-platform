@@ -2,6 +2,7 @@ package com.frauddetection.scoring.mapper;
 
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
+import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -31,23 +32,28 @@ class ProducerEngineIntelligenceBaseEventStabilityTest {
     private static final Instant GENERATED_AT = Instant.parse("2026-05-31T10:00:00Z");
 
     @Test
-    void enabledSummaryChangesOnlyOptionalEngineIntelligenceField() {
+    void enabledDiagnosticsPreserveBaselineDecisionFieldsAndDeclareEvidenceOutcome() {
         var mapper = new TransactionScoredEventMapper();
         var request = FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build());
         var result = scoreResult();
-        ObjectNode disabled = reviewedBaseFields(mapper.toEvent(
+        TransactionScoredEvent disabledEvent = mapper.toEvent(
                 request, result, Optional.empty(),
                 MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED, null
-        ));
-        ObjectNode enabled = reviewedBaseFields(mapper.toEvent(
+        );
+        TransactionScoredEvent enabledEvent = mapper.toEvent(
                 request, result, Optional.of(summary()),
                 MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE, null
-        ));
+        );
 
-        assertThat(enabled).isEqualTo(disabled);
+        assertThat(reviewedBaselineDecisionFields(enabledEvent))
+                .isEqualTo(reviewedBaselineDecisionFields(disabledEvent));
+        assertThat(disabledEvent.mlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED);
+        assertThat(enabledEvent.mlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE);
     }
 
-    private ObjectNode reviewedBaseFields(Object event) {
+    private ObjectNode reviewedBaselineDecisionFields(Object event) {
         ObjectNode json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build().valueToTree(event);
         json.remove("eventId");
         json.remove("createdAt");

@@ -18,33 +18,29 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class ProducerEngineIntelligenceDefaultOutputCompatibilityTest {
+class ProducerEngineIntelligenceDisabledOutputContractTest {
 
     private final ObjectMapper objectMapper = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
     private final TransactionScoredEventMapper mapper = new TransactionScoredEventMapper();
 
     @Test
-    void missingConfigSerializedEventMatchesOldShape() throws Exception {
-        assertOldShape(serializedDefaultEvent());
+    void disabledOutputUsesCanonicalEvidenceOutcome() throws Exception {
+        assertDisabledOutputContract(serializedDefaultEvent());
     }
 
     @Test
-    void explicitFalseSerializedEventMatchesOldShape() throws Exception {
-        assertOldShape(serializedDefaultEvent());
-    }
-
-    @Test
-    void defaultApplicationYamlSerializedEventOmitsEngineIntelligence() throws Exception {
+    void defaultApplicationYamlKeepsDiagnosticsDisabledByDefault() throws Exception {
         assertThat(Files.readString(moduleRoot().resolve("src/main/resources/application.yml")))
                 .contains("emit-enabled: ${FRAUD_SCORING_EVENTS_ENGINE_INTELLIGENCE_EMIT_ENABLED:false}");
-        assertOldShape(serializedDefaultEvent());
+        assertDisabledOutputContract(serializedDefaultEvent());
     }
 
     @Test
-    void disabledSerializedEventDoesNotContainEngineIntelligenceEvenAsNull() throws Exception {
+    void disabledOutputOmitsDiagnosticPayloads() throws Exception {
         assertThat(serializedDefaultEvent()).doesNotContain(
                 "\"engineIntelligence\"",
                 "\"engineIntelligence\":null",
+                "\"mlPredictionEvidence\"",
                 "diagnosticSignals",
                 "agreementStatus",
                 "riskMismatchStatus",
@@ -52,9 +48,12 @@ class ProducerEngineIntelligenceDefaultOutputCompatibilityTest {
         );
     }
 
-    private void assertOldShape(String json) throws Exception {
+    private void assertDisabledOutputContract(String json) throws Exception {
         JsonNode tree = objectMapper.readTree(json);
         assertThat(tree.has("engineIntelligence")).isFalse();
+        assertThat(tree.has("mlPredictionEvidence")).isFalse();
+        assertThat(tree.path("mlPredictionEvidenceOmissionReason").textValue())
+                .isEqualTo("DIAGNOSTIC_EMISSION_DISABLED");
         assertThat(tree.path("fraudScore").doubleValue()).isEqualTo(0.91d);
         assertThat(tree.path("riskLevel").textValue()).isEqualTo("CRITICAL");
         assertThat(tree.path("alertRecommended").booleanValue()).isTrue();

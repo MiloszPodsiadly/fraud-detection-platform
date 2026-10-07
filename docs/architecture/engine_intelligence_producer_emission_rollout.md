@@ -25,9 +25,9 @@ FRAUD_SCORING_EVENTS_ENGINE_INTELLIGENCE_EMIT_ENABLED
 
 ## Mapping Boundary
 
-`TransactionScoredEventMapper` accepts an optional public `EngineIntelligenceSummary` and optional internal
-`MlPredictionEvidenceV1`.
-An empty optional keeps the evidence-free event shape and omits the `engineIntelligence` JSON field.
+`TransactionScoredEventMapper` accepts an optional public `EngineIntelligenceSummary`, optional internal
+`MlPredictionEvidenceV1`, and the canonical omission outcome when exact evidence is absent.
+An empty diagnostic summary omits the `engineIntelligence` JSON field but never permits a null/null evidence outcome.
 A present summary adds only the bounded public DTO. Internal aggregation objects, raw model payloads,
 contributions, and internal diagnostics are not event payload fields.
 
@@ -52,8 +52,8 @@ separate responsibilities. The platform score remains authoritative for the scor
 
 Baseline scoring remains in the existing `FraudScoringEngine` path.
 
-Disabled mode keeps the evidence-free serialized event shape and emits neither Engine Intelligence nor ML prediction
-evidence.
+Disabled mode emits neither Engine Intelligence nor ML prediction evidence and records the current canonical
+`DIAGNOSTIC_EMISSION_DISABLED` omission reason.
 It does not invoke orchestrator, aggregation, public mapper, rules, or ML diagnostic path.
 It does not initialize the conditional diagnostic runtime graph.
 
@@ -69,8 +69,9 @@ Diagnostic enrichment is not scoring migration and does not feed back into the b
 
 ## Failure Isolation
 
-Enrichment failure returns the base event without `engineIntelligence` or ML prediction evidence. Non-AVAILABLE ML
-statuses are represented in the bounded public summary but do not manufacture exact prediction evidence. Failure logging is bounded
+Enrichment failure returns the base event without `engineIntelligence` or ML prediction evidence and records the
+canonical bounded failure omission reason. Non-AVAILABLE ML statuses are represented in the bounded public summary but
+do not manufacture exact prediction evidence. Failure logging is bounded
 and does not include raw exception messages. Baseline scoring failures are not swallowed.
 
 Current behavior is passive capture and persistence for evaluation. It does not train, promote, calibrate, or activate
@@ -88,8 +89,9 @@ through a separately reviewed contract.
 ## Rollback
 
 Set `fraud.scoring.events.engine-intelligence.emit-enabled=false` and redeploy. Disabled mode omits
-both optional diagnostic fields and restores the prior emitted event shape. Existing alert-service projections and
-private evidence remain governed by their retention policy; rollback does not delete or rewrite accepted records.
+both optional diagnostic payloads and emits `mlPredictionEvidenceOmissionReason=DIAGNOSTIC_EMISSION_DISABLED`.
+Rollback never restores historical null/null evidence semantics. Existing alert-service projections and private
+evidence remain governed by their retention policy; rollback does not delete or rewrite accepted records.
 
 ## Operational Observability Boundary
 

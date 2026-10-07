@@ -18,12 +18,19 @@ import static org.mockito.Mockito.when;
 class TransactionFraudScoringServiceEngineIntelligenceJoinedPathTest {
 
     @Test
-    void disabledFlagJoinedPathPublishesOldShapeAndDoesNotInvokeDiagnosticPipeline() {
+    void disabledDiagnosticsPreserveBaselineDecisionAndCanonicalEvidenceOutcome() {
         var harness = harness(false);
 
         var event = harness.scoreAndCapture();
 
         assertThat(event.engineIntelligence()).isNull();
+        assertThat(event.mlPredictionEvidence()).isNull();
+        assertThat(event.mlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED);
+        assertThat(event.fraudScore()).isEqualTo(harness.baselineResult().fraudScore());
+        assertThat(event.riskLevel()).isEqualTo(harness.baselineResult().riskLevel());
+        assertThat(event.alertRecommended()).isEqualTo(harness.baselineResult().alertRecommended());
+        assertThat(event.reasonCodes()).isEqualTo(harness.baselineResult().reasonCodes());
         assertThat(json(event)).doesNotContain("\"engineIntelligence\"");
         verifyNoInteractions(harness.orchestrator(), harness.aggregation(), harness.mapper());
     }
@@ -44,13 +51,16 @@ class TransactionFraudScoringServiceEngineIntelligenceJoinedPathTest {
     }
 
     @Test
-    void enabledFlagJoinedPathFailurePublishesOldShape() {
+    void enabledDiagnosticFailurePublishesCanonicalUnavailableEvidenceOutcome() {
         var harness = harness(true);
         when(harness.orchestrator().evaluate(any())).thenThrow(new IllegalStateException("raw-secret"));
 
         var event = harness.scoreAndCapture();
 
         assertThat(event.engineIntelligence()).isNull();
+        assertThat(event.mlPredictionEvidence()).isNull();
+        assertThat(event.mlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE);
         assertThat(event.fraudScore()).isEqualTo(harness.baselineResult().fraudScore());
         assertThat(event.riskLevel()).isEqualTo(harness.baselineResult().riskLevel());
         assertThat(json(event)).doesNotContain("\"engineIntelligence\"", "raw-secret");
