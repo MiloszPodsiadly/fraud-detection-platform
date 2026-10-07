@@ -12,6 +12,7 @@ import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.serialization.Serializer;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
@@ -27,6 +28,8 @@ import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.kafka.support.SendResult;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -59,7 +62,7 @@ class AlertKafkaFailureHandlingTest {
     }
 
     @Test
-    void everyCurrentConsumerFactoryRejectsInvalidCanonicalEvidence() {
+    void canonicalConsumerFactoryRejectsInvalidCanonicalEvidence() {
         byte[] payload = ("{"
                 + "\"eventId\":\"event-1\","
                 + "\"transactionId\":\"transaction-1\","
@@ -67,24 +70,41 @@ class AlertKafkaFailureHandlingTest {
                 + "\"riskLevel\":\"HIGH\","
                 + "\"mlPredictionEvidence\":{\"contractVersion\":2}"
                 + "}").getBytes(StandardCharsets.UTF_8);
-        DefaultKafkaConsumerFactory<String, TransactionScoredEvent> baselineFactory =
+        DefaultKafkaConsumerFactory<String, TransactionScoredEvent> canonicalFactory =
                 (DefaultKafkaConsumerFactory<String, TransactionScoredEvent>) config
                         .transactionScoredEventConsumerFactory(new KafkaProperties());
-        DefaultKafkaConsumerFactory<String, TransactionScoredEvent> evidenceFactory =
-                (DefaultKafkaConsumerFactory<String, TransactionScoredEvent>) config
-                        .mlPredictionEvidenceConsumerFactory(new KafkaProperties());
-        RecordHeaders baselineHeaders = new RecordHeaders();
-        RecordHeaders evidenceHeaders = new RecordHeaders();
+        RecordHeaders headers = new RecordHeaders();
 
-        TransactionScoredEvent rejectedBaseline = baselineFactory.getValueDeserializer()
-                .deserialize("transactions.scored", baselineHeaders, payload);
-        TransactionScoredEvent rejectedEvidence = evidenceFactory.getValueDeserializer()
-                .deserialize("transactions.scored", evidenceHeaders, payload);
+        TransactionScoredEvent rejected = canonicalFactory.getValueDeserializer()
+                .deserialize("transactions.scored", headers, payload);
 
-        assertThat(rejectedBaseline).isNull();
-        assertThat(baselineHeaders).isNotEmpty();
-        assertThat(rejectedEvidence).isNull();
-        assertThat(evidenceHeaders).isNotEmpty();
+        assertThat(rejected).isNull();
+        assertThat(headers).isNotEmpty();
+    }
+
+    @Test
+    void everyTransactionScoredContainerUsesCanonicalConsumerFactoryBean() {
+        List<String> containerFactoryMethods = List.of(
+                "transactionScoredKafkaListenerContainerFactory",
+                "mlPredictionEvidenceKafkaListenerContainerFactory",
+                "engineIntelligenceKafkaListenerContainerFactory",
+                "engineIntelligenceRedriveKafkaListenerContainerFactory"
+        );
+
+        assertThat(containerFactoryMethods).allSatisfy(methodName -> {
+            var method = Arrays.stream(AlertKafkaConfig.class.getDeclaredMethods())
+                    .filter(candidate -> candidate.getName().equals(methodName))
+                    .findFirst()
+                    .orElseThrow();
+            Qualifier qualifier = method.getParameters()[0].getAnnotation(Qualifier.class);
+
+            assertThat(qualifier).isNotNull();
+            assertThat(qualifier.value()).isEqualTo("transactionScoredEventConsumerFactory");
+        });
+
+        assertThat(Arrays.stream(AlertKafkaConfig.class.getDeclaredMethods())
+                .map(java.lang.reflect.Method::getName))
+                .doesNotContain("mlPredictionEvidenceConsumerFactory");
     }
 
     @Test

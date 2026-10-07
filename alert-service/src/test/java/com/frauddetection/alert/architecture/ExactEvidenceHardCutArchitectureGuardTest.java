@@ -1,7 +1,6 @@
 package com.frauddetection.alert.architecture;
 
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
-import com.frauddetection.alert.engineintelligence.CanonicalTransactionScoredEventDeserializationTest;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjection;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionMapper;
 import org.junit.jupiter.api.Test;
@@ -18,21 +17,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ExactEvidenceHardCutArchitectureGuardTest {
 
     private static final Path ROOT = repositoryRoot();
-    private final CanonicalTransactionScoredEventDeserializationTest canonicalEventContract =
-            new CanonicalTransactionScoredEventDeserializationTest();
-
-    @Test
-    void everyCurrentConsumerPreservesBothCanonicalEvidenceOutcomes() throws Exception {
-        canonicalEventContract.everyCurrentConsumerPreservesCanonicalExactEvidence();
-        canonicalEventContract.everyCurrentConsumerPreservesCanonicalExplicitOmission();
-    }
-
-    @Test
-    void everyCurrentConsumerRejectsMalformedCanonicalEvidence() throws Exception {
-        canonicalEventContract.everyCurrentConsumerRejectsMalformedCanonicalEvidence();
-        canonicalEventContract.malformedJsonFailsEveryCurrentConsumerBoundary();
-    }
-
     @Test
     void currentProjectionConstructionRequiresOccurrenceOwnership() {
         assertThat(Arrays.asList(EngineIntelligenceProjection.class.getConstructors()))

@@ -27,50 +27,48 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-public class CanonicalTransactionScoredEventDeserializationTest {
+class CanonicalTransactionScoredEventDeserializationTest {
 
     private final AlertKafkaConfig config = new AlertKafkaConfig();
     private final ObjectMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
 
     @Test
-    public void everyCurrentConsumerPreservesCanonicalExactEvidence() throws Exception {
+    void canonicalDeserializerPreservesExactEvidence() throws Exception {
         TransactionScoredEvent source = MlPredictionEvidenceProjectionTestSupport.event("event-valid", 0.8123d, "v1");
         byte[] payload = objectMapper.writeValueAsBytes(source);
         String fingerprint = ScoringOccurrenceFingerprint.from(source);
 
-        for (Deserializer<TransactionScoredEvent> deserializer : currentDeserializers()) {
-            RecordHeaders headers = new RecordHeaders();
-            TransactionScoredEvent deserialized = deserializer.deserialize("transactions.scored", headers, payload);
+        RecordHeaders headers = new RecordHeaders();
+        TransactionScoredEvent deserialized = canonicalDeserializer()
+                .deserialize("transactions.scored", headers, payload);
 
-            assertThat(headers).isEmpty();
-            assertThat(deserialized).isEqualTo(source);
-            assertThat(deserialized.mlPredictionEvidence()).isEqualTo(source.mlPredictionEvidence());
-            assertThat(deserialized.mlPredictionEvidenceOmissionReason()).isNull();
-            assertThat(deserialized.eventId()).isEqualTo(source.eventId());
-            assertThat(deserialized.createdAt()).isEqualTo(source.createdAt());
-            assertThat(ScoringOccurrenceFingerprint.from(deserialized)).isEqualTo(fingerprint);
-        }
+        assertThat(headers).isEmpty();
+        assertThat(deserialized).isEqualTo(source);
+        assertThat(deserialized.mlPredictionEvidence()).isEqualTo(source.mlPredictionEvidence());
+        assertThat(deserialized.mlPredictionEvidenceOmissionReason()).isNull();
+        assertThat(deserialized.eventId()).isEqualTo(source.eventId());
+        assertThat(deserialized.createdAt()).isEqualTo(source.createdAt());
+        assertThat(ScoringOccurrenceFingerprint.from(deserialized)).isEqualTo(fingerprint);
     }
 
     @Test
-    public void everyCurrentConsumerPreservesCanonicalExplicitOmission() throws Exception {
+    void canonicalDeserializerPreservesExplicitOmission() throws Exception {
         TransactionScoredEvent source = MlPredictionEvidenceProjectionTestSupport.eventWithoutEvidence("event-omitted");
         byte[] payload = objectMapper.writeValueAsBytes(source);
 
-        for (Deserializer<TransactionScoredEvent> deserializer : currentDeserializers()) {
-            RecordHeaders headers = new RecordHeaders();
-            TransactionScoredEvent deserialized = deserializer.deserialize("transactions.scored", headers, payload);
+        RecordHeaders headers = new RecordHeaders();
+        TransactionScoredEvent deserialized = canonicalDeserializer()
+                .deserialize("transactions.scored", headers, payload);
 
-            assertThat(headers).isEmpty();
-            assertThat(deserialized).isEqualTo(source);
-            assertThat(deserialized.mlPredictionEvidence()).isNull();
-            assertThat(deserialized.mlPredictionEvidenceOmissionReason())
-                    .isEqualTo(MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED);
-        }
+        assertThat(headers).isEmpty();
+        assertThat(deserialized).isEqualTo(source);
+        assertThat(deserialized.mlPredictionEvidence()).isNull();
+        assertThat(deserialized.mlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED);
     }
 
     @Test
-    public void everyCurrentConsumerRejectsMalformedCanonicalEvidence() throws Exception {
+    void canonicalDeserializerRejectsMalformedEvidence() throws Exception {
         ObjectNode evidenceAndOmission = validEventJson("event-both-outcomes");
         evidenceAndOmission.put(
                 "mlPredictionEvidenceOmissionReason",
@@ -85,35 +83,31 @@ public class CanonicalTransactionScoredEventDeserializationTest {
 
         for (ObjectNode malformed : List.of(evidenceAndOmission, partialIdentity, unsupportedVersion)) {
             byte[] payload = objectMapper.writeValueAsBytes(malformed);
-            for (Deserializer<TransactionScoredEvent> deserializer : currentDeserializers()) {
-                RecordHeaders headers = new RecordHeaders();
-
-                assertThat(deserializer.deserialize("transactions.scored", headers, payload)).isNull();
-                assertThat(headers).isNotEmpty();
-            }
-        }
-    }
-
-    @Test
-    public void malformedJsonFailsEveryCurrentConsumerBoundary() {
-        byte[] payload = "{not-json".getBytes(StandardCharsets.UTF_8);
-
-        for (Deserializer<TransactionScoredEvent> deserializer : currentDeserializers()) {
             RecordHeaders headers = new RecordHeaders();
 
-            assertThat(deserializer.deserialize("transactions.scored", headers, payload)).isNull();
+            assertThat(canonicalDeserializer().deserialize("transactions.scored", headers, payload)).isNull();
             assertThat(headers).isNotEmpty();
         }
     }
 
     @Test
-    public void baselineBusinessProcessingReceivesCanonicalEventWithEvidenceIntact() throws Exception {
+    void canonicalDeserializerRejectsMalformedJson() {
+        byte[] payload = "{not-json".getBytes(StandardCharsets.UTF_8);
+
+        RecordHeaders headers = new RecordHeaders();
+
+        assertThat(canonicalDeserializer().deserialize("transactions.scored", headers, payload)).isNull();
+        assertThat(headers).isNotEmpty();
+    }
+
+    @Test
+    void baselineBusinessProcessingReceivesCanonicalEventWithEvidenceIntact() throws Exception {
         TransactionScoredEvent source = MlPredictionEvidenceProjectionTestSupport.event(
                 "event-baseline-processing",
                 0.8123d,
                 "v1"
         );
-        TransactionScoredEvent deserialized = baselineDeserializer().deserialize(
+        TransactionScoredEvent deserialized = canonicalDeserializer().deserialize(
                 "transactions.scored",
                 new RecordHeaders(),
                 objectMapper.writeValueAsBytes(source)
@@ -146,19 +140,9 @@ public class CanonicalTransactionScoredEventDeserializationTest {
         return objectMapper.valueToTree(MlPredictionEvidenceProjectionTestSupport.event(eventId, 0.8123d, "v1"));
     }
 
-    private List<Deserializer<TransactionScoredEvent>> currentDeserializers() {
-        return List.of(baselineDeserializer(), evidenceDeserializer());
-    }
-
     @SuppressWarnings("unchecked")
-    private Deserializer<TransactionScoredEvent> baselineDeserializer() {
+    private Deserializer<TransactionScoredEvent> canonicalDeserializer() {
         return ((DefaultKafkaConsumerFactory<String, TransactionScoredEvent>) config
                 .transactionScoredEventConsumerFactory(new KafkaProperties())).getValueDeserializer();
-    }
-
-    @SuppressWarnings("unchecked")
-    private Deserializer<TransactionScoredEvent> evidenceDeserializer() {
-        return ((DefaultKafkaConsumerFactory<String, TransactionScoredEvent>) config
-                .mlPredictionEvidenceConsumerFactory(new KafkaProperties())).getValueDeserializer();
     }
 }

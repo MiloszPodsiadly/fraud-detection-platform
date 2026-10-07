@@ -20,7 +20,6 @@ import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.O
 import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.ReasonCode.FIRST_OCCURRENCE_ACCEPTED;
 import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.ReasonCode.IDENTICAL_OCCURRENCE_REPLAYED;
 import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.ReasonCode.NEWER_OCCURRENCE_ACCEPTED;
-import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.ReasonCode.OCCURRENCE_FINGERPRINT_MISSING;
 import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.ReasonCode.OCCURRENCE_PAYLOAD_CONFLICT;
 import static com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult.ReasonCode.OLDER_OCCURRENCE_REJECTED;
 
@@ -43,7 +42,7 @@ public class ScoredTransactionProjectionWriter {
                     ScoredTransactionDocument.class
             );
             if (current != null) {
-                persistedOwnership(current);
+                validatePersistedOwnership(current);
                 ScoringOccurrenceAdmissionResult classified = classify(candidate, current);
                 if (classified != null) {
                     return classified;
@@ -118,9 +117,6 @@ public class ScoredTransactionProjectionWriter {
             return null;
         }
         if (candidate.getSourceEventId().equals(current.getSourceEventId())) {
-            if (current.getSourceEventFingerprint() == null) {
-                return new ScoringOccurrenceAdmissionResult(CONFLICT_REJECTED, OCCURRENCE_FINGERPRINT_MISSING);
-            }
             if (candidate.getSourceEventFingerprint().equals(current.getSourceEventFingerprint())) {
                 return new ScoringOccurrenceAdmissionResult(IDEMPOTENT_REPLAY, IDENTICAL_OCCURRENCE_REPLAYED);
             }
@@ -181,9 +177,9 @@ public class ScoredTransactionProjectionWriter {
         }
     }
 
-    private ScoringOccurrenceOwnership persistedOwnership(ScoredTransactionDocument document) {
+    private void validatePersistedOwnership(ScoredTransactionDocument document) {
         try {
-            return ScoringOccurrenceOwnership.fromPersistedIdentity(
+            ScoringOccurrenceOwnership.fromPersistedIdentity(
                     document.getSourceEventId(),
                     document.getSourceEventCreatedAt(),
                     document.getSourceEventCreatedAtEpochSecond(),
