@@ -30,7 +30,7 @@ class EngineIntelligenceConsumerReadinessDocsTest {
                 "future projection behavior change still requires separate review",
                 "Producer emission requires an explicit rollout flag",
                 "Producer emission was not allowed until FDP-93 consumer-readiness tests were green",
-                "Old event shape remained the default until rollout was explicitly enabled",
+                "Before producer rollout, omission of the optional `engineIntelligence` summary remained the default",
                 "Producer tests in later branches had to cover enabled and disabled modes",
                 "Producer emission must preserve FDP-92 public contract semantics",
                 "Producer emission must not introduce final decisioning",

@@ -20,7 +20,7 @@ class EngineIntelligenceAlertServiceProjectionDocsTest {
                 "## Projection-only Boundary",
                 "## Storage Model",
                 "## Projection Policy and Limits",
-                "## Old Event Compatibility",
+                "## Explicit Diagnostic Omission",
                 "## New Bounded Event Projection",
                 "## Invalid/Oversized Safe Omission",
                 "## Idempotency/Replay Safety",
@@ -35,8 +35,9 @@ class EngineIntelligenceAlertServiceProjectionDocsTest {
                 "Alert-service projects bounded engine intelligence into a Mongo read model.",
                 "Bounded API and Analyst Console",
                 "The projection does not use engine intelligence for decisions.",
-                "Old events without engineIntelligence remain compatible.",
-                "Events without `mlPredictionEvidence` create no private evidence document",
+                "Current events with diagnostics explicitly disabled omit `engineIntelligence`",
+                "`DIAGNOSTIC_EMISSION_DISABLED` evidence omission reason",
+                "Events with an explicit evidence omission reason create no private evidence document",
                 "Projection failure must not break base alert projection.",
                 "Projection must be idempotent under replay.",
                 "source event ID, exact creation time, and",
@@ -48,7 +49,7 @@ class EngineIntelligenceAlertServiceProjectionDocsTest {
                 "insert-only persistence keyed by source",
                 "conflicting replay is observable and cannot overwrite accepted",
                 "Concurrent duplicate delivery produces one immutable document",
-                "temporary deployment compatibility",
+                "Current traffic cannot claim or replace identity-free historical state.",
                 "[Scoring Occurrence Ownership Migration](scoring_occurrence_ownership_migration.md)",
                 "Partially populated",
                 "identity is invalid and fails closed as projection unavailable",
@@ -119,16 +120,16 @@ class EngineIntelligenceAlertServiceProjectionDocsTest {
     }
 
     @Test
-    void scoringOccurrenceMigrationDefinesClassificationProcedureAndRemovalGate() throws Exception {
+    void scoringOccurrenceMigrationDefinesClassificationProcedureAndCutoverEvidence() throws Exception {
         assertThat(readArchitectureDoc("scoring_occurrence_ownership_migration.md")).contains(
                 "### RETAINED",
                 "### MODIFIED",
                 "### REMOVED",
                 "### MIGRATION_REQUIRED",
-                "unknown-set count is zero",
+                "identity-free count is zero",
                 "partial-identity count is zero",
                 "Do not manufacture source identity",
-                "do not invoke current ML inference",
+                "Do not invoke current ML inference",
                 "effective Kafka retention period",
                 "suspicious_transaction_source_event_unique_idx",
                 "suspicious_transaction_current_unique_idx",

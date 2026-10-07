@@ -50,13 +50,12 @@ wins; equal timestamps use the lexicographically greater event ID as the determi
 and nanosecond components are persisted so ordering does not depend on Mongo date precision or delivery order.
 
 Selection is an atomic conditional write. Concurrent and out-of-order deliveries therefore converge on the same
-occurrence without read-then-save behavior. A historical document missing any occurrence identity component maps to
-`UNKNOWN_OCCURRENCE`; identity is never reconstructed from transaction ID, processing time, model registry state, or
-Mongo natural order. The first valid current event may replace that unknown state.
+occurrence without read-then-save behavior. A document missing any occurrence identity component fails closed;
+identity is never reconstructed from transaction ID, processing time, model registry state, or Mongo natural order.
+Current traffic cannot claim or replace identity-free historical state.
 
-This is temporary deployment compatibility for fully identity-free historical Mongo documents, not a second current
-runtime path. Current domain construction and writes require explicit authoritative ownership; partial identity fails
-closed. The inventory, archival procedure, and verifiable removal gate are defined in
+Current domain construction, reads, and writes require explicit authoritative ownership. The inventory, archival
+procedure, and cutover evidence for retained pre-cut data are defined in
 [Scoring Occurrence Ownership Migration](scoring_occurrence_ownership_migration.md).
 
 Event time is producer-owned ordering, so producer clock skew can delay or prevent a later real-world execution from
@@ -85,12 +84,13 @@ source-of-truth allowlist. Alert-service projection revalidates public contract 
 does not maintain a divergent second source of truth for public enum allowlists. Storage-specific limits are
 enforced by `EngineIntelligenceProjectionPolicy`.
 
-## Old Event Compatibility
+## Explicit Diagnostic Omission
 
-Old events without engineIntelligence remain compatible. They create no engine-intelligence projection document.
+Current events with diagnostics explicitly disabled omit `engineIntelligence` and carry the bounded
+`DIAGNOSTIC_EMISSION_DISABLED` evidence omission reason. They create no engine-intelligence projection document.
 A newer authoritative occurrence without diagnostics never inherits an older occurrence's projection: snapshot reads
 return `NOT_PROJECTED` unless the private projection owner matches the current scored transaction.
-Events without `mlPredictionEvidence` create no private evidence document and never erase accepted evidence.
+Events with an explicit evidence omission reason create no private evidence document and never erase accepted evidence.
 
 ## New Bounded Event Projection
 

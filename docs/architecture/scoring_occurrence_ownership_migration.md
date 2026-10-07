@@ -2,15 +2,10 @@
 
 ## Decision
 
-Current scored events carry authoritative occurrence identity, but deployments upgraded from the earlier
-`scored_transactions` shape may still contain documents without `sourceEventId`, exact source event time, or payload
-fingerprint. The repository has no Mongo migration framework and does not configure or attest the effective retention
-period of `transactions.scored`. An immediate runtime hard cut is therefore not verifiably safe.
-
-`UNKNOWN_OCCURRENCE` remains temporary deployment compatibility only for a fully identity-free historical Mongo
-document. Current Kafka input must provide an event ID and event creation time, and every current write candidate must
-carry all occurrence fields. Partially populated identity fails closed. New Java domain construction has no implicit
-unknown-occurrence default.
+Current scored events and active `scored_transactions` documents require complete authoritative occurrence identity:
+`sourceEventId`, exact source event time in all persisted representations, and the canonical payload fingerprint.
+Identity-free and partially populated documents fail closed at runtime. They are not claimed, repaired, or replaced by
+current traffic; retained pre-cut data requires the governed offline procedure below.
 
 ## Audit Classification
 
@@ -27,10 +22,9 @@ unknown-occurrence default.
 
 ### MODIFIED
 
-- Scoring occurrence ownership is mandatory for current domain construction and current writes.
-- A completely identity-free historical Mongo document may still be read as `UNKNOWN_OCCURRENCE` and conditionally
-  replaced by the first valid current scored event. The conditional Mongo query is the only migration compatibility;
-  it is not a second current-state authority.
+- Scoring occurrence ownership is mandatory for current domain construction, reads, and writes.
+- Identity-free historical Mongo documents are rejected by the active runtime and cannot be conditionally claimed by
+  a current scored event.
 - Partial identity, an unverifiable fingerprint, or conflicting current replay fails closed instead of being repaired
   from transaction ID, processing time, model registry state, or Mongo natural order.
 
@@ -39,7 +33,7 @@ unknown-occurrence default.
 - The superseded alert-existence preflight and duplicate suspicious-transaction readback path were removed when the
   current atomic occurrence admission and transaction-scoped projection became authoritative.
 - Repository methods and tests owned only by those replaced paths were removed with them.
-- Convenience constructors that silently created `UNKNOWN_OCCURRENCE` were removed. Tests and callers now declare
+- Convenience constructors that silently created identity-free ownership were removed. Tests and callers now declare
   occurrence ownership explicitly.
 
 ### MIGRATION_REQUIRED
@@ -47,7 +41,11 @@ unknown-occurrence default.
 - Every retained `scored_transactions` document with all five occurrence fields absent requires inventory and either
   authoritative event replay or governed archival.
 - Any document with only some occurrence fields is invalid, must be quarantined, and must never enter the unknown
-  compatibility path.
+  current-state path.
+- Identity-free or invalid `engine_intelligence_projections` must be rebuilt only from their exact retained scored
+  event or archived/quarantined unchanged.
+- Pre-lineage `fraud_feedback_records` remain audit history but must be archived, quarantined, or excluded by the
+  current Dataset v2 eligibility policy. They never become current evaluation observations.
 - Effective `transactions.scored` retention and the availability of exact original events require deployment evidence;
   repository defaults are not sufficient proof.
 - Existing `suspicious_transactions` data must be reconciled before creating the transaction-scoped unique index.
@@ -57,16 +55,26 @@ unknown-occurrence default.
 
 1. Pause alert-service writes or take a consistent Mongo snapshot and record the snapshot identifier.
 2. Count documents where all of `sourceEventId`, `sourceEventCreatedAt`, `sourceEventCreatedAtEpochSecond`,
-   `sourceEventCreatedAtNano`, and `sourceEventFingerprint` are null or absent. Record this as the unknown set.
+   `sourceEventCreatedAtNano`, and `sourceEventFingerprint` are null or absent. Record this as the identity-free set.
 3. Separately count documents where at least one but not all five fields are present. Copy these invalid partial
    documents to an access-controlled quarantine collection without altering their original fields.
-4. For an unknown document, replay only an exact retained authoritative `TransactionScoredEvent` through the normal
-   consumer. Do not derive identity from transaction ID and do not invoke current ML inference to reconstruct history.
-5. Copy unresolved unknown documents to a governed historical archive and exclude them from authoritative current
+4. For an identity-free document, recover only from an exact retained authoritative `TransactionScoredEvent` through
+   a reviewed offline migration. Do not invoke current ML inference to reconstruct history. Do not send the document
+   through the active consumer or derive identity from transaction ID.
+5. Copy unresolved identity-free documents to a governed historical archive and exclude them from authoritative current
    evaluation before removing them from `scored_transactions`. Preserve audit provenance and reconcile source and
    archive counts before deletion.
 6. Do not manufacture source identity, inference timestamps, model identity, model version, feature-contract version,
    or ML score. Do not relabel historical model versions.
+7. Record one reconciliation for each collection where
+   `source count = migrated count + archived count + quarantined count`. Preserve the original BSON and hashes for
+   every archived or quarantined record.
+
+Retained pre-cut `transactions.scored` messages with neither `mlPredictionEvidence` nor
+`mlPredictionEvidenceOmissionReason` must be drained before strict deployment, migrated only from authoritative
+historical evidence, or archived/quarantined. Replay and redrive use the same strict current event contract; they do
+not restore a permissive parser. Diagnostics intentionally disabled remain valid only through the explicit
+`DIAGNOSTIC_EMISSION_DISABLED` omission reason.
 
 For `suspicious_transactions`, inventory groups with more than one document per `transactionId` while writes are
 paused. Select the survivor only from the occurrence already accepted by the authoritative `scored_transactions`
@@ -75,11 +83,12 @@ record; quarantine all non-survivors with their original fields and reconcile co
 `transactionId`. If the authoritative occurrence cannot be proven, quarantine the entire group instead of choosing
 by processing time, Mongo natural order, model version, or score.
 
-## Removal Gate
+## Cutover Evidence
 
-The compatibility may be removed only after one deployment evidence pack proves all of the following:
+The runtime compatibility has been removed. Before a database is treated as current authoritative state, a deployment
+evidence pack must prove all of the following:
 
-- unknown-set count is zero in every target database;
+- identity-free count is zero in every target database;
 - partial-identity count is zero and quarantine reconciliation is complete;
 - archive/replay counts reconcile with the original snapshot;
 - no duplicate `suspicious_transactions.transactionId` group remains and the current unique index exists;
@@ -87,5 +96,17 @@ The compatibility may be removed only after one deployment evidence pack proves 
 - a full retention window has passed with no new identity-free document;
 - current producer, consumer, replay, and recovery tests remain green with authoritative identity required.
 
-After that gate, a separate reviewed change may remove `UNKNOWN_OCCURRENCE`, the historical conditional claim query,
-and their focused tests. This document does not authorize that removal early.
+Failure to satisfy this evidence does not enable a runtime fallback. The affected data remains quarantined or archived
+until its authoritative source identity can be proven through the governed migration.
+
+The deployment evidence pack must also record the effective `transactions.scored` retention by topic and environment,
+the earliest and latest available offsets/timestamps used for exact replay, and the operator who verified availability.
+Repository defaults or current model-registry state are not evidence that an exact historical event remains available.
+
+## Rollback Principle
+
+Rollback must never restore identity-free runtime interpretation. If deployment discovers unresolved historical data,
+roll back the strict deployment, keep affected records outside active current-state collections, complete the governed
+offline migration or archive/quarantine procedure, reconcile and validate the inventory again, and redeploy. Historical
+identity must never be reconstructed from transaction ID, processing time, Mongo natural order, score, current model,
+model registry state, timestamp proximity, or current ML inference.

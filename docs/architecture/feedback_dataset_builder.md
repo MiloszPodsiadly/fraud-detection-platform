@@ -27,6 +27,16 @@ The builder reads bounded candidates from `fraud_feedback_records` and performs 
 `ml_prediction_evidence_projections`. It does not read `engine_intelligence_feedback`, a current transaction
 projection, or the model registry.
 
+`feedback-dataset-v2` contains only current exact-occurrence evaluation observations. A candidate must carry complete,
+valid scoring-occurrence ownership before it enters the evidence batch lookup. A fully missing occurrence is counted
+in `skippedMissingRequiredFieldCount`; partial or malformed occurrence identity is counted in
+`skippedInvalidSourceRecordCount`. Neither condition emits a `DATASET_RECORD`.
+
+Pre-lineage fraud feedback remains governed historical audit data, not current evaluation input. It must be inventoried
+and archived or quarantined under the retention policy; archive does not mean delete, and dataset construction never
+rewrites historical lineage. Source ingestion accounting keeps every excluded source row visible without exporting
+private occurrence identifiers.
+
 This is separate from the Engine Intelligence Feedback Dataset Export bounded context. The feedback dataset does not replace that export contract,
 does not use `alert-service/src/main/java/com/frauddetection/alert/engineintelligence/dataset` as source of truth, and
 does not use `ml-inference-service/app/feedback/feedback_dataset.py` as source of truth.
@@ -108,7 +118,6 @@ The authoritative omission mapping is:
 | --- | --- | --- |
 | `DIAGNOSTIC_EMISSION_DISABLED` | `LEGITIMATELY_ABSENT` | Direct evaluation evidence was intentionally not emitted; this does not assert that ML inference never executed. |
 | `DIAGNOSTIC_ENRICHMENT_UNAVAILABLE` | `MISSING_UNEXPECTEDLY` | Diagnostic enrichment failed before a direct ML engine outcome could be established. |
-| `LEGITIMATE_ABSENCE` | `LEGITIMATELY_ABSENT` | Direct evidence absence was positively established, not inferred from missing data. |
 | `ML_ENGINE_UNAVAILABLE` | `MISSING_UNEXPECTEDLY` | The expected ML engine did not provide usable evidence. |
 | `SOURCE_TIMESTAMP_MISSING` | `MALFORMED` | Required source execution time was absent. |
 | `INVALID_SCORE` | `MALFORMED` | The direct score was absent or outside its contract. |
@@ -130,8 +139,9 @@ The builder resolves this evidence only through the feedback record's exact auth
 immutable `MlPredictionEvidenceProjection` keyed by that event. It validates occurrence timestamp, transaction
 ownership, optional correlation ownership, and any captured feedback model identity. The scoring occurrence carries
 either exact prediction evidence or a bounded authoritative omission reason through the scored event and feedback
-snapshot. Older scored events may deserialize with neither field for replay compatibility, but current producers
-always emit exactly one outcome and the historical missing outcome never becomes legitimate absence. Evidence
+snapshot. Scored events with neither field are outside the current contract and fail closed; legacy messages must be
+drained, migrated from authoritative evidence, archived, or quarantined before current consumption. The missing
+outcome never becomes legitimate absence. Evidence
 resolution contradictions are retained with `MALFORMED` or `IDENTITY_MISMATCH`; malformed
 non-ML source contracts still fail closed as invalid source rows. The lookup is one bounded `findAllById` batch after
 the dataset row limit is applied; there is no transaction-to-latest, current projection, registry, runtime-model, or
@@ -175,10 +185,11 @@ Candidate feedback store failure returns `FEEDBACK_STORE_UNAVAILABLE`. A transie
 returns `ML_PREDICTION_EVIDENCE_STORE_UNAVAILABLE`; an impossible repository result or evidence-resolution invariant
 failure returns `ML_PREDICTION_EVIDENCE_INTEGRITY_FAILURE`. These whole-build failures emit no records and never expose
 exception text. A row-level `MISSING_UNEXPECTEDLY`, `MALFORMED`, or `IDENTITY_MISMATCH` outcome remains a successful,
-explicit dataset observation. Invalid request returns `INVALID_REQUEST`. Missing required source fields are counted in
-`skippedMissingRequiredFieldCount` and do not create fake records. Corrupted non-ML source rows with unknown, unsafe,
-or label-incompatible reason codes, invalid source identifiers, or unsafe optional values are counted in
-`skippedInvalidSourceRecordCount`.
+explicit dataset observation only after exact-occurrence eligibility is established. Invalid request returns
+`INVALID_REQUEST`. Missing required source fields, including fully absent occurrence lineage, are counted in
+`skippedMissingRequiredFieldCount` and do not create fake records. Corrupted source rows with partial or malformed
+occurrence lineage, unknown, unsafe, or label-incompatible reason codes, invalid source identifiers, or unsafe optional
+values are counted in `skippedInvalidSourceRecordCount`.
 
 Build outcomes and successful ML evidence statuses are recorded through the service's Micrometer registry using only
 bounded `result` and `status` labels. Raw identifiers, model versions, payloads, and exception details are not metric

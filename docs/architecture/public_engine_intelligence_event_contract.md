@@ -40,9 +40,10 @@ be complete and explicit regardless of the outer event `modelVersion`. Historica
 comparison identity, summaries missing Rules or ML, incorrect engine ordering, unsupported IDs, and malformed current
 canonical values are rejected or fail closed; the read boundary does not repair them.
 
-`TransactionScoredEvent.mlPredictionEvidence` is a separate optional internal field. Historical events may omit both
-it and `mlPredictionEvidenceOmissionReason` for replay compatibility, and consumers must not backfill evidence. The
-current producer API requires exactly one of those fields and cannot intentionally emit a fresh event with neither.
+`TransactionScoredEvent.mlPredictionEvidence` is a separate optional internal field. Every current scored event requires
+exactly one of it or `mlPredictionEvidenceOmissionReason`; events with neither fail deserialization. Legacy null/null
+messages must be drained, migrated from authoritative evidence, archived, or quarantined before current consumers read
+them, and consumers must not invent or backfill evidence.
 Pipeline-level reasons (`DIAGNOSTIC_EMISSION_DISABLED` and `DIAGNOSTIC_ENRICHMENT_UNAVAILABLE`) require the summary
 to be absent. ML-engine-derived reasons require an observed `ml.python.primary` result and cannot be used to describe
 an unavailable diagnostic pipeline; `ML_ENGINE_UNAVAILABLE` is reserved for observed operational ML statuses.

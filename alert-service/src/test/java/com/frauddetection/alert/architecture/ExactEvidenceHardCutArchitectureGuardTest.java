@@ -1,0 +1,78 @@
+package com.frauddetection.alert.architecture;
+
+import org.junit.jupiter.api.Test;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class ExactEvidenceHardCutArchitectureGuardTest {
+
+    private static final Path ROOT = repositoryRoot();
+
+    @Test
+    void productionSourceDoesNotRestoreRemovedOccurrenceOrEvidenceFallbacks() throws IOException {
+        String productionSource = sourceText(List.of(
+                ROOT.resolve("common-events/src/main"),
+                ROOT.resolve("fraud-scoring-service/src/main"),
+                ROOT.resolve("alert-service/src/main"),
+                ROOT.resolve("ml-inference-service/app"),
+                ROOT.resolve("ml-inference-service/offline_evaluation")
+        ));
+
+        assertThat(productionSource).doesNotContain(
+                "UNKNOWN_OCCURRENCE",
+                "ScoringOccurrenceOwnership.unknown",
+                "historicalUnknownQuery",
+                "replaceHistoricalUnknown",
+                "HISTORICAL_OCCURRENCE_CLAIMED",
+                "historicalWithoutFence",
+                "LEGITIMATE_ABSENCE",
+                "CURRENT_ML_PREDICTION_EVIDENCE_LEGITIMATE_ABSENCE_UNSUPPORTED"
+        );
+    }
+
+    @Test
+    void cutoverProcedureForbidsRuntimeCompatibilityRollback() throws IOException {
+        String procedure = Files.readString(
+                ROOT.resolve("docs/architecture/scoring_occurrence_ownership_migration.md")
+        );
+
+        assertThat(procedure)
+                .contains("Rollback must never restore identity-free runtime interpretation")
+                .contains("current ML inference")
+                .contains("source count = migrated count + archived count + quarantined count");
+    }
+
+    private String sourceText(List<Path> roots) throws IOException {
+        StringBuilder source = new StringBuilder();
+        for (Path root : roots) {
+            if (!Files.exists(root)) {
+                continue;
+            }
+            try (var paths = Files.walk(root)) {
+                paths.filter(Files::isRegularFile)
+                        .filter(path -> path.toString().endsWith(".java") || path.toString().endsWith(".py"))
+                        .sorted()
+                        .forEach(path -> source.append(read(path)).append('\n'));
+            }
+        }
+        return source.toString();
+    }
+
+    private String read(Path path) {
+        try {
+            return Files.readString(path);
+        } catch (IOException exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private static Path repositoryRoot() {
+        Path current = Path.of("").toAbsolutePath();
+        return current.endsWith("alert-service") ? current.getParent() : current;
+    }
+}
