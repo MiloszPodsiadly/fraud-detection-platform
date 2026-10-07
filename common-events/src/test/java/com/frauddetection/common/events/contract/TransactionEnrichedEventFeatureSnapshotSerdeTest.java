@@ -4,6 +4,7 @@ import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
 import com.frauddetection.common.events.kafka.JacksonKafkaSerializer;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.model.CustomerContext;
 import com.frauddetection.common.events.model.DeviceInfo;
 import com.frauddetection.common.events.model.LocationInfo;
@@ -231,7 +232,11 @@ class TransactionEnrichedEventFeatureSnapshotSerdeTest {
                 Map.of(),
                 featureSnapshot,
                 true,
-                List.of()
+                List.of(),
+                null,
+                null,
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                null
         );
     }
 

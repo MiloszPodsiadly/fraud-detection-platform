@@ -23,7 +23,6 @@ from offline_evaluation.feedback_dataset_evaluation.evaluation_card.schema impor
 from offline_evaluation.feedback_dataset_evaluation.evaluation_card.writer import write_evaluation_card_artifacts
 from offline_evaluation.feedback_dataset_evaluation.evaluation_runner import run_feedback_dataset_evaluation
 from offline_evaluation.feedback_dataset_evaluation.model_evaluation import (
-    MODEL_PREDICTION_SIGNAL_UNAVAILABLE,
     ModelEvaluationIdentity,
 )
 from offline_evaluation.feedback_dataset_evaluation.model_evaluation_artifact_set import (
@@ -76,7 +75,7 @@ class FeedbackEvaluationCrossChainRegressionTest(unittest.TestCase):
             self.assertEqual(GENERATED_AT, platform_summary["generatedAt"])
             self.assertEqual(platform_manifest["reportType"], platform_summary["reportType"])
             self.assertEqual(
-                "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
+                "PLATFORM_RECOMMENDATION_NOT_MODEL_ARTIFACT_SCOPED",
                 platform_summary["evaluationSubject"]["identityCompleteness"],
             )
             self._assert_named_manifest_integrity(run.platform_dir, platform_manifest)
@@ -200,9 +199,13 @@ class FeedbackEvaluationCrossChainRegressionTest(unittest.TestCase):
             self.assertEqual(
                 {
                     "recordsConsidered": 4,
+                    "recordsWithPredictionEvidence": 3,
                     "recordsEvaluated": 2,
-                    "recordsExcludedMissingLineage": 1,
                     "recordsExcludedIdentityMismatch": 1,
+                    "recordsExcludedSourceIdentityMismatch": 0,
+                    "recordsExcludedMissingPredictionEvidence": 1,
+                    "recordsExcludedUnexpectedMissingPredictionEvidence": 0,
+                    "recordsExcludedInvalidPredictionEvidence": 0,
                 },
                 dict(model_summary["population"]),
             )
@@ -210,13 +213,10 @@ class FeedbackEvaluationCrossChainRegressionTest(unittest.TestCase):
                 {"positiveClassCount": 1, "negativeClassCount": 1},
                 dict(model_summary["classBalance"]),
             )
-            self.assertEqual((MODEL_PREDICTION_SIGNAL_UNAVAILABLE,), model_summary["warnings"])
+            self.assertEqual(("MODEL_EVALUATION_PARTIAL_COVERAGE",), model_summary["warnings"])
             self.assertTrue(model_summary["supportedMetrics"]["classBalance"]["available"])
-            self.assertFalse(model_summary["supportedMetrics"]["mlPredictionMetrics"]["available"])
-            self.assertEqual(
-                MODEL_PREDICTION_SIGNAL_UNAVAILABLE,
-                model_summary["supportedMetrics"]["mlPredictionMetrics"]["reason"],
-            )
+            self.assertTrue(model_summary["supportedMetrics"]["mlPredictionMetrics"]["available"])
+            self.assertIsNone(model_summary["supportedMetrics"]["mlPredictionMetrics"]["reason"])
             self.assertLessEqual(model_summary["population"]["recordsConsidered"], MAX_DATASET_RECORDS)
             window = model_summary["evaluationWindow"]
             self.assertLessEqual(
@@ -250,7 +250,7 @@ class FeedbackEvaluationCrossChainRegressionTest(unittest.TestCase):
 
             original_model_manifest = (run.model_dir / "manifest.json").read_bytes()
             inconsistent = self._json(model_summary_path)
-            inconsistent["warnings"] = []
+            inconsistent["warnings"] = ["SINGLE_CLASS_MODEL_LINEAGE_RECORDS"]
             self._write_json(model_summary_path, inconsistent)
             self._reseal_model_manifest(run.model_dir)
 

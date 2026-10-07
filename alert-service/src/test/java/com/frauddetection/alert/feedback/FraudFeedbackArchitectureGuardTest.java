@@ -108,6 +108,7 @@ class FraudFeedbackArchitectureGuardTest {
     void feedbackOccurrenceLineageAndHistoricalMigrationRulesStayDocumented() throws IOException {
         String feedbackLoop = Files.readString(architectureDoc("fraud_feedback_loop.md"));
         String datasetBuilder = Files.readString(architectureDoc("feedback_dataset_builder.md"));
+        String normalizedDatasetBuilder = datasetBuilder.replaceAll("\\s+", " ");
 
         assertThat(feedbackLoop)
                 .contains("authoritative scoring occurrence identity")
@@ -116,11 +117,13 @@ class FraudFeedbackArchitectureGuardTest {
                 .contains("lineage unavailable")
                 .contains("quarantined and excluded")
                 .contains("must not be guessed or backfilled");
-        assertThat(datasetBuilder)
+        assertThat(normalizedDatasetBuilder)
                 .contains("does not export the private scoring occurrence identity")
                 .contains("exact authoritative `sourceEventId`")
-                .contains("quarantined and excluded")
-                .contains("must never infer missing lineage");
+                .contains("Consumers must never infer missing evidence or lineage from the platform score, current runtime, registry, model version, latest projection, or timestamps")
+                .contains("remains a successful, explicit dataset observation")
+                .contains("excluded only from the exact model metric population")
+                .contains("No valid feedback observation silently disappears from population accounting");
     }
 
     @Test

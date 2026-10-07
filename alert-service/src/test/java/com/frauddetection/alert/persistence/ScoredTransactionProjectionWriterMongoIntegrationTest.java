@@ -4,6 +4,7 @@ import com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult;
 import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import org.junit.jupiter.api.AfterEach;
@@ -313,28 +314,26 @@ class ScoredTransactionProjectionWriterMongoIntegrationTest {
     }
 
     @Test
-    void knownOccurrenceAtomicallyReplacesHistoricalUnknownOccurrence() {
+    void identityFreeHistoricalOccurrenceFailsClosedWithoutReplacement() {
         ScoredTransactionDocument historical = new ScoredTransactionDocument();
         historical.setTransactionId("txn-historical");
         historical.setFraudScore(0.12d);
         mongoTemplate.insert(historical);
 
-        ScoringOccurrenceAdmissionResult result = writer.write(mapper.toDocument(event(
+        ScoredTransactionDocument replacement = mapper.toDocument(event(
                 "txn-historical",
                 "event-known",
                 BASE_TIME,
                 0.73d,
                 false,
                 "model-current"
-        )));
+        ));
 
-        ScoredTransactionDocument stored = stored("txn-historical");
-        assertThat(result.outcome()).isEqualTo(APPLIED_NEWER);
-        assertThat(result.reasonCode()).isEqualTo(
-                ScoringOccurrenceAdmissionResult.ReasonCode.HISTORICAL_OCCURRENCE_CLAIMED
-        );
-        assertThat(stored.getSourceEventId()).isEqualTo("event-known");
-        assertThat(stored.getFraudScore()).isEqualTo(0.73d);
+        assertThatThrownBy(() -> writer.write(replacement))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("SCORING_OCCURRENCE_IDENTITY_INVALID");
+        assertThat(stored("txn-historical").getSourceEventId()).isNull();
+        assertThat(stored("txn-historical").getFraudScore()).isEqualTo(0.12d);
     }
 
     @Test
@@ -430,7 +429,12 @@ class ScoredTransactionProjectionWriterMongoIntegrationTest {
                 List.of(),
                 scoreDetails,
                 Map.of(),
-                alertRecommended
+                alertRecommended,
+                List.of(),
+                null,
+                null,
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                null
         );
     }
 }

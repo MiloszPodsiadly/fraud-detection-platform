@@ -3,6 +3,7 @@ package com.frauddetection.scoring.mapper;
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import com.frauddetection.scoring.domain.FraudScoreResult;
@@ -10,28 +11,18 @@ import com.frauddetection.scoring.domain.FraudScoringRequest;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
 @Component
 public class TransactionScoredEventMapper {
 
-    public TransactionScoredEvent toEvent(FraudScoringRequest scoringRequest, FraudScoreResult scoreResult) {
-        return toEvent(scoringRequest, scoreResult, Optional.empty(), null);
-    }
-
-    public TransactionScoredEvent toEvent(
-            FraudScoringRequest scoringRequest,
-            FraudScoreResult scoreResult,
-            Optional<EngineIntelligenceSummary> engineIntelligence
-    ) {
-        return toEvent(scoringRequest, scoreResult, engineIntelligence, null);
-    }
-
     public TransactionScoredEvent toEvent(
             FraudScoringRequest scoringRequest,
             FraudScoreResult scoreResult,
             Optional<EngineIntelligenceSummary> engineIntelligence,
+            MlPredictionEvidenceOmissionReason omissionReason,
             AnalystRecommendationResult analystRecommendation
     ) {
         return toEvent(
@@ -39,6 +30,7 @@ public class TransactionScoredEventMapper {
                 scoreResult,
                 engineIntelligence,
                 Optional.empty(),
+                Optional.of(Objects.requireNonNull(omissionReason, "omissionReason is required")),
                 analystRecommendation
         );
     }
@@ -48,8 +40,18 @@ public class TransactionScoredEventMapper {
             FraudScoreResult scoreResult,
             Optional<EngineIntelligenceSummary> engineIntelligence,
             Optional<MlPredictionEvidenceV1> mlPredictionEvidence,
+            Optional<MlPredictionEvidenceOmissionReason> mlPredictionEvidenceOmissionReason,
             AnalystRecommendationResult analystRecommendation
     ) {
+        Objects.requireNonNull(engineIntelligence, "engineIntelligence is required");
+        Objects.requireNonNull(mlPredictionEvidence, "mlPredictionEvidence is required");
+        Objects.requireNonNull(
+                mlPredictionEvidenceOmissionReason,
+                "mlPredictionEvidenceOmissionReason is required"
+        );
+        if (mlPredictionEvidence.isPresent() == mlPredictionEvidenceOmissionReason.isPresent()) {
+            throw new IllegalArgumentException("ML_PREDICTION_EVIDENCE_REQUIRES_EXACTLY_ONE_OUTCOME");
+        }
         TransactionEnrichedEvent event = scoringRequest.event();
         return new TransactionScoredEvent(
                 UUID.randomUUID().toString(),
@@ -77,6 +79,7 @@ public class TransactionScoredEventMapper {
                 scoreResult.scoringEvidence(),
                 engineIntelligence.orElse(null),
                 mlPredictionEvidence.orElse(null),
+                mlPredictionEvidenceOmissionReason.orElse(null),
                 analystRecommendation
         );
     }

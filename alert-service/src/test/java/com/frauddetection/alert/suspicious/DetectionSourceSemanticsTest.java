@@ -15,8 +15,7 @@ class DetectionSourceSemanticsTest {
                         DetectionSource.RULE_ENGINE,
                         DetectionSource.ML_MODEL,
                         DetectionSource.HYBRID_SCORING,
-                        DetectionSource.SCORING_FALLBACK,
-                        DetectionSource.LEGACY_SCORING
+                        DetectionSource.SCORING_FALLBACK
                 );
     }
 

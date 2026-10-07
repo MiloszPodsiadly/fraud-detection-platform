@@ -13,6 +13,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBuck
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.domain.FraudScoreResult;
@@ -25,6 +26,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TransactionScoredEventMapperEngineIntelligenceTest {
 
@@ -35,17 +37,38 @@ class TransactionScoredEventMapperEngineIntelligenceTest {
 
     @Test
     void mapperOmitsEngineIntelligenceWhenOptionalEmpty() throws Exception {
-        var event = mapper.toEvent(request(), scoreResult(), Optional.empty());
+        var event = mapper.toEvent(
+                request(), scoreResult(), Optional.empty(),
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED, null
+        );
 
         assertThat(event.engineIntelligence()).isNull();
         assertThat(event.mlPredictionEvidence()).isNull();
         assertThat(objectMapper.writeValueAsString(event))
                 .doesNotContain("\"engineIntelligence\"", "\"mlPredictionEvidence\"");
+        assertThat(event.mlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED);
+    }
+
+    @Test
+    void currentMapperRequiresExactlyOneMlPredictionEvidenceOutcome() {
+        assertThatThrownBy(() -> mapper.toEvent(
+                request(),
+                scoreResult(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                null
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("ML_PREDICTION_EVIDENCE_REQUIRES_EXACTLY_ONE_OUTCOME");
     }
 
     @Test
     void mapperIncludesEngineIntelligenceWhenProvided() throws Exception {
-        var event = mapper.toEvent(request(), scoreResult(), Optional.of(summary()));
+        var event = mapper.toEvent(
+                request(), scoreResult(), Optional.of(summary()),
+                MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE, null
+        );
 
         assertThat(event.engineIntelligence()).isEqualTo(summary());
         assertThat(objectMapper.writeValueAsString(event)).contains("\"engineIntelligence\"");
@@ -70,6 +93,7 @@ class TransactionScoredEventMapperEngineIntelligenceTest {
                 scoreResult(),
                 Optional.of(availableMlSummary("model-X")),
                 Optional.of(evidence),
+                Optional.empty(),
                 null
         );
 
@@ -80,12 +104,23 @@ class TransactionScoredEventMapperEngineIntelligenceTest {
 
     @Test
     void mapperDoesNotChangeExistingEventFieldsWhenEngineIntelligenceProvided() {
-        var withoutSummary = mapper.toEvent(request(), scoreResult(), Optional.empty());
-        var withSummary = mapper.toEvent(request(), scoreResult(), Optional.of(summary()));
+        var withoutSummary = mapper.toEvent(
+                request(), scoreResult(), Optional.empty(),
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED, null
+        );
+        var withSummary = mapper.toEvent(
+                request(), scoreResult(), Optional.of(summary()),
+                MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE, null
+        );
 
         assertThat(withSummary)
                 .usingRecursiveComparison()
-                .ignoringFields("eventId", "createdAt", "engineIntelligence")
+                .ignoringFields(
+                        "eventId",
+                        "createdAt",
+                        "engineIntelligence",
+                        "mlPredictionEvidenceOmissionReason"
+                )
                 .isEqualTo(withoutSummary);
     }
 
@@ -94,7 +129,19 @@ class TransactionScoredEventMapperEngineIntelligenceTest {
         var event = mapper.toEvent(
                 request(),
                 ruleBasedScoreResult("rules-v2-final"),
-                Optional.of(availableMlSummary("model-X"))
+                Optional.of(availableMlSummary("model-X")),
+                Optional.of(new MlPredictionEvidenceV1(
+                        0.8123d,
+                        RiskLevel.HIGH,
+                        new MlModelIdentity(
+                                "python-logistic-fraud-model",
+                                "model-X",
+                                "2026-05-30.feature-contract.v1"
+                        ),
+                        GENERATED_AT
+                )),
+                Optional.empty(),
+                null
         );
 
         assertThat(event.scoringStrategy()).isEqualTo("RULE_BASED");

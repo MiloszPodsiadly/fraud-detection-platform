@@ -1556,8 +1556,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
                  PARTIAL_TRUNCATED,
                  UNAVAILABLE_UNSUPPORTED_EVIDENCE,
                  ERROR_PROJECTED,
-                 ERROR_PROJECTION_FAILED,
-                 LEGACY_PROJECTED -> state.name();
+                 ERROR_PROJECTION_FAILED -> state.name();
         };
     }
 
@@ -1573,7 +1572,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
             return "UNKNOWN";
         }
         return switch (status) {
-            case NEW, ALERT_CREATED, LEGACY_IMPORTED -> status.name();
+            case NEW, ALERT_CREATED -> status.name();
         };
     }
 
@@ -1593,7 +1592,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
 
     private String normalizeSuspiciousTransactionApiStatus(String status) {
         return switch (status) {
-            case "NEW", "ALERT_CREATED", "LEGACY_IMPORTED", "ANY" -> status;
+            case "NEW", "ALERT_CREATED", "ANY" -> status;
             default -> "ANY";
         };
     }

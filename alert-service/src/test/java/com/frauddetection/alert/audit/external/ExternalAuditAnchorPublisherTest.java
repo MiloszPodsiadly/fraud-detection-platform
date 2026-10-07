@@ -151,7 +151,8 @@ class ExternalAuditAnchorPublisherTest {
         when(anchorRepository.findByPartitionKeyAndChainPositionGreaterThan("source_service:alert-service", 0L, 100))
                 .thenReturn(List.of(anchor));
         when(sink.publish(any(ExternalAuditAnchor.class)))
-                .thenAnswer(invocation -> ((ExternalAuditAnchor) invocation.getArgument(0)).partial());
+                .thenAnswer(invocation -> ((ExternalAuditAnchor) invocation.getArgument(0))
+                        .unverified(ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED));
         when(sink.externalReference(any(ExternalAuditAnchor.class)))
                 .thenReturn(java.util.Optional.of(new ExternalAnchorReference(
                         "local-anchor-1",

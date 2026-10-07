@@ -2,6 +2,7 @@ package com.frauddetection.scoring.service;
 
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.config.ScoringProperties;
@@ -11,6 +12,8 @@ import com.frauddetection.scoring.mapper.TransactionScoredEventMapper;
 import com.frauddetection.scoring.messaging.TransactionScoredEventPublisher;
 import com.frauddetection.scoring.observability.ScoringMetrics;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionOmissionReason;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionResult;
 import org.junit.jupiter.api.Test;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
@@ -66,12 +69,15 @@ class TransactionFraudScoringServiceTest {
         TransactionScoredEvent scoredEvent = TransactionFixtures.scoredTransaction().build();
 
         when(scoringEngine.score(FraudScoringRequest.from(event))).thenReturn(scoreResult);
-        when(emissionService.emitIfEnabled(FraudScoringRequest.from(event))).thenReturn(Optional.empty());
+        when(emissionService.emitIfEnabled(FraudScoringRequest.from(event))).thenReturn(
+                EngineIntelligenceEmissionResult.omitted(EngineIntelligenceEmissionOmissionReason.DISABLED)
+        );
         when(mapper.toEvent(
                 FraudScoringRequest.from(event),
                 scoreResult,
                 Optional.empty(),
                 Optional.empty(),
+                Optional.of(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED),
                 com.frauddetection.common.events.recommendation.AnalystRecommendationResult.absent(GENERATED_AT)
         )).thenReturn(scoredEvent);
 
@@ -85,6 +91,7 @@ class TransactionFraudScoringServiceTest {
                 scoreResult,
                 Optional.empty(),
                 Optional.empty(),
+                Optional.of(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED),
                 com.frauddetection.common.events.recommendation.AnalystRecommendationResult.absent(GENERATED_AT)
         );
         inOrder.verify(publisher).publish(scoredEvent);

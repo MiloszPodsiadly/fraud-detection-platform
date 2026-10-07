@@ -5,6 +5,8 @@ import com.frauddetection.alert.api.EngineIntelligenceResponse;
 import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModelMapper;
 import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
+import com.frauddetection.alert.persistence.ScoringOccurrenceFingerprint;
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionRawEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
@@ -15,6 +17,7 @@ import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.features.FraudFeatureThresholdContract;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparison;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
 import com.frauddetection.common.events.kafka.JacksonKafkaSerializer;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
@@ -108,8 +111,9 @@ class EngineIntelligenceFullPathCompositionTest {
         TransactionScoredEvent event = scoredKafkaRoundTrip(new TransactionScoredEventMapper().toEvent(
                 request,
                 baselineResult,
-                enrichment.engineIntelligenceSummary(),
+                Optional.of(enrichment.engineIntelligenceSummary()),
                 enrichment.mlPredictionEvidence(),
+                enrichment.mlPredictionEvidenceOmissionReason(),
                 null
         ));
         EngineIntelligenceResponse response = responseFor(event);
@@ -215,7 +219,9 @@ class EngineIntelligenceFullPathCompositionTest {
         TransactionScoredEvent scored = scoredKafkaRoundTrip(new TransactionScoredEventMapper().toEvent(
                 request,
                 result,
-                Optional.empty()
+                Optional.empty(),
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                null
         ));
 
         assertThat(scored.featureSnapshot())
@@ -249,12 +255,16 @@ class EngineIntelligenceFullPathCompositionTest {
         EngineIntelligenceResponse withoutVelocity = responseFor(scoredKafkaRoundTrip(new TransactionScoredEventMapper().toEvent(
                 request,
                 baselineResult,
-                Optional.of(summary(evaluate(context, productionEngines(baselineEngine, false))))
+                Optional.of(summary(evaluate(context, productionEngines(baselineEngine, false)))),
+                MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED,
+                null
         )));
         EngineIntelligenceResponse failedVelocity = responseFor(scoredKafkaRoundTrip(new TransactionScoredEventMapper().toEvent(
                 request,
                 baselineResult,
-                Optional.of(summary(evaluate(context, enginesWithFailingVelocity(baselineEngine))))
+                Optional.of(summary(evaluate(context, enginesWithFailingVelocity(baselineEngine)))),
+                MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED,
+                null
         )));
 
         assertThat(withoutVelocity.status()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
@@ -428,7 +438,16 @@ class EngineIntelligenceFullPathCompositionTest {
     private EngineIntelligenceResponse responseFor(TransactionScoredEvent event) {
         EngineIntelligenceProjection projection = new EngineIntelligenceProjectionMapper(
                 new EngineIntelligenceProjectionPolicy()
-        ).map(event.transactionId(), event.engineIntelligence(), null).projection().orElseThrow();
+        ).map(
+                event.transactionId(),
+                new ScoringOccurrenceOwnership(
+                        event.eventId(),
+                        event.createdAt(),
+                        ScoringOccurrenceFingerprint.from(event)
+                ),
+                event.engineIntelligence(),
+                null
+        ).projection().orElseThrow();
         return new EngineIntelligenceResponseMapper().toResponse(
                 new EngineIntelligenceReadModelMapper().map(projection)
         );

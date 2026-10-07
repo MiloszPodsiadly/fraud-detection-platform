@@ -17,7 +17,6 @@ export function availableEvidenceSummary() {
     linkedAlertCount: 1,
     evidenceItemCount: 1,
     partial: false,
-    legacy: false,
     truncated: false,
     truncationReason: null
   };
@@ -28,14 +27,6 @@ export function partialEvidenceSummary() {
     ...availableEvidenceSummary(),
     aggregateEvidenceStatus: "PARTIAL",
     partial: true
-  };
-}
-
-export function legacyEvidenceSummary() {
-  return {
-    ...unavailableEvidenceSummary(),
-    aggregateEvidenceStatus: "LEGACY",
-    legacy: true
   };
 }
 
@@ -59,8 +50,7 @@ export function unavailableEvidenceSummary() {
     evidenceByStatus: [],
     linkedAlertCount: 0,
     evidenceItemCount: 0,
-    partial: false,
-    legacy: false,
+    partial: true,
     truncated: false,
     truncationReason: null
   };

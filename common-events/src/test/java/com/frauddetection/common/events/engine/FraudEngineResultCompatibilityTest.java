@@ -4,6 +4,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.RecordComponent;
@@ -78,6 +79,9 @@ class FraudEngineResultCompatibilityTest {
                 Map.of(),
                 true,
                 List.of(),
+                null,
+                null,
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
                 null
         );
     }

@@ -1,5 +1,6 @@
 package com.frauddetection.alert.engineintelligence;
 
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
@@ -16,6 +17,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCat
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningSummary;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 
 import java.time.Instant;
 import java.util.List;
@@ -26,6 +28,14 @@ final class EngineIntelligenceProjectionTestFixtures {
     static final Instant GENERATED_AT = Instant.parse("2026-06-01T06:00:01Z");
 
     private EngineIntelligenceProjectionTestFixtures() {
+    }
+
+    static ScoringOccurrenceOwnership occurrence() {
+        return new ScoringOccurrenceOwnership(
+                "event-engine-intelligence-fixture",
+                GENERATED_AT.minusSeconds(1),
+                "a".repeat(64)
+        );
     }
 
     static EngineIntelligenceSummary minimalSummary() {
@@ -185,7 +195,25 @@ final class EngineIntelligenceProjectionTestFixtures {
                 Map.of(),
                 true,
                 List.of(),
-                engineIntelligence
+                engineIntelligence,
+                null,
+                omissionReason(engineIntelligence),
+                null
         );
+    }
+
+    private static MlPredictionEvidenceOmissionReason omissionReason(
+            EngineIntelligenceSummary engineIntelligence
+    ) {
+        if (engineIntelligence == null) {
+            return MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED;
+        }
+        return engineIntelligence.engines().stream()
+                .filter(engine -> "ml.python.primary".equals(engine.engineId()))
+                .findFirst()
+                .map(engine -> engine.status() == FraudEngineStatus.AVAILABLE
+                        ? MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED
+                        : MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE)
+                .orElse(MlPredictionEvidenceOmissionReason.EVIDENCE_SOURCE_INTEGRITY_FAILURE);
     }
 }

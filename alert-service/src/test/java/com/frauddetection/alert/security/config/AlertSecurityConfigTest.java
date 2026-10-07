@@ -513,7 +513,8 @@ class AlertSecurityConfigTest {
                                 "event-txn-old",
                                 Instant.parse("2026-06-18T10:00:01Z"),
                                 "a".repeat(64)
-                        )
+                        ),
+                        com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED
                 ));
         when(engineIntelligenceReadService.read("txn-old"))
                 .thenReturn(EngineIntelligenceReadModel.notProjected("txn-old"));

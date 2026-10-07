@@ -2,6 +2,7 @@ package com.frauddetection.alert.evidence;
 
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 
 import java.time.Instant;
 import java.util.List;
@@ -48,7 +49,12 @@ final class EvidenceProjectionTestSupport {
                 reasonCodes,
                 Map.of("reasonCodeCount", reasonCodes == null ? 0 : reasonCodes.size()),
                 Map.of(),
-                true
+                true,
+                List.of(),
+                null,
+                null,
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                null
         );
     }
 }

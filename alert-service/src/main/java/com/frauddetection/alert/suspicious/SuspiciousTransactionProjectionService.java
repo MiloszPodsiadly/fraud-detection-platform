@@ -162,7 +162,7 @@ public class SuspiciousTransactionProjectionService {
         }
         boolean hasAvailable = false;
         boolean hasError = false;
-        boolean hasPartialOrLegacy = false;
+        boolean hasPartial = false;
         boolean hasUnavailableOrNotApplicable = false;
         for (ScoringEvidenceItem item : scoringEvidence) {
             if (item == null || item.status() == null) {
@@ -172,14 +172,14 @@ public class SuspiciousTransactionProjectionService {
             switch (item.status()) {
                 case AVAILABLE -> hasAvailable = true;
                 case ERROR -> hasError = true;
-                case PARTIAL, LEGACY -> hasPartialOrLegacy = true;
+                case PARTIAL -> hasPartial = true;
                 case UNAVAILABLE, NOT_APPLICABLE -> hasUnavailableOrNotApplicable = true;
             }
         }
         if (hasError) {
             return EvidenceStatus.ERROR;
         }
-        if (hasPartialOrLegacy) {
+        if (hasPartial) {
             return EvidenceStatus.PARTIAL;
         }
         if (hasAvailable && hasUnavailableOrNotApplicable) {
@@ -198,7 +198,7 @@ public class SuspiciousTransactionProjectionService {
         return switch (status) {
             case AVAILABLE -> "AVAILABLE_METADATA";
             case ERROR -> "ERROR_METADATA";
-            case PARTIAL, LEGACY -> "PARTIAL_METADATA";
+            case PARTIAL -> "PARTIAL_METADATA";
             case UNAVAILABLE, NOT_APPLICABLE, STALE -> "UNAVAILABLE_METADATA";
         };
     }
@@ -215,9 +215,6 @@ public class SuspiciousTransactionProjectionService {
         }
         if (hasMlEvidence || contains(event.scoringStrategy(), "ML")) {
             return DetectionSource.ML_MODEL;
-        }
-        if (hasEvidenceSource(event.scoringEvidence(), ScoringEvidenceSource.LEGACY_SCORING)) {
-            return DetectionSource.LEGACY_SCORING;
         }
         return DetectionSource.RULE_ENGINE;
     }

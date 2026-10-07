@@ -162,11 +162,14 @@ public class EngineIntelligenceProjectionService {
                 return result;
             }
 
-            EngineIntelligenceProjectionResult result = mapper.map(
-                    transactionId,
+            ScoringOccurrenceOwnership ownership = new ScoringOccurrenceOwnership(
                     sourceEventId,
                     sourceEventCreatedAt,
-                    sourceEventFingerprint,
+                    sourceEventFingerprint
+            );
+            EngineIntelligenceProjectionResult result = mapper.map(
+                    transactionId,
+                    ownership,
                     engineIntelligence,
                     null
             );
@@ -311,9 +314,6 @@ public class EngineIntelligenceProjectionService {
             );
         } catch (IllegalArgumentException exception) {
             throw new IllegalStateException("SCORING_OCCURRENCE_IDENTITY_INVALID", exception);
-        }
-        if (ownership.state() != ScoringOccurrenceOwnership.State.AUTHORITATIVE) {
-            throw new CurrentScoringOccurrencePendingException();
         }
         if (ownership.sourceEventId().equals(sourceEventId)) {
             if (!Objects.equals(current.getSourceEventFingerprint(), sourceEventFingerprint)) {

@@ -334,7 +334,8 @@ class FraudFeedbackPostFlowIntegrationTest {
                         "event-1",
                         Instant.parse("2026-06-25T09:00:01Z"),
                         "a".repeat(64)
-                )
+                ),
+                com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED
         );
     }
 

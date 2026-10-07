@@ -1,6 +1,7 @@
 package com.frauddetection.alert.persistence;
 
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.model.Money;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
@@ -54,6 +55,7 @@ public class ScoredTransactionDocument {
 
     private List<String> reasonCodes;
     private AnalystRecommendationResult analystRecommendation;
+    private MlPredictionEvidenceOmissionReason mlPredictionEvidenceOmissionReason;
 
     public String getTransactionId() { return transactionId; }
     public void setTransactionId(String transactionId) { this.transactionId = transactionId; }
@@ -97,4 +99,6 @@ public class ScoredTransactionDocument {
     public void setReasonCodes(List<String> reasonCodes) { this.reasonCodes = reasonCodes; }
     public AnalystRecommendationResult getAnalystRecommendation() { return analystRecommendation; }
     public void setAnalystRecommendation(AnalystRecommendationResult analystRecommendation) { this.analystRecommendation = analystRecommendation; }
+    public MlPredictionEvidenceOmissionReason getMlPredictionEvidenceOmissionReason() { return mlPredictionEvidenceOmissionReason; }
+    public void setMlPredictionEvidenceOmissionReason(MlPredictionEvidenceOmissionReason reason) { this.mlPredictionEvidenceOmissionReason = reason; }
 }

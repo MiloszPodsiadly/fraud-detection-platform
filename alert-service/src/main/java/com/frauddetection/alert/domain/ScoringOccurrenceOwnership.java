@@ -4,7 +4,6 @@ import java.time.Instant;
 import java.util.regex.Pattern;
 
 public record ScoringOccurrenceOwnership(
-        State state,
         String sourceEventId,
         Instant sourceEventCreatedAt,
         String sourceEventFingerprint
@@ -15,14 +14,7 @@ public record ScoringOccurrenceOwnership(
     private static final Pattern SOURCE_EVENT_FINGERPRINT_PATTERN = Pattern.compile("[0-9a-f]{64}");
 
     public ScoringOccurrenceOwnership {
-        if (state == null) {
-            throw new IllegalArgumentException("SCORING_OCCURRENCE_STATE_REQUIRED");
-        }
-        if (state == State.UNKNOWN_OCCURRENCE) {
-            if (sourceEventId != null || sourceEventCreatedAt != null || sourceEventFingerprint != null) {
-                throw new IllegalArgumentException("UNKNOWN_SCORING_OCCURRENCE_CANNOT_HAVE_IDENTITY");
-            }
-        } else if (sourceEventId == null
+        if (sourceEventId == null
                 || sourceEventId.isBlank()
                 || sourceEventId.length() > MAX_SOURCE_EVENT_ID_LENGTH
                 || sourceEventId.chars().anyMatch(Character::isISOControl)
@@ -39,12 +31,7 @@ public record ScoringOccurrenceOwnership(
             Instant sourceEventCreatedAt,
             String sourceEventFingerprint
     ) {
-        return new ScoringOccurrenceOwnership(
-                State.AUTHORITATIVE,
-                sourceEventId,
-                sourceEventCreatedAt,
-                sourceEventFingerprint
-        );
+        return new ScoringOccurrenceOwnership(sourceEventId, sourceEventCreatedAt, sourceEventFingerprint);
     }
 
     public static ScoringOccurrenceOwnership fromPersistedIdentity(
@@ -54,14 +41,6 @@ public record ScoringOccurrenceOwnership(
             Integer sourceEventCreatedAtNano,
             String sourceEventFingerprint
     ) {
-        boolean identityFree = sourceEventId == null
-                && sourceEventCreatedAt == null
-                && sourceEventCreatedAtEpochSecond == null
-                && sourceEventCreatedAtNano == null
-                && sourceEventFingerprint == null;
-        if (identityFree) {
-            return unknown();
-        }
         if (sourceEventId == null
                 || sourceEventCreatedAt == null
                 || sourceEventCreatedAtEpochSecond == null
@@ -84,22 +63,13 @@ public record ScoringOccurrenceOwnership(
             throw invalidPersistedIdentity();
         }
         try {
-            return authoritative(sourceEventId, parsedCreatedAt, sourceEventFingerprint);
+            return new ScoringOccurrenceOwnership(sourceEventId, parsedCreatedAt, sourceEventFingerprint);
         } catch (IllegalArgumentException exception) {
             throw invalidPersistedIdentity();
         }
     }
 
-    public static ScoringOccurrenceOwnership unknown() {
-        return new ScoringOccurrenceOwnership(State.UNKNOWN_OCCURRENCE, null, null, null);
-    }
-
     private static IllegalArgumentException invalidPersistedIdentity() {
         return new IllegalArgumentException("SCORING_OCCURRENCE_IDENTITY_INVALID");
-    }
-
-    public enum State {
-        AUTHORITATIVE,
-        UNKNOWN_OCCURRENCE
     }
 }

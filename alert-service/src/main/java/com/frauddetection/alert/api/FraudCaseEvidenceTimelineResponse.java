@@ -7,7 +7,6 @@ public record FraudCaseEvidenceTimelineResponse(
         String caseId,
         List<FraudCaseTimelineEventResponse> events,
         boolean partial,
-        boolean legacy,
         boolean truncated,
         String truncationReason,
         Instant generatedAt

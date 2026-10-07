@@ -1,5 +1,7 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
+
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -37,7 +39,8 @@ class EngineIntelligenceEmissionMetricsTest {
                 metrics
         );
 
-        assertThat(service.emitIfEnabled(request())).isEmpty();
+        assertThat(service.emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.DISABLED);
         verify(metrics).recordSkippedDisabled();
         verify(metrics, never()).recordAttempt();
         verify(metrics, never()).recordSuccess();
@@ -58,17 +61,17 @@ class EngineIntelligenceEmissionMetricsTest {
         when(pipeline.enrich(any())).thenReturn(Optional.of(
                 EngineIntelligenceEnrichmentResult.withoutEvidence(
                         summary,
-                        MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE
+                        MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED
                 )
         ));
 
-        assertThat(service(true, pipeline, metrics).emitIfEnabled(request()))
-                .flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
+        assertThat(service(true, pipeline, metrics).emitIfEnabled(request()).enrichment())
+                .map(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
                 .contains(summary);
         verify(metrics).recordAttempt();
         verify(metrics).recordSuccess();
         verify(metrics, never()).recordOmitted(any());
-        verify(metrics).recordEvidenceOmitted(MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE);
+        verify(metrics).recordEvidenceOmitted(MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED);
         verify(metrics).recordLatency(any(Duration.class));
     }
 
@@ -79,9 +82,13 @@ class EngineIntelligenceEmissionMetricsTest {
                 mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class);
         when(pipeline.enrich(any())).thenReturn(Optional.empty());
 
-        assertThat(service(true, pipeline, metrics).emitIfEnabled(request())).isEmpty();
+        assertThat(service(true, pipeline, metrics).emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT);
         verify(metrics).recordAttempt();
         verify(metrics).recordOmitted(EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT);
+        verify(metrics).recordEvidenceOmitted(
+                MlPredictionEvidenceOmissionReason.EVIDENCE_SOURCE_INTEGRITY_FAILURE
+        );
         verify(metrics, never()).recordSuccess();
         verify(metrics).recordLatency(any(Duration.class));
     }
@@ -99,7 +106,7 @@ class EngineIntelligenceEmissionMetricsTest {
                 )
         ));
 
-        assertThat(service(true, pipeline, metrics).emitIfEnabled(request())).isPresent();
+        assertThat(service(true, pipeline, metrics).emitIfEnabled(request()).enrichment()).isPresent();
 
         verify(metrics).recordSuccess();
         verify(metrics).recordEvidenceOmitted(MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING);
@@ -109,9 +116,13 @@ class EngineIntelligenceEmissionMetricsTest {
     void missingPipelineRecordsPipelineUnavailableAndLatency() {
         EngineIntelligenceEmissionMetrics metrics = mock(EngineIntelligenceEmissionMetrics.class);
 
-        assertThat(service(true, null, metrics).emitIfEnabled(request())).isEmpty();
+        assertThat(service(true, null, metrics).emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.PIPELINE_UNAVAILABLE);
         verify(metrics).recordAttempt();
         verify(metrics).recordOmitted(EngineIntelligenceEmissionOmissionReason.PIPELINE_UNAVAILABLE);
+        verify(metrics).recordEvidenceOmitted(
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE
+        );
         verify(metrics, never()).recordSuccess();
         verify(metrics).recordLatency(any(Duration.class));
     }
@@ -123,9 +134,13 @@ class EngineIntelligenceEmissionMetricsTest {
                 mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class);
         when(pipeline.enrich(any())).thenThrow(new IllegalStateException("raw-secret-must-not-be-a-label"));
 
-        assertThat(service(true, pipeline, metrics).emitIfEnabled(request())).isEmpty();
+        assertThat(service(true, pipeline, metrics).emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
         verify(metrics).recordAttempt();
         verify(metrics).recordOmitted(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
+        verify(metrics).recordEvidenceOmitted(
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE
+        );
         verify(metrics, never()).recordSuccess();
         verify(metrics).recordLatency(any(Duration.class));
     }
@@ -140,12 +155,12 @@ class EngineIntelligenceEmissionMetricsTest {
         when(pipeline.enrich(any())).thenReturn(Optional.of(
                 EngineIntelligenceEnrichmentResult.withoutEvidence(
                         summary,
-                        MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE
+                        MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED
                 )
         ));
 
-        assertThat(service(true, pipeline, metrics).emitIfEnabled(request()))
-                .flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
+        assertThat(service(true, pipeline, metrics).emitIfEnabled(request()).enrichment())
+                .map(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
                 .contains(summary);
     }
 
@@ -173,18 +188,16 @@ class EngineIntelligenceEmissionMetricsTest {
                 EngineIntelligenceEmissionOmissionReason.DISABLED,
                 EngineIntelligenceEmissionOmissionReason.PIPELINE_UNAVAILABLE,
                 EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT,
-                EngineIntelligenceEmissionOmissionReason.ORCHESTRATOR_FAILURE,
-                EngineIntelligenceEmissionOmissionReason.AGGREGATION_FAILURE,
-                EngineIntelligenceEmissionOmissionReason.MAPPER_FAILURE,
                 EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE
         );
         assertThat(Arrays.asList(MlPredictionEvidenceOmissionReason.values())).containsExactly(
                 MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE,
                 MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE,
                 MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING,
                 MlPredictionEvidenceOmissionReason.INVALID_SCORE,
                 MlPredictionEvidenceOmissionReason.IDENTITY_VALIDATION_FAILURE,
-                MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE,
+                MlPredictionEvidenceOmissionReason.EVIDENCE_SOURCE_INTEGRITY_FAILURE,
                 MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED
         );
     }

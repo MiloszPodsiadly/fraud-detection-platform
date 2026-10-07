@@ -3,7 +3,6 @@ package com.frauddetection.alert.observability;
 public enum FraudCaseReadModelOutcome {
     AVAILABLE("available"),
     PARTIAL("partial"),
-    LEGACY("legacy"),
     TRUNCATED("truncated"),
     EMPTY("empty"),
     NOT_FOUND("not_found"),

@@ -106,7 +106,11 @@ class AlertManagementServiceTest {
                 base.scoreDetails(),
                 base.featureSnapshot(),
                 true,
-                List.of(scoringEvidence())
+                List.of(scoringEvidence()),
+                base.engineIntelligence(),
+                base.mlPredictionEvidence(),
+                base.mlPredictionEvidenceOmissionReason(),
+                base.analystRecommendation()
         );
         ArgumentCaptor<AlertDocument> captor = ArgumentCaptor.forClass(AlertDocument.class);
 

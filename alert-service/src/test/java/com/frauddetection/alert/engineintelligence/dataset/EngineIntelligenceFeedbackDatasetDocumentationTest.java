@@ -158,6 +158,21 @@ class EngineIntelligenceFeedbackDatasetDocumentationTest {
                 .contains("batch lookup");
     }
 
+    @Test
+    void docsKeepEngineIntelligenceFeedbackSeparateFromExactModelEvidence() throws IOException {
+        assertThat(normalizedDoc())
+                .contains("analyst usefulness/accuracy feedback")
+                .contains("not the source of exact model prediction evidence")
+                .contains("FraudFeedbackRecord")
+                .contains("MlPredictionEvidenceProjection")
+                .contains("must not use EngineIntelligenceFeedbackDatasetExport")
+                .contains("current Engine Intelligence projection selected by transaction ID")
+                .contains("latest/current diagnostic projection")
+                .contains("was future scope for that historical delivery")
+                .contains("current offline suite is now implemented")
+                .contains("feedback-dataset-v2 exact-occurrence bounded context");
+    }
+
     private static String normalizedDoc() throws IOException {
         return Files.readString(DOC)
                 .replace("`", "")

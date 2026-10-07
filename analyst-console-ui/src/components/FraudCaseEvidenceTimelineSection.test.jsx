@@ -15,12 +15,11 @@ import {
 import { timelineEventDescription, timelineEventTitle, timelineStateNotice } from "./fraudCaseTimelineCopy.js";
 import {
   availableTimeline,
-  emptyLegacyPartialTimeline,
   emptyPartialTimeline,
   emptyTimeline,
   emptyTruncatedTimeline,
   largeTimeline,
-  legacyTimeline,
+  unavailableLinkedAlertContextTimeline,
   maliciousTimeline,
   malformedTimeline,
   nullTimestampTimeline,
@@ -158,7 +157,7 @@ describe("FraudCaseEvidenceTimelineSection", () => {
     expect(section.textContent).not.toContain("10:00:00Z");
   });
 
-  it("FraudCaseEvidenceTimelineSectionRendersPartialLegacyTruncatedStatesTest", async () => {
+  it("FraudCaseEvidenceTimelineSectionRendersPartialTruncatedStatesTest", async () => {
     renderSection({ timeline: truncatedTimeline() });
 
     const section = await findSection();
@@ -168,13 +167,14 @@ describe("FraudCaseEvidenceTimelineSection", () => {
     expect(within(section).getByText("TIMELINE_EVENT_LIMIT_EXCEEDED")).toBeInTheDocument();
   });
 
-  it("FraudCaseEvidenceTimelineSectionRendersLegacyStateTest", async () => {
-    renderSection({ timeline: legacyTimeline() });
+  it("FraudCaseEvidenceTimelineSectionRendersUnavailableLinkedAlertContextTest", async () => {
+    renderSection({ timeline: unavailableLinkedAlertContextTimeline() });
 
     const section = await findSection();
 
-    expect(within(section).getByText("Legacy context. This case may not have structured evidence timeline data.")).toBeInTheDocument();
-    expect(within(section).getByText("Legacy case context")).toBeInTheDocument();
+    expect(within(section).getByText("Partial timeline. Some linked evidence context is incomplete or unavailable.")).toBeInTheDocument();
+    expect(within(section).getByText("Linked alert context unavailable")).toBeInTheDocument();
+    expect(within(section).getByText("No linked alert context was available for this fraud case.")).toBeInTheDocument();
   });
 
   it("FraudCaseEvidenceTimelineSectionRendersSafeEmptyStateTest", async () => {
@@ -205,16 +205,6 @@ describe("FraudCaseEvidenceTimelineSection", () => {
     renderSection({ timeline: emptyTruncatedTimeline() });
 
     expect(within(await findSection()).getByText("TIMELINE_EVENT_LIMIT_EXCEEDED")).toBeInTheDocument();
-  });
-
-  it("FraudCaseEvidenceTimelineSectionRendersLegacyAndPartialWhenEventsEmptyTest", async () => {
-    renderSection({ timeline: emptyLegacyPartialTimeline() });
-
-    const section = await findSection();
-
-    expect(within(section).getByText("Legacy context. This case may not have structured evidence timeline data.")).toBeInTheDocument();
-    expect(within(section).getByText("Partial timeline. Some linked evidence context is incomplete or unavailable.")).toBeInTheDocument();
-    expect(within(section).getByText("No evidence timeline events are available for this case.")).toBeInTheDocument();
   });
 
   it("FraudCaseEvidenceTimelineSectionRendersSafeStateForNullTimelineResponseTest", async () => {

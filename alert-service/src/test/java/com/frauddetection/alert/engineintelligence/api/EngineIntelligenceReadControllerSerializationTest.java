@@ -1,5 +1,6 @@
 package com.frauddetection.alert.engineintelligence.api;
 
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceDiagnosticSignalProjection;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceEngineProjection;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjection;
@@ -123,9 +124,7 @@ class EngineIntelligenceReadControllerSerializationTest {
     private EngineIntelligenceProjection fullProjection() {
         return new EngineIntelligenceProjection(
                 "txn-full",
-                "event-full",
-                GENERATED_AT,
-                SOURCE_EVENT_FINGERPRINT,
+                new ScoringOccurrenceOwnership("event-full", GENERATED_AT, SOURCE_EVENT_FINGERPRINT),
                 1,
                 GENERATED_AT,
                 EngineIntelligenceComparisonType.RULES_VS_ML,
@@ -183,9 +182,7 @@ class EngineIntelligenceReadControllerSerializationTest {
     private EngineIntelligenceProjection corruptedProjection() {
         return new EngineIntelligenceProjection(
                 "txn-corrupted",
-                "event-corrupted",
-                GENERATED_AT,
-                SOURCE_EVENT_FINGERPRINT,
+                new ScoringOccurrenceOwnership("event-corrupted", GENERATED_AT, SOURCE_EVENT_FINGERPRINT),
                 1,
                 GENERATED_AT,
                 null,

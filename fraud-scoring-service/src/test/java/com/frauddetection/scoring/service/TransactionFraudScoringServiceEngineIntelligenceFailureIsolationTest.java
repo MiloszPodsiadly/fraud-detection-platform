@@ -2,6 +2,7 @@ package com.frauddetection.scoring.service;
 
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.features.FraudFeatureContract;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.EngineIntelligenceEmissionProperties;
 import com.frauddetection.scoring.config.ScoringMode;
@@ -49,6 +50,9 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
         TransactionScoredEvent event = throwingEnrichmentHarness().scoreAndCapture();
         assertThat(event.engineIntelligence()).isNull();
         assertThat(event.mlPredictionEvidence()).isNull();
+        assertThat(event.mlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE);
+        assertThat(event.analystRecommendation().status().name()).isEqualTo("UNAVAILABLE");
     }
 
     @Test
@@ -83,7 +87,13 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
         var request = FraudScoringRequest.from(input);
         var scoreResult = scoreResult();
         var recommendation = analystRecommendationService().unavailable();
-        var baseEvent = new TransactionScoredEventMapper().toEvent(request, scoreResult, Optional.empty(), recommendation);
+        var baseEvent = new TransactionScoredEventMapper().toEvent(
+                request,
+                scoreResult,
+                Optional.empty(),
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE,
+                recommendation
+        );
         FraudScoringEngine scoringEngine = mock(FraudScoringEngine.class);
         EngineIntelligenceEmissionService emissionService = mock(EngineIntelligenceEmissionService.class);
         TransactionScoredEventMapper mapper = mock(TransactionScoredEventMapper.class);
@@ -96,6 +106,7 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
                 scoreResult,
                 Optional.empty(),
                 Optional.empty(),
+                Optional.of(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE),
                 recommendation
         )).thenReturn(baseEvent);
         var service = new TransactionFraudScoringService(
@@ -115,6 +126,7 @@ class TransactionFraudScoringServiceEngineIntelligenceFailureIsolationTest {
                 scoreResult,
                 Optional.empty(),
                 Optional.empty(),
+                Optional.of(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE),
                 recommendation
         );
         verify(publisher).publish(baseEvent);

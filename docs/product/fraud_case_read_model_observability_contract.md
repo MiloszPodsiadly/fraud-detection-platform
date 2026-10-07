@@ -41,7 +41,7 @@ Allowed labels:
 | Label | Values |
 | --- | --- |
 | `endpoint` | `evidence_summary`, `evidence_timeline` |
-| `outcome` | `available`, `partial`, `legacy`, `truncated`, `empty`, `not_found`, `error` |
+| `outcome` | `available`, `partial`, `truncated`, `empty`, `not_found`, `error` |
 
 No other labels are part of the FDP-79 contract.
 
@@ -61,10 +61,9 @@ Forbidden and security rejections remain owned by existing security and sensitiv
 Successful summary and timeline reads use the same precedence:
 
 1. `truncated`
-2. `legacy`
-3. `partial`
-4. `empty`
-5. `available`
+2. `partial`
+3. `empty`
+4. `available`
 
 Missing fraud cases record `not_found`.
 Unexpected runtime failures record `error`.

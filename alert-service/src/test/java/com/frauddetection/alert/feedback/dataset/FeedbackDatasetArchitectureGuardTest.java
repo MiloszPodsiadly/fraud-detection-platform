@@ -105,6 +105,20 @@ class FeedbackDatasetArchitectureGuardTest {
     }
 
     @Test
+    void documentationKeepsExactModelEvaluationIndependentFromCurrentDiagnosticProjections() throws IOException {
+        String docs = Files.readString(ROOT.resolve("docs/architecture/feedback_dataset_builder.md"))
+                .replaceAll("\\s+", " ");
+
+        assertThat(docs)
+                .contains("Engine Intelligence analyst usefulness/accuracy feedback bounded context")
+                .contains("does not use `EngineIntelligenceFeedbackDatasetExport`")
+                .contains("current Engine Intelligence projection selected by transaction ID")
+                .contains("latest/current diagnostic projection")
+                .contains("does not implement a Model Card, Promotion Workflow, retraining, model activation")
+                .contains("threshold automation, Device Risk, Merchant Risk, Graph Risk, or recommendation automation");
+    }
+
+    @Test
     void feedbackDatasetSchemaArtifactExists() {
         assertThat(ROOT.resolve("docs/schemas/feedback_dataset_record.schema.json")).exists();
     }

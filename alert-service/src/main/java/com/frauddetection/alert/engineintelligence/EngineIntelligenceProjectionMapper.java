@@ -1,5 +1,6 @@
 package com.frauddetection.alert.engineintelligence;
 
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -25,12 +26,15 @@ public class EngineIntelligenceProjectionMapper {
 
     public EngineIntelligenceProjectionResult map(
             String transactionId,
-            String sourceEventId,
-            Instant sourceEventCreatedAt,
-            String sourceEventFingerprint,
+            ScoringOccurrenceOwnership ownership,
             EngineIntelligenceSummary engineIntelligence,
             Instant existingCreatedAt
     ) {
+        if (ownership == null) {
+            return EngineIntelligenceProjectionResult.omitted(
+                    EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_INVALID_SHAPE
+            );
+        }
         if (engineIntelligence == null) {
             return EngineIntelligenceProjectionResult.omitted(
                     EngineIntelligenceProjectionOmissionReason.ENGINE_INTELLIGENCE_ABSENT
@@ -43,9 +47,7 @@ public class EngineIntelligenceProjectionMapper {
             Instant now = clock.instant();
             return EngineIntelligenceProjectionResult.projected(new EngineIntelligenceProjection(
                     safeTransactionId,
-                    sourceEventId,
-                    sourceEventCreatedAt,
-                    sourceEventFingerprint,
+                    ownership,
                     safe.contractVersion(),
                     safe.generatedAt(),
                     safe.comparison().comparisonType(),
@@ -90,20 +92,4 @@ public class EngineIntelligenceProjectionMapper {
         }
     }
 
-    public EngineIntelligenceProjectionResult map(
-            String transactionId,
-            String sourceEventId,
-            EngineIntelligenceSummary engineIntelligence,
-            Instant existingCreatedAt
-    ) {
-        return map(transactionId, sourceEventId, null, null, engineIntelligence, existingCreatedAt);
-    }
-
-    public EngineIntelligenceProjectionResult map(
-            String transactionId,
-            EngineIntelligenceSummary engineIntelligence,
-            Instant existingCreatedAt
-    ) {
-        return map(transactionId, null, null, null, engineIntelligence, existingCreatedAt);
-    }
 }

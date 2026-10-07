@@ -28,11 +28,11 @@ shape requires explicit compatibility review and a new contract version.
 
 ## Backward Compatibility Rules
 
-`TransactionScoredEvent.engineIntelligence` is optional. Old producers may omit it, and old event
-JSON remains valid. A missing summary does not mean safe, low risk, or zero score. Producer
-wiring requires a consumer-first rollout: consumers must deploy the compatible contract before any
-producer emits `engineIntelligence`, because historical consumers may reject an unknown top-level
-field.
+`TransactionScoredEvent.engineIntelligence` is optional. A current producer may omit it, but every current event must
+still carry exactly one canonical ML evidence outcome: exact `mlPredictionEvidence` or an explicit
+`mlPredictionEvidenceOmissionReason`. A missing summary does not mean safe, low risk, or zero score. Historical event
+JSON with neither evidence outcome is not a valid current wire message and must be drained, migrated from authoritative
+evidence, archived, or quarantined before strict consumers read it.
 
 Compatibility is intentionally narrow. A valid current event may omit `engineIntelligence` or carry explicit null,
 which is accepted as absence and does not invent model lineage. When a summary is present, its comparison identity must
@@ -40,8 +40,13 @@ be complete and explicit regardless of the outer event `modelVersion`. Historica
 comparison identity, summaries missing Rules or ML, incorrect engine ordering, unsupported IDs, and malformed current
 canonical values are rejected or fail closed; the read boundary does not repair them.
 
-`TransactionScoredEvent.mlPredictionEvidence` is a separate optional internal field. Valid
-events may omit it, so current events without evidence remain compatible and consumers must not backfill evidence.
+`TransactionScoredEvent.mlPredictionEvidence` is a separate optional internal field. Every current scored event requires
+exactly one of it or `mlPredictionEvidenceOmissionReason`; events with neither fail deserialization. Historical null/null
+messages must be drained, migrated from authoritative evidence, archived, or quarantined before current consumers read
+them, and consumers must not invent or backfill evidence.
+Pipeline-level reasons (`DIAGNOSTIC_EMISSION_DISABLED` and `DIAGNOSTIC_ENRICHMENT_UNAVAILABLE`) require the summary
+to be absent. ML-engine-derived reasons require an observed `ml.python.primary` result and cannot be used to describe
+an unavailable diagnostic pipeline; `ML_ENGINE_UNAVAILABLE` is reserved for observed operational ML statuses.
 When present, it requires a matching `AVAILABLE` `ml.python.primary` entry in `engineIntelligence`, complete identical
 model identity, matching risk level and status, canonical engine identity, supported evidence version, finite exact
 score, matching forward-derived public score bucket, and source execution timestamp. This check maps the exact score
@@ -72,8 +77,8 @@ An `AVAILABLE` `ml.python.primary` result must include a bounded `modelIdentity`
 and `featureContractVersion`. This identity belongs to the ML engine-intelligence result, not to the top-level final
 scoring fields on `TransactionScoredEvent`. Rules, Velocity, and non-AVAILABLE ML engine results must omit it. A current
 identity-free AVAILABLE ML result is malformed and fails closed; readers do not invent lineage or rewrite the engine
-to another operational status. Previously stored feedback rows with missing lineage remain historical data and are
-classified as `MODEL_LINEAGE_UNAVAILABLE` and excluded from model-specific evaluation.
+to another operational status. Dataset v2 likewise rejects `AVAILABLE` prediction evidence unless score, risk,
+execution timestamp, and the complete model identity are all present.
 
 ### Deployment Treatment For Historical Projections
 
@@ -81,9 +86,8 @@ Before deploying the strict reader, inventory Mongo `engine_intelligence_project
 `AVAILABLE` `ml.python.primary` engine without complete `modelIdentity`. Such documents do not satisfy the current read
 contract: archive them under the approved retention policy or rebuild the projection only from an authoritative event
 that already contains complete lineage. Do not synthesize identity from the currently loaded model, registry state, or
-deployment configuration. Existing feedback records keep their original missing-lineage evidence, remain classified as
-`MODEL_LINEAGE_UNAVAILABLE`, and stay excluded from exact-model evaluation; the runtime does not normalize them merely
-to make a historical projection displayable.
+deployment configuration. Identity-free historical documents are not valid inputs to the current Dataset v2 or
+exact-model evaluation contracts and must not be normalized merely to make a historical projection displayable.
 
 ## Field Omission Rules
 

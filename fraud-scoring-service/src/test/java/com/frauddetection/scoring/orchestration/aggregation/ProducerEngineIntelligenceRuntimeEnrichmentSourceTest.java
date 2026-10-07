@@ -35,13 +35,15 @@ class ProducerEngineIntelligenceRuntimeEnrichmentSourceTest {
 
     @Test
     void disabledFlagDoesNotInvokeOrchestrator() {
-        assertThat(service(false).emitIfEnabled(request)).isEmpty();
+        assertThat(service(false).emitIfEnabled(request).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.DISABLED);
         verifyNoInteractions(orchestrator);
     }
 
     @Test
     void disabledFlagDoesNotInvokeAggregation() {
-        assertThat(service(false).emitIfEnabled(request)).isEmpty();
+        assertThat(service(false).emitIfEnabled(request).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.DISABLED);
         verifyNoInteractions(aggregationService);
     }
 
@@ -62,8 +64,8 @@ class ProducerEngineIntelligenceRuntimeEnrichmentSourceTest {
     @Test
     void enabledFlagMapsAggregationToPublicSummary() {
         stubSuccessfulEnrichment();
-        assertThat(service(true).emitIfEnabled(request))
-                .flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
+        assertThat(service(true).emitIfEnabled(request).enrichment())
+                .map(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
                 .contains(summary);
         verify(mapper).map(aggregation);
     }
@@ -79,7 +81,8 @@ class ProducerEngineIntelligenceRuntimeEnrichmentSourceTest {
     @Test
     void orchestratorFailureReturnsEmptyOptional() {
         when(orchestrator.evaluate(any())).thenThrow(new IllegalStateException("raw-secret"));
-        assertThat(service(true).emitIfEnabled(request)).isEmpty();
+        assertThat(service(true).emitIfEnabled(request).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
         verify(aggregationService, never()).aggregate(any());
     }
 
@@ -87,7 +90,8 @@ class ProducerEngineIntelligenceRuntimeEnrichmentSourceTest {
     void aggregationFailureReturnsEmptyOptional() {
         when(orchestrator.evaluate(any())).thenReturn(orchestration);
         when(aggregationService.aggregate(orchestration)).thenThrow(new IllegalStateException("raw-secret"));
-        assertThat(service(true).emitIfEnabled(request)).isEmpty();
+        assertThat(service(true).emitIfEnabled(request).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
         verify(mapper, never()).map(any());
     }
 

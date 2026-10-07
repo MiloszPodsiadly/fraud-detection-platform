@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from offline_evaluation.feedback_dataset_evaluation.classification_policy import (
+    NEGATIVE_RISK_LEVELS,
+    POSITIVE_RISK_LEVELS,
+)
 from offline_evaluation.feedback_dataset_evaluation.models import FeedbackDatasetRecord
 
 
 DEFAULT_MAX_DISAGREEMENT_ROWS = 100
-HIGH_RISK_LEVELS = {"HIGH", "CRITICAL"}
-LOW_RISK_LEVELS = {"LOW", "MEDIUM"}
 
 
 def build_feedback_dataset_disagreement_report(
@@ -57,9 +59,9 @@ def _disagreement_types(record: FeedbackDatasetRecord) -> list[str]:
         types.append("ALERT_RECOMMENDED_NEGATIVE_FEEDBACK")
     if record.alert_recommended is False and record.is_positive_class:
         types.append("NO_ALERT_POSITIVE_FEEDBACK")
-    if record.risk_level in HIGH_RISK_LEVELS and record.is_negative_class:
+    if record.risk_level in POSITIVE_RISK_LEVELS and record.is_negative_class:
         types.append("HIGH_RISK_NEGATIVE_FEEDBACK")
-    if record.risk_level in LOW_RISK_LEVELS and record.is_positive_class:
+    if record.risk_level in NEGATIVE_RISK_LEVELS and record.is_positive_class:
         types.append("LOW_RISK_POSITIVE_FEEDBACK")
     return types
 

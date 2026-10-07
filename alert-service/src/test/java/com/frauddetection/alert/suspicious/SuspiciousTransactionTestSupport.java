@@ -99,7 +99,11 @@ final class SuspiciousTransactionTestSupport {
                 base.scoreDetails(),
                 base.featureSnapshot(),
                 alertRecommended,
-                scoringEvidence
+                scoringEvidence,
+                base.engineIntelligence(),
+                base.mlPredictionEvidence(),
+                base.mlPredictionEvidenceOmissionReason(),
+                base.analystRecommendation()
         );
     }
 
@@ -127,7 +131,11 @@ final class SuspiciousTransactionTestSupport {
                 scoreDetails,
                 base.featureSnapshot(),
                 base.alertRecommended(),
-                base.scoringEvidence()
+                base.scoringEvidence(),
+                base.engineIntelligence(),
+                base.mlPredictionEvidence(),
+                base.mlPredictionEvidenceOmissionReason(),
+                base.analystRecommendation()
         );
     }
 
@@ -155,7 +163,11 @@ final class SuspiciousTransactionTestSupport {
                 base.scoreDetails(),
                 base.featureSnapshot(),
                 base.alertRecommended(),
-                base.scoringEvidence()
+                base.scoringEvidence(),
+                base.engineIntelligence(),
+                base.mlPredictionEvidence(),
+                base.mlPredictionEvidenceOmissionReason(),
+                base.analystRecommendation()
         );
     }
 
@@ -173,10 +185,6 @@ final class SuspiciousTransactionTestSupport {
 
     static ScoringEvidenceItem errorEvidence() {
         return evidence(ScoringEvidenceStatus.ERROR, ScoringEvidenceSource.RULE_BASED_SCORING);
-    }
-
-    static ScoringEvidenceItem legacyEvidence() {
-        return evidence(ScoringEvidenceStatus.LEGACY, ScoringEvidenceSource.LEGACY_SCORING);
     }
 
     static ScoringEvidenceItem notApplicableEvidence() {

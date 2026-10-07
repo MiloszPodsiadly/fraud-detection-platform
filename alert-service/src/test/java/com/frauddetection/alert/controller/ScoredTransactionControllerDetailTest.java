@@ -279,7 +279,8 @@ class ScoredTransactionControllerDetailTest {
                         "event-" + transactionId,
                         Instant.parse("2026-06-18T10:00:01Z"),
                         "a".repeat(64)
-                )
+                ),
+                com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED
         );
     }
 
@@ -301,7 +302,8 @@ class ScoredTransactionControllerDetailTest {
                         "event-" + transactionId,
                         Instant.parse("2026-06-18T10:00:01Z"),
                         "a".repeat(64)
-                )
+                ),
+                com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED
         );
     }
 

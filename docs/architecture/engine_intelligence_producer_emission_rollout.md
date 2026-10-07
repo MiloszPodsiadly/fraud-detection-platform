@@ -25,9 +25,9 @@ FRAUD_SCORING_EVENTS_ENGINE_INTELLIGENCE_EMIT_ENABLED
 
 ## Mapping Boundary
 
-`TransactionScoredEventMapper` accepts an optional public `EngineIntelligenceSummary` and optional internal
-`MlPredictionEvidenceV1`.
-An empty optional keeps the evidence-free event shape and omits the `engineIntelligence` JSON field.
+`TransactionScoredEventMapper` accepts an optional public `EngineIntelligenceSummary`, optional internal
+`MlPredictionEvidenceV1`, and the canonical omission outcome when exact evidence is absent.
+An empty diagnostic summary omits the `engineIntelligence` JSON field but never permits a null/null evidence outcome.
 A present summary adds only the bounded public DTO. Internal aggregation objects, raw model payloads,
 contributions, and internal diagnostics are not event payload fields.
 
@@ -52,8 +52,8 @@ separate responsibilities. The platform score remains authoritative for the scor
 
 Baseline scoring remains in the existing `FraudScoringEngine` path.
 
-Disabled mode keeps the evidence-free serialized event shape and emits neither Engine Intelligence nor ML prediction
-evidence.
+Disabled mode emits neither Engine Intelligence nor ML prediction evidence and records the current canonical
+`DIAGNOSTIC_EMISSION_DISABLED` omission reason.
 It does not invoke orchestrator, aggregation, public mapper, rules, or ML diagnostic path.
 It does not initialize the conditional diagnostic runtime graph.
 
@@ -69,8 +69,9 @@ Diagnostic enrichment is not scoring migration and does not feed back into the b
 
 ## Failure Isolation
 
-Enrichment failure returns the base event without `engineIntelligence` or ML prediction evidence. Non-AVAILABLE ML
-statuses are represented in the bounded public summary but do not manufacture exact prediction evidence. Failure logging is bounded
+Enrichment failure returns the base event without `engineIntelligence` or ML prediction evidence and records the
+canonical bounded failure omission reason. Non-AVAILABLE ML statuses are represented in the bounded public summary but
+do not manufacture exact prediction evidence. Failure logging is bounded
 and does not include raw exception messages. Baseline scoring failures are not swallowed.
 
 Current behavior is passive capture and persistence for evaluation. It does not train, promote, calibrate, or activate
@@ -88,30 +89,35 @@ through a separately reviewed contract.
 ## Rollback
 
 Set `fraud.scoring.events.engine-intelligence.emit-enabled=false` and redeploy. Disabled mode omits
-both optional diagnostic fields and restores the prior emitted event shape. Existing alert-service projections and
-private evidence remain governed by their retention policy; rollback does not delete or rewrite accepted records.
+both optional diagnostic payloads and emits `mlPredictionEvidenceOmissionReason=DIAGNOSTIC_EMISSION_DISABLED`.
+Rollback never restores historical null/null evidence semantics. Existing alert-service projections and private
+evidence remain governed by their retention policy; rollback does not delete or rewrite accepted records.
 
 ## Operational Observability Boundary
 
-The producer includes a no-op metrics boundary for disabled skips, enrichment attempts, successes,
-omissions, and latency. Metrics recording is best-effort and cannot block event publishing.
-Production metrics backend integration remains future scope. Before wider rollout, projection and API owners
-must connect the low-cardinality metrics boundary to production telemetry for:
+The producer integrates low-cardinality runtime metrics through `MeterRegistry` and
+`MicrometerEngineIntelligenceEmissionMetrics`. Runtime contexts without a registry use the no-op implementation.
+Metrics recording is best-effort and cannot block event publishing. Dashboards, alert thresholds, SLO policy, and
+operational alerting policy remain future operational scope. In particular,
+`engine_intelligence_emission_omitted_total` answers why the diagnostic emission layer did not produce enrichment,
+while `ml_prediction_evidence_omitted_total` records the authoritative durable evidence-omission reason emitted for
+the scoring occurrence. The metrics are related but intentionally describe different boundaries.
 
-- `enrichment_attempt_total`
-- `enrichment_success_total`
-- `enrichment_omitted_total`
-- `enrichment_latency_seconds`
-- `enrichment_timeout_total` if applicable
+The integrated instruments are:
+
+- `engine_intelligence_emission_total`, with bounded outcomes `SKIPPED_DISABLED`, `ATTEMPTED`, and `SUCCEEDED`
+- `engine_intelligence_emission_omitted_total`, with a bounded omission-reason label
+- `ml_prediction_evidence_omitted_total`, with a bounded evidence-omission-reason label
+- `engine_intelligence_emission_latency_seconds`
 
 `recordSuccess` means a public `EngineIntelligenceSummary` was actually produced. A completed
 diagnostic pipeline that returns empty is recorded as a bounded omission. Enabled enrichment
 attempts record latency for success, empty result, missing pipeline, and failure. Disabled skips do
 not record enrichment attempt latency.
 
-The producer records `UNKNOWN_FAILURE` for runtime pipeline failures. Stage-specific omission reasons are
-reserved for future pipeline instrumentation. Current omission reasons remain bounded and
-low-cardinality. Raw exception messages are not used as omission reasons.
+The producer records `UNKNOWN_FAILURE` for runtime pipeline failures. Current omission reasons remain bounded and
+low-cardinality; the runtime does not claim stage-specific failure precision it cannot prove.
+Raw exception messages are not used as omission reasons.
 
 Metrics are best-effort and must not affect event publishing. Metrics must remain low-cardinality.
 Metrics must not include transaction IDs, customer IDs, account IDs, raw exception messages,

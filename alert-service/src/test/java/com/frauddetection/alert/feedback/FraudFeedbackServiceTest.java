@@ -27,6 +27,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMisma
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationConfidence;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationNonDecisioning;
@@ -117,6 +118,8 @@ class FraudFeedbackServiceTest {
         assertThat(response.agreementStatus()).isEqualTo(EngineIntelligenceAgreementStatus.PARTIAL);
         assertThat(response.analystRecommendation()).isEqualTo(AnalystRecommendation.RECOMMEND_REVIEW);
         assertThat(savedRecords).singleElement().satisfies(record -> {
+            assertThat(record.getRulesEngineStatus()).isEqualTo(FraudEngineStatus.AVAILABLE);
+            assertThat(record.getRulesRiskLevel()).isEqualTo(RiskLevel.CRITICAL);
             assertThat(record.getSourceEventId()).isEqualTo("event-1");
             assertThat(record.getSourceEventCreatedAt())
                     .isEqualTo(Instant.parse("2026-06-25T09:00:01Z"));
@@ -163,6 +166,8 @@ class FraudFeedbackServiceTest {
 
         assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.AVAILABLE);
         assertThat(savedRecords).singleElement().satisfies(record -> {
+            assertThat(record.getRulesEngineStatus()).isEqualTo(FraudEngineStatus.AVAILABLE);
+            assertThat(record.getRulesRiskLevel()).isEqualTo(RiskLevel.CRITICAL);
             assertThat(record.getMlModelName()).isEqualTo("python-logistic-fraud-model");
             assertThat(record.getMlModelVersion()).isEqualTo("model-X");
             assertThat(record.getMlFeatureContractVersion()).isEqualTo("feature-contract-v2");
@@ -176,6 +181,8 @@ class FraudFeedbackServiceTest {
         assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.DEGRADED);
         assertThat(response.comparisonType()).isEqualTo(EngineIntelligenceComparisonType.RULES_VS_ML);
         assertThat(savedRecords).singleElement().satisfies(record -> {
+            assertThat(record.getRulesEngineStatus()).isEqualTo(FraudEngineStatus.AVAILABLE);
+            assertThat(record.getRulesRiskLevel()).isEqualTo(RiskLevel.CRITICAL);
             assertThat(record.getMlModelName()).isNull();
             assertThat(record.getMlModelVersion()).isNull();
             assertThat(record.getMlFeatureContractVersion()).isNull();
@@ -212,18 +219,13 @@ class FraudFeedbackServiceTest {
     }
 
     @Test
-    void unknownHistoricalOccurrenceFailsClosedBeforeSnapshotOrPersistence() {
+    void missingPersistedOccurrenceIdentityFailsClosedBeforeSnapshotOrPersistence() {
         when(transactionMonitoringUseCase.getScoredTransaction("txn-1"))
-                .thenReturn(scoredTransaction(ScoringOccurrenceOwnership.unknown()));
+                .thenThrow(new IllegalStateException("SCORING_OCCURRENCE_IDENTITY_INVALID"));
 
         assertThatThrownBy(() -> service.create("txn-1", request()))
-                .isInstanceOf(ResponseStatusException.class)
-                .satisfies(exception -> {
-                    ResponseStatusException statusException = (ResponseStatusException) exception;
-                    assertThat(statusException.getStatusCode().value()).isEqualTo(409);
-                    assertThat(statusException.getReason())
-                            .isEqualTo("FRAUD_FEEDBACK_SCORING_OCCURRENCE_UNAVAILABLE");
-                });
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("SCORING_OCCURRENCE_IDENTITY_INVALID");
 
         verify(engineIntelligenceReadService, never()).readForOccurrence(any(), any());
         verify(repository, never()).save(any());
@@ -533,9 +535,38 @@ class FraudFeedbackServiceTest {
         FraudFeedbackResponse response = service.create("txn-1", request());
 
         assertThat(response.engineIntelligenceStatus()).isEqualTo(EngineIntelligenceResponseStatus.UNAVAILABLE);
+        assertThat(savedRecords).singleElement().satisfies(saved -> {
+            assertThat(saved.getRulesEngineStatus()).isNull();
+            assertThat(saved.getRulesRiskLevel()).isNull();
+        });
         assertThat(response.comparisonType()).isNull();
         assertThat(response.comparedEngineIds()).isEmpty();
         assertThat(response.agreementStatus()).isNull();
+    }
+
+    @Test
+    void projectionReadFailureDoesNotEraseAuthoritativeOccurrenceOmission() {
+        ScoringOccurrenceOwnership ownership = ScoringOccurrenceOwnership.authoritative(
+                "event-1",
+                Instant.parse("2026-06-25T09:00:01Z"),
+                "a".repeat(64)
+        );
+        when(transactionMonitoringUseCase.getScoredTransaction("txn-1")).thenReturn(scoredTransaction(
+                ownership,
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED
+        ));
+        when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
+                .thenThrow(new EngineIntelligenceProjectionReadUnavailableException());
+
+        service.create("txn-1", request());
+
+        assertThat(savedRecords).singleElement().satisfies(saved -> {
+            assertThat(saved.getMlPredictionEvidenceOmissionReason())
+                    .isEqualTo(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED);
+            assertThat(saved.getMlModelName()).isNull();
+            assertThat(saved.getMlModelVersion()).isNull();
+            assertThat(saved.getMlFeatureContractVersion()).isNull();
+        });
     }
 
     @Test
@@ -708,6 +739,13 @@ class FraudFeedbackServiceTest {
     }
 
     private ScoredTransaction scoredTransaction(ScoringOccurrenceOwnership ownership) {
+        return scoredTransaction(ownership, null);
+    }
+
+    private ScoredTransaction scoredTransaction(
+            ScoringOccurrenceOwnership ownership,
+            MlPredictionEvidenceOmissionReason omissionReason
+    ) {
         return new ScoredTransaction(
                 "txn-1",
                 "customer-1",
@@ -731,7 +769,8 @@ class FraudFeedbackServiceTest {
                         List.of(),
                         AnalystRecommendationNonDecisioning.advisoryOnly()
                 ),
-                ownership
+                ownership,
+                omissionReason
         );
     }
 

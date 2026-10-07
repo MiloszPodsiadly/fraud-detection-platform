@@ -2,6 +2,7 @@ package com.frauddetection.alert.consumer;
 
 import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -26,9 +27,10 @@ class AlertServiceEngineIntelligenceUnknownFieldToleranceTest {
     void consumerKeepsExistingProjectionUnchangedWhenUnknownFieldsPresent() {
         TransactionScoredEvent unknownNested = AlertServiceTransactionScoredEventFixtureLoader.unknownNestedEngineIntelligenceFields();
 
-        AlertServiceBaselineProjectionAssertions.assertUnaffectedByEngineIntelligence(
+        AlertServiceBaselineProjectionAssertions.assertBaselineDecisionFieldsUnaffected(
                 mapper,
-                unknownNested
+                unknownNested,
+                MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE
         );
     }
 }

@@ -1,6 +1,7 @@
 package com.frauddetection.alert.domain;
 
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.model.Money;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
@@ -21,6 +22,7 @@ public record ScoredTransaction(
         Boolean alertRecommended,
         List<String> reasonCodes,
         AnalystRecommendationResult analystRecommendation,
-        ScoringOccurrenceOwnership scoringOccurrenceOwnership
+        ScoringOccurrenceOwnership scoringOccurrenceOwnership,
+        MlPredictionEvidenceOmissionReason mlPredictionEvidenceOmissionReason
 ) {
 }

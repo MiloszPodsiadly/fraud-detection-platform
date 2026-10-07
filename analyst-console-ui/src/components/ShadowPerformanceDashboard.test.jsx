@@ -30,7 +30,7 @@ describe("ShadowPerformanceDashboard", () => {
     expect(screen.getByText("PLATFORM_RECOMMENDATION")).toBeInTheDocument();
     expect(screen.getByText("ENGINE_INTELLIGENCE_PROJECTION")).toBeInTheDocument();
     expect(screen.getByText("ENGINE_INTELLIGENCE_PROJECTION_V1")).toBeInTheDocument();
-    expect(screen.getByText("NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE")).toBeInTheDocument();
+    expect(screen.getByText("PLATFORM_RECOMMENDATION_NOT_MODEL_ARTIFACT_SCOPED")).toBeInTheDocument();
   });
 
   it("rendersGovernanceStatus", () => {
@@ -771,7 +771,7 @@ function shadowSummary(overrides = {}) {
       featureContractVersion: "NOT_APPLICABLE",
       modelIdentity: "NOT_AVAILABLE",
       modelArtifactSha256: "NOT_AVAILABLE",
-      identityCompleteness: "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
+      identityCompleteness: "PLATFORM_RECOMMENDATION_NOT_MODEL_ARTIFACT_SCOPED"
     },
     metricBasis: "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK",
     governance: {
@@ -792,7 +792,7 @@ function shadowSummary(overrides = {}) {
       evaluationReportGeneratedAt: "2026-06-10T00:00:00Z",
       evaluationCardGeneratedAt: "2026-06-12T00:00:00Z",
       evaluationArtifactSetVersion: "feedback-dataset-evaluation-report-artifact-set-v1",
-      datasetVersion: "feedback-dataset-v1",
+      datasetVersion: "feedback-dataset-v2",
       datasetTimeBasis: "FEEDBACK_CREATED_AT",
       sourceManifestSha256: "a".repeat(64),
       sourceEvaluationCardManifestSha256: "b".repeat(64)

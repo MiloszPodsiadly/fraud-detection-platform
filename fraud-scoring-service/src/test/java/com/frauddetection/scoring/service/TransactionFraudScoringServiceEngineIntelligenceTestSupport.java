@@ -26,8 +26,10 @@ import com.frauddetection.scoring.mapper.TransactionScoredEventMapper;
 import com.frauddetection.scoring.messaging.TransactionScoredEventPublisher;
 import com.frauddetection.scoring.observability.ScoringMetrics;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionOmissionReason;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionResult;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEnrichmentResult;
-import com.frauddetection.scoring.orchestration.aggregation.MlPredictionEvidenceOmissionReason;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.mockito.ArgumentCaptor;
 
@@ -50,15 +52,25 @@ final class TransactionFraudScoringServiceEngineIntelligenceTestSupport {
     }
 
     static Harness harness(Optional<EngineIntelligenceSummary> summary) {
+        return harness(summary.isPresent(), summary);
+    }
+
+    static Harness harness(boolean emitEnabled, Optional<EngineIntelligenceSummary> summary) {
         EngineIntelligenceEmissionService emissionService = mock(EngineIntelligenceEmissionService.class);
         TransactionEnrichedEvent input = TransactionFixtures.enrichedTransaction().build();
         FraudScoringRequest request = FraudScoringRequest.from(input);
-        when(emissionService.emitIfEnabled(request)).thenReturn(
-                summary.map(value -> EngineIntelligenceEnrichmentResult.withoutEvidence(
+        EngineIntelligenceEmissionResult emission = summary
+                .map(value -> EngineIntelligenceEmissionResult.emitted(
+                        EngineIntelligenceEnrichmentResult.withoutEvidence(
                         value,
-                        MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE
-                ))
-        );
+                        MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE
+                )))
+                .orElseGet(() -> EngineIntelligenceEmissionResult.omitted(
+                        emitEnabled
+                                ? EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE
+                                : EngineIntelligenceEmissionOmissionReason.DISABLED
+                ));
+        when(emissionService.emitIfEnabled(request)).thenReturn(emission);
         return harness(input, request, emissionService);
     }
 
@@ -72,7 +84,7 @@ final class TransactionFraudScoringServiceEngineIntelligenceTestSupport {
         EngineIntelligenceEmissionService emissionService = mock(EngineIntelligenceEmissionService.class);
         TransactionEnrichedEvent input = TransactionFixtures.enrichedTransaction().build();
         FraudScoringRequest request = FraudScoringRequest.from(input);
-        when(emissionService.emitIfEnabled(request)).thenReturn(Optional.of(enrichment));
+        when(emissionService.emitIfEnabled(request)).thenReturn(EngineIntelligenceEmissionResult.emitted(enrichment));
         return harness(input, request, emissionService);
     }
 
@@ -180,6 +192,40 @@ final class TransactionFraudScoringServiceEngineIntelligenceTestSupport {
                         EngineIntelligenceAgreementStatus.AGREEMENT,
                         EngineIntelligenceRiskMismatchStatus.SAME_RISK_LEVEL,
                         EngineIntelligenceScoreDeltaBucket.SMALL
+                ),
+                List.of(),
+                List.of()
+        );
+    }
+
+    static EngineIntelligenceSummary degradedMlSummary() {
+        return new EngineIntelligenceSummary(
+                EngineIntelligenceSummary.CONTRACT_VERSION,
+                GENERATED_AT,
+                List.of(
+                        new EngineIntelligenceEngineResult(
+                                "rules.primary",
+                                FraudEngineType.RULES,
+                                FraudEngineStatus.AVAILABLE,
+                                RiskLevel.HIGH,
+                                EngineIntelligenceScoreBucket.HIGH,
+                                List.of("HIGH_VELOCITY")
+                        ),
+                        new EngineIntelligenceEngineResult(
+                                "ml.python.primary",
+                                FraudEngineType.ML_MODEL,
+                                FraudEngineStatus.DEGRADED,
+                                null,
+                                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                                List.of("ML_MODEL_INVALID_RESPONSE")
+                        )
+                ),
+                new EngineIntelligenceComparison(
+                        EngineIntelligenceComparisonType.RULES_VS_ML,
+                        List.of("rules.primary", "ml.python.primary"),
+                        EngineIntelligenceAgreementStatus.PARTIAL,
+                        EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
+                        EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
                 ),
                 List.of(),
                 List.of()

@@ -144,7 +144,7 @@ class ShadowPerformanceSummaryValidator {
                 ),
                 "evaluation artifact provenance is unsupported"
         );
-        require("feedback-dataset-v1".equals(evaluation.datasetVersion()), "datasetVersion is unsupported");
+        require("feedback-dataset-v2".equals(evaluation.datasetVersion()), "datasetVersion is unsupported");
         require("FEEDBACK_CREATED_AT".equals(evaluation.datasetTimeBasis()), "datasetTimeBasis is unsupported");
         sha256(evaluation.sourceManifestSha256(), "sourceManifestSha256");
         sha256(evaluation.sourceEvaluationCardManifestSha256(), "sourceEvaluationCardManifestSha256");

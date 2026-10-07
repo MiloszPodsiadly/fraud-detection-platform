@@ -2110,7 +2110,6 @@ function evidenceSummary() {
     linkedAlertCount: 0,
     evidenceItemCount: 0,
     partial: false,
-    legacy: false,
     truncated: false,
     truncationReason: null
   };
@@ -2122,7 +2121,6 @@ function evidenceTimeline() {
     generatedAt: "2026-05-23T10:00:00Z",
     events: [],
     partial: false,
-    legacy: false,
     truncated: false,
     truncationReason: null
   };
@@ -2154,7 +2152,7 @@ function shadowPerformanceSummary(overrides = {}) {
       featureContractVersion: "NOT_APPLICABLE",
       modelIdentity: "NOT_AVAILABLE",
       modelArtifactSha256: "NOT_AVAILABLE",
-      identityCompleteness: "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"
+      identityCompleteness: "PLATFORM_RECOMMENDATION_NOT_MODEL_ARTIFACT_SCOPED"
     },
     metricBasis: "ALERT_RECOMMENDED_VS_BOUNDED_ANALYST_FEEDBACK",
     governance: {
@@ -2175,7 +2173,7 @@ function shadowPerformanceSummary(overrides = {}) {
       evaluationReportGeneratedAt: "2026-06-10T00:00:00Z",
       evaluationCardGeneratedAt: "2026-06-12T00:00:00Z",
       evaluationArtifactSetVersion: "feedback-dataset-evaluation-report-artifact-set-v1",
-      datasetVersion: "feedback-dataset-v1",
+      datasetVersion: "feedback-dataset-v2",
       datasetTimeBasis: "FEEDBACK_CREATED_AT",
       sourceManifestSha256: "a".repeat(64),
       sourceEvaluationCardManifestSha256: "b".repeat(64)

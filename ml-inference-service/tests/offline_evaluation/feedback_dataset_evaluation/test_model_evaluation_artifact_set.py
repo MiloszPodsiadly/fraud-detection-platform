@@ -2,6 +2,7 @@ import hashlib
 import json
 import tempfile
 import unittest
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 from offline_evaluation.feedback_dataset_evaluation.dataset_reader import read_feedback_dataset_jsonl
@@ -14,14 +15,15 @@ from offline_evaluation.feedback_dataset_evaluation.model_evaluation_artifact_se
     MAX_SUMMARY_BYTES,
     SUMMARY_FILENAME,
     ModelEvaluationArtifactSetError,
+    ModelEvaluationArtifactVerificationLevel,
     read_validated_model_evaluation_artifact_set,
 )
 from offline_evaluation.feedback_dataset_evaluation.report_writer import write_feedback_dataset_evaluation_reports
 
 try:
-    from feedback_dataset_evaluation.feedback_dataset_fixtures import GENERATED_AT, jsonl, jsonl_file, record
+    from feedback_dataset_evaluation.feedback_dataset_fixtures import GENERATED_AT, jsonl, record
 except ModuleNotFoundError:
-    from feedback_dataset_fixtures import GENERATED_AT, jsonl, jsonl_file, record
+    from feedback_dataset_fixtures import GENERATED_AT, jsonl, record
 
 
 MODEL_IDENTITY = ModelEvaluationIdentity(
@@ -41,11 +43,103 @@ class ModelEvaluationArtifactSetReaderTest(unittest.TestCase):
             self.assertEqual("ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1", evidence.summary["reportType"])
             self.assertEqual(GENERATED_AT, evidence.summary["generatedAt"])
             self.assertEqual(hashlib.sha256(manifest_bytes).hexdigest(), evidence.manifest_sha256)
+            self.assertEqual(
+                ModelEvaluationArtifactVerificationLevel.CLAIM_ONLY,
+                evidence.verification_level,
+            )
             self.assertIsInstance(evidence.summary["warnings"], tuple)
             with self.assertRaises(TypeError):
                 evidence.summary["generatedAt"] = "2026-01-01T00:00:00Z"
             with self.assertRaises(TypeError):
                 evidence.summary["population"]["recordsEvaluated"] = 99
+            with self.assertRaises(FrozenInstanceError):
+                evidence.verification_level = ModelEvaluationArtifactVerificationLevel.VERIFIED_AGAINST_SOURCE_BYTES
+
+    def test_artifactVerifiesAgainstExactSourceDatasetBytes(self):
+        with model_evaluation_artifacts() as artifact_dir:
+            source_path = artifact_dir.parent.parent / "feedback-dataset.jsonl"
+
+            evidence = read_validated_model_evaluation_artifact_set(
+                artifact_dir,
+                source_dataset_path=source_path,
+            )
+
+            self.assertEqual(
+                hashlib.sha256(source_path.read_bytes()).hexdigest(),
+                evidence.summary["sourceDataset"]["sha256"],
+            )
+            self.assertEqual(
+                ModelEvaluationArtifactVerificationLevel.VERIFIED_AGAINST_SOURCE_BYTES,
+                evidence.verification_level,
+            )
+
+    def test_artifactJsonCannotSupplyVerificationLevel(self):
+        with model_evaluation_artifacts() as artifact_dir:
+            summary = self._summary(artifact_dir)
+            summary["verificationLevel"] = "VERIFIED_AGAINST_SOURCE_BYTES"
+            self._write_summary_and_reseal(artifact_dir, summary)
+
+            with self.assertRaisesRegex(ModelEvaluationArtifactSetError, "unsupported fields: verificationLevel"):
+                read_validated_model_evaluation_artifact_set(artifact_dir)
+
+    def test_artifactFromDatasetACannotVerifyAgainstDifferentDatasetB(self):
+        with model_evaluation_artifacts() as artifact_dir:
+            different_source = artifact_dir.parent.parent / "feedback-dataset-b.jsonl"
+            records = (
+                model_evaluation_artifacts._record(
+                    "eval_11111111111111111111111111111111",
+                    fraudScore=0.89,
+                ),
+                model_evaluation_artifacts._record(
+                    "eval_22222222222222222222222222222222",
+                    feedbackLabel="CONFIRMED_LEGITIMATE",
+                    evaluationLabel="NEGATIVE_LEGITIMATE",
+                ),
+            )
+            different_source.write_text(jsonl(*records), encoding="utf-8", newline="\n")
+
+            with self.assertRaisesRegex(ModelEvaluationArtifactSetError, "does not match actual source bytes"):
+                read_validated_model_evaluation_artifact_set(
+                    artifact_dir,
+                    source_dataset_path=different_source,
+                )
+
+    def test_resealedTamperedSourceShaRejectedAgainstActualDataset(self):
+        with model_evaluation_artifacts() as artifact_dir:
+            summary = self._summary(artifact_dir)
+            summary["sourceDataset"]["sha256"] = "0" * 64
+            self._write_summary_and_reseal(artifact_dir, summary)
+
+            with self.assertRaisesRegex(ModelEvaluationArtifactSetError, "does not match actual source bytes"):
+                read_validated_model_evaluation_artifact_set(
+                    artifact_dir,
+                    source_dataset_path=artifact_dir.parent.parent / "feedback-dataset.jsonl",
+                )
+
+    def test_tamperedSourceShaRejectedByManifestIntegrity(self):
+        with model_evaluation_artifacts() as artifact_dir:
+            summary_path = artifact_dir / SUMMARY_FILENAME
+            summary = self._summary(artifact_dir)
+            original_sha = summary["sourceDataset"]["sha256"].encode("ascii")
+            summary_path.write_bytes(
+                summary_path.read_bytes().replace(original_sha, b"0" * 64, 1)
+            )
+
+            with self.assertRaisesRegex(ModelEvaluationArtifactSetError, "sha256 does not match"):
+                read_validated_model_evaluation_artifact_set(artifact_dir)
+
+    def test_resealedTamperedSourcePopulationRejectedAgainstActualDataset(self):
+        with model_evaluation_artifacts() as artifact_dir:
+            summary = self._summary(artifact_dir)
+            summary["sourceDataset"]["rawRowsRead"] = 3
+            summary["sourceDataset"]["excludedUnresolvedCount"] = 1
+            self._write_summary_and_reseal(artifact_dir, summary)
+
+            with self.assertRaisesRegex(ModelEvaluationArtifactSetError, "does not match actual source bytes"):
+                read_validated_model_evaluation_artifact_set(
+                    artifact_dir,
+                    source_dataset_path=artifact_dir.parent.parent / "feedback-dataset.jsonl",
+                )
 
     def test_badSha256Rejected(self):
         with model_evaluation_artifacts() as artifact_dir:
@@ -194,9 +288,13 @@ class ModelEvaluationArtifactSetReaderTest(unittest.TestCase):
             summary = self._summary(artifact_dir)
             summary["population"] = {
                 "recordsConsidered": MAX_DATASET_RECORDS + 1,
+                "recordsWithPredictionEvidence": MAX_DATASET_RECORDS + 1,
                 "recordsEvaluated": MAX_DATASET_RECORDS + 1,
-                "recordsExcludedMissingLineage": 0,
                 "recordsExcludedIdentityMismatch": 0,
+                "recordsExcludedSourceIdentityMismatch": 0,
+                "recordsExcludedMissingPredictionEvidence": 0,
+                "recordsExcludedUnexpectedMissingPredictionEvidence": 0,
+                "recordsExcludedInvalidPredictionEvidence": 0,
             }
             summary["classBalance"] = {
                 "positiveClassCount": MAX_DATASET_RECORDS,
@@ -323,7 +421,8 @@ class model_evaluation_artifacts:
 
     def __enter__(self):
         self.directory = tempfile.TemporaryDirectory()
-        output = Path(self.directory.name) / "evaluation-run"
+        root = Path(self.directory.name)
+        output = root / "evaluation-run"
         records = (
             self._record("eval_11111111111111111111111111111111"),
             self._record(
@@ -332,8 +431,9 @@ class model_evaluation_artifacts:
                 evaluationLabel="NEGATIVE_LEGITIMATE",
             ),
         )
-        with jsonl_file(jsonl(*records)) as input_path:
-            dataset = read_feedback_dataset_jsonl(input_path)
+        input_path = root / "feedback-dataset.jsonl"
+        input_path.write_text(jsonl(*records), encoding="utf-8", newline="\n")
+        dataset = read_feedback_dataset_jsonl(input_path)
         reports = build_feedback_dataset_evaluation_reports(
             dataset,
             generated_at=GENERATED_AT,

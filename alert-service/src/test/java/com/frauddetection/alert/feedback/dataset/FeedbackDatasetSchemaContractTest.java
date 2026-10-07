@@ -1,6 +1,7 @@
 package com.frauddetection.alert.feedback.dataset;
 
 import com.frauddetection.alert.feedback.FraudFeedbackLabel;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.networknt.schema.Error;
 import com.networknt.schema.InputFormat;
 import com.networknt.schema.Schema;
@@ -13,6 +14,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -59,6 +61,12 @@ class FeedbackDatasetSchemaContractTest {
                         "\"evaluationLabel\"",
                         "\"decisionReasonCodes\"",
                         "\"feedbackCreatedAt\"",
+                        "\"rulesEvidenceStatus\"",
+                        "\"rulesRiskLevel\"",
+                        "\"mlPredictionEvidenceStatus\"",
+                        "\"mlPredictionScore\"",
+                        "\"mlPredictionRiskLevel\"",
+                        "\"mlPredictionExecutedAt\"",
                         "\"mlModelName\"",
                         "\"mlModelVersion\"",
                         "\"mlFeatureContractVersion\""
@@ -97,7 +105,7 @@ class FeedbackDatasetSchemaContractTest {
 
     @Test
     void jsonSchemaAcceptsZeroOrCompleteMlIdentityAndRejectsEveryPartialState() throws Exception {
-        assertSchemaValid(datasetRecordLine(null, null, null, false));
+        assertSchemaInvalid(datasetRecordLine(null, null, null, false));
         assertSchemaValid(datasetRecordLine(null, null, null, true));
         assertSchemaValid(datasetRecordLine("model", "v1", "feature-contract-v1", true));
 
@@ -112,6 +120,93 @@ class FeedbackDatasetSchemaContractTest {
         for (String[] state : partialStates) {
             assertSchemaInvalid(datasetRecordLine(state[0], state[1], state[2], true));
         }
+    }
+
+    @Test
+    void schemaFailureReasonsExactlyMatchJavaContract() throws Exception {
+        JsonNode root = objectMapper.readTree(Files.readString(SCHEMA));
+        JsonNode values = root.get("oneOf").get(0)
+                .get("properties").get("failureReason").get("enum");
+        List<String> schemaReasons = new ArrayList<>();
+        values.forEach(value -> schemaReasons.add(value.asString()));
+
+        assertThat(schemaReasons).containsExactlyInAnyOrderElementsOf(
+                java.util.Arrays.stream(FeedbackDatasetBuildFailureReason.values())
+                        .map(Enum::name)
+                        .toList()
+        );
+    }
+
+    @Test
+    void jsonSchemaRejectsPartialOrContradictoryPredictionEvidence() throws Exception {
+        Map<String, Object> availableWithoutScore = datasetRecordLine(
+                "model",
+                "v1",
+                "feature-contract-v1",
+                true
+        );
+        nestedRecord(availableWithoutScore).put("mlPredictionScore", null);
+        assertSchemaInvalid(availableWithoutScore);
+
+        Map<String, Object> absentWithZeroScore = datasetRecordLine(null, null, null, true);
+        nestedRecord(absentWithZeroScore).put("mlPredictionScore", 0.0);
+        assertSchemaInvalid(absentWithZeroScore);
+
+        Map<String, Object> unavailableStatus = datasetRecordLine(null, null, null, true);
+        nestedRecord(unavailableStatus).put("mlPredictionEvidenceStatus", "MISSING_UNEXPECTEDLY");
+        assertSchemaInvalid(unavailableStatus);
+    }
+
+    @Test
+    void jsonSchemaRejectsMissingOrContradictoryRulesEvidence() throws Exception {
+        Map<String, Object> missingStatus = datasetRecordLine(null, null, null, true);
+        nestedRecord(missingStatus).remove("rulesEvidenceStatus");
+        assertSchemaInvalid(missingStatus);
+
+        Map<String, Object> availableWithoutRisk = datasetRecordLine(null, null, null, true);
+        nestedRecord(availableWithoutRisk).put("rulesEvidenceStatus", "AVAILABLE");
+        assertSchemaInvalid(availableWithoutRisk);
+
+        Map<String, Object> unavailableWithRisk = datasetRecordLine(null, null, null, true);
+        nestedRecord(unavailableWithRisk).put("rulesRiskLevel", "LOW");
+        assertSchemaInvalid(unavailableWithRisk);
+    }
+
+    @Test
+    void jsonSchemaRejectsNoncanonicalTimestampsScoresAndEnums() throws Exception {
+        Map<String, Object> offsetTimestamp = datasetRecordLine(null, null, null, true);
+        nestedRecord(offsetTimestamp).put("feedbackCreatedAt", "2026-06-01T02:00:00+02:00");
+        assertSchemaInvalid(offsetTimestamp);
+
+        Map<String, Object> excessiveScoreScale = datasetRecordLine(null, null, null, true);
+        nestedRecord(excessiveScoreScale).put("fraudScore", 0.12345);
+        assertSchemaInvalid(excessiveScoreScale);
+
+        Map<String, Object> staleEnumAliases = datasetRecordLine(null, null, null, true);
+        nestedRecord(staleEnumAliases).put("agreementStatus", "ENGINES_AGREE");
+        nestedRecord(staleEnumAliases).put("riskMismatchStatus", "NONE");
+        nestedRecord(staleEnumAliases).put("scoreDeltaBucket", "SMALL_DELTA");
+        nestedRecord(staleEnumAliases).put("analystRecommendationStatus", "GENERATED");
+        nestedRecord(staleEnumAliases).put("analystRecommendation", "REVIEW_TRANSACTION");
+        assertSchemaInvalid(staleEnumAliases);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void jsonSchemaBoundsDatasetPopulationCounters() throws Exception {
+        String metadataLine = new FeedbackDatasetJsonlWriter()
+                .writeJsonl(result(List.of(record())))
+                .lines()
+                .findFirst()
+                .orElseThrow();
+        Map<String, Object> metadata = objectMapper.readValue(metadataLine, Map.class);
+
+        metadata.put("rawRowsRead", 1002);
+        assertSchemaInvalid(metadata);
+
+        metadata.put("rawRowsRead", 1);
+        metadata.put("excludedUnresolvedCount", 1001);
+        assertSchemaInvalid(metadata);
     }
 
     @Test
@@ -205,6 +300,12 @@ class FeedbackDatasetSchemaContractTest {
         assertThat(record.get("evaluationLabel").asString()).isEqualTo("POSITIVE_FRAUD");
         assertThat(record.get("decisionReasonCodes").get(0).asString()).isEqualTo("ANALYST_CONFIRMED_FRAUD");
         assertThat(record.get("feedbackCreatedAt").asString()).isEqualTo("2026-06-01T00:00:00Z");
+        assertThat(record.get("rulesEvidenceStatus").asString()).isEqualTo("UNAVAILABLE");
+        assertThat(record.get("rulesRiskLevel").isNull()).isTrue();
+        assertThat(record.get("mlPredictionEvidenceStatus").asString()).isEqualTo("LEGITIMATELY_ABSENT");
+        assertThat(record.get("mlPredictionScore").isNull()).isTrue();
+        assertThat(record.get("mlPredictionRiskLevel").isNull()).isTrue();
+        assertThat(record.get("mlPredictionExecutedAt").isNull()).isTrue();
         assertThat(record.has("mlModelName")).isTrue();
         assertThat(record.has("mlModelVersion")).isTrue();
         assertThat(record.has("mlFeatureContractVersion")).isTrue();
@@ -364,6 +465,16 @@ class FeedbackDatasetSchemaContractTest {
                 null,
                 null,
                 null,
+                FeedbackDatasetRulesEvidenceStatus.UNAVAILABLE,
+                null,
+                FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT,
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
                 null,
                 null,
                 null,
@@ -427,7 +538,15 @@ class FeedbackDatasetSchemaContractTest {
         record.put("evaluationLabel", "POSITIVE_FRAUD");
         record.put("decisionReasonCodes", List.of("ANALYST_CONFIRMED_FRAUD"));
         record.put("feedbackCreatedAt", "2026-06-01T00:00:00Z");
+        record.put("rulesEvidenceStatus", "UNAVAILABLE");
+        record.put("rulesRiskLevel", null);
         if (includeIdentityFields) {
+            boolean available = modelName != null || modelVersion != null || featureContractVersion != null;
+            record.put("mlPredictionEvidenceStatus", available ? "AVAILABLE" : "LEGITIMATELY_ABSENT");
+            record.put("mlPredictionEvidenceOmissionReason", available ? null : "DIAGNOSTIC_EMISSION_DISABLED");
+            record.put("mlPredictionScore", available ? 0.8123 : null);
+            record.put("mlPredictionRiskLevel", available ? "HIGH" : null);
+            record.put("mlPredictionExecutedAt", available ? "2026-06-01T00:00:01Z" : null);
             record.put("mlModelName", modelName);
             record.put("mlModelVersion", modelVersion);
             record.put("mlFeatureContractVersion", featureContractVersion);
@@ -436,6 +555,11 @@ class FeedbackDatasetSchemaContractTest {
         envelope.put("type", "DATASET_RECORD");
         envelope.put("record", record);
         return envelope;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> nestedRecord(Map<String, Object> envelope) {
+        return (Map<String, Object>) envelope.get("record");
     }
 
     private static Path repositoryRoot() {

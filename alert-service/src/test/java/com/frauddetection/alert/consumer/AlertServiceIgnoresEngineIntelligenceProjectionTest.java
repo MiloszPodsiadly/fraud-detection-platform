@@ -8,6 +8,7 @@ import com.frauddetection.alert.persistence.ScoredTransactionDocument;
 import com.frauddetection.alert.persistence.ScoringOccurrenceFingerprint;
 import com.frauddetection.alert.suspicious.SuspiciousTransactionDocument;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
@@ -45,21 +46,21 @@ class AlertServiceIgnoresEngineIntelligenceProjectionTest {
 
     @Test
     void minimalEngineIntelligenceDoesNotAddProjectionFields() {
-        assertProjectionUnchanged(
+        assertBaselineDecisionAndOccurrenceContract(
                 AlertServiceTransactionScoredEventFixtureLoader.minimalEngineIntelligence()
         );
     }
 
     @Test
     void fullBoundedEngineIntelligenceDoesNotAddProjectionFields() {
-        assertProjectionUnchanged(
+        assertBaselineDecisionAndOccurrenceContract(
                 AlertServiceTransactionScoredEventFixtureLoader.fullBoundedEngineIntelligence()
         );
     }
 
     @Test
     void unknownNestedEngineIntelligenceFieldsDoNotAffectProjection() {
-        assertProjectionUnchanged(
+        assertBaselineDecisionAndOccurrenceContract(
                 AlertServiceTransactionScoredEventFixtureLoader
                         .unknownNestedEngineIntelligenceFields()
         );
@@ -93,10 +94,11 @@ class AlertServiceIgnoresEngineIntelligenceProjectionTest {
                 .isEqualTo(ScoringOccurrenceFingerprint.from(event));
     }
 
-    private void assertProjectionUnchanged(TransactionScoredEvent event) {
-        AlertServiceBaselineProjectionAssertions.assertUnaffectedByEngineIntelligence(
+    private void assertBaselineDecisionAndOccurrenceContract(TransactionScoredEvent event) {
+        AlertServiceBaselineProjectionAssertions.assertBaselineDecisionFieldsUnaffected(
                 mapper,
-                event
+                event,
+                MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE
         );
     }
 }

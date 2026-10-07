@@ -54,7 +54,7 @@ class MlFallbackScoringEvidenceTest {
         assertThat(result.scoringEvidence())
                 .anySatisfy(item -> {
                     assertThat(item.source()).isEqualTo(ScoringEvidenceSource.SCORING_FALLBACK);
-                    assertThat(item.status()).isEqualTo(ScoringEvidenceStatus.LEGACY);
+                    assertThat(item.status()).isEqualTo(ScoringEvidenceStatus.PARTIAL);
                     assertThat(item.reasonCode()).isNull();
                     assertThat(item.attributes()).containsEntry("scoringEvidenceState", "ml_decision_fallback_used");
                 })

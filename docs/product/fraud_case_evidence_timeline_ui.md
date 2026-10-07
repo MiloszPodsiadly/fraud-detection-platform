@@ -34,7 +34,7 @@ does not fall back to audit, alert, evidence summary, or suspicious transaction 
 - mount in `FraudCaseDetailsPage`
 - safe loading, error, and empty states
 - `approximateTime` rendering
-- partial, legacy, and truncated notices
+- partial, unavailable, and truncated notices
 - section-scoped tests
 - docs
 
@@ -75,8 +75,8 @@ transaction text, correlation text, raw payloads, raw identifiers, or raw backen
 
 FDP-77 uses field-specific allowlists for `eventType`, `source`, `evidenceStatus`, and `linkedEntityType`. The
 event-type allowlist matches the FDP-76 backend enum: `FRAUD_CASE_CREATED`, `LINKED_ALERT_CONTEXT`,
-`ALERT_EVIDENCE_SNAPSHOT_AVAILABLE`, `ALERT_EVIDENCE_SNAPSHOT_PARTIAL`,
-`ALERT_EVIDENCE_SNAPSHOT_UNAVAILABLE`, and `LEGACY_CONTEXT`.
+`LINKED_ALERT_CONTEXT_UNAVAILABLE`, `ALERT_EVIDENCE_SNAPSHOT_AVAILABLE`,
+`ALERT_EVIDENCE_SNAPSHOT_PARTIAL`, and `ALERT_EVIDENCE_SNAPSHOT_UNAVAILABLE`.
 
 FDP-77 follows the FDP-76 backend contract. The linked-alert timeline event type is `LINKED_ALERT_CONTEXT`.
 `FRAUD_ALERT_LINKED` is intentionally not used by the current backend contract and must remain unknown unless a future
@@ -134,15 +134,14 @@ The section renders bounded states:
 
 - `Loading evidence timeline...`
 - `No evidence timeline events are available for this case.`
-- `Legacy context. This case may not have structured evidence timeline data.`
 - `Partial timeline. Some linked evidence context is incomplete or unavailable.`
 - `Truncated timeline. Only the first bounded set of evidence timeline events was included.`
 - `Evidence timeline unavailable.`
 - `Timeline display capped. Only the bounded timeline window is shown.`
 
 Timeline failure is section-local and must not break FraudCase detail. Empty timelines still display any backend state
-flags: `partial=true` shows the partial notice, `legacy=true` shows the legacy notice, and `truncated=true` shows the
-truncated notice plus a safe truncation reason when present.
+flags that are set: `partial=true` shows the partial notice, and `truncated=true` shows the truncated notice plus a safe
+truncation reason when present.
 
 ## Non-Claims
 
@@ -172,8 +171,8 @@ may remain elsewhere on the page and are not added, removed, or redefined by FDP
 - `approximateTime` renders safely.
 - Null or malformed `occurredAt` renders `Time unavailable`.
 - `generatedAt` is not used as event time.
-- Partial, legacy, and truncated states are visible.
-- Empty timelines do not suppress partial, legacy, or truncated notices.
+- Partial, unavailable, and truncated states are visible.
+- Empty timelines do not suppress partial or truncated notices.
 - `truncationReason` renders safely.
 - Field-specific allowlists protect `eventType`, `source`, `evidenceStatus`, and `linkedEntityType`.
 - Uppercase raw-ID-shaped values render as `UNKNOWN` or bounded fallback copy.

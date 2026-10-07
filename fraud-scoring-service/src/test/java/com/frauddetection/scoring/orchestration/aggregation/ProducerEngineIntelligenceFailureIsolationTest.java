@@ -2,6 +2,7 @@ package com.frauddetection.scoring.orchestration.aggregation;
 
 import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.mapper.TransactionScoredEventMapper;
@@ -36,11 +37,14 @@ class ProducerEngineIntelligenceFailureIsolationTest {
         var event = new TransactionScoredEventMapper().toEvent(
                 request(),
                 scoreResult(),
-                intelligence.flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
+                intelligence.enrichment().map(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary),
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE,
+                null
         );
         String json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build().writeValueAsString(event);
 
-        assertThat(intelligence).isEmpty();
+        assertThat(intelligence.omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
         assertThat(json).doesNotContain("engineIntelligence", "raw-secret-must-not-leak");
     }
 
@@ -55,7 +59,8 @@ class ProducerEngineIntelligenceFailureIsolationTest {
         when(mapper.map(aggregation)).thenThrow(new IllegalStateException("raw-secret-must-not-leak"));
         var emission = service(true, pipeline(orchestrator, aggregationService, mapper));
 
-        assertThat(emission.emitIfEnabled(request())).isEmpty();
+        assertThat(emission.emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
     }
 
     @Test

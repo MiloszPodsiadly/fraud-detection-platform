@@ -8,6 +8,7 @@ import com.frauddetection.common.events.evidence.ScoringEvidenceSeverity;
 import com.frauddetection.common.events.evidence.ScoringEvidenceSource;
 import com.frauddetection.common.events.evidence.ScoringEvidenceStatus;
 import com.frauddetection.common.events.evidence.ScoringEvidenceType;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
@@ -54,13 +55,19 @@ class AlertEvidenceSnapshotProjectionServiceTest {
         assertThat(first(project(diagnostic(ScoringEvidenceStatus.PARTIAL))).status()).isEqualTo(EvidenceStatus.PARTIAL);
         assertThat(first(project(diagnostic(ScoringEvidenceStatus.UNAVAILABLE))).status()).isEqualTo(EvidenceStatus.UNAVAILABLE);
         assertThat(first(project(diagnostic(ScoringEvidenceStatus.ERROR))).status()).isEqualTo(EvidenceStatus.ERROR);
-        assertThat(first(project(diagnostic(ScoringEvidenceStatus.LEGACY))).status()).isEqualTo(EvidenceStatus.LEGACY);
     }
 
     @Test
-    void legacyStatusUsesLegacyProjectedState() {
-        assertThat(first(project(diagnostic(ScoringEvidenceStatus.LEGACY))).attributes())
-                .containsEntry("evidenceProjectionState", EvidenceProjectionState.LEGACY_PROJECTED.name());
+    void currentScoringFallbackProjectsAsPartialFraudScoringEvidence() {
+        EvidenceSnapshotItem projected = first(project(diagnostic(
+                ScoringEvidenceStatus.PARTIAL,
+                ScoringEvidenceSource.SCORING_FALLBACK
+        )));
+
+        assertThat(projected.status()).isEqualTo(EvidenceStatus.PARTIAL);
+        assertThat(projected.source()).isEqualTo(EvidenceSource.FRAUD_SCORING_SERVICE);
+        assertThat(projected.attributes())
+                .containsEntry("evidenceProjectionState", EvidenceProjectionState.UNAVAILABLE_UNSUPPORTED_EVIDENCE.name());
     }
 
     @Test
@@ -466,7 +473,11 @@ class AlertEvidenceSnapshotProjectionServiceTest {
                 Map.of(),
                 Map.of(),
                 alertRecommended,
-                scoringEvidence
+                scoringEvidence,
+                null,
+                null,
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                null
         );
     }
 
@@ -492,11 +503,18 @@ class AlertEvidenceSnapshotProjectionServiceTest {
     }
 
     private ScoringEvidenceItem diagnostic(ScoringEvidenceStatus status) {
+        return diagnostic(status, ScoringEvidenceSource.ML_RUNTIME);
+    }
+
+    private ScoringEvidenceItem diagnostic(
+            ScoringEvidenceStatus status,
+            ScoringEvidenceSource source
+    ) {
         return new ScoringEvidenceItem(
                 "diagnostic-" + status.name(),
                 null,
                 ScoringEvidenceType.DIAGNOSTIC,
-                ScoringEvidenceSource.ML_RUNTIME,
+                source,
                 status,
                 ScoringEvidenceSeverity.LOW,
                 "Diagnostic",

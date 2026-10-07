@@ -15,7 +15,7 @@ public class ScoredTransactionDocumentMapper {
 
     public ScoredTransactionDocument toDocument(TransactionScoredEvent event) {
         String sourceEventFingerprint = ScoringOccurrenceFingerprint.from(event);
-        ScoringOccurrenceOwnership occurrence = ScoringOccurrenceOwnership.authoritative(
+        ScoringOccurrenceOwnership occurrence = new ScoringOccurrenceOwnership(
                 event.eventId(),
                 event.createdAt(),
                 sourceEventFingerprint
@@ -42,6 +42,7 @@ public class ScoredTransactionDocumentMapper {
         document.setAlertRecommended(event.alertRecommended());
         document.setReasonCodes(event.reasonCodes());
         document.setAnalystRecommendation(event.analystRecommendation());
+        document.setMlPredictionEvidenceOmissionReason(event.mlPredictionEvidenceOmissionReason());
         return document;
     }
 
@@ -59,7 +60,8 @@ public class ScoredTransactionDocumentMapper {
                 document.getAlertRecommended(),
                 document.getReasonCodes(),
                 document.getAnalystRecommendation(),
-                occurrence(document)
+                occurrence(document),
+                document.getMlPredictionEvidenceOmissionReason()
         );
     }
 
@@ -81,10 +83,7 @@ public class ScoredTransactionDocumentMapper {
         if (event.inferenceTimestamp() != null) {
             return event.inferenceTimestamp();
         }
-        if (event.createdAt() != null) {
-            return event.createdAt();
-        }
-        return Instant.now();
+        return event.createdAt();
     }
 
     private String normalizeSearchValue(String value) {

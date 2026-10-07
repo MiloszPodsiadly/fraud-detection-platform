@@ -113,16 +113,9 @@ public class EngineIntelligenceProjectionWriteFence {
                         )
                 )
         );
-        Criteria historicalWithoutFence = new Criteria().andOperator(
-                Criteria.where("sourceEventId").is(null),
-                Criteria.where("sourceEventCreatedAt").is(null),
-                Criteria.where("sourceEventCreatedAtEpochSecond").is(null),
-                Criteria.where("sourceEventCreatedAtNano").is(null),
-                Criteria.where("sourceEventFingerprint").is(null)
-        );
         return Query.query(new Criteria().andOperator(
                 Criteria.where("_id").is(candidate.getTransactionId()),
-                new Criteria().orOperator(sameOccurrence, olderOccurrence, historicalWithoutFence)
+                new Criteria().orOperator(sameOccurrence, olderOccurrence)
         ));
     }
 
@@ -154,9 +147,6 @@ public class EngineIntelligenceProjectionWriteFence {
             EngineIntelligenceProjection candidate
     ) {
         ScoringOccurrenceOwnership currentOwnership = persistedOwnership(current);
-        if (currentOwnership.state() == ScoringOccurrenceOwnership.State.UNKNOWN_OCCURRENCE) {
-            return true;
-        }
         ScoringOccurrenceOwnership candidateOwnership = candidate.scoringOccurrenceOwnership();
         int timestampOrder = currentOwnership.sourceEventCreatedAt()
                 .compareTo(candidateOwnership.sourceEventCreatedAt());
@@ -184,10 +174,7 @@ public class EngineIntelligenceProjectionWriteFence {
             throw new IllegalArgumentException("ENGINE_INTELLIGENCE_PROJECTION_OCCURRENCE_IDENTITY_REQUIRED");
         }
         try {
-            if (candidate.scoringOccurrenceOwnership().state()
-                    != ScoringOccurrenceOwnership.State.AUTHORITATIVE) {
-                throw new IllegalArgumentException("ENGINE_INTELLIGENCE_PROJECTION_OCCURRENCE_IDENTITY_REQUIRED");
-            }
+            candidate.scoringOccurrenceOwnership();
         } catch (IllegalArgumentException exception) {
             throw new IllegalArgumentException(
                     "ENGINE_INTELLIGENCE_PROJECTION_OCCURRENCE_IDENTITY_REQUIRED",

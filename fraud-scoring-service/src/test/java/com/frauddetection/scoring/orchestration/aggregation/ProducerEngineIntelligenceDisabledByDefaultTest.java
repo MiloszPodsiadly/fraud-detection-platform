@@ -29,12 +29,14 @@ class ProducerEngineIntelligenceDisabledByDefaultTest {
         FraudEngineAggregationService aggregationService = mock(FraudEngineAggregationService.class);
         var service = service(false, pipeline(orchestrator, aggregationService, mapper));
 
-        assertThat(service.emitIfEnabled(request())).isEmpty();
+        assertThat(service.emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.DISABLED);
         verifyNoInteractions(orchestrator, aggregationService, mapper);
     }
 
     private void assertDisabled() {
         assertThat(service(false, mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class))
-                .emitIfEnabled(request())).isEmpty();
+                .emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.DISABLED);
     }
 }

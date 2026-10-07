@@ -1,6 +1,5 @@
 package com.frauddetection.scoring.config;
 
-import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
 import org.junit.jupiter.api.Test;
 
 import static com.frauddetection.scoring.config.EngineIntelligenceSpringContextTestSupport.contextRunner;
@@ -38,13 +37,5 @@ class EngineIntelligenceEmissionPropertiesSpringContextTest {
         contextRunner().run(context ->
                 assertThat(context).hasSingleBean(EngineIntelligenceEmissionProperties.class)
         );
-    }
-
-    @Test
-    void emissionServiceBeanReceivesProperties() {
-        enabledContextRunner()
-                .run(context ->
-                        assertThat(context.getBean(EngineIntelligenceEmissionService.class).emitEnabled()).isTrue()
-                );
     }
 }

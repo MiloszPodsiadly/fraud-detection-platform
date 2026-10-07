@@ -6,6 +6,7 @@ import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCategory;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -22,9 +23,10 @@ class AlertServiceEngineIntelligencePayloadToleranceTest {
 
         assertThat(fixture.getBytes(java.nio.charset.StandardCharsets.UTF_8)).hasSizeLessThan(SAFE_FIXTURE_THRESHOLD_BYTES);
         assertThat(full.engineIntelligence()).isNotNull();
-        AlertServiceBaselineProjectionAssertions.assertUnaffectedByEngineIntelligence(
+        AlertServiceBaselineProjectionAssertions.assertBaselineDecisionFieldsUnaffected(
                 mapper,
-                full
+                full,
+                MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE
         );
         assertThat(full.engineIntelligence().toString())
                 .doesNotContainIgnoringCase("rawPayload", "rawEvidence", "finalDecision", "recommendedAction");

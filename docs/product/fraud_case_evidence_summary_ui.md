@@ -121,7 +121,6 @@ case workflow handlers.
 The section renders bounded user-facing states:
 
 - `Loading evidence summary...`
-- `Legacy context. This case may not have structured evidence summary data.`
 - `Evidence summary unavailable.`
 - `Partial summary. Some linked evidence context is incomplete or unavailable.`
 - `Truncated summary. Only the first bounded set of linked alert evidence was included.`
@@ -164,6 +163,6 @@ remain elsewhere on the page and are not added, removed, or redefined by FDP-74.
 - Evidence summary failure does not break the rest of FraudCase detail.
 - FDP-75 does not expand the product surface beyond FDP-74.
 - Display and copy helpers remain explicit and evidence-summary-specific.
-- Shared fixtures cover available, partial, legacy, truncated, unavailable, malformed, and raw-payload response shapes.
+- Shared fixtures cover available, partial, truncated, unavailable, malformed, and raw-payload response shapes.
 - Source-level guards prevent fallback clients, raw renderers, workflow helpers, mutation helpers, and raw response field
   rendering.

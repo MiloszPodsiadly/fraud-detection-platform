@@ -20,8 +20,7 @@ class EvidenceProjectionStateTest {
                 EvidenceProjectionState.PARTIAL_TRUNCATED,
                 EvidenceProjectionState.UNAVAILABLE_UNSUPPORTED_EVIDENCE,
                 EvidenceProjectionState.ERROR_PROJECTION_FAILED,
-                EvidenceProjectionState.ERROR_PROJECTED,
-                EvidenceProjectionState.LEGACY_PROJECTED
+                EvidenceProjectionState.ERROR_PROJECTED
         );
     }
 

@@ -26,7 +26,6 @@ Evidence is not complete when correlation or transaction linkage is missing.
 `STALE` means evidence may no longer reflect current source state.
 `ERROR` means evidence collection or projection failed.
 `NOT_APPLICABLE` means this evidence type does not apply to the entity or context.
-`LEGACY` means evidence was derived from older payloads with limited semantics.
 
 ## Relationship To ReasonCode
 

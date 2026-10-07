@@ -1,11 +1,12 @@
-package com.frauddetection.scoring.orchestration.aggregation;
+package com.frauddetection.common.events.intelligence;
 
 public enum MlPredictionEvidenceOmissionReason {
     DIAGNOSTIC_EMISSION_DISABLED,
+    DIAGNOSTIC_ENRICHMENT_UNAVAILABLE,
     ML_ENGINE_UNAVAILABLE,
     SOURCE_TIMESTAMP_MISSING,
     INVALID_SCORE,
     IDENTITY_VALIDATION_FAILURE,
-    LEGITIMATE_ABSENCE,
+    EVIDENCE_SOURCE_INTEGRITY_FAILURE,
     PREDICTION_NOT_ACCEPTED
 }

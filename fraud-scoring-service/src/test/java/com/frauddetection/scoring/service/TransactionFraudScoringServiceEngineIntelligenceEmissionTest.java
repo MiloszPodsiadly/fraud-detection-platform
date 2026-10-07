@@ -9,14 +9,17 @@ import com.frauddetection.scoring.mapper.TransactionScoredEventMapper;
 import com.frauddetection.scoring.messaging.TransactionScoredEventPublisher;
 import com.frauddetection.scoring.observability.ScoringMetrics;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionOmissionReason;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionResult;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEnrichmentResult;
-import com.frauddetection.scoring.orchestration.aggregation.MlPredictionEvidenceOmissionReason;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
 
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.analystRecommendationService;
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.availableMlSummary;
+import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.degradedMlSummary;
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.harness;
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.harnessWithEnrichment;
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.json;
@@ -24,6 +27,7 @@ import static com.frauddetection.scoring.service.TransactionFraudScoringServiceE
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.scoreResult;
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceTestSupport.summary;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -72,7 +76,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
     void missingMlSourceTimestampOmitsEvidenceWithoutChangingBaselineScore() {
         TransactionScoredEvent event = harnessWithEnrichment(
                 EngineIntelligenceEnrichmentResult.withoutEvidence(
-                        availableMlSummary(),
+                        degradedMlSummary(),
                         MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING
                 )
         ).scoreAndCapture();
@@ -90,17 +94,23 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
         var scoreResult = scoreResult();
         var summary = summary();
         var recommendation = analystRecommendationService().recommend(scoreResult, Optional.of(summary));
-        var scoredEvent = new TransactionScoredEventMapper().toEvent(request, scoreResult, Optional.of(summary), recommendation);
+        var scoredEvent = new TransactionScoredEventMapper().toEvent(
+                request,
+                scoreResult,
+                Optional.of(summary),
+                MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE,
+                recommendation
+        );
         FraudScoringEngine scoringEngine = mock(FraudScoringEngine.class);
         EngineIntelligenceEmissionService emissionService = mock(EngineIntelligenceEmissionService.class);
         TransactionScoredEventMapper mapper = mock(TransactionScoredEventMapper.class);
         TransactionScoredEventPublisher publisher = mock(TransactionScoredEventPublisher.class);
         ScoringMetrics metrics = mock(ScoringMetrics.class);
         when(scoringEngine.score(request)).thenReturn(scoreResult);
-        when(emissionService.emitIfEnabled(request)).thenReturn(Optional.of(
+        when(emissionService.emitIfEnabled(request)).thenReturn(EngineIntelligenceEmissionResult.emitted(
                 EngineIntelligenceEnrichmentResult.withoutEvidence(
                         summary,
-                        MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE
+                        MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE
                 )
         ));
         when(mapper.toEvent(
@@ -108,6 +118,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
                 scoreResult,
                 Optional.of(summary),
                 Optional.empty(),
+                Optional.of(MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE),
                 recommendation
         )).thenReturn(scoredEvent);
         var service = new TransactionFraudScoringService(
@@ -129,6 +140,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
                 scoreResult,
                 Optional.of(summary),
                 Optional.empty(),
+                Optional.of(MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE),
                 recommendation
         );
         verify(publisher).publish(scoredEvent);
@@ -157,11 +169,31 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
 
     @Test
     void enabledEmissionFailurePublishesBaseEvent() throws Exception {
-        TransactionScoredEvent event = harness(Optional.empty()).scoreAndCapture();
+        TransactionScoredEvent event = harness(true, Optional.empty()).scoreAndCapture();
         assertThat(event.engineIntelligence()).isNull();
         assertThat(event.mlPredictionEvidence()).isNull();
-        assertThat(event.analystRecommendation().status().name()).isEqualTo("ABSENT");
+        assertThat(event.mlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE);
+        assertThat(event.analystRecommendation().status().name()).isEqualTo("UNAVAILABLE");
         assertThat(json(event)).doesNotContain("\"engineIntelligence\"", "\"mlPredictionEvidence\"", "raw-secret");
+    }
+
+    @Test
+    void pipelineUnavailablePublishesDiagnosticUnavailableAndUnavailableRecommendation() {
+        TransactionScoredEvent event = eventForOmission(EngineIntelligenceEmissionOmissionReason.PIPELINE_UNAVAILABLE);
+
+        assertThat(event.mlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE);
+        assertThat(event.analystRecommendation().status().name()).isEqualTo("UNAVAILABLE");
+    }
+
+    @Test
+    void emptyPipelineResultPublishesIntegrityFailureAndUnavailableRecommendation() {
+        TransactionScoredEvent event = eventForOmission(EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT);
+
+        assertThat(event.mlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.EVIDENCE_SOURCE_INTEGRITY_FAILURE);
+        assertThat(event.analystRecommendation().status().name()).isEqualTo("UNAVAILABLE");
     }
 
     @Test
@@ -171,7 +203,23 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
 
         assertThat(enabled)
                 .usingRecursiveComparison()
-                .ignoringFields("eventId", "createdAt", "engineIntelligence", "analystRecommendation")
+                .ignoringFields(
+                        "eventId",
+                        "createdAt",
+                        "engineIntelligence",
+                        "mlPredictionEvidenceOmissionReason",
+                        "analystRecommendation"
+                )
                 .isEqualTo(disabled);
+        assertThat(enabled.mlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE);
+        assertThat(disabled.mlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED);
+    }
+
+    private TransactionScoredEvent eventForOmission(EngineIntelligenceEmissionOmissionReason reason) {
+        EngineIntelligenceEmissionService emissionService = mock(EngineIntelligenceEmissionService.class);
+        when(emissionService.emitIfEnabled(any())).thenReturn(EngineIntelligenceEmissionResult.omitted(reason));
+        return harness(emissionService).scoreAndCapture();
     }
 }

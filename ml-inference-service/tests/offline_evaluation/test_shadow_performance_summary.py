@@ -34,7 +34,7 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
         self.assertEqual(SUMMARY_VERSION, summary["summaryVersion"])
         self.assertEqual("PLATFORM_RECOMMENDATION", summary["evaluationSubject"]["subjectType"])
         self.assertEqual(
-            "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
+            "PLATFORM_RECOMMENDATION_NOT_MODEL_ARTIFACT_SCOPED",
             summary["evaluationSubject"]["identityCompleteness"],
         )
         self.assertEqual("2026-06-10T00:00:00Z", summary["evaluation"]["evaluationReportGeneratedAt"])
@@ -248,12 +248,12 @@ class ShadowPerformanceSummaryTest(unittest.TestCase):
                 (
                     "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
                     "unsupported-artifact-set-v1",
-                    "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
+                    "PLATFORM_RECOMMENDATION_NOT_MODEL_ARTIFACT_SCOPED",
                 ),
                 (
                     "UNSUPPORTED_PLATFORM_EVALUATION",
                     "feedback-dataset-evaluation-report-artifact-set-v1",
-                    "NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE",
+                    "PLATFORM_RECOMMENDATION_NOT_MODEL_ARTIFACT_SCOPED",
                 ),
                 (
                     "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",

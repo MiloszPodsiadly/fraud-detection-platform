@@ -10,6 +10,7 @@ import com.frauddetection.scoring.orchestration.FraudScoringOrchestrator;
 import com.frauddetection.scoring.orchestration.FraudSignalEngineRegistry;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceDiagnosticEnrichmentPipeline;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionMetrics;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionOmissionReason;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
 import com.frauddetection.scoring.orchestration.aggregation.FraudEngineAggregationService;
 import com.frauddetection.scoring.orchestration.aggregation.NoOpEngineIntelligenceEmissionMetrics;
@@ -75,7 +76,8 @@ class EngineIntelligenceConditionalRuntimeGraphTest {
         ObjectProvider<EngineIntelligenceDiagnosticEnrichmentPipeline> provider = provider();
         var service = service(false, provider);
 
-        assertThat(service.emitIfEnabled(request())).isEmpty();
+        assertThat(service.emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.DISABLED);
         verifyNoInteractions(provider);
     }
 
@@ -88,7 +90,8 @@ class EngineIntelligenceConditionalRuntimeGraphTest {
         when(pipeline.enrich(org.mockito.ArgumentMatchers.any())).thenReturn(Optional.empty());
         var service = service(true, provider);
 
-        assertThat(service.emitIfEnabled(request())).isEmpty();
+        assertThat(service.emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT);
         verify(provider).getIfAvailable();
     }
 

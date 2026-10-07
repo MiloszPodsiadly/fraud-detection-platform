@@ -64,8 +64,6 @@ public record ExternalAuditAnchor(
     public static final String STATUS_CONFLICT = "CONFLICT";
     public static final String STATUS_MISSING = "MISSING";
     public static final String STATUS_UNAVAILABLE = "UNAVAILABLE";
-    @Deprecated
-    public static final String STATUS_PARTIAL = STATUS_UNVERIFIED;
     public static final String REASON_HEAD_MANIFEST_UPDATE_FAILED = "HEAD_MANIFEST_UPDATE_FAILED";
     public static final String REASON_STATUS_PERSISTENCE_FAILED_AFTER_EXTERNAL_PUBLISH = "STATUS_PERSISTENCE_FAILED_AFTER_EXTERNAL_PUBLISH";
     public static final String REASON_EXTERNAL_ANCHOR_REQUIRED_FAILED = "EXTERNAL_ANCHOR_REQUIRED_FAILED";
@@ -139,16 +137,6 @@ public record ExternalAuditAnchor(
 
     ExternalAuditAnchor conflict(String reason) {
         return withPublicationStatus(STATUS_CONFLICT, reason, null);
-    }
-
-    @Deprecated
-    ExternalAuditAnchor partial() {
-        return unverified(REASON_HEAD_MANIFEST_UPDATE_FAILED);
-    }
-
-    @Deprecated
-    ExternalAuditAnchor partial(String reason, String manifestStatus) {
-        return withPublicationStatus(STATUS_UNVERIFIED, reason, manifestStatus);
     }
 
     private ExternalAuditAnchor withPublicationStatus(String status, String reason, String manifestStatus) {

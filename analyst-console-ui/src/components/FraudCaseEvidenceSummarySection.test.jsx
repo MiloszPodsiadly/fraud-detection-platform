@@ -8,7 +8,6 @@ import {
 } from "./FraudCaseEvidenceSummarySection.jsx";
 import {
   availableEvidenceSummary,
-  legacyEvidenceSummary,
   maliciousTextEvidenceSummary,
   malformedCountsEvidenceSummary,
   malformedEnumEvidenceSummary,
@@ -56,12 +55,6 @@ describe("FraudCaseEvidenceSummarySection", () => {
     renderSection({ summary: partialEvidenceSummary() });
 
     expect(await screen.findByText("Partial summary. Some linked evidence context is incomplete or unavailable.")).toBeInTheDocument();
-  });
-
-  it("FraudCaseEvidenceSummarySectionRendersLegacyContextTest", async () => {
-    renderSection({ summary: legacyEvidenceSummary() });
-
-    expect(await screen.findByText("Legacy context. This case may not have structured evidence summary data.")).toBeInTheDocument();
   });
 
   it("FraudCaseEvidenceSummarySectionRendersTruncatedSummaryTest", async () => {

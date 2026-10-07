@@ -2,11 +2,13 @@ package com.frauddetection.alert.feedback;
 
 import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
+import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationStatus;
 import org.springframework.data.annotation.Id;
@@ -60,9 +62,12 @@ public class FraudFeedbackRecord {
     private EngineIntelligenceAgreementStatus agreementStatus;
     private EngineIntelligenceRiskMismatchStatus riskMismatchStatus;
     private EngineIntelligenceScoreDeltaBucket scoreDeltaBucket;
+    private FraudEngineStatus rulesEngineStatus;
+    private RiskLevel rulesRiskLevel;
     private String mlModelName;
     private String mlModelVersion;
     private String mlFeatureContractVersion;
+    private MlPredictionEvidenceOmissionReason mlPredictionEvidenceOmissionReason;
     private AnalystRecommendationStatus analystRecommendationStatus;
     private AnalystRecommendation analystRecommendation;
     private String analystRecommendationVersion;
@@ -102,7 +107,7 @@ public class FraudFeedbackRecord {
         }
     }
     void captureScoringOccurrence(ScoringOccurrenceOwnership ownership) {
-        if (ownership == null || ownership.state() != ScoringOccurrenceOwnership.State.AUTHORITATIVE) {
+        if (ownership == null) {
             throw new IllegalArgumentException("FRAUD_FEEDBACK_AUTHORITATIVE_SCORING_OCCURRENCE_REQUIRED");
         }
         Optional<ScoringOccurrenceOwnership> existing = scoringOccurrenceOwnership();
@@ -161,12 +166,18 @@ public class FraudFeedbackRecord {
     public void setRiskMismatchStatus(EngineIntelligenceRiskMismatchStatus riskMismatchStatus) { this.riskMismatchStatus = riskMismatchStatus; }
     public EngineIntelligenceScoreDeltaBucket getScoreDeltaBucket() { return scoreDeltaBucket; }
     public void setScoreDeltaBucket(EngineIntelligenceScoreDeltaBucket scoreDeltaBucket) { this.scoreDeltaBucket = scoreDeltaBucket; }
+    public FraudEngineStatus getRulesEngineStatus() { return rulesEngineStatus; }
+    public void setRulesEngineStatus(FraudEngineStatus rulesEngineStatus) { this.rulesEngineStatus = rulesEngineStatus; }
+    public RiskLevel getRulesRiskLevel() { return rulesRiskLevel; }
+    public void setRulesRiskLevel(RiskLevel rulesRiskLevel) { this.rulesRiskLevel = rulesRiskLevel; }
     public String getMlModelName() { return mlModelName; }
     public void setMlModelName(String mlModelName) { this.mlModelName = mlModelName; }
     public String getMlModelVersion() { return mlModelVersion; }
     public void setMlModelVersion(String mlModelVersion) { this.mlModelVersion = mlModelVersion; }
     public String getMlFeatureContractVersion() { return mlFeatureContractVersion; }
     public void setMlFeatureContractVersion(String mlFeatureContractVersion) { this.mlFeatureContractVersion = mlFeatureContractVersion; }
+    public MlPredictionEvidenceOmissionReason getMlPredictionEvidenceOmissionReason() { return mlPredictionEvidenceOmissionReason; }
+    public void setMlPredictionEvidenceOmissionReason(MlPredictionEvidenceOmissionReason reason) { this.mlPredictionEvidenceOmissionReason = reason; }
     public AnalystRecommendationStatus getAnalystRecommendationStatus() { return analystRecommendationStatus; }
     public void setAnalystRecommendationStatus(AnalystRecommendationStatus analystRecommendationStatus) { this.analystRecommendationStatus = analystRecommendationStatus; }
     public AnalystRecommendation getAnalystRecommendation() { return analystRecommendation; }

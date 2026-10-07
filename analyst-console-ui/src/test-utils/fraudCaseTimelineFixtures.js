@@ -30,7 +30,6 @@ export function availableTimeline() {
       })
     ],
     partial: false,
-    legacy: false,
     truncated: false,
     truncationReason: null
   };
@@ -54,20 +53,19 @@ export function partialTimeline() {
   };
 }
 
-export function legacyTimeline() {
+export function unavailableLinkedAlertContextTimeline() {
   return {
     ...emptyTimeline(),
-    legacy: true,
     partial: true,
     events: [
       event({
-        eventKey: "legacy-context",
-        eventType: "LEGACY_CONTEXT",
+        eventKey: "linked-alert-context-unavailable",
+        eventType: "LINKED_ALERT_CONTEXT_UNAVAILABLE",
         occurredAt: null,
         approximateTime: true,
         source: "ALERT_SERVICE",
-        evidenceStatus: "LEGACY",
-        linkedEntityType: "LEGACY_CONTEXT"
+        evidenceStatus: "UNAVAILABLE",
+        linkedEntityType: "FRAUD_CASE"
       })
     ]
   };
@@ -87,7 +85,6 @@ export function emptyTimeline() {
     generatedAt: "2026-05-23T10:00:00Z",
     events: [],
     partial: false,
-    legacy: false,
     truncated: false,
     truncationReason: null
   };
@@ -106,14 +103,6 @@ export function emptyTruncatedTimeline() {
     partial: true,
     truncated: true,
     truncationReason: "TIMELINE_EVENT_LIMIT_EXCEEDED"
-  };
-}
-
-export function emptyLegacyPartialTimeline() {
-  return {
-    ...emptyTimeline(),
-    partial: true,
-    legacy: true
   };
 }
 
@@ -219,7 +208,6 @@ export function maliciousTimeline() {
       analystDecision: "FRAUD"
     }],
     partial: false,
-    legacy: false,
     truncated: false,
     truncationReason: null
   };

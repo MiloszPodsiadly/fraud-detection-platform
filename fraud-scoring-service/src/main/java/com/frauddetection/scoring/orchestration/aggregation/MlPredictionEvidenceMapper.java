@@ -6,6 +6,7 @@ import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
 import com.frauddetection.scoring.engine.ml.PythonMlSignalReasonCode;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrationResult;
@@ -53,7 +54,7 @@ final class MlPredictionEvidenceMapper {
 
     private MlPredictionEvidenceOmissionReason omissionReason(FraudEngineResult result) {
         if (result == null || result.engineType() != FraudEngineType.ML_MODEL) {
-            return MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE;
+            return MlPredictionEvidenceOmissionReason.EVIDENCE_SOURCE_INTEGRITY_FAILURE;
         }
         if (PythonMlSignalReasonCode.ML_INFERENCE_TIMESTAMP_MISSING.wireValue().equals(result.statusReason())) {
             return MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING;

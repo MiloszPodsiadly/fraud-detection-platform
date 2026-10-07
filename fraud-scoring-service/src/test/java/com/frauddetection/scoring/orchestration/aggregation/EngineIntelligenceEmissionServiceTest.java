@@ -1,6 +1,8 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrationResult;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrator;
@@ -27,9 +29,10 @@ import static org.mockito.Mockito.when;
 class EngineIntelligenceEmissionServiceTest {
 
     @Test
-    void emitDisabledReturnsEmpty() {
+    void emitDisabledReturnsBoundedOmission() {
         assertThat(service(false, mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class))
-                .emitIfEnabled(request())).isEmpty();
+                .emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.DISABLED);
     }
 
     @Test
@@ -43,7 +46,8 @@ class EngineIntelligenceEmissionServiceTest {
                 new NoOpEngineIntelligenceEmissionMetrics()
         );
 
-        assertThat(service.emitIfEnabled(request())).isEmpty();
+        assertThat(service.emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.DISABLED);
         verifyNoInteractions(provider);
     }
 
@@ -53,7 +57,9 @@ class EngineIntelligenceEmissionServiceTest {
         FraudEngineAggregationService aggregation = mock(FraudEngineAggregationService.class);
         PublicEngineIntelligenceMapper mapper = mock(PublicEngineIntelligenceMapper.class);
 
-        assertThat(service(false, pipeline(orchestrator, aggregation, mapper)).emitIfEnabled(request())).isEmpty();
+        assertThat(service(false, pipeline(orchestrator, aggregation, mapper))
+                .emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.DISABLED);
         verifyNoInteractions(orchestrator, aggregation, mapper);
     }
 
@@ -69,8 +75,9 @@ class EngineIntelligenceEmissionServiceTest {
         when(aggregation.aggregate(orchestration)).thenReturn(aggregationResult);
         when(mapper.map(aggregationResult)).thenReturn(summary);
 
-        assertThat(service(true, pipeline(orchestrator, aggregation, mapper)).emitIfEnabled(request()))
-                .flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
+        assertThat(service(true, pipeline(orchestrator, aggregation, mapper))
+                .emitIfEnabled(request()).enrichment())
+                .map(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
                 .contains(summary);
         verify(orchestrator).evaluate(any());
         verify(aggregation).aggregate(orchestration);
@@ -89,35 +96,40 @@ class EngineIntelligenceEmissionServiceTest {
                 new NoOpEngineIntelligenceEmissionMetrics()
         );
 
-        assertThat(service.emitIfEnabled(request())).isEmpty();
+        assertThat(service.emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT);
         verify(provider).getIfAvailable();
     }
 
     @Test
-    void emitEnabledWhenOrchestratorThrowsReturnsEmptyBeforeAggregationOrMapping() {
+    void emitEnabledWhenOrchestratorThrowsReturnsUnknownFailureBeforeAggregationOrMapping() {
         FraudScoringOrchestrator orchestrator = mock(FraudScoringOrchestrator.class);
         FraudEngineAggregationService aggregation = mock(FraudEngineAggregationService.class);
         PublicEngineIntelligenceMapper mapper = mock(PublicEngineIntelligenceMapper.class);
         when(orchestrator.evaluate(any())).thenThrow(new IllegalStateException("raw-secret"));
 
-        assertThat(service(true, pipeline(orchestrator, aggregation, mapper)).emitIfEnabled(request())).isEmpty();
+        assertThat(service(true, pipeline(orchestrator, aggregation, mapper))
+                .emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
         verifyNoInteractions(aggregation, mapper);
     }
 
     @Test
-    void emitEnabledWhenAggregationThrowsReturnsEmptyBeforeMapping() {
+    void emitEnabledWhenAggregationThrowsReturnsUnknownFailureBeforeMapping() {
         FraudScoringOrchestrator orchestrator = mock(FraudScoringOrchestrator.class);
         FraudEngineAggregationService aggregation = mock(FraudEngineAggregationService.class);
         PublicEngineIntelligenceMapper mapper = mock(PublicEngineIntelligenceMapper.class);
         when(orchestrator.evaluate(any())).thenReturn(mock(FraudScoringOrchestrationResult.class));
         when(aggregation.aggregate(any())).thenThrow(new IllegalStateException("raw-secret"));
 
-        assertThat(service(true, pipeline(orchestrator, aggregation, mapper)).emitIfEnabled(request())).isEmpty();
+        assertThat(service(true, pipeline(orchestrator, aggregation, mapper))
+                .emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
         verify(mapper, never()).map(any());
     }
 
     @Test
-    void emitEnabledWhenMapperThrowsReturnsEmpty() {
+    void emitEnabledWhenMapperThrowsReturnsUnknownFailure() {
         FraudScoringOrchestrator orchestrator = mock(FraudScoringOrchestrator.class);
         FraudEngineAggregationService aggregation = mock(FraudEngineAggregationService.class);
         PublicEngineIntelligenceMapper mapper = mock(PublicEngineIntelligenceMapper.class);
@@ -125,12 +137,71 @@ class EngineIntelligenceEmissionServiceTest {
         when(aggregation.aggregate(any())).thenReturn(mock(FraudEngineAggregationResult.class));
         when(mapper.map(any())).thenThrow(new IllegalStateException("raw-secret"));
 
-        assertThat(service(true, pipeline(orchestrator, aggregation, mapper)).emitIfEnabled(request())).isEmpty();
+        assertThat(service(true, pipeline(orchestrator, aggregation, mapper))
+                .emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
     }
 
     @Test
-    void emitEnabledWhenPipelineIsMissingReturnsEmpty() {
-        assertThat(service(true, null).emitIfEnabled(request())).isEmpty();
+    void emitEnabledWhenPipelineIsMissingReturnsPipelineUnavailable() {
+        assertThat(service(true, null).emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.PIPELINE_UNAVAILABLE);
+    }
+
+    @Test
+    void emissionResultRequiresExactlyOneOutcome() {
+        EngineIntelligenceEnrichmentResult enrichment = mock(EngineIntelligenceEnrichmentResult.class);
+
+        assertThatThrownBy(() -> new EngineIntelligenceEmissionResult(Optional.empty(), Optional.empty()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("ENGINE_INTELLIGENCE_EMISSION_REQUIRES_EXACTLY_ONE_OUTCOME");
+        assertThatThrownBy(() -> new EngineIntelligenceEmissionResult(
+                Optional.of(enrichment),
+                Optional.of(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE)
+        ))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("ENGINE_INTELLIGENCE_EMISSION_REQUIRES_EXACTLY_ONE_OUTCOME");
+    }
+
+    @Test
+    void enrichmentRequiresSummaryAndExactlyOneEvidenceOutcome() {
+        EngineIntelligenceSummary summary = mock(EngineIntelligenceSummary.class);
+
+        assertThatThrownBy(() -> new EngineIntelligenceEnrichmentResult(
+                null,
+                Optional.empty(),
+                Optional.of(MlPredictionEvidenceOmissionReason.INVALID_SCORE)
+        ))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("engineIntelligenceSummary is required");
+        assertThatThrownBy(() -> new EngineIntelligenceEnrichmentResult(
+                summary,
+                Optional.empty(),
+                Optional.empty()
+        ))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("ML_PREDICTION_EVIDENCE_REQUIRES_EXACTLY_ONE_OUTCOME");
+    }
+
+    @Test
+    void enrichmentFactoriesPreserveSummaryAndExactlyOneOutcome() {
+        EngineIntelligenceSummary summary = mock(EngineIntelligenceSummary.class);
+        MlPredictionEvidenceV1 evidence = mock(MlPredictionEvidenceV1.class);
+
+        EngineIntelligenceEnrichmentResult withEvidence =
+                EngineIntelligenceEnrichmentResult.withEvidence(summary, evidence);
+        EngineIntelligenceEnrichmentResult withoutEvidence = EngineIntelligenceEnrichmentResult.withoutEvidence(
+                summary,
+                MlPredictionEvidenceOmissionReason.INVALID_SCORE
+        );
+
+        assertThat(withEvidence.engineIntelligenceSummary()).isSameAs(summary);
+        assertThat(withEvidence.mlPredictionEvidence()).contains(evidence);
+        assertThat(withEvidence.mlPredictionEvidenceOmissionReason()).isEmpty();
+        assertThat(withoutEvidence.engineIntelligenceSummary()).isSameAs(summary);
+        assertThat(withoutEvidence.mlPredictionEvidence()).isEmpty();
+        assertThat(withoutEvidence.mlPredictionEvidenceOmissionReason())
+                .contains(MlPredictionEvidenceOmissionReason.INVALID_SCORE);
     }
 
     @Test

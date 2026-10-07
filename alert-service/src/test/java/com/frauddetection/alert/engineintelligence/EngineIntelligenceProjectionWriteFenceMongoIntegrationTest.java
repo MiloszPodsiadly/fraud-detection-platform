@@ -1,11 +1,13 @@
 package com.frauddetection.alert.engineintelligence;
 
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import org.bson.Document;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.mapping.model.MappingInstantiationException;
 import org.springframework.data.mongodb.MongoTransactionManager;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -143,7 +145,7 @@ class EngineIntelligenceProjectionWriteFenceMongoIntegrationTest {
     }
 
     @Test
-    void historicalProjectionWithoutOccurrenceIdentityCanBeReplacedOnce() {
+    void historicalProjectionWithoutOccurrenceIdentityFailsClosed() {
         mongoTemplate.insert(projection("historical-event", EARLIER, "f".repeat(64)));
         mongoTemplate.getCollection("engine_intelligence_projections").updateOne(
                 new Document("_id", "transaction-current"),
@@ -157,10 +159,16 @@ class EngineIntelligenceProjectionWriteFenceMongoIntegrationTest {
 
         EngineIntelligenceProjection current = projection("event-current", LATER, "a".repeat(64));
 
-        assertThat(writeFence.write(current).status())
-                .isEqualTo(EngineIntelligenceProjectionWriteResult.Status.ACCEPTED);
-        assertThat(stored().getSourceEventId()).isEqualTo("event-current");
-        assertThat(stored().getSourceEventFingerprint()).isEqualTo("a".repeat(64));
+        assertThatThrownBy(() -> writeFence.write(current))
+                .isInstanceOf(MappingInstantiationException.class)
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage("SCORING_OCCURRENCE_IDENTITY_INVALID");
+        Document persisted = mongoTemplate.getCollection("engine_intelligence_projections")
+                .find(new Document("_id", "transaction-current"))
+                .first();
+        assertThat(persisted).isNotNull();
+        assertThat(persisted.getString("sourceEventId")).isNull();
+        assertThat(persisted.get("sourceEventFingerprint")).isNull();
     }
 
     @Test
@@ -174,8 +182,9 @@ class EngineIntelligenceProjectionWriteFenceMongoIntegrationTest {
         EngineIntelligenceProjection current = projection("event-current", LATER, "b".repeat(64));
 
         assertThatThrownBy(() -> writeFence.write(current))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("ENGINE_INTELLIGENCE_PROJECTION_OCCURRENCE_IDENTITY_INVALID");
+                .isInstanceOf(MappingInstantiationException.class)
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage("SCORING_OCCURRENCE_IDENTITY_INVALID");
         Document persisted = mongoTemplate.getCollection("engine_intelligence_projections")
                 .find(new Document("_id", "transaction-current"))
                 .first();
@@ -189,9 +198,7 @@ class EngineIntelligenceProjectionWriteFenceMongoIntegrationTest {
                 Clock.fixed(sourceCreatedAt, ZoneOffset.UTC)
         ).map(
                 "transaction-current",
-                eventId,
-                sourceCreatedAt,
-                fingerprint,
+                new ScoringOccurrenceOwnership(eventId, sourceCreatedAt, fingerprint),
                 EngineIntelligenceProjectionTestFixtures.minimalSummary(),
                 null
         ).projection().orElseThrow();

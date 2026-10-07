@@ -103,6 +103,7 @@ final class EngineIntelligenceValuePolicy {
                 "ML_MODEL_INVALID_RESPONSE",
                 "ML_SCORE_MISSING",
                 "ML_SCORE_OUT_OF_RANGE",
+                "ML_INFERENCE_TIMESTAMP_MISSING",
                 "ML_MODEL_METADATA_MISSING",
                 "ML_AVAILABILITY_METADATA_MISSING",
                 "ML_AVAILABILITY_METADATA_INVALID",

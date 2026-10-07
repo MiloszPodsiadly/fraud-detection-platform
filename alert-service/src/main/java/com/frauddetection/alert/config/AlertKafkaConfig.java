@@ -1,6 +1,5 @@
 package com.frauddetection.alert.config;
 
-import com.frauddetection.alert.messaging.AuthoritativeTransactionScoredEventDeserializer;
 import com.frauddetection.alert.messaging.EngineIntelligenceRecoveryValidationException;
 import com.frauddetection.alert.messaging.MlPredictionEvidencePermanentProcessingException;
 import com.frauddetection.alert.messaging.ScoringOccurrenceConflictException;
@@ -65,19 +64,6 @@ public class AlertKafkaConfig {
 
     @Bean
     public ConsumerFactory<String, TransactionScoredEvent> transactionScoredEventConsumerFactory(KafkaProperties kafkaProperties) {
-        Map<String, Object> properties = new HashMap<>(kafkaProperties.buildConsumerProperties());
-
-        return new DefaultKafkaConsumerFactory<>(
-                properties,
-                new StringDeserializer(),
-                new ErrorHandlingDeserializer<>(new AuthoritativeTransactionScoredEventDeserializer())
-        );
-    }
-
-    @Bean
-    public ConsumerFactory<String, TransactionScoredEvent> mlPredictionEvidenceConsumerFactory(
-            KafkaProperties kafkaProperties
-    ) {
         Map<String, Object> properties = new HashMap<>(kafkaProperties.buildConsumerProperties());
 
         return new DefaultKafkaConsumerFactory<>(
@@ -376,14 +362,14 @@ public class AlertKafkaConfig {
 
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, TransactionScoredEvent> mlPredictionEvidenceKafkaListenerContainerFactory(
-            @Qualifier("mlPredictionEvidenceConsumerFactory")
-            ConsumerFactory<String, TransactionScoredEvent> mlPredictionEvidenceConsumerFactory,
+            @Qualifier("transactionScoredEventConsumerFactory")
+            ConsumerFactory<String, TransactionScoredEvent> transactionScoredEventConsumerFactory,
             @Qualifier("mlPredictionEvidenceErrorHandler") DefaultErrorHandler evidenceErrorHandler,
             KafkaConsumerProperties kafkaConsumerProperties
     ) {
         ConcurrentKafkaListenerContainerFactory<String, TransactionScoredEvent> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(mlPredictionEvidenceConsumerFactory);
+        factory.setConsumerFactory(transactionScoredEventConsumerFactory);
         factory.setCommonErrorHandler(evidenceErrorHandler);
         factory.setConcurrency(kafkaConsumerProperties.concurrency() == null ? 1 : kafkaConsumerProperties.concurrency());
         factory.getContainerProperties().setAckMode(
@@ -412,7 +398,7 @@ public class AlertKafkaConfig {
 
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, TransactionScoredEvent> engineIntelligenceRedriveKafkaListenerContainerFactory(
-            @Qualifier("mlPredictionEvidenceConsumerFactory")
+            @Qualifier("transactionScoredEventConsumerFactory")
             ConsumerFactory<String, TransactionScoredEvent> consumerFactory,
             @Qualifier("engineIntelligenceRedriveErrorHandler") DefaultErrorHandler errorHandler,
             KafkaConsumerProperties kafkaConsumerProperties

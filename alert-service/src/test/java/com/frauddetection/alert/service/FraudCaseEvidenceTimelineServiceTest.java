@@ -2,6 +2,7 @@ package com.frauddetection.alert.service;
 
 import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.alert.api.FraudCaseTimelineEventType;
+import com.frauddetection.alert.api.FraudCaseTimelineLinkedEntityType;
 import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.evidence.EvidenceSeverity;
 import com.frauddetection.alert.evidence.EvidenceSnapshotItem;
@@ -70,7 +71,6 @@ class FraudCaseEvidenceTimelineServiceTest {
                 FraudCaseTimelineEventType.ALERT_EVIDENCE_SNAPSHOT_AVAILABLE
         );
         assertThat(response.partial()).isFalse();
-        assertThat(response.legacy()).isFalse();
         assertThat(response.truncated()).isFalse();
         assertThat(response.generatedAt()).isEqualTo(NOW);
     }
@@ -320,17 +320,23 @@ class FraudCaseEvidenceTimelineServiceTest {
     }
 
     @Test
-    void FraudCaseEvidenceTimelineLegacyCaseSafeTest() {
+    void FraudCaseEvidenceTimelineMissingLinkedAlertContextIsUnavailableTest() {
         FraudCaseEvidenceTimelineService service = service();
-        when(fraudCaseRepository.findById("case-legacy")).thenReturn(Optional.of(caseWithAlerts(
-                "case-legacy",
+        when(fraudCaseRepository.findById("case-unlinked")).thenReturn(Optional.of(caseWithAlerts(
+                "case-unlinked",
                 Instant.parse("2026-05-20T10:00:00Z")
         )));
 
-        var response = service.timeline("case-legacy");
+        var response = service.timeline("case-unlinked");
 
-        assertThat(response.legacy()).isTrue();
-        assertThat(response.events()).extracting("eventType").contains(FraudCaseTimelineEventType.LEGACY_CONTEXT);
+        assertThat(response.partial()).isTrue();
+        assertThat(response.events())
+                .filteredOn(event -> event.eventType() == FraudCaseTimelineEventType.LINKED_ALERT_CONTEXT_UNAVAILABLE)
+                .singleElement()
+                .satisfies(event -> {
+                    assertThat(event.evidenceStatus()).isEqualTo(EvidenceStatus.UNAVAILABLE);
+                    assertThat(event.linkedEntityType()).isEqualTo(FraudCaseTimelineLinkedEntityType.FRAUD_CASE);
+                });
     }
 
     @Test
@@ -508,16 +514,26 @@ class FraudCaseEvidenceTimelineServiceTest {
 
     private EvidenceSnapshotItem evidence(String reasonCode, EvidenceStatus status, EvidenceSeverity severity, Instant observedAt) {
         return new EvidenceSnapshotItem(
+                "timeline-evidence-" + reasonCode,
+                "timeline-source-event",
+                "timeline-transaction",
+                "timeline-correlation",
                 reasonCode,
                 EvidenceType.RULE_MATCH,
-                severity,
                 EvidenceSource.ALERT_SERVICE,
                 status,
+                severity,
                 "Evidence title",
                 "Evidence description",
                 "value",
                 "baseline",
-                observedAt
+                Map.of(),
+                observedAt,
+                observedAt.plusSeconds(1),
+                null,
+                null,
+                null,
+                null
         );
     }
 

@@ -1,5 +1,7 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
+
 import java.time.Duration;
 import java.util.Objects;
 

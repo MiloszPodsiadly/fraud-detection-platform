@@ -12,9 +12,6 @@ public final class FraudCaseReadModelOutcomeClassifier {
         if (response.truncated()) {
             return FraudCaseReadModelOutcome.TRUNCATED;
         }
-        if (response.legacy()) {
-            return FraudCaseReadModelOutcome.LEGACY;
-        }
         if (response.partial()) {
             return FraudCaseReadModelOutcome.PARTIAL;
         }
@@ -27,9 +24,6 @@ public final class FraudCaseReadModelOutcomeClassifier {
     public static FraudCaseReadModelOutcome classifyTimeline(FraudCaseEvidenceTimelineResponse response) {
         if (response.truncated()) {
             return FraudCaseReadModelOutcome.TRUNCATED;
-        }
-        if (response.legacy()) {
-            return FraudCaseReadModelOutcome.LEGACY;
         }
         if (response.partial()) {
             return FraudCaseReadModelOutcome.PARTIAL;

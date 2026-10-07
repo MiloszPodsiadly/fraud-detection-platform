@@ -52,7 +52,9 @@ class PublicEngineIntelligenceEventContractDocsTest {
                 "consumer-first rollout",
                 "historical consumers may reject unknown top-level fields",
                 "`transactionscoredevent.mlpredictionevidence` is a separate optional internal field",
-                "current events without evidence remain compatible",
+                "every current scored event requires exactly one of it or `mlpredictionevidenceomissionreason`",
+                "events with neither fail deserialization",
+                "archived, or quarantined before current consumers read them",
                 "matching `available` `ml.python.primary` entry",
                 "matching forward-derived public score bucket",
                 "never reconstructs an exact score from a bucket",
@@ -65,9 +67,9 @@ class PublicEngineIntelligenceEventContractDocsTest {
                 "inventory mongo `engine_intelligence_projections` documents",
                 "archive them under the approved retention policy",
                 "do not synthesize identity",
-                "`model_lineage_unavailable`",
-                "excluded from exact-model evaluation",
-                "runtime does not normalize them"
+                "dataset v2 likewise rejects `available` prediction evidence",
+                "identity-free historical documents are not valid inputs",
+                "must not be normalized"
         ).doesNotContain(
                 "production decisioning",
                 "automatic decline",

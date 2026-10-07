@@ -23,6 +23,9 @@ public record FeedbackDatasetBuildResult(
 
     public FeedbackDatasetBuildResult {
         datasetVersion = Objects.requireNonNull(datasetVersion, "datasetVersion is required");
+        if (!FeedbackDatasetBuilder.DATASET_VERSION.equals(datasetVersion)) {
+            throw new IllegalArgumentException("datasetVersion is unsupported");
+        }
         builtAt = Objects.requireNonNull(builtAt, "builtAt is required");
         timeBasis = Objects.requireNonNull(timeBasis, "timeBasis is required");
         failureReason = failureReason == null ? FeedbackDatasetBuildFailureReason.NONE : failureReason;
@@ -42,6 +45,19 @@ public record FeedbackDatasetBuildResult(
         }
         if (recordsReturned != records.size()) {
             throw new IllegalArgumentException("recordsReturned must match records size");
+        }
+        long accountedRows = (long) recordsReturned
+                + excludedUnresolvedCount
+                + excludedGovernanceReviewCount
+                + skippedMissingRequiredFieldCount
+                + skippedInvalidSourceRecordCount;
+        if (accountedRows > FeedbackDatasetBuildRequest.HARD_MAX_RECORDS
+                || rawRowsRead > FeedbackDatasetBuildRequest.HARD_MAX_RECORDS + 1) {
+            throw new IllegalArgumentException("dataset population exceeds the bounded record limit");
+        }
+        long expectedRawRows = accountedRows + (truncated ? 1 : 0);
+        if (rawRowsRead != expectedRawRows) {
+            throw new IllegalArgumentException("dataset population counts must reconcile");
         }
     }
 

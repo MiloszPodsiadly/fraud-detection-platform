@@ -10,7 +10,6 @@ from app.data.dataset import Dataset
 from app.data.generator import generate_fraud_behavior, generate_normal_behavior
 from app.data.splitting import split_dataset
 from app.evaluation.evaluate import cli_summary, evaluate_scores
-from app.feedback.feedback_dataset import FeedbackDatasetStore, dataset_from_feedback, feedback_from_decision_event
 from app.features import feature_contract as feature_contract_module
 from app.features.feature_contract import ALLOW_FALLBACK_ENV, FEATURE_CONTRACT, PRODUCTION_CONTRACT_ENV, FeatureContract
 from app.features.feature_pipeline import (
@@ -1227,78 +1226,6 @@ class FraudModelTest(unittest.TestCase):
             evaluate_scores(y_true=[], y_score=[])
         with self.assertRaises(ValueError):
             evaluate_scores(y_true=[0, 1], y_score=[0.1])
-
-    def test_feedback_events_build_privacy_safe_training_dataset(self):
-        event = {
-            "decisionId": "decision-1",
-            "transactionId": "txn-sensitive",
-            "decision": "CONFIRMED_FRAUD",
-            "decisionMetadata": {
-                "modelScore": 0.87,
-                "featureSnapshot": {
-                    "recentTransactionCount": 5,
-                    "recentAmountSumPln": 7000.0,
-                    "transactionVelocityPerMinute": 5.0,
-                    "merchantFrequency7d": 2,
-                    "deviceNovelty": True,
-                    "countryMismatch": False,
-                    "proxyOrVpnDetected": True,
-                },
-            },
-            "decidedAt": "2026-04-22T18:00:00Z",
-        }
-
-        feedback = feedback_from_decision_event(event)
-        dataset = dataset_from_feedback([feedback])
-
-        self.assertNotEqual(feedback.transaction_ref, "txn-sensitive")
-        self.assertEqual(feedback.model_score, 0.87)
-        self.assertEqual(feedback.label, 1)
-        self.assertEqual(dataset.size, 1)
-        self.assertEqual(dataset.y, [1])
-        self.assertEqual(dataset.metadata["privacy"], "hashed identifiers only")
-
-    def test_unresolved_feedback_is_excluded_from_training_dataset(self):
-        feedback = feedback_from_decision_event(
-            {
-                "decisionId": "decision-more-evidence",
-                "transactionId": "txn-more-evidence",
-                "decision": "REQUIRE_MORE_EVIDENCE",
-                "decisionMetadata": {"featureSnapshot": {"recentTransactionCount": 1}},
-            }
-        )
-
-        dataset = dataset_from_feedback([feedback])
-
-        self.assertIsNone(feedback.label)
-        self.assertEqual(dataset.size, 0)
-        self.assertEqual(dataset.y, [])
-
-    def test_feedback_store_versions_and_delayed_label_updates(self):
-        store = FeedbackDatasetStore(Path.cwd())
-        initial = feedback_from_decision_event(
-            {
-                "decisionId": "decision-2",
-                "transactionId": "txn-delayed",
-                "decision": "REQUIRE_MORE_EVIDENCE",
-                "decisionMetadata": {"featureSnapshot": {"recentTransactionCount": 1}},
-                "decidedAt": "2026-04-22T18:00:00Z",
-            }
-        )
-        first_path = None
-        second_path = None
-        try:
-            first_path = store.save_version([initial], version="unit-feedback")
-            second_path = store.update_label(first_path, initial.feedback_id, "MARKED_LEGITIMATE")
-            updated = store.load_version(second_path)
-        finally:
-            for path in (first_path, second_path):
-                if path and path.exists():
-                    path.unlink()
-
-        self.assertIsNone(initial.label)
-        self.assertEqual(updated[0].label, 0)
-        self.assertEqual(updated[0].analyst_decision, "MARKED_LEGITIMATE")
 
     def test_retraining_comparison_reports_challenger_metrics(self):
         dataset = generate_fraud_behavior(count=1000, seed=301, user_count=8, fraud_ratio=0.03)

@@ -133,7 +133,7 @@ class OpenApiContractTest(unittest.TestCase):
         evaluation_schema = schemas["ShadowPerformanceEvaluationResponse"]["properties"]
 
         self.assertEqual(
-            ["NO_MODEL_ARTIFACT_IDENTITY_IN_FEEDBACK_DATASET_SOURCE"],
+            ["PLATFORM_RECOMMENDATION_NOT_MODEL_ARTIFACT_SCOPED"],
             marker_schema["enum"],
         )
         self.assertEqual(

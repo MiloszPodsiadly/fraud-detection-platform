@@ -4,6 +4,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
@@ -33,7 +34,10 @@ class ProducerEngineIntelligenceEnabledEventContractTest {
                         ))
         );
         JsonNode intelligence = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build().valueToTree(
-                new TransactionScoredEventMapper().toEvent(request(), scoreResult(), Optional.of(summary))
+                new TransactionScoredEventMapper().toEvent(
+                        request(), scoreResult(), Optional.of(summary),
+                        MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE, null
+                )
         ).path("engineIntelligence");
 
         assertThat(intelligence.isMissingNode()).isFalse();

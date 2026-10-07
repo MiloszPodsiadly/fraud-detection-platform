@@ -6,12 +6,14 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.frauddetection.common.events.evidence.ScoringEvidenceItem;
 import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
+import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.features.FeatureSnapshotWireValueDeserializer;
 import com.frauddetection.common.events.features.FeatureSnapshotWireValueNormalizer;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceEngineResult;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
 import com.frauddetection.common.events.model.CustomerContext;
 import com.frauddetection.common.events.model.DeviceInfo;
@@ -53,6 +55,7 @@ public record TransactionScoredEvent(
         List<ScoringEvidenceItem> scoringEvidence,
         @JsonInclude(JsonInclude.Include.NON_NULL) EngineIntelligenceSummary engineIntelligence,
         @JsonInclude(JsonInclude.Include.NON_NULL) MlPredictionEvidenceV1 mlPredictionEvidence,
+        @JsonInclude(JsonInclude.Include.NON_NULL) MlPredictionEvidenceOmissionReason mlPredictionEvidenceOmissionReason,
         @JsonInclude(JsonInclude.Include.NON_NULL) AnalystRecommendationResult analystRecommendation
 ) {
     @JsonCreator
@@ -84,6 +87,8 @@ public record TransactionScoredEvent(
             @JsonProperty("scoringEvidence") List<ScoringEvidenceItem> scoringEvidence,
             @JsonProperty("engineIntelligence") EngineIntelligenceSummary engineIntelligence,
             @JsonProperty("mlPredictionEvidence") MlPredictionEvidenceV1 mlPredictionEvidence,
+            @JsonProperty("mlPredictionEvidenceOmissionReason")
+            MlPredictionEvidenceOmissionReason mlPredictionEvidenceOmissionReason,
             @JsonProperty("analystRecommendation") AnalystRecommendationResult analystRecommendation
     ) {
         return new TransactionScoredEvent(
@@ -112,6 +117,7 @@ public record TransactionScoredEvent(
                 scoringEvidence,
                 engineIntelligence,
                 mlPredictionEvidence,
+                mlPredictionEvidenceOmissionReason,
                 analystRecommendation
         );
     }
@@ -121,233 +127,23 @@ public record TransactionScoredEvent(
         if (featureSnapshot != null) {
             featureSnapshot = FeatureSnapshotWireValueNormalizer.normalize(featureSnapshot);
         }
-        validateMlPredictionEvidence(engineIntelligence, mlPredictionEvidence);
-    }
-
-    public TransactionScoredEvent(
-            String eventId,
-            String transactionId,
-            String correlationId,
-            String customerId,
-            String accountId,
-            Instant createdAt,
-            Instant transactionTimestamp,
-            Money transactionAmount,
-            MerchantInfo merchantInfo,
-            DeviceInfo deviceInfo,
-            LocationInfo locationInfo,
-            CustomerContext customerContext,
-            Double fraudScore,
-            RiskLevel riskLevel,
-            String scoringStrategy,
-            String modelName,
-            String modelVersion,
-            Instant inferenceTimestamp,
-            List<String> reasonCodes,
-            Map<String, Object> scoreDetails,
-            Map<String, Object> featureSnapshot,
-            Boolean alertRecommended,
-            List<ScoringEvidenceItem> scoringEvidence
-    ) {
-        this(
-                eventId,
-                transactionId,
-                correlationId,
-                customerId,
-                accountId,
-                createdAt,
-                transactionTimestamp,
-                transactionAmount,
-                merchantInfo,
-                deviceInfo,
-                locationInfo,
-                customerContext,
-                fraudScore,
-                riskLevel,
-                scoringStrategy,
-                modelName,
-                modelVersion,
-                inferenceTimestamp,
-                reasonCodes,
-                scoreDetails,
-                featureSnapshot,
-                alertRecommended,
-                scoringEvidence,
-                null,
-                null,
-                null
-        );
-    }
-
-    public TransactionScoredEvent(
-            String eventId,
-            String transactionId,
-            String correlationId,
-            String customerId,
-            String accountId,
-            Instant createdAt,
-            Instant transactionTimestamp,
-            Money transactionAmount,
-            MerchantInfo merchantInfo,
-            DeviceInfo deviceInfo,
-            LocationInfo locationInfo,
-            CustomerContext customerContext,
-            Double fraudScore,
-            RiskLevel riskLevel,
-            String scoringStrategy,
-            String modelName,
-            String modelVersion,
-            Instant inferenceTimestamp,
-            List<String> reasonCodes,
-            Map<String, Object> scoreDetails,
-            Map<String, Object> featureSnapshot,
-            Boolean alertRecommended,
-            List<ScoringEvidenceItem> scoringEvidence,
-            EngineIntelligenceSummary engineIntelligence
-    ) {
-        this(
-                eventId,
-                transactionId,
-                correlationId,
-                customerId,
-                accountId,
-                createdAt,
-                transactionTimestamp,
-                transactionAmount,
-                merchantInfo,
-                deviceInfo,
-                locationInfo,
-                customerContext,
-                fraudScore,
-                riskLevel,
-                scoringStrategy,
-                modelName,
-                modelVersion,
-                inferenceTimestamp,
-                reasonCodes,
-                scoreDetails,
-                featureSnapshot,
-                alertRecommended,
-                scoringEvidence,
+        validateMlPredictionEvidenceOutcome(
                 engineIntelligence,
-                null,
-                null
+                mlPredictionEvidence,
+                mlPredictionEvidenceOmissionReason
         );
     }
 
-    public TransactionScoredEvent(
-            String eventId,
-            String transactionId,
-            String correlationId,
-            String customerId,
-            String accountId,
-            Instant createdAt,
-            Instant transactionTimestamp,
-            Money transactionAmount,
-            MerchantInfo merchantInfo,
-            DeviceInfo deviceInfo,
-            LocationInfo locationInfo,
-            CustomerContext customerContext,
-            Double fraudScore,
-            RiskLevel riskLevel,
-            String scoringStrategy,
-            String modelName,
-            String modelVersion,
-            Instant inferenceTimestamp,
-            List<String> reasonCodes,
-            Map<String, Object> scoreDetails,
-            Map<String, Object> featureSnapshot,
-            Boolean alertRecommended,
-            List<ScoringEvidenceItem> scoringEvidence,
+    private static void validateMlPredictionEvidenceOutcome(
             EngineIntelligenceSummary engineIntelligence,
-            AnalystRecommendationResult analystRecommendation
+            MlPredictionEvidenceV1 mlPredictionEvidence,
+            MlPredictionEvidenceOmissionReason omissionReason
     ) {
-        this(
-                eventId,
-                transactionId,
-                correlationId,
-                customerId,
-                accountId,
-                createdAt,
-                transactionTimestamp,
-                transactionAmount,
-                merchantInfo,
-                deviceInfo,
-                locationInfo,
-                customerContext,
-                fraudScore,
-                riskLevel,
-                scoringStrategy,
-                modelName,
-                modelVersion,
-                inferenceTimestamp,
-                reasonCodes,
-                scoreDetails,
-                featureSnapshot,
-                alertRecommended,
-                scoringEvidence,
-                engineIntelligence,
-                null,
-                analystRecommendation
-        );
-    }
-
-    public TransactionScoredEvent(
-            String eventId,
-            String transactionId,
-            String correlationId,
-            String customerId,
-            String accountId,
-            Instant createdAt,
-            Instant transactionTimestamp,
-            Money transactionAmount,
-            MerchantInfo merchantInfo,
-            DeviceInfo deviceInfo,
-            LocationInfo locationInfo,
-            CustomerContext customerContext,
-            Double fraudScore,
-            RiskLevel riskLevel,
-            String scoringStrategy,
-            String modelName,
-            String modelVersion,
-            Instant inferenceTimestamp,
-            List<String> reasonCodes,
-            Map<String, Object> scoreDetails,
-            Map<String, Object> featureSnapshot,
-            Boolean alertRecommended
-    ) {
-        this(
-                eventId,
-                transactionId,
-                correlationId,
-                customerId,
-                accountId,
-                createdAt,
-                transactionTimestamp,
-                transactionAmount,
-                merchantInfo,
-                deviceInfo,
-                locationInfo,
-                customerContext,
-                fraudScore,
-                riskLevel,
-                scoringStrategy,
-                modelName,
-                modelVersion,
-                inferenceTimestamp,
-                reasonCodes,
-                scoreDetails,
-                featureSnapshot,
-                alertRecommended,
-                List.of()
-        );
-    }
-
-    private static void validateMlPredictionEvidence(
-            EngineIntelligenceSummary engineIntelligence,
-            MlPredictionEvidenceV1 mlPredictionEvidence
-    ) {
+        if ((mlPredictionEvidence == null) == (omissionReason == null)) {
+            throw new IllegalArgumentException("ML_PREDICTION_EVIDENCE_REQUIRES_EXACTLY_ONE_OUTCOME");
+        }
         if (mlPredictionEvidence == null) {
+            validateMlPredictionEvidenceOmission(engineIntelligence, omissionReason);
             return;
         }
         if (engineIntelligence == null) {
@@ -365,6 +161,51 @@ public record TransactionScoredEvent(
                 )
                 || !mlPredictionEvidence.modelIdentity().equals(sourceEngine.modelIdentity())) {
             throw new IllegalArgumentException("ML_PREDICTION_EVIDENCE_SOURCE_ENGINE_INCONSISTENT");
+        }
+    }
+
+    private static void validateMlPredictionEvidenceOmission(
+            EngineIntelligenceSummary engineIntelligence,
+            MlPredictionEvidenceOmissionReason omissionReason
+    ) {
+        EngineIntelligenceEngineResult sourceEngine = engineIntelligence == null ? null : engineIntelligence.engines().stream()
+                .filter(engine -> FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID.equals(engine.engineId()))
+                .findFirst()
+                .orElse(null);
+        switch (omissionReason) {
+            case DIAGNOSTIC_EMISSION_DISABLED, DIAGNOSTIC_ENRICHMENT_UNAVAILABLE ->
+                    requireAbsentEngineIntelligence(engineIntelligence);
+            case ML_ENGINE_UNAVAILABLE -> requireOperationallyUnavailableMlEngine(sourceEngine);
+            case SOURCE_TIMESTAMP_MISSING, INVALID_SCORE, IDENTITY_VALIDATION_FAILURE, PREDICTION_NOT_ACCEPTED ->
+                    requireObservedMlEngine(sourceEngine);
+            case EVIDENCE_SOURCE_INTEGRITY_FAILURE -> {
+                // Public Engine Intelligence cannot prove private source ownership or evidence integrity.
+            }
+        }
+    }
+
+    private static void requireAbsentEngineIntelligence(EngineIntelligenceSummary engineIntelligence) {
+        if (engineIntelligence != null) {
+            throw new IllegalArgumentException(
+                    "ML_PREDICTION_EVIDENCE_OMISSION_CONTRADICTS_ENGINE_INTELLIGENCE"
+            );
+        }
+    }
+
+    private static void requireObservedMlEngine(EngineIntelligenceEngineResult sourceEngine) {
+        if (sourceEngine == null) {
+            throw new IllegalArgumentException(
+                    "ML_PREDICTION_EVIDENCE_OMISSION_REQUIRES_OBSERVED_ML_ENGINE"
+            );
+        }
+    }
+
+    private static void requireOperationallyUnavailableMlEngine(EngineIntelligenceEngineResult sourceEngine) {
+        requireObservedMlEngine(sourceEngine);
+        if (sourceEngine.status() != FraudEngineStatus.UNAVAILABLE
+                && sourceEngine.status() != FraudEngineStatus.TIMEOUT
+                && sourceEngine.status() != FraudEngineStatus.SKIPPED) {
+            throw new IllegalArgumentException("ML_PREDICTION_EVIDENCE_OMISSION_CONTRADICTS_ENGINE_INTELLIGENCE");
         }
     }
 }

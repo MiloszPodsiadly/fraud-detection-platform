@@ -34,8 +34,9 @@ class ProducerEngineIntelligenceEnabledEmissionTest {
                 new PublicEngineIntelligenceMapper()
         ))
                 .emitIfEnabled(request())
+                .enrichment()
                 .orElseThrow();
-        var summary = enrichment.engineIntelligenceSummary().orElseThrow();
+        var summary = enrichment.engineIntelligenceSummary();
         String json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build().writeValueAsString(summary);
 
         assertThat(summary.engines()).hasSize(2);

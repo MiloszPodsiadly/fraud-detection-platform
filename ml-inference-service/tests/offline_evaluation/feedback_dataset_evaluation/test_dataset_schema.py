@@ -2,7 +2,11 @@ import json
 import unittest
 
 from offline_evaluation.feedback_dataset_evaluation.dataset_reader import read_feedback_dataset_jsonl
-from offline_evaluation.feedback_dataset_evaluation.dataset_schema import FeedbackDatasetValidationError, evaluation_label_value
+from offline_evaluation.feedback_dataset_evaluation.dataset_schema import (
+    FeedbackDatasetFormatError,
+    FeedbackDatasetValidationError,
+    evaluation_label_value,
+)
 try:
     from feedback_dataset_evaluation.feedback_dataset_fixtures import jsonl, jsonl_file, metadata, record
 except ModuleNotFoundError:
@@ -79,6 +83,54 @@ class FeedbackDatasetSchemaTest(unittest.TestCase):
 
         self.assertIsNone(parsed.records[0].alert_recommended)
 
+    def test_rejectsNoncanonicalOrInvalidTimestamps(self):
+        timestamp_fields = (
+            "feedbackCreatedAt",
+            "mlPredictionExecutedAt",
+            "analystRecommendationGeneratedAt",
+            "scoredAt",
+            "transactionTimestamp",
+        )
+        for field in timestamp_fields:
+            with self.subTest(field=field):
+                overrides = {field: "2026-06-03T14:00:00+02:00"}
+                if field == "mlPredictionExecutedAt":
+                    overrides.update({
+                        "mlModelName": "python-logistic-fraud-model",
+                        "mlModelVersion": "2026-06-25.v1",
+                        "mlFeatureContractVersion": "feature-contract-v2",
+                    })
+                self._assert_rejected(record(**overrides))
+        self._assert_rejected(record(feedbackCreatedAt="2026-02-30T12:00:00Z"))
+        with jsonl_file(jsonl(record(), metadata_overrides={"builtAt": "2026-06-10T02:00:00+02:00"})) as path:
+            with self.assertRaises(FeedbackDatasetValidationError):
+                read_feedback_dataset_jsonl(path)
+
+    def test_rejectsEnumsOutsideJavaContract(self):
+        invalid_values = {
+            "riskLevel": "UNKNOWN",
+            "engineIntelligenceStatus": "PRESENT",
+            "agreementStatus": "ENGINES_AGREE",
+            "riskMismatchStatus": "NONE",
+            "scoreDeltaBucket": "SMALL_DELTA",
+            "analystRecommendationStatus": "GENERATED",
+            "analystRecommendation": "REVIEW_TRANSACTION",
+        }
+        for field, value in invalid_values.items():
+            with self.subTest(field=field):
+                self._assert_rejected(record(**{field: value}))
+
+    def test_rejectsInvalidPlatformScoreAndRecommendationVersion(self):
+        for score in (-0.1, 1.1, 0.12345):
+            with self.subTest(score=score):
+                self._assert_rejected(record(fraudScore=score))
+        for score in (float("nan"), float("inf")):
+            with self.subTest(score=score), jsonl_file(jsonl(record(fraudScore=score))) as path:
+                with self.assertRaises(FeedbackDatasetFormatError):
+                    read_feedback_dataset_jsonl(path)
+        self._assert_rejected(record(analystRecommendationVersion="v1/path"))
+        self._assert_rejected(record(analystRecommendationVersion="v" * 65))
+
     def test_readsExactMlModelIdentity(self):
         parsed = self._parse(record(
             mlModelName="python-logistic-fraud-model",
@@ -89,10 +141,18 @@ class FeedbackDatasetSchemaTest(unittest.TestCase):
         self.assertEqual("python-logistic-fraud-model", parsed.records[0].ml_model_name)
         self.assertEqual("2026-06-25.v1", parsed.records[0].ml_model_version)
         self.assertEqual("feature-contract-v2", parsed.records[0].ml_feature_contract_version)
+        self.assertEqual("AVAILABLE", parsed.records[0].ml_prediction_evidence_status)
+        self.assertEqual(0.8123, parsed.records[0].ml_prediction_score)
+        self.assertEqual("HIGH", parsed.records[0].ml_prediction_risk_level)
+        self.assertEqual("2026-06-03T11:59:00Z", parsed.records[0].ml_prediction_executed_at)
 
-    def test_oldJsonlWithoutMlModelIdentityRemainsValid(self):
+    def test_explicitlyAbsentMlPredictionEvidenceRemainsValid(self):
         parsed = self._parse(record())
 
+        self.assertEqual("LEGITIMATELY_ABSENT", parsed.records[0].ml_prediction_evidence_status)
+        self.assertIsNone(parsed.records[0].ml_prediction_score)
+        self.assertIsNone(parsed.records[0].ml_prediction_risk_level)
+        self.assertIsNone(parsed.records[0].ml_prediction_executed_at)
         self.assertIsNone(parsed.records[0].ml_model_name)
         self.assertIsNone(parsed.records[0].ml_model_version)
         self.assertIsNone(parsed.records[0].ml_feature_contract_version)
@@ -121,6 +181,109 @@ class FeedbackDatasetSchemaTest(unittest.TestCase):
         for identity in partial_identities:
             with self.subTest(identity=identity):
                 self._assert_rejected(record(**identity))
+
+    def test_rejectsMissingMlPredictionEvidenceContractFields(self):
+        fields = (
+            "mlPredictionEvidenceStatus",
+            "mlPredictionScore",
+            "mlPredictionRiskLevel",
+            "mlPredictionExecutedAt",
+            "mlModelName",
+            "mlModelVersion",
+            "mlFeatureContractVersion",
+        )
+        for field in fields:
+            with self.subTest(field=field):
+                payload = record()
+                payload.pop(field)
+                self._assert_rejected(payload)
+
+    def test_rejectsMissingOrContradictoryRulesEvidence(self):
+        for field in ("rulesEvidenceStatus", "rulesRiskLevel"):
+            with self.subTest(field=field):
+                payload = record()
+                payload.pop(field)
+                self._assert_rejected(payload)
+        self._assert_rejected(record(rulesEvidenceStatus="AVAILABLE", rulesRiskLevel=None))
+        self._assert_rejected(record(rulesEvidenceStatus="UNAVAILABLE", rulesRiskLevel="LOW"))
+        self._assert_rejected(record(rulesEvidenceStatus="UNKNOWN", rulesRiskLevel=None))
+
+    def test_rejectsAvailableMlPredictionEvidenceWithPartialSignal(self):
+        available = {
+            "mlModelName": "python-logistic-fraud-model",
+            "mlModelVersion": "2026-06-25.v1",
+            "mlFeatureContractVersion": "feature-contract-v2",
+        }
+        for field in ("mlPredictionScore", "mlPredictionRiskLevel", "mlPredictionExecutedAt"):
+            with self.subTest(field=field):
+                self._assert_rejected(record(**available, **{field: None}))
+
+    def test_rejectsAbsentMlPredictionEvidenceWithAnyPredictionValue(self):
+        overrides = (
+            {"mlPredictionScore": 0.0},
+            {"mlPredictionRiskLevel": "LOW"},
+            {"mlPredictionExecutedAt": "2026-06-03T11:59:00Z"},
+            {
+                "mlModelName": "python-logistic-fraud-model",
+                "mlModelVersion": "2026-06-25.v1",
+                "mlFeatureContractVersion": "feature-contract-v2",
+            },
+        )
+        for values in overrides:
+            with self.subTest(values=values):
+                self._assert_rejected(record(mlPredictionEvidenceStatus="LEGITIMATELY_ABSENT", **values))
+
+    def test_acceptsBoundedNonAvailableEvidenceStatuses(self):
+        cases = (
+            ("MISSING_UNEXPECTEDLY", "DIAGNOSTIC_ENRICHMENT_UNAVAILABLE"),
+            ("MISSING_UNEXPECTEDLY", "ML_ENGINE_UNAVAILABLE"),
+            ("MALFORMED", "INVALID_SCORE"),
+            ("MALFORMED", "IDENTITY_VALIDATION_FAILURE"),
+            ("MALFORMED", "EVIDENCE_SOURCE_INTEGRITY_FAILURE"),
+        )
+        for status, reason in cases:
+            with self.subTest(status=status):
+                parsed = self._parse(record(
+                    mlPredictionEvidenceStatus=status,
+                    mlPredictionEvidenceOmissionReason=reason,
+                ))
+
+                self.assertEqual(status, parsed.records[0].ml_prediction_evidence_status)
+                self.assertEqual(reason, parsed.records[0].ml_prediction_evidence_omission_reason)
+
+    def test_rejectsEvidenceStatusReasonContradictions(self):
+        self._assert_rejected(record(mlPredictionEvidenceOmissionReason=None))
+        self._assert_rejected(record(
+            mlPredictionEvidenceStatus="MISSING_UNEXPECTEDLY",
+            mlPredictionEvidenceOmissionReason="INVALID_SCORE",
+        ))
+        self._assert_rejected(record(
+            mlPredictionEvidenceStatus="AVAILABLE",
+            mlPredictionEvidenceOmissionReason="DIAGNOSTIC_EMISSION_DISABLED",
+            mlModelName="python-logistic-fraud-model",
+            mlModelVersion="2026-06-25.v1",
+            mlFeatureContractVersion="feature-contract-v2",
+        ))
+
+    def test_rejectsUnsupportedRiskAndScore(self):
+        self._assert_rejected(record(
+            mlModelName="python-logistic-fraud-model",
+            mlModelVersion="2026-06-25.v1",
+            mlFeatureContractVersion="feature-contract-v2",
+            mlPredictionRiskLevel="UNKNOWN",
+        ))
+        self._assert_rejected(record(
+            mlModelName="python-logistic-fraud-model",
+            mlModelVersion="2026-06-25.v1",
+            mlFeatureContractVersion="feature-contract-v2",
+            mlPredictionScore=1.1,
+        ))
+        self._assert_rejected(record(
+            mlModelName="python-logistic-fraud-model",
+            mlModelVersion="2026-06-25.v1",
+            mlFeatureContractVersion="feature-contract-v2",
+            mlPredictionScore=0.81234,
+        ))
 
     def test_rejectsUnsafeMlModelIdentity(self):
         self._assert_rejected(record(mlModelName="s3://bucket/model"))
@@ -170,6 +333,23 @@ class FeedbackDatasetSchemaTest(unittest.TestCase):
                 with self.assertRaises(FeedbackDatasetValidationError):
                     self._parse_with_metadata_window(window)
 
+    def test_metadataPopulationCountsMustReconcile(self):
+        invalid_counts = (
+            {"rawRowsRead": 2},
+            {"excludedUnresolvedCount": 1},
+            {"truncated": True},
+            {"rawRowsRead": 1002, "recordsReturned": 1, "truncated": True},
+        )
+        for overrides in invalid_counts:
+            with self.subTest(overrides=overrides), jsonl_file(
+                jsonl(record(), metadata_overrides=overrides)
+            ) as path:
+                with self.assertRaises(FeedbackDatasetValidationError):
+                    read_feedback_dataset_jsonl(path)
+
+        parsed = self._parse_metadata({"rawRowsRead": 2, "truncated": True})
+        self.assertTrue(parsed.metadata.truncated)
+
     def _parse(self, payload):
         with jsonl_file(jsonl(payload)) as path:
             return read_feedback_dataset_jsonl(path)
@@ -190,6 +370,10 @@ class FeedbackDatasetSchemaTest(unittest.TestCase):
             "",
         ))
         with jsonl_file(payload) as path:
+            return read_feedback_dataset_jsonl(path)
+
+    def _parse_metadata(self, overrides):
+        with jsonl_file(jsonl(record(), metadata_overrides=overrides)) as path:
             return read_feedback_dataset_jsonl(path)
 
 

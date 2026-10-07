@@ -37,7 +37,6 @@ public class ScoringEvidenceSnapshotMapper {
             case UNAVAILABLE -> EvidenceStatus.UNAVAILABLE;
             case ERROR -> EvidenceStatus.ERROR;
             case NOT_APPLICABLE -> EvidenceStatus.NOT_APPLICABLE;
-            case LEGACY -> EvidenceStatus.LEGACY;
         };
     }
 
@@ -61,7 +60,6 @@ public class ScoringEvidenceSnapshotMapper {
             case RULE_BASED_SCORING, SCORING_FALLBACK -> EvidenceSource.FRAUD_SCORING_SERVICE;
             case ML_MODEL, ML_RUNTIME -> EvidenceSource.ML_INFERENCE_SERVICE;
             case FEATURE_SNAPSHOT -> EvidenceSource.FEATURE_ENRICHER;
-            case LEGACY_SCORING -> EvidenceSource.LEGACY_SCORING_PAYLOAD;
         };
     }
 }

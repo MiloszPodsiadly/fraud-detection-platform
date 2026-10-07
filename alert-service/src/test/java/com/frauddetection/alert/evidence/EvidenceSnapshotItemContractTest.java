@@ -59,42 +59,16 @@ class EvidenceSnapshotItemContractTest {
     }
 
     @Test
-    void legacyConstructorRequiresObservedAt() {
-        assertThatThrownBy(() -> new EvidenceSnapshotItem(
+    void canonicalSnapshotRequiresProjectedAt() {
+        assertThatThrownBy(() -> snapshot(
                 "COUNTRY_MISMATCH",
                 EvidenceType.GEO_SIGNAL,
-                EvidenceSeverity.HIGH,
-                EvidenceSource.FRAUD_SCORING_SERVICE,
                 EvidenceStatus.AVAILABLE,
-                "Title",
-                "Description",
-                null,
-                null,
+                Map.of(),
                 null
         ))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("observedAt is required");
-    }
-
-    @Test
-    void legacyConstructorUsesObservedAtAsProjectedAt() {
-        Instant observedAt = Instant.parse("2026-05-18T10:00:00Z");
-
-        EvidenceSnapshotItem item = new EvidenceSnapshotItem(
-                "COUNTRY_MISMATCH",
-                EvidenceType.GEO_SIGNAL,
-                EvidenceSeverity.HIGH,
-                EvidenceSource.FRAUD_SCORING_SERVICE,
-                EvidenceStatus.AVAILABLE,
-                "Title",
-                "Description",
-                null,
-                null,
-                observedAt
-        );
-
-        assertThat(item.observedAt()).isEqualTo(observedAt);
-        assertThat(item.projectedAt()).isEqualTo(observedAt);
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("projectedAt is required");
     }
 
     @Test
@@ -108,6 +82,16 @@ class EvidenceSnapshotItemContractTest {
             EvidenceType evidenceType,
             EvidenceStatus status,
             Map<String, Object> attributes
+    ) {
+        return snapshot(reasonCode, evidenceType, status, attributes, PROJECTED_AT);
+    }
+
+    private EvidenceSnapshotItem snapshot(
+            String reasonCode,
+            EvidenceType evidenceType,
+            EvidenceStatus status,
+            Map<String, Object> attributes,
+            Instant projectedAt
     ) {
         return new EvidenceSnapshotItem(
                 "event-1:evidence-1:0",
@@ -125,7 +109,7 @@ class EvidenceSnapshotItemContractTest {
                 null,
                 attributes,
                 Instant.parse("2026-05-18T10:00:00Z"),
-                PROJECTED_AT,
+                projectedAt,
                 "RULE_BASED",
                 "rule-based",
                 "v1",

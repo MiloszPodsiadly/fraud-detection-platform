@@ -19,7 +19,7 @@ class FraudCaseReadModelObservabilityDocsContractTest {
                 .contains("bounded endpoint label")
                 .contains("`endpoint`")
                 .contains("`evidence_summary`, `evidence_timeline`")
-                .contains("`available`, `partial`, `legacy`, `truncated`, `empty`, `not_found`, `error`")
+                .contains("`available`, `partial`, `truncated`, `empty`, `not_found`, `error`")
                 .contains("## Authorization / forbidden outcomes")
                 .contains("`forbidden`")
                 .contains("controller-level read-model outcomes")
@@ -37,7 +37,7 @@ class FraudCaseReadModelObservabilityDocsContractTest {
 
         assertThat(docs)
                 .doesNotContain("`forbidden` |")
-                .doesNotContain("`outcome` | `available`, `partial`, `legacy`, `truncated`, `empty`, `not_found`, `error`, `forbidden`")
+                .doesNotContain("`outcome` | `available`, `partial`, `truncated`, `empty`, `not_found`, `error`, `forbidden`")
                 .doesNotContain("principal labels")
                 .doesNotContain("authority labels")
                 .contains("not active metric names");

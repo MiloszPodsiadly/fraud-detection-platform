@@ -10,9 +10,11 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class EngineIntelligenceProjectionArchitectureGuardTest {
 
@@ -24,6 +26,15 @@ class EngineIntelligenceProjectionArchitectureGuardTest {
     private static final List<String> FORBIDDEN_DECISION_STORAGE = List.of(
             "alertseverity", "alertpriority", "fraudcasestatus", "approve", "decline", "block",
             "paymentauthorization", "recommendedaction", "finaldecision"
+    );
+    private static final Set<String> FEEDBACK_PRIVATE_ML_EVIDENCE_ALLOWLIST = Set.of(
+            "FraudFeedbackRecord.java",
+            "FraudFeedbackService.java",
+            "dataset/FeedbackDatasetBuilder.java",
+            "dataset/FeedbackDatasetMlPredictionEvidence.java",
+            "dataset/FeedbackDatasetMlPredictionEvidenceStatus.java",
+            "dataset/FeedbackDatasetRecord.java",
+            "dataset/MicrometerFeedbackDatasetMetricsRecorder.java"
     );
 
     @Test
@@ -41,7 +52,12 @@ class EngineIntelligenceProjectionArchitectureGuardTest {
                 .reduce("", String::concat);
         String serialized = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build()
                 .writeValueAsString(new EngineIntelligenceProjectionMapper(new EngineIntelligenceProjectionPolicy())
-                        .map("txn-guard", EngineIntelligenceProjectionTestFixtures.fullSummary(), null)
+                        .map(
+                                "txn-guard",
+                                EngineIntelligenceProjectionTestFixtures.occurrence(),
+                                EngineIntelligenceProjectionTestFixtures.fullSummary(),
+                                null
+                        )
                         .projection()
                         .orElseThrow());
 
@@ -101,20 +117,68 @@ class EngineIntelligenceProjectionArchitectureGuardTest {
     }
 
     @Test
-    void privateMlPredictionEvidenceDoesNotReachPublicApiFeedbackOrUiSources() throws Exception {
+    void privateMlPredictionEvidenceDoesNotReachPublicApiOrUiSources() throws Exception {
         String externallyVisibleSources = sources(
                 "alert-service/src/main/java/com/frauddetection/alert/api",
                 "alert-service/src/main/java/com/frauddetection/alert/controller",
-                "alert-service/src/main/java/com/frauddetection/alert/feedback",
                 "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/api",
                 "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/dataset",
                 "analyst-console-ui/src"
         );
 
-        assertThat(externallyVisibleSources).doesNotContain(
-                "MlPredictionEvidence",
-                "mlPredictionEvidence"
+        assertNoPrivateMlPredictionEvidence(externallyVisibleSources);
+    }
+
+    @Test
+    void feedbackPrivateMlPredictionEvidenceIsLimitedToExplicitInternalAllowlist() throws Exception {
+        Path feedbackRoot = repositoryRoot().resolve(
+                "alert-service/src/main/java/com/frauddetection/alert/feedback"
         );
+
+        assertFeedbackPrivateMlEvidenceFilesAllowed(privateMlEvidenceFiles(feedbackRoot));
+    }
+
+    @Test
+    void arbitraryPublicOrFeedbackWorkflowPrivateEvidenceUseIsRejected() {
+        assertThatThrownBy(() -> assertNoPrivateMlPredictionEvidence(
+                "public final class UnexpectedResponse { MlPredictionEvidence evidence; }"
+        )).isInstanceOf(AssertionError.class);
+        assertThatThrownBy(() -> assertFeedbackPrivateMlEvidenceFilesAllowed(
+                List.of("UnexpectedFeedbackWorkflow.java")
+        )).isInstanceOf(AssertionError.class);
+    }
+
+    private void assertNoPrivateMlPredictionEvidence(String source) {
+        assertThat(source).doesNotContain("MlPredictionEvidence", "mlPredictionEvidence");
+    }
+
+    private void assertFeedbackPrivateMlEvidenceFilesAllowed(List<String> relativePaths) {
+        assertThat(relativePaths)
+                .isNotEmpty()
+                .isSubsetOf(FEEDBACK_PRIVATE_ML_EVIDENCE_ALLOWLIST);
+    }
+
+    private List<String> privateMlEvidenceFiles(Path root) throws IOException {
+        try (Stream<Path> files = Files.walk(root)) {
+            return files.filter(path -> path.toString().endsWith(".java"))
+                    .filter(path -> containsPrivateMlEvidence(read(path)))
+                    .map(root::relativize)
+                    .map(path -> path.toString().replace('\\', '/'))
+                    .sorted()
+                    .toList();
+        }
+    }
+
+    private boolean containsPrivateMlEvidence(String source) {
+        return source.contains("MlPredictionEvidence") || source.contains("mlPredictionEvidence");
+    }
+
+    private String read(Path path) {
+        try {
+            return Files.readString(path);
+        } catch (IOException exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     private String sources(String... relativePaths) throws IOException {

@@ -226,7 +226,8 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
 
         self.assertIn(("evaluation_summary.json.tmp", "evaluation_summary.json"), replace_calls)
         self.assertIn(("disagreement_report.jsonl.tmp", "disagreement_report.jsonl"), replace_calls)
-        self.assertEqual(("manifest.json.tmp", "manifest.json"), replace_calls[-1])
+        self.assertIn(("manifest.json.tmp", "manifest.json"), replace_calls)
+        self.assertTrue(replace_calls[-1][0].startswith(".") and ".staging-" in replace_calls[-1][0])
 
     def test_manifestListsExpectedArtifactFiles(self):
         reports = self._reports(record(fraudScore=0.1))
@@ -444,16 +445,90 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
             return original_replace(source, destination)
 
         with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory)
+            output = Path(directory) / "output"
             with patch("offline_evaluation.feedback_dataset_evaluation.report_writer.os.replace", failing_second_replace):
                 with self.assertRaises(OSError):
                     write_feedback_dataset_evaluation_reports(self._reports(record(fraudScore=0.1)), output)
 
-            platform = output / "platform-evaluation"
-            self.assertTrue((platform / replace_calls[0]).exists())
-            self.assertFalse((platform / "manifest.json").exists())
-            self.assertFalse((platform / "manifest.json.tmp").exists())
-            self.assertEqual([], list(output.rglob("*.tmp")))
+            self.assertFalse(output.exists())
+            self.assertEqual([], list(Path(directory).glob(".output.staging-*")))
+
+    def test_modelFamilyFailurePublishesNoPartialRunAndAllowsCleanRerun(self):
+        reports = self._reports(
+            record(
+                fraudScore=0.1,
+                mlModelName="python-logistic-fraud-model",
+                mlModelVersion="2026-06-25.v1",
+                mlFeatureContractVersion="feature-contract-v2",
+            ),
+            model_identity=self._model_identity(),
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "output"
+            unrelated = root / "unrelated"
+            unrelated.mkdir()
+            marker = unrelated / "keep.txt"
+            marker.write_text("keep", encoding="utf-8")
+            from offline_evaluation.feedback_dataset_evaluation import report_writer
+            original_write = report_writer._write_artifacts_atomically
+
+            def fail_model_family(payloads, manifest_path, manifest_payload):
+                if manifest_path.parent.name == "model-evaluation":
+                    raise OSError("simulated model family failure")
+                return original_write(payloads, manifest_path, manifest_payload)
+
+            with patch.object(report_writer, "_write_artifacts_atomically", fail_model_family):
+                with self.assertRaisesRegex(OSError, "model family failure"):
+                    write_feedback_dataset_evaluation_reports(reports, output, allow_output_root=root)
+
+            self.assertFalse(output.exists())
+            self.assertEqual("keep", marker.read_text(encoding="utf-8"))
+            self.assertEqual([], list(root.glob(".output.staging-*")))
+
+            paths = write_feedback_dataset_evaluation_reports(reports, output, allow_output_root=root)
+
+            self.assertTrue((output / "platform-evaluation" / "manifest.json").is_file())
+            self.assertTrue((output / "model-evaluation" / "manifest.json").is_file())
+            self.assertTrue(all(output == path or output in path.parents for path in paths.values()))
+
+    def test_stagingDirectoryStaysInsideAllowedRoot(self):
+        observed_manifest_paths = []
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "allowed"
+            output = root / "output"
+            from offline_evaluation.feedback_dataset_evaluation import report_writer
+            original_write = report_writer._write_artifacts_atomically
+
+            def observe_staging(payloads, manifest_path, manifest_payload):
+                observed_manifest_paths.append(manifest_path)
+                return original_write(payloads, manifest_path, manifest_payload)
+
+            with patch.object(report_writer, "_write_artifacts_atomically", observe_staging):
+                write_feedback_dataset_evaluation_reports(
+                    self._reports(),
+                    output,
+                    allow_output_root=root,
+                )
+
+            self.assertTrue(observed_manifest_paths)
+            for manifest_path in observed_manifest_paths:
+                staging_dir = manifest_path.parents[1]
+                self.assertEqual(root, staging_dir.parent)
+                self.assertTrue(staging_dir.name.startswith(".output.staging-"))
+
+    def test_platformOnlyRunPublishesOneCompleteRequestedRunAtomically(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+
+            paths = write_feedback_dataset_evaluation_reports(self._reports(), output)
+
+            self.assertTrue((output / "platform-evaluation" / "manifest.json").is_file())
+            self.assertFalse((output / "model-evaluation").exists())
+            self.assertTrue(all(output == path or output in path.parents for path in paths.values()))
+            self.assertEqual([], list(Path(directory).glob(".output.staging-*")))
 
     def test_runRejectsOutputOutsideAllowedRoot(self):
         with tempfile.TemporaryDirectory() as directory:

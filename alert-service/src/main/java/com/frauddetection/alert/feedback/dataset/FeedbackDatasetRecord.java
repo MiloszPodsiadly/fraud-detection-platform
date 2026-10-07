@@ -2,10 +2,12 @@ package com.frauddetection.alert.feedback.dataset;
 
 import com.frauddetection.alert.api.EngineIntelligenceResponseStatus;
 import com.frauddetection.alert.feedback.FraudFeedbackLabel;
+import com.frauddetection.common.events.engine.FraudEngineScorePolicy;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.recommendation.AnalystRecommendation;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationStatus;
 
@@ -28,6 +30,13 @@ public record FeedbackDatasetRecord(
         EngineIntelligenceAgreementStatus agreementStatus,
         EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
         EngineIntelligenceScoreDeltaBucket scoreDeltaBucket,
+        FeedbackDatasetRulesEvidenceStatus rulesEvidenceStatus,
+        RiskLevel rulesRiskLevel,
+        FeedbackDatasetMlPredictionEvidenceStatus mlPredictionEvidenceStatus,
+        MlPredictionEvidenceOmissionReason mlPredictionEvidenceOmissionReason,
+        Double mlPredictionScore,
+        RiskLevel mlPredictionRiskLevel,
+        Instant mlPredictionExecutedAt,
         String mlModelName,
         String mlModelVersion,
         String mlFeatureContractVersion,
@@ -42,6 +51,9 @@ public record FeedbackDatasetRecord(
 
     public FeedbackDatasetRecord {
         datasetVersion = requireText(datasetVersion, "datasetVersion");
+        if (!FeedbackDatasetBuilder.DATASET_VERSION.equals(datasetVersion)) {
+            throw new IllegalArgumentException("datasetVersion is unsupported");
+        }
         evaluationRecordId = FeedbackDatasetIdentifierHasher.requireEvaluationRecordId(evaluationRecordId);
         transactionReference = FeedbackDatasetIdentifierHasher.requireTransactionReference(transactionReference);
         feedbackLabel = Objects.requireNonNull(feedbackLabel, "feedbackLabel is required");
@@ -67,62 +79,24 @@ public record FeedbackDatasetRecord(
                 mlFeatureContractVersion,
                 "mlFeatureContractVersion"
         );
+        fraudScore = FraudEngineScorePolicy.validateOptional(fraudScore, "fraudScore");
+        mlPredictionScore = FraudEngineScorePolicy.validateOptional(mlPredictionScore, "mlPredictionScore");
         FeedbackDatasetSafety.validateMlModelIdentity(
                 mlModelName,
                 mlModelVersion,
                 mlFeatureContractVersion
         );
-    }
-
-    public FeedbackDatasetRecord(
-            String datasetVersion,
-            String evaluationRecordId,
-            String transactionReference,
-            FraudFeedbackLabel feedbackLabel,
-            FeedbackEvaluationLabel evaluationLabel,
-            List<String> decisionReasonCodes,
-            Instant feedbackCreatedAt,
-            Double fraudScore,
-            RiskLevel riskLevel,
-            Boolean alertRecommended,
-            EngineIntelligenceResponseStatus engineIntelligenceStatus,
-            EngineIntelligenceAgreementStatus agreementStatus,
-            EngineIntelligenceRiskMismatchStatus riskMismatchStatus,
-            EngineIntelligenceScoreDeltaBucket scoreDeltaBucket,
-            AnalystRecommendationStatus analystRecommendationStatus,
-            AnalystRecommendation analystRecommendation,
-            String analystRecommendationVersion,
-            Instant analystRecommendationGeneratedAt,
-            List<String> analystRecommendationReasonCodes,
-            Instant scoredAt,
-            Instant transactionTimestamp
-    ) {
-        this(
-                datasetVersion,
-                evaluationRecordId,
-                transactionReference,
-                feedbackLabel,
-                evaluationLabel,
-                decisionReasonCodes,
-                feedbackCreatedAt,
-                fraudScore,
-                riskLevel,
-                alertRecommended,
-                engineIntelligenceStatus,
-                agreementStatus,
-                riskMismatchStatus,
-                scoreDeltaBucket,
-                null,
-                null,
-                null,
-                analystRecommendationStatus,
-                analystRecommendation,
-                analystRecommendationVersion,
-                analystRecommendationGeneratedAt,
-                analystRecommendationReasonCodes,
-                scoredAt,
-                transactionTimestamp
+        validateMlPredictionEvidence(
+                mlPredictionEvidenceStatus,
+                mlPredictionEvidenceOmissionReason,
+                mlPredictionScore,
+                mlPredictionRiskLevel,
+                mlPredictionExecutedAt,
+                mlModelName,
+                mlModelVersion,
+                mlFeatureContractVersion
         );
+        validateRulesEvidence(rulesEvidenceStatus, rulesRiskLevel);
     }
 
     private static String requireText(String value, String fieldName) {
@@ -143,6 +117,48 @@ public record FeedbackDatasetRecord(
         };
         if (!consistent) {
             throw new IllegalArgumentException("feedbackLabel must match evaluationLabel");
+        }
+    }
+
+    private static void validateRulesEvidence(
+            FeedbackDatasetRulesEvidenceStatus status,
+            RiskLevel riskLevel
+    ) {
+        Objects.requireNonNull(status, "rulesEvidenceStatus is required");
+        if ((status == FeedbackDatasetRulesEvidenceStatus.AVAILABLE) != (riskLevel != null)) {
+            throw new IllegalArgumentException("Rules evidence availability must match rulesRiskLevel");
+        }
+    }
+
+    private static void validateMlPredictionEvidence(
+            FeedbackDatasetMlPredictionEvidenceStatus status,
+            MlPredictionEvidenceOmissionReason omissionReason,
+            Double score,
+            RiskLevel riskLevel,
+            Instant executedAt,
+            String modelName,
+            String modelVersion,
+            String featureContractVersion
+    ) {
+        Objects.requireNonNull(status, "mlPredictionEvidenceStatus is required");
+        boolean directEvidenceComplete = score != null && riskLevel != null && executedAt != null;
+        boolean modelIdentityComplete = modelName != null && modelVersion != null && featureContractVersion != null;
+        if (status == FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE) {
+            if (!directEvidenceComplete || !modelIdentityComplete || omissionReason != null) {
+                throw new IllegalArgumentException("available ML prediction evidence must be complete");
+            }
+            return;
+        }
+        if (score != null || riskLevel != null || executedAt != null || modelIdentityComplete) {
+            throw new IllegalArgumentException("unavailable ML prediction evidence must not carry prediction values");
+        }
+        if (status == FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT
+                && omissionReason == null) {
+            throw new IllegalArgumentException("legitimate absence requires authoritative omission proof");
+        }
+        if (omissionReason != null
+                && status != FeedbackDatasetMlPredictionEvidenceStatus.fromAuthoritativeOmission(omissionReason)) {
+            throw new IllegalArgumentException("ML prediction omission reason contradicts evidence status");
         }
     }
 }

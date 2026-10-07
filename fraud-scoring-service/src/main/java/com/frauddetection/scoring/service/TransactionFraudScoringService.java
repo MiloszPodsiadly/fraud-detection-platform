@@ -3,6 +3,7 @@ package com.frauddetection.scoring.service;
 import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import com.frauddetection.scoring.domain.FraudScoreResult;
@@ -12,6 +13,8 @@ import com.frauddetection.scoring.mapper.TransactionScoredEventMapper;
 import com.frauddetection.scoring.messaging.TransactionScoredEventPublisher;
 import com.frauddetection.scoring.observability.ScoringMetrics;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEnrichmentResult;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionOmissionReason;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionResult;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,13 +64,14 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
         try {
             FraudScoringRequest scoringRequest = FraudScoringRequest.from(event);
             FraudScoreResult scoreResult = fraudScoringEngine.score(scoringRequest);
-            EngineIntelligenceEmission engineIntelligence = engineIntelligence(scoringRequest);
+            EngineIntelligenceEmissionResult engineIntelligence = engineIntelligence(scoringRequest);
             AnalystRecommendationResult analystRecommendation = analystRecommendation(scoreResult, engineIntelligence);
             TransactionScoredEvent scoredEvent = transactionScoredEventMapper.toEvent(
                     scoringRequest,
                     scoreResult,
-                    engineIntelligence.summary(),
-                    engineIntelligence.mlPredictionEvidence(),
+                    summary(engineIntelligence),
+                    mlPredictionEvidence(engineIntelligence),
+                    mlPredictionEvidenceOmissionReason(engineIntelligence),
                     analystRecommendation
             );
             transactionScoredEventPublisher.publish(scoredEvent);
@@ -98,25 +102,50 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
         }
     }
 
-    private AnalystRecommendationResult analystRecommendation(FraudScoreResult scoreResult, EngineIntelligenceEmission engineIntelligence) {
-        if (engineIntelligence.unavailable()) {
+    private AnalystRecommendationResult analystRecommendation(
+            FraudScoreResult scoreResult,
+            EngineIntelligenceEmissionResult engineIntelligence
+    ) {
+        if (engineIntelligence.omissionReason().isPresent()
+                && engineIntelligence.omissionReason().orElseThrow()
+                != EngineIntelligenceEmissionOmissionReason.DISABLED) {
             return analystRecommendationService.unavailable();
         }
         try {
-            return analystRecommendationService.recommend(scoreResult, engineIntelligence.summary());
+            return analystRecommendationService.recommend(scoreResult, summary(engineIntelligence));
         } catch (RuntimeException exception) {
             log.warn("Analyst recommendation enrichment omitted.", exception);
             return analystRecommendationService.unavailable();
         }
     }
 
-    private EngineIntelligenceEmission engineIntelligence(FraudScoringRequest scoringRequest) {
+    private EngineIntelligenceEmissionResult engineIntelligence(FraudScoringRequest scoringRequest) {
         try {
-            return new EngineIntelligenceEmission(engineIntelligenceEmissionService.emitIfEnabled(scoringRequest), false);
+            return engineIntelligenceEmissionService.emitIfEnabled(scoringRequest);
         } catch (RuntimeException exception) {
             log.warn("Engine intelligence enrichment omitted.");
-            return new EngineIntelligenceEmission(Optional.empty(), true);
+            return EngineIntelligenceEmissionResult.omitted(
+                    EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE
+            );
         }
+    }
+
+    private Optional<EngineIntelligenceSummary> summary(EngineIntelligenceEmissionResult emission) {
+        return emission.enrichment().map(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary);
+    }
+
+    private Optional<MlPredictionEvidenceV1> mlPredictionEvidence(EngineIntelligenceEmissionResult emission) {
+        return emission.enrichment().flatMap(EngineIntelligenceEnrichmentResult::mlPredictionEvidence);
+    }
+
+    private Optional<MlPredictionEvidenceOmissionReason> mlPredictionEvidenceOmissionReason(
+            EngineIntelligenceEmissionResult emission
+    ) {
+        if (emission.enrichment().isPresent()) {
+            return emission.enrichment().orElseThrow().mlPredictionEvidenceOmissionReason();
+        }
+        return emission.omissionReason()
+                .map(EngineIntelligenceEmissionOmissionReason::toMlPredictionEvidenceOmissionReason);
     }
 
     private boolean fallbackUsed(FraudScoreResult result) {
@@ -127,16 +156,4 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
         return Boolean.TRUE.equals(diagnostics.get("fallbackUsed"));
     }
 
-    private record EngineIntelligenceEmission(
-            Optional<EngineIntelligenceEnrichmentResult> enrichment,
-            boolean unavailable
-    ) {
-        private Optional<EngineIntelligenceSummary> summary() {
-            return enrichment.flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary);
-        }
-
-        private Optional<MlPredictionEvidenceV1> mlPredictionEvidence() {
-            return enrichment.flatMap(EngineIntelligenceEnrichmentResult::mlPredictionEvidence);
-        }
-    }
 }

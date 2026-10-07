@@ -5,6 +5,5 @@ public enum ScoringEvidenceStatus {
     PARTIAL,
     UNAVAILABLE,
     ERROR,
-    NOT_APPLICABLE,
-    LEGACY
+    NOT_APPLICABLE
 }
