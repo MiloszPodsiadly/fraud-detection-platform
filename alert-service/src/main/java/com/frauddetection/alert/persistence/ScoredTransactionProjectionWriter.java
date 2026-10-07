@@ -113,9 +113,6 @@ public class ScoredTransactionProjectionWriter {
             ScoredTransactionDocument candidate,
             ScoredTransactionDocument current
     ) {
-        if (current == null) {
-            return null;
-        }
         if (candidate.getSourceEventId().equals(current.getSourceEventId())) {
             if (candidate.getSourceEventFingerprint().equals(current.getSourceEventFingerprint())) {
                 return new ScoringOccurrenceAdmissionResult(IDEMPOTENT_REPLAY, IDENTICAL_OCCURRENCE_REPLAYED);
@@ -133,11 +130,6 @@ public class ScoredTransactionProjectionWriter {
     }
 
     private int compareOccurrence(ScoredTransactionDocument candidate, ScoredTransactionDocument current) {
-        if (current.getSourceEventCreatedAtEpochSecond() == null
-                || current.getSourceEventCreatedAtNano() == null
-                || current.getSourceEventId() == null) {
-            throw new IllegalStateException("SCORING_OCCURRENCE_IDENTITY_INVALID");
-        }
         int seconds = Long.compare(
                 candidate.getSourceEventCreatedAtEpochSecond(),
                 current.getSourceEventCreatedAtEpochSecond()
