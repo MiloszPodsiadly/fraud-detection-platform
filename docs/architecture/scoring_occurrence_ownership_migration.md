@@ -51,6 +51,41 @@ current traffic; retained pre-cut data requires the governed offline procedure b
 - Existing `suspicious_transactions` data must be reconciled before creating the transaction-scoped unique index.
   More than one document for a transaction is valid under the replaced schema but invalid under the current one.
 
+## Legacy scoring evidence cutover
+
+The removed scoring-evidence status is a persisted-data cutover concern, not a runtime compatibility contract. Repository
+history proves that the old fallback producer emitted `source == SCORING_FALLBACK`, `status == LEGACY`, and the reviewed
+fallback attributes `fallbackUsed == true` and `scoringEvidenceState == ml_decision_fallback_used`. The current producer
+emits the same fallback meaning with `status == PARTIAL`.
+
+Inventory every target environment before deploying the strict reader. Count the following sources independently:
+
+- `alerts.evidenceSnapshot[*].status == "LEGACY"` and
+  `alerts.evidenceSnapshot[*].attributes.evidenceProjectionState == "LEGACY_PROJECTED"`;
+- `suspicious_transactions.evidenceStatus == "LEGACY"` and
+  `suspicious_transactions.evidenceProjectionState == "LEGACY_PROJECTED"`;
+- retained `transactions.scored` messages where `scoringEvidence[*].status == "LEGACY"`.
+
+The reviewed historical suspicious-transaction projector normalized fallback legacy input to `PARTIAL` and
+`PARTIAL_METADATA`; it did not emit either literal legacy value listed above. Therefore any such
+`suspicious_transactions` value is unexpected and ambiguous unless an exact retained authoritative event proves its
+origin. The alert snapshot also mapped `SCORING_FALLBACK` to `FRAUD_SCORING_SERVICE`, so its status and attributes alone
+do not prove the original source.
+
+Only evidence proven from an exact retained event to have `source == SCORING_FALLBACK`, `status == LEGACY`, and the
+reviewed old producer shape may be normalized by a controlled offline migration to `PARTIAL`. An alert snapshot may be
+normalized only when that exact event establishes the source; all other legacy values must be archived or quarantined
+without reinterpretation. Blanket conversion by status is forbidden.
+
+For each collection or retained topic partition, record and satisfy:
+
+`legacyEvidenceSourceCount = migratedKnownFallbackCount + archivedCount + quarantinedCount`
+
+The deployment evidence must also prove `remainingActiveLegacyEvidenceCount == 0` for every source before strict
+deployment. When inventory finds no legacy data, record the zero counts explicitly rather than treating an absent
+report as evidence. Retained Kafka messages must be drained, migrated only from their authoritative semantics, or
+archived/quarantined; redrive through a permissive parser is forbidden.
+
 ## Offline Procedure
 
 1. Pause alert-service writes or take a consistent Mongo snapshot and record the snapshot identifier.
