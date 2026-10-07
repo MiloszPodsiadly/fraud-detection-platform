@@ -101,6 +101,34 @@ class CanonicalTransactionScoredEventDeserializationTest {
     }
 
     @Test
+    void canonicalDeserializerRejectsRemovedLegacyScoringEvidenceStatus() throws Exception {
+        ObjectNode legacyEvent = validEventJson("event-legacy-scoring-evidence");
+        ObjectNode legacyEvidence = legacyEvent.putArray("scoringEvidence").addObject();
+        legacyEvidence.put("evidenceId", "SCORING_FALLBACK:ml_decision_fallback_used:0");
+        legacyEvidence.put("evidenceType", "DIAGNOSTIC");
+        legacyEvidence.put("source", "SCORING_FALLBACK");
+        legacyEvidence.put("status", "LEGACY");
+        legacyEvidence.put("severity", "LOW");
+        legacyEvidence.put("title", "Scoring evidence diagnostic");
+        legacyEvidence.put("description", "Historical fallback diagnostic");
+        legacyEvidence.putObject("attributes")
+                .put("diagnostic", true)
+                .put("fallbackUsed", true)
+                .put("supportedEvidenceCreated", false)
+                .put("reasonCodeApplicable", false)
+                .put("scoringEvidenceState", "ml_decision_fallback_used");
+        legacyEvidence.put("observedAt", "2026-10-03T10:15:30.123456Z");
+        RecordHeaders headers = new RecordHeaders();
+
+        assertThat(canonicalDeserializer().deserialize(
+                "transactions.scored",
+                headers,
+                objectMapper.writeValueAsBytes(legacyEvent)
+        )).isNull();
+        assertThat(headers).isNotEmpty();
+    }
+
+    @Test
     void baselineBusinessProcessingReceivesCanonicalEventWithEvidenceIntact() throws Exception {
         TransactionScoredEvent source = MlPredictionEvidenceProjectionTestSupport.event(
                 "event-baseline-processing",
