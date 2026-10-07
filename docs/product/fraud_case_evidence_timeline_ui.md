@@ -139,9 +139,9 @@ The section renders bounded states:
 - `Evidence timeline unavailable.`
 - `Timeline display capped. Only the bounded timeline window is shown.`
 
-Timeline failure is section-local and must not break FraudCase detail. Empty timelines still display backend state
-flags: `partial=true` shows the partial notice, and `truncated=true` shows the truncated notice plus a safe truncation
-reason when present.
+Timeline failure is section-local and must not break FraudCase detail. Empty timelines still display any backend state
+flags that are set: `partial=true` shows the partial notice, and `truncated=true` shows the truncated notice plus a safe
+truncation reason when present.
 
 ## Non-Claims
 
