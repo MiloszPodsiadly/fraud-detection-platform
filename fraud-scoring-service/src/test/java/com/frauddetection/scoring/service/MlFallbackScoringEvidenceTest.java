@@ -69,7 +69,6 @@ class MlFallbackScoringEvidenceTest {
                 });
         assertThat(result.scoringEvidence()).noneMatch(item ->
                 item.source() == ScoringEvidenceSource.ML_MODEL && item.status() == ScoringEvidenceStatus.AVAILABLE);
-        assertThat(result.scoringEvidence()).noneMatch(item -> item.status() == ScoringEvidenceStatus.LEGACY);
     }
 
     @Test

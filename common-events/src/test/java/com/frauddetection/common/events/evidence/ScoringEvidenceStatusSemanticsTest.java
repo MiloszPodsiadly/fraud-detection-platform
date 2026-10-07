@@ -16,8 +16,7 @@ class ScoringEvidenceStatusSemanticsTest {
                         "PARTIAL",
                         "UNAVAILABLE",
                         "ERROR",
-                        "NOT_APPLICABLE",
-                        "LEGACY"
+                        "NOT_APPLICABLE"
                 )
                 .doesNotContain("STALE");
     }
@@ -26,7 +25,6 @@ class ScoringEvidenceStatusSemanticsTest {
     void statusesRemainDistinct() {
         assertThat(ScoringEvidenceStatus.PARTIAL).isNotEqualTo(ScoringEvidenceStatus.UNAVAILABLE);
         assertThat(ScoringEvidenceStatus.UNAVAILABLE).isNotEqualTo(ScoringEvidenceStatus.ERROR);
-        assertThat(ScoringEvidenceStatus.LEGACY).isNotEqualTo(ScoringEvidenceStatus.AVAILABLE);
         assertThat(ScoringEvidenceStatus.NOT_APPLICABLE).isNotEqualTo(ScoringEvidenceStatus.UNAVAILABLE);
     }
 }

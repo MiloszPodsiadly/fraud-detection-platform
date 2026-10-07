@@ -6,6 +6,5 @@ public enum EvidenceStatus {
     UNAVAILABLE,
     STALE,
     ERROR,
-    NOT_APPLICABLE,
-    LEGACY
+    NOT_APPLICABLE
 }

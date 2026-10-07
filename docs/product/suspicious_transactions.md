@@ -63,12 +63,12 @@ If scoring evidence contains mixed AVAILABLE and degraded items, the summary mus
 Rules:
 - empty scoring evidence -> PARTIAL
 - any ERROR -> ERROR
-- any PARTIAL or LEGACY -> PARTIAL
+- any PARTIAL -> PARTIAL
 - mixed AVAILABLE with UNAVAILABLE or NOT_APPLICABLE -> PARTIAL
 - only unavailable/not-applicable evidence -> UNAVAILABLE
 - all evidence available -> AVAILABLE
 
-This prevents a positive available signal from hiding partial, unavailable, legacy, or failed evidence.
+This prevents a positive available signal from hiding partial, unavailable, or failed evidence.
 
 ## Transaction-scoped ownership
 

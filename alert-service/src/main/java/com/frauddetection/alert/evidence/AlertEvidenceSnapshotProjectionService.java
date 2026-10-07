@@ -317,7 +317,6 @@ public class AlertEvidenceSnapshotProjectionService {
     private EvidenceProjectionState projectionState(EvidenceStatus status) {
         return switch (status) {
             case AVAILABLE -> EvidenceProjectionState.PROJECTED;
-            case LEGACY -> EvidenceProjectionState.LEGACY_PROJECTED;
             case ERROR -> EvidenceProjectionState.ERROR_PROJECTED;
             case PARTIAL, UNAVAILABLE, NOT_APPLICABLE, STALE -> EvidenceProjectionState.UNAVAILABLE_UNSUPPORTED_EVIDENCE;
         };

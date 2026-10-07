@@ -37,7 +37,6 @@ public class ScoringEvidenceSnapshotMapper {
             case UNAVAILABLE -> EvidenceStatus.UNAVAILABLE;
             case ERROR -> EvidenceStatus.ERROR;
             case NOT_APPLICABLE -> EvidenceStatus.NOT_APPLICABLE;
-            case LEGACY -> EvidenceStatus.LEGACY;
         };
     }
 

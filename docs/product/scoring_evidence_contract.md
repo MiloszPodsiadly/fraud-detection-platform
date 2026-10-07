@@ -32,7 +32,6 @@ ScoringEvidence severity is not final risk level.
 | `UNAVAILABLE` | The scoring source or runtime could not provide supported evidence. |
 | `ERROR` | Diagnostic evidence represents an explicit scoring-evidence creation error. |
 | `NOT_APPLICABLE` | The evidence category was not applicable to the scoring path. |
-| `LEGACY` | Evidence describes genuinely historical scoring semantics retained for persisted or replayed data. |
 
 `PARTIAL`, `UNAVAILABLE`, and `ERROR` are intentionally distinct. `STALE` is not part of this contract.
 
@@ -135,7 +134,7 @@ diagnostic evidence instead of silently succeeding with an empty supported-evide
 
 ML fallback is represented through runtime or fallback evidence. It must not appear as `ML_MODEL` `AVAILABLE`.
 Current fallback-path evidence uses `SCORING_FALLBACK` with `PARTIAL`; ML runtime unavailability remains a separate
-`ML_RUNTIME` item with `UNAVAILABLE`. A current fallback must never be labeled `LEGACY`.
+`ML_RUNTIME` item with `UNAVAILABLE`.
 
 ## Out Of Scope
 

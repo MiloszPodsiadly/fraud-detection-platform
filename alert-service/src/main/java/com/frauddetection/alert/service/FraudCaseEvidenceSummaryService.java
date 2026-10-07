@@ -148,7 +148,6 @@ public class FraudCaseEvidenceSummaryService {
 
     private boolean containsPartialStatus(List<EvidenceSnapshotItem> evidenceItems) {
         return evidenceItems.stream().anyMatch(item -> item.status() == EvidenceStatus.PARTIAL
-                || item.status() == EvidenceStatus.LEGACY
                 || item.status() == EvidenceStatus.STALE
                 || item.status() == EvidenceStatus.UNAVAILABLE
                 || item.status() == EvidenceStatus.NOT_APPLICABLE);

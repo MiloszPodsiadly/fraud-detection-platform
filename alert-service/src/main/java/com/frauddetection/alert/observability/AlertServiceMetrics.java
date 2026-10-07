@@ -1556,8 +1556,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
                  PARTIAL_TRUNCATED,
                  UNAVAILABLE_UNSUPPORTED_EVIDENCE,
                  ERROR_PROJECTED,
-                 ERROR_PROJECTION_FAILED,
-                 LEGACY_PROJECTED -> state.name();
+                 ERROR_PROJECTION_FAILED -> state.name();
         };
     }
 

@@ -10,7 +10,6 @@ class EvidenceStatusSemanticsTest {
     void statusValuesStaySemanticallyDistinct() {
         assertThat(EvidenceStatus.PARTIAL).isNotEqualTo(EvidenceStatus.UNAVAILABLE);
         assertThat(EvidenceStatus.UNAVAILABLE).isNotEqualTo(EvidenceStatus.ERROR);
-        assertThat(EvidenceStatus.LEGACY).isNotEqualTo(EvidenceStatus.AVAILABLE);
         assertThat(EvidenceStatus.NOT_APPLICABLE).isNotEqualTo(EvidenceStatus.UNAVAILABLE);
     }
 

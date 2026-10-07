@@ -38,7 +38,7 @@ class AlertEvidenceSnapshotDocumentationContractTest {
                 .contains("FDP-59 does not change case lifecycle ordering")
                 .contains("ERROR_PROJECTION_FAILED")
                 .contains("ERROR_PROJECTED")
-                .contains("LEGACY_PROJECTED");
+                .doesNotContain("LEGACY_PROJECTED");
 
         assertThat(docs.toLowerCase())
                 .doesNotContain("legal proof")

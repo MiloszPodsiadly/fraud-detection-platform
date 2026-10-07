@@ -55,13 +55,6 @@ class AlertEvidenceSnapshotProjectionServiceTest {
         assertThat(first(project(diagnostic(ScoringEvidenceStatus.PARTIAL))).status()).isEqualTo(EvidenceStatus.PARTIAL);
         assertThat(first(project(diagnostic(ScoringEvidenceStatus.UNAVAILABLE))).status()).isEqualTo(EvidenceStatus.UNAVAILABLE);
         assertThat(first(project(diagnostic(ScoringEvidenceStatus.ERROR))).status()).isEqualTo(EvidenceStatus.ERROR);
-        assertThat(first(project(diagnostic(ScoringEvidenceStatus.LEGACY))).status()).isEqualTo(EvidenceStatus.LEGACY);
-    }
-
-    @Test
-    void legacyStatusUsesLegacyProjectedState() {
-        assertThat(first(project(diagnostic(ScoringEvidenceStatus.LEGACY))).attributes())
-                .containsEntry("evidenceProjectionState", EvidenceProjectionState.LEGACY_PROJECTED.name());
     }
 
     @Test
@@ -74,7 +67,7 @@ class AlertEvidenceSnapshotProjectionServiceTest {
         assertThat(projected.status()).isEqualTo(EvidenceStatus.PARTIAL);
         assertThat(projected.source()).isEqualTo(EvidenceSource.FRAUD_SCORING_SERVICE);
         assertThat(projected.attributes())
-                .doesNotContainEntry("evidenceProjectionState", EvidenceProjectionState.LEGACY_PROJECTED.name());
+                .containsEntry("evidenceProjectionState", EvidenceProjectionState.UNAVAILABLE_UNSUPPORTED_EVIDENCE.name());
     }
 
     @Test

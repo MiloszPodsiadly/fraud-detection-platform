@@ -87,7 +87,7 @@ result counts, reason codes, evidence statuses, principal data, or exception det
   `partial=true` because linked evidence context cannot be established.
 - Linked-alert context with no evidence returns aggregate status `UNAVAILABLE`.
 - `ERROR` evidence status dominates the aggregate status.
-- Any `PARTIAL`, `LEGACY`, `STALE`, `UNAVAILABLE`, or `NOT_APPLICABLE` evidence status makes the aggregate status
+- Any `PARTIAL`, `STALE`, `UNAVAILABLE`, or `NOT_APPLICABLE` evidence status makes the aggregate status
   `PARTIAL` unless an `ERROR` is present.
 - `NOT_APPLICABLE` is treated conservatively as preventing aggregate `AVAILABLE`. It contributes to `PARTIAL` because
   the summary cannot claim all evidence is available and applicable.
