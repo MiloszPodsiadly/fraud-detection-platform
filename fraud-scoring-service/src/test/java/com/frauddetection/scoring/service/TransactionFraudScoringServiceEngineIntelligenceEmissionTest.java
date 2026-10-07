@@ -98,7 +98,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
                 request,
                 scoreResult,
                 Optional.of(summary),
-                MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED,
+                MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE,
                 recommendation
         );
         FraudScoringEngine scoringEngine = mock(FraudScoringEngine.class);
@@ -110,7 +110,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
         when(emissionService.emitIfEnabled(request)).thenReturn(EngineIntelligenceEmissionResult.emitted(
                 EngineIntelligenceEnrichmentResult.withoutEvidence(
                         summary,
-                        MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED
+                        MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE
                 )
         ));
         when(mapper.toEvent(
@@ -118,7 +118,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
                 scoreResult,
                 Optional.of(summary),
                 Optional.empty(),
-                Optional.of(MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED),
+                Optional.of(MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE),
                 recommendation
         )).thenReturn(scoredEvent);
         var service = new TransactionFraudScoringService(
@@ -140,7 +140,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
                 scoreResult,
                 Optional.of(summary),
                 Optional.empty(),
-                Optional.of(MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED),
+                Optional.of(MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE),
                 recommendation
         );
         verify(publisher).publish(scoredEvent);

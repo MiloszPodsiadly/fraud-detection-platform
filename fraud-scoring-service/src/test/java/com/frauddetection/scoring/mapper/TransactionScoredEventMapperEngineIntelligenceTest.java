@@ -143,7 +143,17 @@ class TransactionScoredEventMapperEngineIntelligenceTest {
                 request(),
                 ruleBasedScoreResult("rules-v2-final"),
                 Optional.of(availableMlSummary("model-X")),
-                MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED,
+                Optional.of(new MlPredictionEvidenceV1(
+                        0.8123d,
+                        RiskLevel.HIGH,
+                        new MlModelIdentity(
+                                "python-logistic-fraud-model",
+                                "model-X",
+                                "2026-05-30.feature-contract.v1"
+                        ),
+                        GENERATED_AT
+                )),
+                Optional.empty(),
                 null
         );
 

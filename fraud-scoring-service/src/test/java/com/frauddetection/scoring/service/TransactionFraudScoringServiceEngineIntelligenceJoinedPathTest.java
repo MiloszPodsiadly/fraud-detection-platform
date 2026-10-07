@@ -2,9 +2,13 @@ package com.frauddetection.scoring.service;
 
 import org.junit.jupiter.api.Test;
 
+import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
+
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceJoinedTestSupport.harness;
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceJoinedTestSupport.highDiagnosticSummary;
 import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceJoinedTestSupport.json;
+import static com.frauddetection.scoring.service.TransactionFraudScoringServiceEngineIntelligenceJoinedTestSupport.scoreWithRealMlMissingSourceTimestamp;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
@@ -65,5 +69,25 @@ class TransactionFraudScoringServiceEngineIntelligenceJoinedPathTest {
         assertThat(event.alertRecommended()).isEqualTo(harness.baselineResult().alertRecommended());
         assertThat(event.reasonCodes()).isEqualTo(harness.baselineResult().reasonCodes());
         assertThat(json).doesNotContain("finalDecision", "recommendedAction", "\"approve\"", "\"decline\"", "\"block\"");
+    }
+
+    @Test
+    void realMlMissingSourceTimestampPublishesOmissionWithoutChangingBaselineResult() {
+        var event = scoreWithRealMlMissingSourceTimestamp();
+        var publicMl = event.engineIntelligence().engines().stream()
+                .filter(engine -> "ml.python.primary".equals(engine.engineId()))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(publicMl.status()).isEqualTo(FraudEngineStatus.DEGRADED);
+        assertThat(event.mlPredictionEvidence()).isNull();
+        assertThat(event.mlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING);
+        assertThat(event.fraudScore()).isEqualTo(
+                TransactionFraudScoringServiceEngineIntelligenceJoinedTestSupport.baselineLowResult().fraudScore()
+        );
+        assertThat(event.riskLevel()).isEqualTo(
+                TransactionFraudScoringServiceEngineIntelligenceJoinedTestSupport.baselineLowResult().riskLevel()
+        );
     }
 }

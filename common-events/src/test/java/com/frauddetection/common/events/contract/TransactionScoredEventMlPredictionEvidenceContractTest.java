@@ -108,10 +108,8 @@ class TransactionScoredEventMlPredictionEvidenceContractTest {
     }
 
     @Test
-    void availableMlEngineContradictsEveryNonAvailableEvidenceClaim() throws Exception {
+    void availableMlEngineAcceptsExactEvidenceOmissionsNotDisprovedByPublicSummary() throws Exception {
         for (MlPredictionEvidenceOmissionReason reason : List.of(
-                MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE,
-                MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE,
                 MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING,
                 MlPredictionEvidenceOmissionReason.INVALID_SCORE,
                 MlPredictionEvidenceOmissionReason.IDENTITY_VALIDATION_FAILURE,
@@ -121,16 +119,28 @@ class TransactionScoredEventMlPredictionEvidenceContractTest {
             ObjectNode json = eventWithSummary();
             json.put("mlPredictionEvidenceOmissionReason", reason.name());
 
-            assertThatThrownBy(() -> objectMapper.readValue(json.toString(), TransactionScoredEvent.class))
-                    .hasRootCauseMessage("ML_PREDICTION_EVIDENCE_OMISSION_CONTRADICTS_ENGINE_INTELLIGENCE");
+            TransactionScoredEvent event = objectMapper.readValue(json.toString(), TransactionScoredEvent.class);
+
+            assertThat(event.mlPredictionEvidence()).isNull();
+            assertThat(event.mlPredictionEvidenceOmissionReason()).isEqualTo(reason);
         }
+    }
+
+    @Test
+    void availableMlEngineContradictsMlEngineUnavailableOmission() throws Exception {
+        ObjectNode json = eventWithSummary();
+        json.put("mlPredictionEvidenceOmissionReason", "ML_ENGINE_UNAVAILABLE");
+
+        assertThatThrownBy(() -> objectMapper.readValue(json.toString(), TransactionScoredEvent.class))
+                .hasRootCauseMessage("ML_PREDICTION_EVIDENCE_OMISSION_CONTRADICTS_ENGINE_INTELLIGENCE");
     }
 
     @Test
     void emittedEngineIntelligenceContradictsPipelineLevelOmission() throws Exception {
         for (MlPredictionEvidenceOmissionReason reason : List.of(
                 MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
-                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE,
+                MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE
         )) {
             ObjectNode json = eventWithSummary(summaryWithUnavailableMl());
             json.put("mlPredictionEvidenceOmissionReason", reason.name());

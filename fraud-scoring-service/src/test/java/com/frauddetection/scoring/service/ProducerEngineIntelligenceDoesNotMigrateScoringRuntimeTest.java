@@ -15,13 +15,21 @@ class ProducerEngineIntelligenceDoesNotMigrateScoringRuntimeTest {
                 "src/main/java/com/frauddetection/scoring/service/TransactionFraudScoringService.java"
         ));
 
+        int baselineScoring = scoringService.indexOf(
+                "FraudScoreResult scoreResult = fraudScoringEngine.score(scoringRequest);"
+        );
+        int diagnosticEmission = scoringService.indexOf(
+                "EngineIntelligenceEmissionResult engineIntelligence = engineIntelligence(scoringRequest);"
+        );
+
+        assertThat(baselineScoring).isGreaterThanOrEqualTo(0);
+        assertThat(diagnosticEmission).isGreaterThan(baselineScoring);
         assertThat(scoringService)
                 .contains(
-                        "FraudScoreResult scoreResult = fraudScoringEngine.score(scoringRequest);",
-                        "EngineIntelligenceEmission engineIntelligence = engineIntelligence(scoringRequest);",
                         "engineIntelligenceEmissionService.emitIfEnabled(scoringRequest)",
-                        "scoreResult,",
-                        "engineIntelligence.summary()"
+                        "summary(engineIntelligence)",
+                        "mlPredictionEvidence(engineIntelligence)",
+                        "mlPredictionEvidenceOmissionReason(engineIntelligence)"
                 )
                 .doesNotContain("FraudScoringOrchestrator");
     }

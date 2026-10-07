@@ -54,6 +54,20 @@ class EngineIntelligenceEngineResultTest {
     }
 
     @Test
+    void acceptsBoundedMissingInferenceTimestampReasonForDegradedMlEngine() {
+        EngineIntelligenceEngineResult engine = new EngineIntelligenceEngineResult(
+                "ml.python.primary",
+                FraudEngineType.ML_MODEL,
+                FraudEngineStatus.DEGRADED,
+                null,
+                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                List.of("ML_INFERENCE_TIMESTAMP_MISSING")
+        );
+
+        assertThat(engine.reasonCodes()).containsExactly("ML_INFERENCE_TIMESTAMP_MISSING");
+    }
+
+    @Test
     void rejectsAvailableMlEngineResultWithoutModelIdentity() {
         assertThatThrownBy(() -> new EngineIntelligenceEngineResult(
                 "ml.python.primary",

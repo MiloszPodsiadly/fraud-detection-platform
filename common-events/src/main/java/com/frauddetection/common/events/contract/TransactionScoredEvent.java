@@ -452,38 +452,41 @@ public record TransactionScoredEvent(
         if (omissionReason == null) {
             return;
         }
-        if (omissionReason == MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED
-                || omissionReason == MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE
-                || omissionReason == MlPredictionEvidenceOmissionReason.LEGITIMATE_ABSENCE) {
-            if (engineIntelligence != null) {
-                throw new IllegalArgumentException(
-                        "ML_PREDICTION_EVIDENCE_OMISSION_CONTRADICTS_ENGINE_INTELLIGENCE"
-                );
-            }
-            return;
-        }
         EngineIntelligenceEngineResult sourceEngine = engineIntelligence == null ? null : engineIntelligence.engines().stream()
                 .filter(engine -> FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID.equals(engine.engineId()))
                 .findFirst()
                 .orElse(null);
-        if (omissionReason == MlPredictionEvidenceOmissionReason.EVIDENCE_SOURCE_INTEGRITY_FAILURE) {
-            if (sourceEngine != null && sourceEngine.status() == FraudEngineStatus.AVAILABLE) {
-                throw new IllegalArgumentException(
-                        "ML_PREDICTION_EVIDENCE_OMISSION_CONTRADICTS_ENGINE_INTELLIGENCE"
-                );
+        switch (omissionReason) {
+            case DIAGNOSTIC_EMISSION_DISABLED, DIAGNOSTIC_ENRICHMENT_UNAVAILABLE, LEGITIMATE_ABSENCE ->
+                    requireAbsentEngineIntelligence(engineIntelligence);
+            case ML_ENGINE_UNAVAILABLE -> requireOperationallyUnavailableMlEngine(sourceEngine);
+            case SOURCE_TIMESTAMP_MISSING, INVALID_SCORE, IDENTITY_VALIDATION_FAILURE, PREDICTION_NOT_ACCEPTED ->
+                    requireObservedMlEngine(sourceEngine);
+            case EVIDENCE_SOURCE_INTEGRITY_FAILURE -> {
+                // Public Engine Intelligence cannot prove private source ownership or evidence integrity.
             }
-            return;
         }
+    }
+
+    private static void requireAbsentEngineIntelligence(EngineIntelligenceSummary engineIntelligence) {
+        if (engineIntelligence != null) {
+            throw new IllegalArgumentException(
+                    "ML_PREDICTION_EVIDENCE_OMISSION_CONTRADICTS_ENGINE_INTELLIGENCE"
+            );
+        }
+    }
+
+    private static void requireObservedMlEngine(EngineIntelligenceEngineResult sourceEngine) {
         if (sourceEngine == null) {
             throw new IllegalArgumentException(
                     "ML_PREDICTION_EVIDENCE_OMISSION_REQUIRES_OBSERVED_ML_ENGINE"
             );
         }
-        if (sourceEngine.status() == FraudEngineStatus.AVAILABLE) {
-            throw new IllegalArgumentException("ML_PREDICTION_EVIDENCE_OMISSION_CONTRADICTS_ENGINE_INTELLIGENCE");
-        }
-        if (omissionReason == MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE
-                && sourceEngine.status() != FraudEngineStatus.UNAVAILABLE
+    }
+
+    private static void requireOperationallyUnavailableMlEngine(EngineIntelligenceEngineResult sourceEngine) {
+        requireObservedMlEngine(sourceEngine);
+        if (sourceEngine.status() != FraudEngineStatus.UNAVAILABLE
                 && sourceEngine.status() != FraudEngineStatus.TIMEOUT
                 && sourceEngine.status() != FraudEngineStatus.SKIPPED) {
             throw new IllegalArgumentException("ML_PREDICTION_EVIDENCE_OMISSION_CONTRADICTS_ENGINE_INTELLIGENCE");
