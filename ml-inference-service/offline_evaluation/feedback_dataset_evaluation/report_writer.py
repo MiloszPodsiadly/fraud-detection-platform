@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -155,15 +157,33 @@ def write_feedback_dataset_evaluation_reports(
             artifact_set_version=MODEL_EVALUATION_ARTIFACT_SET_VERSION,
             report_type=MODEL_EVALUATION_REPORT_TYPE,
         )
-    _prepare_fresh_evaluation_output_dir(output_dir, allow_output_root)
-    _prepare_output_dir(platform_dir, allow_output_root)
-    _write_artifacts_atomically(platform_payloads, platform_manifest_path, platform_manifest_payload)
     paths["platformManifest"] = platform_manifest_path
     paths["manifest"] = platform_manifest_path
-    if model_manifest_path is not None and model_manifest_payload is not None:
-        _prepare_output_dir(model_dir, allow_output_root)
-        _write_artifacts_atomically(model_payloads, model_manifest_path, model_manifest_payload)
+    if model_manifest_path is not None:
         paths["modelEvaluationManifest"] = model_manifest_path
+
+    _validate_fresh_evaluation_output_dir(output_dir, allow_output_root)
+    staging_dir = _create_staging_output_dir(output_dir, allow_output_root)
+    try:
+        staging_platform_dir = staging_dir / "platform-evaluation"
+        _prepare_output_dir(staging_platform_dir, allow_output_root)
+        _write_artifacts_atomically(
+            _relocate_payloads(platform_payloads, output_dir, staging_dir),
+            staging_platform_dir / "manifest.json",
+            platform_manifest_payload,
+        )
+        if model_manifest_path is not None and model_manifest_payload is not None:
+            staging_model_dir = staging_dir / "model-evaluation"
+            _prepare_output_dir(staging_model_dir, allow_output_root)
+            _write_artifacts_atomically(
+                _relocate_payloads(model_payloads, output_dir, staging_dir),
+                staging_model_dir / "manifest.json",
+                model_manifest_payload,
+            )
+        _publish_staged_evaluation_run(staging_dir, output_dir)
+    except Exception:
+        _cleanup_staging_directory(staging_dir)
+        raise
     return paths
 
 
@@ -290,10 +310,64 @@ def _prepare_output_dir(output_dir: Path, allow_output_root: Path | None) -> Non
         raise ValueError("output directory must not be a symlink")
 
 
-def _prepare_fresh_evaluation_output_dir(output_dir: Path, allow_output_root: Path | None) -> None:
-    _prepare_output_dir(output_dir, allow_output_root)
-    if any(output_dir.iterdir()):
-        raise ValueError("output directory must be empty for a new evaluation run")
+def _validate_fresh_evaluation_output_dir(output_dir: Path, allow_output_root: Path | None) -> None:
+    if output_dir.is_symlink():
+        raise ValueError("output directory must not be a symlink")
+    if output_dir.exists():
+        if not output_dir.is_dir():
+            raise ValueError("output path exists and is not a directory")
+        if any(output_dir.iterdir()):
+            raise ValueError("output directory must be empty for a new evaluation run")
+    if allow_output_root is not None:
+        resolved_output = output_dir.resolve()
+        resolved_root = Path(allow_output_root).resolve()
+        if resolved_output != resolved_root and resolved_root not in resolved_output.parents:
+            raise ValueError("output directory is outside allowed output root")
+        if resolved_output == resolved_root:
+            raise ValueError("output directory must be below allowed output root for atomic publication")
+    _prepare_output_dir(output_dir.parent, allow_output_root)
+
+
+def _create_staging_output_dir(output_dir: Path, allow_output_root: Path | None) -> Path:
+    staging_dir = Path(tempfile.mkdtemp(
+        prefix=f".{output_dir.name}.staging-",
+        dir=output_dir.parent,
+    ))
+    try:
+        _prepare_output_dir(staging_dir, allow_output_root)
+    except Exception:
+        _cleanup_staging_directory(staging_dir)
+        raise
+    return staging_dir
+
+
+def _relocate_payloads(payloads: dict[Path, str], output_dir: Path, staging_dir: Path) -> dict[Path, str]:
+    return {
+        staging_dir / path.relative_to(output_dir): payload
+        for path, payload in payloads.items()
+    }
+
+
+def _publish_staged_evaluation_run(staging_dir: Path, output_dir: Path) -> None:
+    if output_dir.is_symlink():
+        raise ValueError("output directory must not be a symlink")
+    if output_dir.exists():
+        if not output_dir.is_dir():
+            raise ValueError("output path exists and is not a directory")
+        if any(output_dir.iterdir()):
+            raise ValueError("output directory must be empty for a new evaluation run")
+        output_dir.rmdir()
+    os.replace(staging_dir, output_dir)
+
+
+def _cleanup_staging_directory(staging_dir: Path) -> None:
+    if staging_dir.is_symlink():
+        raise RuntimeError("evaluation staging cleanup refused a symlink")
+    if staging_dir.exists():
+        try:
+            shutil.rmtree(staging_dir)
+        except OSError as exception:
+            raise RuntimeError("evaluation staging cleanup failed") from exception
 
 
 def _write_artifacts_atomically(payloads: dict[Path, str], manifest_path: Path, manifest_payload: str) -> None:
