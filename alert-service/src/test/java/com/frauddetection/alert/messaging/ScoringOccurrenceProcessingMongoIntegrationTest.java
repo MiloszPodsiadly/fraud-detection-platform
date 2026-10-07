@@ -547,7 +547,7 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
     }
 
     @Test
-    void concurrentNewerLowRemovesProjectionCreatedBySuspendedEarlierHigh() throws Exception {
+    void concurrentNewerLowWinsWithoutLeavingStaleCurrentProjectionOrPartialAlertEffects() throws Exception {
         TransactionScoredEvent earlierHigh = event("event-a", BASE_TIME, 0.81d, "model-a");
         TransactionScoredEvent newerLow = event(
                 "event-b", BASE_TIME.plusSeconds(1), 0.18d, "model-b", RiskLevel.LOW, false, null
@@ -573,8 +573,22 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
 
             assertCurrentScoredOccurrence("event-b", RiskLevel.LOW, false);
             assertThat(mongoTemplate.count(new Query(), SuspiciousTransactionDocument.class)).isZero();
-            assertThat(mongoTemplate.count(new Query(), AlertDocument.class)).isEqualTo(1L);
-            assertThat(mongoTemplate.count(new Query(), FraudAlertOutboxRecord.class)).isEqualTo(1L);
+            // Admission is observed before commit, so the earlier HIGH may commit atomically or roll back completely.
+            long alertCount = mongoTemplate.count(new Query(), AlertDocument.class);
+            long outboxCount = mongoTemplate.count(new Query(), FraudAlertOutboxRecord.class);
+            assertThat(alertCount).isIn(0L, 1L);
+            assertThat(outboxCount).isEqualTo(alertCount);
+            if (alertCount == 1L) {
+                AlertDocument alert = mongoTemplate.findOne(new Query(), AlertDocument.class);
+                FraudAlertOutboxRecord outbox = mongoTemplate.findOne(new Query(), FraudAlertOutboxRecord.class);
+                assertThat(alert).isNotNull();
+                assertThat(alert.getSourceEventId()).isEqualTo("event-a");
+                assertThat(outbox).isNotNull();
+                assertThat(outbox.getAlertId()).isEqualTo(alert.getAlertId());
+                assertThat(outbox.getTransactionId()).isEqualTo(TRANSACTION_ID);
+                assertThat(outbox.getPayload()).isNotNull();
+                assertThat(outbox.getPayload().alertId()).isEqualTo(alert.getAlertId());
+            }
         } finally {
             resumeEarlier.countDown();
             executor.shutdownNow();
