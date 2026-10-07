@@ -18,6 +18,9 @@ from offline_evaluation.feedback_dataset_evaluation.model_evaluation import (
     ML_SCORE_RANKING_POLICY,
     RULES_SIGNAL_UNAVAILABLE,
     SINGLE_CLASS_MODEL_LINEAGE_RECORDS,
+    SOURCE_DATASET_INVALID_ROWS_SKIPPED,
+    SOURCE_DATASET_REQUIRED_FIELDS_MISSING,
+    SOURCE_DATASET_TRUNCATED,
     UNEXPECTED_ML_EVIDENCE_LOSS,
     ModelEvaluationIdentity,
     build_model_specific_evaluation_summary,
@@ -290,6 +293,49 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
             "accountid",
         ):
             self.assertNotIn(forbidden, serialized_lineage)
+
+    def test_sourceDatasetQualityLossProducesDeterministicWarnings(self):
+        cases = (
+            (
+                SOURCE_DATASET_TRUNCATED,
+                {"rawRowsRead": 3, "truncated": True},
+            ),
+            (
+                SOURCE_DATASET_REQUIRED_FIELDS_MISSING,
+                {"rawRowsRead": 3, "skippedMissingRequiredFieldCount": 1},
+            ),
+            (
+                SOURCE_DATASET_INVALID_ROWS_SKIPPED,
+                {"rawRowsRead": 3, "skippedInvalidSourceRecordCount": 1},
+            ),
+        )
+        for expected_warning, metadata_overrides in cases:
+            with self.subTest(expected_warning=expected_warning):
+                summary = self._model_summary_with_metadata(metadata_overrides)
+
+                self.assertEqual([expected_warning], summary["warnings"])
+                self.assertIs(summary, validate_model_evaluation_summary(summary))
+
+    def test_cleanSourceDatasetHasNoSourceQualityWarnings(self):
+        summary = self._model_summary_with_metadata({})
+
+        self.assertEqual([], summary["warnings"])
+
+    def test_policyExclusionsAloneDoNotProduceSourceQualityWarnings(self):
+        summary = self._model_summary_with_metadata({
+            "rawRowsRead": 4,
+            "excludedUnresolvedCount": 1,
+            "excludedGovernanceReviewCount": 1,
+        })
+
+        self.assertEqual([], summary["warnings"])
+
+    def test_sourceDatasetWarningsCannotContradictSourceMetadata(self):
+        summary = self._model_summary_with_metadata({})
+        summary["warnings"] = [SOURCE_DATASET_TRUNCATED]
+
+        with self.assertRaisesRegex(ValueError, "warnings must match evaluated population"):
+            validate_model_evaluation_summary(summary)
 
     def test_shadowMlIdentityVersionRemainsTheModelSpecificEvaluationSubject(self):
         summary = self._model_summary(
@@ -1006,6 +1052,20 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
 
     def _model_summary(self, *records, requested=MODEL_X):
         return self._reports(*records, model_identity=requested)["modelEvaluationSummary"]
+
+    def _model_summary_with_metadata(self, metadata_overrides):
+        records = (
+            self._model_record("eval_11111111111111111111111111111111", MODEL_X),
+            self._model_record(
+                "eval_22222222222222222222222222222222",
+                MODEL_X,
+                feedbackLabel="CONFIRMED_LEGITIMATE",
+                evaluationLabel="NEGATIVE_LEGITIMATE",
+            ),
+        )
+        with jsonl_file(jsonl(*records, metadata_overrides=metadata_overrides)) as path:
+            dataset = read_feedback_dataset_jsonl(path)
+        return build_model_specific_evaluation_summary(dataset, MODEL_X, GENERATED_AT)
 
     def _ranked_summary(self, records, top_k_values):
         return build_model_specific_evaluation_summary(

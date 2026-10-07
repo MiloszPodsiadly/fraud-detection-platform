@@ -31,19 +31,23 @@ Each model summary contains one canonical `sourceDataset` identity: the dataset 
 JSONL bytes consumed by the reader, and the source population counters. The digest is computed before parsing and is
 not a digest of reserialized records. Source accounting remains distinct from model accounting and must reconcile as
 `rawRowsRead` to `recordsReturned` to model `recordsConsidered`, followed by the model-specific evaluated and excluded
-populations. This proves which immutable source bytes and returned population were evaluated for the requested exact
-model; it does not make analyst feedback legal ground truth or prove approval, promotion readiness, calibration,
-payment authorization, or suitability for production-primary decisioning.
+populations. The summary records a claim about which immutable source bytes and returned population were evaluated;
+the claim becomes independently source-byte verified only when the trusted reader receives and matches the exact
+source JSONL. Neither state makes analyst feedback legal ground truth or proves approval, promotion readiness,
+calibration, payment authorization, or suitability for production-primary decisioning.
 
 The trusted model-evaluation artifact reader accepts only a `model-evaluation/` directory containing exactly
 `model_evaluation_summary.json` and `manifest.json`. Before returning read-only evidence it bounds both files, rejects
 symlinks and noncanonical manifest paths, verifies the canonical report and artifact-set identity, checks `sizeBytes`
 and SHA-256 against the actual summary bytes, validates the summary contract, and requires matching `generatedAt`
 values. Because the manifest protects the summary bytes, it transitively protects the embedded source identity; the
-source digest is not duplicated in the manifest. When the trusted reader is given the source JSONL, it also recomputes
-and compares the complete source identity. Without those bytes it validates only the immutable identity claimed by the
-artifact and does not fetch or infer a source dataset. Unknown files, malformed manifests, and tampered summaries fail
-closed.
+source digest is not duplicated in the manifest. The returned evidence exposes an immutable bounded verification
+level. `CLAIM_ONLY` means manifest and summary integrity passed and the embedded source identity claim is structurally
+valid, but external source bytes were not compared. `VERIFIED_AGAINST_SOURCE_BYTES` means exact source JSONL bytes
+were supplied and their SHA-256 plus complete source identity matched. The level is runtime validation context and is
+not serialized into the immutable summary. Unknown files, malformed manifests, mismatched source bytes, and tampered
+summaries fail closed. Neither verification level means analyst feedback is legal ground truth, model approval,
+promotion approval, calibrated probability, or production-primary suitability.
 
 Public JSON Schema, OpenAPI, and frontend model-identity contracts enforce the canonical structural syntax:
 `modelName` and `modelVersion` are bounded to 64 characters, `featureContractVersion` is bounded to 96 characters,
@@ -74,6 +78,9 @@ Warnings are deterministic evidence-quality facts derived from that population. 
 records unexpected missing direct evidence, `INVALID_ML_EVIDENCE_PRESENT` records malformed evidence, and
 `MODEL_EVALUATION_PARTIAL_COVERAGE` records that fewer rows were evaluated than considered. They define no approval
 threshold and do not approve or reject promotion, recommend threshold changes, or influence payment decisions.
+Source metadata also deterministically emits `SOURCE_DATASET_TRUNCATED`,
+`SOURCE_DATASET_REQUIRED_FIELDS_MISSING`, and `SOURCE_DATASET_INVALID_ROWS_SKIPPED` for the corresponding factual
+loss conditions. Intentional unresolved or governance-review exclusions remain policy outcomes, not corruption.
 
 Its aggregate confusion matrix reports TP, FP, TN, and FN plus precision, recall, true-positive rate,
 false-positive rate, and false-negative rate. A zero denominator is an explicit unavailable metric with a

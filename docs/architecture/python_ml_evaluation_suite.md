@@ -112,7 +112,10 @@ by pseudonymous evaluation record ID. Ranking does not claim score calibration. 
 The model summary binds that evaluation to the exact source JSONL bytes through its canonical `sourceDataset` SHA-256
 and reconciled source counters. Its manifest protects the summary and therefore that embedded identity; a trusted
 reader can additionally verify it against supplied source bytes, while a standalone artifact read cannot establish
-that external byte-level comparison.
+that external byte-level comparison. The reader reports `CLAIM_ONLY` when it validates only the artifact-protected
+claim and `VERIFIED_AGAINST_SOURCE_BYTES` only after exact source bytes and the complete source identity match. These
+runtime verification levels are not serialized into the summary and convey no ground-truth, approval, promotion,
+calibration, payment, or production-primary authority.
 
 Its aggregate Rules-vs-ML breakdown uses the Rules snapshot captured from the same scoring occurrence as the direct
 ML evidence. Missing Rules evidence is counted as unavailable, never converted to low risk, and no current/latest
@@ -163,10 +166,16 @@ temporary artifact files, writes `manifest.json.tmp`, replaces report artifacts,
 the manifest `sha256` and `sizeBytes`. The manifest is not external publishing, and scheduled generation or external
 publication requires a separate security, governance, and observability review.
 
+The `platform-evaluation/` and `model-evaluation/` families are independently complete under their own manifests.
+No current production or offline consumer treats the parent directory as an atomically published combined artifact
+set. Before a future Model Card or Promotion consumer relies on both families as one governed run, a run-level
+completion manifest or equivalent last-written publication boundary is required.
+
 An evaluation output directory represents exactly one evaluation run. A run may use a new directory or an existing
 empty directory only. Any non-empty output directory is rejected before `platform-evaluation/` or `model-evaluation/`
 is created; the runner does not merge runs, delete prior evidence, or infer ownership of existing artifacts. Downstream
-consumers may rely on this one-directory, one-run invariant.
+consumers may rely on this one-directory, one-run ownership invariant, but must not infer combined completion of both
+artifact families from the parent directory alone.
 
 Platform Evaluation writers and readers use only `FEEDBACK_DATASET_OFFLINE_EVALUATION_V1` with
 `feedback-dataset-evaluation-report-artifact-set-v1` and

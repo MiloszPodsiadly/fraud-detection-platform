@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import MappingProxyType
 from typing import Any
@@ -43,10 +44,16 @@ class ModelEvaluationArtifactSetError(ValueError):
     """Raised when model-specific evaluation evidence is incomplete or untrusted."""
 
 
+class ModelEvaluationArtifactVerificationLevel(str, Enum):
+    CLAIM_ONLY = "CLAIM_ONLY"
+    VERIFIED_AGAINST_SOURCE_BYTES = "VERIFIED_AGAINST_SOURCE_BYTES"
+
+
 @dataclass(frozen=True)
 class ValidatedModelEvaluationArtifactSet:
     summary: Mapping[str, Any]
     manifest_sha256: str
+    verification_level: ModelEvaluationArtifactVerificationLevel
 
 
 def read_validated_model_evaluation_artifact_set(
@@ -77,6 +84,7 @@ def read_validated_model_evaluation_artifact_set(
         raise ModelEvaluationArtifactSetError(
             "model evaluation manifest generatedAt must match summary generatedAt"
         )
+    verification_level = ModelEvaluationArtifactVerificationLevel.CLAIM_ONLY
     if source_dataset_path is not None:
         try:
             actual_source = build_source_dataset_identity(
@@ -90,9 +98,11 @@ def read_validated_model_evaluation_artifact_set(
             raise ModelEvaluationArtifactSetError(
                 "model evaluation source dataset identity does not match actual source bytes"
             )
+        verification_level = ModelEvaluationArtifactVerificationLevel.VERIFIED_AGAINST_SOURCE_BYTES
     return ValidatedModelEvaluationArtifactSet(
         summary=_freeze_json(validated_summary),
         manifest_sha256=sha256_hex(manifest_bytes),
+        verification_level=verification_level,
     )
 
 

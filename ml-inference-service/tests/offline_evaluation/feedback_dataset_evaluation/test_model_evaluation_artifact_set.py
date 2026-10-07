@@ -2,6 +2,7 @@ import hashlib
 import json
 import tempfile
 import unittest
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 from offline_evaluation.feedback_dataset_evaluation.dataset_reader import read_feedback_dataset_jsonl
@@ -14,6 +15,7 @@ from offline_evaluation.feedback_dataset_evaluation.model_evaluation_artifact_se
     MAX_SUMMARY_BYTES,
     SUMMARY_FILENAME,
     ModelEvaluationArtifactSetError,
+    ModelEvaluationArtifactVerificationLevel,
     read_validated_model_evaluation_artifact_set,
 )
 from offline_evaluation.feedback_dataset_evaluation.report_writer import write_feedback_dataset_evaluation_reports
@@ -41,11 +43,17 @@ class ModelEvaluationArtifactSetReaderTest(unittest.TestCase):
             self.assertEqual("ML_MODEL_FEEDBACK_DATASET_EVALUATION_V1", evidence.summary["reportType"])
             self.assertEqual(GENERATED_AT, evidence.summary["generatedAt"])
             self.assertEqual(hashlib.sha256(manifest_bytes).hexdigest(), evidence.manifest_sha256)
+            self.assertEqual(
+                ModelEvaluationArtifactVerificationLevel.CLAIM_ONLY,
+                evidence.verification_level,
+            )
             self.assertIsInstance(evidence.summary["warnings"], tuple)
             with self.assertRaises(TypeError):
                 evidence.summary["generatedAt"] = "2026-01-01T00:00:00Z"
             with self.assertRaises(TypeError):
                 evidence.summary["population"]["recordsEvaluated"] = 99
+            with self.assertRaises(FrozenInstanceError):
+                evidence.verification_level = ModelEvaluationArtifactVerificationLevel.VERIFIED_AGAINST_SOURCE_BYTES
 
     def test_artifactVerifiesAgainstExactSourceDatasetBytes(self):
         with model_evaluation_artifacts() as artifact_dir:
@@ -60,6 +68,19 @@ class ModelEvaluationArtifactSetReaderTest(unittest.TestCase):
                 hashlib.sha256(source_path.read_bytes()).hexdigest(),
                 evidence.summary["sourceDataset"]["sha256"],
             )
+            self.assertEqual(
+                ModelEvaluationArtifactVerificationLevel.VERIFIED_AGAINST_SOURCE_BYTES,
+                evidence.verification_level,
+            )
+
+    def test_artifactJsonCannotSupplyVerificationLevel(self):
+        with model_evaluation_artifacts() as artifact_dir:
+            summary = self._summary(artifact_dir)
+            summary["verificationLevel"] = "VERIFIED_AGAINST_SOURCE_BYTES"
+            self._write_summary_and_reseal(artifact_dir, summary)
+
+            with self.assertRaisesRegex(ModelEvaluationArtifactSetError, "unsupported fields: verificationLevel"):
+                read_validated_model_evaluation_artifact_set(artifact_dir)
 
     def test_artifactFromDatasetACannotVerifyAgainstDifferentDatasetB(self):
         with model_evaluation_artifacts() as artifact_dir:

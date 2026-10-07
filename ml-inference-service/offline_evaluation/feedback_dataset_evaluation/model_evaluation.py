@@ -46,6 +46,9 @@ SINGLE_CLASS_MODEL_LINEAGE_RECORDS = "SINGLE_CLASS_MODEL_LINEAGE_RECORDS"
 UNEXPECTED_ML_EVIDENCE_LOSS = "UNEXPECTED_ML_EVIDENCE_LOSS"
 INVALID_ML_EVIDENCE_PRESENT = "INVALID_ML_EVIDENCE_PRESENT"
 MODEL_EVALUATION_PARTIAL_COVERAGE = "MODEL_EVALUATION_PARTIAL_COVERAGE"
+SOURCE_DATASET_TRUNCATED = "SOURCE_DATASET_TRUNCATED"
+SOURCE_DATASET_REQUIRED_FIELDS_MISSING = "SOURCE_DATASET_REQUIRED_FIELDS_MISSING"
+SOURCE_DATASET_INVALID_ROWS_SKIPPED = "SOURCE_DATASET_INVALID_ROWS_SKIPPED"
 SOURCE_DATASET_VERSION = DATASET_VERSION
 EVALUATION_TIME_BASIS = "FEEDBACK_CREATED_AT"
 ROOT_FIELDS = {
@@ -150,6 +153,9 @@ ALLOWED_WARNINGS = {
     UNEXPECTED_ML_EVIDENCE_LOSS,
     INVALID_ML_EVIDENCE_PRESENT,
     MODEL_EVALUATION_PARTIAL_COVERAGE,
+    SOURCE_DATASET_TRUNCATED,
+    SOURCE_DATASET_REQUIRED_FIELDS_MISSING,
+    SOURCE_DATASET_INVALID_ROWS_SKIPPED,
 }
 
 
@@ -218,7 +224,9 @@ def build_model_specific_evaluation_summary(
         **ranking_metrics,
     })
     disagreement = _build_rules_vs_ml_disagreement(evaluated)
+    source_dataset = build_source_dataset_identity(dataset)
     warnings = _expected_warnings(
+        source_dataset,
         len(records),
         len(evaluated),
         len(positives),
@@ -229,7 +237,7 @@ def build_model_specific_evaluation_summary(
     summary = {
         "reportType": MODEL_EVALUATION_REPORT_TYPE,
         "generatedAt": generated_at,
-        "sourceDataset": build_source_dataset_identity(dataset),
+        "sourceDataset": source_dataset,
         "metricBasis": MODEL_EVALUATION_METRIC_BASIS,
         "evaluationSubject": requested_identity.as_subject(),
         "evaluationWindow": {
@@ -320,6 +328,7 @@ def validate_model_evaluation_summary(summary: dict[str, Any]) -> dict[str, Any]
     _validate_machine_code_set(summary.get("limitations"), REQUIRED_LIMITATIONS, "limitations", exact=True)
     _validate_machine_code_set(summary.get("warnings"), ALLOWED_WARNINGS, "warnings", exact=False)
     expected_warnings = _expected_warnings(
+        source_dataset,
         population["recordsConsidered"],
         population["recordsEvaluated"],
         class_balance["positiveClassCount"],
@@ -711,6 +720,7 @@ def _bounded_count(value: Any, location: str, maximum: int = MAX_DATASET_RECORDS
 
 
 def _expected_warnings(
+        source_dataset: dict[str, Any],
         records_considered: int,
         records_evaluated: int,
         positive_class_count: int,
@@ -719,6 +729,12 @@ def _expected_warnings(
         invalid_prediction_evidence: int,
 ) -> list[str]:
     warnings = []
+    if source_dataset["truncated"]:
+        warnings.append(SOURCE_DATASET_TRUNCATED)
+    if source_dataset["skippedMissingRequiredFieldCount"] > 0:
+        warnings.append(SOURCE_DATASET_REQUIRED_FIELDS_MISSING)
+    if source_dataset["skippedInvalidSourceRecordCount"] > 0:
+        warnings.append(SOURCE_DATASET_INVALID_ROWS_SKIPPED)
     if records_evaluated == 0:
         warnings.extend((INSUFFICIENT_MODEL_LINEAGE_RECORDS, MODEL_PREDICTION_SIGNAL_UNAVAILABLE))
     elif positive_class_count == 0 or negative_class_count == 0:
