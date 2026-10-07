@@ -365,15 +365,25 @@ class EvidenceGatedFinalizeCoordinatorIntegrationTest extends AbstractIntegratio
         occurrenceA.setReasonCodes(List.of("HIGH_VELOCITY"));
         occurrenceA.setScoreDetails(Map.of("modelName", "rules-engine", "modelVersion", "model-a"));
         EvidenceSnapshotItem evidenceA = new EvidenceSnapshotItem(
+                "event-a:HIGH_VELOCITY:0",
+                "event-a",
+                occurrenceA.getTransactionId(),
+                occurrenceA.getCorrelationId(),
                 "HIGH_VELOCITY",
                 EvidenceType.VELOCITY_SIGNAL,
-                EvidenceSeverity.HIGH,
                 EvidenceSource.FRAUD_SCORING_SERVICE,
                 EvidenceStatus.AVAILABLE,
+                EvidenceSeverity.HIGH,
                 "High velocity",
                 "High transaction velocity was observed.",
                 "3",
                 "1",
+                Map.of(),
+                Instant.parse("2026-05-03T00:00:00Z"),
+                Instant.parse("2026-05-03T00:00:01Z"),
+                "RULE_BASED",
+                "rules-engine",
+                "model-a",
                 Instant.parse("2026-05-03T00:00:00Z")
         );
         occurrenceA.setEvidenceSnapshot(List.of(evidenceA));
