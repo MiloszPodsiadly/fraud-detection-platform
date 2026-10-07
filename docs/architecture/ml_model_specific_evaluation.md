@@ -19,9 +19,9 @@ ML Model Evaluation answers:
 - It never uses latest runtime model, majority version, registry state, or current deployment state.
 
 The model-specific path uses an explicit exact-identity policy. Records whose lineage exactly matches the requested
-identity are evaluated. Records with missing lineage are counted as `MODEL_LINEAGE_UNAVAILABLE` and excluded. Records
-with complete but different lineage are counted as `MODEL_IDENTITY_MISMATCH` and excluded. Unknown lineage is never
-merged into a known model group.
+identity are evaluated. Records with complete but different lineage are counted as `MODEL_IDENTITY_MISMATCH` and
+excluded. Dataset v2 rejects `AVAILABLE` prediction evidence with missing, partial, or invalid model identity; a
+defensively supplied in-memory record with that impossible shape is classified as invalid prediction evidence.
 
 The model-specific report is aggregate-only. It contains counts, class balance, evaluation window, limitations, and
 explicit unavailable metric reasons. It does not emit `evaluationRecordId`, `transactionReference`, raw identifiers,
@@ -67,12 +67,18 @@ same feedback scoring occurrence. It counts ML-high/Rules-low, Rules-high/ML-low
 Rows without Rules evidence are reported separately and never become low risk; rows excluded by exact model identity
 cannot contribute a Rules signal. The aggregate contains counts only, not record or transaction identifiers.
 
-The model summary reconciles every considered row as evaluated, legitimately missing prediction evidence,
-unexpectedly missing prediction evidence, invalid prediction evidence, missing lineage, or exact-identity mismatch.
+The model summary reconciles every considered row as evaluated, exact-identity mismatch, source-identity mismatch,
+legitimately missing prediction evidence, unexpectedly missing prediction evidence, or invalid prediction evidence.
 `recordsWithPredictionEvidence` counts only rows carrying usable direct ML prediction evidence. A complete direct
 identity that differs from the requested model is counted as a model identity mismatch with evidence; an upstream
 source/projection identity conflict has no exported direct prediction and is counted separately as
 `recordsExcludedSourceIdentityMismatch`.
+
+The exact population equations are:
+
+`recordsConsidered = recordsEvaluated + recordsExcludedIdentityMismatch + recordsExcludedSourceIdentityMismatch + recordsExcludedMissingPredictionEvidence + recordsExcludedUnexpectedMissingPredictionEvidence + recordsExcludedInvalidPredictionEvidence`
+
+`recordsWithPredictionEvidence = recordsEvaluated + recordsExcludedIdentityMismatch`
 
 Warnings are deterministic evidence-quality facts derived from that population. `UNEXPECTED_ML_EVIDENCE_LOSS`
 records unexpected missing direct evidence, `INVALID_ML_EVIDENCE_PRESENT` records malformed evidence, and

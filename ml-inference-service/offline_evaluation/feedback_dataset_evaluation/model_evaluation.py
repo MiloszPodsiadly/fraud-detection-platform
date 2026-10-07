@@ -36,7 +36,6 @@ from app.model_identity_policy import (
 
 MODEL_EVALUATION_METRIC_BASIS = "BOUNDED_ANALYST_FEEDBACK_BY_EXACT_ML_MODEL_IDENTITY"
 MODEL_IDENTITY_COMPLETE = "COMPLETE"
-MODEL_LINEAGE_UNAVAILABLE = "MODEL_LINEAGE_UNAVAILABLE"
 MODEL_IDENTITY_MISMATCH = "MODEL_IDENTITY_MISMATCH"
 MODEL_PREDICTION_SIGNAL_UNAVAILABLE = "MODEL_PREDICTION_SIGNAL_UNAVAILABLE"
 RULES_SIGNAL_UNAVAILABLE = "RULES_SIGNAL_UNAVAILABLE"
@@ -77,7 +76,6 @@ POPULATION_FIELDS = {
     "recordsConsidered",
     "recordsWithPredictionEvidence",
     "recordsEvaluated",
-    "recordsExcludedMissingLineage",
     "recordsExcludedIdentityMismatch",
     "recordsExcludedSourceIdentityMismatch",
     "recordsExcludedMissingPredictionEvidence",
@@ -98,9 +96,7 @@ SOURCE_DATASET_FIELDS = {
 CLASS_BALANCE_FIELDS = {"positiveClassCount", "negativeClassCount"}
 LINEAGE_POLICY_FIELDS = {
     "policy",
-    "unknownLineageBehavior",
     "identityMismatchBehavior",
-    "missingLineageReason",
     "identityMismatchReason",
 }
 SUPPORTED_METRICS_FIELDS = {"classBalance", "mlPredictionMetrics", "rulesVsMlDisagreement"}
@@ -188,7 +184,6 @@ class ModelEvaluationIdentity:
 class _ModelEvaluationPopulation:
     records_with_prediction_evidence: int
     records_evaluated: list[FeedbackDatasetRecord]
-    records_excluded_missing_lineage: int
     records_excluded_identity_mismatch: int
     records_excluded_source_identity_mismatch: int
     records_excluded_missing_prediction_evidence: int
@@ -249,7 +244,6 @@ def build_model_specific_evaluation_summary(
             "recordsConsidered": len(records),
             "recordsWithPredictionEvidence": population.records_with_prediction_evidence,
             "recordsEvaluated": len(evaluated),
-            "recordsExcludedMissingLineage": population.records_excluded_missing_lineage,
             "recordsExcludedIdentityMismatch": population.records_excluded_identity_mismatch,
             "recordsExcludedSourceIdentityMismatch": population.records_excluded_source_identity_mismatch,
             "recordsExcludedMissingPredictionEvidence": population.records_excluded_missing_prediction_evidence,
@@ -264,9 +258,7 @@ def build_model_specific_evaluation_summary(
         },
         "lineagePolicy": {
             "policy": "REQUESTED_EXACT_IDENTITY",
-            "unknownLineageBehavior": "EXCLUDE",
             "identityMismatchBehavior": "EXCLUDE",
-            "missingLineageReason": MODEL_LINEAGE_UNAVAILABLE,
             "identityMismatchReason": MODEL_IDENTITY_MISMATCH,
         },
         "supportedMetrics": {
@@ -303,7 +295,6 @@ def validate_model_evaluation_summary(summary: dict[str, Any]) -> dict[str, Any]
         raise ValueError("model evaluation class balance must sum to recordsEvaluated")
     if population["recordsConsidered"] != (
             population["recordsEvaluated"]
-            + population["recordsExcludedMissingLineage"]
             + population["recordsExcludedIdentityMismatch"]
             + population["recordsExcludedSourceIdentityMismatch"]
             + population["recordsExcludedMissingPredictionEvidence"]
@@ -313,7 +304,6 @@ def validate_model_evaluation_summary(summary: dict[str, Any]) -> dict[str, Any]
         raise ValueError("model evaluation population counts must reconcile")
     if population["recordsWithPredictionEvidence"] != (
             population["recordsEvaluated"]
-            + population["recordsExcludedMissingLineage"]
             + population["recordsExcludedIdentityMismatch"]
     ):
         raise ValueError("model evaluation prediction evidence counts must reconcile")
@@ -442,9 +432,7 @@ def _validate_lineage_policy(value: Any) -> None:
     _reject_unknown_or_missing(value, LINEAGE_POLICY_FIELDS, "lineagePolicy")
     expected = {
         "policy": "REQUESTED_EXACT_IDENTITY",
-        "unknownLineageBehavior": "EXCLUDE",
         "identityMismatchBehavior": "EXCLUDE",
-        "missingLineageReason": MODEL_LINEAGE_UNAVAILABLE,
         "identityMismatchReason": MODEL_IDENTITY_MISMATCH,
     }
     if value != expected:
@@ -754,7 +742,6 @@ def _partition_records(
 ) -> _ModelEvaluationPopulation:
     with_prediction_evidence = 0
     evaluated: list[FeedbackDatasetRecord] = []
-    missing_lineage = 0
     identity_mismatch = 0
     source_identity_mismatch = 0
     missing_prediction_evidence = 0
@@ -779,16 +766,13 @@ def _partition_records(
             invalid_prediction_evidence += 1
             continue
         with_prediction_evidence += 1
-        if identity_state == "MISSING":
-            missing_lineage += 1
-        elif not _matches_identity(record, requested_identity):
+        if not _matches_identity(record, requested_identity):
             identity_mismatch += 1
         else:
             evaluated.append(record)
     return _ModelEvaluationPopulation(
         records_with_prediction_evidence=with_prediction_evidence,
         records_evaluated=evaluated,
-        records_excluded_missing_lineage=missing_lineage,
         records_excluded_identity_mismatch=identity_mismatch,
         records_excluded_source_identity_mismatch=source_identity_mismatch,
         records_excluded_missing_prediction_evidence=missing_prediction_evidence,
@@ -845,8 +829,6 @@ def _model_identity_state(record: FeedbackDatasetRecord) -> str:
         record.ml_feature_contract_version,
     )
     present = sum(value is not None for value in identity)
-    if present == 0:
-        return "MISSING"
     if present != len(identity):
         return "INVALID"
     try:

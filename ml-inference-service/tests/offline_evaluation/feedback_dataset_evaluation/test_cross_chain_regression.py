@@ -201,7 +201,6 @@ class FeedbackEvaluationCrossChainRegressionTest(unittest.TestCase):
                     "recordsConsidered": 4,
                     "recordsWithPredictionEvidence": 3,
                     "recordsEvaluated": 2,
-                    "recordsExcludedMissingLineage": 0,
                     "recordsExcludedIdentityMismatch": 1,
                     "recordsExcludedSourceIdentityMismatch": 0,
                     "recordsExcludedMissingPredictionEvidence": 1,

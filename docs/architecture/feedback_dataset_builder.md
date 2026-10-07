@@ -39,7 +39,7 @@ private occurrence identifiers.
 
 This is separate from the Engine Intelligence Feedback Dataset Export bounded context. The feedback dataset does not replace that export contract,
 does not use `alert-service/src/main/java/com/frauddetection/alert/engineintelligence/dataset` as source of truth, and
-does not use `ml-inference-service/app/feedback/feedback_dataset.py` as source of truth.
+does not use the removed competing `app.feedback.feedback_dataset` local training-store path as source of truth.
 
 ## Request And Query
 

@@ -17,6 +17,10 @@ class FeedbackDatasetEvaluationScopeGuardTest(unittest.TestCase):
         with self.assertRaises(ModuleNotFoundError):
             importlib.import_module("offline_evaluation.dataset_reader")
 
+    def test_removed_competing_feedback_training_dataset_cannot_resolve(self):
+        with self.assertRaises(ModuleNotFoundError):
+            importlib.import_module("app.feedback.feedback_dataset")
+
     def test_noRuntimeSurfaces(self):
         self.assertNotInAnyFeedbackDatasetEvaluationFile("FastAPI", "Flask", "@app.route", "uvicorn", "@RestController", "@RequestMapping")
 

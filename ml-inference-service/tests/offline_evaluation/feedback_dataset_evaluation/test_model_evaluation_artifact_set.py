@@ -290,7 +290,6 @@ class ModelEvaluationArtifactSetReaderTest(unittest.TestCase):
                 "recordsConsidered": MAX_DATASET_RECORDS + 1,
                 "recordsWithPredictionEvidence": MAX_DATASET_RECORDS + 1,
                 "recordsEvaluated": MAX_DATASET_RECORDS + 1,
-                "recordsExcludedMissingLineage": 0,
                 "recordsExcludedIdentityMismatch": 0,
                 "recordsExcludedSourceIdentityMismatch": 0,
                 "recordsExcludedMissingPredictionEvidence": 0,

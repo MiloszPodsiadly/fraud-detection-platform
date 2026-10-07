@@ -71,7 +71,6 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
         self.assertEqual(MODEL_EVALUATION_REPORT_TYPE, summary["reportType"])
         self.assertEqual(MODEL_X.as_subject(), summary["evaluationSubject"])
         self.assertEqual(2, summary["population"]["recordsEvaluated"])
-        self.assertEqual(0, summary["population"]["recordsExcludedMissingLineage"])
         self.assertEqual(0, summary["population"]["recordsExcludedIdentityMismatch"])
         self.assertEqual({"positiveClassCount": 1, "negativeClassCount": 1}, summary["classBalance"])
 
@@ -86,13 +85,11 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
         self.assertEqual(1, summary["population"]["recordsExcludedIdentityMismatch"])
         self.assertEqual("EXCLUDE", summary["lineagePolicy"]["identityMismatchBehavior"])
 
-    def test_unknownLineageIsNotAttributedToRequestedModel(self):
+    def test_legitimatelyAbsentPredictionIsNotAttributedToRequestedModel(self):
         summary = self._model_summary(record(), self._model_record("eval_22222222222222222222222222222222", MODEL_X))
 
         self.assertEqual(1, summary["population"]["recordsEvaluated"])
         self.assertEqual(1, summary["population"]["recordsExcludedMissingPredictionEvidence"])
-        self.assertEqual(0, summary["population"]["recordsExcludedMissingLineage"])
-        self.assertEqual("MODEL_LINEAGE_UNAVAILABLE", summary["lineagePolicy"]["missingLineageReason"])
 
     def test_partialLineageFailsInsteadOfBecomingUnavailableLineage(self):
         with jsonl_file(jsonl(record(
@@ -147,7 +144,6 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
             "recordsConsidered": 10,
             "recordsWithPredictionEvidence": 4,
             "recordsEvaluated": 4,
-            "recordsExcludedMissingLineage": 0,
             "recordsExcludedIdentityMismatch": 0,
             "recordsExcludedSourceIdentityMismatch": 2,
             "recordsExcludedMissingPredictionEvidence": 0,
@@ -221,7 +217,6 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
             "recordsConsidered": 10,
             "recordsWithPredictionEvidence": 4,
             "recordsEvaluated": 4,
-            "recordsExcludedMissingLineage": 0,
             "recordsExcludedIdentityMismatch": 0,
             "recordsExcludedSourceIdentityMismatch": 1,
             "recordsExcludedMissingPredictionEvidence": 0,
@@ -645,7 +640,7 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
         metrics = summary["supportedMetrics"]["mlPredictionMetrics"]
         self.assertEqual((1, 0, 0, 0), self._confusion_counts(metrics))
 
-    def test_directEvaluatorAccountsForMissingLineageDefensively(self):
+    def test_directEvaluatorRejectsMissingLineageAsInvalidPredictionEvidence(self):
         dataset = self._dataset(self._model_record("eval_11111111111111111111111111111111", MODEL_X))
         without_lineage = replace(
             dataset.records[0],
@@ -660,8 +655,8 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
             GENERATED_AT,
         )
 
-        self.assertEqual(1, summary["population"]["recordsWithPredictionEvidence"])
-        self.assertEqual(1, summary["population"]["recordsExcludedMissingLineage"])
+        self.assertEqual(0, summary["population"]["recordsWithPredictionEvidence"])
+        self.assertEqual(1, summary["population"]["recordsExcludedInvalidPredictionEvidence"])
         self.assertEqual(0, summary["population"]["recordsEvaluated"])
 
     def test_directEvaluatorAccountsForInvalidPredictionEvidenceDefensively(self):
@@ -694,7 +689,6 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
                 )
 
                 self.assertEqual(1, summary["population"]["recordsExcludedInvalidPredictionEvidence"])
-                self.assertEqual(0, summary["population"]["recordsExcludedMissingLineage"])
                 self.assertEqual(0, summary["population"]["recordsWithPredictionEvidence"])
 
     def test_directEvaluatorRejectsNoncanonicalPredictionScoreScaleDefensively(self):
@@ -878,11 +872,11 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
 
     def test_modelEvaluationSummaryValidatorAcceptsBoundedCounts(self):
         cases = (
-            (0, 0, 0, 0, 0, 0),
-            (MAX_DATASET_RECORDS, 0, MAX_DATASET_RECORDS, 0, 0, 0),
-            (MAX_DATASET_RECORDS, 0, 0, MAX_DATASET_RECORDS, 0, 0),
-            (MAX_DATASET_RECORDS, MAX_DATASET_RECORDS, 0, 0, MAX_DATASET_RECORDS, 0),
-            (MAX_DATASET_RECORDS, MAX_DATASET_RECORDS, 0, 0, 0, MAX_DATASET_RECORDS),
+            (0, 0, 0, 0, 0),
+            (MAX_DATASET_RECORDS, 0, 0, 0, 0),
+            (MAX_DATASET_RECORDS, 0, MAX_DATASET_RECORDS, 0, 0),
+            (MAX_DATASET_RECORDS, MAX_DATASET_RECORDS, 0, MAX_DATASET_RECORDS, 0),
+            (MAX_DATASET_RECORDS, MAX_DATASET_RECORDS, 0, 0, MAX_DATASET_RECORDS),
         )
 
         for accounting in cases:
@@ -899,7 +893,6 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
             ("population", "recordsConsidered"),
             ("population", "recordsWithPredictionEvidence"),
             ("population", "recordsEvaluated"),
-            ("population", "recordsExcludedMissingLineage"),
             ("population", "recordsExcludedIdentityMismatch"),
             ("population", "recordsExcludedSourceIdentityMismatch"),
             ("population", "recordsExcludedMissingPredictionEvidence"),
@@ -916,7 +909,7 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
                     summary = self._model_summary(
                         self._model_record("eval_11111111111111111111111111111111", MODEL_X)
                     )
-                    self._set_accounting(summary, 0, 0, 0, 0, 0, 0)
+                    self._set_accounting(summary, 0, 0, 0, 0, 0)
                     summary[section][field] = invalid_value
 
                     with self.assertRaisesRegex(
@@ -933,7 +926,6 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
             summary,
             MAX_DATASET_RECORDS + 1,
             MAX_DATASET_RECORDS + 1,
-            0,
             0,
             MAX_DATASET_RECORDS,
             1,
@@ -1076,13 +1068,12 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
         )
 
     @staticmethod
-    def _set_accounting(summary, considered, evaluated, missing, mismatch, positives, negatives):
-        missing_prediction = considered - evaluated - missing - mismatch
+    def _set_accounting(summary, considered, evaluated, mismatch, positives, negatives):
+        missing_prediction = considered - evaluated - mismatch
         summary["population"] = {
             "recordsConsidered": considered,
-            "recordsWithPredictionEvidence": evaluated + missing + mismatch,
+            "recordsWithPredictionEvidence": evaluated + mismatch,
             "recordsEvaluated": evaluated,
-            "recordsExcludedMissingLineage": missing,
             "recordsExcludedIdentityMismatch": mismatch,
             "recordsExcludedSourceIdentityMismatch": 0,
             "recordsExcludedMissingPredictionEvidence": missing_prediction,
