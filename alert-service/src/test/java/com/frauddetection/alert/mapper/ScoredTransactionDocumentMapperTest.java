@@ -1,7 +1,17 @@
 package com.frauddetection.alert.mapper;
 
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
+import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceAgreementStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparison;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceComparisonType;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceEngineResult;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceRiskMismatchStatus;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
+import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.events.model.MerchantInfo;
 import com.frauddetection.common.events.model.Money;
@@ -125,7 +135,7 @@ class ScoredTransactionDocumentMapperTest {
                 Map.of(),
                 true,
                 List.of(),
-                null,
+                unavailableMlSummary(),
                 null,
                 MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE,
                 AnalystRecommendationResult.absent()
@@ -138,6 +148,40 @@ class ScoredTransactionDocumentMapperTest {
                 .isEqualTo(MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE);
         assertThat(domain.mlPredictionEvidenceOmissionReason())
                 .isEqualTo(MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE);
+    }
+
+    private EngineIntelligenceSummary unavailableMlSummary() {
+        return new EngineIntelligenceSummary(
+                EngineIntelligenceSummary.CONTRACT_VERSION,
+                Instant.parse("2026-01-01T00:00:01Z"),
+                List.of(
+                        new EngineIntelligenceEngineResult(
+                                "rules.primary",
+                                FraudEngineType.RULES,
+                                FraudEngineStatus.AVAILABLE,
+                                RiskLevel.CRITICAL,
+                                EngineIntelligenceScoreBucket.VERY_HIGH,
+                                List.of("DEVICE_NOVELTY")
+                        ),
+                        new EngineIntelligenceEngineResult(
+                                "ml.python.primary",
+                                FraudEngineType.ML_MODEL,
+                                FraudEngineStatus.UNAVAILABLE,
+                                null,
+                                EngineIntelligenceScoreBucket.UNAVAILABLE,
+                                List.of("ML_MODEL_UNAVAILABLE")
+                        )
+                ),
+                new EngineIntelligenceComparison(
+                        EngineIntelligenceComparisonType.RULES_VS_ML,
+                        List.of("rules.primary", "ml.python.primary"),
+                        EngineIntelligenceAgreementStatus.PARTIAL,
+                        EngineIntelligenceRiskMismatchStatus.NOT_COMPARABLE,
+                        EngineIntelligenceScoreDeltaBucket.UNAVAILABLE
+                ),
+                List.of(),
+                List.of()
+        );
     }
 
     @Test

@@ -208,7 +208,7 @@
                       "const": "MISSING_UNEXPECTEDLY"
                     },
                     "mlPredictionEvidenceOmissionReason": {
-                      "enum": ["ML_ENGINE_UNAVAILABLE", null]
+                      "enum": ["DIAGNOSTIC_ENRICHMENT_UNAVAILABLE", "ML_ENGINE_UNAVAILABLE", null]
                     },
                     "mlPredictionScore": {"type": "null"},
                     "mlPredictionRiskLevel": {"type": "null"},
@@ -476,6 +476,7 @@
             "mlPredictionEvidenceOmissionReason": {
               "enum": [
                 "DIAGNOSTIC_EMISSION_DISABLED",
+                "DIAGNOSTIC_ENRICHMENT_UNAVAILABLE",
                 "ML_ENGINE_UNAVAILABLE",
                 "SOURCE_TIMESTAMP_MISSING",
                 "INVALID_SCORE",

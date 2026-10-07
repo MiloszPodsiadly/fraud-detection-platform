@@ -524,6 +524,7 @@ class FeedbackDatasetBuilderTest {
     void authoritativeOmissionReasonsMapToBoundedDatasetStatuses() {
         List<MlPredictionEvidenceOmissionReason> reasons = List.of(
                 MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE,
                 MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE,
                 MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING,
                 MlPredictionEvidenceOmissionReason.INVALID_SCORE,
@@ -552,6 +553,7 @@ class FeedbackDatasetBuilderTest {
         assertThat(result.records()).extracting(FeedbackDatasetRecord::mlPredictionEvidenceStatus)
                 .containsExactly(
                         FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT,
+                        FeedbackDatasetMlPredictionEvidenceStatus.MISSING_UNEXPECTEDLY,
                         FeedbackDatasetMlPredictionEvidenceStatus.MISSING_UNEXPECTEDLY,
                         FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED,
                         FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED,

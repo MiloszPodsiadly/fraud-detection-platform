@@ -235,6 +235,7 @@ class FeedbackDatasetSchemaTest(unittest.TestCase):
 
     def test_acceptsBoundedNonAvailableEvidenceStatuses(self):
         cases = (
+            ("MISSING_UNEXPECTEDLY", "DIAGNOSTIC_ENRICHMENT_UNAVAILABLE"),
             ("MISSING_UNEXPECTEDLY", "ML_ENGINE_UNAVAILABLE"),
             ("MALFORMED", "INVALID_SCORE"),
             ("MALFORMED", "IDENTITY_VALIDATION_FAILURE"),

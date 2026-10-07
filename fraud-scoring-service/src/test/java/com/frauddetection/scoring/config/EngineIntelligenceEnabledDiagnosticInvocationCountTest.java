@@ -39,8 +39,8 @@ class EngineIntelligenceEnabledDiagnosticInvocationCountTest {
             var enrichment = context.getBean(EngineIntelligenceEmissionService.class)
                     .emitIfEnabled(FraudScoringRequest.from(validRulesInput()));
 
-            assertThat(enrichment).isPresent();
-            var value = enrichment.orElseThrow();
+            assertThat(enrichment.enrichment()).isPresent();
+            var value = enrichment.enrichment().orElseThrow();
             assertThat(value.mlPredictionEvidence()).isPresent();
             assertThat(value.mlPredictionEvidence().orElseThrow().sourceExecutionTimestamp())
                     .isEqualTo(SOURCE_INFERENCE_AT)

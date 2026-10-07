@@ -39,7 +39,8 @@ class EngineIntelligenceEmissionMetricsTest {
                 metrics
         );
 
-        assertThat(service.emitIfEnabled(request())).isEmpty();
+        assertThat(service.emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.DISABLED);
         verify(metrics).recordSkippedDisabled();
         verify(metrics, never()).recordAttempt();
         verify(metrics, never()).recordSuccess();
@@ -64,7 +65,7 @@ class EngineIntelligenceEmissionMetricsTest {
                 )
         ));
 
-        assertThat(service(true, pipeline, metrics).emitIfEnabled(request()))
+        assertThat(service(true, pipeline, metrics).emitIfEnabled(request()).enrichment())
                 .flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
                 .contains(summary);
         verify(metrics).recordAttempt();
@@ -81,7 +82,8 @@ class EngineIntelligenceEmissionMetricsTest {
                 mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class);
         when(pipeline.enrich(any())).thenReturn(Optional.empty());
 
-        assertThat(service(true, pipeline, metrics).emitIfEnabled(request())).isEmpty();
+        assertThat(service(true, pipeline, metrics).emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT);
         verify(metrics).recordAttempt();
         verify(metrics).recordOmitted(EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT);
         verify(metrics, never()).recordSuccess();
@@ -101,7 +103,7 @@ class EngineIntelligenceEmissionMetricsTest {
                 )
         ));
 
-        assertThat(service(true, pipeline, metrics).emitIfEnabled(request())).isPresent();
+        assertThat(service(true, pipeline, metrics).emitIfEnabled(request()).enrichment()).isPresent();
 
         verify(metrics).recordSuccess();
         verify(metrics).recordEvidenceOmitted(MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING);
@@ -111,7 +113,8 @@ class EngineIntelligenceEmissionMetricsTest {
     void missingPipelineRecordsPipelineUnavailableAndLatency() {
         EngineIntelligenceEmissionMetrics metrics = mock(EngineIntelligenceEmissionMetrics.class);
 
-        assertThat(service(true, null, metrics).emitIfEnabled(request())).isEmpty();
+        assertThat(service(true, null, metrics).emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.PIPELINE_UNAVAILABLE);
         verify(metrics).recordAttempt();
         verify(metrics).recordOmitted(EngineIntelligenceEmissionOmissionReason.PIPELINE_UNAVAILABLE);
         verify(metrics, never()).recordSuccess();
@@ -125,7 +128,8 @@ class EngineIntelligenceEmissionMetricsTest {
                 mock(EngineIntelligenceDiagnosticEnrichmentPipeline.class);
         when(pipeline.enrich(any())).thenThrow(new IllegalStateException("raw-secret-must-not-be-a-label"));
 
-        assertThat(service(true, pipeline, metrics).emitIfEnabled(request())).isEmpty();
+        assertThat(service(true, pipeline, metrics).emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
         verify(metrics).recordAttempt();
         verify(metrics).recordOmitted(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
         verify(metrics, never()).recordSuccess();
@@ -146,7 +150,7 @@ class EngineIntelligenceEmissionMetricsTest {
                 )
         ));
 
-        assertThat(service(true, pipeline, metrics).emitIfEnabled(request()))
+        assertThat(service(true, pipeline, metrics).emitIfEnabled(request()).enrichment())
                 .flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
                 .contains(summary);
     }
@@ -182,6 +186,7 @@ class EngineIntelligenceEmissionMetricsTest {
         );
         assertThat(Arrays.asList(MlPredictionEvidenceOmissionReason.values())).containsExactly(
                 MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE,
                 MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE,
                 MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING,
                 MlPredictionEvidenceOmissionReason.INVALID_SCORE,

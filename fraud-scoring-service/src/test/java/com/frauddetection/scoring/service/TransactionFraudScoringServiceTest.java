@@ -12,6 +12,8 @@ import com.frauddetection.scoring.mapper.TransactionScoredEventMapper;
 import com.frauddetection.scoring.messaging.TransactionScoredEventPublisher;
 import com.frauddetection.scoring.observability.ScoringMetrics;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionOmissionReason;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionResult;
 import org.junit.jupiter.api.Test;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
@@ -67,7 +69,9 @@ class TransactionFraudScoringServiceTest {
         TransactionScoredEvent scoredEvent = TransactionFixtures.scoredTransaction().build();
 
         when(scoringEngine.score(FraudScoringRequest.from(event))).thenReturn(scoreResult);
-        when(emissionService.emitIfEnabled(FraudScoringRequest.from(event))).thenReturn(Optional.empty());
+        when(emissionService.emitIfEnabled(FraudScoringRequest.from(event))).thenReturn(
+                EngineIntelligenceEmissionResult.omitted(EngineIntelligenceEmissionOmissionReason.DISABLED)
+        );
         when(mapper.toEvent(
                 FraudScoringRequest.from(event),
                 scoreResult,

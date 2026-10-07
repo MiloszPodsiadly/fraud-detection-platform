@@ -107,6 +107,7 @@ The authoritative omission mapping is:
 | Scored-event omission reason | Dataset status | Meaning |
 | --- | --- | --- |
 | `DIAGNOSTIC_EMISSION_DISABLED` | `LEGITIMATELY_ABSENT` | Direct evaluation evidence was intentionally not emitted; this does not assert that ML inference never executed. |
+| `DIAGNOSTIC_ENRICHMENT_UNAVAILABLE` | `MISSING_UNEXPECTEDLY` | Diagnostic enrichment failed before a direct ML engine outcome could be established. |
 | `LEGITIMATE_ABSENCE` | `LEGITIMATELY_ABSENT` | Direct evidence absence was positively established, not inferred from missing data. |
 | `ML_ENGINE_UNAVAILABLE` | `MISSING_UNEXPECTEDLY` | The expected ML engine did not provide usable evidence. |
 | `SOURCE_TIMESTAMP_MISSING` | `MALFORMED` | Required source execution time was absent. |
@@ -135,6 +136,11 @@ resolution contradictions are retained with `MALFORMED` or `IDENTITY_MISMATCH`; 
 non-ML source contracts still fail closed as invalid source rows. The lookup is one bounded `findAllById` batch after
 the dataset row limit is applied; there is no transaction-to-latest, current projection, registry, runtime-model, or
 timestamp-proximity fallback.
+
+A valid analyst feedback row with missing, unavailable, malformed, or mismatched ML evidence remains a successful,
+explicit dataset observation. It is excluded only from the exact model metric population according to its bounded
+status and remains represented in model population counters. No valid feedback observation silently disappears from
+population accounting solely because ML evidence is unusable.
 
 The builder never serializes `FraudFeedbackRecord` directly.
 

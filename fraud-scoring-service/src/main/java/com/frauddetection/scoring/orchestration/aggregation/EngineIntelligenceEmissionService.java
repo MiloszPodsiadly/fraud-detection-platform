@@ -9,7 +9,6 @@ import org.springframework.beans.factory.ObjectProvider;
 
 import java.time.Duration;
 import java.util.Objects;
-import java.util.Optional;
 
 public class EngineIntelligenceEmissionService {
 
@@ -29,14 +28,14 @@ public class EngineIntelligenceEmissionService {
         this.metrics = Objects.requireNonNull(metrics, "metrics is required");
     }
 
-    public Optional<EngineIntelligenceEnrichmentResult> emitIfEnabled(FraudScoringRequest scoringRequest) {
+    public EngineIntelligenceEmissionResult emitIfEnabled(FraudScoringRequest scoringRequest) {
         Objects.requireNonNull(scoringRequest, "scoringRequest is required");
         if (!properties.emitEnabled()) {
             recordMetrics(metrics::recordSkippedDisabled);
             recordMetrics(() -> metrics.recordEvidenceOmitted(
                     MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED
             ));
-            return Optional.empty();
+            return EngineIntelligenceEmissionResult.omitted(EngineIntelligenceEmissionOmissionReason.DISABLED);
         }
         recordMetrics(metrics::recordAttempt);
         long startedAtNanos = System.nanoTime();
@@ -45,28 +44,27 @@ public class EngineIntelligenceEmissionService {
             if (pipeline == null) {
                 recordMetrics(() -> metrics.recordOmitted(EngineIntelligenceEmissionOmissionReason.PIPELINE_UNAVAILABLE));
                 log.warn("Engine intelligence enrichment omitted.");
-                return Optional.empty();
+                return EngineIntelligenceEmissionResult.omitted(
+                        EngineIntelligenceEmissionOmissionReason.PIPELINE_UNAVAILABLE
+                );
             }
-            Optional<EngineIntelligenceEnrichmentResult> result = pipeline.enrich(scoringRequest);
+            var result = pipeline.enrich(scoringRequest);
             if (result.isPresent()) {
                 recordMetrics(metrics::recordSuccess);
                 result.orElseThrow().mlPredictionEvidenceOmissionReason()
                         .ifPresent(reason -> recordMetrics(() -> metrics.recordEvidenceOmitted(reason)));
+                return EngineIntelligenceEmissionResult.emitted(result.orElseThrow());
             } else {
                 recordMetrics(() -> metrics.recordOmitted(EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT));
+                return EngineIntelligenceEmissionResult.omitted(EngineIntelligenceEmissionOmissionReason.EMPTY_RESULT);
             }
-            return result;
         } catch (RuntimeException exception) {
             recordMetrics(() -> metrics.recordOmitted(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE));
             log.warn("Engine intelligence enrichment omitted.");
-            return Optional.empty();
+            return EngineIntelligenceEmissionResult.omitted(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
         } finally {
             recordMetrics(() -> metrics.recordLatency(Duration.ofNanos(elapsedNanos(startedAtNanos))));
         }
-    }
-
-    public boolean emitEnabled() {
-        return properties.emitEnabled();
     }
 
     private long elapsedNanos(long startedAtNanos) {

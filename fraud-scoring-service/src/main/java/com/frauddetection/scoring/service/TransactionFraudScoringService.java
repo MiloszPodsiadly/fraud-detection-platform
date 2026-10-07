@@ -13,6 +13,8 @@ import com.frauddetection.scoring.mapper.TransactionScoredEventMapper;
 import com.frauddetection.scoring.messaging.TransactionScoredEventPublisher;
 import com.frauddetection.scoring.observability.ScoringMetrics;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEnrichmentResult;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionOmissionReason;
+import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionResult;
 import com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,14 +64,14 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
         try {
             FraudScoringRequest scoringRequest = FraudScoringRequest.from(event);
             FraudScoreResult scoreResult = fraudScoringEngine.score(scoringRequest);
-            EngineIntelligenceEmission engineIntelligence = engineIntelligence(scoringRequest);
+            EngineIntelligenceEmissionResult engineIntelligence = engineIntelligence(scoringRequest);
             AnalystRecommendationResult analystRecommendation = analystRecommendation(scoreResult, engineIntelligence);
             TransactionScoredEvent scoredEvent = transactionScoredEventMapper.toEvent(
                     scoringRequest,
                     scoreResult,
-                    engineIntelligence.summary(),
-                    engineIntelligence.mlPredictionEvidence(),
-                    engineIntelligence.mlPredictionEvidenceOmissionReason(),
+                    summary(engineIntelligence),
+                    mlPredictionEvidence(engineIntelligence),
+                    mlPredictionEvidenceOmissionReason(engineIntelligence),
                     analystRecommendation
             );
             transactionScoredEventPublisher.publish(scoredEvent);
@@ -100,36 +102,54 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
         }
     }
 
-    private AnalystRecommendationResult analystRecommendation(FraudScoreResult scoreResult, EngineIntelligenceEmission engineIntelligence) {
-        if (engineIntelligence.unavailable()) {
+    private AnalystRecommendationResult analystRecommendation(
+            FraudScoreResult scoreResult,
+            EngineIntelligenceEmissionResult engineIntelligence
+    ) {
+        if (engineIntelligence.omissionReason().isPresent()
+                && engineIntelligence.omissionReason().orElseThrow()
+                != EngineIntelligenceEmissionOmissionReason.DISABLED) {
             return analystRecommendationService.unavailable();
         }
         try {
-            return analystRecommendationService.recommend(scoreResult, engineIntelligence.summary());
+            return analystRecommendationService.recommend(scoreResult, summary(engineIntelligence));
         } catch (RuntimeException exception) {
             log.warn("Analyst recommendation enrichment omitted.", exception);
             return analystRecommendationService.unavailable();
         }
     }
 
-    private EngineIntelligenceEmission engineIntelligence(FraudScoringRequest scoringRequest) {
+    private EngineIntelligenceEmissionResult engineIntelligence(FraudScoringRequest scoringRequest) {
         try {
-            Optional<EngineIntelligenceEnrichmentResult> enrichment =
-                    engineIntelligenceEmissionService.emitIfEnabled(scoringRequest);
-            Optional<MlPredictionEvidenceOmissionReason> fallbackReason = enrichment.isPresent()
-                    ? Optional.empty()
-                    : Optional.of(engineIntelligenceEmissionService.emitEnabled()
-                            ? MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE
-                            : MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED);
-            return new EngineIntelligenceEmission(enrichment, false, fallbackReason);
+            return engineIntelligenceEmissionService.emitIfEnabled(scoringRequest);
         } catch (RuntimeException exception) {
             log.warn("Engine intelligence enrichment omitted.");
-            return new EngineIntelligenceEmission(
-                    Optional.empty(),
-                    true,
-                    Optional.of(MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE)
+            return EngineIntelligenceEmissionResult.omitted(
+                    EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE
             );
         }
+    }
+
+    private Optional<EngineIntelligenceSummary> summary(EngineIntelligenceEmissionResult emission) {
+        return emission.enrichment().flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary);
+    }
+
+    private Optional<MlPredictionEvidenceV1> mlPredictionEvidence(EngineIntelligenceEmissionResult emission) {
+        return emission.enrichment().flatMap(EngineIntelligenceEnrichmentResult::mlPredictionEvidence);
+    }
+
+    private Optional<MlPredictionEvidenceOmissionReason> mlPredictionEvidenceOmissionReason(
+            EngineIntelligenceEmissionResult emission
+    ) {
+        if (emission.enrichment().isPresent()) {
+            return emission.enrichment().orElseThrow().mlPredictionEvidenceOmissionReason();
+        }
+        return Optional.of(switch (emission.omissionReason().orElseThrow()) {
+            case DISABLED -> MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED;
+            case EMPTY_RESULT -> MlPredictionEvidenceOmissionReason.EVIDENCE_SOURCE_INTEGRITY_FAILURE;
+            case PIPELINE_UNAVAILABLE, ORCHESTRATOR_FAILURE, AGGREGATION_FAILURE, MAPPER_FAILURE, UNKNOWN_FAILURE ->
+                    MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE;
+        });
     }
 
     private boolean fallbackUsed(FraudScoreResult result) {
@@ -140,30 +160,4 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
         return Boolean.TRUE.equals(diagnostics.get("fallbackUsed"));
     }
 
-    private record EngineIntelligenceEmission(
-            Optional<EngineIntelligenceEnrichmentResult> enrichment,
-            boolean unavailable,
-            Optional<MlPredictionEvidenceOmissionReason> fallbackOmissionReason
-    ) {
-        private Optional<EngineIntelligenceSummary> summary() {
-            return enrichment.flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary);
-        }
-
-        private Optional<MlPredictionEvidenceV1> mlPredictionEvidence() {
-            return enrichment.flatMap(EngineIntelligenceEnrichmentResult::mlPredictionEvidence);
-        }
-
-        private Optional<MlPredictionEvidenceOmissionReason> mlPredictionEvidenceOmissionReason() {
-            Optional<MlPredictionEvidenceOmissionReason> authoritative = enrichment.flatMap(
-                    EngineIntelligenceEnrichmentResult::mlPredictionEvidenceOmissionReason
-            );
-            if (authoritative.isPresent()) {
-                return authoritative;
-            }
-            if (mlPredictionEvidence().isPresent()) {
-                return Optional.empty();
-            }
-            return fallbackOmissionReason;
-        }
-    }
 }

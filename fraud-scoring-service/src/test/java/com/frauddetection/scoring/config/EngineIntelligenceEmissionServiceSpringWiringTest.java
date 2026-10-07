@@ -102,9 +102,11 @@ class EngineIntelligenceEmissionServiceSpringWiringTest {
                 new NoOpEngineIntelligenceEmissionMetrics()
         );
 
-        assertThat(service.emitIfEnabled(
+        var emission = service.emitIfEnabled(
                 FraudScoringRequest.from(TransactionFixtures.enrichedTransaction().build())
-        )).flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
+        );
+        assertThat(emission.enrichment())
+                .flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary)
                 .contains(summary);
         verify(mapper).map(aggregation);
     }

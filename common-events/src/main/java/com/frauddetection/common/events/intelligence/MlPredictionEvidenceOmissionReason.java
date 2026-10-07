@@ -2,6 +2,7 @@ package com.frauddetection.common.events.intelligence;
 
 public enum MlPredictionEvidenceOmissionReason {
     DIAGNOSTIC_EMISSION_DISABLED,
+    DIAGNOSTIC_ENRICHMENT_UNAVAILABLE,
     ML_ENGINE_UNAVAILABLE,
     SOURCE_TIMESTAMP_MISSING,
     INVALID_SCORE,

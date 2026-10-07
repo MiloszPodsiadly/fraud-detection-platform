@@ -37,13 +37,14 @@ class ProducerEngineIntelligenceFailureIsolationTest {
         var event = new TransactionScoredEventMapper().toEvent(
                 request(),
                 scoreResult(),
-                intelligence.flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary),
-                MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE,
+                intelligence.enrichment().flatMap(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary),
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_ENRICHMENT_UNAVAILABLE,
                 null
         );
         String json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build().writeValueAsString(event);
 
-        assertThat(intelligence).isEmpty();
+        assertThat(intelligence.omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
         assertThat(json).doesNotContain("engineIntelligence", "raw-secret-must-not-leak");
     }
 
@@ -58,7 +59,8 @@ class ProducerEngineIntelligenceFailureIsolationTest {
         when(mapper.map(aggregation)).thenThrow(new IllegalStateException("raw-secret-must-not-leak"));
         var emission = service(true, pipeline(orchestrator, aggregationService, mapper));
 
-        assertThat(emission.emitIfEnabled(request())).isEmpty();
+        assertThat(emission.emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
     }
 
     @Test

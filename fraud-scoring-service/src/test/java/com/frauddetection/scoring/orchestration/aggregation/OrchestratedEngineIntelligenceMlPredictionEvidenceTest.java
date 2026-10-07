@@ -42,7 +42,7 @@ class OrchestratedEngineIntelligenceMlPredictionEvidenceTest {
                 orchestrator,
                 new FraudEngineAggregationService(FraudEngineAggregationPolicy.defaultInternalPolicy()),
                 new PublicEngineIntelligenceMapper()
-        )).emitIfEnabled(request()).orElseThrow();
+        )).emitIfEnabled(request()).enrichment().orElseThrow();
 
         var evidence = enrichment.mlPredictionEvidence().orElseThrow();
         assertThat(evidence.mlScore()).isEqualTo(0.8765d).isNotEqualTo(0.1111d);
@@ -123,7 +123,7 @@ class OrchestratedEngineIntelligenceMlPredictionEvidenceTest {
                 orchestrator,
                 new FraudEngineAggregationService(FraudEngineAggregationPolicy.defaultInternalPolicy()),
                 new PublicEngineIntelligenceMapper()
-        )).emitIfEnabled(request()).orElseThrow();
+        )).emitIfEnabled(request()).enrichment().orElseThrow();
 
         assertThat(enrichment.engineIntelligenceSummary()).isPresent();
         assertThat(enrichment.mlPredictionEvidence()).isEmpty();
@@ -166,7 +166,7 @@ class OrchestratedEngineIntelligenceMlPredictionEvidenceTest {
                 orchestrator,
                 new FraudEngineAggregationService(FraudEngineAggregationPolicy.defaultInternalPolicy()),
                 new PublicEngineIntelligenceMapper()
-        )).emitIfEnabled(request()).orElseThrow();
+        )).emitIfEnabled(request()).enrichment().orElseThrow();
 
         assertThat(enrichment.engineIntelligenceSummary()).isPresent();
         assertThat(enrichment.mlPredictionEvidence()).isEmpty();
@@ -195,7 +195,7 @@ class OrchestratedEngineIntelligenceMlPredictionEvidenceTest {
                 orchestrator,
                 new FraudEngineAggregationService(FraudEngineAggregationPolicy.defaultInternalPolicy()),
                 new PublicEngineIntelligenceMapper()
-        )).emitIfEnabled(request()).orElseThrow();
+        )).emitIfEnabled(request()).enrichment().orElseThrow();
 
         assertThat(enrichment.mlPredictionEvidence()).isEmpty();
         assertThat(enrichment.mlPredictionEvidenceOmissionReason()).contains(expectedReason);
@@ -216,7 +216,8 @@ class OrchestratedEngineIntelligenceMlPredictionEvidenceTest {
                 orchestrator,
                 new FraudEngineAggregationService(rulesOnlyPolicy),
                 new PublicEngineIntelligenceMapper()
-        )).emitIfEnabled(request())).isEmpty();
+        )).emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
     }
 
     @Test
@@ -245,6 +246,7 @@ class OrchestratedEngineIntelligenceMlPredictionEvidenceTest {
                 orchestrator,
                 new FraudEngineAggregationService(FraudEngineAggregationPolicy.defaultInternalPolicy()),
                 new PublicEngineIntelligenceMapper()
-        )).emitIfEnabled(request())).isEmpty();
+        )).emitIfEnabled(request()).omissionReason())
+                .contains(EngineIntelligenceEmissionOmissionReason.UNKNOWN_FAILURE);
     }
 }
