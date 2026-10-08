@@ -7,7 +7,7 @@ import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
 import com.frauddetection.scoring.engine.ml.PythonMlSignalReasonCode;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrationResult;
 
@@ -44,10 +44,11 @@ final class MlPredictionEvidenceMapper {
             );
         }
 
-        return EngineIntelligenceEnrichmentResult.withEvidence(summary, new MlPredictionEvidenceV1(
+        return EngineIntelligenceEnrichmentResult.withEvidence(summary, new MlPredictionEvidence(
                 source.score(),
                 source.riskLevel(),
                 new MlModelIdentity(source.modelName(), source.modelVersion(), source.featureContractVersion()),
+                source.modelArtifactSha256(),
                 source.sourceInferenceTimestamp()
         ));
     }

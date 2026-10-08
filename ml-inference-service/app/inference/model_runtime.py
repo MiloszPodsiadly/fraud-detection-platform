@@ -151,6 +151,7 @@ class FraudModelRuntime:
             "modelName": self.model_name,
             "modelVersion": self.model_version,
             "featureContractVersion": self.feature_contract_version,
+            "modelArtifactSha256": self.model_artifact_sha256,
             "inferenceTimestamp": datetime.now(timezone.utc).isoformat(),
             "reasonCodes": self._reason_codes(contributions),
             "scoreDetails": {
@@ -183,6 +184,7 @@ class FraudModelRuntime:
             "modelName": self.model_name,
             "modelVersion": self.model_version,
             "featureContractVersion": self.feature_contract_version,
+            "modelArtifactSha256": self.model_artifact_sha256,
             "inferenceTimestamp": datetime.now(timezone.utc).isoformat(),
             "reasonCodes": [],
             "scoreDetails": {

@@ -125,7 +125,8 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
                 || sourceResult.modelVersion() == null
                 || sourceResult.modelVersion().isBlank()
                 || sourceResult.featureContractVersion() == null
-                || sourceResult.featureContractVersion().isBlank();
+                || sourceResult.featureContractVersion().isBlank()
+                || sourceResult.modelArtifactSha256() == null;
     }
 
     private FraudSignalEvaluation availableResult(FraudScoreResult sourceResult) {
@@ -142,7 +143,8 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
                 sourceResult.modelVersion(),
                 sourceResult.featureContractVersion(),
                 null,
-                sourceResult.inferenceTimestamp()
+                sourceResult.inferenceTimestamp(),
+                sourceResult.modelArtifactSha256()
         );
     }
 

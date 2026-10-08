@@ -4,7 +4,7 @@ import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
@@ -39,7 +39,7 @@ public class TransactionScoredEventMapper {
             FraudScoringRequest scoringRequest,
             FraudScoreResult scoreResult,
             Optional<EngineIntelligenceSummary> engineIntelligence,
-            Optional<MlPredictionEvidenceV1> mlPredictionEvidence,
+            Optional<MlPredictionEvidence> mlPredictionEvidence,
             Optional<MlPredictionEvidenceOmissionReason> mlPredictionEvidenceOmissionReason,
             AnalystRecommendationResult analystRecommendation
     ) {

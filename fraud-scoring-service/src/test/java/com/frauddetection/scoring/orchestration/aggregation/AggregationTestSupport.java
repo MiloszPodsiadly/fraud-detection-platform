@@ -82,7 +82,8 @@ final class AggregationTestSupport {
                 featureContractVersion(engineType, status),
                 status == FraudEngineStatus.AVAILABLE ? null : reasonCodes.getFirst(),
                 GENERATED_AT,
-                isAvailableMl(engineType, status) ? SOURCE_INFERENCE_AT : null
+                isAvailableMl(engineType, status) ? SOURCE_INFERENCE_AT : null,
+                isAvailableMl(engineType, status) ? "a".repeat(64) : null
         );
     }
 

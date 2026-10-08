@@ -2,7 +2,7 @@ package com.frauddetection.scoring.orchestration.aggregation;
 
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrationResult;
 import com.frauddetection.scoring.orchestration.FraudScoringOrchestrator;
@@ -186,7 +186,7 @@ class EngineIntelligenceEmissionServiceTest {
     @Test
     void enrichmentFactoriesPreserveSummaryAndExactlyOneOutcome() {
         EngineIntelligenceSummary summary = mock(EngineIntelligenceSummary.class);
-        MlPredictionEvidenceV1 evidence = mock(MlPredictionEvidenceV1.class);
+        MlPredictionEvidence evidence = mock(MlPredictionEvidence.class);
 
         EngineIntelligenceEnrichmentResult withEvidence =
                 EngineIntelligenceEnrichmentResult.withEvidence(summary, evidence);

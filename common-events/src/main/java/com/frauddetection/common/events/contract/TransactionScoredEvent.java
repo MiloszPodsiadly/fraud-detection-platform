@@ -13,8 +13,9 @@ import com.frauddetection.common.events.features.FeatureSnapshotWireValueNormali
 import com.frauddetection.common.events.intelligence.EngineIntelligenceEngineResult;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.common.events.model.CustomerContext;
 import com.frauddetection.common.events.model.DeviceInfo;
 import com.frauddetection.common.events.model.LocationInfo;
@@ -54,7 +55,7 @@ public record TransactionScoredEvent(
         Boolean alertRecommended,
         List<ScoringEvidenceItem> scoringEvidence,
         @JsonInclude(JsonInclude.Include.NON_NULL) EngineIntelligenceSummary engineIntelligence,
-        @JsonInclude(JsonInclude.Include.NON_NULL) MlPredictionEvidenceV1 mlPredictionEvidence,
+        @JsonInclude(JsonInclude.Include.NON_NULL) MlPredictionEvidence mlPredictionEvidence,
         @JsonInclude(JsonInclude.Include.NON_NULL) MlPredictionEvidenceOmissionReason mlPredictionEvidenceOmissionReason,
         @JsonInclude(JsonInclude.Include.NON_NULL) AnalystRecommendationResult analystRecommendation
 ) {
@@ -86,7 +87,7 @@ public record TransactionScoredEvent(
             @JsonProperty("alertRecommended") Boolean alertRecommended,
             @JsonProperty("scoringEvidence") List<ScoringEvidenceItem> scoringEvidence,
             @JsonProperty("engineIntelligence") EngineIntelligenceSummary engineIntelligence,
-            @JsonProperty("mlPredictionEvidence") MlPredictionEvidenceV1 mlPredictionEvidence,
+            @JsonProperty("mlPredictionEvidence") MlPredictionEvidence mlPredictionEvidence,
             @JsonProperty("mlPredictionEvidenceOmissionReason")
             MlPredictionEvidenceOmissionReason mlPredictionEvidenceOmissionReason,
             @JsonProperty("analystRecommendation") AnalystRecommendationResult analystRecommendation
@@ -136,16 +137,36 @@ public record TransactionScoredEvent(
 
     private static void validateMlPredictionEvidenceOutcome(
             EngineIntelligenceSummary engineIntelligence,
-            MlPredictionEvidenceV1 mlPredictionEvidence,
+            MlPredictionEvidence mlPredictionEvidence,
             MlPredictionEvidenceOmissionReason omissionReason
     ) {
-        if ((mlPredictionEvidence == null) == (omissionReason == null)) {
+        if (mlPredictionEvidence == null && omissionReason == null) {
+            if (engineIntelligence == null) {
+                return;
+            }
             throw new IllegalArgumentException("ML_PREDICTION_EVIDENCE_REQUIRES_EXACTLY_ONE_OUTCOME");
         }
-        if (mlPredictionEvidence == null) {
+        if (mlPredictionEvidence != null && omissionReason != null) {
+            throw new IllegalArgumentException("ML_PREDICTION_EVIDENCE_REQUIRES_EXACTLY_ONE_OUTCOME");
+        }
+        if (omissionReason != null) {
             validateMlPredictionEvidenceOmission(engineIntelligence, omissionReason);
             return;
         }
+        validateMlPredictionEvidence(
+                engineIntelligence,
+                mlPredictionEvidence.mlRiskLevel(),
+                mlPredictionEvidence.mlScore(),
+                mlPredictionEvidence.modelIdentity()
+        );
+    }
+
+    private static void validateMlPredictionEvidence(
+            EngineIntelligenceSummary engineIntelligence,
+            RiskLevel mlRiskLevel,
+            Double mlScore,
+            MlModelIdentity modelIdentity
+    ) {
         if (engineIntelligence == null) {
             throw new IllegalArgumentException("ML_PREDICTION_EVIDENCE_REQUIRES_ENGINE_INTELLIGENCE");
         }
@@ -153,13 +174,13 @@ public record TransactionScoredEvent(
                 .filter(engine -> FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID.equals(engine.engineId()))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("ML_PREDICTION_EVIDENCE_SOURCE_ENGINE_MISSING"));
-        if (sourceEngine.status() != mlPredictionEvidence.engineStatus()
-                || sourceEngine.riskLevel() != mlPredictionEvidence.mlRiskLevel()
+        if (sourceEngine.status() != FraudEngineStatus.AVAILABLE
+                || sourceEngine.riskLevel() != mlRiskLevel
                 || sourceEngine.scoreBucket() != EngineIntelligenceScoreBucket.from(
-                        mlPredictionEvidence.engineStatus(),
-                        mlPredictionEvidence.mlScore()
+                        FraudEngineStatus.AVAILABLE,
+                        mlScore
                 )
-                || !mlPredictionEvidence.modelIdentity().equals(sourceEngine.modelIdentity())) {
+                || !modelIdentity.equals(sourceEngine.modelIdentity())) {
             throw new IllegalArgumentException("ML_PREDICTION_EVIDENCE_SOURCE_ENGINE_INCONSISTENT");
         }
     }

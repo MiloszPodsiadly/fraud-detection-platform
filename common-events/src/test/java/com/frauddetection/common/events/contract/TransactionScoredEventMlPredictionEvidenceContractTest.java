@@ -13,7 +13,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDelt
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
 import com.frauddetection.common.events.kafka.JacksonKafkaDeserializer;
 import org.apache.kafka.common.errors.SerializationException;
 import org.junit.jupiter.api.Test;
@@ -32,6 +32,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class TransactionScoredEventMlPredictionEvidenceContractTest {
 
     private static final Instant GENERATED_AT = Instant.parse("2026-10-03T10:15:30.123456Z");
+    private static final String ARTIFACT_SHA256 = "a".repeat(64);
     private static final MlModelIdentity MODEL_IDENTITY = new MlModelIdentity(
             "python-logistic-fraud-model",
             "2026-05-30.v1",
@@ -61,12 +62,15 @@ class TransactionScoredEventMlPredictionEvidenceContractTest {
     }
 
     @Test
-    void priorEventShapeWithoutEvidenceOutcomeFailsClosed() throws Exception {
+    void historicalEventWithoutEngineIntelligenceOrPredictionEvidenceRemainsReadable() throws Exception {
         ObjectNode json = eventJson();
         json.remove("mlPredictionEvidenceOmissionReason");
 
-        assertThatThrownBy(() -> objectMapper.readValue(json.toString(), TransactionScoredEvent.class))
-                .hasRootCauseMessage("ML_PREDICTION_EVIDENCE_REQUIRES_EXACTLY_ONE_OUTCOME");
+        TransactionScoredEvent event = objectMapper.readValue(json.toString(), TransactionScoredEvent.class);
+
+        assertThat(event.engineIntelligence()).isNull();
+        assertThat(event.mlPredictionEvidence()).isNull();
+        assertThat(event.mlPredictionEvidenceOmissionReason()).isNull();
     }
 
     @Test
@@ -210,18 +214,17 @@ class TransactionScoredEventMlPredictionEvidenceContractTest {
     }
 
     @Test
-    void unsupportedEvidenceVersionFailsKafkaDeserializationInsteadOfBeingSilentlyAccepted() throws Exception {
+    void partialEvidenceWithoutArtifactDigestFailsKafkaDeserialization() throws Exception {
         ObjectNode json = eventWithSummary();
         ObjectNode evidence = objectMapper.valueToTree(evidence(0.8123d, RiskLevel.HIGH, MODEL_IDENTITY));
-        evidence.put("contractVersion", 2);
+        evidence.remove("modelArtifactSha256");
         json.set("mlPredictionEvidence", evidence);
 
         assertThatThrownBy(() -> kafkaDeserializer.deserialize(
                 "transactions.scored",
                 json.toString().getBytes(StandardCharsets.UTF_8)
         ))
-                .isInstanceOf(SerializationException.class)
-                .hasRootCauseMessage("ML_PREDICTION_EVIDENCE_UNSUPPORTED_CONTRACT_VERSION");
+                .isInstanceOf(SerializationException.class);
     }
 
     private ObjectNode eventWithSummary() throws Exception {
@@ -336,7 +339,7 @@ class TransactionScoredEventMlPredictionEvidenceContractTest {
         );
     }
 
-    private MlPredictionEvidenceV1 evidence(double score, RiskLevel riskLevel, MlModelIdentity identity) {
-        return new MlPredictionEvidenceV1(score, riskLevel, identity, GENERATED_AT);
+    private MlPredictionEvidence evidence(double score, RiskLevel riskLevel, MlModelIdentity identity) {
+        return new MlPredictionEvidence(score, riskLevel, identity, ARTIFACT_SHA256, GENERATED_AT);
     }
 }

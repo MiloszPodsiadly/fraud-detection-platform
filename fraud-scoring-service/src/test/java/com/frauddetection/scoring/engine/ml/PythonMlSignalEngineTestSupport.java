@@ -79,7 +79,9 @@ final class PythonMlSignalEngineTestSupport {
                 new LinkedHashMap<>(),
                 Map.of(),
                 metadata,
-                Boolean.TRUE.equals(modelAvailable) && (riskLevel == RiskLevel.HIGH || riskLevel == RiskLevel.CRITICAL)
+                Boolean.TRUE.equals(modelAvailable) && (riskLevel == RiskLevel.HIGH || riskLevel == RiskLevel.CRITICAL),
+                List.of(),
+                modelName == null && modelVersion == null ? null : "a".repeat(64)
         );
     }
 
@@ -202,6 +204,7 @@ final class PythonMlSignalEngineTestSupport {
                 modelName,
                 modelVersion,
                 modelName == null && modelVersion == null ? null : FEATURE_CONTRACT_VERSION,
+                modelName == null && modelVersion == null ? null : "a".repeat(64),
                 Instant.parse("2026-05-30T09:59:59Z"),
                 reasonCodes,
                 Map.of(),
@@ -215,6 +218,7 @@ final class PythonMlSignalEngineTestSupport {
                 false,
                 0.0d,
                 RiskLevel.LOW,
+                null,
                 null,
                 null,
                 null,

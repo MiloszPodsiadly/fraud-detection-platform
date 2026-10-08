@@ -68,6 +68,7 @@ class TransactionFraudScoringServiceEngineIntelligenceEmissionTest {
         ).scoreAndCapture();
 
         assertThat(event.engineIntelligence()).isEqualTo(summary);
+        assertThat(event.mlPredictionEvidence()).isNull();
         assertThat(event.mlPredictionEvidence()).isEqualTo(evidence);
         assertThat(json(event)).contains("\"mlPredictionEvidence\"", "\"mlScore\":0.8123");
     }

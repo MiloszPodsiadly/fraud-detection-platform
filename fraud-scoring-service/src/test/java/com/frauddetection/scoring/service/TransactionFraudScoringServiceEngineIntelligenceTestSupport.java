@@ -16,7 +16,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBuck
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.config.ScoringMode;
 import com.frauddetection.scoring.config.ScoringProperties;
@@ -232,8 +232,14 @@ final class TransactionFraudScoringServiceEngineIntelligenceTestSupport {
         );
     }
 
-    static MlPredictionEvidenceV1 mlPredictionEvidence() {
-        return new MlPredictionEvidenceV1(0.8123d, RiskLevel.HIGH, mlModelIdentity(), GENERATED_AT);
+    static MlPredictionEvidence mlPredictionEvidence() {
+        return new MlPredictionEvidence(
+                0.8123d,
+                RiskLevel.HIGH,
+                mlModelIdentity(),
+                "a".repeat(64),
+                GENERATED_AT
+        );
     }
 
     private static MlModelIdentity mlModelIdentity() {

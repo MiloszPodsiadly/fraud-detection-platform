@@ -21,7 +21,8 @@ public record FraudScoreResult(
         Map<String, Object> featureSnapshot,
         Map<String, Object> explanationMetadata,
         Boolean alertRecommended,
-        List<ScoringEvidenceItem> scoringEvidence
+        List<ScoringEvidenceItem> scoringEvidence,
+        String modelArtifactSha256
 ) {
     public FraudScoreResult {
         if ("ML".equals(scoringStrategy)) {
@@ -32,6 +33,10 @@ public record FraudScoreResult(
                     "featureContractVersion"
             );
             validateAtomicMlModelIdentity(modelName, modelVersion, featureContractVersion);
+            modelArtifactSha256 = MlModelIdentityPolicy.optionalArtifactSha256(
+                    modelArtifactSha256,
+                    "modelArtifactSha256"
+            );
         }
         scoringEvidence = scoringEvidence == null ? List.of() : List.copyOf(scoringEvidence);
     }
@@ -63,7 +68,8 @@ public record FraudScoreResult(
                 featureSnapshot,
                 explanationMetadata,
                 alertRecommended,
-                List.of()
+                List.of(),
+                null
         );
     }
 
@@ -94,7 +100,8 @@ public record FraudScoreResult(
                 featureSnapshot,
                 explanationMetadata,
                 alertRecommended,
-                scoringEvidence
+                scoringEvidence,
+                null
         );
     }
 
@@ -124,7 +131,41 @@ public record FraudScoreResult(
                 featureSnapshot,
                 explanationMetadata,
                 alertRecommended,
-                List.of()
+                List.of(),
+                null
+        );
+    }
+
+    public FraudScoreResult(
+            Double fraudScore,
+            RiskLevel riskLevel,
+            String scoringStrategy,
+            String modelName,
+            String modelVersion,
+            String featureContractVersion,
+            Instant inferenceTimestamp,
+            List<String> reasonCodes,
+            Map<String, Object> scoreDetails,
+            Map<String, Object> featureSnapshot,
+            Map<String, Object> explanationMetadata,
+            Boolean alertRecommended,
+            List<ScoringEvidenceItem> scoringEvidence
+    ) {
+        this(
+                fraudScore,
+                riskLevel,
+                scoringStrategy,
+                modelName,
+                modelVersion,
+                featureContractVersion,
+                inferenceTimestamp,
+                reasonCodes,
+                scoreDetails,
+                featureSnapshot,
+                explanationMetadata,
+                alertRecommended,
+                scoringEvidence,
+                null
         );
     }
 

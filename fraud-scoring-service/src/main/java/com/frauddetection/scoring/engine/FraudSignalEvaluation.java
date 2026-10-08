@@ -22,7 +22,8 @@ public record FraudSignalEvaluation(
         String modelVersion,
         String featureContractVersion,
         String statusReason,
-        Instant sourceInferenceTimestamp
+        Instant sourceInferenceTimestamp,
+        String modelArtifactSha256
 ) {
     public FraudSignalEvaluation {
         Objects.requireNonNull(status, "status is required");
@@ -57,6 +58,7 @@ public record FraudSignalEvaluation(
                 modelVersion,
                 featureContractVersion,
                 statusReason,
+                null,
                 null
         );
     }
@@ -85,6 +87,38 @@ public record FraudSignalEvaluation(
                 modelVersion,
                 null,
                 statusReason,
+                null,
+                null
+        );
+    }
+
+    public FraudSignalEvaluation(
+            FraudEngineStatus status,
+            Double score,
+            RiskLevel riskLevel,
+            FraudEngineConfidence confidence,
+            List<String> reasonCodes,
+            List<FraudEngineContribution> contributions,
+            List<FraudEngineEvidence> evidence,
+            String modelName,
+            String modelVersion,
+            String featureContractVersion,
+            String statusReason,
+            Instant sourceInferenceTimestamp
+    ) {
+        this(
+                status,
+                score,
+                riskLevel,
+                confidence,
+                reasonCodes,
+                contributions,
+                evidence,
+                modelName,
+                modelVersion,
+                featureContractVersion,
+                statusReason,
+                sourceInferenceTimestamp,
                 null
         );
     }

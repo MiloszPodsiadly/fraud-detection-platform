@@ -2,14 +2,14 @@ package com.frauddetection.scoring.orchestration.aggregation;
 
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
 
 import java.util.Objects;
 import java.util.Optional;
 
 public record EngineIntelligenceEnrichmentResult(
         EngineIntelligenceSummary engineIntelligenceSummary,
-        Optional<MlPredictionEvidenceV1> mlPredictionEvidence,
+        Optional<MlPredictionEvidence> mlPredictionEvidence,
         Optional<MlPredictionEvidenceOmissionReason> mlPredictionEvidenceOmissionReason
 ) {
     public EngineIntelligenceEnrichmentResult {
@@ -26,7 +26,7 @@ public record EngineIntelligenceEnrichmentResult(
 
     public static EngineIntelligenceEnrichmentResult withEvidence(
             EngineIntelligenceSummary engineIntelligenceSummary,
-            MlPredictionEvidenceV1 mlPredictionEvidence
+            MlPredictionEvidence mlPredictionEvidence
     ) {
         return new EngineIntelligenceEnrichmentResult(
                 Objects.requireNonNull(engineIntelligenceSummary, "engineIntelligenceSummary is required"),

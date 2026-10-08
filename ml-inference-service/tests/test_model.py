@@ -173,7 +173,8 @@ class FraudModelTest(unittest.TestCase):
             return FraudModel.from_packaged_artifact(artifact_path)._runtime
 
     def test_scores_high_risk_signal_as_high_or_critical(self):
-        result = FraudModel.from_packaged_artifact().score(
+        model = FraudModel.from_packaged_artifact()
+        result = model.score(
             {
                 "recentTransactionCount": 8,
                 "currentTransactionAmountPln": 28_800.0,
@@ -194,6 +195,7 @@ class FraudModelTest(unittest.TestCase):
         self.assertGreaterEqual(result["fraudScore"], 0.75)
         self.assertIn("PROXY_OR_VPN", result["reasonCodes"])
         self.assertEqual(result["featureContractVersion"], FEATURE_CONTRACT.version)
+        self.assertEqual(result["modelArtifactSha256"], model.model_artifact_sha256)
         self.assertEqual(result["explanationMetadata"]["featureContractVersion"], FEATURE_CONTRACT.version)
 
     def test_scores_baseline_signal_as_low(self):

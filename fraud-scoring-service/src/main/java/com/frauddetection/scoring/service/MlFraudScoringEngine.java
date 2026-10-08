@@ -67,7 +67,8 @@ public class MlFraudScoringEngine implements FraudScoringEngine {
                 explanationMetadata,
                 output.available() && (output.riskLevel() == com.frauddetection.common.events.enums.RiskLevel.HIGH
                         || output.riskLevel() == com.frauddetection.common.events.enums.RiskLevel.CRITICAL),
-                scoringEvidence
+                scoringEvidence,
+                output.modelArtifactSha256()
         );
     }
 
@@ -109,7 +110,8 @@ public class MlFraudScoringEngine implements FraudScoringEngine {
                         null,
                         output.inferenceTimestamp(),
                         fallbackReason
-                )
+                ),
+                null
         );
     }
 

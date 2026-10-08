@@ -50,6 +50,7 @@ class OrchestratedEngineIntelligenceMlPredictionEvidenceTest {
         assertThat(evidence.modelName()).isEqualTo("python-logistic-fraud-model");
         assertThat(evidence.modelVersion()).isEqualTo("2026-05-30.v1");
         assertThat(evidence.featureContractVersion()).isEqualTo("2026-05-30.feature-contract.v1");
+        assertThat(evidence.modelArtifactSha256()).isEqualTo("a".repeat(64));
         assertThat(evidence.sourceExecutionTimestamp())
                 .isEqualTo(AggregationTestSupport.SOURCE_INFERENCE_AT)
                 .isNotEqualTo(AggregationTestSupport.GENERATED_AT);
@@ -155,7 +156,8 @@ class OrchestratedEngineIntelligenceMlPredictionEvidenceTest {
                 "2026-05-30.feature-contract.v1",
                 null,
                 AggregationTestSupport.GENERATED_AT,
-                null
+                null,
+                "a".repeat(64)
         );
         when(orchestrator.evaluate(any())).thenReturn(AggregationTestSupport.orchestration(
                 AggregationTestSupport.available("rules.primary", 0.1111d, RiskLevel.LOW, "HIGH_VELOCITY"),
