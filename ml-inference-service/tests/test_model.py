@@ -2,6 +2,7 @@ import unittest
 import json
 import importlib.util
 import os
+import tempfile
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
@@ -166,13 +167,13 @@ class FraudModelTest(unittest.TestCase):
         schema_weights = {name: 0.0 for name in FeaturePipeline.PRODUCTION_FEATURE_NAMES}
         schema_weights.update(weights)
         artifact = self._artifact_payload(weights=schema_weights)
-        return FraudModelRuntime(
-            Path.cwd() / "missing-runtime-artifact.json",
-            model=LogisticFraudModel(artifact),
-        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            artifact_path = Path(temporary_directory) / "runtime-artifact.json"
+            artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+            return FraudModel.from_packaged_artifact(artifact_path)._runtime
 
     def test_scores_high_risk_signal_as_high_or_critical(self):
-        result = FraudModel().score(
+        result = FraudModel.from_packaged_artifact().score(
             {
                 "recentTransactionCount": 8,
                 "currentTransactionAmountPln": 28_800.0,
@@ -196,7 +197,7 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(result["explanationMetadata"]["featureContractVersion"], FEATURE_CONTRACT.version)
 
     def test_scores_baseline_signal_as_low(self):
-        result = FraudModel().score(
+        result = FraudModel.from_packaged_artifact().score(
             {
                 "recentTransactionCount": 1,
                 "currentTransactionAmountPln": 180.0,
@@ -226,7 +227,7 @@ class FraudModelTest(unittest.TestCase):
         self.assertGreaterEqual(Decimal(str(round_tripped_score)).as_tuple().exponent, -4)
 
     def test_scores_rapid_transfer_burst_as_high_or_critical(self):
-        result = FraudModel().score(
+        result = FraudModel.from_packaged_artifact().score(
             {
                 "recentTransactionCount": 2,
                 "recentAmountSumPln": 20000.0,
@@ -246,7 +247,7 @@ class FraudModelTest(unittest.TestCase):
         self.assertIn("RAPID_PLN_20K_BURST", result["reasonCodes"])
 
     def test_keeps_rapid_transfer_seed_without_aggregate_signal_low(self):
-        result = FraudModel().score(
+        result = FraudModel.from_packaged_artifact().score(
             {
                 "recentTransactionCount": 1,
                 "recentAmountSumPln": 1000.0,
@@ -728,7 +729,7 @@ class FraudModelTest(unittest.TestCase):
         self.assertIn("merchantFrequency7d", compatibility["missingRequiredFeatures"])
 
     def test_runtime_fails_closed_when_canonical_windows_are_missing(self):
-        result = FraudModel().score(
+        result = FraudModel.from_packaged_artifact().score(
             {
                 "recentTransactionCount": 2,
                 "recentAmountSumPln": 20000.0,
@@ -751,7 +752,7 @@ class FraudModelTest(unittest.TestCase):
         )
 
     def test_runtime_rejects_raw_sequence_payload_in_production_inference(self):
-        result = FraudModel().score(
+        result = FraudModel.from_packaged_artifact().score(
             {
                 "raw_transaction": {
                     "amount": 10000.0,
@@ -810,7 +811,7 @@ class FraudModelTest(unittest.TestCase):
 
         for case_name, mutation in invalid_cases.items():
             with self.subTest(case_name=case_name):
-                result = FraudModel().score({**valid, **mutation})
+                result = FraudModel.from_packaged_artifact().score({**valid, **mutation})
 
                 self.assertFalse(result["available"])
                 self.assertEqual(result["fallbackReason"], "INCOMPATIBLE_FEATURE_SNAPSHOT")
@@ -1264,36 +1265,21 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(_promotion_decision(current, reject, thresholds)["decision"], "reject")
 
     def test_model_registry_tracks_latest_champion_challenger_and_versions(self):
-        artifact_path = Path.cwd() / "registry-test-artifact.json"
+        first_artifact_path = Path.cwd() / "registry-test-artifact-v1.json"
+        second_artifact_path = Path.cwd() / "registry-test-artifact-v2.json"
         registry_path = Path.cwd() / "registry-test"
         try:
-            artifact_path.write_text(
-                json.dumps(
-                    {
-                        "modelName": "python-logistic-fraud-model",
-                        "modelVersion": "registry-v1",
-                        "modelType": "logistic",
-                        "modelFamily": "LOGISTIC_REGRESSION",
-                        "bias": -2.0,
-                        "weights": {},
-                        "thresholds": {"medium": 0.45, "high": 0.75, "critical": 0.9},
-                    }
-                ),
-                encoding="utf-8",
-            )
+            first_artifact_path.write_text(json.dumps(self._artifact_payload("registry-v1")), encoding="utf-8")
+            second_artifact_path.write_text(json.dumps(self._artifact_payload("registry-v2")), encoding="utf-8")
             registry = ModelRegistry(registry_path)
             first = registry.register(
-                artifact_path=artifact_path,
-                model_version="registry-v1",
-                model_type="logistic",
+                artifact_path=first_artifact_path,
                 metrics={"prAuc": 0.5},
                 training_metadata={"examples": 10},
                 role="champion",
             )
             second = registry.register(
-                artifact_path=artifact_path,
-                model_version="registry-v2",
-                model_type="logistic",
+                artifact_path=second_artifact_path,
                 metrics={"prAuc": 0.6},
                 training_metadata={"examples": 20},
                 role="challenger",
@@ -1304,13 +1290,14 @@ class FraudModelTest(unittest.TestCase):
             self.assertEqual(registry.challenger().model_version, "registry-v2")
             self.assertEqual(registry.latest().model_version, second.model_version)
 
-            promoted = registry.promote("registry-v2")
+            promoted = registry.promote("python-logistic-fraud-model", "registry-v2")
             self.assertEqual(promoted.role, "champion")
             self.assertEqual(registry.champion().model_version, "registry-v2")
             self.assertEqual(registry.by_version("registry-v1").role, "archived")
         finally:
-            if artifact_path.exists():
-                artifact_path.unlink()
+            for artifact_path in (first_artifact_path, second_artifact_path):
+                if artifact_path.exists():
+                    artifact_path.unlink()
             if registry_path.exists():
                 for child in sorted(registry_path.rglob("*"), reverse=True):
                     if child.is_file():
@@ -1319,7 +1306,7 @@ class FraudModelTest(unittest.TestCase):
                         child.rmdir()
                 registry_path.rmdir()
 
-    def test_runtime_loads_champion_model_from_registry(self):
+    def test_runtime_loads_exact_model_from_registry(self):
         artifact_path = Path.cwd() / "registry-runtime-artifact.json"
         registry_path = Path.cwd() / "registry-runtime"
         try:
@@ -1330,12 +1317,12 @@ class FraudModelTest(unittest.TestCase):
                 encoding="utf-8",
             )
             registry = ModelRegistry(registry_path)
-            registry.register(artifact_path, "registry-runtime-v1", "logistic", role="champion")
+            registry.register(artifact_path, role="champion")
 
-            model = FraudModel(
-                artifact_path=Path.cwd() / "missing-artifact.json",
-                model_version="registry-runtime-v1",
-                registry=registry,
+            model = FraudModel.from_registry_exact(
+                "python-logistic-fraud-model",
+                "registry-runtime-v1",
+                registry,
             )
 
             self.assertEqual(model.model_version, "registry-runtime-v1")
@@ -1350,7 +1337,7 @@ class FraudModelTest(unittest.TestCase):
                         child.rmdir()
                 registry_path.rmdir()
 
-    def test_runtime_compares_champion_and_challenger_models(self):
+    def test_runtime_compares_two_exact_registry_models(self):
         champion_artifact = Path.cwd() / "registry-compare-champion.json"
         challenger_artifact = Path.cwd() / "registry-compare-challenger.json"
         registry_path = Path.cwd() / "registry-compare"
@@ -1373,9 +1360,18 @@ class FraudModelTest(unittest.TestCase):
                 encoding="utf-8",
             )
             registry = ModelRegistry(registry_path)
-            registry.register(champion_artifact, "champion-v1", "logistic", role="champion")
-            registry.register(challenger_artifact, "challenger-v2", "logistic", role="challenger")
-            model = FraudModel(artifact_path=Path.cwd() / "missing-artifact.json", registry=registry)
+            registry.register(champion_artifact, role="champion")
+            registry.register(challenger_artifact, role="challenger")
+            model = FraudModel.from_registry_exact(
+                "python-logistic-fraud-model",
+                "champion-v1",
+                registry,
+            )
+            challenger = FraudModel.from_registry_exact(
+                "python-logistic-fraud-model",
+                "challenger-v2",
+                registry,
+            )
 
             comparison = model.compare_with(
                 {
@@ -1391,8 +1387,7 @@ class FraudModelTest(unittest.TestCase):
                     "countryMismatch": False,
                     "proxyOrVpnDetected": True,
                 },
-                artifact_path=Path.cwd() / "missing-artifact.json",
-                registry=registry,
+                challenger,
             )
             invalid_comparison = model.compare_with(
                 {
@@ -1408,8 +1403,7 @@ class FraudModelTest(unittest.TestCase):
                     "countryMismatch": False,
                     "proxyOrVpnDetected": True,
                 },
-                artifact_path=Path.cwd() / "missing-artifact.json",
-                registry=registry,
+                challenger,
             )
         finally:
             for artifact_path in (champion_artifact, challenger_artifact):
@@ -1619,10 +1613,9 @@ class FraudModelTest(unittest.TestCase):
         try:
             artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
             registry = ModelRegistry(registry_path)
-            registry.register(artifact_path, "registry-invalid-v1", "logistic", role="champion")
-
             with self.assertRaisesRegex(ModelConfigurationError, "featureSetVersion mismatch"):
-                FraudModel(artifact_path=Path.cwd() / "missing-artifact.json", registry=registry)
+                registry.register(artifact_path, role="champion")
+            self.assertFalse(registry.index_path.exists())
         finally:
             if artifact_path.exists():
                 artifact_path.unlink()
@@ -1646,10 +1639,9 @@ class FraudModelTest(unittest.TestCase):
         try:
             artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
             registry = ModelRegistry(registry_path)
-            registry.register(artifact_path, "registry-not-ready-v1", "logistic", role="champion")
-
             with self.assertRaisesRegex(ModelConfigurationError, "model runtime readiness failed"):
-                FraudModel(artifact_path=Path.cwd() / "missing-artifact.json", registry=registry)
+                registry.register(artifact_path, role="champion")
+            self.assertFalse(registry.index_path.exists())
         finally:
             if artifact_path.exists():
                 artifact_path.unlink()

@@ -6,8 +6,18 @@ from pathlib import Path
 from typing import Any
 
 from app.features.feature_pipeline import FeaturePipeline
+from app.inference.model_selection import (
+    ModelSelectionMode,
+    ModelSelectionPolicy,
+    select_model_artifact,
+)
+from app.model_identity_policy import ModelArtifactIdentity, ModelLogicalIdentity
 from app.models.logistic_model import LogisticFraudModel
-from app.models.model_loader import load_model_from_artifact
+from app.models.model_loader import (
+    ValidatedModelArtifact,
+    model_from_validated_artifact,
+)
+from app.models.xgboost_model import XGBoostFraudModel
 from app.registry.model_registry import ModelRegistry, default_registry_path
 
 
@@ -37,45 +47,57 @@ class FeatureContribution:
         return self.value * self.weight
 
 
+@dataclass(frozen=True)
+class ResolvedModelRuntime:
+    """One exact artifact resolution shared by scoring and runtime metadata."""
+
+    model: LogisticFraudModel | XGBoostFraudModel
+    logical_identity: ModelLogicalIdentity
+    artifact_identity: ModelArtifactIdentity
+    artifact_sha256: str
+    canonical_artifact_path_or_id: str
+    selection_source: ModelSelectionMode
+    loaded_at: datetime
+    validated_artifact: ValidatedModelArtifact
+
+
+def resolve_model_runtime(
+        artifact_path: Path | None,
+        selection_policy: ModelSelectionPolicy,
+        registry: ModelRegistry | None = None,
+) -> ResolvedModelRuntime:
+    """Resolve, validate and construct exactly one authoritative runtime model."""
+    active_registry = registry
+    if selection_policy.mode is ModelSelectionMode.REGISTRY_EXACT and active_registry is None:
+        active_registry = ModelRegistry(default_registry_path())
+    artifact = select_model_artifact(selection_policy, artifact_path, active_registry)
+    model = model_from_validated_artifact(artifact)
+    return ResolvedModelRuntime(
+        model=model,
+        logical_identity=artifact.logical_identity,
+        artifact_identity=artifact.artifact_identity,
+        artifact_sha256=artifact.artifact_sha256,
+        canonical_artifact_path_or_id=(
+            f"{artifact.logical_identity.model_name}/{artifact.logical_identity.model_version}"
+            f"@sha256:{artifact.artifact_sha256}"
+        ),
+        selection_source=selection_policy.mode,
+        loaded_at=datetime.now(timezone.utc),
+        validated_artifact=artifact,
+    )
+
+
 class FraudModelRuntime:
     """Compatibility runtime for the fraud scoring HTTP API."""
 
     def __init__(
             self,
-            artifact_path: Path,
+            resolved_model: ResolvedModelRuntime,
             feature_pipeline: FeaturePipeline | None = None,
-            model: LogisticFraudModel | None = None,
-            registry: ModelRegistry | None = None,
-            model_version: str | None = None,
-            registry_role: str = "champion",
     ) -> None:
         self.feature_pipeline = feature_pipeline or FeaturePipeline()
-        artifact = self._resolve_artifact_path(
-            artifact_path=artifact_path,
-            registry=registry or ModelRegistry(default_registry_path()),
-            model_version=model_version,
-            registry_role=registry_role,
-        )
-        self.model = model or load_model_from_artifact(artifact)
-
-    def _resolve_artifact_path(
-            self,
-            artifact_path: Path,
-            registry: ModelRegistry,
-            model_version: str | None,
-            registry_role: str,
-    ) -> Path:
-        if model_version:
-            entry = registry.by_version(model_version)
-            if entry:
-                return Path(entry.artifact_path)
-        entry = registry.champion() if registry_role == "champion" else registry.challenger()
-        if entry:
-            return Path(entry.artifact_path)
-        latest = registry.latest()
-        if latest:
-            return Path(latest.artifact_path)
-        return artifact_path
+        self.resolved_model = resolved_model
+        self.model = resolved_model.model
 
     @property
     def model_name(self) -> str:
@@ -96,6 +118,14 @@ class FraudModelRuntime:
     def feature_contract_version(self) -> str:
         """Feature contract version declared by the loaded model artifact."""
         return self.model.feature_contract_version
+
+    @property
+    def model_artifact_sha256(self) -> str:
+        return self.resolved_model.artifact_sha256
+
+    @property
+    def selection_source(self) -> ModelSelectionMode:
+        return self.resolved_model.selection_source
 
     def score(self, features: dict[str, Any]) -> dict[str, Any]:
         """Score a fraud feature payload without changing the public response contract."""
