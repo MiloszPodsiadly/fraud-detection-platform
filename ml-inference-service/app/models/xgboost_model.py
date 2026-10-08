@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import importlib.util
+import math
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -28,20 +29,37 @@ class XGBoostFraudModel:
             raise RuntimeError("model_type=xgboost requires the optional 'xgboost' Python package.")
         import xgboost as xgb
 
-        artifact = artifact or {}
         self._xgb = xgb
-        self.model_name = str(artifact.get("modelName", self.model_name))
-        self.model_version = str(artifact.get("modelVersion", self.model_version))
-        self.model_family = str(artifact.get("modelFamily", self.model_family))
-        self.feature_contract_version = str(artifact.get("featureContractVersion", self.feature_contract_version))
-        self.training_mode = self._training_mode(artifact)
-        self.feature_schema = self._feature_schema(artifact.get("featureSchema"))
-        self.thresholds = artifact.get("thresholds") if isinstance(artifact.get("thresholds"), dict) else dict(self.thresholds)
         self.booster = None
-        model_data = artifact.get("modelDataBase64")
-        if isinstance(model_data, str):
-            self.booster = xgb.Booster()
-            self._load_booster_from_bytes(base64.b64decode(model_data))
+        if artifact is None:
+            self.model_name = "python-xgboost-fraud-model"
+            self.model_version = "untrained"
+            self.model_family = "XGBOOST"
+            self.feature_contract_version = FEATURE_CONTRACT.version
+            self.training_mode = "production"
+            self.feature_schema = list(FeaturePipeline.PRODUCTION_FEATURE_NAMES)
+            self.thresholds = {"medium": 0.45, "high": 0.75, "critical": 0.90}
+            self.weights = {}
+            self.bias = 0.0
+            return
+
+        self.model_name = artifact["modelName"]
+        self.model_version = artifact["modelVersion"]
+        self.model_family = artifact["modelFamily"]
+        self.feature_contract_version = artifact["featureContractVersion"]
+        self.training_mode = artifact["trainingMode"]
+        self.feature_schema = list(artifact["featureSchema"])
+        self.thresholds = {
+            name: self._persisted_number(artifact["thresholds"][name], f"threshold {name!r}")
+            for name in ("medium", "high", "critical")
+        }
+        model_data = artifact["modelDataBase64"]
+        try:
+            payload = base64.b64decode(model_data, validate=True)
+        except (TypeError, ValueError) as exception:
+            raise ValueError("Persisted XGBoost modelDataBase64 is invalid.") from exception
+        self.booster = xgb.Booster()
+        self._load_booster_from_bytes(payload)
 
     def fit(self, X: list[dict[str, float]], y: list[int]) -> None:
         """Fit the XGBoost model."""
@@ -105,11 +123,12 @@ class XGBoostFraudModel:
     @classmethod
     def load(cls, artifact_path: Path) -> XGBoostFraudModel:
         """Load an XGBoost model artifact."""
-        if not artifact_path.exists():
-            return cls()
-        with artifact_path.open("r", encoding="utf-8") as artifact_file:
-            artifact = json.load(artifact_file)
-        return cls(artifact if isinstance(artifact, dict) else {})
+        from app.models.model_loader import load_model_from_artifact
+
+        model = load_model_from_artifact(artifact_path)
+        if not isinstance(model, cls):
+            raise ValueError("Artifact does not declare an XGBoost model.")
+        return model
 
     def feature_importance(self) -> dict[str, float]:
         """Return XGBoost feature importances."""
@@ -144,18 +163,6 @@ class XGBoostFraudModel:
         finally:
             temp_path.unlink(missing_ok=True)
 
-    def _feature_schema(self, value: Any) -> list[str]:
-        if isinstance(value, list) and all(isinstance(name, str) for name in value):
-            return list(value)
-        return list(FeaturePipeline.PRODUCTION_FEATURE_NAMES)
-
-    def _training_mode(self, artifact: dict[str, Any]) -> str:
-        value = artifact.get("trainingMode")
-        training = artifact.get("training")
-        if value is None and isinstance(training, dict):
-            value = training.get("trainingMode")
-        return str(value or "production")
-
     def _threshold_policy(self) -> dict[str, object]:
         return {
             "policyVersion": "fixed-business-risk-thresholds-v1",
@@ -178,3 +185,8 @@ class XGBoostFraudModel:
             "deployedAlertThreshold": self.thresholds["high"],
             "rankingMetricsAreNotSufficient": True,
         }
+
+    def _persisted_number(self, value: Any, label: str) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ValueError(f"Persisted XGBoost {label} must be a finite number.")
+        return float(value)
