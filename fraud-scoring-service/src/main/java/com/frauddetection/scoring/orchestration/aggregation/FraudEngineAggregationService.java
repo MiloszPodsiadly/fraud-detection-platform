@@ -89,7 +89,9 @@ public final class FraudEngineAggregationService {
                 evidenceSanitizer.sanitize(result.engineId(), result.evidence(), policy, warnings),
                 contributionSanitizer.sanitize(result.engineId(), result.contributions(), policy, warnings),
                 result.latencyMs(),
-                modelIdentity(result)
+                modelIdentity(result),
+                exactArtifactSha256(result),
+                sourceInferenceTimestamp(result)
         );
     }
 
@@ -98,5 +100,18 @@ public final class FraudEngineAggregationService {
             return null;
         }
         return new MlModelIdentity(result.modelName(), result.modelVersion(), result.featureContractVersion());
+    }
+
+    private String exactArtifactSha256(FraudEngineResult result) {
+        return hasAcceptedMlPrediction(result) ? result.modelArtifactSha256() : null;
+    }
+
+    private java.time.Instant sourceInferenceTimestamp(FraudEngineResult result) {
+        return hasAcceptedMlPrediction(result) ? result.sourceInferenceTimestamp() : null;
+    }
+
+    private boolean hasAcceptedMlPrediction(FraudEngineResult result) {
+        return result.engineType() == FraudEngineType.ML_MODEL
+                && result.status() == FraudEngineStatus.AVAILABLE;
     }
 }

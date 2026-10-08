@@ -40,7 +40,9 @@ class FraudEngineResultExamplePayloadTest {
         for (String file : SAMPLE_FILES) {
             String json = objectMapper().writeValueAsString(read(file));
 
-            assertThat(json).as(file).contains("\"engineId\"");
+            assertThat(json).as(file)
+                    .contains("\"engineId\"")
+                    .doesNotContain("modelArtifactSha256", "sourceInferenceTimestamp");
         }
     }
 

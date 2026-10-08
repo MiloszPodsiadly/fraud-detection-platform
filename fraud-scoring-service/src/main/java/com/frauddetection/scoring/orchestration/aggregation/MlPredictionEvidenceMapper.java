@@ -94,6 +94,8 @@ final class MlPredictionEvidenceMapper {
                 && source.riskLevel() == normalized.riskLevel()
                 && Objects.equals(source.modelName(), normalized.modelIdentity().modelName())
                 && Objects.equals(source.modelVersion(), normalized.modelIdentity().modelVersion())
-                && Objects.equals(source.featureContractVersion(), normalized.modelIdentity().featureContractVersion());
+                && Objects.equals(source.featureContractVersion(), normalized.modelIdentity().featureContractVersion())
+                && Objects.equals(source.modelArtifactSha256(), normalized.modelArtifactSha256())
+                && Objects.equals(source.sourceInferenceTimestamp(), normalized.sourceInferenceTimestamp());
     }
 }

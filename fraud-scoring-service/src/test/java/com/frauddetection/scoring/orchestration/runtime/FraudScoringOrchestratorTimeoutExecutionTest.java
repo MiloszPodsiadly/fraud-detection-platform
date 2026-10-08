@@ -49,6 +49,7 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
     private static final Instant RECEIVED_AT = Instant.parse("2026-05-30T10:00:00Z");
     private static final Duration RULES_DEADLINE = Duration.ofMillis(30);
     private static final Duration ML_DEADLINE = Duration.ofMillis(40);
+    private static final String MODEL_ARTIFACT_SHA256 = "a".repeat(64);
 
     @Test
     void optionalMlTimeoutDoesNotEraseRuleResult() {
@@ -308,7 +309,9 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
                 result.modelName(),
                 result.modelVersion(),
                 result.featureContractVersion(),
-                result.statusReason()
+                result.statusReason(),
+                result.sourceInferenceTimestamp(),
+                result.modelArtifactSha256()
         );
     }
 
@@ -346,7 +349,9 @@ class FraudScoringOrchestratorTimeoutExecutionTest {
                 descriptor.engineType() == FraudEngineType.ML_MODEL ? "2026-05-30.v1" : null,
                 descriptor.engineType() == FraudEngineType.ML_MODEL ? "2026-05-30.feature-contract.v1" : null,
                 null,
-                RECEIVED_AT
+                RECEIVED_AT,
+                descriptor.engineType() == FraudEngineType.ML_MODEL ? RECEIVED_AT : null,
+                descriptor.engineType() == FraudEngineType.ML_MODEL ? MODEL_ARTIFACT_SHA256 : null
         );
     }
 

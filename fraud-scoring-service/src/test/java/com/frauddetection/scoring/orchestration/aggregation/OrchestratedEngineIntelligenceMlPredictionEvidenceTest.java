@@ -1,6 +1,7 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
+import com.frauddetection.common.events.intelligence.MlModelIdentity;
 
 import com.frauddetection.common.events.engine.FraudEngineConfidence;
 import com.frauddetection.common.events.engine.FraudEngineResult;
@@ -21,6 +22,7 @@ import static com.frauddetection.scoring.orchestration.aggregation.EngineIntelli
 import static com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionTestSupport.request;
 import static com.frauddetection.scoring.orchestration.aggregation.EngineIntelligenceEmissionTestSupport.service;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -137,9 +139,8 @@ class OrchestratedEngineIntelligenceMlPredictionEvidenceTest {
     }
 
     @Test
-    void availableMlWithoutSourceTimestampHasExplicitOmissionAndNoFabricatedEvidence() {
-        FraudScoringOrchestrator orchestrator = mock(FraudScoringOrchestrator.class);
-        FraudEngineResult sourceWithoutTimestamp = new FraudEngineResult(
+    void availableMlWithoutSourceTimestampIsRejectedAtConstructionBoundary() {
+        assertThatThrownBy(() -> new FraudEngineResult(
                 "ml.python.primary",
                 FraudEngineType.ML_MODEL,
                 "python",
@@ -158,24 +159,48 @@ class OrchestratedEngineIntelligenceMlPredictionEvidenceTest {
                 AggregationTestSupport.GENERATED_AT,
                 null,
                 "a".repeat(64)
+        )).hasMessageContaining("requires sourceInferenceTimestamp");
+    }
+
+    @Test
+    void exactArtifactMismatchCannotProducePredictionEvidence() {
+        FraudEngineResult source = AggregationTestSupport.available(
+                "ml.python.primary",
+                0.8765d,
+                RiskLevel.HIGH,
+                "MODEL_HIGH_RISK"
         );
-        when(orchestrator.evaluate(any())).thenReturn(AggregationTestSupport.orchestration(
-                AggregationTestSupport.available("rules.primary", 0.1111d, RiskLevel.LOW, "HIGH_VELOCITY"),
-                sourceWithoutTimestamp
-        ));
+        FraudEngineAggregationResult aggregation = mock(FraudEngineAggregationResult.class);
+        when(aggregation.normalizedEngineResults()).thenReturn(List.of(new NormalizedFraudEngineResult(
+                source.engineId(),
+                source.engineType(),
+                source.status(),
+                source.score(),
+                source.riskLevel(),
+                source.confidence(),
+                source.reasonCodes(),
+                List.of(),
+                List.of(),
+                source.latencyMs(),
+                new MlModelIdentity(
+                        source.modelName(),
+                        source.modelVersion(),
+                        source.featureContractVersion()
+                ),
+                "b".repeat(64),
+                source.sourceInferenceTimestamp()
+        )));
 
-        EngineIntelligenceEnrichmentResult enrichment = service(true, pipeline(
-                orchestrator,
-                new FraudEngineAggregationService(FraudEngineAggregationPolicy.defaultInternalPolicy()),
-                new PublicEngineIntelligenceMapper()
-        )).emitIfEnabled(request()).enrichment().orElseThrow();
+        EngineIntelligenceEnrichmentResult enrichment = new MlPredictionEvidenceMapper().map(
+                mock(com.frauddetection.common.events.intelligence.EngineIntelligenceSummary.class),
+                AggregationTestSupport.orchestration(source),
+                aggregation
+        );
 
-        assertThat(enrichment.engineIntelligenceSummary()).isNotNull();
         assertThat(enrichment.mlPredictionEvidence()).isEmpty();
         assertThat(enrichment.mlPredictionEvidenceOmissionReason()).contains(
-                MlPredictionEvidenceOmissionReason.SOURCE_TIMESTAMP_MISSING
+                MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED
         );
-        verify(orchestrator, times(1)).evaluate(any());
     }
 
     @ParameterizedTest

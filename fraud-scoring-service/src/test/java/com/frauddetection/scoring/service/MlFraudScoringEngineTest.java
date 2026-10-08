@@ -103,7 +103,7 @@ class MlFraudScoringEngineTest {
                 Map.of("modelAvailable", true),
                 Map.of("modelAvailable", true),
                 null
-        )).hasMessageContaining("ML model identity must be entirely absent or complete");
+        )).hasMessageContaining("ML model artifact identity must be entirely absent or complete");
     }
 
     @Test

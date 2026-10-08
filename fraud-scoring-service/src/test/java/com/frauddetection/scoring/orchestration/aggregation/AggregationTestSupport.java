@@ -39,7 +39,9 @@ final class AggregationTestSupport {
                 List.of(),
                 List.of(),
                 0L,
-                modelIdentity(engineType(engineId), status)
+                modelIdentity(engineType(engineId), status),
+                isAvailableMl(engineType(engineId), status) ? "a".repeat(64) : null,
+                isAvailableMl(engineType(engineId), status) ? SOURCE_INFERENCE_AT : null
         );
     }
 

@@ -35,6 +35,7 @@ class HttpMlModelScoringClientTest {
                           "modelName": "python-logistic-fraud-model",
                           "modelVersion": "2026-04-21.v1",
                           "featureContractVersion": "2026-05-30.feature-contract.v1",
+                          "modelArtifactSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                           "inferenceTimestamp": "2026-04-21T10:00:00Z",
                           "reasonCodes": ["countryMismatch"],
                           "scoreDetails": {"logit": 1.52},

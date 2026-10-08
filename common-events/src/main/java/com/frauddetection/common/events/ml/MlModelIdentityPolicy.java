@@ -86,6 +86,36 @@ public final class MlModelIdentityPolicy {
         return value == null ? null : requireArtifactSha256(value, fieldName);
     }
 
+    public static void requireAtomicArtifactIdentity(
+            String modelName,
+            String modelVersion,
+            String featureContractVersion,
+            String modelArtifactSha256
+    ) {
+        int present = 0;
+        present += modelName == null ? 0 : 1;
+        present += modelVersion == null ? 0 : 1;
+        present += featureContractVersion == null ? 0 : 1;
+        present += modelArtifactSha256 == null ? 0 : 1;
+        if (present != 0 && present != 4) {
+            throw new IllegalArgumentException(
+                    "ML model artifact identity must be entirely absent or complete"
+            );
+        }
+    }
+
+    public static boolean hasCompleteArtifactIdentity(
+            String modelName,
+            String modelVersion,
+            String featureContractVersion,
+            String modelArtifactSha256
+    ) {
+        return modelName != null
+                && modelVersion != null
+                && featureContractVersion != null
+                && modelArtifactSha256 != null;
+    }
+
     private static String requireIdentityPart(String value, String fieldName, int maxLength) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(fieldName + " is required");

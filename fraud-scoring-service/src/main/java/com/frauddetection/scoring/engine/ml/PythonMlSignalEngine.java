@@ -80,6 +80,12 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
         if (availabilityStatus == ModelAvailabilityStatus.INVALID) {
             return degradedResult(PythonMlSignalReasonCode.ML_AVAILABILITY_METADATA_INVALID);
         }
+        if (sourceResult.inferenceTimestamp() == null) {
+            return degradedResult(PythonMlSignalReasonCode.ML_INFERENCE_TIMESTAMP_MISSING);
+        }
+        if (missingModelMetadata(sourceResult)) {
+            return degradedResult(PythonMlSignalReasonCode.ML_MODEL_METADATA_MISSING);
+        }
         if (sourceResult.fraudScore() == null) {
             return degradedResult(PythonMlSignalReasonCode.ML_SCORE_MISSING);
         }
@@ -88,12 +94,6 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
         }
         if (sourceResult.riskLevel() == null) {
             return degradedResult(PythonMlSignalReasonCode.ML_MODEL_INVALID_RESPONSE);
-        }
-        if (missingModelMetadata(sourceResult)) {
-            return degradedResult(PythonMlSignalReasonCode.ML_MODEL_METADATA_MISSING);
-        }
-        if (sourceResult.inferenceTimestamp() == null) {
-            return degradedResult(PythonMlSignalReasonCode.ML_INFERENCE_TIMESTAMP_MISSING);
         }
         return availableResult(sourceResult);
     }
@@ -126,7 +126,8 @@ public final class PythonMlSignalEngine implements FraudSignalEngine {
                 || sourceResult.modelVersion().isBlank()
                 || sourceResult.featureContractVersion() == null
                 || sourceResult.featureContractVersion().isBlank()
-                || sourceResult.modelArtifactSha256() == null;
+                || sourceResult.modelArtifactSha256() == null
+                || sourceResult.modelArtifactSha256().isBlank();
     }
 
     private FraudSignalEvaluation availableResult(FraudScoreResult sourceResult) {

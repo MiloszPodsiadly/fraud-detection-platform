@@ -32,10 +32,15 @@ public record FraudScoreResult(
                     featureContractVersion,
                     "featureContractVersion"
             );
-            validateAtomicMlModelIdentity(modelName, modelVersion, featureContractVersion);
             modelArtifactSha256 = MlModelIdentityPolicy.optionalArtifactSha256(
                     modelArtifactSha256,
                     "modelArtifactSha256"
+            );
+            MlModelIdentityPolicy.requireAtomicArtifactIdentity(
+                    modelName,
+                    modelVersion,
+                    featureContractVersion,
+                    modelArtifactSha256
             );
         }
         scoringEvidence = scoringEvidence == null ? List.of() : List.copyOf(scoringEvidence);
@@ -169,17 +174,4 @@ public record FraudScoreResult(
         );
     }
 
-    private static void validateAtomicMlModelIdentity(
-            String modelName,
-            String modelVersion,
-            String featureContractVersion
-    ) {
-        int present = 0;
-        present += modelName == null ? 0 : 1;
-        present += modelVersion == null ? 0 : 1;
-        present += featureContractVersion == null ? 0 : 1;
-        if (present != 0 && present != 3) {
-            throw new IllegalArgumentException("ML model identity must be entirely absent or complete");
-        }
-    }
 }

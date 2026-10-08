@@ -104,7 +104,9 @@ final class PythonMlSignalEngineTestSupport {
                 scoreDetails,
                 Map.of("customerSegment", "VIP"),
                 metadata,
-                true
+                true,
+                List.of(),
+                "a".repeat(64)
         );
     }
 
@@ -138,7 +140,8 @@ final class PythonMlSignalEngineTestSupport {
                 Map.of(),
                 metadata,
                 true,
-                List.of(unsafeEvidence)
+                List.of(unsafeEvidence),
+                "a".repeat(64)
         );
     }
 

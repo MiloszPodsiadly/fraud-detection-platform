@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.ml.MlModelIdentityPolicy;
 
@@ -31,8 +32,8 @@ public record FraudEngineResult(
         String featureContractVersion,
         @JsonAlias("fallbackReason") String statusReason,
         Instant generatedAt,
-        @JsonIgnore Instant sourceInferenceTimestamp,
-        @JsonIgnore String modelArtifactSha256
+        @JsonProperty(access = JsonProperty.Access.WRITE_ONLY) Instant sourceInferenceTimestamp,
+        @JsonProperty(access = JsonProperty.Access.WRITE_ONLY) String modelArtifactSha256
 ) {
     public static final int REASON_CODES_MAX_SIZE = 10;
     public static final int CONTRIBUTIONS_MAX_SIZE = 10;
@@ -81,7 +82,17 @@ public record FraudEngineResult(
                 featureContractVersion,
                 "featureContractVersion"
         );
-        validateAtomicMlModelIdentity(engineType, modelName, modelVersion, featureContractVersion);
+        modelArtifactSha256 = MlModelIdentityPolicy.optionalArtifactSha256(
+                modelArtifactSha256,
+                "modelArtifactSha256"
+        );
+        validateAtomicMlModelIdentity(
+                engineType,
+                modelName,
+                modelVersion,
+                featureContractVersion,
+                modelArtifactSha256
+        );
         statusReason = FraudEngineValuePolicy.optionalMachineCode(
                 statusReason,
                 "statusReason",
@@ -96,6 +107,8 @@ public record FraudEngineResult(
                 modelName,
                 modelVersion,
                 featureContractVersion,
+                modelArtifactSha256,
+                sourceInferenceTimestamp,
                 statusReason
         );
     }
@@ -324,13 +337,22 @@ public record FraudEngineResult(
             String modelName,
             String modelVersion,
             String featureContractVersion,
+            String modelArtifactSha256,
+            Instant sourceInferenceTimestamp,
             String statusReason
     ) {
         switch (status) {
             case AVAILABLE -> {
                 requireScoreAndRiskLevel(score, riskLevel, status);
                 requireConfidence(confidence, status);
-                requireAvailableMlIdentity(engineType, modelName, modelVersion, featureContractVersion);
+                requireAvailableMlIdentity(
+                        engineType,
+                        modelName,
+                        modelVersion,
+                        featureContractVersion,
+                        modelArtifactSha256,
+                        sourceInferenceTimestamp
+                );
                 if (statusReason != null) {
                     throw new IllegalArgumentException("AVAILABLE status must not declare statusReason");
                 }
@@ -363,14 +385,26 @@ public record FraudEngineResult(
             FraudEngineType engineType,
             String modelName,
             String modelVersion,
-            String featureContractVersion
+            String featureContractVersion,
+            String modelArtifactSha256,
+            Instant sourceInferenceTimestamp
     ) {
         if (engineType != FraudEngineType.ML_MODEL) {
             return;
         }
-        if (modelName == null || modelVersion == null || featureContractVersion == null) {
+        if (!MlModelIdentityPolicy.hasCompleteArtifactIdentity(
+                modelName,
+                modelVersion,
+                featureContractVersion,
+                modelArtifactSha256
+        )) {
             throw new IllegalArgumentException(
-                    "AVAILABLE ML_MODEL status requires modelName, modelVersion, and featureContractVersion"
+                    "AVAILABLE ML_MODEL status requires complete model artifact identity"
+            );
+        }
+        if (sourceInferenceTimestamp == null) {
+            throw new IllegalArgumentException(
+                    "AVAILABLE ML_MODEL status requires sourceInferenceTimestamp"
             );
         }
     }
@@ -379,18 +413,18 @@ public record FraudEngineResult(
             FraudEngineType engineType,
             String modelName,
             String modelVersion,
-            String featureContractVersion
+            String featureContractVersion,
+            String modelArtifactSha256
     ) {
         if (engineType != FraudEngineType.ML_MODEL) {
             return;
         }
-        int present = 0;
-        present += modelName == null ? 0 : 1;
-        present += modelVersion == null ? 0 : 1;
-        present += featureContractVersion == null ? 0 : 1;
-        if (present != 0 && present != 3) {
-            throw new IllegalArgumentException("ML model identity must be entirely absent or complete");
-        }
+        MlModelIdentityPolicy.requireAtomicArtifactIdentity(
+                modelName,
+                modelVersion,
+                featureContractVersion,
+                modelArtifactSha256
+        );
     }
 
     private static FraudEngineConfidence normalizeConfidenceForStatus(

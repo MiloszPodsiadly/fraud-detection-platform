@@ -75,7 +75,8 @@ public class MlFraudScoringEngine implements FraudScoringEngine {
     private boolean missingModelIdentity(MlModelOutput output) {
         return isBlank(output.modelName())
                 || isBlank(output.modelVersion())
-                || isBlank(output.featureContractVersion());
+                || isBlank(output.featureContractVersion())
+                || isBlank(output.modelArtifactSha256());
     }
 
     private FraudScoreResult unavailableIdentityResult(FraudScoringRequest request, MlModelOutput output) {
