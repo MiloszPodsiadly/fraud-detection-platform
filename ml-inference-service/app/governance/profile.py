@@ -5,7 +5,15 @@ import math
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from app.model_identity_policy import (
+    ARTIFACT_SHA256_PATTERN,
+    ModelLogicalIdentity,
+)
+
+if TYPE_CHECKING:
+    from app.inference.model_runtime import ResolvedModelRuntime
 
 
 REFERENCE_PROFILE_PATH = Path(__file__).with_name("reference_profile.local.json")
@@ -77,9 +85,11 @@ class NumericProfile:
 class InferenceProfile:
     """Process-local aggregate inference profile; no raw requests are retained."""
 
-    def __init__(self, model_name: str, model_version: str, feature_names: list[str]) -> None:
-        self.model_name = model_name
-        self.model_version = model_version
+    def __init__(self, resolved_runtime: ResolvedModelRuntime, feature_names: list[str]) -> None:
+        self.model_name = resolved_runtime.logical_identity.model_name
+        self.model_version = resolved_runtime.logical_identity.model_version
+        self.artifact_sha256 = resolved_runtime.artifact_sha256
+        self.selection_source = resolved_runtime.selection_source.value
         self.feature_names = list(feature_names)
         self._lock = threading.Lock()
         self.reset()
@@ -124,6 +134,8 @@ class InferenceProfile:
                 "profileType": "process_lifetime_inference",
                 "model_name": self.model_name,
                 "model_version": self.model_version,
+                "artifact_sha256": self.artifact_sha256,
+                "selection_source": self.selection_source,
                 "profile_started_at": profile_started_at,
                 "last_updated_at": self.last_updated_at,
                 "observation_count": self.observations,
@@ -158,58 +170,45 @@ class InferenceProfile:
         }
 
 
-def load_reference_profile(path: Path = REFERENCE_PROFILE_PATH) -> dict[str, Any]:
+def load_reference_profile(
+        resolved_runtime: ResolvedModelRuntime,
+        path: Path = REFERENCE_PROFILE_PATH,
+) -> dict[str, Any]:
     if not path.exists():
-        return {
-            "available": False,
-            "status": "missing",
-            "path": str(path),
-            "reference_quality": "UNKNOWN",
-            "drift_status": "UNKNOWN",
-        }
+        return _unavailable_reference_profile("missing", path, "REFERENCE_PROFILE_MISSING")
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        return {
-            "available": False,
-            "status": "invalid",
-            "path": str(path),
-            "error": exc.__class__.__name__,
-            "reference_quality": "UNKNOWN",
-            "drift_status": "UNKNOWN",
-        }
+        return _unavailable_reference_profile(
+            "invalid",
+            path,
+            "REFERENCE_PROFILE_INVALID",
+            error=exc.__class__.__name__,
+        )
     if not isinstance(payload, dict):
-        return {
-            "available": False,
-            "status": "invalid",
-            "path": str(path),
-            "reference_quality": "UNKNOWN",
-            "drift_status": "UNKNOWN",
-        }
+        return _unavailable_reference_profile("invalid", path, "REFERENCE_PROFILE_INVALID")
     normalized = _normalize_reference_profile(payload)
-    return {
-        "available": True,
-        "status": "loaded",
-        "path": str(path),
-        **normalized,
-    }
+    return _bind_reference_profile(normalized, resolved_runtime, path)
 
 
-def governance_model_metadata(model: Any, artifact_path: Path) -> dict[str, Any]:
-    artifact = _load_artifact(artifact_path)
+def governance_model_metadata(resolved_runtime: Any) -> dict[str, Any]:
+    artifact = resolved_runtime.validated_artifact.artifact
+    artifact_path = resolved_runtime.canonical_artifact_path_or_id
     training = artifact.get("training") if isinstance(artifact.get("training"), dict) else {}
     feature_set = _string_list(artifact.get("featureSetUsed")) or _string_list(training.get("featureSetUsed"))
     if not feature_set:
         feature_set = _string_list(artifact.get("featureSchema")) or _string_list(artifact.get("weights"))
     return {
-        "model_name": getattr(model, "model_name", None),
-        "model_version": getattr(model, "model_version", None),
-        "model_family": getattr(model, "model_family", None),
+        "model_name": resolved_runtime.logical_identity.model_name,
+        "model_version": resolved_runtime.logical_identity.model_version,
+        "model_family": resolved_runtime.artifact_identity.model_family,
         "training_mode": str(artifact.get("trainingMode") or training.get("trainingMode") or "production"),
         "feature_set": feature_set,
         "artifact": {
             "path": str(artifact_path),
-            "loaded": bool(artifact),
+            "loaded": True,
+            "sha256": resolved_runtime.artifact_sha256,
+            "selection_source": resolved_runtime.selection_source.value,
             "training_source": training.get("source"),
             "training_examples": training.get("examples"),
             "algorithm": training.get("algorithm"),
@@ -227,6 +226,8 @@ def governance_model_metadata(model: Any, artifact_path: Path) -> dict[str, Any]
 
 
 def reference_feature_names(reference_profile: dict[str, Any]) -> list[str]:
+    if not reference_profile.get("available"):
+        return []
     stats = reference_profile.get("numeric_feature_stats")
     if not isinstance(stats, dict):
         return []
@@ -245,6 +246,9 @@ def reference_profile_summary(reference_profile: dict[str, Any]) -> dict[str, An
         "sample_size": reference_profile.get("sample_size"),
         "model_name": reference_profile.get("model_name"),
         "model_version": reference_profile.get("model_version"),
+        "artifact_sha256": reference_profile.get("artifact_sha256"),
+        "identity_status": reference_profile.get("identity_status"),
+        "unavailable_reason": reference_profile.get("unavailable_reason"),
     }
 
 
@@ -253,6 +257,8 @@ def inference_profile_summary(inference_profile: dict[str, Any]) -> dict[str, An
         "profileType": inference_profile.get("profileType"),
         "model_name": inference_profile.get("model_name"),
         "model_version": inference_profile.get("model_version"),
+        "artifact_sha256": inference_profile.get("artifact_sha256"),
+        "selection_source": inference_profile.get("selection_source"),
         "profile_started_at": inference_profile.get("profile_started_at"),
         "last_updated_at": inference_profile.get("last_updated_at"),
         "observation_count": inference_profile.get("observation_count", inference_profile.get("observations", 0)),
@@ -304,6 +310,80 @@ def _normalize_reference_profile(payload: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _bind_reference_profile(
+        profile: dict[str, Any],
+        resolved_runtime: ResolvedModelRuntime,
+        path: Path,
+) -> dict[str, Any]:
+    model_name = profile.get("model_name")
+    model_version = profile.get("model_version")
+    try:
+        profile_identity = ModelLogicalIdentity(model_name, model_version)
+    except (TypeError, ValueError):
+        return _unavailable_reference_profile(
+            "UNKNOWN",
+            path,
+            "REFERENCE_LOGICAL_IDENTITY_MISSING_OR_INVALID",
+            profile,
+        )
+    if profile_identity != resolved_runtime.logical_identity:
+        return _unavailable_reference_profile(
+            "IDENTITY_MISMATCH",
+            path,
+            "REFERENCE_LOGICAL_IDENTITY_MISMATCH",
+            profile,
+            identity_status="MISMATCH",
+        )
+
+    artifact_sha256 = profile.get("artifact_sha256")
+    if not isinstance(artifact_sha256, str) or ARTIFACT_SHA256_PATTERN.fullmatch(artifact_sha256) is None:
+        return _unavailable_reference_profile(
+            "UNKNOWN",
+            path,
+            "REFERENCE_ARTIFACT_SHA256_MISSING_OR_INVALID",
+            profile,
+        )
+    if artifact_sha256 != resolved_runtime.artifact_sha256:
+        return _unavailable_reference_profile(
+            "IDENTITY_MISMATCH",
+            path,
+            "REFERENCE_ARTIFACT_SHA256_MISMATCH",
+            profile,
+            identity_status="MISMATCH",
+        )
+    return {
+        **profile,
+        "available": True,
+        "status": "loaded",
+        "identity_status": "MATCH",
+        "path": path.name,
+    }
+
+
+def _unavailable_reference_profile(
+        status: str,
+        path: Path,
+        reason: str,
+        profile: dict[str, Any] | None = None,
+        *,
+        identity_status: str = "UNKNOWN",
+        error: str | None = None,
+) -> dict[str, Any]:
+    result = {
+        **(profile or {}),
+        "available": False,
+        "status": status,
+        "identity_status": identity_status,
+        "unavailable_reason": reason,
+        "path": path.name,
+        "reference_quality": (profile or {}).get("reference_quality", "UNKNOWN"),
+        "drift_status": "UNKNOWN",
+    }
+    if error is not None:
+        result["error"] = error
+    return result
+
+
 def _sample_size(profile: dict[str, Any]) -> int:
     value = profile.get("score_distribution")
     if isinstance(value, dict):
@@ -312,14 +392,6 @@ def _sample_size(profile: dict[str, Any]) -> int:
         except (TypeError, ValueError):
             return 0
     return 0
-
-
-def _load_artifact(path: Path) -> dict[str, Any]:
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
 
 
 def _string_list(value: Any) -> list[str]:

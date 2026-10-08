@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -45,6 +46,7 @@ def main() -> None:
         training_mode=args.training_mode,
     )
     write_model_artifact(args.output, model, dataset.size, evaluation)
+    artifact_sha256 = hashlib.sha256(args.output.read_bytes()).hexdigest()
     evaluation_output = args.evaluation_output or args.output.with_suffix(".evaluation.json")
     write_report(evaluation, evaluation_output)
     reference_dataset = generate_examples(args.reference_examples, args.reference_seed)
@@ -54,13 +56,12 @@ def main() -> None:
         reference_dataset,
         seed=args.reference_seed,
         examples=args.reference_examples,
+        artifact_sha256=artifact_sha256,
     )
     if args.register_model:
         registry = ModelRegistry(args.registry_path)
         registry.register(
             artifact_path=args.output,
-            model_version=model.model_version,
-            model_type=args.model_type,
             metrics=evaluation,
             training_metadata={
                 "examples": dataset.size,
@@ -73,7 +74,7 @@ def main() -> None:
 
     from app.model import FraudModel
 
-    model = FraudModel(args.output)
+    model = FraudModel.from_packaged_artifact(args.output)
     high_risk = model.score(
         {
             "recentTransactionCount": 8,
@@ -114,7 +115,14 @@ def main() -> None:
     print(f"highRisk={high_risk['fraudScore']} {high_risk['riskLevel']}")
 
 
-def write_reference_profile(path: Path, model, dataset, seed: int, examples: int) -> None:
+def write_reference_profile(
+        path: Path,
+        model,
+        dataset,
+        seed: int,
+        examples: int,
+        artifact_sha256: str,
+) -> None:
     """Write a local synthetic reference profile aligned with the active model artifact."""
     pipeline = FeaturePipeline().fit(dataset)
     feature_rows = pipeline.transform(dataset, mode=model.training_mode)
@@ -137,6 +145,7 @@ def write_reference_profile(path: Path, model, dataset, seed: int, examples: int
         "generated_by": "ml-inference-service canonical rules-v2 feature pipeline",
         "model_name": model.model_name,
         "model_version": model.model_version,
+        "artifact_sha256": artifact_sha256,
         "numeric_feature_stats": {
             name: profile.snapshot()
             for name, profile in feature_profiles.items()

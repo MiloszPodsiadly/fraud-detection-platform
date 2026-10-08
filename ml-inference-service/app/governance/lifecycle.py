@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import uuid
@@ -250,23 +249,22 @@ def create_lifecycle_repository(config: LifecyclePersistenceConfig) -> Lifecycle
 
 
 def current_model_lifecycle_metadata(
-        model: dict[str, Any],
-        artifact_path: Path,
+        resolved_runtime: Any,
         reference_profile: dict[str, Any],
-        loaded_at: datetime,
 ) -> dict[str, Any]:
-    artifact = _load_artifact(artifact_path)
+    artifact = resolved_runtime.validated_artifact.artifact
+    model = resolved_runtime.model
     training = artifact.get("training") if isinstance(artifact.get("training"), dict) else {}
     return {
-        "model_name": model.get("model_name"),
-        "model_version": model.get("model_version"),
-        "model_family": model.get("model_family"),
-        "loaded_at": loaded_at.isoformat(timespec="seconds"),
-        "artifact_path_or_id": _safe_artifact_id(artifact_path),
-        "artifact_source": "LOCAL_FILE" if artifact_path.exists() else "UNKNOWN",
-        "artifact_checksum": _artifact_checksum(artifact_path),
+        "model_name": resolved_runtime.logical_identity.model_name,
+        "model_version": resolved_runtime.logical_identity.model_version,
+        "model_family": model.model_family,
+        "loaded_at": resolved_runtime.loaded_at.isoformat(timespec="seconds"),
+        "artifact_path_or_id": resolved_runtime.canonical_artifact_path_or_id,
+        "artifact_source": "LOCAL_FILE",
+        "artifact_checksum": f"sha256:{resolved_runtime.artifact_sha256}",
         "feature_set_version": artifact.get("featureSetVersion") or training.get("featureSetVersion"),
-        "training_mode": model.get("training_mode") or artifact.get("trainingMode") or training.get("trainingMode"),
+        "training_mode": model.training_mode,
         "reference_profile_id": reference_profile.get("profileVersion"),
         "runtime_environment": "ml-inference-service",
         "lifecycle_mode": LIFECYCLE_MODE,
@@ -326,31 +324,6 @@ def _bounded_summary(summary: dict[str, Any]) -> dict[str, Any]:
         "feature_count",
     }
     return {key: value for key, value in summary.items() if key in allowed}
-
-
-def _safe_artifact_id(path: Path) -> str:
-    try:
-        return str(path.resolve().relative_to(Path(__file__).resolve().parents[1]))
-    except ValueError:
-        return path.name
-    except OSError:
-        return path.name
-
-
-def _artifact_checksum(path: Path) -> str | None:
-    try:
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError:
-        return None
-    return f"sha256:{digest}"
-
-
-def _load_artifact(path: Path) -> dict[str, Any]:
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
 
 
 def _parse_time(value: Any) -> datetime:
