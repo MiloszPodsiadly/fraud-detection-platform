@@ -7,7 +7,6 @@ import com.frauddetection.alert.feedback.FraudFeedbackRecord;
 import com.frauddetection.alert.feedback.governance.FeedbackDatasetEligibility;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,7 +28,7 @@ import java.util.Set;
 @Service
 public class FeedbackDatasetBuilder {
 
-    public static final String DATASET_VERSION = "feedback-dataset-v2";
+    public static final String DATASET_VERSION = "feedback-dataset-v3";
 
     private static final Logger log = LoggerFactory.getLogger(FeedbackDatasetBuilder.class);
 
@@ -238,6 +237,7 @@ public class FeedbackDatasetBuilder {
                 projection == null ? null : projection.getModelName(),
                 projection == null ? null : projection.getModelVersion(),
                 projection == null ? null : projection.getFeatureContractVersion(),
+                projection == null ? null : projection.getModelArtifactSha256(),
                 source.getAnalystRecommendationStatus(),
                 source.getAnalystRecommendation(),
                 source.getAnalystRecommendationVersion(),
@@ -298,8 +298,8 @@ public class FeedbackDatasetBuilder {
             ScoringOccurrenceOwnership ownership,
             MlPredictionEvidenceProjection projection
     ) {
-        int feedbackIdentityParts = presentIdentityParts(source);
-        if (feedbackIdentityParts != 0 && feedbackIdentityParts != 3) {
+        int feedbackLineageParts = presentLineageParts(source);
+        if (feedbackLineageParts != 0 && feedbackLineageParts != 4) {
             return FeedbackDatasetMlPredictionEvidence.unavailable(
                     FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
             );
@@ -319,17 +319,6 @@ public class FeedbackDatasetBuilder {
         }
 
         try {
-            new MlPredictionEvidenceV1(
-                    projection.getContractVersion(),
-                    projection.getSourceEngineId(),
-                    projection.getEngineStatus(),
-                    projection.getMlScore(),
-                    projection.getMlRiskLevel(),
-                    projection.getModelName(),
-                    projection.getModelVersion(),
-                    projection.getFeatureContractVersion(),
-                    projection.getSourceExecutionTimestamp()
-            );
             if (!ownership.sourceEventId().equals(projection.getSourceEventId())
                     || !ownership.sourceEventCreatedAt().equals(projection.getSourceEventCreatedAt())
                     || !Objects.equals(source.getTransactionId(), projection.getTransactionId())
@@ -339,13 +328,14 @@ public class FeedbackDatasetBuilder {
                         FeedbackDatasetMlPredictionEvidenceStatus.IDENTITY_MISMATCH
                 );
             }
-            if (feedbackIdentityParts == 3
+            if (feedbackLineageParts != 0
                     && (!Objects.equals(source.getMlModelName(), projection.getModelName())
                     || !Objects.equals(source.getMlModelVersion(), projection.getModelVersion())
                     || !Objects.equals(
                             source.getMlFeatureContractVersion(),
                             projection.getFeatureContractVersion()
-                    ))) {
+                    )
+                    || !Objects.equals(source.getMlModelArtifactSha256(), projection.getModelArtifactSha256()))) {
                 return FeedbackDatasetMlPredictionEvidence.unavailable(
                         FeedbackDatasetMlPredictionEvidenceStatus.IDENTITY_MISMATCH
                 );
@@ -358,11 +348,12 @@ public class FeedbackDatasetBuilder {
         }
     }
 
-    private int presentIdentityParts(FraudFeedbackRecord source) {
+    private int presentLineageParts(FraudFeedbackRecord source) {
         int present = 0;
         present += source.getMlModelName() == null ? 0 : 1;
         present += source.getMlModelVersion() == null ? 0 : 1;
         present += source.getMlFeatureContractVersion() == null ? 0 : 1;
+        present += source.getMlModelArtifactSha256() == null ? 0 : 1;
         return present;
     }
 

@@ -39,6 +39,7 @@ class FeedbackDatasetBuilderTest {
     private static final Instant EXECUTED_AT = Instant.parse("2026-06-01T00:00:00.500Z");
     private static final String MODEL_NAME = "python-logistic-fraud-model";
     private static final String FEATURE_CONTRACT_VERSION = "feature-contract-v2";
+    private static final String MODEL_ARTIFACT_SHA256 = "a".repeat(64);
 
     private final FeedbackDatasetCandidateStore store = mock(FeedbackDatasetCandidateStore.class);
     private final MlPredictionEvidenceProjectionRepository evidenceRepository =
@@ -600,6 +601,7 @@ class FeedbackDatasetBuilderTest {
             assertThat(record.mlPredictionEvidenceStatus())
                     .isEqualTo(FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE);
             assertThat(record.mlModelVersion()).isEqualTo("model-a");
+            assertThat(record.mlModelArtifactSha256()).isEqualTo(MODEL_ARTIFACT_SHA256);
         });
     }
 
@@ -869,14 +871,12 @@ class FeedbackDatasetBuilderTest {
                 transactionId,
                 correlationId == null ? "correlation-" + sourceEventId : correlationId,
                 sourceEventCreatedAt.toString(),
-                1,
-                "ml.python.primary",
-                FraudEngineStatus.AVAILABLE,
                 score,
                 score >= 0.8 ? RiskLevel.HIGH : RiskLevel.LOW,
                 MODEL_NAME,
                 modelVersion,
                 FEATURE_CONTRACT_VERSION,
+                MODEL_ARTIFACT_SHA256,
                 EXECUTED_AT.toString(),
                 BUILT_AT
         );

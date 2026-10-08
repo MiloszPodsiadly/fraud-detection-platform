@@ -170,7 +170,7 @@ class EngineIntelligenceFeedbackDatasetDocumentationTest {
                 .contains("latest/current diagnostic projection")
                 .contains("was future scope for that historical delivery")
                 .contains("current offline suite is now implemented")
-                .contains("feedback-dataset-v2 exact-occurrence bounded context");
+                .contains("feedback-dataset-v3 exact-occurrence bounded context");
     }
 
     private static String normalizedDoc() throws IOException {

@@ -49,11 +49,13 @@ MODEL_X = ModelEvaluationIdentity(
     "python-logistic-fraud-model",
     "model-X",
     "feature-contract-v2",
+    "a" * 64,
 )
 MODEL_Y = ModelEvaluationIdentity(
     "python-logistic-fraud-model",
     "model-Y",
     "feature-contract-v2",
+    "b" * 64,
 )
 CARD_GENERATED_AT = "2026-06-11T00:00:00.123456789Z"
 SHADOW_GENERATED_AT = "2026-06-12T00:00:00.234567891Z"

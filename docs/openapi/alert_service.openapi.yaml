@@ -5632,7 +5632,7 @@ components:
           description: Canonical Platform Evaluation artifact-set version.
         datasetVersion:
           type: string
-          enum: [feedback-dataset-v2]
+          enum: [feedback-dataset-v3]
         datasetTimeBasis:
           type: string
           enum: [FEEDBACK_CREATED_AT]

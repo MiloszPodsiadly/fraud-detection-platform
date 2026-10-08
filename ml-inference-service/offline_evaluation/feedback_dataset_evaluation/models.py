@@ -63,6 +63,7 @@ class FeedbackDatasetRecord:
     ml_model_name: str | None
     ml_model_version: str | None
     ml_feature_contract_version: str | None
+    ml_model_artifact_sha256: str | None
     analyst_recommendation_status: str | None
     analyst_recommendation: str | None
     analyst_recommendation_version: str | None

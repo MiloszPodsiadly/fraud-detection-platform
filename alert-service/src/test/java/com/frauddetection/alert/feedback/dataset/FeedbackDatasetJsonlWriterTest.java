@@ -93,7 +93,7 @@ class FeedbackDatasetJsonlWriterTest {
 
         assertThat(jsonl.lines().findFirst().orElseThrow())
                 .contains("\"type\":\"DATASET_METADATA\"")
-                .contains("\"datasetVersion\":\"feedback-dataset-v2\"")
+                .contains("\"datasetVersion\":\"feedback-dataset-v3\"")
                 .contains("\"timeBasis\":\"FEEDBACK_CREATED_AT\"")
                 .contains("\"skippedInvalidSourceRecordCount\":0");
     }
@@ -277,6 +277,7 @@ class FeedbackDatasetJsonlWriterTest {
                 null,
                 null,
                 null,
+                null,
                 List.of(),
                 null,
                 null
@@ -309,6 +310,7 @@ class FeedbackDatasetJsonlWriterTest {
                 "python-logistic-fraud-model",
                 "2026-06-25.v1",
                 "feature-contract-v2",
+                "a".repeat(64),
                 null,
                 null,
                 null,

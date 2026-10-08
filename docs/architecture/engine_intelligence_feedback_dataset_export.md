@@ -17,7 +17,7 @@ service does not authorize public, operator-triggered, scheduled, CLI, or extern
 Engine Intelligence feedback, current alert decision state, and the transaction-scoped Engine Intelligence
 projection. It remains valid for that independent diagnostic context.
 
-It is not the source of exact model prediction evidence for `feedback-dataset-v2` model evaluation. That evaluation
+It is not the source of exact model prediction evidence for `feedback-dataset-v3` model evaluation. That evaluation
 uses `FraudFeedbackRecord` with exact scoring-occurrence ownership and the immutable
 `MlPredictionEvidenceProjection` selected by exact source event. It must not use
 `EngineIntelligenceFeedbackDatasetExport`, a current Engine Intelligence projection selected by transaction ID, or a
@@ -141,5 +141,5 @@ Any future public/operator/scheduled/external export requires a separate scoped 
 audit, rate limits, privacy review, retention policy, access controls, operational monitoring, and an approved
 privacy-reviewed identifier strategy. Public or operator-triggered export is a separate future scope. The Python ML
 Evaluation Suite was future scope for that historical delivery. The current offline suite is now implemented in the
-separate `feedback-dataset-v2` exact-occurrence bounded context and does not consume this export as exact model
+separate `feedback-dataset-v3` exact-occurrence bounded context and does not consume this export as exact model
 prediction evidence.

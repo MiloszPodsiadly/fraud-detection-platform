@@ -465,6 +465,7 @@ class FeedbackDatasetRecordContractTest {
                 null,
                 null,
                 null,
+                null,
                 List.of(),
                 null,
                 null
@@ -548,6 +549,8 @@ class FeedbackDatasetRecordContractTest {
                 mlModelName,
                 mlModelVersion,
                 mlFeatureContractVersion,
+                status == FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE
+                        ? "a".repeat(64) : null,
                 null,
                 null,
                 null,

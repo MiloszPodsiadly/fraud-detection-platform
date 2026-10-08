@@ -12,7 +12,7 @@ GENERATED_AT = "2026-06-10T00:00:00Z"
 def metadata(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
         "type": "DATASET_METADATA",
-        "datasetVersion": "feedback-dataset-v2",
+        "datasetVersion": "feedback-dataset-v3",
         "builtAt": "2026-06-10T00:00:00Z",
         "timeBasis": "FEEDBACK_CREATED_AT",
         "fromInclusive": "2026-06-01T00:00:00Z",
@@ -32,7 +32,7 @@ def metadata(**overrides: object) -> dict[str, object]:
 
 def record(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
-        "datasetVersion": "feedback-dataset-v2",
+        "datasetVersion": "feedback-dataset-v3",
         "evaluationRecordId": "eval_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "transactionReference": "txnref_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "feedbackLabel": "CONFIRMED_FRAUD",
@@ -56,6 +56,7 @@ def record(**overrides: object) -> dict[str, object]:
         "mlModelName": None,
         "mlModelVersion": None,
         "mlFeatureContractVersion": None,
+        "mlModelArtifactSha256": None,
         "analystRecommendationStatus": "AVAILABLE",
         "analystRecommendation": "RECOMMEND_REVIEW",
         "analystRecommendationVersion": "v1",
@@ -72,6 +73,7 @@ def record(**overrides: object) -> dict[str, object]:
             "mlPredictionScore": 0.8123,
             "mlPredictionRiskLevel": "HIGH",
             "mlPredictionExecutedAt": "2026-06-03T11:59:00Z",
+            "mlModelArtifactSha256": "a" * 64,
         }
         for field, value in evidence_defaults.items():
             if field not in overrides:

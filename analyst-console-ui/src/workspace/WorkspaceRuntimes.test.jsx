@@ -338,7 +338,7 @@ function shadowSummary() {
       evaluationReportGeneratedAt: "2026-06-10T00:00:00Z",
       evaluationCardGeneratedAt: "2026-06-12T00:00:00Z",
       evaluationArtifactSetVersion: "feedback-dataset-evaluation-report-artifact-set-v1",
-      datasetVersion: "feedback-dataset-v2",
+      datasetVersion: "feedback-dataset-v3",
       datasetTimeBasis: "FEEDBACK_CREATED_AT",
       sourceManifestSha256: "a".repeat(64),
       sourceEvaluationCardManifestSha256: "b".repeat(64)

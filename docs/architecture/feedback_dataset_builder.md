@@ -27,7 +27,7 @@ The builder reads bounded candidates from `fraud_feedback_records` and performs 
 `ml_prediction_evidence_projections`. It does not read `engine_intelligence_feedback`, a current transaction
 projection, or the model registry.
 
-`feedback-dataset-v2` contains only current exact-occurrence evaluation observations. A candidate must carry complete,
+`feedback-dataset-v3` contains only current exact-occurrence evaluation observations. A candidate must carry complete,
 valid scoring-occurrence ownership before it enters the evidence batch lookup. A fully missing occurrence is counted
 in `skippedMissingRequiredFieldCount`; partial or malformed occurrence identity is counted in
 `skippedInvalidSourceRecordCount`. Neither condition emits a `DATASET_RECORD`.
@@ -225,7 +225,7 @@ export path in feedback dataset.
 
 ## V2 Rollout
 
-Current validators and runtime artifacts intentionally require `feedback-dataset-v2`; there is no executable v1
+Current validators and runtime artifacts intentionally require `feedback-dataset-v3`; there is no executable v1 or v2
 fallback. Deployment order is therefore contractual: generate or publish valid v2 evaluation artifacts, verify those
 artifacts against the v2 validators, and only then deploy the runtime that requires v2. A missing or invalid v2
 artifact must fail closed instead of silently removing Shadow Performance diagnostics or loading a v1 artifact.

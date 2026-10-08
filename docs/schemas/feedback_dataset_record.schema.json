@@ -28,7 +28,7 @@
           "const": "DATASET_METADATA"
         },
         "datasetVersion": {
-          "const": "feedback-dataset-v2"
+          "const": "feedback-dataset-v3"
         },
         "builtAt": {
           "type": "string",
@@ -163,7 +163,8 @@
                     "mlPredictionExecutedAt",
                     "mlModelName",
                     "mlModelVersion",
-                    "mlFeatureContractVersion"
+                    "mlFeatureContractVersion",
+                    "mlModelArtifactSha256"
                   ],
                   "properties": {
                     "mlPredictionEvidenceStatus": {
@@ -189,6 +190,9 @@
                     },
                     "mlFeatureContractVersion": {
                       "type": "null"
+                    },
+                    "mlModelArtifactSha256": {
+                      "type": "null"
                     }
                   }
                 },
@@ -201,7 +205,8 @@
                     "mlPredictionExecutedAt",
                     "mlModelName",
                     "mlModelVersion",
-                    "mlFeatureContractVersion"
+                    "mlFeatureContractVersion",
+                    "mlModelArtifactSha256"
                   ],
                   "properties": {
                     "mlPredictionEvidenceStatus": {
@@ -215,7 +220,8 @@
                     "mlPredictionExecutedAt": {"type": "null"},
                     "mlModelName": {"type": "null"},
                     "mlModelVersion": {"type": "null"},
-                    "mlFeatureContractVersion": {"type": "null"}
+                    "mlFeatureContractVersion": {"type": "null"},
+                    "mlModelArtifactSha256": {"type": "null"}
                   }
                 },
                 {
@@ -227,7 +233,8 @@
                     "mlPredictionExecutedAt",
                     "mlModelName",
                     "mlModelVersion",
-                    "mlFeatureContractVersion"
+                    "mlFeatureContractVersion",
+                    "mlModelArtifactSha256"
                   ],
                   "properties": {
                     "mlPredictionEvidenceStatus": {
@@ -248,7 +255,8 @@
                     "mlPredictionExecutedAt": {"type": "null"},
                     "mlModelName": {"type": "null"},
                     "mlModelVersion": {"type": "null"},
-                    "mlFeatureContractVersion": {"type": "null"}
+                    "mlFeatureContractVersion": {"type": "null"},
+                    "mlModelArtifactSha256": {"type": "null"}
                   }
                 },
                 {
@@ -260,7 +268,8 @@
                     "mlPredictionExecutedAt",
                     "mlModelName",
                     "mlModelVersion",
-                    "mlFeatureContractVersion"
+                    "mlFeatureContractVersion",
+                    "mlModelArtifactSha256"
                   ],
                   "properties": {
                     "mlPredictionEvidenceStatus": {
@@ -274,7 +283,8 @@
                     "mlPredictionExecutedAt": {"type": "null"},
                     "mlModelName": {"type": "null"},
                     "mlModelVersion": {"type": "null"},
-                    "mlFeatureContractVersion": {"type": "null"}
+                    "mlFeatureContractVersion": {"type": "null"},
+                    "mlModelArtifactSha256": {"type": "null"}
                   }
                 },
                 {
@@ -286,7 +296,8 @@
                     "mlPredictionExecutedAt",
                     "mlModelName",
                     "mlModelVersion",
-                    "mlFeatureContractVersion"
+                    "mlFeatureContractVersion",
+                    "mlModelArtifactSha256"
                   ],
                   "properties": {
                     "mlPredictionEvidenceStatus": {
@@ -312,6 +323,10 @@
                     },
                     "mlFeatureContractVersion": {
                       "type": "string"
+                    },
+                    "mlModelArtifactSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
                     }
                   }
                 }
@@ -355,11 +370,12 @@
             "mlPredictionExecutedAt",
             "mlModelName",
             "mlModelVersion",
-            "mlFeatureContractVersion"
+            "mlFeatureContractVersion",
+            "mlModelArtifactSha256"
           ],
           "properties": {
             "datasetVersion": {
-              "const": "feedback-dataset-v2"
+              "const": "feedback-dataset-v3"
             },
             "evaluationRecordId": {
               "type": "string",
@@ -538,6 +554,10 @@
               "minLength": 1,
               "maxLength": 96,
               "pattern": "^[A-Za-z0-9._-]+$"
+            },
+            "mlModelArtifactSha256": {
+              "type": ["string", "null"],
+              "pattern": "^[a-f0-9]{64}$"
             },
             "analystRecommendationStatus": {
               "enum": [
