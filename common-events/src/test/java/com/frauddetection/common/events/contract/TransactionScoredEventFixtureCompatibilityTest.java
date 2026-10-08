@@ -49,7 +49,7 @@ class TransactionScoredEventFixtureCompatibilityTest {
     @Test
     void unknownTopLevelFieldFixtureDeserializes() throws Exception {
         assertThat(read(TransactionScoredEventFixtureLoader.unknownTopLevelFieldJson()).transactionId())
-                .isEqualTo("txn-fdp93-001");
+                .isEqualTo("txn-engine-intelligence-contract-001");
     }
 
     @Test

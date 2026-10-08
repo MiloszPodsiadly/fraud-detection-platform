@@ -83,10 +83,10 @@ class AlertServiceTransactionScoredEventDeserializationCompatibilityTest {
     }
 
     private void assertExistingFields(TransactionScoredEvent event) {
-        assertThat(event.eventId()).isEqualTo("evt-fdp93-001");
-        assertThat(event.transactionId()).isEqualTo("txn-fdp93-001");
-        assertThat(event.correlationId()).isEqualTo("corr-fdp93-001");
-        assertThat(event.customerId()).isEqualTo("cust-fdp93-001");
+        assertThat(event.eventId()).isEqualTo("evt-engine-intelligence-contract-001");
+        assertThat(event.transactionId()).isEqualTo("txn-engine-intelligence-contract-001");
+        assertThat(event.correlationId()).isEqualTo("corr-engine-intelligence-contract-001");
+        assertThat(event.customerId()).isEqualTo("cust-engine-intelligence-contract-001");
         assertThat(event.alertRecommended()).isTrue();
     }
 }

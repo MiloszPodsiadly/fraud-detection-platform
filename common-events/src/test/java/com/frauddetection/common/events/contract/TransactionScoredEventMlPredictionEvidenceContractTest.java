@@ -62,15 +62,45 @@ class TransactionScoredEventMlPredictionEvidenceContractTest {
     }
 
     @Test
-    void historicalEventWithoutEngineIntelligenceOrPredictionEvidenceRemainsReadable() throws Exception {
+    void currentEventWithoutPredictionEvidenceOutcomeFailsClosed() throws Exception {
         ObjectNode json = eventJson();
         json.remove("mlPredictionEvidenceOmissionReason");
 
-        TransactionScoredEvent event = objectMapper.readValue(json.toString(), TransactionScoredEvent.class);
+        assertThatThrownBy(() -> objectMapper.readValue(json.toString(), TransactionScoredEvent.class))
+                .hasRootCauseMessage("ML_PREDICTION_EVIDENCE_REQUIRES_EXACTLY_ONE_OUTCOME");
+    }
 
-        assertThat(event.engineIntelligence()).isNull();
-        assertThat(event.mlPredictionEvidence()).isNull();
-        assertThat(event.mlPredictionEvidenceOmissionReason()).isNull();
+    @Test
+    void missingContractVersionDoesNotImplyHistoricalProvenance() throws Exception {
+        ObjectNode json = eventJson();
+        json.remove("eventContractVersion");
+
+        assertThatThrownBy(() -> objectMapper.readValue(json.toString(), TransactionScoredEvent.class))
+                .hasRootCauseMessage("TRANSACTION_SCORED_EVENT_CONTRACT_VERSION_REQUIRED");
+    }
+
+    @Test
+    void retiredAndFutureContractVersionsFailClosed() throws Exception {
+        ObjectNode retired = eventJson();
+        retired.put("eventContractVersion", TransactionScoredEvent.CURRENT_CONTRACT_VERSION - 1);
+        ObjectNode future = eventJson();
+        future.put("eventContractVersion", TransactionScoredEvent.CURRENT_CONTRACT_VERSION + 1);
+
+        assertThatThrownBy(() -> objectMapper.readValue(retired.toString(), TransactionScoredEvent.class))
+                .hasRootCauseMessage("TRANSACTION_SCORED_EVENT_CONTRACT_VERSION_UNSUPPORTED");
+        assertThatThrownBy(() -> objectMapper.readValue(future.toString(), TransactionScoredEvent.class))
+                .hasRootCauseMessage("TRANSACTION_SCORED_EVENT_CONTRACT_VERSION_UNSUPPORTED");
+    }
+
+    @Test
+    void malformedContractVersionFailsKafkaDeserialization() throws Exception {
+        ObjectNode json = eventJson();
+        json.put("eventContractVersion", "current");
+
+        assertThatThrownBy(() -> kafkaDeserializer.deserialize(
+                "transaction-scored",
+                json.toString().getBytes(StandardCharsets.UTF_8)
+        )).isInstanceOf(SerializationException.class);
     }
 
     @Test

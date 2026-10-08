@@ -1,9 +1,10 @@
 {
-  "eventId": "evt-fdp93-001",
-  "transactionId": "txn-fdp93-001",
-  "correlationId": "corr-fdp93-001",
-  "customerId": "cust-fdp93-001",
-  "accountId": "acct-fdp93-001",
+  "eventContractVersion": 2,
+  "eventId": "evt-engine-intelligence-contract-001",
+  "transactionId": "txn-engine-intelligence-contract-001",
+  "correlationId": "corr-engine-intelligence-contract-001",
+  "customerId": "cust-engine-intelligence-contract-001",
+  "accountId": "acct-engine-intelligence-contract-001",
   "createdAt": "2026-06-01T06:00:00Z",
   "transactionTimestamp": "2026-06-01T05:59:58Z",
   "transactionAmount": {
@@ -11,7 +12,7 @@
     "currency": "PLN"
   },
   "merchantInfo": {
-    "merchantId": "merchant-fdp93-001",
+    "merchantId": "merchant-engine-intelligence-contract-001",
     "merchantName": "Northwind Electronics",
     "merchantCategoryCode": "5732",
     "merchantCategory": "Electronics",

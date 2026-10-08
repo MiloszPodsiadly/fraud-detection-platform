@@ -23,6 +23,10 @@ to the public DTOs. It is called only for disabled-by-default producer diagnosti
 
 ## Versioning Strategy
 
+`TransactionScoredEvent.eventContractVersion` is required and equals `2` on every message admitted by the current
+`transactions.scored` consumer boundary. Missing, malformed, retired, and future versions fail closed. Absence of this
+marker is not evidence that a record is safely historical and never selects a permissive parser.
+
 `EngineIntelligenceSummary.contractVersion` is required and equals `1`. A future incompatible
 shape requires explicit compatibility review and a new contract version.
 
@@ -44,6 +48,11 @@ canonical values are rejected or fail closed; the read boundary does not repair 
 exactly one of it or `mlPredictionEvidenceOmissionReason`; events with neither fail deserialization. Historical null/null
 messages must be drained, migrated from authoritative evidence, archived, or quarantined before current consumers read
 them, and consumers must not invent or backfill evidence.
+
+All current alert-service listeners and redrive listeners use the same strict full-event deserializer. The repository
+does not provide a historical scored-event runtime parser. Active historical replay remains **NO-GO** until an authorized
+operator attests the retained partition/offset boundary and completes the governed archive, quarantine, or authoritative
+migration described in [Scoring occurrence ownership migration](scoring_occurrence_ownership_migration.md).
 Pipeline-level reasons (`DIAGNOSTIC_EMISSION_DISABLED` and `DIAGNOSTIC_ENRICHMENT_UNAVAILABLE`) require the summary
 to be absent. ML-engine-derived reasons require an observed `ml.python.primary` result and cannot be used to describe
 an unavailable diagnostic pipeline; `ML_ENGINE_UNAVAILABLE` is reserved for observed operational ML statuses.

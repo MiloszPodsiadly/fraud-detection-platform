@@ -326,6 +326,7 @@ class FeedbackDatasetBuilderTest {
         source.setMlModelName(MODEL_NAME);
         source.setMlModelVersion("2026-06-25.v1");
         source.setMlFeatureContractVersion(FEATURE_CONTRACT_VERSION);
+        source.setMlModelArtifactSha256(MODEL_ARTIFACT_SHA256);
         when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
         when(evidenceRepository.findAllById(any())).thenReturn(List.of(evidence(
                 "event-1",
@@ -417,11 +418,13 @@ class FeedbackDatasetBuilderTest {
         first.setMlModelName(MODEL_NAME);
         first.setMlModelVersion("2026-06-25.v1");
         first.setMlFeatureContractVersion(FEATURE_CONTRACT_VERSION);
+        first.setMlModelArtifactSha256(MODEL_ARTIFACT_SHA256);
         FraudFeedbackRecord second = feedback("feedback-2", "txn-2", FraudFeedbackLabel.CONFIRMED_LEGITIMATE, FROM.plusSeconds(1));
         captureOccurrence(second, "event-2", FROM.minusSeconds(1));
         second.setMlModelName(MODEL_NAME);
         second.setMlModelVersion("2026-06-26.v1");
         second.setMlFeatureContractVersion(FEATURE_CONTRACT_VERSION);
+        second.setMlModelArtifactSha256(MODEL_ARTIFACT_SHA256);
         when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(first, second));
         when(evidenceRepository.findAllById(any())).thenReturn(List.of(
                 evidence("event-1", "txn-1", FROM.minusSeconds(2), "2026-06-25.v1", 0.81),
@@ -628,6 +631,24 @@ class FeedbackDatasetBuilderTest {
         when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
         when(evidenceRepository.findAllById(any())).thenReturn(List.of(
                 evidence("event-a", "txn-a", FROM.minusSeconds(1), "model-b", 0.91)
+        ));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.records()).singleElement().extracting(FeedbackDatasetRecord::mlPredictionEvidenceStatus)
+                .isEqualTo(FeedbackDatasetMlPredictionEvidenceStatus.IDENTITY_MISMATCH);
+        assertThat(result.skippedInvalidSourceRecordCount()).isZero();
+    }
+
+    @Test
+    void artifactDigestMismatchRemainsExplicitWithoutMergingSources() {
+        FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        captureOccurrence(source, "event-a", FROM.minusSeconds(1));
+        setModelIdentity(source, "model-a");
+        source.setMlModelArtifactSha256("b".repeat(64));
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+        when(evidenceRepository.findAllById(any())).thenReturn(List.of(
+                evidence("event-a", "txn-a", FROM.minusSeconds(1), "model-a", 0.91)
         ));
 
         FeedbackDatasetBuildResult result = builder.build(request(10));
@@ -846,6 +867,7 @@ class FeedbackDatasetBuilderTest {
         record.setMlModelName(MODEL_NAME);
         record.setMlModelVersion(modelVersion);
         record.setMlFeatureContractVersion(FEATURE_CONTRACT_VERSION);
+        record.setMlModelArtifactSha256(MODEL_ARTIFACT_SHA256);
     }
 
     private MlPredictionEvidenceProjection evidence(

@@ -30,6 +30,7 @@ import java.util.Map;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record TransactionScoredEvent(
+        int eventContractVersion,
         String eventId,
         String transactionId,
         String correlationId,
@@ -59,8 +60,11 @@ public record TransactionScoredEvent(
         @JsonInclude(JsonInclude.Include.NON_NULL) MlPredictionEvidenceOmissionReason mlPredictionEvidenceOmissionReason,
         @JsonInclude(JsonInclude.Include.NON_NULL) AnalystRecommendationResult analystRecommendation
 ) {
+    public static final int CURRENT_CONTRACT_VERSION = 2;
+
     @JsonCreator
     public static TransactionScoredEvent fromJson(
+            @JsonProperty("eventContractVersion") Integer eventContractVersion,
             @JsonProperty("eventId") String eventId,
             @JsonProperty("transactionId") String transactionId,
             @JsonProperty("correlationId") String correlationId,
@@ -92,7 +96,72 @@ public record TransactionScoredEvent(
             MlPredictionEvidenceOmissionReason mlPredictionEvidenceOmissionReason,
             @JsonProperty("analystRecommendation") AnalystRecommendationResult analystRecommendation
     ) {
+        if (eventContractVersion == null) {
+            throw new IllegalArgumentException("TRANSACTION_SCORED_EVENT_CONTRACT_VERSION_REQUIRED");
+        }
         return new TransactionScoredEvent(
+                eventContractVersion,
+                eventId,
+                transactionId,
+                correlationId,
+                customerId,
+                accountId,
+                createdAt,
+                transactionTimestamp,
+                transactionAmount,
+                merchantInfo,
+                deviceInfo,
+                locationInfo,
+                customerContext,
+                fraudScore,
+                riskLevel,
+                scoringStrategy,
+                modelName,
+                modelVersion,
+                inferenceTimestamp,
+                reasonCodes,
+                scoreDetails,
+                featureSnapshot,
+                alertRecommended,
+                scoringEvidence,
+                engineIntelligence,
+                mlPredictionEvidence,
+                mlPredictionEvidenceOmissionReason,
+                analystRecommendation
+        );
+    }
+
+    public TransactionScoredEvent(
+            String eventId,
+            String transactionId,
+            String correlationId,
+            String customerId,
+            String accountId,
+            Instant createdAt,
+            Instant transactionTimestamp,
+            Money transactionAmount,
+            MerchantInfo merchantInfo,
+            DeviceInfo deviceInfo,
+            LocationInfo locationInfo,
+            CustomerContext customerContext,
+            Double fraudScore,
+            RiskLevel riskLevel,
+            String scoringStrategy,
+            String modelName,
+            String modelVersion,
+            Instant inferenceTimestamp,
+            List<String> reasonCodes,
+            Map<String, Object> scoreDetails,
+            Map<String, Object> featureSnapshot,
+            Boolean alertRecommended,
+            List<ScoringEvidenceItem> scoringEvidence,
+            EngineIntelligenceSummary engineIntelligence,
+            MlPredictionEvidence mlPredictionEvidence,
+            MlPredictionEvidenceOmissionReason mlPredictionEvidenceOmissionReason,
+            AnalystRecommendationResult analystRecommendation
+    ) {
+        this(
+                CURRENT_CONTRACT_VERSION,
                 eventId,
                 transactionId,
                 correlationId,
@@ -124,6 +193,9 @@ public record TransactionScoredEvent(
     }
 
     public TransactionScoredEvent {
+        if (eventContractVersion != CURRENT_CONTRACT_VERSION) {
+            throw new IllegalArgumentException("TRANSACTION_SCORED_EVENT_CONTRACT_VERSION_UNSUPPORTED");
+        }
         scoringEvidence = scoringEvidence == null ? List.of() : List.copyOf(scoringEvidence);
         if (featureSnapshot != null) {
             featureSnapshot = FeatureSnapshotWireValueNormalizer.normalize(featureSnapshot);
@@ -141,9 +213,6 @@ public record TransactionScoredEvent(
             MlPredictionEvidenceOmissionReason omissionReason
     ) {
         if (mlPredictionEvidence == null && omissionReason == null) {
-            if (engineIntelligence == null) {
-                return;
-            }
             throw new IllegalArgumentException("ML_PREDICTION_EVIDENCE_REQUIRES_EXACTLY_ONE_OUTCOME");
         }
         if (mlPredictionEvidence != null && omissionReason != null) {

@@ -21,6 +21,7 @@ import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineType;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -249,12 +250,22 @@ public class FraudFeedbackService {
             ScoredTransaction transaction,
             ScoringOccurrenceOwnership ownership
     ) {
+        if (transaction.mlPredictionEvidenceOmissionReason() != null) {
+            return;
+        }
         try {
-            mlPredictionEvidenceProjectionRepository.findById(ownership.sourceEventId())
-                    .filter(projection -> matchesOccurrence(projection, transaction, ownership))
-                    .ifPresent(projection -> applyMlPredictionEvidence(record, projection));
+            MlPredictionEvidenceProjection projection = mlPredictionEvidenceProjectionRepository
+                    .findById(ownership.sourceEventId())
+                    .orElseThrow(() -> evidenceSnapshotUnavailable(null));
+            if (!matchesOccurrence(projection, transaction, ownership)) {
+                throw evidenceSnapshotUnavailable(null);
+            }
+            validateExactEvidence(projection);
+            applyMlPredictionEvidence(record, projection);
+        } catch (ResponseStatusException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
-            log.warn("Fraud feedback ML prediction evidence snapshot unavailable.");
+            throw evidenceSnapshotUnavailable(exception);
         }
     }
 
@@ -263,9 +274,30 @@ public class FraudFeedbackService {
             ScoredTransaction transaction,
             ScoringOccurrenceOwnership ownership
     ) {
-        return Objects.equals(projection.getTransactionId(), transaction.transactionId())
+        return Objects.equals(projection.getSourceEventId(), ownership.sourceEventId())
+                && Objects.equals(projection.getTransactionId(), transaction.transactionId())
                 && Objects.equals(projection.getCorrelationId(), transaction.correlationId())
                 && Objects.equals(projection.getSourceEventCreatedAt(), ownership.sourceEventCreatedAt());
+    }
+
+    private void validateExactEvidence(MlPredictionEvidenceProjection projection) {
+        new MlPredictionEvidence(
+                projection.getMlScore(),
+                projection.getMlRiskLevel(),
+                projection.getModelName(),
+                projection.getModelVersion(),
+                projection.getFeatureContractVersion(),
+                projection.getModelArtifactSha256(),
+                projection.getSourceExecutionTimestamp()
+        );
+    }
+
+    private ResponseStatusException evidenceSnapshotUnavailable(RuntimeException cause) {
+        return new ResponseStatusException(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                "FRAUD_FEEDBACK_ML_PREDICTION_EVIDENCE_UNAVAILABLE",
+                cause
+        );
     }
 
     private void applyMlPredictionEvidence(

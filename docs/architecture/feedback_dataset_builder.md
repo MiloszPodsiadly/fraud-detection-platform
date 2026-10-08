@@ -109,14 +109,18 @@ Optional nullable fields are limited to bounded feedback diagnostics already pre
 agreement/mismatch/score-delta buckets, Analyst Recommendation status/value/version/generated-at/reason codes,
 `scoredAt`, and `transactionTimestamp`.
 
-The v2 record shape carries bounded direct ML evidence through `mlPredictionEvidenceStatus`,
+The v3 record shape carries bounded direct ML evidence through `mlPredictionEvidenceStatus`,
 `mlPredictionEvidenceOmissionReason`, `mlPredictionScore`, `mlPredictionRiskLevel`, and
-`mlPredictionExecutedAt`, together with `mlModelName`, `mlModelVersion`, and `mlFeatureContractVersion`.
-`AVAILABLE` requires the complete signal and model identity. Every non-available status requires the direct
+`mlPredictionExecutedAt`, together with `mlModelName`, `mlModelVersion`, `mlFeatureContractVersion`, and
+`mlModelArtifactSha256`. `AVAILABLE` requires the complete signal and exact M/V/F/SHA identity. Every non-available status requires the direct
 prediction and model identity fields to be null. `LEGITIMATELY_ABSENT` additionally requires an authoritative
 omission reason; missing projection or identity data alone never proves legitimate absence. Unexpected absence,
 malformed evidence, and identity mismatch remain explicit dataset records rather than disappearing from the bounded
 population. Absence is never represented as score zero or low risk.
+
+The repository currently has no attested historical partition/offset boundary that can independently prove legitimate
+absence. Consequently, historical age, missing fields, or timestamps never produce `LEGITIMATELY_ABSENT`; only the
+authoritative omission mapping below can do so until the external cutover evidence is completed.
 
 The authoritative omission mapping is:
 

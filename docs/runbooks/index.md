@@ -11,6 +11,7 @@ Status: current runbook standard.
 | [Regulated mutation recovery](regulated_mutation_recovery.md) | Lease renewal failures, checkpoint renewal failures, finalize recovery, and local audit-chain contention. |
 | [Regulated mutation drills](regulated_mutation_drills.md) | Modeled recovery drills and real alert-service kill-restart drill evidence. |
 | [Fraud case operations](fraud_case_operations.md) | Fraud-case lifecycle idempotency, work queue cursor rotation, and sensitive-read audit failures. |
+| [Scoring occurrence ownership migration](../architecture/scoring_occurrence_ownership_migration.md) | Exact ML evidence inventory, release attestation, cutover ordering, and fail-closed rollback. |
 
 ## Required Sections
 

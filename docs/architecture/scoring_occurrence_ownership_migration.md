@@ -11,8 +11,8 @@ current traffic; retained pre-cut data requires the governed offline procedure b
 
 ### RETAINED
 
-- The current Python `ModelRuntime`, strict artifact loader, and file-backed registry selection by explicit version or
-  champion/challenger role are the single ML runtime path.
+- The current Python `ModelRuntime`, strict artifact loader, and file-backed registry selection by exact model name and
+  version are the single ML runtime path.
 - Persisted model versions and registry entries are immutable historical identity. A name containing `v1` is not by
   itself obsolete executable compatibility and must not be rewritten as another model version.
 - The Java ML adapter, orchestrator, canonical scored-event contract, immutable ML evidence projection, and
@@ -117,6 +117,42 @@ record; quarantine all non-survivors with their original fields and reconcile co
 `suspicious_transaction_source_event_unique_idx` and create `suspicious_transaction_current_unique_idx` on
 `transactionId`. If the authoritative occurrence cannot be proven, quarantine the entire group instead of choosing
 by processing time, Mongo natural order, model version, or score.
+
+## Exact ML Evidence Release Attestation
+
+The repository cannot attest to retained records in a deployed Kafka cluster, Mongo database, export store, archive,
+snapshot, or backup. Until an authorized operator records the evidence below for every deployed environment, the
+cutover status is **NOT VERIFIED — EXTERNAL ATTESTATION REQUIRED**. Repository tests and ephemeral CI data cannot be
+used to claim that retained logical-only evidence is absent.
+
+Classify every inspected record without changing it:
+
+| Class | Meaning | Required disposition |
+| --- | --- | --- |
+| A | Old event genuinely lacks the newer optional ML evidence. | Record its bounded source range; do not manufacture evidence. |
+| B | Logical model name/version/feature identity exists without the exact artifact SHA-256. | Archive outside active replay, move to a separately governed non-exact historical representation, or block release. |
+| C | Model name, version, feature contract, exact artifact SHA-256, and source execution timestamp are complete and valid. | Retain under the current evidence policy. |
+| D | Evidence is partial, malformed, conflicting, or otherwise untrusted. | Quarantine unchanged and block replay until governed remediation. |
+
+The required inventory covers the repository-owned `transactions.scored`, `engine-intelligence.dead-letter`, and
+`engine-intelligence.redrive` topics; their retained partition offsets and timestamps; the
+`ml_prediction_evidence_projections` and `fraud_feedback_records` collections; bounded feedback dataset exports; and
+every operator-managed archive, snapshot, and backup/restore source. CI/Testcontainers and local Compose are ephemeral
+execution environments, not evidence about any retained deployed environment.
+
+For each environment and source, the evidence pack records the cluster/database identifier, topic or collection,
+retention setting, earliest and latest inspected offset or timestamp, immutable snapshot/export reference, counts for
+classes A-D, unresolved populations, operator identity, verification time, and independent approval. Class B must have
+one explicit disposition: verified absent from the retained range, archived and removed from active replay, migrated
+to a separate non-exact historical representation, or release blocked. A current registry digest or a model sharing
+the historical version is never evidence of the original bytes and must never be assigned to class B.
+
+Roll out in this order: freeze bounded replay/redrive inputs, capture immutable inventories, quarantine D, complete and
+reconcile the approved B disposition, verify zero B/D records in active replay and current collections, deploy strict
+consumers, then observe one full effective retention window. DLT records follow the same classification; they are not
+redriven through a permissive reader. Rollback may stop the strict deployment but cannot restore permissive parsing or
+reconstruct SHA-256 values. Go only when every covered source reconciles and two authorized reviewers approve the
+evidence pack; otherwise the release remains blocked.
 
 ## Cutover Evidence
 
