@@ -2,7 +2,7 @@
 
 ## Scope
 
-This runbook recovers the private `MlPredictionEvidenceV1` projection only. It never republishes a failed
+This runbook recovers the private `MlPredictionEvidence` projection only. It never republishes a failed
 record to `transactions.scored`, because that topic also activates baseline alert, fraud-case, and audit processing.
 
 The recovery topics are:

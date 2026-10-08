@@ -1,8 +1,7 @@
 package com.frauddetection.alert.engineintelligence;
 
-import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.PersistenceCreator;
 import org.springframework.data.mongodb.core.mapping.Document;
@@ -20,14 +19,12 @@ public class MlPredictionEvidenceProjection {
     private final String transactionId;
     private final String correlationId;
     private final String sourceEventCreatedAt;
-    private final int contractVersion;
-    private final String sourceEngineId;
-    private final FraudEngineStatus engineStatus;
     private final Double mlScore;
     private final RiskLevel mlRiskLevel;
     private final String modelName;
     private final String modelVersion;
     private final String featureContractVersion;
+    private final String modelArtifactSha256;
     private final String sourceExecutionTimestamp;
     private final Instant projectedAt;
 
@@ -37,14 +34,12 @@ public class MlPredictionEvidenceProjection {
             String transactionId,
             String correlationId,
             String sourceEventCreatedAt,
-            int contractVersion,
-            String sourceEngineId,
-            FraudEngineStatus engineStatus,
             Double mlScore,
             RiskLevel mlRiskLevel,
             String modelName,
             String modelVersion,
             String featureContractVersion,
+            String modelArtifactSha256,
             String sourceExecutionTimestamp,
             Instant projectedAt
     ) {
@@ -52,33 +47,32 @@ public class MlPredictionEvidenceProjection {
         this.transactionId = requiredIdentity(transactionId, "transactionId");
         this.correlationId = requiredIdentity(correlationId, "correlationId");
         this.sourceEventCreatedAt = validatedInstantText(sourceEventCreatedAt);
-        MlPredictionEvidenceV1 validated;
         try {
-            validated = new MlPredictionEvidenceV1(
-                    contractVersion,
-                    sourceEngineId,
-                    engineStatus,
+            Instant executionTimestamp = Instant.parse(requiredIdentity(
+                    sourceExecutionTimestamp,
+                    "sourceExecutionTimestamp"
+            ));
+            MlPredictionEvidence validated = new MlPredictionEvidence(
                     mlScore,
                     mlRiskLevel,
                     modelName,
                     modelVersion,
                     featureContractVersion,
-                    Instant.parse(requiredIdentity(sourceExecutionTimestamp, "sourceExecutionTimestamp"))
+                    modelArtifactSha256,
+                    executionTimestamp
             );
+            this.mlScore = validated.mlScore();
+            this.mlRiskLevel = validated.mlRiskLevel();
+            this.modelName = validated.modelName();
+            this.modelVersion = validated.modelVersion();
+            this.featureContractVersion = validated.featureContractVersion();
+            this.modelArtifactSha256 = validated.modelArtifactSha256();
+            this.sourceExecutionTimestamp = validated.sourceExecutionTimestamp().toString();
         } catch (MlPredictionEvidenceProjectionShapeException exception) {
             throw exception;
         } catch (RuntimeException exception) {
             throw new MlPredictionEvidenceProjectionShapeException();
         }
-        this.contractVersion = validated.contractVersion();
-        this.sourceEngineId = validated.sourceEngineId();
-        this.engineStatus = validated.engineStatus();
-        this.mlScore = validated.mlScore();
-        this.mlRiskLevel = validated.mlRiskLevel();
-        this.modelName = validated.modelName();
-        this.modelVersion = validated.modelVersion();
-        this.featureContractVersion = validated.featureContractVersion();
-        this.sourceExecutionTimestamp = validated.sourceExecutionTimestamp().toString();
         this.projectedAt = requiredInstant(projectedAt);
     }
 
@@ -87,23 +81,21 @@ public class MlPredictionEvidenceProjection {
             String transactionId,
             String correlationId,
             Instant sourceEventCreatedAt,
-            MlPredictionEvidenceV1 evidence,
+            MlPredictionEvidence evidence,
             Instant projectedAt
     ) {
-        MlPredictionEvidenceV1 source = Objects.requireNonNull(evidence, "evidence is required");
+        MlPredictionEvidence source = Objects.requireNonNull(evidence, "evidence is required");
         return new MlPredictionEvidenceProjection(
                 sourceEventId,
                 transactionId,
                 correlationId,
                 sourceEventCreatedAt.toString(),
-                source.contractVersion(),
-                source.sourceEngineId(),
-                source.engineStatus(),
                 source.mlScore(),
                 source.mlRiskLevel(),
                 source.modelName(),
                 source.modelVersion(),
                 source.featureContractVersion(),
+                source.modelArtifactSha256(),
                 source.sourceExecutionTimestamp().toString(),
                 projectedAt
         );
@@ -113,14 +105,12 @@ public class MlPredictionEvidenceProjection {
     public String getTransactionId() { return transactionId; }
     public String getCorrelationId() { return correlationId; }
     public Instant getSourceEventCreatedAt() { return Instant.parse(sourceEventCreatedAt); }
-    public int getContractVersion() { return contractVersion; }
-    public String getSourceEngineId() { return sourceEngineId; }
-    public FraudEngineStatus getEngineStatus() { return engineStatus; }
     public Double getMlScore() { return mlScore; }
     public RiskLevel getMlRiskLevel() { return mlRiskLevel; }
     public String getModelName() { return modelName; }
     public String getModelVersion() { return modelVersion; }
     public String getFeatureContractVersion() { return featureContractVersion; }
+    public String getModelArtifactSha256() { return modelArtifactSha256; }
     public Instant getSourceExecutionTimestamp() { return Instant.parse(sourceExecutionTimestamp); }
     public Instant getProjectedAt() { return projectedAt; }
 
@@ -130,14 +120,12 @@ public class MlPredictionEvidenceProjection {
                 && transactionId.equals(other.transactionId)
                 && correlationId.equals(other.correlationId)
                 && sourceEventCreatedAt.equals(other.sourceEventCreatedAt)
-                && contractVersion == other.contractVersion
-                && sourceEngineId.equals(other.sourceEngineId)
-                && engineStatus == other.engineStatus
                 && mlScore.equals(other.mlScore)
                 && mlRiskLevel == other.mlRiskLevel
                 && modelName.equals(other.modelName)
                 && modelVersion.equals(other.modelVersion)
                 && featureContractVersion.equals(other.featureContractVersion)
+                && modelArtifactSha256.equals(other.modelArtifactSha256)
                 && sourceExecutionTimestamp.equals(other.sourceExecutionTimestamp);
     }
 

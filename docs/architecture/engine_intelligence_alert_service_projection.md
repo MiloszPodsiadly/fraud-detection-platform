@@ -162,7 +162,7 @@ raw exception, endpoint, or payload.
 ## No Raw/Internal Storage
 
 The public projection stores only bounded public event contract fields. The dedicated internal evidence collection stores
-only canonical `MlPredictionEvidenceV1` and bounded source ownership fields. Raw model requests/responses, raw
+only canonical `MlPredictionEvidence` and bounded source ownership fields. Raw model requests/responses, raw
 features, raw contributions, arbitrary metadata, customer/account data, endpoints, tokens, secrets, stack traces,
 exception messages, and internal aggregation objects must not be stored.
 

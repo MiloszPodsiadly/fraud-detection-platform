@@ -251,6 +251,7 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
                         new EngineIntelligenceReadModelMapper()
                 ),
                 new EngineIntelligenceResponseMapper(),
+                evidence,
                 currentUser,
                 auditOutbox,
                 transactionRunner,
@@ -331,14 +332,12 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
                 TRANSACTION_ID,
                 "correlation-1",
                 createdAt.toString(),
-                1,
-                "ml.python.primary",
-                FraudEngineStatus.AVAILABLE,
                 0.91d,
                 RiskLevel.HIGH,
                 "fraud-model",
                 modelVersion,
                 "feature-contract-v2",
+                "a".repeat(64),
                 createdAt.toString(),
                 createdAt
         );

@@ -13,6 +13,8 @@ import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceEngineR
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
+import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjection;
+import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionRepository;
 import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
@@ -63,6 +65,8 @@ class FraudFeedbackServiceTest {
     private final FraudFeedbackRepository repository = mock(FraudFeedbackRepository.class);
     private final TransactionMonitoringUseCase transactionMonitoringUseCase = mock(TransactionMonitoringUseCase.class);
     private final EngineIntelligenceReadService engineIntelligenceReadService = mock(EngineIntelligenceReadService.class);
+    private final MlPredictionEvidenceProjectionRepository mlPredictionEvidenceProjectionRepository =
+            mock(MlPredictionEvidenceProjectionRepository.class);
     private final CurrentAnalystUser currentAnalystUser = mock(CurrentAnalystUser.class);
     private final WriteActionAuditOutboxService auditOutboxService = mock(WriteActionAuditOutboxService.class);
     private final RegulatedMutationTransactionRunner transactionRunner = mock(RegulatedMutationTransactionRunner.class);
@@ -77,6 +81,7 @@ class FraudFeedbackServiceTest {
                 transactionMonitoringUseCase,
                 engineIntelligenceReadService,
                 new EngineIntelligenceResponseMapper(),
+                mlPredictionEvidenceProjectionRepository,
                 currentAnalystUser,
                 auditOutboxService,
                 transactionRunner,
@@ -154,13 +159,28 @@ class FraudFeedbackServiceTest {
     }
 
     @Test
-    void snapshotsMlIdentityFromPersistedEngineIntelligenceProjection() {
+    void snapshotsExactMlIdentityFromPersistedPredictionEvidenceProjection() {
         when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
                 .thenReturn(projectedEngineIntelligenceWithAvailableMl(
                 "python-logistic-fraud-model",
                 "model-X",
                 "feature-contract-v2"
         ));
+        when(mlPredictionEvidenceProjectionRepository.findById("event-1"))
+                .thenReturn(Optional.of(new MlPredictionEvidenceProjection(
+                        "event-1",
+                        "txn-1",
+                        "corr-1",
+                        "2026-06-25T09:00:01Z",
+                        0.91d,
+                        RiskLevel.CRITICAL,
+                        "python-logistic-fraud-model",
+                        "model-X",
+                        "feature-contract-v2",
+                        "b".repeat(64),
+                        "2026-06-25T09:00:00Z",
+                        Instant.parse("2026-06-25T09:00:03Z")
+                )));
 
         FraudFeedbackResponse response = service.create("txn-1", request());
 
@@ -171,6 +191,7 @@ class FraudFeedbackServiceTest {
             assertThat(record.getMlModelName()).isEqualTo("python-logistic-fraud-model");
             assertThat(record.getMlModelVersion()).isEqualTo("model-X");
             assertThat(record.getMlFeatureContractVersion()).isEqualTo("feature-contract-v2");
+            assertThat(record.getMlModelArtifactSha256()).isEqualTo("b".repeat(64));
         });
     }
 
@@ -595,6 +616,7 @@ class FraudFeedbackServiceTest {
                 transactionMonitoringUseCase,
                 engineIntelligenceReadService,
                 mapper,
+                mlPredictionEvidenceProjectionRepository,
                 currentAnalystUser,
                 auditOutboxService,
                 transactionRunner,

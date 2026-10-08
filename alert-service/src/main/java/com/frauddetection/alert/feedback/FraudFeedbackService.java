@@ -10,7 +10,8 @@ import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
-import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceEngineReadModel;
+import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjection;
+import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionRepository;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
 import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
@@ -19,9 +20,7 @@ import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
-import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
-import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,6 +34,7 @@ import java.time.Clock;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -72,6 +72,7 @@ public class FraudFeedbackService {
     private final TransactionMonitoringUseCase transactionMonitoringUseCase;
     private final EngineIntelligenceReadService engineIntelligenceReadService;
     private final EngineIntelligenceResponseMapper engineIntelligenceResponseMapper;
+    private final MlPredictionEvidenceProjectionRepository mlPredictionEvidenceProjectionRepository;
     private final CurrentAnalystUser currentAnalystUser;
     private final WriteActionAuditOutboxService auditOutboxService;
     private final RegulatedMutationTransactionRunner transactionRunner;
@@ -84,6 +85,7 @@ public class FraudFeedbackService {
             TransactionMonitoringUseCase transactionMonitoringUseCase,
             EngineIntelligenceReadService engineIntelligenceReadService,
             EngineIntelligenceResponseMapper engineIntelligenceResponseMapper,
+            MlPredictionEvidenceProjectionRepository mlPredictionEvidenceProjectionRepository,
             CurrentAnalystUser currentAnalystUser,
             WriteActionAuditOutboxService auditOutboxService,
             RegulatedMutationTransactionRunner transactionRunner
@@ -94,6 +96,7 @@ public class FraudFeedbackService {
                 transactionMonitoringUseCase,
                 engineIntelligenceReadService,
                 engineIntelligenceResponseMapper,
+                mlPredictionEvidenceProjectionRepository,
                 currentAnalystUser,
                 auditOutboxService,
                 transactionRunner,
@@ -107,6 +110,7 @@ public class FraudFeedbackService {
             TransactionMonitoringUseCase transactionMonitoringUseCase,
             EngineIntelligenceReadService engineIntelligenceReadService,
             EngineIntelligenceResponseMapper engineIntelligenceResponseMapper,
+            MlPredictionEvidenceProjectionRepository mlPredictionEvidenceProjectionRepository,
             CurrentAnalystUser currentAnalystUser,
             WriteActionAuditOutboxService auditOutboxService,
             RegulatedMutationTransactionRunner transactionRunner,
@@ -117,6 +121,10 @@ public class FraudFeedbackService {
         this.transactionMonitoringUseCase = transactionMonitoringUseCase;
         this.engineIntelligenceReadService = engineIntelligenceReadService;
         this.engineIntelligenceResponseMapper = engineIntelligenceResponseMapper;
+        this.mlPredictionEvidenceProjectionRepository = Objects.requireNonNull(
+                mlPredictionEvidenceProjectionRepository,
+                "mlPredictionEvidenceProjectionRepository is required"
+        );
         this.currentAnalystUser = currentAnalystUser;
         this.auditOutboxService = auditOutboxService;
         this.transactionRunner = transactionRunner;
@@ -172,6 +180,7 @@ public class FraudFeedbackService {
         record.setTransactionTimestamp(transaction.transactionTimestamp());
         record.setMlPredictionEvidenceOmissionReason(transaction.mlPredictionEvidenceOmissionReason());
         snapshotEngineIntelligence(record, transaction);
+        snapshotMlPredictionEvidence(record, transaction, ownership);
         snapshotAnalystRecommendation(record, transaction.analystRecommendation());
         return persistFeedbackWithAuditIntent(record);
     }
@@ -213,7 +222,6 @@ public class FraudFeedbackService {
                 record.setScoreDeltaBucket(response.comparison().scoreDeltaBucket());
             }
             snapshotRulesEvidence(record, readModel);
-            snapshotMlModelIdentity(record, readModel);
         } catch (EngineIntelligenceProjectionReadUnavailableException exception) {
             record.setEngineIntelligenceStatus(EngineIntelligenceResponseStatus.UNAVAILABLE);
         } catch (RuntimeException exception) {
@@ -236,26 +244,38 @@ public class FraudFeedbackService {
                 });
     }
 
-    private void snapshotMlModelIdentity(FraudFeedbackRecord record, EngineIntelligenceReadModel readModel) {
-        if (readModel == null || !readModel.available() || readModel.engines() == null) {
-            return;
+    private void snapshotMlPredictionEvidence(
+            FraudFeedbackRecord record,
+            ScoredTransaction transaction,
+            ScoringOccurrenceOwnership ownership
+    ) {
+        try {
+            mlPredictionEvidenceProjectionRepository.findById(ownership.sourceEventId())
+                    .filter(projection -> matchesOccurrence(projection, transaction, ownership))
+                    .ifPresent(projection -> applyMlPredictionEvidence(record, projection));
+        } catch (RuntimeException exception) {
+            log.warn("Fraud feedback ML prediction evidence snapshot unavailable.");
         }
-        readModel.engines().stream()
-                .filter(engine -> FraudEngineIdentityContract.PYTHON_ML_PRIMARY_ENGINE_ID.equals(engine.engineId()))
-                .filter(engine -> engine.engineType() == FraudEngineType.ML_MODEL)
-                .filter(engine -> engine.status() == FraudEngineStatus.AVAILABLE)
-                .findFirst()
-                .map(EngineIntelligenceEngineReadModel::modelIdentity)
-                .ifPresent(identity -> applyMlModelIdentity(record, identity));
     }
 
-    private void applyMlModelIdentity(FraudFeedbackRecord record, MlModelIdentity identity) {
-        if (identity == null) {
-            return;
-        }
-        record.setMlModelName(identity.modelName());
-        record.setMlModelVersion(identity.modelVersion());
-        record.setMlFeatureContractVersion(identity.featureContractVersion());
+    private boolean matchesOccurrence(
+            MlPredictionEvidenceProjection projection,
+            ScoredTransaction transaction,
+            ScoringOccurrenceOwnership ownership
+    ) {
+        return Objects.equals(projection.getTransactionId(), transaction.transactionId())
+                && Objects.equals(projection.getCorrelationId(), transaction.correlationId())
+                && Objects.equals(projection.getSourceEventCreatedAt(), ownership.sourceEventCreatedAt());
+    }
+
+    private void applyMlPredictionEvidence(
+            FraudFeedbackRecord record,
+            MlPredictionEvidenceProjection projection
+    ) {
+        record.setMlModelName(projection.getModelName());
+        record.setMlModelVersion(projection.getModelVersion());
+        record.setMlFeatureContractVersion(projection.getFeatureContractVersion());
+        record.setMlModelArtifactSha256(projection.getModelArtifactSha256());
     }
 
     private void snapshotAnalystRecommendation(FraudFeedbackRecord record, AnalystRecommendationResult recommendation) {

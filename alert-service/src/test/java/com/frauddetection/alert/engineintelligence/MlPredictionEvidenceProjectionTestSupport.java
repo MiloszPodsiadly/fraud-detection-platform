@@ -14,7 +14,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDelt
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
 
 import java.time.Instant;
 import java.util.List;
@@ -110,10 +110,11 @@ final class MlPredictionEvidenceProjectionTestSupport {
                 List.of(),
                 List.of()
         );
-        MlPredictionEvidenceV1 evidence = new MlPredictionEvidenceV1(
+        MlPredictionEvidence evidence = new MlPredictionEvidence(
                 score,
                 RiskLevel.HIGH,
                 identity,
+                "a".repeat(64),
                 EXECUTED_AT
         );
         return new TransactionScoredEvent(

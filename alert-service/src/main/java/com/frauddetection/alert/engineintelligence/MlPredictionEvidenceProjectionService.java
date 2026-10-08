@@ -3,7 +3,7 @@ package com.frauddetection.alert.engineintelligence;
 import com.frauddetection.alert.engineintelligence.observability.MlPredictionEvidenceProjectionMetricReason;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -89,14 +89,17 @@ public class MlPredictionEvidenceProjectionService {
     }
 
     private MlPredictionEvidenceProjection validatedProjection(TransactionScoredEvent event) {
-        MlPredictionEvidenceV1 evidence = policy.validatedEvidenceCopy(event.mlPredictionEvidence());
         if (event.createdAt() == null) {
             throw new MlPredictionEvidenceProjectionShapeException();
         }
+        String sourceEventId = policy.validatedSourceEventId(event.eventId());
+        String transactionId = policy.validatedTransactionId(event.transactionId());
+        String correlationId = policy.validatedCorrelationId(event.correlationId());
+        MlPredictionEvidence evidence = policy.validatedEvidenceCopy(event.mlPredictionEvidence());
         return MlPredictionEvidenceProjection.create(
-                policy.validatedSourceEventId(event.eventId()),
-                policy.validatedTransactionId(event.transactionId()),
-                policy.validatedCorrelationId(event.correlationId()),
+                sourceEventId,
+                transactionId,
+                correlationId,
                 event.createdAt(),
                 evidence,
                 clock.instant()

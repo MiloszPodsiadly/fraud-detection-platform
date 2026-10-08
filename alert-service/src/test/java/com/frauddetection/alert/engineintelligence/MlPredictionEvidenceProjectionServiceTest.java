@@ -2,7 +2,7 @@ package com.frauddetection.alert.engineintelligence;
 
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DuplicateKeyException;
@@ -48,7 +48,7 @@ class MlPredictionEvidenceProjectionServiceTest {
     @Test
     void invalidEvidenceIsRejectedBeforeStorage() {
         TransactionScoredEvent event = mock(TransactionScoredEvent.class);
-        MlPredictionEvidenceV1 invalid = mock(MlPredictionEvidenceV1.class);
+        MlPredictionEvidence invalid = mock(MlPredictionEvidence.class);
         when(event.mlPredictionEvidence()).thenReturn(invalid);
 
         MlPredictionEvidenceProjectionResult result = service.project(event);
