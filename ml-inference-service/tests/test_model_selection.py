@@ -37,7 +37,7 @@ class ModelSelectionTest(unittest.TestCase):
         self._temporary_directory.cleanup()
 
     def test_exact_requested_model_loads_and_scores(self):
-        self.registry.register(self._artifact("requested-v17"), role="archived")
+        self.registry.register(self._artifact("requested-v17"))
 
         model = self._registry_model("requested-v17")
         result = model.score(self._production_features())
@@ -49,20 +49,8 @@ class ModelSelectionTest(unittest.TestCase):
         with self.assertRaisesRegex(ModelSelectionError, "requested-v17"):
             self._registry_model("requested-v17")
 
-    def test_absent_exact_model_does_not_select_champion(self):
-        self.registry.register(self._artifact("champion-v12"), role="champion")
-
-        with self.assertRaisesRegex(ModelSelectionError, "requested-v17"):
-            self._registry_model("requested-v17")
-
-    def test_absent_exact_model_does_not_select_challenger(self):
-        self.registry.register(self._artifact("challenger-v16"), role="challenger")
-
-        with self.assertRaisesRegex(ModelSelectionError, "requested-v17"):
-            self._registry_model("requested-v17")
-
-    def test_absent_exact_model_does_not_select_latest(self):
-        self.registry.register(self._artifact("latest-v18"), role="archived")
+    def test_absent_exact_model_does_not_select_another_registered_identity(self):
+        self.registry.register(self._artifact("other-v18"))
 
         with self.assertRaisesRegex(ModelSelectionError, "requested-v17"):
             self._registry_model("requested-v17")
@@ -101,18 +89,10 @@ class ModelSelectionTest(unittest.TestCase):
         with self.assertRaisesRegex(ModelSelectionError, "requires an artifact path"):
             FraudModel.from_selection(None, ModelSelectionPolicy.packaged_explicit())
 
-    def test_exact_lookup_never_calls_role_or_recency_selectors(self):
-        with (
-            patch.object(self.registry, "latest", side_effect=AssertionError("latest fallback forbidden")) as latest,
-            patch.object(self.registry, "champion", side_effect=AssertionError("role fallback forbidden")) as champion,
-            patch.object(self.registry, "challenger", side_effect=AssertionError("role fallback forbidden")) as challenger,
-        ):
-            with self.assertRaises(ModelSelectionError):
-                self._registry_model("requested-v17")
-
-        latest.assert_not_called()
-        champion.assert_not_called()
-        challenger.assert_not_called()
+    def test_registry_exposes_no_role_or_recency_selection_api(self):
+        for method_name in ("latest", "by_version", "champion", "challenger", "promote"):
+            with self.subTest(method_name=method_name):
+                self.assertFalse(hasattr(self.registry, method_name))
 
     def test_environment_configuration_is_explicit_and_fail_closed(self):
         packaged = model_selection_policy_from_environment({})

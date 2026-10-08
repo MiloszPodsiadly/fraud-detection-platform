@@ -7,8 +7,8 @@ from app.training.train import train_with_evaluation
 
 
 @dataclass(frozen=True)
-class PromotionThresholds:
-    """Business thresholds for challenger promotion."""
+class ChallengerComparisonThresholds:
+    """Bounds used only to interpret observed challenger diagnostics."""
 
     max_false_positive_rate_increase: float = 0.02
     max_alert_rate: float = 0.20
@@ -20,26 +20,26 @@ class PromotionThresholds:
 
 
 @dataclass(frozen=True)
-class RetrainingComparison:
-    """Comparison between current and challenger model evaluation."""
+class ChallengerDiagnosticComparison:
+    """Non-decisioning comparison between current and challenger evaluation."""
 
-    current_pr_auc: float
-    challenger_pr_auc: float
-    promote_challenger: bool
+    current_pr_auc: float | None
+    challenger_pr_auc: float | None
+    diagnostic_outcome: str
     challenger_evaluation: dict[str, object]
-    decision: dict[str, object]
+    diagnostics: dict[str, object]
 
 
-def compare_retrained_model(
+def evaluate_challenger_diagnostics(
         feedback_dataset: Dataset,
         current_evaluation: dict[str, object],
         epochs: int,
         learning_rate: float,
-        thresholds: PromotionThresholds | None = None,
+        thresholds: ChallengerComparisonThresholds | None = None,
         model_type: str = "logistic",
         training_mode: str = "production",
-) -> RetrainingComparison:
-    """Retrain on analyst feedback and compare challenger on held-out metrics."""
+) -> ChallengerDiagnosticComparison:
+    """Retrain offline and report observed diagnostics without lifecycle authority."""
     if feedback_dataset.size == 0:
         raise ValueError("feedback_dataset must contain labelled examples.")
     _, _, challenger_evaluation = train_with_evaluation(
@@ -49,36 +49,44 @@ def compare_retrained_model(
         training_mode=training_mode,
         model_type=model_type,
     )
-    split_metadata = challenger_evaluation.get("splitMetadata")
-    if not isinstance(split_metadata, dict) or split_metadata.get("testRows", 0) <= 0:
-        raise ValueError("challenger evaluation must include held-out test rows.")
-    current_pr_auc = float(current_evaluation.get("heldOutPrAuc", current_evaluation.get("prAuc", 0.0)))
-    challenger_pr_auc = float(challenger_evaluation.get("prAuc", 0.0))
-    thresholds = thresholds or PromotionThresholds()
-    decision = _promotion_decision(current_evaluation, challenger_evaluation, thresholds)
-    return RetrainingComparison(
+    current_pr_auc = _optional_metric(current_evaluation, "heldOutPrAuc", "prAuc")
+    challenger_pr_auc = _optional_metric(challenger_evaluation, "prAuc")
+    thresholds = thresholds or ChallengerComparisonThresholds()
+    diagnostics = _diagnostic_assessment(
+        current_evaluation,
+        challenger_evaluation,
+        thresholds,
+        feedback_dataset,
+    )
+    return ChallengerDiagnosticComparison(
         current_pr_auc=current_pr_auc,
         challenger_pr_auc=challenger_pr_auc,
-        promote_challenger=decision["decision"] == "promote",
+        diagnostic_outcome=diagnostics["outcome"],
         challenger_evaluation=challenger_evaluation,
-        decision=decision,
+        diagnostics=diagnostics,
     )
 
 
-def _promotion_decision(
+def _diagnostic_assessment(
         current_evaluation: dict[str, object],
         challenger_evaluation: dict[str, object],
-        thresholds: PromotionThresholds,
+        thresholds: ChallengerComparisonThresholds,
+        feedback_dataset: Dataset | None = None,
 ) -> dict[str, object]:
+    insufficient_reasons = _insufficient_evidence_reasons(current_evaluation, challenger_evaluation)
     current_optimal = _optimal(current_evaluation)
     challenger_optimal = _optimal(challenger_evaluation)
-    current_pr_auc = float(current_evaluation.get("heldOutPrAuc", current_evaluation.get("prAuc", 0.0)))
-    challenger_pr_auc = float(challenger_evaluation.get("prAuc", 0.0))
+    current_pr_auc = _optional_metric(current_evaluation, "heldOutPrAuc", "prAuc")
+    challenger_pr_auc = _optional_metric(challenger_evaluation, "prAuc")
     current_cost = _cost(current_evaluation)
     challenger_cost = _cost(challenger_evaluation)
     alert_budget = _budget(thresholds.alert_budget, current_evaluation, challenger_evaluation)
     core_checks = {
-        "prAucImproved": challenger_pr_auc > current_pr_auc,
+        "prAucImproved": (
+            current_pr_auc is not None
+            and challenger_pr_auc is not None
+            and challenger_pr_auc > current_pr_auc
+        ),
         "falsePositiveRateWithinThreshold": (
             float(challenger_optimal.get("falsePositiveRate", 0.0))
             <= float(current_optimal.get("falsePositiveRate", 0.0)) + thresholds.max_false_positive_rate_increase
@@ -103,15 +111,18 @@ def _promotion_decision(
     if not stability_check["passed"]:
         failed_soft.append("stabilityRegression")
 
-    if failed_core:
-        decision = "reject"
-        summary = "Challenger failed core promotion constraints."
+    if insufficient_reasons:
+        outcome = "INSUFFICIENT_EVIDENCE"
+        summary = "Observed data is insufficient for a bounded challenger comparison."
+    elif failed_core:
+        outcome = "NOT_BETTER_ON_OBSERVED_METRICS"
+        summary = "Challenger was not better on the configured observed metrics."
     elif failed_soft:
-        decision = "shadow_only"
-        summary = "Challenger is promising but needs shadow monitoring for segment or stability risk."
+        outcome = "REQUIRES_SHADOW_REVIEW"
+        summary = "Observed metrics require additional shadow review for segment or stability risk."
     else:
-        decision = "promote"
-        summary = "Challenger passed promotion, budget, segment, and stability checks."
+        outcome = "BETTER_ON_OBSERVED_METRICS"
+        summary = "Challenger was better within the configured observed diagnostic bounds."
 
     passed_checks = [name for name, passed in core_checks.items() if passed]
     if segment_check["passed"]:
@@ -120,17 +131,17 @@ def _promotion_decision(
         passed_checks.append("stabilityRegression")
     failed_checks = failed_core + failed_soft
     return {
-        "decision": decision,
-        "promote": decision == "promote",
+        "outcome": outcome,
         "summary": summary,
-        "passed_checks": passed_checks,
-        "failed_checks": failed_checks,
+        "passedChecks": passed_checks,
+        "failedChecks": failed_checks,
+        "insufficientEvidenceReasons": insufficient_reasons,
         "criteria": {
             **core_checks,
             "segmentRegression": segment_check["passed"],
             "stabilityRegression": stability_check["passed"],
         },
-        "key_metrics": {
+        "observedMetrics": {
             "currentPrAuc": current_pr_auc,
             "challengerPrAuc": challenger_pr_auc,
             "currentFalsePositiveRate": float(current_optimal.get("falsePositiveRate", 0.0)),
@@ -143,14 +154,12 @@ def _promotion_decision(
             "segmentAssessment": segment_check,
             "stabilityAssessment": stability_check,
         },
-        "metrics": {
-            "currentPrAuc": current_pr_auc,
-            "challengerPrAuc": challenger_pr_auc,
+        "evidence": {
+            "feedbackDatasetRows": feedback_dataset.size if feedback_dataset is not None else None,
+            "datasetProvenance": dict(feedback_dataset.metadata) if feedback_dataset is not None else {},
+            "evaluationWindows": _evaluation_window_metadata(current_evaluation, challenger_evaluation),
         },
-        "recommended_rollout_mode": "ML" if decision == "promote" else ("SHADOW" if decision == "shadow_only" else "NONE"),
-        "recommended_alert_budget": thresholds.alert_budget,
-        "evaluation_window_metadata": _evaluation_window_metadata(current_evaluation, challenger_evaluation),
-        "thresholds": {
+        "comparisonThresholds": {
             "maxFalsePositiveRateIncrease": thresholds.max_false_positive_rate_increase,
             "minAlertRate": thresholds.min_alert_rate,
             "maxAlertRate": thresholds.max_alert_rate,
@@ -159,7 +168,35 @@ def _promotion_decision(
             "maxOutOfTimePrAucDrop": thresholds.max_out_of_time_pr_auc_drop,
             "maxOutOfTimeCostIncrease": thresholds.max_out_of_time_cost_increase,
         },
+        "limitations": [
+            "Observed metrics do not approve promotion or production-primary decisioning.",
+            "Analyst feedback is an evaluation signal, not certified fraud ground truth.",
+            "No registry, deployment, scoring mode, or runtime authority is mutated.",
+        ],
     }
+
+
+def _insufficient_evidence_reasons(
+        current_evaluation: dict[str, object],
+        challenger_evaluation: dict[str, object],
+) -> list[str]:
+    reasons = []
+    split_metadata = challenger_evaluation.get("splitMetadata")
+    if not isinstance(split_metadata, dict) or split_metadata.get("testRows", 0) <= 0:
+        reasons.append("CHALLENGER_HELD_OUT_ROWS_MISSING")
+    if _optional_metric(current_evaluation, "heldOutPrAuc", "prAuc") is None:
+        reasons.append("CURRENT_PR_AUC_MISSING")
+    if _optional_metric(challenger_evaluation, "prAuc") is None:
+        reasons.append("CHALLENGER_PR_AUC_MISSING")
+    return reasons
+
+
+def _optional_metric(evaluation: dict[str, object], *names: str) -> float | None:
+    for name in names:
+        value = evaluation.get(name)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+    return None
 
 
 def _budget(
@@ -204,7 +241,7 @@ def _budget_entry(evaluation: dict[str, object], alert_budget: float) -> dict[st
 def _segment_regression_check(
         current_evaluation: dict[str, object],
         challenger_evaluation: dict[str, object],
-        thresholds: PromotionThresholds,
+        thresholds: ChallengerComparisonThresholds,
 ) -> dict[str, object]:
     current_segments = current_evaluation.get("segmentEvaluation")
     challenger_segments = challenger_evaluation.get("segmentEvaluation")
@@ -225,7 +262,10 @@ def _segment_regression_check(
     return {"passed": not regressions, "regressions": regressions}
 
 
-def _stability_check(evaluation: dict[str, object], thresholds: PromotionThresholds) -> dict[str, object]:
+def _stability_check(
+        evaluation: dict[str, object],
+        thresholds: ChallengerComparisonThresholds,
+) -> dict[str, object]:
     stability = evaluation.get("stabilityAssessment")
     if not isinstance(stability, dict):
         return {"passed": True, "reason": "missing stability assessment"}

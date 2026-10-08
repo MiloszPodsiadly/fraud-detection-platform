@@ -225,10 +225,15 @@ class FraudModelRuntime:
                 name: round(float(threshold_a.get(name, 0.0)) - float(threshold_b.get(name, 0.0)), 6)
                 for name in sorted(set(threshold_a) | set(threshold_b))
             },
-            "comparisonMetricsByVersion": {
-                str(model_a["modelVersion"]): _model_summary(model_a),
-                str(model_b["modelVersion"]): _model_summary(model_b),
-            },
+            "comparisonSubjects": sorted(
+                (_model_summary(model_a), _model_summary(model_b)),
+                key=lambda subject: (
+                    subject["modelName"],
+                    subject["modelVersion"],
+                    subject["featureContractVersion"],
+                    subject["modelArtifactSha256"],
+                ),
+            ),
         }
 
     def _reason_codes(self, contributions: list[FeatureContribution]) -> list[str]:
@@ -265,6 +270,7 @@ def _model_summary(result: dict[str, Any]) -> dict[str, Any]:
         "modelName": result["modelName"],
         "modelVersion": result["modelVersion"],
         "featureContractVersion": result.get("featureContractVersion"),
+        "modelArtifactSha256": result["modelArtifactSha256"],
         "fraudScore": result["fraudScore"],
         "riskLevel": result["riskLevel"],
         "fallbackReason": result["fallbackReason"],

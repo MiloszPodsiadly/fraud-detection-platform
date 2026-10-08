@@ -94,6 +94,42 @@ class ModelRegistryIntegrityTest(unittest.TestCase):
         with self.assertRaisesRegex(ModelRegistryIntegrityError, "not valid JSON"):
             self.registry.entries()
 
+    def test_registry_index_uses_explicit_schema_version_two(self):
+        self.registry.register(self._artifact("schema-v2"))
+
+        index = self._index()
+
+        self.assertEqual(2, index["schemaVersion"])
+        self.assertEqual({"schemaVersion", "models"}, set(index))
+
+    def test_unsupported_old_and_future_schema_versions_are_rejected(self):
+        self.registry.register(self._artifact("schema-version-v1"))
+        for schema_version in (1, 3):
+            with self.subTest(schema_version=schema_version):
+                index = self._index()
+                index["schemaVersion"] = schema_version
+                self._write_index(index)
+
+                with self.assertRaisesRegex(ModelRegistryIntegrityError, "schemaVersion .* unsupported"):
+                    self.registry.entries()
+
+                index["schemaVersion"] = 2
+                self._write_index(index)
+
+    def test_unknown_index_and_obsolete_entry_fields_are_rejected(self):
+        self.registry.register(self._artifact("strict-fields-v1"))
+        index = self._index()
+        index["unexpected"] = True
+        self._write_index(index)
+        with self.assertRaisesRegex(ModelRegistryIntegrityError, "index fields"):
+            self.registry.entries()
+
+        del index["unexpected"]
+        index["models"][0]["role"] = "champion"
+        self._write_index(index)
+        with self.assertRaisesRegex(ModelRegistryIntegrityError, "entry fields"):
+            self.registry.entries()
+
     def test_duplicate_contradictory_logical_identity_is_rejected(self):
         self.registry.register(self._artifact("duplicate-v1"))
         index = self._index()
@@ -112,6 +148,16 @@ class ModelRegistryIntegrityTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ModelRegistryIntegrityError, "digest mismatch"):
             self.registry.resolve(entry)
+
+    def test_duplicate_registration_fails_when_authoritative_stored_artifact_is_corrupt(self):
+        source = self._artifact("duplicate-corrupt-v1")
+        entry = self.registry.register(source)
+        Path(entry.artifact_path).write_text("{corrupt", encoding="utf-8")
+
+        with self.assertRaisesRegex(ModelRegistryIntegrityError, "Registered artifact is invalid"):
+            self.registry.register(source)
+
+        self.assertEqual("{corrupt", Path(entry.artifact_path).read_text(encoding="utf-8"))
 
     def test_registry_metadata_artifact_metadata_mismatch_is_rejected(self):
         self.registry.register(self._artifact("family-drift-v1"))

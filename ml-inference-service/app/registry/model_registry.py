@@ -7,13 +7,13 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, BinaryIO, Iterator
+from typing import BinaryIO, Iterator
 
 from app.model_identity_policy import ModelArtifactIdentity, ModelLogicalIdentity
 from app.models.model_loader import (
     MAX_MODEL_ARTIFACT_BYTES,
+    ModelConfigurationError,
     ValidatedModelArtifact,
     load_model_artifact,
     load_validated_model_artifact,
@@ -44,7 +44,7 @@ class ModelRegistryMutationError(ModelRegistryIntegrityError):
 
 @dataclass(frozen=True)
 class ModelRegistryEntry:
-    """Metadata for one locally registered model artifact."""
+    """Immutable identity and managed location of one registered model artifact."""
 
     model_name: str
     model_version: str
@@ -53,10 +53,6 @@ class ModelRegistryEntry:
     feature_contract_version: str
     artifact_sha256: str
     artifact_path: str
-    metrics: dict[str, Any]
-    training_metadata: dict[str, Any]
-    created_at: str
-    role: str
 
     @property
     def logical_identity(self) -> ModelLogicalIdentity:
@@ -77,8 +73,11 @@ class ModelRegistryEntry:
 class ModelRegistry:
     """Bounded local registry with exact-byte integrity and serialized mutation."""
 
+    SCHEMA_VERSION = 2
     INDEX_NAME = "registry.json"
     LOCK_NAME = ".registry.lock"
+    INDEX_FIELDS = frozenset({"schemaVersion", "models"})
+    ENTRY_FIELDS = frozenset(ModelRegistryEntry.__dataclass_fields__)
 
     def __init__(
             self,
@@ -104,9 +103,6 @@ class ModelRegistry:
     def register(
             self,
             artifact_path: Path,
-            metrics: dict[str, Any] | None = None,
-            training_metadata: dict[str, Any] | None = None,
-            role: str = "challenger",
     ) -> ModelRegistryEntry:
         """Publish artifact-derived immutable identity or return its existing entry."""
         loaded = load_model_artifact(artifact_path, max_bytes=self.max_artifact_bytes)
@@ -117,6 +113,7 @@ class ModelRegistry:
                 None,
             )
             if existing is not None:
+                self._resolve_entry(existing)
                 if existing.artifact_identity != loaded.artifact_identity:
                     raise ModelRegistryConflictError(
                         "Model logical identity is already registered with different immutable artifact identity: "
@@ -154,16 +151,7 @@ class ModelRegistry:
                 feature_contract_version=validated.artifact_identity.feature_contract_version,
                 artifact_sha256=validated.artifact_sha256,
                 artifact_path=str(target.resolve(strict=True)),
-                metrics=metrics or {},
-                training_metadata=training_metadata or {},
-                created_at=datetime.now(timezone.utc).isoformat(),
-                role=role,
             )
-            if role == "champion":
-                entries = [
-                    self._with_role(current, "archived") if current.role == "champion" else current
-                    for current in entries
-                ]
             entries.append(entry)
             self._write_entries(entries)
             return entry
@@ -175,64 +163,30 @@ class ModelRegistry:
             raise ModelRegistryIntegrityError(
                 f"Registry entry is not authoritative for {entry.model_name}/{entry.model_version}."
             )
-        artifact_path = self._managed_artifact_path(authoritative.artifact_path, must_exist=True)
-        validated = load_validated_model_artifact(artifact_path, max_bytes=self.max_artifact_bytes)
-        if validated.artifact_sha256 != authoritative.artifact_sha256:
+        return self._resolve_entry(authoritative)
+
+    def _resolve_entry(self, entry: ModelRegistryEntry) -> ValidatedModelArtifact:
+        artifact_path = self._managed_artifact_path(entry.artifact_path, must_exist=True)
+        try:
+            validated = load_validated_model_artifact(artifact_path, max_bytes=self.max_artifact_bytes)
+        except ModelConfigurationError as exception:
+            raise ModelRegistryIntegrityError(
+                f"Registered artifact is invalid for {entry.model_name}/{entry.model_version}."
+            ) from exception
+        if validated.artifact_sha256 != entry.artifact_sha256:
             raise ModelRegistryIntegrityError(
                 f"Registered artifact digest mismatch for {entry.model_name}/{entry.model_version}."
             )
-        if validated.artifact_identity != authoritative.artifact_identity:
+        if validated.artifact_identity != entry.artifact_identity:
             raise ModelRegistryIntegrityError(
                 f"Registered artifact metadata mismatch for {entry.model_name}/{entry.model_version}."
             )
         return validated
 
-    def latest(self) -> ModelRegistryEntry | None:
-        """Load the most recently registered model."""
-        entries = self.entries()
-        return max(entries, key=lambda item: item.created_at) if entries else None
-
-    def by_version(self, model_version: str) -> ModelRegistryEntry | None:
-        """Load a registry entry by model version."""
-        candidates = [entry for entry in self.entries() if entry.model_version == model_version]
-        if len(candidates) > 1:
-            raise ModelRegistryIntegrityError(
-                f"Model version is ambiguous without model name: {model_version}"
-            )
-        return candidates[0] if candidates else None
-
     def by_identity(self, model_name: str, model_version: str) -> ModelRegistryEntry | None:
         """Load a registry entry by exact logical identity."""
         requested = ModelLogicalIdentity(model_name, model_version)
         return next((entry for entry in self.entries() if entry.logical_identity == requested), None)
-
-    def champion(self) -> ModelRegistryEntry | None:
-        """Load the champion model entry."""
-        return self._by_role("champion")
-
-    def challenger(self) -> ModelRegistryEntry | None:
-        """Load the challenger model entry."""
-        return self._by_role("challenger")
-
-    def promote(self, model_name: str, model_version: str) -> ModelRegistryEntry:
-        """Promote an existing model version to champion."""
-        requested = ModelLogicalIdentity(model_name, model_version)
-        with self._mutation_lock():
-            entries = self.entries()
-            promoted: ModelRegistryEntry | None = None
-            updated: list[ModelRegistryEntry] = []
-            for entry in entries:
-                if entry.logical_identity == requested:
-                    promoted = self._with_role(entry, "champion")
-                    updated.append(promoted)
-                elif entry.role == "champion":
-                    updated.append(self._with_role(entry, "archived"))
-                else:
-                    updated.append(entry)
-            if promoted is None:
-                raise ValueError(f"Unknown model identity: {model_name}/{model_version}")
-            self._write_entries(updated)
-            return promoted
 
     def entries(self) -> list[ModelRegistryEntry]:
         """Load bounded registry state and reject corruption as non-empty failure."""
@@ -244,7 +198,20 @@ class ModelRegistry:
             payload = json.loads(index_bytes)
         except (UnicodeDecodeError, json.JSONDecodeError) as exception:
             raise ModelRegistryIntegrityError("Registry index is not valid JSON.") from exception
-        if not isinstance(payload, dict) or not isinstance(payload.get("models"), list):
+        if not isinstance(payload, dict):
+            raise ModelRegistryIntegrityError("Registry index must be a JSON object.")
+        if "schemaVersion" not in payload:
+            raise ModelRegistryIntegrityError("Registry index schemaVersion is required.")
+        schema_version = payload["schemaVersion"]
+        if type(schema_version) is not int:
+            raise ModelRegistryIntegrityError("Registry index schemaVersion must be an integer.")
+        if schema_version != self.SCHEMA_VERSION:
+            raise ModelRegistryIntegrityError(
+                f"Registry index schemaVersion {schema_version} is unsupported."
+            )
+        if frozenset(payload) != self.INDEX_FIELDS:
+            raise ModelRegistryIntegrityError("Registry index fields do not match schema version 2.")
+        if not isinstance(payload.get("models"), list):
             raise ModelRegistryIntegrityError("Registry index must contain a models array.")
         if len(payload["models"]) > self.max_entries:
             raise ModelRegistryIntegrityError(
@@ -255,17 +222,19 @@ class ModelRegistry:
         for row in payload["models"]:
             if not isinstance(row, dict):
                 raise ModelRegistryIntegrityError("Registry entry must be an object.")
+            if frozenset(row) != self.ENTRY_FIELDS:
+                raise ModelRegistryIntegrityError(
+                    "Registry entry fields do not match schema version 2."
+                )
             try:
                 entry = ModelRegistryEntry(**row)
                 artifact_identity = entry.artifact_identity
+                if not isinstance(entry.artifact_path, str) or not entry.artifact_path.strip():
+                    raise ValueError("artifact_path is required")
             except (TypeError, ValueError) as exception:
                 raise ModelRegistryIntegrityError(
                     "Registry entry uses an unsupported or invalid identity schema."
                 ) from exception
-            if not isinstance(entry.metrics, dict) or not isinstance(entry.training_metadata, dict):
-                raise ModelRegistryIntegrityError("Registry diagnostic metadata must be JSON objects.")
-            if not isinstance(entry.created_at, str) or not isinstance(entry.role, str):
-                raise ModelRegistryIntegrityError("Registry lifecycle metadata must be strings.")
             self._managed_artifact_path(entry.artifact_path, must_exist=True)
             if artifact_identity.logical_identity in logical_identities:
                 raise ModelRegistryIntegrityError(
@@ -320,16 +289,18 @@ class ModelRegistry:
             raise ModelRegistryIntegrityError(f"{label} exceeds maximum size of {max_bytes} bytes.")
         return payload
 
-    def _by_role(self, role: str) -> ModelRegistryEntry | None:
-        candidates = [entry for entry in self.entries() if entry.role == role]
-        return max(candidates, key=lambda item: item.created_at) if candidates else None
-
     def _write_entries(self, entries: list[ModelRegistryEntry]) -> None:
         if len(entries) > self.max_entries:
             raise ModelRegistryIntegrityError(
                 f"Registry entry limit of {self.max_entries} is exceeded."
             )
-        payload = {"models": [asdict(entry) for entry in sorted(entries, key=lambda item: item.created_at)]}
+        payload = {
+            "schemaVersion": self.SCHEMA_VERSION,
+            "models": [
+                asdict(entry)
+                for entry in sorted(entries, key=lambda item: (item.model_name, item.model_version))
+            ]
+        }
         try:
             index_bytes = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
         except (TypeError, ValueError) as exception:
@@ -418,22 +389,6 @@ class ModelRegistry:
                 process_lock.release()
             if cleanup_error is not None and not operation_failed:
                 raise ModelRegistryMutationError("Registry mutation lock cleanup failed.") from cleanup_error
-
-    def _with_role(self, entry: ModelRegistryEntry, role: str) -> ModelRegistryEntry:
-        return ModelRegistryEntry(
-            model_name=entry.model_name,
-            model_version=entry.model_version,
-            model_type=entry.model_type,
-            model_family=entry.model_family,
-            feature_contract_version=entry.feature_contract_version,
-            artifact_sha256=entry.artifact_sha256,
-            artifact_path=entry.artifact_path,
-            metrics=entry.metrics,
-            training_metadata=entry.training_metadata,
-            created_at=entry.created_at,
-            role=role,
-        )
-
 
 def _process_lock(root: Path) -> threading.Lock:
     with _PROCESS_LOCKS_GUARD:

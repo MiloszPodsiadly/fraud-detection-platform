@@ -29,7 +29,7 @@ class ModelRegistryIdentityTest(unittest.TestCase):
     def test_first_registration_uses_artifact_derived_identity_and_exact_sha(self):
         artifact_path = self._artifact("registry-identity-v1")
 
-        entry = self.registry.register(artifact_path, role="champion")
+        entry = self.registry.register(artifact_path)
         validated = load_validated_model_artifact(artifact_path)
 
         self.assertEqual(validated.logical_identity, entry.logical_identity)
@@ -40,13 +40,11 @@ class ModelRegistryIdentityTest(unittest.TestCase):
     def test_same_exact_artifact_registration_is_idempotent(self):
         artifact_path = self._artifact("registry-idempotent-v1")
 
-        first = self.registry.register(artifact_path, metrics={"prAuc": 0.5}, role="champion")
-        second = self.registry.register(artifact_path, metrics={"prAuc": 0.9}, role="challenger")
+        first = self.registry.register(artifact_path)
+        second = self.registry.register(artifact_path)
 
         self.assertEqual(first, second)
         self.assertEqual(1, len(self.registry.entries()))
-        self.assertEqual("champion", second.role)
-        self.assertEqual({"prAuc": 0.5}, second.metrics)
 
     def test_logical_identity_uses_model_name_and_version_together(self):
         first_path = self._artifact("shared-v1", file_name="first-model.json", modelName="first-model")
@@ -57,8 +55,7 @@ class ModelRegistryIdentityTest(unittest.TestCase):
 
         self.assertEqual(first, self.registry.by_identity("first-model", "shared-v1"))
         self.assertEqual(second, self.registry.by_identity("second-model", "shared-v1"))
-        with self.assertRaisesRegex(ModelRegistryIntegrityError, "ambiguous without model name"):
-            self.registry.by_version("shared-v1")
+        self.assertCountEqual([first, second], self.registry.entries())
 
     def test_same_logical_identity_with_different_bytes_is_rejected(self):
         first_path = self._artifact("registry-conflict-v1")
@@ -118,11 +115,14 @@ class ModelRegistryIdentityTest(unittest.TestCase):
     def test_registration_api_has_no_caller_supplied_identity_parameters(self):
         parameters = inspect.signature(ModelRegistry.register).parameters
 
-        self.assertNotIn("model_name", parameters)
-        self.assertNotIn("model_version", parameters)
-        self.assertNotIn("model_type", parameters)
+        self.assertEqual(["self", "artifact_path"], list(parameters))
 
-    def test_old_registry_entry_schema_is_rejected_explicitly(self):
+    def test_registry_api_has_no_lifecycle_or_ambiguous_selection_methods(self):
+        for method_name in ("latest", "by_version", "champion", "challenger", "promote"):
+            with self.subTest(method_name=method_name):
+                self.assertFalse(hasattr(ModelRegistry, method_name))
+
+    def test_old_registry_without_schema_version_is_rejected_explicitly(self):
         self.registry.root.mkdir(parents=True)
         self.registry.index_path.write_text(
             json.dumps({
@@ -139,7 +139,7 @@ class ModelRegistryIdentityTest(unittest.TestCase):
             encoding="utf-8",
         )
 
-        with self.assertRaisesRegex(ModelRegistryIntegrityError, "unsupported or invalid identity schema"):
+        with self.assertRaisesRegex(ModelRegistryIntegrityError, "schemaVersion is required"):
             self.registry.entries()
 
     def _artifact(self, model_version: str, file_name: str | None = None, **overrides: object) -> Path:

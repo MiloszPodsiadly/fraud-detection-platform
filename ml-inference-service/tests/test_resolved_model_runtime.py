@@ -19,9 +19,9 @@ from app.governance.profile import (
 from app.inference.model_runtime import resolve_model_runtime
 from app.inference.model_selection import ModelSelectionMode, ModelSelectionPolicy
 from app.model import FraudModel, resolve_configured_model_runtime
-from app.models.model_loader import load_model_from_artifact
+from app.models.model_loader import ModelConfigurationError, load_model_from_artifact
 from app.registry.model_registry import ModelRegistry
-from app.train_model import write_reference_profile
+from app.train_model import _load_reference_profile_source, write_reference_profile
 
 
 class ResolvedModelRuntimeTest(unittest.TestCase):
@@ -113,7 +113,7 @@ class ResolvedModelRuntimeTest(unittest.TestCase):
             root = Path(directory)
             artifact_path = self._artifact_with_version(root, "registry-v17")
             registry = ModelRegistry(root / "registry")
-            registry.register(artifact_path, role="archived")
+            registry.register(artifact_path)
             resolved = resolve_model_runtime(
                 None,
                 ModelSelectionPolicy.registry_exact("python-logistic-fraud-model", "registry-v17"),
@@ -174,11 +174,57 @@ class ResolvedModelRuntimeTest(unittest.TestCase):
                 generate_examples(32, 7307),
                 seed=7307,
                 examples=32,
-                artifact_sha256=resolved.artifact_sha256,
+                artifact_identity=resolved.artifact_identity,
             )
             payload = json.loads(path.read_text(encoding="utf-8"))
 
         self.assertEqual(resolved.artifact_sha256, payload["artifact_sha256"])
+        self.assertEqual(resolved.logical_identity.model_name, payload["model_name"])
+        self.assertEqual(resolved.logical_identity.model_version, payload["model_version"])
+        self.assertEqual(
+            resolved.artifact_identity.feature_contract_version,
+            payload["feature_schema_version"],
+        )
+
+    def test_reference_profile_rejects_model_that_does_not_match_persisted_identity(self):
+        resolved = resolve_model_runtime(
+            self.CANONICAL_ARTIFACT,
+            ModelSelectionPolicy.packaged_explicit(),
+        )
+        resolved.model.model_version = "different-in-memory-version"
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "does not match the trained model metadata"):
+                write_reference_profile(
+                    Path(directory) / "reference.json",
+                    resolved.model,
+                    generate_examples(32, 7307),
+                    seed=7307,
+                    examples=32,
+                    artifact_identity=resolved.artifact_identity,
+                )
+
+    def test_profile_source_rejects_corrupt_persisted_artifact(self):
+        resolved = resolve_model_runtime(
+            self.CANONICAL_ARTIFACT,
+            ModelSelectionPolicy.packaged_explicit(),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            artifact_path = Path(directory) / "corrupt.json"
+            artifact_path.write_text("{not-json", encoding="utf-8")
+
+            with self.assertRaises(ModelConfigurationError):
+                _load_reference_profile_source(artifact_path, resolved.model)
+
+    def test_profile_source_rejects_in_memory_and_reloaded_identity_mismatch(self):
+        resolved = resolve_model_runtime(
+            self.CANONICAL_ARTIFACT,
+            ModelSelectionPolicy.packaged_explicit(),
+        )
+        resolved.model.model_name = "different-in-memory-model"
+
+        with self.assertRaisesRegex(ValueError, "does not match the trained model metadata"):
+            _load_reference_profile_source(self.CANONICAL_ARTIFACT, resolved.model)
 
     def _production_features(self) -> dict[str, object]:
         return {

@@ -32,7 +32,11 @@ from app.models.model_loader import ModelConfigurationError, load_model_from_art
 from app.models.logistic_model import LogisticFraudModel
 from app.registry.model_registry import ModelRegistry
 from app.models.xgboost_model import XGBoostFraudModel
-from app.training.retraining import PromotionThresholds, _promotion_decision, compare_retrained_model
+from app.training.retraining import (
+    ChallengerComparisonThresholds,
+    _diagnostic_assessment,
+    evaluate_challenger_diagnostics,
+)
 from app.training.train import (
     CANONICAL_MODEL_VERSION,
     _require_binary_evaluation_splits,
@@ -52,6 +56,7 @@ class FraudModelTest(unittest.TestCase):
             training_mode: str = "production",
             feature_schema: list[str] | None = None,
             weights: dict[str, float] | None = None,
+            model_name: str = "python-logistic-fraud-model",
     ) -> dict[str, object]:
         schema = feature_schema or (
             list(FeaturePipeline.PRODUCTION_FEATURE_NAMES)
@@ -59,7 +64,7 @@ class FraudModelTest(unittest.TestCase):
             else list(FeaturePipeline.FEATURE_NAMES)
         )
         payload: dict[str, object] = {
-            "modelName": "python-logistic-fraud-model",
+            "modelName": model_name,
             "modelVersion": model_version,
             "modelType": model_type,
             "modelFamily": "LOGISTIC_REGRESSION" if model_type == "logistic" else "XGBOOST",
@@ -1230,7 +1235,7 @@ class FraudModelTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             evaluate_scores(y_true=[0, 1], y_score=[0.1])
 
-    def test_retraining_comparison_reports_challenger_metrics(self):
+    def test_retraining_comparison_reports_diagnostic_challenger_metrics(self):
         dataset = generate_fraud_behavior(count=1000, seed=301, user_count=8, fraud_ratio=0.03)
         current_evaluation = {
             "prAuc": 0.0,
@@ -1238,35 +1243,58 @@ class FraudModelTest(unittest.TestCase):
             "costEvaluation": {"optimalCostThreshold": {"totalCost": 10000.0}},
         }
 
-        comparison = compare_retrained_model(
+        comparison = evaluate_challenger_diagnostics(
             dataset,
             current_evaluation,
             epochs=2,
             learning_rate=0.1,
-            thresholds=PromotionThresholds(max_alert_rate=1.0),
+            thresholds=ChallengerComparisonThresholds(max_alert_rate=1.0),
         )
 
         self.assertGreaterEqual(comparison.challenger_pr_auc, 0.0)
-        self.assertIn("criteria", comparison.decision)
-        self.assertIn(comparison.decision["decision"], {"promote", "shadow_only", "reject"})
-        self.assertIn("recommended_rollout_mode", comparison.decision)
+        self.assertIn("criteria", comparison.diagnostics)
+        self.assertIn(comparison.diagnostic_outcome, {
+            "BETTER_ON_OBSERVED_METRICS",
+            "REQUIRES_SHADOW_REVIEW",
+            "NOT_BETTER_ON_OBSERVED_METRICS",
+            "INSUFFICIENT_EVIDENCE",
+        })
+        self.assertNotIn("recommended_rollout_mode", comparison.diagnostics)
+        self.assertNotIn("promote", comparison.diagnostics)
+        self.assertEqual(dataset.size, comparison.diagnostics["evidence"]["feedbackDatasetRows"])
+        self.assertIn("limitations", comparison.diagnostics)
         self.assertIn("prAuc", comparison.challenger_evaluation)
         self.assertIn("splitMetadata", comparison.challenger_evaluation)
 
-    def test_rollout_decision_promote_shadow_and_reject_outcomes(self):
+    def test_diagnostic_outcomes_do_not_grant_lifecycle_authority(self):
         current = self._evaluation_for_decision(pr_auc=0.6, fpr=0.05, alert_rate=0.05, cost=1000.0)
-        promote = self._evaluation_for_decision(pr_auc=0.8, fpr=0.05, alert_rate=0.05, cost=900.0)
-        shadow = self._evaluation_for_decision(pr_auc=0.8, fpr=0.05, alert_rate=0.05, cost=900.0)
-        shadow["stabilityAssessment"] = {"prAucDelta": 0.4, "expectedCostDelta": 10.0}
-        reject = self._evaluation_for_decision(pr_auc=0.4, fpr=0.30, alert_rate=0.80, cost=2000.0)
+        better = self._evaluation_for_decision(pr_auc=0.8, fpr=0.05, alert_rate=0.05, cost=900.0)
+        review = self._evaluation_for_decision(pr_auc=0.8, fpr=0.05, alert_rate=0.05, cost=900.0)
+        review["stabilityAssessment"] = {"prAucDelta": 0.4, "expectedCostDelta": 10.0}
+        not_better = self._evaluation_for_decision(pr_auc=0.4, fpr=0.30, alert_rate=0.80, cost=2000.0)
 
-        thresholds = PromotionThresholds(alert_budget=0.01, max_alert_rate=0.5)
+        thresholds = ChallengerComparisonThresholds(alert_budget=0.01, max_alert_rate=0.5)
 
-        self.assertEqual(_promotion_decision(current, promote, thresholds)["decision"], "promote")
-        self.assertEqual(_promotion_decision(current, shadow, thresholds)["decision"], "shadow_only")
-        self.assertEqual(_promotion_decision(current, reject, thresholds)["decision"], "reject")
+        self.assertEqual(
+            _diagnostic_assessment(current, better, thresholds)["outcome"],
+            "BETTER_ON_OBSERVED_METRICS",
+        )
+        self.assertEqual(
+            _diagnostic_assessment(current, review, thresholds)["outcome"],
+            "REQUIRES_SHADOW_REVIEW",
+        )
+        self.assertEqual(
+            _diagnostic_assessment(current, not_better, thresholds)["outcome"],
+            "NOT_BETTER_ON_OBSERVED_METRICS",
+        )
+        insufficient = dict(better)
+        insufficient["splitMetadata"] = {"testRows": 0}
+        self.assertEqual(
+            _diagnostic_assessment(current, insufficient, thresholds)["outcome"],
+            "INSUFFICIENT_EVIDENCE",
+        )
 
-    def test_model_registry_tracks_latest_champion_challenger_and_versions(self):
+    def test_model_registry_registers_and_resolves_exact_identities(self):
         first_artifact_path = Path.cwd() / "registry-test-artifact-v1.json"
         second_artifact_path = Path.cwd() / "registry-test-artifact-v2.json"
         registry_path = Path.cwd() / "registry-test"
@@ -1274,28 +1302,19 @@ class FraudModelTest(unittest.TestCase):
             first_artifact_path.write_text(json.dumps(self._artifact_payload("registry-v1")), encoding="utf-8")
             second_artifact_path.write_text(json.dumps(self._artifact_payload("registry-v2")), encoding="utf-8")
             registry = ModelRegistry(registry_path)
-            first = registry.register(
-                artifact_path=first_artifact_path,
-                metrics={"prAuc": 0.5},
-                training_metadata={"examples": 10},
-                role="champion",
-            )
-            second = registry.register(
-                artifact_path=second_artifact_path,
-                metrics={"prAuc": 0.6},
-                training_metadata={"examples": 20},
-                role="challenger",
-            )
+            first = registry.register(first_artifact_path)
+            second = registry.register(second_artifact_path)
 
-            self.assertEqual(registry.by_version("registry-v1"), first)
-            self.assertEqual(registry.champion().model_version, "registry-v1")
-            self.assertEqual(registry.challenger().model_version, "registry-v2")
-            self.assertEqual(registry.latest().model_version, second.model_version)
-
-            promoted = registry.promote("python-logistic-fraud-model", "registry-v2")
-            self.assertEqual(promoted.role, "champion")
-            self.assertEqual(registry.champion().model_version, "registry-v2")
-            self.assertEqual(registry.by_version("registry-v1").role, "archived")
+            self.assertEqual(
+                registry.by_identity("python-logistic-fraud-model", "registry-v1"),
+                first,
+            )
+            self.assertEqual(
+                registry.by_identity("python-logistic-fraud-model", "registry-v2"),
+                second,
+            )
+            self.assertEqual(registry.resolve(first).artifact_sha256, first.artifact_sha256)
+            self.assertEqual(registry.resolve(second).artifact_sha256, second.artifact_sha256)
         finally:
             for artifact_path in (first_artifact_path, second_artifact_path):
                 if artifact_path.exists():
@@ -1319,7 +1338,7 @@ class FraudModelTest(unittest.TestCase):
                 encoding="utf-8",
             )
             registry = ModelRegistry(registry_path)
-            registry.register(artifact_path, role="champion")
+            registry.register(artifact_path)
 
             model = FraudModel.from_registry_exact(
                 "python-logistic-fraud-model",
@@ -1362,8 +1381,8 @@ class FraudModelTest(unittest.TestCase):
                 encoding="utf-8",
             )
             registry = ModelRegistry(registry_path)
-            registry.register(champion_artifact, role="champion")
-            registry.register(challenger_artifact, role="challenger")
+            registry.register(champion_artifact)
+            registry.register(challenger_artifact)
             model = FraudModel.from_registry_exact(
                 "python-logistic-fraud-model",
                 "champion-v1",
@@ -1423,7 +1442,15 @@ class FraudModelTest(unittest.TestCase):
         self.assertEqual(comparison["modelA"]["modelVersion"], "champion-v1")
         self.assertEqual(comparison["modelB"]["modelVersion"], "challenger-v2")
         self.assertIn("thresholdDifferences", comparison)
-        self.assertIn("comparisonMetricsByVersion", comparison)
+        self.assertEqual(2, len(comparison["comparisonSubjects"]))
+        self.assertEqual(
+            {"champion-v1", "challenger-v2"},
+            {subject["modelVersion"] for subject in comparison["comparisonSubjects"]},
+        )
+        self.assertTrue(
+            all(subject["modelArtifactSha256"] for subject in comparison["comparisonSubjects"])
+        )
+        self.assertNotIn("comparisonMetricsByVersion", comparison)
         self.assertIsNone(invalid_comparison["scoreDelta"])
         self.assertIsNone(invalid_comparison["absoluteScoreDelta"])
         self.assertIsNone(invalid_comparison["riskLevelMismatch"])
@@ -1434,6 +1461,56 @@ class FraudModelTest(unittest.TestCase):
         self.assertIsNone(invalid_comparison["modelB"]["fraudScore"])
         self.assertEqual(invalid_comparison["modelA"]["fallbackReason"], "INCOMPATIBLE_FEATURE_SNAPSHOT")
         self.assertEqual(invalid_comparison["modelB"]["fallbackReason"], "INCOMPATIBLE_FEATURE_SNAPSHOT")
+
+    def test_comparison_keeps_same_version_models_with_different_names_distinct(self):
+        feature_schema = list(FeaturePipeline.PRODUCTION_FEATURE_NAMES)
+        with tempfile.TemporaryDirectory() as directory:
+            first_path = Path(directory) / "first.json"
+            second_path = Path(directory) / "second.json"
+            first_path.write_text(json.dumps(self._artifact_payload(
+                "shared-v1", feature_schema=feature_schema, model_name="fraud-model-a"
+            )), encoding="utf-8")
+            second_path.write_text(json.dumps(self._artifact_payload(
+                "shared-v1", feature_schema=feature_schema, model_name="fraud-model-b"
+            )), encoding="utf-8")
+            first = FraudModel.from_packaged_artifact(first_path)
+            second = FraudModel.from_packaged_artifact(second_path)
+
+            subjects = first.compare_with(self._production_payload(), second)["comparisonSubjects"]
+
+        self.assertEqual(
+            {("fraud-model-a", "shared-v1"), ("fraud-model-b", "shared-v1")},
+            {(subject["modelName"], subject["modelVersion"]) for subject in subjects},
+        )
+
+    def test_comparison_keeps_same_logical_identity_with_different_artifacts_distinct(self):
+        feature_schema = list(FeaturePipeline.PRODUCTION_FEATURE_NAMES)
+        with tempfile.TemporaryDirectory() as directory:
+            first_path = Path(directory) / "first.json"
+            second_path = Path(directory) / "second.json"
+            first_path.write_text(json.dumps(self._artifact_payload(
+                "shared-v1", feature_schema=feature_schema
+            )), encoding="utf-8")
+            second_path.write_text(json.dumps(self._artifact_payload(
+                "shared-v1",
+                feature_schema=feature_schema,
+                weights={name: 0.1 for name in feature_schema},
+            )), encoding="utf-8")
+            first = FraudModel.from_packaged_artifact(first_path)
+            second = FraudModel.from_packaged_artifact(second_path)
+
+            subjects = first.compare_with(self._production_payload(), second)["comparisonSubjects"]
+
+        identities = {
+            (
+                subject["modelName"],
+                subject["modelVersion"],
+                subject["featureContractVersion"],
+                subject["modelArtifactSha256"],
+            )
+            for subject in subjects
+        }
+        self.assertEqual(2, len(identities))
 
     def test_model_loader_uses_logistic_artifact_type(self):
         artifact_path = Path.cwd() / "loader-logistic-artifact.json"
@@ -1616,7 +1693,7 @@ class FraudModelTest(unittest.TestCase):
             artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
             registry = ModelRegistry(registry_path)
             with self.assertRaisesRegex(ModelConfigurationError, "featureSetVersion mismatch"):
-                registry.register(artifact_path, role="champion")
+                registry.register(artifact_path)
             self.assertFalse(registry.index_path.exists())
         finally:
             if artifact_path.exists():
@@ -1642,7 +1719,7 @@ class FraudModelTest(unittest.TestCase):
             artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
             registry = ModelRegistry(registry_path)
             with self.assertRaisesRegex(ModelConfigurationError, "model runtime readiness failed"):
-                registry.register(artifact_path, role="champion")
+                registry.register(artifact_path)
             self.assertFalse(registry.index_path.exists())
         finally:
             if artifact_path.exists():
