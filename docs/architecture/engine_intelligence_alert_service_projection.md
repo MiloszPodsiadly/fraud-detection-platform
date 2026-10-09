@@ -36,10 +36,11 @@ timestamp, explicit Rules-vs-ML comparison identity and summary, bounded engine 
 diagnostic signals, bounded warnings, counts, projection timestamps, and the bounded ML model identity when it is
 present on the `ml.python.primary` engine result.
 
-The private `ml_prediction_evidence_projections` collection stores one immutable occurrence per source event ID. It
-preserves transaction and correlation ownership, original event time, canonical engine ID and status, exact bounded
-ML score and risk, complete model/feature-contract identity, source execution timestamp, and projection time. Source
-timestamps use canonical UTC text so Mongo date precision cannot truncate the authoritative fractional value.
+The private `ml_prediction_evidence_projections` collection stores one immutable ML evidence outcome per source event
+ID. It preserves transaction and correlation ownership, original event time, and either the exact bounded ML evidence
+or its authoritative omission reason. Evidence includes score, risk, complete model/feature-contract identity, and
+source execution timestamp. Source timestamps use canonical UTC text so Mongo date precision cannot truncate the
+authoritative fractional value.
 
 ### Scoring occurrence ownership
 
@@ -90,7 +91,9 @@ Current events with diagnostics explicitly disabled omit `engineIntelligence` an
 `DIAGNOSTIC_EMISSION_DISABLED` evidence omission reason. They create no engine-intelligence projection document.
 A newer authoritative occurrence without diagnostics never inherits an older occurrence's projection: snapshot reads
 return `NOT_PROJECTED` unless the private projection owner matches the current scored transaction.
-Events with an explicit evidence omission reason create no private evidence document and never erase accepted evidence.
+Events with an explicit evidence omission reason create an immutable private outcome document. An omission can be
+replayed only with the same reason and source ownership; it cannot replace accepted evidence, and accepted evidence
+cannot replace it.
 
 ## New Bounded Event Projection
 
@@ -109,11 +112,12 @@ payloads and exception messages are not logged.
 Projection must be idempotent under replay. A stable transaction ID replaces the existing Mongo document instead of
 appending engines, diagnostic signals, or warnings.
 
-The private evidence projection has stricter occurrence semantics. It uses insert-only persistence keyed by source
-event ID. An identical replay is idempotent; a conflicting replay is observable and cannot overwrite accepted
-evidence. Concurrent duplicate delivery produces one immutable document. A different source event ID is a distinct
-scoring occurrence, even for the same transaction. Replay classification reads the authoritative stored document;
-there is no read-then-save update path.
+The private evidence-outcome projection has stricter occurrence semantics. It uses insert-only persistence keyed by
+source event ID. An identical evidence or omission replay is idempotent; a changed evidence payload, changed omission
+reason, or evidence/omission transition is a permanent conflict and cannot overwrite the first accepted outcome.
+Concurrent contradictory delivery produces one immutable winner and one conflict. A different source event ID is a
+distinct scoring occurrence, even for the same transaction. Replay classification reads the authoritative stored
+document; there is no read-then-save update path or second outcome authority.
 
 Evidence capture consumes the scored-event topic through its own consumer group and record-level acknowledgement.
 Transient store and unknown infrastructure failures retain the Kafka delivery for bounded retry. Exhausted transient

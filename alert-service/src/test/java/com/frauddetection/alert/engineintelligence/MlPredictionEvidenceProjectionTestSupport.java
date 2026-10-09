@@ -33,6 +33,13 @@ final class MlPredictionEvidenceProjectionTestSupport {
     }
 
     static TransactionScoredEvent eventWithoutEvidence(String eventId) {
+        return eventWithoutEvidence(eventId, MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED);
+    }
+
+    static TransactionScoredEvent eventWithoutEvidence(
+            String eventId,
+            MlPredictionEvidenceOmissionReason omissionReason
+    ) {
         TransactionScoredEvent source = event(eventId, 0.8123d, "model-v1");
         return new TransactionScoredEvent(
                 source.eventId(),
@@ -60,7 +67,7 @@ final class MlPredictionEvidenceProjectionTestSupport {
                 source.scoringEvidence(),
                 source.engineIntelligence(),
                 null,
-                MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED,
+                omissionReason,
                 source.analystRecommendation()
         );
     }

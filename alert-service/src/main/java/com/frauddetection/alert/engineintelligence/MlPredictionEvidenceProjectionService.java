@@ -55,20 +55,19 @@ public class MlPredictionEvidenceProjectionService {
             if (event == null) {
                 return failure(MlPredictionEvidenceProjectionReason.INVALID_EVIDENCE);
             }
-            if (event.mlPredictionEvidence() == null) {
+            MlPredictionEvidenceProjection projection = validatedProjection(event);
+            try {
+                repository.insert(projection);
+                if (projection.hasEvidence()) {
+                    metrics.recordMlPredictionEvidenceProjectionSuccess();
+                    return MlPredictionEvidenceProjectionResult.projected();
+                }
                 metrics.recordMlPredictionEvidenceProjectionOmitted(
                         MlPredictionEvidenceProjectionMetricReason.EVIDENCE_ABSENT
                 );
                 return MlPredictionEvidenceProjectionResult.omitted(
                         MlPredictionEvidenceProjectionReason.EVIDENCE_ABSENT
                 );
-            }
-
-            MlPredictionEvidenceProjection projection = validatedProjection(event);
-            try {
-                repository.insert(projection);
-                metrics.recordMlPredictionEvidenceProjectionSuccess();
-                return MlPredictionEvidenceProjectionResult.projected();
             } catch (DuplicateKeyException duplicate) {
                 return classifyReplay(projection);
             }
@@ -95,13 +94,26 @@ public class MlPredictionEvidenceProjectionService {
         String sourceEventId = policy.validatedSourceEventId(event.eventId());
         String transactionId = policy.validatedTransactionId(event.transactionId());
         String correlationId = policy.validatedCorrelationId(event.correlationId());
-        MlPredictionEvidence evidence = policy.validatedEvidenceCopy(event.mlPredictionEvidence());
-        return MlPredictionEvidenceProjection.create(
+        if (event.mlPredictionEvidence() != null) {
+            MlPredictionEvidence evidence = policy.validatedEvidenceCopy(event.mlPredictionEvidence());
+            return MlPredictionEvidenceProjection.create(
+                    sourceEventId,
+                    transactionId,
+                    correlationId,
+                    event.createdAt(),
+                    evidence,
+                    clock.instant()
+            );
+        }
+        if (event.mlPredictionEvidenceOmissionReason() == null) {
+            throw new MlPredictionEvidenceProjectionShapeException();
+        }
+        return MlPredictionEvidenceProjection.omitted(
                 sourceEventId,
                 transactionId,
                 correlationId,
                 event.createdAt(),
-                evidence,
+                event.mlPredictionEvidenceOmissionReason(),
                 clock.instant()
         );
     }

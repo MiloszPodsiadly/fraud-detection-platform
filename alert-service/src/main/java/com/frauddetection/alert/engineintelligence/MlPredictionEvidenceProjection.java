@@ -2,6 +2,7 @@ package com.frauddetection.alert.engineintelligence;
 
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.PersistenceCreator;
 import org.springframework.data.mongodb.core.mapping.Document;
@@ -19,6 +20,7 @@ public class MlPredictionEvidenceProjection {
     private final String transactionId;
     private final String correlationId;
     private final String sourceEventCreatedAt;
+    private final MlPredictionEvidenceOmissionReason mlPredictionEvidenceOmissionReason;
     private final Double mlScore;
     private final RiskLevel mlRiskLevel;
     private final String modelName;
@@ -34,6 +36,7 @@ public class MlPredictionEvidenceProjection {
             String transactionId,
             String correlationId,
             String sourceEventCreatedAt,
+            MlPredictionEvidenceOmissionReason mlPredictionEvidenceOmissionReason,
             Double mlScore,
             RiskLevel mlRiskLevel,
             String modelName,
@@ -47,6 +50,28 @@ public class MlPredictionEvidenceProjection {
         this.transactionId = requiredIdentity(transactionId, "transactionId");
         this.correlationId = requiredIdentity(correlationId, "correlationId");
         this.sourceEventCreatedAt = validatedInstantText(sourceEventCreatedAt);
+        this.mlPredictionEvidenceOmissionReason = mlPredictionEvidenceOmissionReason;
+        boolean evidenceAbsent = mlScore == null
+                && mlRiskLevel == null
+                && modelName == null
+                && modelVersion == null
+                && featureContractVersion == null
+                && modelArtifactSha256 == null
+                && sourceExecutionTimestamp == null;
+        if (mlPredictionEvidenceOmissionReason != null) {
+            if (!evidenceAbsent) {
+                throw new MlPredictionEvidenceProjectionShapeException();
+            }
+            this.mlScore = null;
+            this.mlRiskLevel = null;
+            this.modelName = null;
+            this.modelVersion = null;
+            this.featureContractVersion = null;
+            this.modelArtifactSha256 = null;
+            this.sourceExecutionTimestamp = null;
+            this.projectedAt = requiredInstant(projectedAt);
+            return;
+        }
         try {
             Instant executionTimestamp = Instant.parse(requiredIdentity(
                     sourceExecutionTimestamp,
@@ -76,6 +101,37 @@ public class MlPredictionEvidenceProjection {
         this.projectedAt = requiredInstant(projectedAt);
     }
 
+    public MlPredictionEvidenceProjection(
+            String sourceEventId,
+            String transactionId,
+            String correlationId,
+            String sourceEventCreatedAt,
+            Double mlScore,
+            RiskLevel mlRiskLevel,
+            String modelName,
+            String modelVersion,
+            String featureContractVersion,
+            String modelArtifactSha256,
+            String sourceExecutionTimestamp,
+            Instant projectedAt
+    ) {
+        this(
+                sourceEventId,
+                transactionId,
+                correlationId,
+                sourceEventCreatedAt,
+                null,
+                mlScore,
+                mlRiskLevel,
+                modelName,
+                modelVersion,
+                featureContractVersion,
+                modelArtifactSha256,
+                sourceExecutionTimestamp,
+                projectedAt
+        );
+    }
+
     public static MlPredictionEvidenceProjection create(
             String sourceEventId,
             String transactionId,
@@ -90,6 +146,7 @@ public class MlPredictionEvidenceProjection {
                 transactionId,
                 correlationId,
                 sourceEventCreatedAt.toString(),
+                null,
                 source.mlScore(),
                 source.mlRiskLevel(),
                 source.modelName(),
@@ -101,10 +158,39 @@ public class MlPredictionEvidenceProjection {
         );
     }
 
+    public static MlPredictionEvidenceProjection omitted(
+            String sourceEventId,
+            String transactionId,
+            String correlationId,
+            Instant sourceEventCreatedAt,
+            MlPredictionEvidenceOmissionReason omissionReason,
+            Instant projectedAt
+    ) {
+        return new MlPredictionEvidenceProjection(
+                sourceEventId,
+                transactionId,
+                correlationId,
+                sourceEventCreatedAt.toString(),
+                Objects.requireNonNull(omissionReason, "omissionReason is required"),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                projectedAt
+        );
+    }
+
     public String getSourceEventId() { return sourceEventId; }
     public String getTransactionId() { return transactionId; }
     public String getCorrelationId() { return correlationId; }
     public Instant getSourceEventCreatedAt() { return Instant.parse(sourceEventCreatedAt); }
+    public MlPredictionEvidenceOmissionReason getMlPredictionEvidenceOmissionReason() {
+        return mlPredictionEvidenceOmissionReason;
+    }
+    public boolean hasEvidence() { return mlPredictionEvidenceOmissionReason == null; }
     public Double getMlScore() { return mlScore; }
     public RiskLevel getMlRiskLevel() { return mlRiskLevel; }
     public String getModelName() { return modelName; }
@@ -120,13 +206,14 @@ public class MlPredictionEvidenceProjection {
                 && transactionId.equals(other.transactionId)
                 && correlationId.equals(other.correlationId)
                 && sourceEventCreatedAt.equals(other.sourceEventCreatedAt)
-                && mlScore.equals(other.mlScore)
+                && mlPredictionEvidenceOmissionReason == other.mlPredictionEvidenceOmissionReason
+                && Objects.equals(mlScore, other.mlScore)
                 && mlRiskLevel == other.mlRiskLevel
-                && modelName.equals(other.modelName)
-                && modelVersion.equals(other.modelVersion)
-                && featureContractVersion.equals(other.featureContractVersion)
-                && modelArtifactSha256.equals(other.modelArtifactSha256)
-                && sourceExecutionTimestamp.equals(other.sourceExecutionTimestamp);
+                && Objects.equals(modelName, other.modelName)
+                && Objects.equals(modelVersion, other.modelVersion)
+                && Objects.equals(featureContractVersion, other.featureContractVersion)
+                && Objects.equals(modelArtifactSha256, other.modelArtifactSha256)
+                && Objects.equals(sourceExecutionTimestamp, other.sourceExecutionTimestamp);
     }
 
     private static String requiredIdentity(String value, String field) {
