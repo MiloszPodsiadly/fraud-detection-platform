@@ -8,16 +8,21 @@ import java.util.Optional;
 
 record FeedbackDatasetMlPredictionEvidence(
         FeedbackDatasetMlPredictionEvidenceStatus status,
+        Optional<FeedbackDatasetMlPredictionEvidenceResolutionProvenance> resolutionProvenance,
         Optional<MlPredictionEvidenceProjection> projection,
         Optional<MlPredictionEvidenceOmissionReason> omissionReason
 ) {
 
     FeedbackDatasetMlPredictionEvidence {
         status = Objects.requireNonNull(status, "status is required");
+        resolutionProvenance = Objects.requireNonNull(resolutionProvenance, "resolutionProvenance is required");
         projection = Objects.requireNonNull(projection, "projection is required");
         omissionReason = Objects.requireNonNull(omissionReason, "omissionReason is required");
         if ((status == FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE) != projection.isPresent()) {
             throw new IllegalArgumentException("only available ML prediction evidence may carry a projection");
+        }
+        if (projection.isPresent() != resolutionProvenance.isPresent()) {
+            throw new IllegalArgumentException("available ML prediction evidence requires resolution provenance");
         }
         if (projection.isPresent() && omissionReason.isPresent()) {
             throw new IllegalArgumentException("ML prediction evidence requires exactly one authoritative outcome");
@@ -30,9 +35,13 @@ record FeedbackDatasetMlPredictionEvidence(
         }
     }
 
-    static FeedbackDatasetMlPredictionEvidence available(MlPredictionEvidenceProjection projection) {
+    static FeedbackDatasetMlPredictionEvidence available(
+            MlPredictionEvidenceProjection projection,
+            FeedbackDatasetMlPredictionEvidenceResolutionProvenance resolutionProvenance
+    ) {
         return new FeedbackDatasetMlPredictionEvidence(
                 FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE,
+                Optional.of(Objects.requireNonNull(resolutionProvenance, "resolutionProvenance is required")),
                 Optional.of(Objects.requireNonNull(projection, "projection is required")),
                 Optional.empty()
         );
@@ -43,6 +52,7 @@ record FeedbackDatasetMlPredictionEvidence(
         return new FeedbackDatasetMlPredictionEvidence(
                 FeedbackDatasetMlPredictionEvidenceStatus.fromAuthoritativeOmission(required),
                 Optional.empty(),
+                Optional.empty(),
                 Optional.of(required)
         );
     }
@@ -51,6 +61,11 @@ record FeedbackDatasetMlPredictionEvidence(
         if (status == FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE) {
             throw new IllegalArgumentException("available evidence requires a projection");
         }
-        return new FeedbackDatasetMlPredictionEvidence(status, Optional.empty(), Optional.empty());
+        return new FeedbackDatasetMlPredictionEvidence(
+                status,
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty()
+        );
     }
 }

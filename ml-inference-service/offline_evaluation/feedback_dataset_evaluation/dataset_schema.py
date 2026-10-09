@@ -57,6 +57,10 @@ ALLOWED_ML_PREDICTION_EVIDENCE_STATUSES = {
     "MALFORMED",
     "IDENTITY_MISMATCH",
 }
+ALLOWED_ML_PREDICTION_EVIDENCE_RESOLUTION_PROVENANCE = {
+    "CAPTURED_AND_CONFIRMED",
+    "RECOVERED_FROM_EXACT_OCCURRENCE_PROJECTION",
+}
 ML_PREDICTION_OMISSION_STATUS = {
     "DIAGNOSTIC_EMISSION_DISABLED": "LEGITIMATELY_ABSENT",
     "DIAGNOSTIC_ENRICHMENT_UNAVAILABLE": "MISSING_UNEXPECTEDLY",
@@ -146,6 +150,7 @@ ALLOWED_RECORD_FIELDS = {
     "rulesEvidenceStatus",
     "rulesRiskLevel",
     "mlPredictionEvidenceStatus",
+    "mlPredictionEvidenceResolutionProvenance",
     "mlPredictionEvidenceOmissionReason",
     "mlPredictionScore",
     "mlPredictionRiskLevel",
@@ -173,6 +178,7 @@ REQUIRED_RECORD_FIELDS = {
     "rulesEvidenceStatus",
     "rulesRiskLevel",
     *ML_PREDICTION_EVIDENCE_FIELDS,
+    "mlPredictionEvidenceResolutionProvenance",
     *ML_MODEL_IDENTITY_FIELDS,
     "mlModelArtifactSha256",
 }
@@ -344,6 +350,11 @@ def validate_record(raw: dict[str, Any]) -> FeedbackDatasetRecord:
         "mlPredictionEvidenceStatus",
         ALLOWED_ML_PREDICTION_EVIDENCE_STATUSES,
     )
+    ml_prediction_evidence_resolution_provenance = _optional_enum(
+        raw,
+        "mlPredictionEvidenceResolutionProvenance",
+        ALLOWED_ML_PREDICTION_EVIDENCE_RESOLUTION_PROVENANCE,
+    )
     ml_prediction_evidence_omission_reason = _optional_enum(
         raw,
         "mlPredictionEvidenceOmissionReason",
@@ -359,6 +370,7 @@ def validate_record(raw: dict[str, Any]) -> FeedbackDatasetRecord:
     ml_prediction_executed_at = _optional_datetime_string(raw, "mlPredictionExecutedAt")
     _validate_ml_prediction_evidence(
         ml_prediction_evidence_status,
+        ml_prediction_evidence_resolution_provenance,
         ml_prediction_evidence_omission_reason,
         ml_prediction_score,
         ml_prediction_risk_level,
@@ -394,6 +406,7 @@ def validate_record(raw: dict[str, Any]) -> FeedbackDatasetRecord:
         rules_evidence_status=rules_evidence_status,
         rules_risk_level=rules_risk_level,
         ml_prediction_evidence_status=ml_prediction_evidence_status,
+        ml_prediction_evidence_resolution_provenance=ml_prediction_evidence_resolution_provenance,
         ml_prediction_evidence_omission_reason=ml_prediction_evidence_omission_reason,
         ml_prediction_score=ml_prediction_score,
         ml_prediction_risk_level=ml_prediction_risk_level,
@@ -581,6 +594,7 @@ def _optional_safe_identifier(raw: dict[str, Any], field: str) -> str | None:
 
 def _validate_ml_prediction_evidence(
         status: str,
+        resolution_provenance: str | None,
         omission_reason: str | None,
         score: float | None,
         risk_level: str | None,
@@ -599,11 +613,16 @@ def _validate_ml_prediction_evidence(
         if (
                 not values_complete
                 or not identity_complete
+                or resolution_provenance is None
                 or omission_reason is not None
                 or model_artifact_sha256 is None
         ):
             raise FeedbackDatasetValidationError("exact-artifact ML prediction evidence must be complete")
         return
+    if resolution_provenance is not None:
+        raise FeedbackDatasetValidationError(
+            "unavailable ML prediction evidence must not carry resolution provenance"
+        )
     if any(value is not None for value in (
         score,
         risk_level,

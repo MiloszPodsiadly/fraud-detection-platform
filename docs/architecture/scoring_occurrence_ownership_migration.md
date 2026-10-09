@@ -45,7 +45,7 @@ current traffic; retained pre-cut data requires the governed offline procedure b
 - Identity-free or invalid `engine_intelligence_projections` must be rebuilt only from their exact retained scored
   event or archived/quarantined unchanged.
 - Pre-lineage `fraud_feedback_records` remain audit history but must be archived, quarantined, or excluded by the
-  current Dataset v2 eligibility policy. They never become current evaluation observations.
+  current Dataset v3 eligibility policy. They never become current evaluation observations.
 - Effective `transactions.scored` retention and the availability of exact original events require deployment evidence;
   repository defaults are not sufficient proof.
 - Existing `suspicious_transactions` data must be reconciled before creating the transaction-scoped unique index.

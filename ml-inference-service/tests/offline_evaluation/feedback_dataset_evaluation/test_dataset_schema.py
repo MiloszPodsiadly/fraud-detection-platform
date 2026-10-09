@@ -185,6 +185,7 @@ class FeedbackDatasetSchemaTest(unittest.TestCase):
     def test_rejectsMissingMlPredictionEvidenceContractFields(self):
         fields = (
             "mlPredictionEvidenceStatus",
+            "mlPredictionEvidenceResolutionProvenance",
             "mlPredictionScore",
             "mlPredictionRiskLevel",
             "mlPredictionExecutedAt",
@@ -217,6 +218,48 @@ class FeedbackDatasetSchemaTest(unittest.TestCase):
         for field in ("mlPredictionScore", "mlPredictionRiskLevel", "mlPredictionExecutedAt"):
             with self.subTest(field=field):
                 self._assert_rejected(record(**available, **{field: None}))
+
+    def test_acceptsBothExactOccurrenceResolutionProvenanceValues(self):
+        identity = {
+            "mlModelName": "python-logistic-fraud-model",
+            "mlModelVersion": "2026-06-25.v1",
+            "mlFeatureContractVersion": "feature-contract-v2",
+        }
+        for provenance in (
+            "CAPTURED_AND_CONFIRMED",
+            "RECOVERED_FROM_EXACT_OCCURRENCE_PROJECTION",
+        ):
+            with self.subTest(provenance=provenance):
+                parsed = self._parse(record(
+                    **identity,
+                    mlPredictionEvidenceResolutionProvenance=provenance,
+                ))
+
+                self.assertEqual(
+                    provenance,
+                    parsed.records[0].ml_prediction_evidence_resolution_provenance,
+                )
+
+    def test_rejectsMissingOrUnsupportedAvailableResolutionProvenance(self):
+        identity = {
+            "mlModelName": "python-logistic-fraud-model",
+            "mlModelVersion": "2026-06-25.v1",
+            "mlFeatureContractVersion": "feature-contract-v2",
+        }
+
+        self._assert_rejected(record(
+            **identity,
+            mlPredictionEvidenceResolutionProvenance=None,
+        ))
+        self._assert_rejected(record(
+            **identity,
+            mlPredictionEvidenceResolutionProvenance="REGISTRY_INFERRED",
+        ))
+
+    def test_rejectsResolutionProvenanceWithoutAvailableEvidence(self):
+        self._assert_rejected(record(
+            mlPredictionEvidenceResolutionProvenance="CAPTURED_AND_CONFIRMED",
+        ))
 
     def test_rejectsAbsentMlPredictionEvidenceWithAnyPredictionValue(self):
         overrides = (

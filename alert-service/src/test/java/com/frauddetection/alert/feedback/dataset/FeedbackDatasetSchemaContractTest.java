@@ -31,6 +31,7 @@ class FeedbackDatasetSchemaContractTest {
     private static final Instant FROM = Instant.parse("2026-06-01T00:00:00Z");
     private static final Instant TO = Instant.parse("2026-06-02T00:00:00Z");
     private static final Instant BUILT_AT = Instant.parse("2026-06-02T12:00:00Z");
+    private static final String MODEL_ARTIFACT_SHA256 = "a".repeat(64);
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -64,12 +65,14 @@ class FeedbackDatasetSchemaContractTest {
                         "\"rulesEvidenceStatus\"",
                         "\"rulesRiskLevel\"",
                         "\"mlPredictionEvidenceStatus\"",
+                        "\"mlPredictionEvidenceResolutionProvenance\"",
                         "\"mlPredictionScore\"",
                         "\"mlPredictionRiskLevel\"",
                         "\"mlPredictionExecutedAt\"",
                         "\"mlModelName\"",
                         "\"mlModelVersion\"",
-                        "\"mlFeatureContractVersion\""
+                        "\"mlFeatureContractVersion\"",
+                        "\"mlModelArtifactSha256\""
                 );
     }
 
@@ -98,6 +101,7 @@ class FeedbackDatasetSchemaContractTest {
                 .contains("\"mlModelName\"")
                 .contains("\"mlModelVersion\"")
                 .contains("\"mlFeatureContractVersion\"")
+                .contains("\"mlModelArtifactSha256\"")
                 .contains("\"maxLength\": 64")
                 .contains("\"maxLength\": 96")
                 .contains("\"pattern\": \"^[A-Za-z0-9._-]+$\"");
@@ -105,21 +109,36 @@ class FeedbackDatasetSchemaContractTest {
 
     @Test
     void jsonSchemaAcceptsZeroOrCompleteMlIdentityAndRejectsEveryPartialState() throws Exception {
-        assertSchemaInvalid(datasetRecordLine(null, null, null, false));
-        assertSchemaValid(datasetRecordLine(null, null, null, true));
-        assertSchemaValid(datasetRecordLine("model", "v1", "feature-contract-v1", true));
+        assertSchemaInvalid(datasetRecordLine(null, null, null, null, false));
+        assertSchemaValid(datasetRecordLine(null, null, null, null, true));
+        assertSchemaValid(datasetRecordLine(
+                "model",
+                "v1",
+                "feature-contract-v1",
+                MODEL_ARTIFACT_SHA256,
+                true
+        ));
 
         String[][] partialStates = {
-                {"model", null, null},
-                {null, "v1", null},
-                {null, null, "feature-contract-v1"},
-                {"model", "v1", null},
-                {"model", null, "feature-contract-v1"},
-                {null, "v1", "feature-contract-v1"}
+                {"model", null, null, null},
+                {null, "v1", null, null},
+                {null, null, "feature-contract-v1", null},
+                {null, null, null, MODEL_ARTIFACT_SHA256},
+                {"model", "v1", "feature-contract-v1", null},
+                {null, "v1", "feature-contract-v1", MODEL_ARTIFACT_SHA256},
+                {"model", null, "feature-contract-v1", MODEL_ARTIFACT_SHA256},
+                {"model", "v1", null, MODEL_ARTIFACT_SHA256}
         };
         for (String[] state : partialStates) {
-            assertSchemaInvalid(datasetRecordLine(state[0], state[1], state[2], true));
+            assertSchemaInvalid(datasetRecordLine(state[0], state[1], state[2], state[3], true));
         }
+
+        assertSchemaInvalid(datasetRecordLine(
+                "model", "v1", "feature-contract-v1", "A".repeat(64), true
+        ));
+        assertSchemaInvalid(datasetRecordLine(
+                "model", "v1", "feature-contract-v1", "a".repeat(63), true
+        ));
     }
 
     @Test
@@ -303,12 +322,14 @@ class FeedbackDatasetSchemaContractTest {
         assertThat(record.get("rulesEvidenceStatus").asString()).isEqualTo("UNAVAILABLE");
         assertThat(record.get("rulesRiskLevel").isNull()).isTrue();
         assertThat(record.get("mlPredictionEvidenceStatus").asString()).isEqualTo("LEGITIMATELY_ABSENT");
+        assertThat(record.get("mlPredictionEvidenceResolutionProvenance").isNull()).isTrue();
         assertThat(record.get("mlPredictionScore").isNull()).isTrue();
         assertThat(record.get("mlPredictionRiskLevel").isNull()).isTrue();
         assertThat(record.get("mlPredictionExecutedAt").isNull()).isTrue();
         assertThat(record.has("mlModelName")).isTrue();
         assertThat(record.has("mlModelVersion")).isTrue();
         assertThat(record.has("mlFeatureContractVersion")).isTrue();
+        assertThat(record.has("mlModelArtifactSha256")).isTrue();
     }
 
     @Test
@@ -468,6 +489,7 @@ class FeedbackDatasetSchemaContractTest {
                 FeedbackDatasetRulesEvidenceStatus.UNAVAILABLE,
                 null,
                 FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT,
+                null,
                 MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
                 null,
                 null,
@@ -531,6 +553,23 @@ class FeedbackDatasetSchemaContractTest {
             String featureContractVersion,
             boolean includeIdentityFields
     ) {
+        boolean anyIdentity = modelName != null || modelVersion != null || featureContractVersion != null;
+        return datasetRecordLine(
+                modelName,
+                modelVersion,
+                featureContractVersion,
+                anyIdentity ? MODEL_ARTIFACT_SHA256 : null,
+                includeIdentityFields
+        );
+    }
+
+    private Map<String, Object> datasetRecordLine(
+            String modelName,
+            String modelVersion,
+            String featureContractVersion,
+            String modelArtifactSha256,
+            boolean includeIdentityFields
+    ) {
         Map<String, Object> record = new LinkedHashMap<>();
         record.put("datasetVersion", FeedbackDatasetBuilder.DATASET_VERSION);
         record.put("evaluationRecordId", "eval_11111111111111111111111111111111");
@@ -542,8 +581,15 @@ class FeedbackDatasetSchemaContractTest {
         record.put("rulesEvidenceStatus", "UNAVAILABLE");
         record.put("rulesRiskLevel", null);
         if (includeIdentityFields) {
-            boolean available = modelName != null || modelVersion != null || featureContractVersion != null;
+            boolean available = modelName != null
+                    || modelVersion != null
+                    || featureContractVersion != null
+                    || modelArtifactSha256 != null;
             record.put("mlPredictionEvidenceStatus", available ? "AVAILABLE" : "LEGITIMATELY_ABSENT");
+            record.put(
+                    "mlPredictionEvidenceResolutionProvenance",
+                    available ? "CAPTURED_AND_CONFIRMED" : null
+            );
             record.put("mlPredictionEvidenceOmissionReason", available ? null : "DIAGNOSTIC_EMISSION_DISABLED");
             record.put("mlPredictionScore", available ? 0.8123 : null);
             record.put("mlPredictionRiskLevel", available ? "HIGH" : null);
@@ -551,6 +597,7 @@ class FeedbackDatasetSchemaContractTest {
             record.put("mlModelName", modelName);
             record.put("mlModelVersion", modelVersion);
             record.put("mlFeatureContractVersion", featureContractVersion);
+            record.put("mlModelArtifactSha256", modelArtifactSha256);
         }
         Map<String, Object> envelope = new LinkedHashMap<>();
         envelope.put("type", "DATASET_RECORD");

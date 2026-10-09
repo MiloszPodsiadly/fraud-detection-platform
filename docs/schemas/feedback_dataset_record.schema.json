@@ -170,6 +170,9 @@
                     "mlPredictionEvidenceStatus": {
                       "const": "LEGITIMATELY_ABSENT"
                     },
+                    "mlPredictionEvidenceResolutionProvenance": {
+                      "type": "null"
+                    },
                     "mlPredictionEvidenceOmissionReason": {
                       "const": "DIAGNOSTIC_EMISSION_DISABLED"
                     },
@@ -212,6 +215,9 @@
                     "mlPredictionEvidenceStatus": {
                       "const": "MISSING_UNEXPECTEDLY"
                     },
+                    "mlPredictionEvidenceResolutionProvenance": {
+                      "type": "null"
+                    },
                     "mlPredictionEvidenceOmissionReason": {
                       "enum": ["DIAGNOSTIC_ENRICHMENT_UNAVAILABLE", "ML_ENGINE_UNAVAILABLE", null]
                     },
@@ -239,6 +245,9 @@
                   "properties": {
                     "mlPredictionEvidenceStatus": {
                       "const": "MALFORMED"
+                    },
+                    "mlPredictionEvidenceResolutionProvenance": {
+                      "type": "null"
                     },
                     "mlPredictionEvidenceOmissionReason": {
                       "enum": [
@@ -275,6 +284,9 @@
                     "mlPredictionEvidenceStatus": {
                       "const": "IDENTITY_MISMATCH"
                     },
+                    "mlPredictionEvidenceResolutionProvenance": {
+                      "type": "null"
+                    },
                     "mlPredictionEvidenceOmissionReason": {
                       "type": "null"
                     },
@@ -302,6 +314,12 @@
                   "properties": {
                     "mlPredictionEvidenceStatus": {
                       "const": "AVAILABLE"
+                    },
+                    "mlPredictionEvidenceResolutionProvenance": {
+                      "enum": [
+                        "CAPTURED_AND_CONFIRMED",
+                        "RECOVERED_FROM_EXACT_OCCURRENCE_PROJECTION"
+                      ]
                     },
                     "mlPredictionEvidenceOmissionReason": {
                       "type": "null"
@@ -364,6 +382,7 @@
             "rulesEvidenceStatus",
             "rulesRiskLevel",
             "mlPredictionEvidenceStatus",
+            "mlPredictionEvidenceResolutionProvenance",
             "mlPredictionEvidenceOmissionReason",
             "mlPredictionScore",
             "mlPredictionRiskLevel",
@@ -487,6 +506,13 @@
                 "MISSING_UNEXPECTEDLY",
                 "MALFORMED",
                 "IDENTITY_MISMATCH"
+              ]
+            },
+            "mlPredictionEvidenceResolutionProvenance": {
+              "enum": [
+                "CAPTURED_AND_CONFIRMED",
+                "RECOVERED_FROM_EXACT_OCCURRENCE_PROJECTION",
+                null
               ]
             },
             "mlPredictionEvidenceOmissionReason": {

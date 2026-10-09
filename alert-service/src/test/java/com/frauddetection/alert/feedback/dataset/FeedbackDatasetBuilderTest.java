@@ -584,6 +584,37 @@ class FeedbackDatasetBuilderTest {
     }
 
     @Test
+    void exactOccurrenceOmissionProjectionConfirmsAuthoritativeAbsence() {
+        Instant occurrenceTime = FROM.minusSeconds(1);
+        FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        captureOccurrence(source, "event-a", occurrenceTime);
+        source.setMlPredictionEvidenceOmissionReason(
+                MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED
+        );
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+        when(evidenceRepository.findAllById(any())).thenReturn(List.of(
+                MlPredictionEvidenceProjection.omitted(
+                        "event-a",
+                        "txn-a",
+                        "correlation-event-a",
+                        occurrenceTime,
+                        MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                        BUILT_AT
+                )
+        ));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.records()).singleElement().satisfies(record -> {
+            assertThat(record.mlPredictionEvidenceStatus())
+                    .isEqualTo(FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT);
+            assertThat(record.mlPredictionEvidenceOmissionReason())
+                    .isEqualTo(MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED);
+            assertThat(record.mlPredictionEvidenceResolutionProvenance()).isNull();
+        });
+    }
+
+    @Test
     void recoveredExactEvidenceChangesUnexpectedMissingToAvailableWithoutRewritingEarlierBuild() {
         FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
         captureOccurrence(source, "event-a", FROM.minusSeconds(1));
@@ -603,8 +634,31 @@ class FeedbackDatasetBuilderTest {
         assertThat(afterRecovery.records()).singleElement().satisfies(record -> {
             assertThat(record.mlPredictionEvidenceStatus())
                     .isEqualTo(FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE);
+            assertThat(record.mlPredictionEvidenceResolutionProvenance())
+                    .isEqualTo(FeedbackDatasetMlPredictionEvidenceResolutionProvenance
+                            .RECOVERED_FROM_EXACT_OCCURRENCE_PROJECTION);
             assertThat(record.mlModelVersion()).isEqualTo("model-a");
             assertThat(record.mlModelArtifactSha256()).isEqualTo(MODEL_ARTIFACT_SHA256);
+        });
+    }
+
+    @Test
+    void capturedModelIdentityIsConfirmedByExactOccurrenceProjection() {
+        FraudFeedbackRecord source = feedback("feedback-a", "txn-a", FraudFeedbackLabel.CONFIRMED_FRAUD, FROM);
+        captureOccurrence(source, "event-a", FROM.minusSeconds(1));
+        setModelIdentity(source, "model-a");
+        when(store.findBoundedByCreatedAt(FROM, TO, 10)).thenReturn(List.of(source));
+        when(evidenceRepository.findAllById(any())).thenReturn(List.of(
+                evidence("event-a", "txn-a", FROM.minusSeconds(1), "model-a", 0.91)
+        ));
+
+        FeedbackDatasetBuildResult result = builder.build(request(10));
+
+        assertThat(result.records()).singleElement().satisfies(record -> {
+            assertThat(record.mlPredictionEvidenceStatus())
+                    .isEqualTo(FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE);
+            assertThat(record.mlPredictionEvidenceResolutionProvenance())
+                    .isEqualTo(FeedbackDatasetMlPredictionEvidenceResolutionProvenance.CAPTURED_AND_CONFIRMED);
         });
     }
 

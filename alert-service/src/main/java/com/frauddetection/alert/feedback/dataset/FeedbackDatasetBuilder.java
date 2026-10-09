@@ -230,6 +230,7 @@ public class FeedbackDatasetBuilder {
                         ? source.getRulesRiskLevel()
                         : null,
                 evidence.status(),
+                evidence.resolutionProvenance().orElse(null),
                 evidence.omissionReason().orElse(null),
                 projection == null ? null : projection.getMlScore(),
                 projection == null ? null : projection.getMlRiskLevel(),
@@ -312,12 +313,6 @@ public class FeedbackDatasetBuilder {
                     )
                     : FeedbackDatasetMlPredictionEvidence.omitted(omissionReason);
         }
-        if (source.getMlPredictionEvidenceOmissionReason() != null) {
-            return FeedbackDatasetMlPredictionEvidence.unavailable(
-                    FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
-            );
-        }
-
         try {
             if (!ownership.sourceEventId().equals(projection.getSourceEventId())
                     || !ownership.sourceEventCreatedAt().equals(projection.getSourceEventCreatedAt())
@@ -326,6 +321,24 @@ public class FeedbackDatasetBuilder {
                     && !Objects.equals(source.getCorrelationId(), projection.getCorrelationId()))) {
                 return FeedbackDatasetMlPredictionEvidence.unavailable(
                         FeedbackDatasetMlPredictionEvidenceStatus.IDENTITY_MISMATCH
+                );
+            }
+            if (!projection.hasEvidence()) {
+                if (feedbackLineageParts != 0
+                        || source.getMlPredictionEvidenceOmissionReason() == null
+                        || source.getMlPredictionEvidenceOmissionReason()
+                        != projection.getMlPredictionEvidenceOmissionReason()) {
+                    return FeedbackDatasetMlPredictionEvidence.unavailable(
+                            FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
+                    );
+                }
+                return FeedbackDatasetMlPredictionEvidence.omitted(
+                        projection.getMlPredictionEvidenceOmissionReason()
+                );
+            }
+            if (source.getMlPredictionEvidenceOmissionReason() != null) {
+                return FeedbackDatasetMlPredictionEvidence.unavailable(
+                        FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
                 );
             }
             if (feedbackLineageParts != 0
@@ -340,7 +353,12 @@ public class FeedbackDatasetBuilder {
                         FeedbackDatasetMlPredictionEvidenceStatus.IDENTITY_MISMATCH
                 );
             }
-            return FeedbackDatasetMlPredictionEvidence.available(projection);
+            FeedbackDatasetMlPredictionEvidenceResolutionProvenance resolutionProvenance =
+                    feedbackLineageParts == 4
+                            ? FeedbackDatasetMlPredictionEvidenceResolutionProvenance.CAPTURED_AND_CONFIRMED
+                            : FeedbackDatasetMlPredictionEvidenceResolutionProvenance
+                                    .RECOVERED_FROM_EXACT_OCCURRENCE_PROJECTION;
+            return FeedbackDatasetMlPredictionEvidence.available(projection, resolutionProvenance);
         } catch (IllegalArgumentException exception) {
             return FeedbackDatasetMlPredictionEvidence.unavailable(
                     FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED

@@ -33,6 +33,7 @@ public record FeedbackDatasetRecord(
         FeedbackDatasetRulesEvidenceStatus rulesEvidenceStatus,
         RiskLevel rulesRiskLevel,
         FeedbackDatasetMlPredictionEvidenceStatus mlPredictionEvidenceStatus,
+        FeedbackDatasetMlPredictionEvidenceResolutionProvenance mlPredictionEvidenceResolutionProvenance,
         MlPredictionEvidenceOmissionReason mlPredictionEvidenceOmissionReason,
         Double mlPredictionScore,
         RiskLevel mlPredictionRiskLevel,
@@ -93,6 +94,7 @@ public record FeedbackDatasetRecord(
         );
         validateMlPredictionEvidence(
                 mlPredictionEvidenceStatus,
+                mlPredictionEvidenceResolutionProvenance,
                 mlPredictionEvidenceOmissionReason,
                 mlPredictionScore,
                 mlPredictionRiskLevel,
@@ -138,6 +140,7 @@ public record FeedbackDatasetRecord(
 
     private static void validateMlPredictionEvidence(
             FeedbackDatasetMlPredictionEvidenceStatus status,
+            FeedbackDatasetMlPredictionEvidenceResolutionProvenance resolutionProvenance,
             MlPredictionEvidenceOmissionReason omissionReason,
             Double score,
             RiskLevel riskLevel,
@@ -148,6 +151,12 @@ public record FeedbackDatasetRecord(
             String modelArtifactSha256
     ) {
         Objects.requireNonNull(status, "mlPredictionEvidenceStatus is required");
+        if ((status == FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE)
+                != (resolutionProvenance != null)) {
+            throw new IllegalArgumentException(
+                    "ML prediction evidence availability must match resolution provenance"
+            );
+        }
         boolean directEvidenceComplete = score != null && riskLevel != null && executedAt != null;
         boolean modelIdentityComplete = modelName != null && modelVersion != null && featureContractVersion != null;
         if (status == FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE) {

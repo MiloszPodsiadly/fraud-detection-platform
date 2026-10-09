@@ -20,7 +20,7 @@ The bounded context has two data sources with distinct ownership:
 
 - `FraudFeedbackRecord` owns analyst feedback, exact scoring-occurrence ownership, and the bounded historical
   snapshots captured when feedback is created.
-- `MlPredictionEvidenceProjection` owns direct ML prediction evidence for the exact source event.
+- `MlPredictionEvidenceProjection` owns the immutable evidence-or-omission outcome for the exact source event.
 - `FeedbackDatasetEligibilityPolicy` owns label eligibility.
 
 The builder reads bounded candidates from `fraud_feedback_records` and performs one bounded exact-event lookup in
@@ -80,7 +80,7 @@ The builder does not duplicate eligibility rules. It calls `FeedbackDatasetEligi
 - `NEEDS_MORE_INFO` -> excluded
 - null or governance-review labels -> excluded
 
-Unresolved labels are not written to JSONL v2.
+Unresolved labels are not written to JSONL v3.
 
 `FeedbackDatasetRecord` also enforces the record-level invariant. Only these pairs can be represented:
 
@@ -110,13 +110,19 @@ agreement/mismatch/score-delta buckets, Analyst Recommendation status/value/vers
 `scoredAt`, and `transactionTimestamp`.
 
 The v3 record shape carries bounded direct ML evidence through `mlPredictionEvidenceStatus`,
-`mlPredictionEvidenceOmissionReason`, `mlPredictionScore`, `mlPredictionRiskLevel`, and
+`mlPredictionEvidenceResolutionProvenance`, `mlPredictionEvidenceOmissionReason`, `mlPredictionScore`, `mlPredictionRiskLevel`, and
 `mlPredictionExecutedAt`, together with `mlModelName`, `mlModelVersion`, `mlFeatureContractVersion`, and
 `mlModelArtifactSha256`. `AVAILABLE` requires the complete signal and exact M/V/F/SHA identity. Every non-available status requires the direct
 prediction and model identity fields to be null. `LEGITIMATELY_ABSENT` additionally requires an authoritative
 omission reason; missing projection or identity data alone never proves legitimate absence. Unexpected absence,
 malformed evidence, and identity mismatch remain explicit dataset records rather than disappearing from the bounded
 population. Absence is never represented as score zero or low risk.
+
+An `AVAILABLE` record also states how that exact-occurrence identity was resolved. `CAPTURED_AND_CONFIRMED` means
+the feedback snapshot carried the complete M/V/F/SHA identity and the occurrence projection confirmed it.
+`RECOVERED_FROM_EXACT_OCCURRENCE_PROJECTION` means the feedback snapshot carried no ML identity and the builder
+recovered it solely from the immutable projection owned by the same source event. Partial feedback identity is
+malformed, and neither provenance permits registry, current-model, latest-projection, or timestamp inference.
 
 The repository currently has no attested historical partition/offset boundary that can independently prove legitimate
 absence. Consequently, historical age, missing fields, or timestamps never produce `LEGITIMATELY_ABSENT`; only the
