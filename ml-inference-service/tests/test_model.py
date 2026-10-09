@@ -1,8 +1,9 @@
-import unittest
+import copy
 import json
 import importlib.util
 import os
 import tempfile
+import unittest
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
@@ -1294,6 +1295,62 @@ class FraudModelTest(unittest.TestCase):
             "INSUFFICIENT_EVIDENCE",
         )
 
+    def test_missing_mandatory_diagnostic_evidence_is_not_counted_as_passed(self):
+        current = self._evaluation_for_decision(pr_auc=0.6, fpr=0.05, alert_rate=0.05, cost=1000.0)
+        challenger = self._evaluation_for_decision(pr_auc=0.8, fpr=0.04, alert_rate=0.05, cost=900.0)
+        thresholds = ChallengerComparisonThresholds(alert_budget=0.01)
+        cases = (
+            ("segmentRegression", lambda candidate: candidate.pop("segmentEvaluation")),
+            ("stabilityRegression", lambda candidate: candidate.pop("stabilityAssessment")),
+            ("expectedCostNotWorse", lambda candidate: candidate.pop("costEvaluation")),
+            ("budgetExpectedCostNotWorse", lambda candidate: candidate.pop("budgetEvaluation")),
+        )
+
+        for expected_check, remove_evidence in cases:
+            with self.subTest(expected_check=expected_check):
+                incomplete = copy.deepcopy(challenger)
+                remove_evidence(incomplete)
+
+                diagnostics = _diagnostic_assessment(current, incomplete, thresholds)
+
+                self.assertEqual("INSUFFICIENT_EVIDENCE", diagnostics["outcome"])
+                self.assertIn(expected_check, diagnostics["notEvaluatedChecks"])
+                self.assertNotIn(expected_check, diagnostics["passedChecks"])
+
+    def test_diagnostic_distinguishes_measured_zero_cost_from_missing_cost(self):
+        current = self._evaluation_for_decision(pr_auc=0.6, fpr=0.05, alert_rate=0.05, cost=0.0)
+        challenger = self._evaluation_for_decision(pr_auc=0.8, fpr=0.04, alert_rate=0.05, cost=0.0)
+
+        diagnostics = _diagnostic_assessment(current, challenger, ChallengerComparisonThresholds())
+
+        self.assertEqual("PASS", diagnostics["criteria"]["expectedCostNotWorse"])
+        self.assertEqual(0.0, diagnostics["observedMetrics"]["currentExpectedCost"])
+        self.assertEqual(0.0, diagnostics["observedMetrics"]["challengerExpectedCost"])
+
+    def test_non_finite_metrics_and_noncomparable_windows_are_insufficient(self):
+        current = self._evaluation_for_decision(pr_auc=0.6, fpr=0.05, alert_rate=0.05, cost=1000.0)
+        challenger = self._evaluation_for_decision(pr_auc=0.8, fpr=0.04, alert_rate=0.05, cost=900.0)
+        challenger["prAuc"] = float("nan")
+        challenger["optimalThreshold"]["falsePositiveRate"] = float("inf")
+        challenger["splitMetadata"]["testStartTimestamp"] = "2026-02-01T00:00:00Z"
+
+        diagnostics = _diagnostic_assessment(current, challenger, ChallengerComparisonThresholds())
+
+        self.assertEqual("INSUFFICIENT_EVIDENCE", diagnostics["outcome"])
+        self.assertIsNone(diagnostics["observedMetrics"]["challengerPrAuc"])
+        self.assertIsNone(diagnostics["observedMetrics"]["challengerFalsePositiveRate"])
+        self.assertIn("EVALUATION_WINDOWS_NOT_COMPARABLE", diagnostics["insufficientEvidenceReasons"])
+
+    def test_diagnostic_report_is_deterministic_for_identical_evidence(self):
+        current = self._evaluation_for_decision(pr_auc=0.6, fpr=0.05, alert_rate=0.05, cost=1000.0)
+        challenger = self._evaluation_for_decision(pr_auc=0.8, fpr=0.04, alert_rate=0.05, cost=900.0)
+        thresholds = ChallengerComparisonThresholds(alert_budget=0.01)
+
+        first = _diagnostic_assessment(current, challenger, thresholds)
+        second = _diagnostic_assessment(current, challenger, thresholds)
+
+        self.assertEqual(json.dumps(first, sort_keys=True), json.dumps(second, sort_keys=True))
+
     def test_model_registry_registers_and_resolves_exact_identities(self):
         first_artifact_path = Path.cwd() / "registry-test-artifact-v1.json"
         second_artifact_path = Path.cwd() / "registry-test-artifact-v2.json"
@@ -1825,7 +1882,15 @@ class FraudModelTest(unittest.TestCase):
                 ]
             },
             "stabilityAssessment": {"prAucDelta": 0.02, "expectedCostDelta": 10.0},
-            "splitMetadata": {"testRows": 10},
+            "segmentEvaluation": {
+                "customerSegment": {
+                    "RETAIL": {"prAuc": pr_auc},
+                },
+            },
+            "splitMetadata": {
+                "testRows": 10,
+                "testStartTimestamp": "2026-01-01T00:00:00Z",
+            },
         }
 
 

@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import Barrier
 from unittest.mock import patch
 
-from app.models.model_loader import ModelConfigurationError
+from app.models.model_loader import ModelConfigurationError, load_validated_model_artifact
 from app.registry.model_registry import (
     ModelRegistry,
     ModelRegistryIntegrityError,
@@ -203,7 +203,68 @@ class ModelRegistryIntegrityTest(unittest.TestCase):
                 self.registry.register(second_path)
 
         self.assertEqual([first], self.registry.entries())
+        self.assertEqual([Path(first.artifact_path)], self._managed_artifacts())
         self.assertEqual([], list(self.registry.root.glob(".registry.json.*.tmp")))
+
+    def test_index_serialization_failure_rolls_back_new_artifact(self):
+        artifact = self._artifact("serialization-failure-v1")
+
+        with patch("app.registry.model_registry.json.dumps", side_effect=TypeError("injected serialization failure")):
+            with self.assertRaisesRegex(ModelRegistryIntegrityError, "not JSON serializable"):
+                self.registry.register(artifact)
+
+        self.assertEqual([], self.registry.entries())
+        self.assertEqual([], self._managed_artifacts())
+
+    def test_repeated_index_publication_failures_do_not_accumulate_orphans(self):
+        first = self.registry.register(self._artifact("repeated-failure-authoritative-v1"))
+        real_replace = os.replace
+
+        def fail_index_replace(source: str | Path, target: str | Path) -> None:
+            if Path(target) == self.registry.index_path:
+                raise OSError("injected repeated index failure")
+            real_replace(source, target)
+
+        with patch("app.registry.model_registry.os.replace", side_effect=fail_index_replace):
+            for version in ("repeated-failure-v2", "repeated-failure-v3"):
+                with self.assertRaises(ModelRegistryMutationError):
+                    self.registry.register(self._artifact(version))
+
+        self.assertEqual([first], self.registry.entries())
+        self.assertEqual([Path(first.artifact_path)], self._managed_artifacts())
+
+    def test_index_replace_followed_by_fsync_failure_preserves_committed_artifact(self):
+        first = self.registry.register(self._artifact("fsync-authoritative-v1"))
+        second_path = self._artifact("fsync-ambiguous-v2")
+        real_fsync_directory = self.registry._fsync_directory
+
+        def fail_index_directory_fsync(directory: Path) -> None:
+            if directory == self.registry.root:
+                raise OSError("injected index directory fsync failure")
+            real_fsync_directory(directory)
+
+        with patch.object(self.registry, "_fsync_directory", side_effect=fail_index_directory_fsync):
+            with self.assertRaisesRegex(ModelRegistryMutationError, "publish registry index atomically"):
+                self.registry.register(second_path)
+
+        entries = self.registry.entries()
+        self.assertEqual(2, len(entries))
+        self.assertIn(first, entries)
+        self.assertEqual(2, len(self._managed_artifacts()))
+
+    def test_next_mutation_reconciles_artifact_left_by_interrupted_publication(self):
+        orphan_source = self._artifact("interrupted-orphan-v1")
+        orphan_target = self.registry._artifact_target(
+            load_validated_model_artifact(orphan_source).logical_identity
+        )
+        orphan_target.parent.mkdir(parents=True)
+        orphan_target.write_bytes(orphan_source.read_bytes())
+
+        registered = self.registry.register(self._artifact("post-interruption-v1"))
+
+        self.assertFalse(orphan_target.exists())
+        self.assertEqual([registered], self.registry.entries())
+        self.assertEqual([Path(registered.artifact_path)], self._managed_artifacts())
 
     def test_unlock_failure_does_not_leave_process_lock_held(self):
         with patch("app.registry.model_registry._unlock_file", side_effect=OSError("injected unlock failure")):
@@ -227,6 +288,11 @@ class ModelRegistryIntegrityTest(unittest.TestCase):
 
     def _write_index(self, payload: dict[str, object]) -> None:
         self.registry.index_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    def _managed_artifacts(self) -> list[Path]:
+        if not self.registry.artifacts_root.exists():
+            return []
+        return sorted(path.resolve() for path in self.registry.artifacts_root.iterdir())
 
 
 if __name__ == "__main__":

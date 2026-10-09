@@ -367,8 +367,11 @@ def _new_model(
 def _stability_assessment(temporal_report: dict[str, object], out_of_time_report: dict[str, object]) -> dict[str, object]:
     temporal_deployed = temporal_report["deployedAlertThresholdMetrics"]
     out_of_time_deployed = out_of_time_report["deployedAlertThresholdMetrics"]
+    temporal_cost = temporal_report["costEvaluation"]["optimalCostThreshold"]["totalCost"]
+    out_of_time_cost = out_of_time_report["costEvaluation"]["optimalCostThreshold"]["totalCost"]
     return {
         "prAucDelta": round(float(temporal_report["prAuc"]) - float(out_of_time_report["prAuc"]), 6),
+        "expectedCostDelta": round(float(out_of_time_cost) - float(temporal_cost), 6),
         "deployedFraudCaptureDelta": round(float(temporal_deployed["fraudCaptureRate"]) - float(out_of_time_deployed["fraudCaptureRate"]), 6),
         "deployedFalsePositiveRateDelta": round(
             float(out_of_time_deployed["falsePositiveRate"]) - float(temporal_deployed["falsePositiveRate"]),

@@ -25,6 +25,8 @@ DEFAULT_MAX_REGISTRY_INDEX_BYTES = 4 * 1024 * 1024
 DEFAULT_MAX_REGISTRY_ENTRIES = 1_000
 DEFAULT_MUTATION_LOCK_TIMEOUT_SECONDS = 5.0
 LOCK_POLL_INTERVAL_SECONDS = 0.01
+MIN_ORPHAN_RECONCILIATION_SCAN_LIMIT = 32
+ORPHAN_RECONCILIATION_ENTRY_MULTIPLIER = 4
 
 _PROCESS_LOCKS_GUARD = threading.Lock()
 _PROCESS_LOCKS: dict[Path, threading.Lock] = {}
@@ -108,6 +110,7 @@ class ModelRegistry:
         loaded = load_model_artifact(artifact_path, max_bytes=self.max_artifact_bytes)
         with self._mutation_lock():
             entries = self.entries()
+            self._reconcile_orphaned_artifacts(entries)
             existing = next(
                 (entry for entry in entries if entry.logical_identity == loaded.logical_identity),
                 None,
@@ -127,6 +130,7 @@ class ModelRegistry:
                 )
             validated = validate_loaded_model_artifact(loaded)
             target = self._artifact_target(validated.logical_identity)
+            created_artifact = False
             self.artifacts_root.mkdir(parents=True, exist_ok=True)
             if target.exists() or target.is_symlink():
                 canonical_target = self._managed_artifact_path(target, must_exist=True)
@@ -141,7 +145,17 @@ class ModelRegistry:
                     )
             else:
                 self._managed_artifact_path(target, must_exist=False)
-                self._atomic_write_bytes(target, validated.exact_bytes, replace_existing=False, label="model artifact")
+                created_artifact = True
+                try:
+                    self._atomic_write_bytes(
+                        target,
+                        validated.exact_bytes,
+                        replace_existing=False,
+                        label="model artifact",
+                    )
+                except Exception as publication_error:
+                    self._rollback_uncommitted_artifact(target, publication_error)
+                    raise
 
             entry = ModelRegistryEntry(
                 model_name=validated.artifact_identity.model_name,
@@ -153,7 +167,12 @@ class ModelRegistry:
                 artifact_path=str(target.resolve(strict=True)),
             )
             entries.append(entry)
-            self._write_entries(entries)
+            try:
+                self._write_entries(entries)
+            except Exception as publication_error:
+                if created_artifact:
+                    self._rollback_uncommitted_artifact(target, publication_error)
+                raise
             return entry
 
     def resolve(self, entry: ModelRegistryEntry) -> ValidatedModelArtifact:
@@ -247,6 +266,86 @@ class ModelRegistry:
 
     def _artifact_target(self, identity: ModelLogicalIdentity) -> Path:
         return self.artifacts_root / f"{identity.model_name}--{identity.model_version}.json"
+
+    def _reconcile_orphaned_artifacts(self, entries: list[ModelRegistryEntry]) -> None:
+        if not self.artifacts_root.exists() and not self.artifacts_root.is_symlink():
+            return
+        if self.artifacts_root.is_symlink() or not self.artifacts_root.is_dir():
+            raise ModelRegistryIntegrityError("Registry artifacts root must be a non-symlink directory.")
+        authoritative_paths = {
+            self._managed_artifact_path(entry.artifact_path, must_exist=True)
+            for entry in entries
+        }
+        scan_limit = max(
+            MIN_ORPHAN_RECONCILIATION_SCAN_LIMIT,
+            self.max_entries * ORPHAN_RECONCILIATION_ENTRY_MULTIPLIER,
+        )
+        removed = False
+        with os.scandir(self.artifacts_root) as candidates:
+            for inspected, candidate in enumerate(candidates, start=1):
+                if inspected > scan_limit:
+                    raise ModelRegistryIntegrityError(
+                        f"Registry orphan reconciliation exceeds bounded scan limit of {scan_limit} entries."
+                    )
+                path = Path(candidate.path)
+                if candidate.is_symlink() or not candidate.is_file(follow_symlinks=False):
+                    raise ModelRegistryIntegrityError(
+                        "Registry artifacts root contains an unsupported non-regular entry."
+                    )
+                canonical_path = path.resolve(strict=True)
+                self._require_contained(canonical_path, self.artifacts_root.resolve(strict=True), "registry artifact")
+                if canonical_path in authoritative_paths:
+                    continue
+                try:
+                    path.unlink()
+                except OSError as exception:
+                    raise ModelRegistryMutationError(
+                        "Failed to reconcile an uncommitted registry artifact."
+                    ) from exception
+                removed = True
+        if removed:
+            self._fsync_directory(self.artifacts_root)
+
+    def _rollback_uncommitted_artifact(self, target: Path, publication_error: Exception) -> None:
+        try:
+            authoritative_entries = self.entries()
+        except Exception as inspection_error:
+            rollback_error = ModelRegistryMutationError(
+                "Registry publication failed and authoritative index state could not be re-inspected; "
+                "the candidate artifact was retained."
+            )
+            rollback_error.add_note(
+                f"Original publication failure: {type(publication_error).__name__}."
+            )
+            raise rollback_error from inspection_error
+
+        authoritative_paths = {
+            self._managed_artifact_path(entry.artifact_path, must_exist=True)
+            for entry in authoritative_entries
+        }
+        if target.exists() or target.is_symlink():
+            if target.is_symlink():
+                rollback_error = ModelRegistryMutationError(
+                    "Registry publication failed and candidate artifact rollback encountered a symbolic link."
+                )
+                rollback_error.add_note(
+                    f"Original publication failure: {type(publication_error).__name__}."
+                )
+                raise rollback_error
+            canonical_target = self._managed_artifact_path(target, must_exist=True)
+            if canonical_target in authoritative_paths:
+                return
+            try:
+                target.unlink()
+                self._fsync_directory(self.artifacts_root)
+            except OSError as cleanup_error:
+                rollback_error = ModelRegistryMutationError(
+                    "Registry publication failed and the uncommitted artifact rollback also failed."
+                )
+                rollback_error.add_note(
+                    f"Original publication failure: {type(publication_error).__name__}."
+                )
+                raise rollback_error from cleanup_error
 
     def _managed_artifact_path(self, raw_path: str | Path, must_exist: bool) -> Path:
         path = Path(raw_path)
