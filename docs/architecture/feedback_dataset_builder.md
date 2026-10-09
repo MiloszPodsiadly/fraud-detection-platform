@@ -233,9 +233,10 @@ Failed builds emit metadata with a bounded `failureReason` and no fake successfu
 consumers. It covers both `DATASET_METADATA` and `DATASET_RECORD` line shapes. It does not add a public API or runtime
 export path in feedback dataset.
 
-## V2 Rollout
+## V3 Contract Deployment
 
-Current validators and runtime artifacts intentionally require `feedback-dataset-v3`; there is no executable v1 or v2
-fallback. Deployment order is therefore contractual: generate or publish valid v2 evaluation artifacts, verify those
-artifacts against the v2 validators, and only then deploy the runtime that requires v2. A missing or invalid v2
-artifact must fail closed instead of silently removing Shadow Performance diagnostics or loading a v1 artifact.
+Current producers, validators, and offline evaluation consumers require `feedback-dataset-v3`; there is no executable
+v1 or v2 fallback. Deployment is a coordinated hard cut: deploy the v3 producer and consumer contract together, then
+generate and validate new v3 evaluation artifacts through the canonical builder. Older dataset artifacts remain
+governed historical material but are not accepted as current evaluation input. A missing or invalid v3 artifact fails
+closed rather than being reinterpreted through an older schema or silently removed from population accounting.

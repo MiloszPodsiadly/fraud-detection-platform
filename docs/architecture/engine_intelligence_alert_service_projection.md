@@ -91,9 +91,11 @@ Current events with diagnostics explicitly disabled omit `engineIntelligence` an
 `DIAGNOSTIC_EMISSION_DISABLED` evidence omission reason. They create no engine-intelligence projection document.
 A newer authoritative occurrence without diagnostics never inherits an older occurrence's projection: snapshot reads
 return `NOT_PROJECTED` unless the private projection owner matches the current scored transaction.
-Events with an explicit evidence omission reason create an immutable private outcome document. An omission can be
-replayed only with the same reason and source ownership; it cannot replace accepted evidence, and accepted evidence
-cannot replace it.
+The private collection records one immutable private evidence outcome per `sourceEventId`.
+Accepted evidence persists as private exact evidence, while an explicit evidence omission persists as a private
+omission outcome. An identical
+evidence or omission replay is idempotent. A changed omission reason, changed evidence, or evidence/omission transition
+is a permanent conflict and cannot overwrite the first accepted outcome. Public Engine Intelligence remains bounded.
 
 ## New Bounded Event Projection
 
@@ -176,8 +178,9 @@ Bounded API/UI exposure exists through later scoped Engine Intelligence work. Th
 metadata, raw payloads, internal aggregation objects, raw engine outputs, or scoring internals. API/UI layers consume
 dedicated read DTOs and validators rather than the projection class directly.
 
-The exact evidence collection has no controller, public read DTO, feedback-record field, dataset-export
-field, or Analyst Console path. Public surfaces continue to expose only bounded score buckets and approved model
+The exact evidence collection has no controller, public read DTO, or Analyst Console path. Its bounded exact artifact
+lineage feeds only approved internal feedback snapshots and `feedback-dataset-v3`; this does not expose private exact
+evidence through public surfaces. Public surfaces continue to expose only bounded score buckets and approved model
 identity. Evidence projection failures are reported through bounded low-cardinality metrics and logs and remain
 isolated from the base scored-transaction save and alert processing.
 
