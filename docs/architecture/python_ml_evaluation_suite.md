@@ -94,6 +94,11 @@ raw or sensitive patterns, but they are bounded safeguards, not a full DLP contr
 Reports are diagnostic aids only. They are not promotion criteria, not threshold-change criteria, and not production
 approval criteria.
 
+`splitMetadata.testCohortFingerprint` is an order-independent SHA-256 over the canonical feature-and-label
+observations in the evaluation test cohort. Equality establishes only evaluation-input equivalence for bounded model
+comparison. It is not a source-event identifier, scoring-occurrence fingerprint, dataset signature, external
+attestation, or proof of production lineage.
+
 ## Model-Specific Evaluation
 
 The offline package also supports an optional aggregate-only ML model evaluation summary for an exact requested

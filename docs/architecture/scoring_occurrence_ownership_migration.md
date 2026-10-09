@@ -7,6 +7,11 @@ Current scored events and active `scored_transactions` documents require complet
 Identity-free and partially populated documents fail closed at runtime. They are not claimed, repaired, or replaced by
 current traffic; retained pre-cut data requires the governed offline procedure below.
 
+The current `TransactionScoredEvent` boundary admits only `eventContractVersion = 2`. Every admitted event carries
+exactly one complete ML evidence outcome: canonical `mlPredictionEvidence` or an explicit
+`mlPredictionEvidenceOmissionReason`. Missing, retired, or future versions and incomplete evidence outcomes fail
+closed before projection, including on DLT replay and controlled redrive.
+
 ## Audit Classification
 
 ### RETAINED
@@ -181,3 +186,6 @@ roll back the strict deployment, keep affected records outside active current-st
 offline migration or archive/quarantine procedure, reconcile and validate the inventory again, and redeploy. Historical
 identity must never be reconstructed from transaction ID, processing time, Mongo natural order, score, current model,
 model registry state, timestamp proximity, or current ML inference.
+Rollback to a previous consumer is not proof that the consumer can read contract-v2 events. Compatibility must be
+demonstrated before rollback; otherwise affected records remain frozen, archived, or quarantined outside current
+runtime processing.

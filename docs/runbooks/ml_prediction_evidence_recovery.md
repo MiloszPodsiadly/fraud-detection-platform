@@ -15,6 +15,10 @@ The redrive listener is disabled by default. Enable it only for an approved reco
 `ML_PREDICTION_EVIDENCE_REDRIVE_ENABLED=true` and a dedicated service identity that can read the redrive topic and
 write the private evidence collection.
 
+DLT and redrive records pass through the same strict `TransactionScoredEvent` admission as live traffic: outer
+contract version 2 and exactly one complete ML evidence outcome. Recovery never enables a pre-v2 parser, invents
+missing evidence, or treats an invalid current record as safely historical.
+
 ## Recovery Procedure
 
 1. Confirm the evidence MongoDB store is healthy and the projection-failure rate has returned to normal.

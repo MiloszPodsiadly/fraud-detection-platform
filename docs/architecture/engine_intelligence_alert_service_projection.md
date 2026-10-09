@@ -13,6 +13,10 @@ public `engineIntelligence` field into a bounded Mongo read model. Internal evid
 `mlPredictionEvidence` to a
 separate private evidence collection; it does not add that exact score to the public read model.
 
+Both paths admit only outer `TransactionScoredEvent.eventContractVersion = 2` messages with exactly one complete ML
+evidence outcome: canonical evidence or its explicit omission reason. DLT and redrive processing use the same strict
+admission contract; no recovery path selects a pre-v2 parser or reconstructs missing evidence.
+
 ## Current Scope
 
 The projection is the alert-service storage boundary for public `TransactionScoredEvent.engineIntelligence`.
@@ -106,8 +110,10 @@ reconstructs it from top-level final-scoring `modelName` or `modelVersion`.
 
 ## Invalid/Oversized Safe Omission
 
-Unsupported contract versions and invalid or oversized shapes are omitted with bounded internal reasons. Raw
-payloads and exception messages are not logged.
+After the outer scored event has passed strict contract-v2 admission, an unsupported, invalid, or oversized optional
+`engineIntelligence` shape is omitted with a bounded internal reason. An unsupported outer
+`TransactionScoredEvent.eventContractVersion` fails deserialization and is not converted into a diagnostic omission.
+Raw payloads and exception messages are not logged.
 
 ## Idempotency/Replay Safety
 

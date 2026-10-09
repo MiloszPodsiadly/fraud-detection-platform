@@ -165,6 +165,8 @@ The public contract was deployed before runtime emission. Producer diagnostic en
 and follows a consumer-first rollout.
 Historical consumers may reject unknown top-level fields, so emission must remain explicitly
 controlled and required consumers must remain compatible with the current contract.
+Rollback to an earlier consumer is not guaranteed to preserve contract-v2 readability and must not be treated as a
+compatibility strategy. Consumer compatibility requires explicit proof before either rollout or rollback.
 
 Producer mapping must use `PublicEngineIntelligenceMapper` or an explicitly reviewed equivalent.
 Producer mapping must preserve timeout does not mean low risk, missing score does not become zero,

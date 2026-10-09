@@ -15,6 +15,10 @@ the active lease fence after a successful projection or a confirmed stale no-op.
 `engine-intelligence.dead-letter` topic is reserved for EI consumer failures that could not be handed to this inbox; it
 must not be mixed with baseline `transactions.dead-letter` recovery.
 
+Live, DLT, and redrive inputs share the strict outer `TransactionScoredEvent` contract: version 2 with exactly one
+complete ML evidence outcome. An unsupported outer version or incomplete evidence fails closed before projection;
+recovery never selects a historical parser or fabricates missing evidence.
+
 ## Controlled projection-only redrive
 
 1. Record an approved recovery change, operator identity, source DLT partition and bounded offset range.
