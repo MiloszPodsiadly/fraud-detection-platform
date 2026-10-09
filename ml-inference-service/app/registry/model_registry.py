@@ -25,8 +25,8 @@ DEFAULT_MAX_REGISTRY_INDEX_BYTES = 4 * 1024 * 1024
 DEFAULT_MAX_REGISTRY_ENTRIES = 1_000
 DEFAULT_MUTATION_LOCK_TIMEOUT_SECONDS = 5.0
 LOCK_POLL_INTERVAL_SECONDS = 0.01
-MIN_ORPHAN_RECONCILIATION_SCAN_LIMIT = 32
-ORPHAN_RECONCILIATION_ENTRY_MULTIPLIER = 4
+MIN_UNINDEXED_ARTIFACT_SCAN_LIMIT = 32
+UNINDEXED_ARTIFACT_ENTRY_MULTIPLIER = 4
 
 _PROCESS_LOCKS_GUARD = threading.Lock()
 _PROCESS_LOCKS: dict[Path, threading.Lock] = {}
@@ -117,7 +117,7 @@ class ModelRegistry:
                     "Registry index changed while authoritative state was being loaded."
                 )
             if index_is_present:
-                self._reconcile_orphaned_artifacts(entries)
+                self._validate_no_unindexed_artifacts(entries)
             existing = next(
                 (entry for entry in entries if entry.logical_identity == loaded.logical_identity),
                 None,
@@ -289,8 +289,8 @@ class ModelRegistry:
             )
 
         scan_limit = max(
-            MIN_ORPHAN_RECONCILIATION_SCAN_LIMIT,
-            self.max_entries * ORPHAN_RECONCILIATION_ENTRY_MULTIPLIER,
+            MIN_UNINDEXED_ARTIFACT_SCAN_LIMIT,
+            self.max_entries * UNINDEXED_ARTIFACT_ENTRY_MULTIPLIER,
         )
         with os.scandir(self.root) as candidates:
             for inspected, candidate in enumerate(candidates, start=1):
@@ -326,7 +326,7 @@ class ModelRegistry:
     def _artifact_target(self, identity: ModelLogicalIdentity) -> Path:
         return self.artifacts_root / f"{identity.model_name}--{identity.model_version}.json"
 
-    def _reconcile_orphaned_artifacts(self, entries: list[ModelRegistryEntry]) -> None:
+    def _validate_no_unindexed_artifacts(self, entries: list[ModelRegistryEntry]) -> None:
         if not self.artifacts_root.exists() and not self.artifacts_root.is_symlink():
             return
         if self.artifacts_root.is_symlink() or not self.artifacts_root.is_dir():
@@ -336,15 +336,14 @@ class ModelRegistry:
             for entry in entries
         }
         scan_limit = max(
-            MIN_ORPHAN_RECONCILIATION_SCAN_LIMIT,
-            self.max_entries * ORPHAN_RECONCILIATION_ENTRY_MULTIPLIER,
+            MIN_UNINDEXED_ARTIFACT_SCAN_LIMIT,
+            self.max_entries * UNINDEXED_ARTIFACT_ENTRY_MULTIPLIER,
         )
-        removed = False
         with os.scandir(self.artifacts_root) as candidates:
             for inspected, candidate in enumerate(candidates, start=1):
                 if inspected > scan_limit:
                     raise ModelRegistryIntegrityError(
-                        f"Registry orphan reconciliation exceeds bounded scan limit of {scan_limit} entries."
+                        f"Registry artifact validation exceeds bounded scan limit of {scan_limit} entries."
                     )
                 path = Path(candidate.path)
                 if candidate.is_symlink() or not candidate.is_file(follow_symlinks=False):
@@ -355,15 +354,9 @@ class ModelRegistry:
                 self._require_contained(canonical_path, self.artifacts_root.resolve(strict=True), "registry artifact")
                 if canonical_path in authoritative_paths:
                     continue
-                try:
-                    path.unlink()
-                except OSError as exception:
-                    raise ModelRegistryMutationError(
-                        "Failed to reconcile an uncommitted registry artifact."
-                    ) from exception
-                removed = True
-        if removed:
-            self._fsync_directory(self.artifacts_root)
+                raise ModelRegistryIntegrityError(
+                    "Registry contains an unindexed managed artifact; controlled recovery is required."
+                )
 
     def _rollback_uncommitted_artifact(
             self,

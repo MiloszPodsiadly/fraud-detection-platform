@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -317,23 +318,54 @@ class ModelRegistryIntegrityTest(unittest.TestCase):
         self.assertIn(first, entries)
         self.assertEqual(2, len(self._managed_artifacts()))
 
-    def test_next_mutation_reconciles_artifact_left_by_interrupted_publication(self):
+    def test_stale_valid_index_cannot_delete_a_previously_committed_artifact(self):
+        first = self.registry.register(self._artifact("stale-index-authoritative-v1"))
+        stale_index_bytes = self.registry.index_path.read_bytes()
+        second = self.registry.register(self._artifact("stale-index-committed-v2"))
+        second_path = Path(second.artifact_path)
+        second_bytes = second_path.read_bytes()
+        second_sha_before = hashlib.sha256(second_bytes).hexdigest()
+
+        self.assertCountEqual([first, second], self.registry.entries())
+        self.assertEqual(2, len(self._managed_artifacts()))
+
+        self.registry.index_path.write_bytes(stale_index_bytes)
+        registration_error = None
+        try:
+            self.registry.register(self._artifact("stale-index-candidate-v3"))
+        except ModelRegistryIntegrityError as exception:
+            registration_error = exception
+
+        self.assertTrue(
+            second_path.exists(),
+            f"committed artifact SHA-256 {second_sha_before} was deleted",
+        )
+        self.assertEqual(second_bytes, second_path.read_bytes())
+        self.assertEqual(second_sha_before, hashlib.sha256(second_path.read_bytes()).hexdigest())
+        self.assertIsInstance(registration_error, ModelRegistryIntegrityError)
+        self.assertIn("controlled recovery is required", str(registration_error))
+
+    def test_unindexed_artifact_requires_controlled_recovery_without_mutation(self):
         authoritative = self.registry.register(self._artifact("interruption-authoritative-v1"))
         orphan_source = self._artifact("interrupted-orphan-v1")
         orphan_target = self.registry._artifact_target(
             load_validated_model_artifact(orphan_source).logical_identity
         )
         orphan_target.parent.mkdir(parents=True, exist_ok=True)
-        orphan_target.write_bytes(orphan_source.read_bytes())
-
-        registered = self.registry.register(self._artifact("post-interruption-v1"))
-
-        self.assertFalse(orphan_target.exists())
-        self.assertCountEqual([authoritative, registered], self.registry.entries())
-        self.assertEqual(
-            sorted([Path(authoritative.artifact_path), Path(registered.artifact_path)]),
-            self._managed_artifacts(),
+        orphan_bytes = orphan_source.read_bytes()
+        orphan_target.write_bytes(orphan_bytes)
+        candidate_source = self._artifact("post-interruption-v1")
+        candidate_target = self.registry._artifact_target(
+            load_validated_model_artifact(candidate_source).logical_identity
         )
+
+        with self.assertRaisesRegex(ModelRegistryIntegrityError, "controlled recovery is required"):
+            self.registry.register(candidate_source)
+
+        self.assertEqual(orphan_bytes, orphan_target.read_bytes())
+        self.assertFalse(candidate_target.exists())
+        self.assertEqual([authoritative], self.registry.entries())
+        self.assertEqual(sorted([Path(authoritative.artifact_path), orphan_target]), self._managed_artifacts())
 
     def test_unlock_failure_does_not_leave_process_lock_held(self):
         with patch("app.registry.model_registry._unlock_file", side_effect=OSError("injected unlock failure")):
