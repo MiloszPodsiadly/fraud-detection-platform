@@ -300,13 +300,18 @@ public class FeedbackDatasetBuilder {
             MlPredictionEvidenceProjection projection
     ) {
         int feedbackLineageParts = presentLineageParts(source);
+        MlPredictionEvidenceOmissionReason omissionReason = source.getMlPredictionEvidenceOmissionReason();
+        if (omissionReason != null && feedbackLineageParts != 0) {
+            return FeedbackDatasetMlPredictionEvidence.unavailable(
+                    FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
+            );
+        }
         if (feedbackLineageParts != 0 && feedbackLineageParts != 4) {
             return FeedbackDatasetMlPredictionEvidence.unavailable(
                     FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
             );
         }
         if (projection == null) {
-            MlPredictionEvidenceOmissionReason omissionReason = source.getMlPredictionEvidenceOmissionReason();
             return omissionReason == null
                     ? FeedbackDatasetMlPredictionEvidence.unavailable(
                             FeedbackDatasetMlPredictionEvidenceStatus.MISSING_UNEXPECTEDLY

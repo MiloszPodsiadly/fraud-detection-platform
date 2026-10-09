@@ -126,6 +126,7 @@ class MlPredictionEvidenceProjectionMongoIntegrationTest {
 
         MlPredictionEvidenceProjection stored = repository.findById("evt-omission-replay").orElseThrow();
         assertThat(stored.hasEvidence()).isFalse();
+        assertThat(stored.getSourceExecutionTimestamp()).isNull();
         assertThat(stored.getMlPredictionEvidenceOmissionReason())
                 .isEqualTo(MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED);
         assertThat(repository.count()).isEqualTo(1L);

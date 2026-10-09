@@ -197,7 +197,9 @@ public class MlPredictionEvidenceProjection {
     public String getModelVersion() { return modelVersion; }
     public String getFeatureContractVersion() { return featureContractVersion; }
     public String getModelArtifactSha256() { return modelArtifactSha256; }
-    public Instant getSourceExecutionTimestamp() { return Instant.parse(sourceExecutionTimestamp); }
+    public Instant getSourceExecutionTimestamp() {
+        return sourceExecutionTimestamp == null ? null : Instant.parse(sourceExecutionTimestamp);
+    }
     public Instant getProjectedAt() { return projectedAt; }
 
     public boolean sameAuthoritativeOccurrence(MlPredictionEvidenceProjection other) {

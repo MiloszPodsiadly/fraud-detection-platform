@@ -15,6 +15,7 @@ import java.time.ZoneOffset;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -45,6 +46,40 @@ class MlPredictionEvidenceProjectionServiceTest {
         assertThat(result.status()).isEqualTo(MlPredictionEvidenceProjectionStatus.OMITTED);
         assertThat(result.reason()).contains(MlPredictionEvidenceProjectionReason.EVIDENCE_ABSENT);
         verify(repository).insert(any(MlPredictionEvidenceProjection.class));
+    }
+
+    @Test
+    void timestampAccessPreservesEvidencePrecisionAndIsNullForOmission() {
+        TransactionScoredEvent evidenceEvent = MlPredictionEvidenceProjectionTestSupport.event(
+                "timestamp-evidence", 0.8123d, "model-v1"
+        );
+        MlPredictionEvidenceProjection evidence = outcome(evidenceEvent);
+        MlPredictionEvidenceProjection omission = outcome(
+                MlPredictionEvidenceProjectionTestSupport.eventWithoutEvidence("timestamp-omission")
+        );
+
+        assertThat(evidence.getSourceExecutionTimestamp())
+                .isEqualTo(MlPredictionEvidenceProjectionTestSupport.EXECUTED_AT);
+        assertThat(evidence.getSourceExecutionTimestamp().getNano()).isEqualTo(123_456_000);
+        assertThat(omission.getSourceExecutionTimestamp()).isNull();
+    }
+
+    @Test
+    void partialEvidenceShapeStillFailsClosed() {
+        assertThatThrownBy(() -> new MlPredictionEvidenceProjection(
+                "partial-event",
+                "partial-transaction",
+                "partial-correlation",
+                MlPredictionEvidenceProjectionTestSupport.EVENT_CREATED_AT.toString(),
+                0.5d,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                NOW
+        )).isInstanceOf(MlPredictionEvidenceProjectionShapeException.class);
     }
 
     @Test
