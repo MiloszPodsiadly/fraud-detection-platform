@@ -55,6 +55,24 @@ class MlPredictionEvidenceContractTest {
     }
 
     @Test
+    void rejectsObsoleteNestedContractVersionMarker() {
+        String json = objectMapper.writeValueAsString(validEvidence())
+                .replaceFirst("\\{", "{\\\"contractVersion\\\":1,");
+
+        assertThatThrownBy(() -> objectMapper.readValue(json, MlPredictionEvidence.class))
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage("ML_PREDICTION_EVIDENCE_OBSOLETE_VERSION_MARKER");
+    }
+
+    @Test
+    void toleratesHarmlessUnknownForwardCompatibleField() throws Exception {
+        String json = objectMapper.writeValueAsString(validEvidence())
+                .replaceFirst("\\{", "{\\\"futureDiagnosticHint\\\":\\\"bounded\\\",");
+
+        assertThat(objectMapper.readValue(json, MlPredictionEvidence.class)).isEqualTo(validEvidence());
+    }
+
+    @Test
     void rejectsMissingOrMalformedExactArtifactIdentity() {
         assertThatThrownBy(() -> new MlPredictionEvidence(
                 0.8123d,

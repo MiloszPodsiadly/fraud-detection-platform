@@ -1,5 +1,6 @@
 package com.frauddetection.common.events.intelligence;
 
+import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.frauddetection.common.events.engine.FraudEngineScorePolicy;
@@ -54,6 +55,13 @@ public record MlPredictionEvidence(
     @JsonIgnore
     public MlModelIdentity modelIdentity() {
         return new MlModelIdentity(modelName, modelVersion, featureContractVersion);
+    }
+
+    @JsonAnySetter
+    void rejectObsoleteVersionMarker(String fieldName, Object value) {
+        if ("contractVersion".equals(fieldName)) {
+            throw new IllegalArgumentException("ML_PREDICTION_EVIDENCE_OBSOLETE_VERSION_MARKER");
+        }
     }
 
     private static MlModelIdentity requireIdentity(MlModelIdentity modelIdentity) {

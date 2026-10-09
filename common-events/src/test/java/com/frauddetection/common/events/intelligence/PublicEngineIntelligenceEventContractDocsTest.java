@@ -67,7 +67,7 @@ class PublicEngineIntelligenceEventContractDocsTest {
                 "inventory mongo `engine_intelligence_projections` documents",
                 "archive them under the approved retention policy",
                 "do not synthesize identity",
-                "dataset v2 likewise rejects `available` prediction evidence",
+                "dataset v3 likewise rejects `available` prediction evidence",
                 "identity-free historical documents are not valid inputs",
                 "must not be normalized"
         ).doesNotContain(

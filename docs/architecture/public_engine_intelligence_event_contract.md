@@ -47,7 +47,9 @@ canonical values are rejected or fail closed; the read boundary does not repair 
 `TransactionScoredEvent.mlPredictionEvidence` is a separate optional internal field. Every current scored event requires
 exactly one of it or `mlPredictionEvidenceOmissionReason`; events with neither fail deserialization. Historical null/null
 messages must be drained, migrated from authoritative evidence, archived, or quarantined before current consumers read
-them, and consumers must not invent or backfill evidence.
+them, and consumers must not invent or backfill evidence. The outer `eventContractVersion` owns the current event
+version. A nested `mlPredictionEvidence.contractVersion` is a known obsolete marker and is rejected as contradictory;
+other bounded unknown evidence fields remain forward-compatible and do not change the canonical evidence meaning.
 
 All current alert-service listeners and redrive listeners use the same strict full-event deserializer. The repository
 does not provide a historical scored-event runtime parser. Active historical replay remains **NO-GO** until an authorized
@@ -86,7 +88,7 @@ An `AVAILABLE` `ml.python.primary` result must include a bounded `modelIdentity`
 and `featureContractVersion`. This identity belongs to the ML engine-intelligence result, not to the top-level final
 scoring fields on `TransactionScoredEvent`. Rules, Velocity, and non-AVAILABLE ML engine results must omit it. A current
 identity-free AVAILABLE ML result is malformed and fails closed; readers do not invent lineage or rewrite the engine
-to another operational status. Dataset v2 likewise rejects `AVAILABLE` prediction evidence unless score, risk,
+to another operational status. Dataset v3 likewise rejects `AVAILABLE` prediction evidence unless score, risk,
 execution timestamp, and the complete model identity are all present.
 
 ### Deployment Treatment For Historical Projections
@@ -95,7 +97,7 @@ Before deploying the strict reader, inventory Mongo `engine_intelligence_project
 `AVAILABLE` `ml.python.primary` engine without complete `modelIdentity`. Such documents do not satisfy the current read
 contract: archive them under the approved retention policy or rebuild the projection only from an authoritative event
 that already contains complete lineage. Do not synthesize identity from the currently loaded model, registry state, or
-deployment configuration. Identity-free historical documents are not valid inputs to the current Dataset v2 or
+deployment configuration. Identity-free historical documents are not valid inputs to the current Dataset v3 or
 exact-model evaluation contracts and must not be normalized merely to make a historical projection displayable.
 
 ## Field Omission Rules
