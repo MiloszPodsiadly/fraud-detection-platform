@@ -14,7 +14,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDelt
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
@@ -43,6 +43,7 @@ class TransactionScoredEventMapperEngineIntelligenceTest {
         );
 
         assertThat(event.engineIntelligence()).isNull();
+        assertThat(event.mlPredictionEvidence()).isNull();
         assertThat(event.mlPredictionEvidence()).isNull();
         assertThat(objectMapper.writeValueAsString(event))
                 .doesNotContain("\"engineIntelligence\"", "\"mlPredictionEvidence\"");
@@ -81,10 +82,11 @@ class TransactionScoredEventMapperEngineIntelligenceTest {
                 "model-X",
                 "2026-05-30.feature-contract.v1"
         );
-        MlPredictionEvidenceV1 evidence = new MlPredictionEvidenceV1(
+        MlPredictionEvidence evidence = new MlPredictionEvidence(
                 0.8123d,
                 RiskLevel.HIGH,
                 identity,
+                "a".repeat(64),
                 GENERATED_AT
         );
 
@@ -99,7 +101,7 @@ class TransactionScoredEventMapperEngineIntelligenceTest {
 
         assertThat(event.mlPredictionEvidence()).isEqualTo(evidence);
         assertThat(objectMapper.writeValueAsString(event))
-                .contains("\"mlPredictionEvidence\"", "\"mlScore\":0.8123");
+                .contains("\"mlPredictionEvidence\"", "\"mlScore\":0.8123", "\"modelArtifactSha256\"");
     }
 
     @Test
@@ -130,7 +132,7 @@ class TransactionScoredEventMapperEngineIntelligenceTest {
                 request(),
                 ruleBasedScoreResult("rules-v2-final"),
                 Optional.of(availableMlSummary("model-X")),
-                Optional.of(new MlPredictionEvidenceV1(
+                Optional.of(new MlPredictionEvidence(
                         0.8123d,
                         RiskLevel.HIGH,
                         new MlModelIdentity(
@@ -138,6 +140,7 @@ class TransactionScoredEventMapperEngineIntelligenceTest {
                                 "model-X",
                                 "2026-05-30.feature-contract.v1"
                         ),
+                        "a".repeat(64),
                         GENERATED_AT
                 )),
                 Optional.empty(),

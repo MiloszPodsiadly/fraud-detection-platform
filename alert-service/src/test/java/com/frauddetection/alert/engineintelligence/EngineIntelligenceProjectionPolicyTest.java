@@ -11,7 +11,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningSummary;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -34,7 +34,7 @@ class EngineIntelligenceProjectionPolicyTest {
 
     @Test
     void evidenceProjectionUsesCanonicalModelIdentityPolicyWithoutFreeTextBlacklist() {
-        MlPredictionEvidenceV1 source = new MlPredictionEvidenceV1(
+        MlPredictionEvidence source = new MlPredictionEvidence(
                 0.8123d,
                 RiskLevel.HIGH,
                 new MlModelIdentity(
@@ -42,6 +42,7 @@ class EngineIntelligenceProjectionPolicyTest {
                         "2026-05-30.v1",
                         "2026-05-30.feature-contract.v1"
                 ),
+                "a".repeat(64),
                 MlPredictionEvidenceProjectionTestSupport.EXECUTED_AT
         );
 
@@ -50,15 +51,13 @@ class EngineIntelligenceProjectionPolicyTest {
 
     @Test
     void evidenceProjectionRejectsIdentityForbiddenByCanonicalPolicy() {
-        MlPredictionEvidenceV1 source = mock(MlPredictionEvidenceV1.class);
-        when(source.contractVersion()).thenReturn(MlPredictionEvidenceV1.CONTRACT_VERSION);
-        when(source.sourceEngineId()).thenReturn("ml.python.primary");
-        when(source.engineStatus()).thenReturn(FraudEngineStatus.AVAILABLE);
+        MlPredictionEvidence source = mock(MlPredictionEvidence.class);
         when(source.mlScore()).thenReturn(0.8123d);
         when(source.mlRiskLevel()).thenReturn(RiskLevel.HIGH);
         when(source.modelName()).thenReturn("raw-payload-model");
         when(source.modelVersion()).thenReturn("2026-05-30.v1");
         when(source.featureContractVersion()).thenReturn("2026-05-30.feature-contract.v1");
+        when(source.modelArtifactSha256()).thenReturn("a".repeat(64));
         when(source.sourceExecutionTimestamp()).thenReturn(MlPredictionEvidenceProjectionTestSupport.EXECUTED_AT);
 
         assertThatThrownBy(() -> policy.validatedEvidenceCopy(source))

@@ -30,6 +30,7 @@ MODEL_IDENTITY = ModelEvaluationIdentity(
     "python-logistic-fraud-model",
     "2026-06-25.v1",
     "feature-contract-v2",
+    "a" * 64,
 )
 
 

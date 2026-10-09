@@ -13,6 +13,8 @@ import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceEngineR
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
+import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjection;
+import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionRepository;
 import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
@@ -63,6 +65,8 @@ class FraudFeedbackServiceTest {
     private final FraudFeedbackRepository repository = mock(FraudFeedbackRepository.class);
     private final TransactionMonitoringUseCase transactionMonitoringUseCase = mock(TransactionMonitoringUseCase.class);
     private final EngineIntelligenceReadService engineIntelligenceReadService = mock(EngineIntelligenceReadService.class);
+    private final MlPredictionEvidenceProjectionRepository mlPredictionEvidenceProjectionRepository =
+            mock(MlPredictionEvidenceProjectionRepository.class);
     private final CurrentAnalystUser currentAnalystUser = mock(CurrentAnalystUser.class);
     private final WriteActionAuditOutboxService auditOutboxService = mock(WriteActionAuditOutboxService.class);
     private final RegulatedMutationTransactionRunner transactionRunner = mock(RegulatedMutationTransactionRunner.class);
@@ -77,6 +81,7 @@ class FraudFeedbackServiceTest {
                 transactionMonitoringUseCase,
                 engineIntelligenceReadService,
                 new EngineIntelligenceResponseMapper(),
+                mlPredictionEvidenceProjectionRepository,
                 currentAnalystUser,
                 auditOutboxService,
                 transactionRunner,
@@ -154,13 +159,30 @@ class FraudFeedbackServiceTest {
     }
 
     @Test
-    void snapshotsMlIdentityFromPersistedEngineIntelligenceProjection() {
+    void snapshotsExactMlIdentityFromPersistedPredictionEvidenceProjection() {
+        when(transactionMonitoringUseCase.getScoredTransaction("txn-1"))
+                .thenReturn(scoredTransactionExpectingMlEvidence());
         when(engineIntelligenceReadService.readForOccurrence(eq("txn-1"), any()))
                 .thenReturn(projectedEngineIntelligenceWithAvailableMl(
                 "python-logistic-fraud-model",
                 "model-X",
                 "feature-contract-v2"
         ));
+        when(mlPredictionEvidenceProjectionRepository.findById("event-1"))
+                .thenReturn(Optional.of(new MlPredictionEvidenceProjection(
+                        "event-1",
+                        "txn-1",
+                        "corr-1",
+                        "2026-06-25T09:00:01Z",
+                        0.91d,
+                        RiskLevel.CRITICAL,
+                        "python-logistic-fraud-model",
+                        "model-X",
+                        "feature-contract-v2",
+                        "b".repeat(64),
+                        "2026-06-25T09:00:00Z",
+                        Instant.parse("2026-06-25T09:00:03Z")
+                )));
 
         FraudFeedbackResponse response = service.create("txn-1", request());
 
@@ -171,7 +193,68 @@ class FraudFeedbackServiceTest {
             assertThat(record.getMlModelName()).isEqualTo("python-logistic-fraud-model");
             assertThat(record.getMlModelVersion()).isEqualTo("model-X");
             assertThat(record.getMlFeatureContractVersion()).isEqualTo("feature-contract-v2");
+            assertThat(record.getMlModelArtifactSha256()).isEqualTo("b".repeat(64));
         });
+    }
+
+    @Test
+    void legitimatelyAbsentPredictionDoesNotReadEvidenceStore() {
+        service.create("txn-1", request());
+
+        verify(mlPredictionEvidenceProjectionRepository, never()).findById(any());
+        assertThat(savedRecords).singleElement().satisfies(record -> {
+            assertThat(record.getMlPredictionEvidenceOmissionReason())
+                    .isEqualTo(MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE);
+            assertThat(record.getMlModelArtifactSha256()).isNull();
+        });
+    }
+
+    @Test
+    void evidenceStoreFailureFailsClosedBeforeFeedbackOrAuditPersistence() {
+        when(transactionMonitoringUseCase.getScoredTransaction("txn-1"))
+                .thenReturn(scoredTransactionExpectingMlEvidence());
+        when(mlPredictionEvidenceProjectionRepository.findById("event-1"))
+                .thenThrow(new IllegalStateException("store unavailable"));
+
+        assertEvidenceSnapshotFailure();
+    }
+
+    @Test
+    void unexpectedlyMissingEvidenceFailsClosedBeforeFeedbackOrAuditPersistence() {
+        when(transactionMonitoringUseCase.getScoredTransaction("txn-1"))
+                .thenReturn(scoredTransactionExpectingMlEvidence());
+        when(mlPredictionEvidenceProjectionRepository.findById("event-1"))
+                .thenReturn(Optional.empty());
+
+        assertEvidenceSnapshotFailure();
+    }
+
+    @Test
+    void evidenceFromWrongSourceOccurrenceFailsClosed() {
+        when(transactionMonitoringUseCase.getScoredTransaction("txn-1"))
+                .thenReturn(scoredTransactionExpectingMlEvidence());
+        when(mlPredictionEvidenceProjectionRepository.findById("event-1"))
+                .thenReturn(Optional.of(exactEvidenceProjection("different-correlation", "b".repeat(64))));
+
+        assertEvidenceSnapshotFailure();
+    }
+
+    @Test
+    void corruptEvidenceProjectionFailsClosed() {
+        when(transactionMonitoringUseCase.getScoredTransaction("txn-1"))
+                .thenReturn(scoredTransactionExpectingMlEvidence());
+        MlPredictionEvidenceProjection corrupt = mock(MlPredictionEvidenceProjection.class);
+        when(corrupt.getSourceEventId()).thenReturn("event-1");
+        when(corrupt.getTransactionId()).thenReturn("txn-1");
+        when(corrupt.getCorrelationId()).thenReturn("corr-1");
+        when(corrupt.getSourceEventCreatedAt()).thenReturn(Instant.parse("2026-06-25T09:00:01Z"));
+        when(corrupt.getMlScore()).thenReturn(0.91d);
+        when(corrupt.getMlRiskLevel()).thenReturn(RiskLevel.CRITICAL);
+        when(corrupt.getModelName()).thenReturn(null);
+        when(mlPredictionEvidenceProjectionRepository.findById("event-1"))
+                .thenReturn(Optional.of(corrupt));
+
+        assertEvidenceSnapshotFailure();
     }
 
     @Test
@@ -595,6 +678,7 @@ class FraudFeedbackServiceTest {
                 transactionMonitoringUseCase,
                 engineIntelligenceReadService,
                 mapper,
+                mlPredictionEvidenceProjectionRepository,
                 currentAnalystUser,
                 auditOutboxService,
                 transactionRunner,
@@ -730,12 +814,51 @@ class FraudFeedbackServiceTest {
         );
     }
 
+    private void assertEvidenceSnapshotFailure() {
+        assertThatThrownBy(() -> service.create("txn-1", request()))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(exception -> {
+                    ResponseStatusException statusException = (ResponseStatusException) exception;
+                    assertThat(statusException.getStatusCode().value()).isEqualTo(503);
+                    assertThat(statusException.getReason())
+                            .isEqualTo("FRAUD_FEEDBACK_ML_PREDICTION_EVIDENCE_UNAVAILABLE");
+                });
+        verify(repository, never()).save(any());
+        verify(auditOutboxService, never())
+                .createPendingAudit(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    private MlPredictionEvidenceProjection exactEvidenceProjection(String correlationId, String artifactSha256) {
+        return new MlPredictionEvidenceProjection(
+                "event-1",
+                "txn-1",
+                correlationId,
+                "2026-06-25T09:00:01Z",
+                0.91d,
+                RiskLevel.CRITICAL,
+                "python-logistic-fraud-model",
+                "model-X",
+                "feature-contract-v2",
+                artifactSha256,
+                "2026-06-25T09:00:00Z",
+                Instant.parse("2026-06-25T09:00:03Z")
+        );
+    }
+
     private ScoredTransaction scoredTransaction() {
         return scoredTransaction(ScoringOccurrenceOwnership.authoritative(
                 "event-1",
                 Instant.parse("2026-06-25T09:00:01Z"),
                 "a".repeat(64)
-        ));
+        ), MlPredictionEvidenceOmissionReason.ML_ENGINE_UNAVAILABLE);
+    }
+
+    private ScoredTransaction scoredTransactionExpectingMlEvidence() {
+        return scoredTransaction(ScoringOccurrenceOwnership.authoritative(
+                "event-1",
+                Instant.parse("2026-06-25T09:00:01Z"),
+                "a".repeat(64)
+        ), null);
     }
 
     private ScoredTransaction scoredTransaction(ScoringOccurrenceOwnership ownership) {

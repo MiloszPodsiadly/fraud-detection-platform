@@ -13,6 +13,7 @@ from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import (
     validate_optional_timestamp_range,
 )
 from app.model_identity_policy import (
+    ARTIFACT_SHA256_PATTERN,
     validate_feature_contract_version,
     validate_model_name,
     validate_model_version,
@@ -31,7 +32,7 @@ class FeedbackDatasetFailedDatasetError(ValueError):
     """Raised when feedback dataset metadata declares an unsuccessful build."""
 
 
-DATASET_VERSION = "feedback-dataset-v2"
+DATASET_VERSION = "feedback-dataset-v3"
 DATASET_TIME_BASIS = "FEEDBACK_CREATED_AT"
 MAX_DATASET_RECORDS = 1000
 MAX_JSONL_LINE_LENGTH = 64_000
@@ -55,6 +56,10 @@ ALLOWED_ML_PREDICTION_EVIDENCE_STATUSES = {
     "MISSING_UNEXPECTEDLY",
     "MALFORMED",
     "IDENTITY_MISMATCH",
+}
+ALLOWED_ML_PREDICTION_EVIDENCE_RESOLUTION_PROVENANCE = {
+    "CAPTURED_AND_CONFIRMED",
+    "RECOVERED_FROM_EXACT_OCCURRENCE_PROJECTION",
 }
 ML_PREDICTION_OMISSION_STATUS = {
     "DIAGNOSTIC_EMISSION_DISABLED": "LEGITIMATELY_ABSENT",
@@ -145,6 +150,7 @@ ALLOWED_RECORD_FIELDS = {
     "rulesEvidenceStatus",
     "rulesRiskLevel",
     "mlPredictionEvidenceStatus",
+    "mlPredictionEvidenceResolutionProvenance",
     "mlPredictionEvidenceOmissionReason",
     "mlPredictionScore",
     "mlPredictionRiskLevel",
@@ -152,6 +158,7 @@ ALLOWED_RECORD_FIELDS = {
     "mlModelName",
     "mlModelVersion",
     "mlFeatureContractVersion",
+    "mlModelArtifactSha256",
     "analystRecommendationStatus",
     "analystRecommendation",
     "analystRecommendationVersion",
@@ -171,7 +178,9 @@ REQUIRED_RECORD_FIELDS = {
     "rulesEvidenceStatus",
     "rulesRiskLevel",
     *ML_PREDICTION_EVIDENCE_FIELDS,
+    "mlPredictionEvidenceResolutionProvenance",
     *ML_MODEL_IDENTITY_FIELDS,
+    "mlModelArtifactSha256",
 }
 ALLOWED_FEEDBACK_LABELS = {"CONFIRMED_FRAUD", "CONFIRMED_LEGITIMATE"}
 ALLOWED_EVALUATION_LABELS = {"POSITIVE_FRAUD", "NEGATIVE_LEGITIMATE"}
@@ -341,11 +350,17 @@ def validate_record(raw: dict[str, Any]) -> FeedbackDatasetRecord:
         "mlPredictionEvidenceStatus",
         ALLOWED_ML_PREDICTION_EVIDENCE_STATUSES,
     )
+    ml_prediction_evidence_resolution_provenance = _optional_enum(
+        raw,
+        "mlPredictionEvidenceResolutionProvenance",
+        ALLOWED_ML_PREDICTION_EVIDENCE_RESOLUTION_PROVENANCE,
+    )
     ml_prediction_evidence_omission_reason = _optional_enum(
         raw,
         "mlPredictionEvidenceOmissionReason",
         set(ML_PREDICTION_OMISSION_STATUS),
     )
+    ml_model_artifact_sha256 = _optional_artifact_sha256(raw, "mlModelArtifactSha256")
     ml_prediction_score = _optional_ml_prediction_score(raw, "mlPredictionScore")
     ml_prediction_risk_level = _optional_enum(
         raw,
@@ -355,6 +370,7 @@ def validate_record(raw: dict[str, Any]) -> FeedbackDatasetRecord:
     ml_prediction_executed_at = _optional_datetime_string(raw, "mlPredictionExecutedAt")
     _validate_ml_prediction_evidence(
         ml_prediction_evidence_status,
+        ml_prediction_evidence_resolution_provenance,
         ml_prediction_evidence_omission_reason,
         ml_prediction_score,
         ml_prediction_risk_level,
@@ -362,6 +378,7 @@ def validate_record(raw: dict[str, Any]) -> FeedbackDatasetRecord:
         ml_model_name,
         ml_model_version,
         ml_feature_contract_version,
+        ml_model_artifact_sha256,
     )
     rules_evidence_status = _required_enum(raw, "rulesEvidenceStatus", ALLOWED_RULES_EVIDENCE_STATUSES)
     rules_risk_level = _optional_enum(raw, "rulesRiskLevel", ALLOWED_RISK_LEVELS)
@@ -389,6 +406,7 @@ def validate_record(raw: dict[str, Any]) -> FeedbackDatasetRecord:
         rules_evidence_status=rules_evidence_status,
         rules_risk_level=rules_risk_level,
         ml_prediction_evidence_status=ml_prediction_evidence_status,
+        ml_prediction_evidence_resolution_provenance=ml_prediction_evidence_resolution_provenance,
         ml_prediction_evidence_omission_reason=ml_prediction_evidence_omission_reason,
         ml_prediction_score=ml_prediction_score,
         ml_prediction_risk_level=ml_prediction_risk_level,
@@ -396,6 +414,7 @@ def validate_record(raw: dict[str, Any]) -> FeedbackDatasetRecord:
         ml_model_name=ml_model_name,
         ml_model_version=ml_model_version,
         ml_feature_contract_version=ml_feature_contract_version,
+        ml_model_artifact_sha256=ml_model_artifact_sha256,
         analyst_recommendation_status=_optional_enum(
             raw, "analystRecommendationStatus", ALLOWED_ANALYST_RECOMMENDATION_STATUSES
         ),
@@ -502,6 +521,15 @@ def _validate_ml_model_identity(
         )
 
 
+def _optional_artifact_sha256(raw: dict[str, Any], field: str) -> str | None:
+    value = raw.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, str) or ARTIFACT_SHA256_PATTERN.fullmatch(value) is None:
+        raise FeedbackDatasetValidationError(f"{field} must be 64 lowercase hexadecimal characters or null")
+    return value
+
+
 def _required_enum(raw: dict[str, Any], field: str, allowed: set[str]) -> str:
     value = _required_string(raw, field)
     if value not in allowed:
@@ -566,6 +594,7 @@ def _optional_safe_identifier(raw: dict[str, Any], field: str) -> str | None:
 
 def _validate_ml_prediction_evidence(
         status: str,
+        resolution_provenance: str | None,
         omission_reason: str | None,
         score: float | None,
         risk_level: str | None,
@@ -573,6 +602,7 @@ def _validate_ml_prediction_evidence(
         model_name: str | None,
         model_version: str | None,
         feature_contract_version: str | None,
+        model_artifact_sha256: str | None,
 ) -> None:
     values_complete = score is not None and risk_level is not None and executed_at is not None
     identity_complete = all(
@@ -580,9 +610,19 @@ def _validate_ml_prediction_evidence(
         for value in (model_name, model_version, feature_contract_version)
     )
     if status == "AVAILABLE":
-        if not values_complete or not identity_complete or omission_reason is not None:
-            raise FeedbackDatasetValidationError("available ML prediction evidence must be complete")
+        if (
+                not values_complete
+                or not identity_complete
+                or resolution_provenance is None
+                or omission_reason is not None
+                or model_artifact_sha256 is None
+        ):
+            raise FeedbackDatasetValidationError("exact-artifact ML prediction evidence must be complete")
         return
+    if resolution_provenance is not None:
+        raise FeedbackDatasetValidationError(
+            "unavailable ML prediction evidence must not carry resolution provenance"
+        )
     if any(value is not None for value in (
         score,
         risk_level,
@@ -590,6 +630,7 @@ def _validate_ml_prediction_evidence(
         model_name,
         model_version,
         feature_contract_version,
+        model_artifact_sha256,
     )):
         raise FeedbackDatasetValidationError("unavailable ML prediction evidence must not carry prediction values")
     if status == "LEGITIMATELY_ABSENT" and omission_reason is None:

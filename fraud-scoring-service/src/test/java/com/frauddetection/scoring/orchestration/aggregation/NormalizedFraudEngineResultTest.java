@@ -6,6 +6,7 @@ import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -168,7 +169,9 @@ class NormalizedFraudEngineResultTest {
                 List.of(),
                 List.of(),
                 0L,
-                modelIdentity
+                modelIdentity,
+                modelIdentity == null ? null : "a".repeat(64),
+                modelIdentity == null ? null : Instant.parse("2026-05-31T09:59:58Z")
         );
     }
 

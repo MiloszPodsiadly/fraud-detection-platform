@@ -234,11 +234,11 @@ class FraudEngineResultValidationTest {
         ).featureContractVersion()).isEqualTo("2026-05-30.feature-contract.v1");
 
         assertThatThrownBy(() -> availableMlResult(null, "2026-05-30.v1", "2026-05-30.feature-contract.v1"))
-                .hasMessageContaining("ML model identity must be entirely absent or complete");
+                .hasMessageContaining("ML model artifact identity must be entirely absent or complete");
         assertThatThrownBy(() -> availableMlResult("python-logistic-fraud-model", null, "2026-05-30.feature-contract.v1"))
-                .hasMessageContaining("ML model identity must be entirely absent or complete");
+                .hasMessageContaining("ML model artifact identity must be entirely absent or complete");
         assertThatThrownBy(() -> availableMlResult("python-logistic-fraud-model", "2026-05-30.v1", null))
-                .hasMessageContaining("ML model identity must be entirely absent or complete");
+                .hasMessageContaining("ML model artifact identity must be entirely absent or complete");
     }
 
     @Test
@@ -260,7 +260,7 @@ class FraudEngineResultValidationTest {
                 null,
                 "ENGINE_STATUS",
                 now()
-        )).hasMessageContaining("ML model identity must be entirely absent or complete");
+        )).hasMessageContaining("ML model artifact identity must be entirely absent or complete");
     }
 
     @Test
@@ -673,7 +673,9 @@ class FraudEngineResultValidationTest {
                 modelVersion,
                 featureContractVersion,
                 null,
-                now()
+                now(),
+                now(),
+                "a".repeat(64)
         );
     }
 

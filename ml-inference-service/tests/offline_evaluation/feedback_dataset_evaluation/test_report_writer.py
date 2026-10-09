@@ -578,6 +578,7 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
                     "--model-name", "python-logistic-fraud-model",
                     "--model-version", "2026-06-25.v1",
                     "--feature-contract-version", "feature-contract-v2",
+                    "--model-artifact-sha256", "a" * 64,
                 ])
 
             self.assertEqual(0, result)
@@ -683,6 +684,7 @@ class FeedbackDatasetEvaluationReportWriterTest(unittest.TestCase):
             "python-logistic-fraud-model",
             "2026-06-25.v1",
             "feature-contract-v2",
+            "a" * 64,
         )
 
 

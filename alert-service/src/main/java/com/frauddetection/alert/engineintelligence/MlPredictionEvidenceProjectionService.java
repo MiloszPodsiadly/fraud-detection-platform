@@ -3,7 +3,7 @@ package com.frauddetection.alert.engineintelligence;
 import com.frauddetection.alert.engineintelligence.observability.MlPredictionEvidenceProjectionMetricReason;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -55,20 +55,19 @@ public class MlPredictionEvidenceProjectionService {
             if (event == null) {
                 return failure(MlPredictionEvidenceProjectionReason.INVALID_EVIDENCE);
             }
-            if (event.mlPredictionEvidence() == null) {
+            MlPredictionEvidenceProjection projection = validatedProjection(event);
+            try {
+                repository.insert(projection);
+                if (projection.hasEvidence()) {
+                    metrics.recordMlPredictionEvidenceProjectionSuccess();
+                    return MlPredictionEvidenceProjectionResult.projected();
+                }
                 metrics.recordMlPredictionEvidenceProjectionOmitted(
                         MlPredictionEvidenceProjectionMetricReason.EVIDENCE_ABSENT
                 );
                 return MlPredictionEvidenceProjectionResult.omitted(
                         MlPredictionEvidenceProjectionReason.EVIDENCE_ABSENT
                 );
-            }
-
-            MlPredictionEvidenceProjection projection = validatedProjection(event);
-            try {
-                repository.insert(projection);
-                metrics.recordMlPredictionEvidenceProjectionSuccess();
-                return MlPredictionEvidenceProjectionResult.projected();
             } catch (DuplicateKeyException duplicate) {
                 return classifyReplay(projection);
             }
@@ -89,16 +88,32 @@ public class MlPredictionEvidenceProjectionService {
     }
 
     private MlPredictionEvidenceProjection validatedProjection(TransactionScoredEvent event) {
-        MlPredictionEvidenceV1 evidence = policy.validatedEvidenceCopy(event.mlPredictionEvidence());
         if (event.createdAt() == null) {
             throw new MlPredictionEvidenceProjectionShapeException();
         }
-        return MlPredictionEvidenceProjection.create(
-                policy.validatedSourceEventId(event.eventId()),
-                policy.validatedTransactionId(event.transactionId()),
-                policy.validatedCorrelationId(event.correlationId()),
+        String sourceEventId = policy.validatedSourceEventId(event.eventId());
+        String transactionId = policy.validatedTransactionId(event.transactionId());
+        String correlationId = policy.validatedCorrelationId(event.correlationId());
+        if (event.mlPredictionEvidence() != null) {
+            MlPredictionEvidence evidence = policy.validatedEvidenceCopy(event.mlPredictionEvidence());
+            return MlPredictionEvidenceProjection.create(
+                    sourceEventId,
+                    transactionId,
+                    correlationId,
+                    event.createdAt(),
+                    evidence,
+                    clock.instant()
+            );
+        }
+        if (event.mlPredictionEvidenceOmissionReason() == null) {
+            throw new MlPredictionEvidenceProjectionShapeException();
+        }
+        return MlPredictionEvidenceProjection.omitted(
+                sourceEventId,
+                transactionId,
+                correlationId,
                 event.createdAt(),
-                evidence,
+                event.mlPredictionEvidenceOmissionReason(),
                 clock.instant()
         );
     }

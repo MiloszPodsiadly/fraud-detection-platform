@@ -26,12 +26,12 @@ FRAUD_SCORING_EVENTS_ENGINE_INTELLIGENCE_EMIT_ENABLED
 ## Mapping Boundary
 
 `TransactionScoredEventMapper` accepts an optional public `EngineIntelligenceSummary`, optional internal
-`MlPredictionEvidenceV1`, and the canonical omission outcome when exact evidence is absent.
+`MlPredictionEvidence`, and the canonical omission outcome when exact evidence is absent.
 An empty diagnostic summary omits the `engineIntelligence` JSON field but never permits a null/null evidence outcome.
 A present summary adds only the bounded public DTO. Internal aggregation objects, raw model payloads,
 contributions, and internal diagnostics are not event payload fields.
 
-Internal prediction evidence capture may additionally carry `MlPredictionEvidenceV1` for an `AVAILABLE` `ml.python.primary` result. It exists
+Internal prediction evidence capture may additionally carry `MlPredictionEvidence` for an `AVAILABLE` `ml.python.primary` result. It exists
 to preserve the exact diagnostic ML output for later governed evaluation; it is not another public Engine
 Intelligence score. Its only authority is the `FraudEngineResult` returned by the same orchestrator execution used
 for aggregation. The evidence preserves that result's exact bounded score, complete model and feature-contract

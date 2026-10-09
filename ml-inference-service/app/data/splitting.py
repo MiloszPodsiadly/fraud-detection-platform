@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -70,6 +72,7 @@ def split_dataset(
         "trainIndices": [index for index, _ in train_rows],
         "validationIndices": [index for index, _ in validation_rows],
         "testIndices": [index for index, _ in test_rows],
+        "testCohortFingerprint": _evaluation_cohort_fingerprint(test_rows),
         "classDistribution": {
             "train": _class_distribution(train_rows),
             "validation": _class_distribution(validation_rows),
@@ -94,6 +97,33 @@ def split_dataset(
         test=_subset(dataset, test_rows, "test", metadata),
         metadata=metadata,
     )
+
+
+def _evaluation_cohort_fingerprint(
+        rows: list[tuple[int, tuple[dict[str, Any], int]]],
+) -> str:
+    observation_digests = []
+    for _, (features, label) in rows:
+        try:
+            canonical_observation = json.dumps(
+                {"features": features, "label": label},
+                allow_nan=False,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        except (TypeError, ValueError) as exception:
+            raise ValueError("evaluation cohort contains a non-canonical observation") from exception
+        observation_digests.append(hashlib.sha256(canonical_observation).hexdigest())
+    canonical_cohort = json.dumps(
+        {
+            "observationDigests": sorted(observation_digests),
+            "schemaVersion": 1,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical_cohort).hexdigest()
 
 
 def _ordered_split(

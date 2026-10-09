@@ -56,6 +56,7 @@ class FeedbackDatasetRecord:
     rules_evidence_status: str
     rules_risk_level: str | None
     ml_prediction_evidence_status: str
+    ml_prediction_evidence_resolution_provenance: str | None
     ml_prediction_evidence_omission_reason: str | None
     ml_prediction_score: float | None
     ml_prediction_risk_level: str | None
@@ -63,6 +64,7 @@ class FeedbackDatasetRecord:
     ml_model_name: str | None
     ml_model_version: str | None
     ml_feature_contract_version: str | None
+    ml_model_artifact_sha256: str | None
     analyst_recommendation_status: str | None
     analyst_recommendation: str | None
     analyst_recommendation_version: str | None

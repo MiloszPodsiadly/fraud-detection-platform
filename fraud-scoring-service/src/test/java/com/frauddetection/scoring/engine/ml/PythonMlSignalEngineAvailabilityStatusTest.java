@@ -66,7 +66,9 @@ class PythonMlSignalEngineAvailabilityStatusTest {
                 Map.of(),
                 Map.of(),
                 Map.of("modelAvailable", "false"),
-                true
+                true,
+                List.of(),
+                "a".repeat(64)
         );
 
         FraudSignalEvaluation result = new PythonMlSignalEngine(sourceReturning(source)).evaluate(context());
@@ -176,7 +178,9 @@ class PythonMlSignalEngineAvailabilityStatusTest {
                 Map.of(),
                 Map.of(),
                 Map.of("modelAvailable", true),
-                true
+                true,
+                List.of(),
+                "a".repeat(64)
         );
 
         FraudSignalEvaluation result = new PythonMlSignalEngine(sourceReturning(source)).evaluate(context());
@@ -220,7 +224,7 @@ class PythonMlSignalEngineAvailabilityStatusTest {
     @Test
     void modelAvailableTrueWithMissingModelMetadataIsRejectedAtResultBoundary() {
         assertThatThrownBy(() -> result(0.82d, RiskLevel.HIGH, null, "2026-05-30.v1", true, List.of()))
-                .hasMessageContaining("ML model identity must be entirely absent or complete");
+                .hasMessageContaining("ML model artifact identity must be entirely absent or complete");
     }
 
     @Test
@@ -238,7 +242,7 @@ class PythonMlSignalEngineAvailabilityStatusTest {
                 Map.of(),
                 Map.of("modelAvailable", true),
                 true
-        )).hasMessageContaining("ML model identity must be entirely absent or complete");
+        )).hasMessageContaining("ML model artifact identity must be entirely absent or complete");
     }
 
     @Test

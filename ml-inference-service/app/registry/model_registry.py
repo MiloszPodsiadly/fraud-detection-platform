@@ -1,132 +1,607 @@
 from __future__ import annotations
 
 import json
-import shutil
+import os
+import tempfile
+import threading
+import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import BinaryIO, Iterator
+
+from app.model_identity_policy import ModelArtifactIdentity, ModelLogicalIdentity
+from app.models.model_loader import (
+    MAX_MODEL_ARTIFACT_BYTES,
+    ModelConfigurationError,
+    ValidatedModelArtifact,
+    load_model_artifact,
+    load_validated_model_artifact,
+    validate_loaded_model_artifact,
+)
+
+
+DEFAULT_MAX_REGISTRY_INDEX_BYTES = 4 * 1024 * 1024
+DEFAULT_MAX_REGISTRY_ENTRIES = 1_000
+DEFAULT_MUTATION_LOCK_TIMEOUT_SECONDS = 5.0
+LOCK_POLL_INTERVAL_SECONDS = 0.01
+MIN_UNINDEXED_ARTIFACT_SCAN_LIMIT = 32
+UNINDEXED_ARTIFACT_ENTRY_MULTIPLIER = 4
+
+_PROCESS_LOCKS_GUARD = threading.Lock()
+_PROCESS_LOCKS: dict[Path, threading.Lock] = {}
+
+
+class ModelRegistryIntegrityError(RuntimeError):
+    """Raised when persisted registry state cannot prove immutable model identity."""
+
+
+class ModelRegistryConflictError(ModelRegistryIntegrityError):
+    """Raised when one logical model identity is associated with different artifact state."""
+
+
+class ModelRegistryMutationError(ModelRegistryIntegrityError):
+    """Raised when exclusive registry mutation cannot be acquired or published."""
 
 
 @dataclass(frozen=True)
 class ModelRegistryEntry:
-    """Metadata for one locally registered model artifact."""
+    """Immutable identity and managed location of one registered model artifact."""
 
+    model_name: str
     model_version: str
     model_type: str
+    model_family: str
+    feature_contract_version: str
+    artifact_sha256: str
     artifact_path: str
-    metrics: dict[str, Any]
-    training_metadata: dict[str, Any]
-    created_at: str
-    role: str
+
+    @property
+    def logical_identity(self) -> ModelLogicalIdentity:
+        return ModelLogicalIdentity(self.model_name, self.model_version)
+
+    @property
+    def artifact_identity(self) -> ModelArtifactIdentity:
+        return ModelArtifactIdentity(
+            model_name=self.model_name,
+            model_version=self.model_version,
+            model_type=self.model_type,
+            model_family=self.model_family,
+            feature_contract_version=self.feature_contract_version,
+            artifact_sha256=self.artifact_sha256,
+        )
 
 
 class ModelRegistry:
-    """Simple local file-backed model registry."""
+    """Bounded local registry with exact-byte integrity and serialized mutation."""
 
+    SCHEMA_VERSION = 2
     INDEX_NAME = "registry.json"
+    LOCK_NAME = ".registry.lock"
+    INDEX_FIELDS = frozenset({"schemaVersion", "models"})
+    ENTRY_FIELDS = frozenset(ModelRegistryEntry.__dataclass_fields__)
 
-    def __init__(self, root: Path) -> None:
-        self.root = root
-        self.artifacts_root = root / "artifacts"
-        self.index_path = root / self.INDEX_NAME
+    def __init__(
+            self,
+            root: Path,
+            max_artifact_bytes: int = MAX_MODEL_ARTIFACT_BYTES,
+            max_index_bytes: int = DEFAULT_MAX_REGISTRY_INDEX_BYTES,
+            max_entries: int = DEFAULT_MAX_REGISTRY_ENTRIES,
+            mutation_lock_timeout_seconds: float = DEFAULT_MUTATION_LOCK_TIMEOUT_SECONDS,
+    ) -> None:
+        if min(max_artifact_bytes, max_index_bytes, max_entries) < 1:
+            raise ValueError("Registry size and entry limits must be positive.")
+        if mutation_lock_timeout_seconds <= 0:
+            raise ValueError("Registry mutation lock timeout must be positive.")
+        self.root = root.resolve()
+        self.artifacts_root = self.root / "artifacts"
+        self.index_path = self.root / self.INDEX_NAME
+        self.lock_path = self.root / self.LOCK_NAME
+        self.max_artifact_bytes = max_artifact_bytes
+        self.max_index_bytes = max_index_bytes
+        self.max_entries = max_entries
+        self.mutation_lock_timeout_seconds = mutation_lock_timeout_seconds
 
     def register(
             self,
             artifact_path: Path,
-            model_version: str,
-            model_type: str,
-            metrics: dict[str, Any] | None = None,
-            training_metadata: dict[str, Any] | None = None,
-            role: str = "challenger",
     ) -> ModelRegistryEntry:
-        """Copy an artifact into the registry and record metadata."""
-        self.artifacts_root.mkdir(parents=True, exist_ok=True)
-        target = self.artifacts_root / f"{model_version}.json"
-        if artifact_path.resolve() != target.resolve():
-            shutil.copyfile(artifact_path, target)
-
-        entry = ModelRegistryEntry(
-            model_version=model_version,
-            model_type=model_type,
-            artifact_path=str(target),
-            metrics=metrics or {},
-            training_metadata=training_metadata or {},
-            created_at=datetime.now(timezone.utc).isoformat(),
-            role=role,
-        )
-        entries = [existing for existing in self.entries() if existing.model_version != model_version]
-        if role == "champion":
-            entries = [self._with_role(existing, "archived") if existing.role == "champion" else existing for existing in entries]
-        entries.append(entry)
-        self._write_entries(entries)
-        return entry
-
-    def latest(self) -> ModelRegistryEntry | None:
-        """Load the most recently registered model."""
-        entries = self.entries()
-        return max(entries, key=lambda item: item.created_at) if entries else None
-
-    def by_version(self, model_version: str) -> ModelRegistryEntry | None:
-        """Load a registry entry by model version."""
-        for entry in self.entries():
-            if entry.model_version == model_version:
-                return entry
-        return None
-
-    def champion(self) -> ModelRegistryEntry | None:
-        """Load the champion model entry."""
-        return self._by_role("champion")
-
-    def challenger(self) -> ModelRegistryEntry | None:
-        """Load the challenger model entry."""
-        return self._by_role("challenger")
-
-    def promote(self, model_version: str) -> ModelRegistryEntry:
-        """Promote an existing model version to champion."""
-        entries = self.entries()
-        promoted: ModelRegistryEntry | None = None
-        updated: list[ModelRegistryEntry] = []
-        for entry in entries:
-            if entry.model_version == model_version:
-                promoted = self._with_role(entry, "champion")
-                updated.append(promoted)
-            elif entry.role == "champion":
-                updated.append(self._with_role(entry, "archived"))
+        """Publish artifact-derived immutable identity or return its existing entry."""
+        loaded = load_model_artifact(artifact_path, max_bytes=self.max_artifact_bytes)
+        with self._mutation_lock():
+            index_was_present = self.index_path.exists() or self.index_path.is_symlink()
+            entries = self.entries()
+            index_is_present = self.index_path.exists() or self.index_path.is_symlink()
+            if index_was_present != index_is_present:
+                raise ModelRegistryMutationError(
+                    "Registry index changed while authoritative state was being loaded."
+                )
+            if index_is_present:
+                self._validate_no_unindexed_artifacts(entries)
+            existing = next(
+                (entry for entry in entries if entry.logical_identity == loaded.logical_identity),
+                None,
+            )
+            if existing is not None:
+                self._resolve_entry(existing)
+                if existing.artifact_identity != loaded.artifact_identity:
+                    raise ModelRegistryConflictError(
+                        "Model logical identity is already registered with different immutable artifact identity: "
+                        f"{loaded.logical_identity.model_name}/{loaded.logical_identity.model_version}"
+                    )
+                validate_loaded_model_artifact(loaded)
+                return existing
+            if len(entries) >= self.max_entries:
+                raise ModelRegistryIntegrityError(
+                    f"Registry entry limit of {self.max_entries} would be exceeded."
+                )
+            validated = validate_loaded_model_artifact(loaded)
+            target = self._artifact_target(validated.logical_identity)
+            created_artifact = False
+            self.artifacts_root.mkdir(parents=True, exist_ok=True)
+            if target.exists() or target.is_symlink():
+                canonical_target = self._managed_artifact_path(target, must_exist=True)
+                target_artifact = load_validated_model_artifact(
+                    canonical_target,
+                    max_bytes=self.max_artifact_bytes,
+                )
+                if target_artifact.artifact_identity != validated.artifact_identity:
+                    raise ModelRegistryConflictError(
+                        "Registry artifact destination already contains different immutable artifact bytes: "
+                        f"{validated.logical_identity.model_name}/{validated.logical_identity.model_version}"
+                    )
             else:
-                updated.append(entry)
-        if promoted is None:
-            raise ValueError(f"Unknown model version: {model_version}")
-        self._write_entries(updated)
-        return promoted
+                self._managed_artifact_path(target, must_exist=False)
+                created_artifact = True
+                try:
+                    self._atomic_write_bytes(
+                        target,
+                        validated.exact_bytes,
+                        replace_existing=False,
+                        label="model artifact",
+                    )
+                except Exception as publication_error:
+                    self._rollback_uncommitted_artifact(
+                        target,
+                        publication_error,
+                        initialization_without_index=not index_is_present,
+                    )
+                    raise
+
+            entry = ModelRegistryEntry(
+                model_name=validated.artifact_identity.model_name,
+                model_version=validated.artifact_identity.model_version,
+                model_type=validated.artifact_identity.model_type,
+                model_family=validated.artifact_identity.model_family,
+                feature_contract_version=validated.artifact_identity.feature_contract_version,
+                artifact_sha256=validated.artifact_sha256,
+                artifact_path=str(target.resolve(strict=True)),
+            )
+            entries.append(entry)
+            try:
+                self._write_entries(entries)
+            except Exception as publication_error:
+                if created_artifact:
+                    self._rollback_uncommitted_artifact(
+                        target,
+                        publication_error,
+                        initialization_without_index=not index_is_present,
+                    )
+                raise
+            return entry
+
+    def resolve(self, entry: ModelRegistryEntry) -> ValidatedModelArtifact:
+        """Resolve and verify exact registered bytes before model construction."""
+        authoritative = self.by_identity(entry.model_name, entry.model_version)
+        if authoritative is None or authoritative != entry:
+            raise ModelRegistryIntegrityError(
+                f"Registry entry is not authoritative for {entry.model_name}/{entry.model_version}."
+            )
+        return self._resolve_entry(authoritative)
+
+    def _resolve_entry(self, entry: ModelRegistryEntry) -> ValidatedModelArtifact:
+        artifact_path = self._managed_artifact_path(entry.artifact_path, must_exist=True)
+        try:
+            validated = load_validated_model_artifact(artifact_path, max_bytes=self.max_artifact_bytes)
+        except ModelConfigurationError as exception:
+            raise ModelRegistryIntegrityError(
+                f"Registered artifact is invalid for {entry.model_name}/{entry.model_version}."
+            ) from exception
+        if validated.artifact_sha256 != entry.artifact_sha256:
+            raise ModelRegistryIntegrityError(
+                f"Registered artifact digest mismatch for {entry.model_name}/{entry.model_version}."
+            )
+        if validated.artifact_identity != entry.artifact_identity:
+            raise ModelRegistryIntegrityError(
+                f"Registered artifact metadata mismatch for {entry.model_name}/{entry.model_version}."
+            )
+        return validated
+
+    def by_identity(self, model_name: str, model_version: str) -> ModelRegistryEntry | None:
+        """Load a registry entry by exact logical identity."""
+        requested = ModelLogicalIdentity(model_name, model_version)
+        return next((entry for entry in self.entries() if entry.logical_identity == requested), None)
 
     def entries(self) -> list[ModelRegistryEntry]:
-        """Load all registry entries."""
-        if not self.index_path.exists():
+        """Load bounded registry state and reject corruption as non-empty failure."""
+        if not self.index_path.exists() and not self.index_path.is_symlink():
+            self._validate_empty_registry_without_index()
             return []
-        payload = json.loads(self.index_path.read_text(encoding="utf-8"))
-        rows = payload.get("models", []) if isinstance(payload, dict) else []
-        return [ModelRegistryEntry(**row) for row in rows]
+        index_path = self._contained_regular_file(self.index_path, self.root, "registry index")
+        index_bytes = self._read_bounded(index_path, self.max_index_bytes, "Registry index")
+        try:
+            payload = json.loads(index_bytes)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exception:
+            raise ModelRegistryIntegrityError("Registry index is not valid JSON.") from exception
+        if not isinstance(payload, dict):
+            raise ModelRegistryIntegrityError("Registry index must be a JSON object.")
+        if "schemaVersion" not in payload:
+            raise ModelRegistryIntegrityError("Registry index schemaVersion is required.")
+        schema_version = payload["schemaVersion"]
+        if type(schema_version) is not int:
+            raise ModelRegistryIntegrityError("Registry index schemaVersion must be an integer.")
+        if schema_version != self.SCHEMA_VERSION:
+            raise ModelRegistryIntegrityError(
+                f"Registry index schemaVersion {schema_version} is unsupported."
+            )
+        if frozenset(payload) != self.INDEX_FIELDS:
+            raise ModelRegistryIntegrityError("Registry index fields do not match schema version 2.")
+        if not isinstance(payload.get("models"), list):
+            raise ModelRegistryIntegrityError("Registry index must contain a models array.")
+        if len(payload["models"]) > self.max_entries:
+            raise ModelRegistryIntegrityError(
+                f"Registry entry limit of {self.max_entries} is exceeded."
+            )
+        entries: list[ModelRegistryEntry] = []
+        logical_identities: set[ModelLogicalIdentity] = set()
+        for row in payload["models"]:
+            if not isinstance(row, dict):
+                raise ModelRegistryIntegrityError("Registry entry must be an object.")
+            if frozenset(row) != self.ENTRY_FIELDS:
+                raise ModelRegistryIntegrityError(
+                    "Registry entry fields do not match schema version 2."
+                )
+            try:
+                entry = ModelRegistryEntry(**row)
+                artifact_identity = entry.artifact_identity
+                if not isinstance(entry.artifact_path, str) or not entry.artifact_path.strip():
+                    raise ValueError("artifact_path is required")
+            except (TypeError, ValueError) as exception:
+                raise ModelRegistryIntegrityError(
+                    "Registry entry uses an unsupported or invalid identity schema."
+                ) from exception
+            self._managed_artifact_path(entry.artifact_path, must_exist=True)
+            if artifact_identity.logical_identity in logical_identities:
+                raise ModelRegistryIntegrityError(
+                    "Registry contains duplicate logical model identity: "
+                    f"{entry.model_name}/{entry.model_version}"
+                )
+            logical_identities.add(artifact_identity.logical_identity)
+            entries.append(entry)
+        return entries
 
-    def _by_role(self, role: str) -> ModelRegistryEntry | None:
-        candidates = [entry for entry in self.entries() if entry.role == role]
-        return max(candidates, key=lambda item: item.created_at) if candidates else None
+    def _validate_empty_registry_without_index(self) -> None:
+        if not self.root.exists() and not self.root.is_symlink():
+            return
+        if self.root.is_symlink() or not self.root.is_dir():
+            raise ModelRegistryIntegrityError(
+                "Registry root without an index must be a non-symlink directory."
+            )
+
+        scan_limit = max(
+            MIN_UNINDEXED_ARTIFACT_SCAN_LIMIT,
+            self.max_entries * UNINDEXED_ARTIFACT_ENTRY_MULTIPLIER,
+        )
+        with os.scandir(self.root) as candidates:
+            for inspected, candidate in enumerate(candidates, start=1):
+                if inspected > scan_limit:
+                    raise ModelRegistryIntegrityError(
+                        f"Registry without an index exceeds bounded scan limit of {scan_limit} entries."
+                    )
+                path = Path(candidate.path)
+                if candidate.name == self.LOCK_NAME:
+                    if candidate.is_symlink() or not candidate.is_file(follow_symlinks=False):
+                        raise ModelRegistryIntegrityError(
+                            "Registry mutation lock must be a regular non-symlink file."
+                        )
+                    continue
+                if path == self.artifacts_root:
+                    self._validate_empty_artifacts_without_index()
+                    continue
+                raise ModelRegistryIntegrityError(
+                    "Registry without an index contains unsupported state."
+                )
+
+    def _validate_empty_artifacts_without_index(self) -> None:
+        if self.artifacts_root.is_symlink() or not self.artifacts_root.is_dir():
+            raise ModelRegistryIntegrityError(
+                "Registry artifacts root without an index must be a non-symlink directory."
+            )
+        with os.scandir(self.artifacts_root) as artifacts:
+            if next(artifacts, None) is not None:
+                raise ModelRegistryIntegrityError(
+                    "Registry artifacts exist without an authoritative registry index."
+                )
+
+    def _artifact_target(self, identity: ModelLogicalIdentity) -> Path:
+        return self.artifacts_root / f"{identity.model_name}--{identity.model_version}.json"
+
+    def _validate_no_unindexed_artifacts(self, entries: list[ModelRegistryEntry]) -> None:
+        if not self.artifacts_root.exists() and not self.artifacts_root.is_symlink():
+            return
+        if self.artifacts_root.is_symlink() or not self.artifacts_root.is_dir():
+            raise ModelRegistryIntegrityError("Registry artifacts root must be a non-symlink directory.")
+        authoritative_paths = {
+            self._managed_artifact_path(entry.artifact_path, must_exist=True)
+            for entry in entries
+        }
+        scan_limit = max(
+            MIN_UNINDEXED_ARTIFACT_SCAN_LIMIT,
+            self.max_entries * UNINDEXED_ARTIFACT_ENTRY_MULTIPLIER,
+        )
+        with os.scandir(self.artifacts_root) as candidates:
+            for inspected, candidate in enumerate(candidates, start=1):
+                if inspected > scan_limit:
+                    raise ModelRegistryIntegrityError(
+                        f"Registry artifact validation exceeds bounded scan limit of {scan_limit} entries."
+                    )
+                path = Path(candidate.path)
+                if candidate.is_symlink() or not candidate.is_file(follow_symlinks=False):
+                    raise ModelRegistryIntegrityError(
+                        "Registry artifacts root contains an unsupported non-regular entry."
+                    )
+                canonical_path = path.resolve(strict=True)
+                self._require_contained(canonical_path, self.artifacts_root.resolve(strict=True), "registry artifact")
+                if canonical_path in authoritative_paths:
+                    continue
+                raise ModelRegistryIntegrityError(
+                    "Registry contains an unindexed managed artifact; controlled recovery is required."
+                )
+
+    def _rollback_uncommitted_artifact(
+            self,
+            target: Path,
+            publication_error: Exception,
+            initialization_without_index: bool = False,
+    ) -> None:
+        if initialization_without_index and not self.index_path.exists() and not self.index_path.is_symlink():
+            self._delete_uncommitted_artifact(target, publication_error)
+            return
+        try:
+            authoritative_entries = self.entries()
+        except Exception as inspection_error:
+            rollback_error = ModelRegistryMutationError(
+                "Registry publication failed and authoritative index state could not be re-inspected; "
+                "the candidate artifact was retained."
+            )
+            rollback_error.add_note(
+                f"Original publication failure: {type(publication_error).__name__}."
+            )
+            raise rollback_error from inspection_error
+
+        authoritative_paths = {
+            self._managed_artifact_path(entry.artifact_path, must_exist=True)
+            for entry in authoritative_entries
+        }
+        if target.exists() or target.is_symlink():
+            if target.is_symlink():
+                rollback_error = ModelRegistryMutationError(
+                    "Registry publication failed and candidate artifact rollback encountered a symbolic link."
+                )
+                rollback_error.add_note(
+                    f"Original publication failure: {type(publication_error).__name__}."
+                )
+                raise rollback_error
+            canonical_target = self._managed_artifact_path(target, must_exist=True)
+            if canonical_target in authoritative_paths:
+                return
+            self._delete_uncommitted_artifact(target, publication_error)
+
+    def _delete_uncommitted_artifact(self, target: Path, publication_error: Exception) -> None:
+        if not target.exists() and not target.is_symlink():
+            return
+        if target.is_symlink():
+            rollback_error = ModelRegistryMutationError(
+                "Registry publication failed and candidate artifact rollback encountered a symbolic link."
+            )
+            rollback_error.add_note(
+                f"Original publication failure: {type(publication_error).__name__}."
+            )
+            raise rollback_error
+        self._managed_artifact_path(target, must_exist=True)
+        try:
+            target.unlink()
+            self._fsync_directory(self.artifacts_root)
+        except OSError as cleanup_error:
+            rollback_error = ModelRegistryMutationError(
+                "Registry publication failed and the uncommitted artifact rollback also failed."
+            )
+            rollback_error.add_note(
+                f"Original publication failure: {type(publication_error).__name__}."
+            )
+            raise rollback_error from cleanup_error
+
+    def _managed_artifact_path(self, raw_path: str | Path, must_exist: bool) -> Path:
+        path = Path(raw_path)
+        if not path.is_absolute():
+            path = self.root / path
+        if path.is_symlink():
+            raise ModelRegistryIntegrityError("Registry-managed artifact must not be a symbolic link.")
+        if must_exist:
+            return self._contained_regular_file(path, self.artifacts_root, "registry artifact")
+        self.artifacts_root.mkdir(parents=True, exist_ok=True)
+        canonical_root = self.artifacts_root.resolve(strict=True)
+        canonical_parent = path.parent.resolve(strict=True)
+        self._require_contained(canonical_parent, canonical_root, "registry artifact")
+        return canonical_parent / path.name
+
+    def _contained_regular_file(self, path: Path, root: Path, label: str) -> Path:
+        try:
+            canonical_root = root.resolve(strict=True)
+            canonical_path = path.resolve(strict=True)
+        except OSError as exception:
+            raise ModelRegistryIntegrityError(f"{label.capitalize()} cannot be resolved.") from exception
+        self._require_contained(canonical_path, canonical_root, label)
+        if path.is_symlink() or not canonical_path.is_file():
+            raise ModelRegistryIntegrityError(f"{label.capitalize()} must be a regular non-symlink file.")
+        return canonical_path
+
+    def _require_contained(self, path: Path, root: Path, label: str) -> None:
+        try:
+            path.relative_to(root)
+        except ValueError as exception:
+            raise ModelRegistryIntegrityError(f"{label.capitalize()} escapes the configured registry root.") from exception
+
+    def _read_bounded(self, path: Path, max_bytes: int, label: str) -> bytes:
+        try:
+            with path.open("rb") as source:
+                payload = source.read(max_bytes + 1)
+        except OSError as exception:
+            raise ModelRegistryIntegrityError(f"{label} cannot be read.") from exception
+        if len(payload) > max_bytes:
+            raise ModelRegistryIntegrityError(f"{label} exceeds maximum size of {max_bytes} bytes.")
+        return payload
 
     def _write_entries(self, entries: list[ModelRegistryEntry]) -> None:
+        if len(entries) > self.max_entries:
+            raise ModelRegistryIntegrityError(
+                f"Registry entry limit of {self.max_entries} is exceeded."
+            )
+        payload = {
+            "schemaVersion": self.SCHEMA_VERSION,
+            "models": [
+                asdict(entry)
+                for entry in sorted(entries, key=lambda item: (item.model_name, item.model_version))
+            ]
+        }
+        try:
+            index_bytes = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        except (TypeError, ValueError) as exception:
+            raise ModelRegistryIntegrityError("Registry metadata is not JSON serializable.") from exception
+        if len(index_bytes) > self.max_index_bytes:
+            raise ModelRegistryIntegrityError(
+                f"Registry index exceeds maximum size of {self.max_index_bytes} bytes."
+            )
         self.root.mkdir(parents=True, exist_ok=True)
-        payload = {"models": [asdict(entry) for entry in sorted(entries, key=lambda item: item.created_at)]}
-        self.index_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        self._atomic_write_bytes(self.index_path, index_bytes, replace_existing=True, label="registry index")
 
-    def _with_role(self, entry: ModelRegistryEntry, role: str) -> ModelRegistryEntry:
-        return ModelRegistryEntry(
-            model_version=entry.model_version,
-            model_type=entry.model_type,
-            artifact_path=entry.artifact_path,
-            metrics=entry.metrics,
-            training_metadata=entry.training_metadata,
-            created_at=entry.created_at,
-            role=role,
+    def _atomic_write_bytes(self, target: Path, payload: bytes, replace_existing: bool, label: str) -> None:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=target.parent,
+            prefix=f".{target.name}.",
+            suffix=".tmp",
         )
+        temporary_path = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "wb") as destination:
+                destination.write(payload)
+                destination.flush()
+                os.fsync(destination.fileno())
+            if not replace_existing and (target.exists() or target.is_symlink()):
+                raise ModelRegistryConflictError(f"{label.capitalize()} already exists.")
+            os.replace(temporary_path, target)
+            self._fsync_directory(target.parent)
+        except ModelRegistryIntegrityError:
+            raise
+        except OSError as exception:
+            raise ModelRegistryMutationError(f"Failed to publish {label} atomically.") from exception
+        finally:
+            temporary_path.unlink(missing_ok=True)
+
+    def _fsync_directory(self, directory: Path) -> None:
+        if os.name == "nt":
+            return
+        descriptor = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    @contextmanager
+    def _mutation_lock(self) -> Iterator[None]:
+        self.root.mkdir(parents=True, exist_ok=True)
+        process_lock = _process_lock(self.root)
+        if not process_lock.acquire(timeout=self.mutation_lock_timeout_seconds):
+            raise ModelRegistryMutationError("Timed out acquiring in-process registry mutation lock.")
+        lock_file: BinaryIO | None = None
+        locked = False
+        operation_failed = False
+        try:
+            lock_file = self.lock_path.open("a+b")
+            _ensure_lock_byte(lock_file)
+            deadline = time.monotonic() + self.mutation_lock_timeout_seconds
+            while not locked:
+                locked = _try_lock_file(lock_file)
+                if locked:
+                    break
+                if time.monotonic() >= deadline:
+                    raise ModelRegistryMutationError("Timed out acquiring inter-process registry mutation lock.")
+                time.sleep(LOCK_POLL_INTERVAL_SECONDS)
+            yield
+        except OSError as exception:
+            operation_failed = True
+            raise ModelRegistryMutationError("Registry mutation lock failed.") from exception
+        except BaseException:
+            operation_failed = True
+            raise
+        finally:
+            cleanup_error: OSError | None = None
+            try:
+                if locked and lock_file is not None:
+                    try:
+                        _unlock_file(lock_file)
+                    except OSError as exception:
+                        cleanup_error = exception
+                if lock_file is not None:
+                    try:
+                        lock_file.close()
+                    except OSError as exception:
+                        cleanup_error = cleanup_error or exception
+            finally:
+                process_lock.release()
+            if cleanup_error is not None and not operation_failed:
+                raise ModelRegistryMutationError("Registry mutation lock cleanup failed.") from cleanup_error
+
+def _process_lock(root: Path) -> threading.Lock:
+    with _PROCESS_LOCKS_GUARD:
+        return _PROCESS_LOCKS.setdefault(root, threading.Lock())
+
+
+def _ensure_lock_byte(lock_file: BinaryIO) -> None:
+    lock_file.seek(0, os.SEEK_END)
+    if lock_file.tell() == 0:
+        lock_file.write(b"\0")
+        lock_file.flush()
+        os.fsync(lock_file.fileno())
+
+
+def _try_lock_file(lock_file: BinaryIO) -> bool:
+    lock_file.seek(0)
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
+
+
+def _unlock_file(lock_file: BinaryIO) -> None:
+    lock_file.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def default_registry_path() -> Path:

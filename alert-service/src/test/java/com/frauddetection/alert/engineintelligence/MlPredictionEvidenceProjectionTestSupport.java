@@ -14,7 +14,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDelt
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
 
 import java.time.Instant;
 import java.util.List;
@@ -33,6 +33,13 @@ final class MlPredictionEvidenceProjectionTestSupport {
     }
 
     static TransactionScoredEvent eventWithoutEvidence(String eventId) {
+        return eventWithoutEvidence(eventId, MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED);
+    }
+
+    static TransactionScoredEvent eventWithoutEvidence(
+            String eventId,
+            MlPredictionEvidenceOmissionReason omissionReason
+    ) {
         TransactionScoredEvent source = event(eventId, 0.8123d, "model-v1");
         return new TransactionScoredEvent(
                 source.eventId(),
@@ -60,7 +67,7 @@ final class MlPredictionEvidenceProjectionTestSupport {
                 source.scoringEvidence(),
                 source.engineIntelligence(),
                 null,
-                MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED,
+                omissionReason,
                 source.analystRecommendation()
         );
     }
@@ -110,10 +117,11 @@ final class MlPredictionEvidenceProjectionTestSupport {
                 List.of(),
                 List.of()
         );
-        MlPredictionEvidenceV1 evidence = new MlPredictionEvidenceV1(
+        MlPredictionEvidence evidence = new MlPredictionEvidence(
                 score,
                 RiskLevel.HIGH,
                 identity,
+                "a".repeat(64),
                 EXECUTED_AT
         );
         return new TransactionScoredEvent(

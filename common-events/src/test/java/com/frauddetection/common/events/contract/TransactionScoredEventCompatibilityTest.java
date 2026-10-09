@@ -146,6 +146,7 @@ class TransactionScoredEventCompatibilityTest {
     private String currentJson() {
         return """
                 {
+                  "eventContractVersion": 2,
                   "eventId": "evt-1",
                   "transactionId": "txn-1",
                   "correlationId": "corr-1",

@@ -647,7 +647,7 @@ How to detect it:
 
 Likely causes:
 - wrong artifact bundled into image
-- stale registry or champion selection mismatch
+- configured exact registry identity does not match the intended release artifact
 - manual local override left active
 
 Immediate response:

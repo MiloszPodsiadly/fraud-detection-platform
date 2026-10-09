@@ -22,6 +22,7 @@ public class PlaceholderMlModelScoringClient implements MlModelScoringClient {
                 null,
                 null,
                 null,
+                null,
                 Instant.now(),
                 List.of(ReasonCode.ML_MODEL_UNAVAILABLE.wireValue()),
                 Map.of(

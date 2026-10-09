@@ -98,6 +98,10 @@ final class FeedbackDatasetSafety {
         }
     }
 
+    static String optionalModelArtifactSha256(String value, String fieldName) {
+        return MlModelIdentityPolicy.optionalArtifactSha256(value, fieldName);
+    }
+
     private static String requireMachineCode(String value, String fieldName) {
         if (value == null || !MACHINE_CODE.matcher(value).matches()) {
             throw new IllegalArgumentException(fieldName + " must use bounded UPPER_SNAKE_CASE");

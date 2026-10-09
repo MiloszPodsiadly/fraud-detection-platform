@@ -14,6 +14,7 @@ public record MlModelOutput(
         String modelName,
         String modelVersion,
         String featureContractVersion,
+        String modelArtifactSha256,
         Instant inferenceTimestamp,
         List<String> reasonCodes,
         Map<String, Object> scoreDetails,
@@ -27,7 +28,16 @@ public record MlModelOutput(
                 featureContractVersion,
                 "featureContractVersion"
         );
-        validateAtomicModelIdentity(modelName, modelVersion, featureContractVersion);
+        modelArtifactSha256 = MlModelIdentityPolicy.optionalArtifactSha256(
+                modelArtifactSha256,
+                "modelArtifactSha256"
+        );
+        MlModelIdentityPolicy.requireAtomicArtifactIdentity(
+                modelName,
+                modelVersion,
+                featureContractVersion,
+                modelArtifactSha256
+        );
     }
 
     public MlModelOutput(
@@ -49,6 +59,7 @@ public record MlModelOutput(
                 modelName,
                 modelVersion,
                 null,
+                null,
                 inferenceTimestamp,
                 reasonCodes,
                 scoreDetails,
@@ -57,17 +68,4 @@ public record MlModelOutput(
         );
     }
 
-    private static void validateAtomicModelIdentity(
-            String modelName,
-            String modelVersion,
-            String featureContractVersion
-    ) {
-        int present = 0;
-        present += modelName == null ? 0 : 1;
-        present += modelVersion == null ? 0 : 1;
-        present += featureContractVersion == null ? 0 : 1;
-        if (present != 0 && present != 3) {
-            throw new IllegalArgumentException("ML model identity must be entirely absent or complete");
-        }
-    }
 }

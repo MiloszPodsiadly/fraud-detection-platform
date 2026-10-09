@@ -17,7 +17,9 @@ class MicrometerFeedbackDatasetMetricsRecorderTest {
     @Test
     void recordsOnlyBoundedBuildResultsAndEvidenceStatuses() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
-        FeedbackDatasetRecord available = record(FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE);
+        FeedbackDatasetRecord available = record(
+                FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE
+        );
         FeedbackDatasetRecord missing = record(FeedbackDatasetMlPredictionEvidenceStatus.MISSING_UNEXPECTEDLY);
         FeedbackDatasetBuildResult success = result(FeedbackDatasetBuildFailureReason.NONE, List.of(available, missing));
         FeedbackDatasetBuildResult failure = result(

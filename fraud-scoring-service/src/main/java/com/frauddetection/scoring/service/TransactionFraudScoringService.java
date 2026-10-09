@@ -4,7 +4,7 @@ import com.frauddetection.common.events.contract.TransactionEnrichedEvent;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import com.frauddetection.scoring.domain.FraudScoreResult;
 import com.frauddetection.scoring.domain.FraudScoringRequest;
@@ -134,7 +134,7 @@ public class TransactionFraudScoringService implements TransactionFraudScoringUs
         return emission.enrichment().map(EngineIntelligenceEnrichmentResult::engineIntelligenceSummary);
     }
 
-    private Optional<MlPredictionEvidenceV1> mlPredictionEvidence(EngineIntelligenceEmissionResult emission) {
+    private Optional<MlPredictionEvidence> mlPredictionEvidence(EngineIntelligenceEmissionResult emission) {
         return emission.enrichment().flatMap(EngineIntelligenceEnrichmentResult::mlPredictionEvidence);
     }
 

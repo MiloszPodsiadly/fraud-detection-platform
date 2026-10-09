@@ -67,6 +67,7 @@ public class FraudFeedbackRecord {
     private String mlModelName;
     private String mlModelVersion;
     private String mlFeatureContractVersion;
+    private String mlModelArtifactSha256;
     private MlPredictionEvidenceOmissionReason mlPredictionEvidenceOmissionReason;
     private AnalystRecommendationStatus analystRecommendationStatus;
     private AnalystRecommendation analystRecommendation;
@@ -176,6 +177,8 @@ public class FraudFeedbackRecord {
     public void setMlModelVersion(String mlModelVersion) { this.mlModelVersion = mlModelVersion; }
     public String getMlFeatureContractVersion() { return mlFeatureContractVersion; }
     public void setMlFeatureContractVersion(String mlFeatureContractVersion) { this.mlFeatureContractVersion = mlFeatureContractVersion; }
+    public String getMlModelArtifactSha256() { return mlModelArtifactSha256; }
+    public void setMlModelArtifactSha256(String modelArtifactSha256) { this.mlModelArtifactSha256 = modelArtifactSha256; }
     public MlPredictionEvidenceOmissionReason getMlPredictionEvidenceOmissionReason() { return mlPredictionEvidenceOmissionReason; }
     public void setMlPredictionEvidenceOmissionReason(MlPredictionEvidenceOmissionReason reason) { this.mlPredictionEvidenceOmissionReason = reason; }
     public AnalystRecommendationStatus getAnalystRecommendationStatus() { return analystRecommendationStatus; }

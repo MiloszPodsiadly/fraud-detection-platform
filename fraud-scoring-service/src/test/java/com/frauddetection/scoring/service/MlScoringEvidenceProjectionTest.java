@@ -29,6 +29,7 @@ class MlScoringEvidenceProjectionTest {
                 "python-logistic-fraud-model",
                 "test-version",
                 FEATURE_CONTRACT_VERSION,
+                "a".repeat(64),
                 Instant.now(),
                 Arrays.asList(
                         "MODEL_HIGH_RISK",

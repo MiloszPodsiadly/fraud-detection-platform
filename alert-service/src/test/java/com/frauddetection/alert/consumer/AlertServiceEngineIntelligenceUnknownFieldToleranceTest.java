@@ -20,7 +20,7 @@ class AlertServiceEngineIntelligenceUnknownFieldToleranceTest {
     @Test
     void consumerToleratesUnknownTopLevelFieldIfContractRequiresIt() {
         assertThat(AlertServiceTransactionScoredEventFixtureLoader.unknownTopLevelField().transactionId())
-                .isEqualTo("txn-fdp93-001");
+                .isEqualTo("txn-engine-intelligence-contract-001");
     }
 
     @Test

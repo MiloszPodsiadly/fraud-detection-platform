@@ -6,7 +6,9 @@ import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
+import com.frauddetection.common.events.ml.MlModelIdentityPolicy;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 
@@ -21,7 +23,9 @@ public record NormalizedFraudEngineResult(
         List<BoundedFraudEngineEvidenceSummary> evidence,
         List<BoundedFraudEngineContributionSummary> contributions,
         Long latencyMs,
-        MlModelIdentity modelIdentity
+        MlModelIdentity modelIdentity,
+        String modelArtifactSha256,
+        Instant sourceInferenceTimestamp
 ) {
     private static final int MAX_REASON_CODES = 32;
     private static final int MAX_EVIDENCE_ITEMS = 16;
@@ -52,7 +56,17 @@ public record NormalizedFraudEngineResult(
         requireSize(reasonCodes, MAX_REASON_CODES, "reasonCodes");
         requireSize(evidence, MAX_EVIDENCE_ITEMS, "evidence");
         requireSize(contributions, MAX_CONTRIBUTIONS, "contributions");
-        validateModelIdentity(engineType, status, modelIdentity);
+        modelArtifactSha256 = MlModelIdentityPolicy.optionalArtifactSha256(
+                modelArtifactSha256,
+                "modelArtifactSha256"
+        );
+        validateModelIdentity(
+                engineType,
+                status,
+                modelIdentity,
+                modelArtifactSha256,
+                sourceInferenceTimestamp
+        );
         FraudEngineReasonCodeNormalizer reasonCodeNormalizer = new FraudEngineReasonCodeNormalizer();
         if (reasonCodes.stream().anyMatch(reasonCode ->
                 !FraudEngineAggregationSafety.isSafe(reasonCode) || !reasonCodeNormalizer.isAllowed(reasonCode))) {
@@ -83,6 +97,8 @@ public record NormalizedFraudEngineResult(
                 evidence,
                 contributions,
                 latencyMs,
+                null,
+                null,
                 null
         );
     }
@@ -104,15 +120,25 @@ public record NormalizedFraudEngineResult(
     private static void validateModelIdentity(
             FraudEngineType engineType,
             FraudEngineStatus status,
-            MlModelIdentity modelIdentity
+            MlModelIdentity modelIdentity,
+            String modelArtifactSha256,
+            Instant sourceInferenceTimestamp
     ) {
-        if (engineType == FraudEngineType.ML_MODEL && status == FraudEngineStatus.AVAILABLE && modelIdentity == null) {
-            throw new IllegalArgumentException("AGGREGATION_AVAILABLE_ML_MODEL_IDENTITY_REQUIRED");
+        if (engineType == FraudEngineType.ML_MODEL && status == FraudEngineStatus.AVAILABLE) {
+            if (modelIdentity == null || modelArtifactSha256 == null) {
+                throw new IllegalArgumentException("AGGREGATION_AVAILABLE_ML_MODEL_IDENTITY_REQUIRED");
+            }
+            if (sourceInferenceTimestamp == null) {
+                throw new IllegalArgumentException("AGGREGATION_AVAILABLE_ML_SOURCE_TIMESTAMP_REQUIRED");
+            }
         }
-        if (engineType != FraudEngineType.ML_MODEL && modelIdentity != null) {
+        if (engineType != FraudEngineType.ML_MODEL
+                && (modelIdentity != null || modelArtifactSha256 != null || sourceInferenceTimestamp != null)) {
             throw new IllegalArgumentException("AGGREGATION_NON_ML_MODEL_IDENTITY_INVALID");
         }
-        if (engineType == FraudEngineType.ML_MODEL && status != FraudEngineStatus.AVAILABLE && modelIdentity != null) {
+        if (engineType == FraudEngineType.ML_MODEL
+                && status != FraudEngineStatus.AVAILABLE
+                && (modelIdentity != null || modelArtifactSha256 != null || sourceInferenceTimestamp != null)) {
             throw new IllegalArgumentException("AGGREGATION_OPERATIONAL_ML_MODEL_IDENTITY_INVALID");
         }
     }

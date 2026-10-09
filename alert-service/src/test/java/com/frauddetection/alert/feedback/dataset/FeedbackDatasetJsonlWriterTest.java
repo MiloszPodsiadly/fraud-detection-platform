@@ -93,7 +93,7 @@ class FeedbackDatasetJsonlWriterTest {
 
         assertThat(jsonl.lines().findFirst().orElseThrow())
                 .contains("\"type\":\"DATASET_METADATA\"")
-                .contains("\"datasetVersion\":\"feedback-dataset-v2\"")
+                .contains("\"datasetVersion\":\"feedback-dataset-v3\"")
                 .contains("\"timeBasis\":\"FEEDBACK_CREATED_AT\"")
                 .contains("\"skippedInvalidSourceRecordCount\":0");
     }
@@ -266,7 +266,9 @@ class FeedbackDatasetJsonlWriterTest {
                 FeedbackDatasetRulesEvidenceStatus.UNAVAILABLE,
                 null,
                 FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT,
+                null,
                 MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                null,
                 null,
                 null,
                 null,
@@ -302,6 +304,7 @@ class FeedbackDatasetJsonlWriterTest {
                 FeedbackDatasetRulesEvidenceStatus.AVAILABLE,
                 RiskLevel.LOW,
                 FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE,
+                FeedbackDatasetMlPredictionEvidenceResolutionProvenance.CAPTURED_AND_CONFIRMED,
                 null,
                 0.8123,
                 RiskLevel.HIGH,
@@ -309,6 +312,7 @@ class FeedbackDatasetJsonlWriterTest {
                 "python-logistic-fraud-model",
                 "2026-06-25.v1",
                 "feature-contract-v2",
+                "a".repeat(64),
                 null,
                 null,
                 null,

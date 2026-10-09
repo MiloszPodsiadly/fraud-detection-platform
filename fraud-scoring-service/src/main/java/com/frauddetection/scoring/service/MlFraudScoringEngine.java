@@ -67,14 +67,16 @@ public class MlFraudScoringEngine implements FraudScoringEngine {
                 explanationMetadata,
                 output.available() && (output.riskLevel() == com.frauddetection.common.events.enums.RiskLevel.HIGH
                         || output.riskLevel() == com.frauddetection.common.events.enums.RiskLevel.CRITICAL),
-                scoringEvidence
+                scoringEvidence,
+                output.modelArtifactSha256()
         );
     }
 
     private boolean missingModelIdentity(MlModelOutput output) {
         return isBlank(output.modelName())
                 || isBlank(output.modelVersion())
-                || isBlank(output.featureContractVersion());
+                || isBlank(output.featureContractVersion())
+                || isBlank(output.modelArtifactSha256());
     }
 
     private FraudScoreResult unavailableIdentityResult(FraudScoringRequest request, MlModelOutput output) {
@@ -109,7 +111,8 @@ public class MlFraudScoringEngine implements FraudScoringEngine {
                         null,
                         output.inferenceTimestamp(),
                         fallbackReason
-                )
+                ),
+                null
         );
     }
 

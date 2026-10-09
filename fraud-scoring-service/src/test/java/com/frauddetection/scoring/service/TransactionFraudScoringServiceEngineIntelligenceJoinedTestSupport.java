@@ -217,7 +217,9 @@ final class TransactionFraudScoringServiceEngineIntelligenceJoinedTestSupport {
                 Map.of(),
                 Map.of(),
                 Map.of("modelAvailable", true),
-                true
+                true,
+                List.of(),
+                "a".repeat(64)
         ));
         var rulesEngine = new RuleBasedSignalEngine(
                 new FeatureSnapshotReaderFactory(),

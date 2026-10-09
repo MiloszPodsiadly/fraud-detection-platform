@@ -23,6 +23,10 @@ to the public DTOs. It is called only for disabled-by-default producer diagnosti
 
 ## Versioning Strategy
 
+`TransactionScoredEvent.eventContractVersion` is required and equals `2` on every message admitted by the current
+`transactions.scored` consumer boundary. Missing, malformed, retired, and future versions fail closed. Absence of this
+marker is not evidence that a record is safely historical and never selects a permissive parser.
+
 `EngineIntelligenceSummary.contractVersion` is required and equals `1`. A future incompatible
 shape requires explicit compatibility review and a new contract version.
 
@@ -43,7 +47,14 @@ canonical values are rejected or fail closed; the read boundary does not repair 
 `TransactionScoredEvent.mlPredictionEvidence` is a separate optional internal field. Every current scored event requires
 exactly one of it or `mlPredictionEvidenceOmissionReason`; events with neither fail deserialization. Historical null/null
 messages must be drained, migrated from authoritative evidence, archived, or quarantined before current consumers read
-them, and consumers must not invent or backfill evidence.
+them, and consumers must not invent or backfill evidence. The outer `eventContractVersion` owns the current event
+version. A nested `mlPredictionEvidence.contractVersion` is a known obsolete marker and is rejected as contradictory;
+other bounded unknown evidence fields remain forward-compatible and do not change the canonical evidence meaning.
+
+All current alert-service listeners and redrive listeners use the same strict full-event deserializer. The repository
+does not provide a historical scored-event runtime parser. Active historical replay remains **NO-GO** until an authorized
+operator attests the retained partition/offset boundary and completes the governed archive, quarantine, or authoritative
+migration described in [Scoring occurrence ownership migration](scoring_occurrence_ownership_migration.md).
 Pipeline-level reasons (`DIAGNOSTIC_EMISSION_DISABLED` and `DIAGNOSTIC_ENRICHMENT_UNAVAILABLE`) require the summary
 to be absent. ML-engine-derived reasons require an observed `ml.python.primary` result and cannot be used to describe
 an unavailable diagnostic pipeline; `ML_ENGINE_UNAVAILABLE` is reserved for observed operational ML statuses.
@@ -77,7 +88,7 @@ An `AVAILABLE` `ml.python.primary` result must include a bounded `modelIdentity`
 and `featureContractVersion`. This identity belongs to the ML engine-intelligence result, not to the top-level final
 scoring fields on `TransactionScoredEvent`. Rules, Velocity, and non-AVAILABLE ML engine results must omit it. A current
 identity-free AVAILABLE ML result is malformed and fails closed; readers do not invent lineage or rewrite the engine
-to another operational status. Dataset v2 likewise rejects `AVAILABLE` prediction evidence unless score, risk,
+to another operational status. Dataset v3 likewise rejects `AVAILABLE` prediction evidence unless score, risk,
 execution timestamp, and the complete model identity are all present.
 
 ### Deployment Treatment For Historical Projections
@@ -86,7 +97,7 @@ Before deploying the strict reader, inventory Mongo `engine_intelligence_project
 `AVAILABLE` `ml.python.primary` engine without complete `modelIdentity`. Such documents do not satisfy the current read
 contract: archive them under the approved retention policy or rebuild the projection only from an authoritative event
 that already contains complete lineage. Do not synthesize identity from the currently loaded model, registry state, or
-deployment configuration. Identity-free historical documents are not valid inputs to the current Dataset v2 or
+deployment configuration. Identity-free historical documents are not valid inputs to the current Dataset v3 or
 exact-model evaluation contracts and must not be normalized merely to make a historical projection displayable.
 
 ## Field Omission Rules
@@ -154,6 +165,8 @@ The public contract was deployed before runtime emission. Producer diagnostic en
 and follows a consumer-first rollout.
 Historical consumers may reject unknown top-level fields, so emission must remain explicitly
 controlled and required consumers must remain compatible with the current contract.
+Rollback to an earlier consumer is not guaranteed to preserve contract-v2 readability and must not be treated as a
+compatibility strategy. Consumer compatibility requires explicit proof before either rollout or rollback.
 
 Producer mapping must use `PublicEngineIntelligenceMapper` or an explicitly reviewed equivalent.
 Producer mapping must preserve timeout does not mean low risk, missing score does not become zero,

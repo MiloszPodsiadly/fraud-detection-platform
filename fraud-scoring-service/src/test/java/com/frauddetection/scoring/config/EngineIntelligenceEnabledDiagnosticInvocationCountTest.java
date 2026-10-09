@@ -110,7 +110,9 @@ class EngineIntelligenceEnabledDiagnosticInvocationCountTest {
                 Map.of(),
                 Map.of(),
                 Map.of("modelAvailable", true),
-                true
+                true,
+                List.of(),
+                "a".repeat(64)
         );
     }
 }

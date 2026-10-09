@@ -2,7 +2,7 @@
 
 ## Scope
 
-This runbook recovers the private `MlPredictionEvidenceV1` projection only. It never republishes a failed
+This runbook recovers the private `MlPredictionEvidence` projection only. It never republishes a failed
 record to `transactions.scored`, because that topic also activates baseline alert, fraud-case, and audit processing.
 
 The recovery topics are:
@@ -14,6 +14,10 @@ The recovery topics are:
 The redrive listener is disabled by default. Enable it only for an approved recovery window with
 `ML_PREDICTION_EVIDENCE_REDRIVE_ENABLED=true` and a dedicated service identity that can read the redrive topic and
 write the private evidence collection.
+
+DLT and redrive records pass through the same strict `TransactionScoredEvent` admission as live traffic: outer
+contract version 2 and exactly one complete ML evidence outcome. Recovery never enables a pre-v2 parser, invents
+missing evidence, or treats an invalid current record as safely historical.
 
 ## Recovery Procedure
 

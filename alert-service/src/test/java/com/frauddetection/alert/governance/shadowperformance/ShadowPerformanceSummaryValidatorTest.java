@@ -118,9 +118,9 @@ class ShadowPerformanceSummaryValidatorTest {
     void rejectsUnsupportedLineageVersions() {
         ShadowPerformanceSummary base = validSummary();
         for (ShadowPerformanceSummary.ShadowPerformanceEvaluation evaluation : List.of(
-                replaceEvaluationLineage(base.evaluation(), "other-artifact-format-v99", "feedback-dataset-v2", "FEEDBACK_CREATED_AT"),
+                replaceEvaluationLineage(base.evaluation(), "other-artifact-format-v99", "feedback-dataset-v3", "FEEDBACK_CREATED_AT"),
                 replaceEvaluationLineage(base.evaluation(), "feedback-dataset-evaluation-report-artifact-set-v1", "unknown-dataset-v77", "FEEDBACK_CREATED_AT"),
-                replaceEvaluationLineage(base.evaluation(), "feedback-dataset-evaluation-report-artifact-set-v1", "feedback-dataset-v2", "TRANSACTION_CREATED_AT")
+                replaceEvaluationLineage(base.evaluation(), "feedback-dataset-evaluation-report-artifact-set-v1", "feedback-dataset-v3", "TRANSACTION_CREATED_AT")
         )) {
             ShadowPerformanceSummary summary = new ShadowPerformanceSummary(
                     base.reportType(),

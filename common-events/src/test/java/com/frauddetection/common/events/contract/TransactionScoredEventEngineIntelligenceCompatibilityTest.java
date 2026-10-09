@@ -27,7 +27,7 @@ class TransactionScoredEventEngineIntelligenceCompatibilityTest {
         assertThat(read(TransactionScoredEventFixtureLoader.unknownNestedEngineIntelligenceFieldsJson())
                 .engineIntelligence()).isNotNull();
         assertThat(read(TransactionScoredEventFixtureLoader.unknownTopLevelFieldJson()).transactionId())
-                .isEqualTo("txn-fdp93-001");
+                .isEqualTo("txn-engine-intelligence-contract-001");
     }
 
     private TransactionScoredEvent read(String json) throws Exception {

@@ -21,7 +21,8 @@ public record FraudScoreResult(
         Map<String, Object> featureSnapshot,
         Map<String, Object> explanationMetadata,
         Boolean alertRecommended,
-        List<ScoringEvidenceItem> scoringEvidence
+        List<ScoringEvidenceItem> scoringEvidence,
+        String modelArtifactSha256
 ) {
     public FraudScoreResult {
         if ("ML".equals(scoringStrategy)) {
@@ -31,7 +32,16 @@ public record FraudScoreResult(
                     featureContractVersion,
                     "featureContractVersion"
             );
-            validateAtomicMlModelIdentity(modelName, modelVersion, featureContractVersion);
+            modelArtifactSha256 = MlModelIdentityPolicy.optionalArtifactSha256(
+                    modelArtifactSha256,
+                    "modelArtifactSha256"
+            );
+            MlModelIdentityPolicy.requireAtomicArtifactIdentity(
+                    modelName,
+                    modelVersion,
+                    featureContractVersion,
+                    modelArtifactSha256
+            );
         }
         scoringEvidence = scoringEvidence == null ? List.of() : List.copyOf(scoringEvidence);
     }
@@ -63,7 +73,8 @@ public record FraudScoreResult(
                 featureSnapshot,
                 explanationMetadata,
                 alertRecommended,
-                List.of()
+                List.of(),
+                null
         );
     }
 
@@ -94,7 +105,8 @@ public record FraudScoreResult(
                 featureSnapshot,
                 explanationMetadata,
                 alertRecommended,
-                scoringEvidence
+                scoringEvidence,
+                null
         );
     }
 
@@ -124,21 +136,42 @@ public record FraudScoreResult(
                 featureSnapshot,
                 explanationMetadata,
                 alertRecommended,
-                List.of()
+                List.of(),
+                null
         );
     }
 
-    private static void validateAtomicMlModelIdentity(
+    public FraudScoreResult(
+            Double fraudScore,
+            RiskLevel riskLevel,
+            String scoringStrategy,
             String modelName,
             String modelVersion,
-            String featureContractVersion
+            String featureContractVersion,
+            Instant inferenceTimestamp,
+            List<String> reasonCodes,
+            Map<String, Object> scoreDetails,
+            Map<String, Object> featureSnapshot,
+            Map<String, Object> explanationMetadata,
+            Boolean alertRecommended,
+            List<ScoringEvidenceItem> scoringEvidence
     ) {
-        int present = 0;
-        present += modelName == null ? 0 : 1;
-        present += modelVersion == null ? 0 : 1;
-        present += featureContractVersion == null ? 0 : 1;
-        if (present != 0 && present != 3) {
-            throw new IllegalArgumentException("ML model identity must be entirely absent or complete");
-        }
+        this(
+                fraudScore,
+                riskLevel,
+                scoringStrategy,
+                modelName,
+                modelVersion,
+                featureContractVersion,
+                inferenceTimestamp,
+                reasonCodes,
+                scoreDetails,
+                featureSnapshot,
+                explanationMetadata,
+                alertRecommended,
+                scoringEvidence,
+                null
+        );
     }
+
 }

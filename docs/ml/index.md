@@ -5,8 +5,15 @@ Status: current ML documentation index.
 ## Scope
 
 This folder contains current ML runtime, governance, and drift documentation. It describes implemented runtime
-visibility and operator interpretation. It does not claim full MLOps automation, model approval, retraining,
+visibility and operator interpretation. It does not claim full MLOps automation, model approval, an automated retraining workflow,
 production drift decisioning, or model quality certification.
+
+The repository includes an offline `evaluate_challenger_diagnostics()` helper that may train a challenger for a
+bounded held-out comparison. Its outcomes are limited to `BETTER_ON_OBSERVED_METRICS`, `REQUIRES_SHADOW_REVIEW`,
+`NOT_BETTER_ON_OBSERVED_METRICS`, and `INSUFFICIENT_EVIDENCE`. The result records sample size, dataset provenance,
+evaluation windows, observed metrics, configured comparison bounds, and limitations. It does not approve promotion,
+recommend a rollout mode, mutate the model registry, deploy a model, change scoring mode, or grant production-primary
+decision authority. Analyst feedback remains an evaluation signal rather than certified fraud ground truth.
 
 ## Current Sources
 

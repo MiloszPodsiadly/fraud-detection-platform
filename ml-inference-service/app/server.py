@@ -68,24 +68,24 @@ from app.governance.persistence import (
     create_snapshot_repository,
     current_snapshot_document,
 )
-from app.model import DEFAULT_ARTIFACT_PATH, MODEL_NAME, MODEL_VERSION, FraudModel
+from app.model import FraudModel, resolve_configured_model_runtime
 
 
 HOST = "0.0.0.0"
 PORT = 8090
-MODEL = FraudModel()
-REFERENCE_PROFILE = load_reference_profile()
-MODEL_GOVERNANCE = governance_model_metadata(MODEL, DEFAULT_ARTIFACT_PATH)
-MODEL_LOADED_AT = datetime.now(timezone.utc)
+RESOLVED_MODEL_RUNTIME = resolve_configured_model_runtime()
+MODEL = FraudModel(RESOLVED_MODEL_RUNTIME)
+MODEL_NAME = MODEL.model_name
+MODEL_VERSION = MODEL.model_version
+REFERENCE_PROFILE = load_reference_profile(RESOLVED_MODEL_RUNTIME)
+MODEL_GOVERNANCE = governance_model_metadata(RESOLVED_MODEL_RUNTIME)
+MODEL_LOADED_AT = RESOLVED_MODEL_RUNTIME.loaded_at
 MODEL_LIFECYCLE = current_model_lifecycle_metadata(
-    MODEL_GOVERNANCE,
-    DEFAULT_ARTIFACT_PATH,
+    RESOLVED_MODEL_RUNTIME,
     REFERENCE_PROFILE,
-    MODEL_LOADED_AT,
 )
 INFERENCE_PROFILE = InferenceProfile(
-    MODEL_NAME,
-    MODEL_VERSION,
+    RESOLVED_MODEL_RUNTIME,
     reference_feature_names(REFERENCE_PROFILE) or MODEL_GOVERNANCE["feature_set"],
 )
 PERSISTENCE_CONFIG = GovernancePersistenceConfig.from_env()

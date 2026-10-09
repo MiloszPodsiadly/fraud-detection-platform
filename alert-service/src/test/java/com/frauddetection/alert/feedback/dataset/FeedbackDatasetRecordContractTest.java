@@ -61,6 +61,7 @@ class FeedbackDatasetRecordContractTest {
                         "rulesEvidenceStatus",
                         "rulesRiskLevel",
                         "mlPredictionEvidenceStatus",
+                        "mlPredictionEvidenceResolutionProvenance",
                         "mlPredictionEvidenceOmissionReason",
                         "mlPredictionScore",
                         "mlPredictionRiskLevel",
@@ -68,6 +69,7 @@ class FeedbackDatasetRecordContractTest {
                         "mlModelName",
                         "mlModelVersion",
                         "mlFeatureContractVersion",
+                        "mlModelArtifactSha256",
                         "analystRecommendationStatus",
                         "analystRecommendation",
                         "analystRecommendationVersion",
@@ -233,6 +235,7 @@ class FeedbackDatasetRecordContractTest {
         assertThat(record.mlModelName()).isEqualTo("python-logistic-fraud-model");
         assertThat(record.mlModelVersion()).isEqualTo("2026-06-25.v1");
         assertThat(record.mlFeatureContractVersion()).isEqualTo("feature-contract-v2");
+        assertThat(record.mlModelArtifactSha256()).isEqualTo("a".repeat(64));
     }
 
     @Test
@@ -242,6 +245,7 @@ class FeedbackDatasetRecordContractTest {
         assertThat(record.mlModelName()).isNull();
         assertThat(record.mlModelVersion()).isNull();
         assertThat(record.mlFeatureContractVersion()).isNull();
+        assertThat(record.mlModelArtifactSha256()).isNull();
     }
 
     @Test
@@ -367,18 +371,22 @@ class FeedbackDatasetRecordContractTest {
     @Test
     void rejectsPartialMlModelIdentitySnapshotFields() {
         String[][] partialIdentities = {
-                {"python-logistic-fraud-model", null, null},
-                {null, "2026-06-25.v1", null},
-                {null, null, "feature-contract-v2"},
-                {"python-logistic-fraud-model", "2026-06-25.v1", null},
-                {"python-logistic-fraud-model", null, "feature-contract-v2"},
-                {null, "2026-06-25.v1", "feature-contract-v2"}
+                {"python-logistic-fraud-model", null, null, null},
+                {null, "2026-06-25.v1", null, null},
+                {null, null, "feature-contract-v2", null},
+                {null, null, null, "a".repeat(64)},
+                {"python-logistic-fraud-model", "2026-06-25.v1", "feature-contract-v2", null},
+                {null, "2026-06-25.v1", "feature-contract-v2", "a".repeat(64)},
+                {"python-logistic-fraud-model", null, "feature-contract-v2", "a".repeat(64)},
+                {"python-logistic-fraud-model", "2026-06-25.v1", null, "a".repeat(64)}
         };
 
         for (String[] identity : partialIdentities) {
-            assertThatThrownBy(() -> recordWithMlIdentity(identity[0], identity[1], identity[2]))
+            assertThatThrownBy(() -> recordWithMlIdentity(identity[0], identity[1], identity[2], identity[3]))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("ML model identity");
+                    .hasMessageMatching(
+                            "(ML model identity.*|exact-artifact ML prediction evidence must be complete)"
+                    );
         }
     }
 
@@ -454,7 +462,9 @@ class FeedbackDatasetRecordContractTest {
                 FeedbackDatasetRulesEvidenceStatus.UNAVAILABLE,
                 null,
                 FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT,
+                null,
                 MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED,
+                null,
                 null,
                 null,
                 null,
@@ -477,16 +487,36 @@ class FeedbackDatasetRecordContractTest {
             String mlFeatureContractVersion
     ) {
         boolean absent = mlModelName == null && mlModelVersion == null && mlFeatureContractVersion == null;
+        return recordWithMlIdentity(
+                mlModelName,
+                mlModelVersion,
+                mlFeatureContractVersion,
+                absent ? null : "a".repeat(64)
+        );
+    }
+
+    private FeedbackDatasetRecord recordWithMlIdentity(
+            String mlModelName,
+            String mlModelVersion,
+            String mlFeatureContractVersion,
+            String mlModelArtifactSha256
+    ) {
+        boolean absent = mlModelName == null
+                && mlModelVersion == null
+                && mlFeatureContractVersion == null
+                && mlModelArtifactSha256 == null;
         return recordWithMlEvidence(
                 absent
                         ? FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT
                         : FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE,
+                absent ? MlPredictionEvidenceOmissionReason.DIAGNOSTIC_EMISSION_DISABLED : null,
                 absent ? null : 0.8123,
                 absent ? null : RiskLevel.HIGH,
                 absent ? null : Instant.parse("2026-06-01T00:00:01Z"),
                 mlModelName,
                 mlModelVersion,
-                mlFeatureContractVersion
+                mlFeatureContractVersion,
+                mlModelArtifactSha256
         );
     }
 
@@ -523,6 +553,31 @@ class FeedbackDatasetRecordContractTest {
             String mlModelVersion,
             String mlFeatureContractVersion
     ) {
+        return recordWithMlEvidence(
+                status,
+                omissionReason,
+                score,
+                riskLevel,
+                executedAt,
+                mlModelName,
+                mlModelVersion,
+                mlFeatureContractVersion,
+                status == FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE
+                        ? "a".repeat(64) : null
+        );
+    }
+
+    private FeedbackDatasetRecord recordWithMlEvidence(
+            FeedbackDatasetMlPredictionEvidenceStatus status,
+            MlPredictionEvidenceOmissionReason omissionReason,
+            Double score,
+            RiskLevel riskLevel,
+            Instant executedAt,
+            String mlModelName,
+            String mlModelVersion,
+            String mlFeatureContractVersion,
+            String mlModelArtifactSha256
+    ) {
         return new FeedbackDatasetRecord(
                 FeedbackDatasetBuilder.DATASET_VERSION,
                 FeedbackDatasetIdentifierHasher.evaluationRecordId("feedback-1"),
@@ -541,6 +596,9 @@ class FeedbackDatasetRecordContractTest {
                 FeedbackDatasetRulesEvidenceStatus.UNAVAILABLE,
                 null,
                 status,
+                status == FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE
+                        ? FeedbackDatasetMlPredictionEvidenceResolutionProvenance.CAPTURED_AND_CONFIRMED
+                        : null,
                 omissionReason,
                 score,
                 riskLevel,
@@ -548,6 +606,7 @@ class FeedbackDatasetRecordContractTest {
                 mlModelName,
                 mlModelVersion,
                 mlFeatureContractVersion,
+                mlModelArtifactSha256,
                 null,
                 null,
                 null,

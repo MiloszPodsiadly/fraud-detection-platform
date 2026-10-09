@@ -27,7 +27,7 @@ class EngineIntelligenceNoApiUiExposureTest {
                 "alert-service/src/main/java/com/frauddetection/alert",
                 List.of("EngineIntelligenceSummary", "engineIntelligence", "diagnosticSignals",
                         "agreementStatus", "riskMismatchStatus", "scoreDeltaBucket",
-                        "mlPredictionEvidence", "MlPredictionEvidenceV1")
+                        "mlPredictionEvidence", "MlPredictionEvidence")
         ).stream()
                 .filter(file -> file.startsWith("alert-service/src/main/java/com/frauddetection/alert/api/")
                         || file.startsWith("alert-service/src/main/java/com/frauddetection/alert/controller/")

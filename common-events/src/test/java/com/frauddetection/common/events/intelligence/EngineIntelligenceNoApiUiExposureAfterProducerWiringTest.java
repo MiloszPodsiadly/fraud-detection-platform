@@ -32,7 +32,7 @@ class EngineIntelligenceNoApiUiExposureAfterProducerWiringTest {
                 "alert-service/src/main/java/com/frauddetection/alert",
                 List.of("EngineIntelligenceSummary", "engineIntelligence", "engineResults",
                         "diagnosticSignals", "agreementStatus", "riskMismatchStatus", "scoreDeltaBucket",
-                        "winningEngine", "mlPredictionEvidence", "MlPredictionEvidenceV1")
+                        "winningEngine", "mlPredictionEvidence", "MlPredictionEvidence")
         ).stream()
                 .filter(file -> file.startsWith("alert-service/src/main/java/com/frauddetection/alert/api/")
                         || file.startsWith("alert-service/src/main/java/com/frauddetection/alert/controller/")

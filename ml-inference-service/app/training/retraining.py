@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+import math
+import re
 from dataclasses import dataclass
 
 from app.data.dataset import Dataset
 from app.training.train import train_with_evaluation
 
 
+PASS = "PASS"
+FAIL = "FAIL"
+NOT_EVALUATED = "NOT_EVALUATED"
+EVALUATION_COHORT_FINGERPRINT_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+
+
 @dataclass(frozen=True)
-class PromotionThresholds:
-    """Business thresholds for challenger promotion."""
+class ChallengerComparisonThresholds:
+    """Bounds used only to interpret observed challenger diagnostics."""
 
     max_false_positive_rate_increase: float = 0.02
     max_alert_rate: float = 0.20
@@ -18,28 +26,66 @@ class PromotionThresholds:
     max_out_of_time_pr_auc_drop: float = 0.20
     max_out_of_time_cost_increase: float = 500.0
 
+    def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
+        _require_finite_threshold(
+            "max_false_positive_rate_increase",
+            self.max_false_positive_rate_increase,
+            maximum=1.0,
+        )
+        _require_finite_threshold("min_alert_rate", self.min_alert_rate, maximum=1.0)
+        _require_finite_threshold("max_alert_rate", self.max_alert_rate, maximum=1.0)
+        if self.min_alert_rate > self.max_alert_rate:
+            raise ValueError("min_alert_rate must not exceed max_alert_rate.")
+        if self.alert_budget is not None:
+            _require_finite_threshold("alert_budget", self.alert_budget, maximum=1.0)
+        _require_finite_threshold(
+            "max_segment_pr_auc_drop",
+            self.max_segment_pr_auc_drop,
+            maximum=1.0,
+        )
+        _require_finite_threshold(
+            "max_out_of_time_pr_auc_drop",
+            self.max_out_of_time_pr_auc_drop,
+            maximum=1.0,
+        )
+        _require_finite_threshold(
+            "max_out_of_time_cost_increase",
+            self.max_out_of_time_cost_increase,
+        )
+
+
+def _require_finite_threshold(name: str, value: object, maximum: float | None = None) -> None:
+    if type(value) not in (int, float) or not math.isfinite(value):
+        raise ValueError(f"{name} must be a finite number.")
+    if value < 0 or (maximum is not None and value > maximum):
+        upper_bound = f" and at most {maximum}" if maximum is not None else ""
+        raise ValueError(f"{name} must be at least 0{upper_bound}.")
+
 
 @dataclass(frozen=True)
-class RetrainingComparison:
-    """Comparison between current and challenger model evaluation."""
+class ChallengerDiagnosticComparison:
+    """Non-decisioning comparison between current and challenger evaluation."""
 
-    current_pr_auc: float
-    challenger_pr_auc: float
-    promote_challenger: bool
+    current_pr_auc: float | None
+    challenger_pr_auc: float | None
+    diagnostic_outcome: str
     challenger_evaluation: dict[str, object]
-    decision: dict[str, object]
+    diagnostics: dict[str, object]
 
 
-def compare_retrained_model(
+def evaluate_challenger_diagnostics(
         feedback_dataset: Dataset,
         current_evaluation: dict[str, object],
         epochs: int,
         learning_rate: float,
-        thresholds: PromotionThresholds | None = None,
+        thresholds: ChallengerComparisonThresholds | None = None,
         model_type: str = "logistic",
         training_mode: str = "production",
-) -> RetrainingComparison:
-    """Retrain on analyst feedback and compare challenger on held-out metrics."""
+) -> ChallengerDiagnosticComparison:
+    """Retrain offline and report observed diagnostics without lifecycle authority."""
     if feedback_dataset.size == 0:
         raise ValueError("feedback_dataset must contain labelled examples.")
     _, _, challenger_evaluation = train_with_evaluation(
@@ -49,108 +95,176 @@ def compare_retrained_model(
         training_mode=training_mode,
         model_type=model_type,
     )
-    split_metadata = challenger_evaluation.get("splitMetadata")
-    if not isinstance(split_metadata, dict) or split_metadata.get("testRows", 0) <= 0:
-        raise ValueError("challenger evaluation must include held-out test rows.")
-    current_pr_auc = float(current_evaluation.get("heldOutPrAuc", current_evaluation.get("prAuc", 0.0)))
-    challenger_pr_auc = float(challenger_evaluation.get("prAuc", 0.0))
-    thresholds = thresholds or PromotionThresholds()
-    decision = _promotion_decision(current_evaluation, challenger_evaluation, thresholds)
-    return RetrainingComparison(
+    current_pr_auc = _optional_metric(current_evaluation, "heldOutPrAuc", "prAuc")
+    challenger_pr_auc = _optional_metric(challenger_evaluation, "prAuc")
+    thresholds = thresholds or ChallengerComparisonThresholds()
+    diagnostics = _diagnostic_assessment(
+        current_evaluation,
+        challenger_evaluation,
+        thresholds,
+        feedback_dataset,
+    )
+    return ChallengerDiagnosticComparison(
         current_pr_auc=current_pr_auc,
         challenger_pr_auc=challenger_pr_auc,
-        promote_challenger=decision["decision"] == "promote",
+        diagnostic_outcome=diagnostics["outcome"],
         challenger_evaluation=challenger_evaluation,
-        decision=decision,
+        diagnostics=diagnostics,
     )
 
 
-def _promotion_decision(
+def _diagnostic_assessment(
         current_evaluation: dict[str, object],
         challenger_evaluation: dict[str, object],
-        thresholds: PromotionThresholds,
+        thresholds: ChallengerComparisonThresholds,
+        feedback_dataset: Dataset | None = None,
 ) -> dict[str, object]:
+    if not isinstance(thresholds, ChallengerComparisonThresholds):
+        raise ValueError("thresholds must be ChallengerComparisonThresholds.")
+    thresholds.validate()
     current_optimal = _optimal(current_evaluation)
     challenger_optimal = _optimal(challenger_evaluation)
-    current_pr_auc = float(current_evaluation.get("heldOutPrAuc", current_evaluation.get("prAuc", 0.0)))
-    challenger_pr_auc = float(challenger_evaluation.get("prAuc", 0.0))
+    current_pr_auc = _optional_metric(current_evaluation, "heldOutPrAuc", "prAuc")
+    challenger_pr_auc = _optional_metric(challenger_evaluation, "prAuc")
     current_cost = _cost(current_evaluation)
     challenger_cost = _cost(challenger_evaluation)
+    current_false_positive_rate = _bounded_metric(current_optimal, "falsePositiveRate", 0.0, 1.0)
+    challenger_false_positive_rate = _bounded_metric(challenger_optimal, "falsePositiveRate", 0.0, 1.0)
+    current_alert_rate = _bounded_metric(current_optimal, "alertRate", 0.0, 1.0)
+    challenger_alert_rate = _bounded_metric(challenger_optimal, "alertRate", 0.0, 1.0)
     alert_budget = _budget(thresholds.alert_budget, current_evaluation, challenger_evaluation)
     core_checks = {
-        "prAucImproved": challenger_pr_auc > current_pr_auc,
-        "falsePositiveRateWithinThreshold": (
-            float(challenger_optimal.get("falsePositiveRate", 0.0))
-            <= float(current_optimal.get("falsePositiveRate", 0.0)) + thresholds.max_false_positive_rate_increase
+        "prAucImproved": _comparison_state(
+            current_pr_auc,
+            challenger_pr_auc,
+            passed=challenger_pr_auc is not None
+            and current_pr_auc is not None
+            and challenger_pr_auc > current_pr_auc,
         ),
-        "alertRateWithinRange": (
-            thresholds.min_alert_rate
-            <= float(challenger_optimal.get("alertRate", 0.0))
-            <= thresholds.max_alert_rate
+        "falsePositiveRateWithinThreshold": _comparison_state(
+            current_false_positive_rate,
+            challenger_false_positive_rate,
+            passed=challenger_false_positive_rate is not None
+            and current_false_positive_rate is not None
+            and challenger_false_positive_rate
+            <= current_false_positive_rate + thresholds.max_false_positive_rate_increase,
         ),
-        "expectedCostNotWorse": challenger_cost <= current_cost,
+        "alertRateWithinRange": _single_metric_state(
+            challenger_alert_rate,
+            passed=challenger_alert_rate is not None
+            and thresholds.min_alert_rate <= challenger_alert_rate <= thresholds.max_alert_rate,
+        ),
+        "expectedCostNotWorse": _comparison_state(
+            current_cost,
+            challenger_cost,
+            passed=challenger_cost is not None
+            and current_cost is not None
+            and challenger_cost <= current_cost,
+        ),
     }
-    if alert_budget:
-        core_checks["budgetExpectedCostNotWorse"] = float(alert_budget["challenger"]["expectedCost"]) <= float(alert_budget["current"]["expectedCost"])
-        core_checks["budgetFraudCaptureNotWorse"] = float(alert_budget["challenger"]["fraudCaptureRate"]) >= float(alert_budget["current"]["fraudCaptureRate"])
+    if thresholds.alert_budget is not None:
+        if alert_budget is None:
+            core_checks["budgetExpectedCostNotWorse"] = NOT_EVALUATED
+            core_checks["budgetFraudCaptureNotWorse"] = NOT_EVALUATED
+        else:
+            core_checks["budgetExpectedCostNotWorse"] = (
+                PASS
+                if alert_budget["challenger"]["expectedCost"] <= alert_budget["current"]["expectedCost"]
+                else FAIL
+            )
+            core_checks["budgetFraudCaptureNotWorse"] = (
+                PASS
+                if alert_budget["challenger"]["fraudCaptureRate"]
+                >= alert_budget["current"]["fraudCaptureRate"]
+                else FAIL
+            )
 
     segment_check = _segment_regression_check(current_evaluation, challenger_evaluation, thresholds)
     stability_check = _stability_check(challenger_evaluation, thresholds)
-    failed_core = [name for name, passed in core_checks.items() if not passed]
-    failed_soft = []
-    if not segment_check["passed"]:
-        failed_soft.append("segmentRegression")
-    if not stability_check["passed"]:
-        failed_soft.append("stabilityRegression")
+    insufficient_reasons = _insufficient_evidence_reasons(current_evaluation, challenger_evaluation)
+    core_reason_codes = {
+        "falsePositiveRateWithinThreshold": "FALSE_POSITIVE_RATE_EVIDENCE_MISSING",
+        "alertRateWithinRange": "ALERT_RATE_EVIDENCE_MISSING",
+        "expectedCostNotWorse": "EXPECTED_COST_EVIDENCE_MISSING",
+        "budgetExpectedCostNotWorse": "ALERT_BUDGET_EVIDENCE_MISSING",
+        "budgetFraudCaptureNotWorse": "ALERT_BUDGET_EVIDENCE_MISSING",
+    }
+    insufficient_reasons.extend(
+        core_reason_codes[name]
+        for name, state in core_checks.items()
+        if state == NOT_EVALUATED and name in core_reason_codes
+    )
+    if segment_check["status"] == NOT_EVALUATED:
+        insufficient_reasons.extend(segment_check["reasonCodes"])
+    if stability_check["status"] == NOT_EVALUATED:
+        insufficient_reasons.extend(stability_check["reasonCodes"])
+    insufficient_reasons = list(dict.fromkeys(insufficient_reasons))
 
-    if failed_core:
-        decision = "reject"
-        summary = "Challenger failed core promotion constraints."
+    failed_core = [name for name, state in core_checks.items() if state == FAIL]
+    failed_soft = [
+        name
+        for name, assessment in (
+            ("segmentRegression", segment_check),
+            ("stabilityRegression", stability_check),
+        )
+        if assessment["status"] == FAIL
+    ]
+
+    if insufficient_reasons:
+        outcome = "INSUFFICIENT_EVIDENCE"
+        summary = "Observed data is insufficient for a bounded challenger comparison."
+    elif failed_core:
+        outcome = "NOT_BETTER_ON_OBSERVED_METRICS"
+        summary = "Challenger was not better on the configured observed metrics."
     elif failed_soft:
-        decision = "shadow_only"
-        summary = "Challenger is promising but needs shadow monitoring for segment or stability risk."
+        outcome = "REQUIRES_SHADOW_REVIEW"
+        summary = "Observed metrics require additional shadow review for segment or stability risk."
     else:
-        decision = "promote"
-        summary = "Challenger passed promotion, budget, segment, and stability checks."
+        outcome = "BETTER_ON_OBSERVED_METRICS"
+        summary = "Challenger was better within the configured observed diagnostic bounds."
 
-    passed_checks = [name for name, passed in core_checks.items() if passed]
-    if segment_check["passed"]:
+    passed_checks = [name for name, state in core_checks.items() if state == PASS]
+    if segment_check["status"] == PASS:
         passed_checks.append("segmentRegression")
-    if stability_check["passed"]:
+    if stability_check["status"] == PASS:
         passed_checks.append("stabilityRegression")
     failed_checks = failed_core + failed_soft
+    not_evaluated_checks = [name for name, state in core_checks.items() if state == NOT_EVALUATED]
+    if segment_check["status"] == NOT_EVALUATED:
+        not_evaluated_checks.append("segmentRegression")
+    if stability_check["status"] == NOT_EVALUATED:
+        not_evaluated_checks.append("stabilityRegression")
     return {
-        "decision": decision,
-        "promote": decision == "promote",
+        "outcome": outcome,
         "summary": summary,
-        "passed_checks": passed_checks,
-        "failed_checks": failed_checks,
+        "passedChecks": passed_checks,
+        "failedChecks": failed_checks,
+        "notEvaluatedChecks": not_evaluated_checks,
+        "insufficientEvidenceReasons": insufficient_reasons,
         "criteria": {
             **core_checks,
-            "segmentRegression": segment_check["passed"],
-            "stabilityRegression": stability_check["passed"],
+            "segmentRegression": segment_check["status"],
+            "stabilityRegression": stability_check["status"],
         },
-        "key_metrics": {
+        "observedMetrics": {
             "currentPrAuc": current_pr_auc,
             "challengerPrAuc": challenger_pr_auc,
-            "currentFalsePositiveRate": float(current_optimal.get("falsePositiveRate", 0.0)),
-            "challengerFalsePositiveRate": float(challenger_optimal.get("falsePositiveRate", 0.0)),
-            "currentAlertRate": float(current_optimal.get("alertRate", 0.0)),
-            "challengerAlertRate": float(challenger_optimal.get("alertRate", 0.0)),
+            "currentFalsePositiveRate": current_false_positive_rate,
+            "challengerFalsePositiveRate": challenger_false_positive_rate,
+            "currentAlertRate": current_alert_rate,
+            "challengerAlertRate": challenger_alert_rate,
             "currentExpectedCost": current_cost,
             "challengerExpectedCost": challenger_cost,
             "alertBudget": alert_budget,
             "segmentAssessment": segment_check,
             "stabilityAssessment": stability_check,
         },
-        "metrics": {
-            "currentPrAuc": current_pr_auc,
-            "challengerPrAuc": challenger_pr_auc,
+        "evidence": {
+            "feedbackDatasetRows": feedback_dataset.size if feedback_dataset is not None else None,
+            "datasetProvenance": dict(feedback_dataset.metadata) if feedback_dataset is not None else {},
+            "evaluationWindows": _evaluation_window_metadata(current_evaluation, challenger_evaluation),
         },
-        "recommended_rollout_mode": "ML" if decision == "promote" else ("SHADOW" if decision == "shadow_only" else "NONE"),
-        "recommended_alert_budget": thresholds.alert_budget,
-        "evaluation_window_metadata": _evaluation_window_metadata(current_evaluation, challenger_evaluation),
-        "thresholds": {
+        "comparisonThresholds": {
             "maxFalsePositiveRateIncrease": thresholds.max_false_positive_rate_increase,
             "minAlertRate": thresholds.min_alert_rate,
             "maxAlertRate": thresholds.max_alert_rate,
@@ -159,7 +273,73 @@ def _promotion_decision(
             "maxOutOfTimePrAucDrop": thresholds.max_out_of_time_pr_auc_drop,
             "maxOutOfTimeCostIncrease": thresholds.max_out_of_time_cost_increase,
         },
+        "limitations": [
+            "Observed metrics do not approve promotion or production-primary decisioning.",
+            "Analyst feedback is an evaluation signal, not certified fraud ground truth.",
+            "No registry, deployment, scoring mode, or runtime authority is mutated.",
+        ],
     }
+
+
+def _insufficient_evidence_reasons(
+        current_evaluation: dict[str, object],
+        challenger_evaluation: dict[str, object],
+) -> list[str]:
+    reasons = _evaluation_window_reasons(current_evaluation, challenger_evaluation)
+    split_metadata = challenger_evaluation.get("splitMetadata")
+    if not isinstance(split_metadata, dict) or _bounded_number(split_metadata.get("testRows"), 1.0) is None:
+        reasons.append("CHALLENGER_HELD_OUT_ROWS_MISSING")
+    if _optional_metric(current_evaluation, "heldOutPrAuc", "prAuc") is None:
+        reasons.append("CURRENT_PR_AUC_MISSING")
+    if _optional_metric(challenger_evaluation, "prAuc") is None:
+        reasons.append("CHALLENGER_PR_AUC_MISSING")
+    return reasons
+
+
+def _optional_metric(evaluation: dict[str, object], *names: str) -> float | None:
+    for name in names:
+        value = _bounded_number(evaluation.get(name), 0.0, 1.0)
+        if value is not None:
+            return value
+    return None
+
+
+def _bounded_metric(
+        values: dict[str, object],
+        name: str,
+        minimum: float | None = None,
+        maximum: float | None = None,
+) -> float | None:
+    return _bounded_number(values.get(name), minimum, maximum)
+
+
+def _bounded_number(
+        value: object,
+        minimum: float | None = None,
+        maximum: float | None = None,
+) -> float | None:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    number = float(value)
+    if not math.isfinite(number):
+        return None
+    if minimum is not None and number < minimum:
+        return None
+    if maximum is not None and number > maximum:
+        return None
+    return number
+
+
+def _comparison_state(left: float | None, right: float | None, passed: bool) -> str:
+    if left is None or right is None:
+        return NOT_EVALUATED
+    return PASS if passed else FAIL
+
+
+def _single_metric_state(value: float | None, passed: bool) -> str:
+    if value is None:
+        return NOT_EVALUATED
+    return PASS if passed else FAIL
 
 
 def _budget(
@@ -188,6 +368,43 @@ def _evaluation_window_metadata(
     }
 
 
+def _evaluation_window_reasons(
+        current_evaluation: dict[str, object],
+        challenger_evaluation: dict[str, object],
+) -> list[str]:
+    current = current_evaluation.get("splitMetadata")
+    challenger = challenger_evaluation.get("splitMetadata")
+    if not isinstance(current, dict):
+        return ["CURRENT_EVALUATION_WINDOW_MISSING"]
+    if not isinstance(challenger, dict):
+        return ["CHALLENGER_EVALUATION_WINDOW_MISSING"]
+
+    current_rows = _bounded_number(current.get("testRows"), 1.0)
+    challenger_rows = _bounded_number(challenger.get("testRows"), 1.0)
+    current_start = current.get("testStartTimestamp")
+    challenger_start = challenger.get("testStartTimestamp")
+    if current_rows is None or not isinstance(current_start, str) or not current_start.strip():
+        return ["CURRENT_EVALUATION_WINDOW_MISSING"]
+    if challenger_rows is None or not isinstance(challenger_start, str) or not challenger_start.strip():
+        return ["CHALLENGER_EVALUATION_WINDOW_MISSING"]
+    current_cohort = current.get("testCohortFingerprint")
+    challenger_cohort = challenger.get("testCohortFingerprint")
+    if current_cohort is None:
+        return ["CURRENT_EVALUATION_COHORT_FINGERPRINT_MISSING"]
+    if challenger_cohort is None:
+        return ["CHALLENGER_EVALUATION_COHORT_FINGERPRINT_MISSING"]
+    if not isinstance(current_cohort, str) \
+            or EVALUATION_COHORT_FINGERPRINT_PATTERN.fullmatch(current_cohort) is None \
+            or not isinstance(challenger_cohort, str) \
+            or EVALUATION_COHORT_FINGERPRINT_PATTERN.fullmatch(challenger_cohort) is None:
+        return ["EVALUATION_COHORT_FINGERPRINT_INVALID"]
+    if current_cohort != challenger_cohort:
+        return ["EVALUATION_COHORT_NOT_COMPARABLE"]
+    if current_rows != challenger_rows or current_start != challenger_start:
+        return ["EVALUATION_WINDOWS_NOT_COMPARABLE"]
+    return []
+
+
 def _budget_entry(evaluation: dict[str, object], alert_budget: float) -> dict[str, object] | None:
     budget_evaluation = evaluation.get("budgetEvaluation")
     if not isinstance(budget_evaluation, dict):
@@ -195,46 +412,116 @@ def _budget_entry(evaluation: dict[str, object], alert_budget: float) -> dict[st
     budgets = budget_evaluation.get("budgets")
     if not isinstance(budgets, list):
         return None
-    return next(
-        (entry for entry in budgets if isinstance(entry, dict) and abs(float(entry.get("alertBudget", -1.0)) - alert_budget) < 0.000001),
-        None,
-    )
+    for entry in budgets:
+        if not isinstance(entry, dict):
+            continue
+        configured_budget = _bounded_number(entry.get("alertBudget"), 0.0, 1.0)
+        if configured_budget is None or abs(configured_budget - alert_budget) >= 0.000001:
+            continue
+        expected_cost = _bounded_number(entry.get("expectedCost"), 0.0)
+        fraud_capture_rate = _bounded_number(entry.get("fraudCaptureRate"), 0.0, 1.0)
+        if expected_cost is None or fraud_capture_rate is None:
+            return None
+        return {
+            "alertBudget": configured_budget,
+            "expectedCost": expected_cost,
+            "fraudCaptureRate": fraud_capture_rate,
+        }
+    return None
 
 
 def _segment_regression_check(
         current_evaluation: dict[str, object],
         challenger_evaluation: dict[str, object],
-        thresholds: PromotionThresholds,
+        thresholds: ChallengerComparisonThresholds,
 ) -> dict[str, object]:
     current_segments = current_evaluation.get("segmentEvaluation")
     challenger_segments = challenger_evaluation.get("segmentEvaluation")
-    if not isinstance(current_segments, dict) or not isinstance(challenger_segments, dict):
-        return {"passed": True, "regressions": []}
+    if not isinstance(current_segments, dict) or not current_segments \
+            or not isinstance(challenger_segments, dict) or not challenger_segments:
+        return {
+            "status": NOT_EVALUATED,
+            "reasonCodes": ["SEGMENT_EVALUATION_MISSING"],
+            "regressions": [],
+        }
+    if set(current_segments) != set(challenger_segments):
+        return {
+            "status": NOT_EVALUATED,
+            "reasonCodes": ["SEGMENT_DIMENSION_COVERAGE_MISMATCH"],
+            "regressions": [],
+        }
     regressions = []
     for dimension, current_by_segment in current_segments.items():
         challenger_by_segment = challenger_segments.get(dimension)
-        if not isinstance(current_by_segment, dict) or not isinstance(challenger_by_segment, dict):
-            continue
+        if not isinstance(current_by_segment, dict) or not current_by_segment \
+                or not isinstance(challenger_by_segment, dict) or not challenger_by_segment \
+                or set(current_by_segment) != set(challenger_by_segment):
+            return {
+                "status": NOT_EVALUATED,
+                "reasonCodes": ["SEGMENT_VALUE_COVERAGE_MISMATCH"],
+                "regressions": [],
+            }
         for segment, current_metrics in current_by_segment.items():
             challenger_metrics = challenger_by_segment.get(segment)
             if not isinstance(current_metrics, dict) or not isinstance(challenger_metrics, dict):
-                continue
-            drop = float(current_metrics.get("prAuc", 0.0)) - float(challenger_metrics.get("prAuc", 0.0))
+                return {
+                    "status": NOT_EVALUATED,
+                    "reasonCodes": ["SEGMENT_METRICS_MISSING"],
+                    "regressions": [],
+                }
+            current_pr_auc = _bounded_metric(current_metrics, "prAuc", 0.0, 1.0)
+            challenger_pr_auc = _bounded_metric(challenger_metrics, "prAuc", 0.0, 1.0)
+            if current_pr_auc is None or challenger_pr_auc is None:
+                return {
+                    "status": NOT_EVALUATED,
+                    "reasonCodes": ["SEGMENT_PR_AUC_INVALID"],
+                    "regressions": [],
+                }
+            drop = current_pr_auc - challenger_pr_auc
             if drop > thresholds.max_segment_pr_auc_drop:
                 regressions.append({"dimension": dimension, "segment": segment, "prAucDrop": round(drop, 6)})
-    return {"passed": not regressions, "regressions": regressions}
+    return {
+        "status": FAIL if regressions else PASS,
+        "reasonCodes": [],
+        "regressions": regressions,
+    }
 
 
-def _stability_check(evaluation: dict[str, object], thresholds: PromotionThresholds) -> dict[str, object]:
+def _stability_check(
+        evaluation: dict[str, object],
+        thresholds: ChallengerComparisonThresholds,
+) -> dict[str, object]:
     stability = evaluation.get("stabilityAssessment")
     if not isinstance(stability, dict):
-        return {"passed": True, "reason": "missing stability assessment"}
+        return {
+            "status": NOT_EVALUATED,
+            "reasonCodes": ["STABILITY_ASSESSMENT_MISSING"],
+            "failures": [],
+            "metrics": None,
+        }
+    pr_auc_delta = _bounded_number(stability.get("prAucDelta"), -1.0, 1.0)
+    expected_cost_delta = _bounded_number(stability.get("expectedCostDelta"))
+    if pr_auc_delta is None or expected_cost_delta is None:
+        return {
+            "status": NOT_EVALUATED,
+            "reasonCodes": ["STABILITY_METRICS_INCOMPLETE_OR_INVALID"],
+            "failures": [],
+            "metrics": None,
+        }
     failures = []
-    if float(stability.get("prAucDelta", 0.0)) > thresholds.max_out_of_time_pr_auc_drop:
+    if pr_auc_delta > thresholds.max_out_of_time_pr_auc_drop:
         failures.append("prAucDelta")
-    if float(stability.get("expectedCostDelta", 0.0)) > thresholds.max_out_of_time_cost_increase:
+    if expected_cost_delta > thresholds.max_out_of_time_cost_increase:
         failures.append("expectedCostDelta")
-    return {"passed": not failures, "failures": failures, "metrics": stability}
+    return {
+        "status": FAIL if failures else PASS,
+        "reasonCodes": [],
+        "failures": failures,
+        "metrics": {
+            "prAucDelta": pr_auc_delta,
+            "expectedCostDelta": expected_cost_delta,
+        },
+    }
 
 
 def _optimal(evaluation: dict[str, object]) -> dict[str, object]:
@@ -245,11 +532,11 @@ def _optimal(evaluation: dict[str, object]) -> dict[str, object]:
     return value if isinstance(value, dict) else {}
 
 
-def _cost(evaluation: dict[str, object]) -> float:
+def _cost(evaluation: dict[str, object]) -> float | None:
     cost_evaluation = evaluation.get("costEvaluation")
     if not isinstance(cost_evaluation, dict):
-        return 0.0
+        return None
     optimal = cost_evaluation.get("optimalCostThreshold")
     if not isinstance(optimal, dict):
-        return 0.0
-    return float(optimal.get("totalCost", 0.0))
+        return None
+    return _bounded_number(optimal.get("totalCost"), 0.0)

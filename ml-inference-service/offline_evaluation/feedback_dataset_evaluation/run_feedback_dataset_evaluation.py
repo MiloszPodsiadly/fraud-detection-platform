@@ -16,10 +16,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model-name", help="Exact ML model name for optional model-specific evaluation.")
     parser.add_argument("--model-version", help="Exact ML model version for optional model-specific evaluation.")
     parser.add_argument("--feature-contract-version", help="Exact ML feature contract version for optional model-specific evaluation.")
+    parser.add_argument("--model-artifact-sha256", help="Exact lowercase SHA-256 of the ML artifact bytes.")
     args = parser.parse_args(argv)
-    model_identity_args = (args.model_name, args.model_version, args.feature_contract_version)
+    model_identity_args = (
+        args.model_name,
+        args.model_version,
+        args.feature_contract_version,
+        args.model_artifact_sha256,
+    )
     if any(model_identity_args) and not all(model_identity_args):
-        parser.error("--model-name, --model-version, and --feature-contract-version must be provided together")
+        parser.error(
+            "--model-name, --model-version, --feature-contract-version, and "
+            "--model-artifact-sha256 must be provided together"
+        )
     run_feedback_dataset_evaluation(
         Path(args.input),
         Path(args.output_dir),

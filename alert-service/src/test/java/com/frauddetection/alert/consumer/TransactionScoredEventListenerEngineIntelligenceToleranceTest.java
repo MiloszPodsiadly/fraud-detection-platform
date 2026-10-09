@@ -38,7 +38,7 @@ class TransactionScoredEventListenerEngineIntelligenceToleranceTest {
                         "transactions.dead-letter"
                 )
         );
-        String traceId = "trace-fdp93-listener-" + fixtureName;
+        String traceId = "trace-engine-intelligence-listener-" + fixtureName;
 
         doAnswer(invocation -> {
             assertListenerTraceContext(event, traceId);

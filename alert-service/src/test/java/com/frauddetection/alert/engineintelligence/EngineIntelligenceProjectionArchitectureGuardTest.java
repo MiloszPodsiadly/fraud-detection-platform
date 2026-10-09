@@ -32,6 +32,7 @@ class EngineIntelligenceProjectionArchitectureGuardTest {
             "FraudFeedbackService.java",
             "dataset/FeedbackDatasetBuilder.java",
             "dataset/FeedbackDatasetMlPredictionEvidence.java",
+            "dataset/FeedbackDatasetMlPredictionEvidenceResolutionProvenance.java",
             "dataset/FeedbackDatasetMlPredictionEvidenceStatus.java",
             "dataset/FeedbackDatasetRecord.java",
             "dataset/MicrometerFeedbackDatasetMetricsRecorder.java"

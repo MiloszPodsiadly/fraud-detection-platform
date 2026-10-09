@@ -43,16 +43,19 @@ MODEL_X = ModelEvaluationIdentity(
     "python-logistic-fraud-model",
     "2026-06-25.v1",
     "feature-contract-v2",
+    "a" * 64,
 )
 MODEL_Y = ModelEvaluationIdentity(
     "python-logistic-fraud-model",
     "2026-07-01.v1",
     "feature-contract-v2",
+    "b" * 64,
 )
 SHADOW_MODEL = ModelEvaluationIdentity(
     "python-logistic-fraud-model",
     "ml-shadow-2026-06-01",
     "feature-contract-v2",
+    "c" * 64,
 )
 
 
@@ -264,7 +267,7 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
         summary = build_model_specific_evaluation_summary(dataset, MODEL_X, GENERATED_AT)
 
         self.assertEqual({
-            "datasetVersion": "feedback-dataset-v2",
+            "datasetVersion": "feedback-dataset-v3",
             "sha256": dataset.source_sha256,
             "rawRowsRead": 7,
             "recordsReturned": 2,
@@ -342,7 +345,12 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
         self.assertEqual(1, summary["population"]["recordsEvaluated"])
 
     def test_modelNameMismatchIsDetected(self):
-        requested = ModelEvaluationIdentity("python-xgboost-fraud-model", MODEL_X.model_version, MODEL_X.feature_contract_version)
+        requested = ModelEvaluationIdentity(
+            "python-xgboost-fraud-model",
+            MODEL_X.model_version,
+            MODEL_X.feature_contract_version,
+            MODEL_X.model_artifact_sha256,
+        )
         summary = self._model_summary(self._model_record("eval_11111111111111111111111111111111", MODEL_X), requested=requested)
 
         self.assertEqual(0, summary["population"]["recordsEvaluated"])
@@ -355,9 +363,31 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
         self.assertEqual(1, summary["population"]["recordsExcludedIdentityMismatch"])
 
     def test_featureContractVersionMismatchIsDetected(self):
-        other_contract = ModelEvaluationIdentity(MODEL_X.model_name, MODEL_X.model_version, "feature-contract-v3")
+        other_contract = ModelEvaluationIdentity(
+            MODEL_X.model_name,
+            MODEL_X.model_version,
+            "feature-contract-v3",
+            MODEL_X.model_artifact_sha256,
+        )
         summary = self._model_summary(
             self._model_record("eval_11111111111111111111111111111111", other_contract)
+        )
+
+        self.assertEqual(0, summary["population"]["recordsEvaluated"])
+        self.assertEqual(1, summary["population"]["recordsExcludedIdentityMismatch"])
+
+    def test_modelArtifactSha256MismatchIsDetectedForSameLogicalIdentity(self):
+        same_logical_identity_different_artifact = ModelEvaluationIdentity(
+            MODEL_X.model_name,
+            MODEL_X.model_version,
+            MODEL_X.feature_contract_version,
+            "d" * 64,
+        )
+        summary = self._model_summary(
+            self._model_record(
+                "eval_11111111111111111111111111111111",
+                same_logical_identity_different_artifact,
+            )
         )
 
         self.assertEqual(0, summary["population"]["recordsEvaluated"])
@@ -819,7 +849,7 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
     def test_modelEvaluationSummaryValidatorRejectsRetiredSourceDatasetVersionField(self):
         summary = self._model_summary(self._model_record("eval_11111111111111111111111111111111", MODEL_X))
         del summary["sourceDataset"]
-        summary["sourceDatasetVersion"] = "feedback-dataset-v2"
+        summary["sourceDatasetVersion"] = "feedback-dataset-v3"
 
         with self.assertRaisesRegex(ValueError, "sourceDatasetVersion"):
             validate_model_evaluation_summary(summary)
@@ -1028,19 +1058,31 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
 
     def test_requestedModelIdentityRejectsSecretLikeValues(self):
         with self.assertRaises(ValueError):
-            ModelEvaluationIdentity("python-logistic-fraud-model", "tokenized-model-version", "feature-contract-v2")
+            ModelEvaluationIdentity(
+                "python-logistic-fraud-model", "tokenized-model-version", "feature-contract-v2", "a" * 64
+            )
         with self.assertRaises(ValueError):
-            ModelEvaluationIdentity("python-logistic-fraud-model", "2026-06-25.v1", "secret-feature-contract")
+            ModelEvaluationIdentity(
+                "python-logistic-fraud-model", "2026-06-25.v1", "secret-feature-contract", "a" * 64
+            )
 
     def test_requestedModelIdentityRejectsUnsafeSyntaxAndBounds(self):
         with self.assertRaises(ValueError):
-            ModelEvaluationIdentity("python/logistic-fraud-model", "2026-06-25.v1", "feature-contract-v2")
+            ModelEvaluationIdentity(
+                "python/logistic-fraud-model", "2026-06-25.v1", "feature-contract-v2", "a" * 64
+            )
         with self.assertRaises(ValueError):
-            ModelEvaluationIdentity("python-logistic-fraud-model", "2026-06-25:v1", "feature-contract-v2")
+            ModelEvaluationIdentity(
+                "python-logistic-fraud-model", "2026-06-25:v1", "feature-contract-v2", "a" * 64
+            )
         with self.assertRaises(ValueError):
-            ModelEvaluationIdentity("python-logistic-fraud-model", "2026-06-25.v1", "feature contract v2")
+            ModelEvaluationIdentity(
+                "python-logistic-fraud-model", "2026-06-25.v1", "feature contract v2", "a" * 64
+            )
         with self.assertRaises(ValueError):
-            ModelEvaluationIdentity("python-logistic-fraud-model", "2026-06-25.v1", "f" * 97)
+            ModelEvaluationIdentity(
+                "python-logistic-fraud-model", "2026-06-25.v1", "f" * 97, "a" * 64
+            )
 
     def _model_summary(self, *records, requested=MODEL_X):
         return self._reports(*records, model_identity=requested)["modelEvaluationSummary"]
@@ -1170,6 +1212,7 @@ class ModelSpecificEvaluationTest(unittest.TestCase):
             mlModelName=identity.model_name,
             mlModelVersion=identity.model_version,
             mlFeatureContractVersion=identity.feature_contract_version,
+            mlModelArtifactSha256=identity.model_artifact_sha256,
             **overrides,
         )
 

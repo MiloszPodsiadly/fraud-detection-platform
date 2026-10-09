@@ -20,14 +20,14 @@ The bounded context has two data sources with distinct ownership:
 
 - `FraudFeedbackRecord` owns analyst feedback, exact scoring-occurrence ownership, and the bounded historical
   snapshots captured when feedback is created.
-- `MlPredictionEvidenceProjection` owns direct ML prediction evidence for the exact source event.
+- `MlPredictionEvidenceProjection` owns the immutable evidence-or-omission outcome for the exact source event.
 - `FeedbackDatasetEligibilityPolicy` owns label eligibility.
 
 The builder reads bounded candidates from `fraud_feedback_records` and performs one bounded exact-event lookup in
 `ml_prediction_evidence_projections`. It does not read `engine_intelligence_feedback`, a current transaction
 projection, or the model registry.
 
-`feedback-dataset-v2` contains only current exact-occurrence evaluation observations. A candidate must carry complete,
+`feedback-dataset-v3` contains only current exact-occurrence evaluation observations. A candidate must carry complete,
 valid scoring-occurrence ownership before it enters the evidence batch lookup. A fully missing occurrence is counted
 in `skippedMissingRequiredFieldCount`; partial or malformed occurrence identity is counted in
 `skippedInvalidSourceRecordCount`. Neither condition emits a `DATASET_RECORD`.
@@ -80,7 +80,7 @@ The builder does not duplicate eligibility rules. It calls `FeedbackDatasetEligi
 - `NEEDS_MORE_INFO` -> excluded
 - null or governance-review labels -> excluded
 
-Unresolved labels are not written to JSONL v2.
+Unresolved labels are not written to JSONL v3.
 
 `FeedbackDatasetRecord` also enforces the record-level invariant. Only these pairs can be represented:
 
@@ -109,14 +109,24 @@ Optional nullable fields are limited to bounded feedback diagnostics already pre
 agreement/mismatch/score-delta buckets, Analyst Recommendation status/value/version/generated-at/reason codes,
 `scoredAt`, and `transactionTimestamp`.
 
-The v2 record shape carries bounded direct ML evidence through `mlPredictionEvidenceStatus`,
-`mlPredictionEvidenceOmissionReason`, `mlPredictionScore`, `mlPredictionRiskLevel`, and
-`mlPredictionExecutedAt`, together with `mlModelName`, `mlModelVersion`, and `mlFeatureContractVersion`.
-`AVAILABLE` requires the complete signal and model identity. Every non-available status requires the direct
+The v3 record shape carries bounded direct ML evidence through `mlPredictionEvidenceStatus`,
+`mlPredictionEvidenceResolutionProvenance`, `mlPredictionEvidenceOmissionReason`, `mlPredictionScore`, `mlPredictionRiskLevel`, and
+`mlPredictionExecutedAt`, together with `mlModelName`, `mlModelVersion`, `mlFeatureContractVersion`, and
+`mlModelArtifactSha256`. `AVAILABLE` requires the complete signal and exact M/V/F/SHA identity. Every non-available status requires the direct
 prediction and model identity fields to be null. `LEGITIMATELY_ABSENT` additionally requires an authoritative
 omission reason; missing projection or identity data alone never proves legitimate absence. Unexpected absence,
 malformed evidence, and identity mismatch remain explicit dataset records rather than disappearing from the bounded
 population. Absence is never represented as score zero or low risk.
+
+An `AVAILABLE` record also states how that exact-occurrence identity was resolved. `CAPTURED_AND_CONFIRMED` means
+the feedback snapshot carried the complete M/V/F/SHA identity and the occurrence projection confirmed it.
+`RECOVERED_FROM_EXACT_OCCURRENCE_PROJECTION` means the feedback snapshot carried no ML identity and the builder
+recovered it solely from the immutable projection owned by the same source event. Partial feedback identity is
+malformed, and neither provenance permits registry, current-model, latest-projection, or timestamp inference.
+
+The repository currently has no attested historical partition/offset boundary that can independently prove legitimate
+absence. Consequently, historical age, missing fields, or timestamps never produce `LEGITIMATELY_ABSENT`; only the
+authoritative omission mapping below can do so until the external cutover evidence is completed.
 
 The authoritative omission mapping is:
 
@@ -223,9 +233,10 @@ Failed builds emit metadata with a bounded `failureReason` and no fake successfu
 consumers. It covers both `DATASET_METADATA` and `DATASET_RECORD` line shapes. It does not add a public API or runtime
 export path in feedback dataset.
 
-## V2 Rollout
+## V3 Contract Deployment
 
-Current validators and runtime artifacts intentionally require `feedback-dataset-v2`; there is no executable v1
-fallback. Deployment order is therefore contractual: generate or publish valid v2 evaluation artifacts, verify those
-artifacts against the v2 validators, and only then deploy the runtime that requires v2. A missing or invalid v2
-artifact must fail closed instead of silently removing Shadow Performance diagnostics or loading a v1 artifact.
+Current producers, validators, and offline evaluation consumers require `feedback-dataset-v3`; there is no executable
+v1 or v2 fallback. Deployment is a coordinated hard cut: deploy the v3 producer and consumer contract together, then
+generate and validate new v3 evaluation artifacts through the canonical builder. Older dataset artifacts remain
+governed historical material but are not accepted as current evaluation input. A missing or invalid v3 artifact fails
+closed rather than being reinterpreted through an older schema or silently removed from population accounting.

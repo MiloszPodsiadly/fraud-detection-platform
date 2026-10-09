@@ -13,7 +13,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceSignalCat
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningCode;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceWarningSummary;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineType;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -92,17 +92,15 @@ public class EngineIntelligenceProjectionPolicy {
         ));
     }
 
-    public MlPredictionEvidenceV1 validatedEvidenceCopy(MlPredictionEvidenceV1 source) {
+    public MlPredictionEvidence validatedEvidenceCopy(MlPredictionEvidence source) {
         requireShape(source);
-        return publicContract(() -> new MlPredictionEvidenceV1(
-                source.contractVersion(),
-                source.sourceEngineId(),
-                source.engineStatus(),
+        return publicContract(() -> new MlPredictionEvidence(
                 source.mlScore(),
                 source.mlRiskLevel(),
                 source.modelName(),
                 source.modelVersion(),
                 source.featureContractVersion(),
+                source.modelArtifactSha256(),
                 source.sourceExecutionTimestamp()
         ));
     }

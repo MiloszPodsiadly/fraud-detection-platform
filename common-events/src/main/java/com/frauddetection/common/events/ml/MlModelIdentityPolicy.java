@@ -8,8 +8,10 @@ public final class MlModelIdentityPolicy {
     public static final int MODEL_NAME_MAX_LENGTH = 64;
     public static final int MODEL_VERSION_MAX_LENGTH = 64;
     public static final int FEATURE_CONTRACT_VERSION_MAX_LENGTH = 96;
+    public static final int ARTIFACT_SHA256_LENGTH = 64;
 
     private static final Pattern IDENTITY_PART_PATTERN = Pattern.compile("[A-Za-z0-9._-]+");
+    private static final Pattern ARTIFACT_SHA256_PATTERN = Pattern.compile("[0-9a-f]{64}");
     private static final Set<String> FORBIDDEN_COMPACT_TERMS = Set.of(
             "accountid",
             "apikey",
@@ -71,6 +73,47 @@ public final class MlModelIdentityPolicy {
 
     public static String optionalFeatureContractVersion(String value, String fieldName) {
         return optionalIdentityPart(value, fieldName, FEATURE_CONTRACT_VERSION_MAX_LENGTH);
+    }
+
+    public static String requireArtifactSha256(String value, String fieldName) {
+        if (value == null || !ARTIFACT_SHA256_PATTERN.matcher(value).matches()) {
+            throw new IllegalArgumentException(fieldName + " must be 64 lowercase hexadecimal characters");
+        }
+        return value;
+    }
+
+    public static String optionalArtifactSha256(String value, String fieldName) {
+        return value == null ? null : requireArtifactSha256(value, fieldName);
+    }
+
+    public static void requireAtomicArtifactIdentity(
+            String modelName,
+            String modelVersion,
+            String featureContractVersion,
+            String modelArtifactSha256
+    ) {
+        int present = 0;
+        present += modelName == null ? 0 : 1;
+        present += modelVersion == null ? 0 : 1;
+        present += featureContractVersion == null ? 0 : 1;
+        present += modelArtifactSha256 == null ? 0 : 1;
+        if (present != 0 && present != 4) {
+            throw new IllegalArgumentException(
+                    "ML model artifact identity must be entirely absent or complete"
+            );
+        }
+    }
+
+    public static boolean hasCompleteArtifactIdentity(
+            String modelName,
+            String modelVersion,
+            String featureContractVersion,
+            String modelArtifactSha256
+    ) {
+        return modelName != null
+                && modelVersion != null
+                && featureContractVersion != null
+                && modelArtifactSha256 != null;
     }
 
     private static String requireIdentityPart(String value, String fieldName, int maxLength) {

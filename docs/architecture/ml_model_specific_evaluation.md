@@ -20,7 +20,7 @@ ML Model Evaluation answers:
 
 The model-specific path uses an explicit exact-identity policy. Records whose lineage exactly matches the requested
 identity are evaluated. Records with complete but different lineage are counted as `MODEL_IDENTITY_MISMATCH` and
-excluded. Dataset v2 rejects `AVAILABLE` prediction evidence with missing, partial, or invalid model identity; a
+excluded. Dataset v3 rejects `AVAILABLE` prediction evidence with missing, partial, or invalid model identity; a
 defensively supplied in-memory record with that impossible shape is classified as invalid prediction evidence.
 
 The model-specific report is aggregate-only. It contains counts, class balance, evaluation window, limitations, and
@@ -55,7 +55,7 @@ and each uses `^[A-Za-z0-9._-]+$`. The Java and Python runtime identity policies
 forbidden semantic-term rejection. A value may therefore be structurally valid for transport while still being
 rejected at the runtime trust boundary; public schemas do not claim to implement that additional security policy.
 
-Feedback dataset v2 carries the exact immutable ML score, risk level, execution timestamp, and complete model identity
+Feedback dataset v3 carries the exact immutable ML score, risk level, execution timestamp, and complete model identity
 for records whose evidence status is `AVAILABLE`. Legitimate absence remains explicit and carries null prediction
 values. Model-specific classification uses only that direct `mlPredictionRiskLevel`: `HIGH` and `CRITICAL` are a
 positive prediction, while `LOW` and `MEDIUM` are a negative prediction under

@@ -61,7 +61,7 @@ import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreBuck
 import com.frauddetection.common.events.intelligence.EngineIntelligenceScoreDeltaBucket;
 import com.frauddetection.common.events.intelligence.EngineIntelligenceSummary;
 import com.frauddetection.common.events.intelligence.MlModelIdentity;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceV1;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidence;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.mongodb.MongoException;
@@ -874,10 +874,11 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
                 engineIntelligence,
                 engineIntelligence == null
                         ? null
-                        : new MlPredictionEvidenceV1(
+                        : new MlPredictionEvidence(
                                 score,
                                 riskLevel,
                                 modelIdentity(modelVersion),
+                                "a".repeat(64),
                                 createdAt.minusNanos(123_456_789L)
                         ),
                 engineIntelligence == null

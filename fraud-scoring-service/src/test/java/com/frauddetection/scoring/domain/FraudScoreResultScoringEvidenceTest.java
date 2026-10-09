@@ -61,7 +61,8 @@ class FraudScoreResultScoringEvidenceTest {
                 Map.of(),
                 Map.of("modelAvailable", true),
                 true,
-                scoringEvidence
+                scoringEvidence,
+                "a".repeat(64)
         );
         scoringEvidence.clear();
 

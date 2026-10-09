@@ -30,6 +30,7 @@ class MlFraudScoringEngineTest {
                 "python-logistic-fraud-model",
                 "test-version",
                 FEATURE_CONTRACT_VERSION,
+                "a".repeat(64),
                 Instant.now(),
                 Arrays.asList(
                         ReasonCode.COUNTRY_MISMATCH.wireValue(),
@@ -73,6 +74,7 @@ class MlFraudScoringEngineTest {
                 "python-logistic-fraud-model",
                 "test-version",
                 FEATURE_CONTRACT_VERSION,
+                "a".repeat(64),
                 Instant.now(),
                 null,
                 Map.of("modelAvailable", true),
@@ -95,12 +97,13 @@ class MlFraudScoringEngineTest {
                 "python-logistic-fraud-model",
                 "test-version",
                 null,
+                null,
                 Instant.now(),
                 List.of(ReasonCode.MODEL_HIGH_RISK.wireValue()),
                 Map.of("modelAvailable", true),
                 Map.of("modelAvailable", true),
                 null
-        )).hasMessageContaining("ML model identity must be entirely absent or complete");
+        )).hasMessageContaining("ML model artifact identity must be entirely absent or complete");
     }
 
     @Test
@@ -109,6 +112,7 @@ class MlFraudScoringEngineTest {
                 true,
                 0.91d,
                 RiskLevel.CRITICAL,
+                null,
                 null,
                 null,
                 null,

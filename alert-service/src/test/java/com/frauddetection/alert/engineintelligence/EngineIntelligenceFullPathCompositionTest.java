@@ -384,6 +384,7 @@ class EngineIntelligenceFullPathCompositionTest {
                         "python-logistic-fraud-model",
                         "2026-06-18.v1",
                         "feature-contract-v2",
+                        "a".repeat(64),
                         ML_INFERENCE_AT,
                         List.of("MODEL_MEDIUM_RISK"),
                         Map.of("modelScoreBucket", "MEDIUM"),

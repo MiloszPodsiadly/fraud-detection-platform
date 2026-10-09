@@ -28,7 +28,7 @@
           "const": "DATASET_METADATA"
         },
         "datasetVersion": {
-          "const": "feedback-dataset-v2"
+          "const": "feedback-dataset-v3"
         },
         "builtAt": {
           "type": "string",
@@ -163,11 +163,15 @@
                     "mlPredictionExecutedAt",
                     "mlModelName",
                     "mlModelVersion",
-                    "mlFeatureContractVersion"
+                    "mlFeatureContractVersion",
+                    "mlModelArtifactSha256"
                   ],
                   "properties": {
                     "mlPredictionEvidenceStatus": {
                       "const": "LEGITIMATELY_ABSENT"
+                    },
+                    "mlPredictionEvidenceResolutionProvenance": {
+                      "type": "null"
                     },
                     "mlPredictionEvidenceOmissionReason": {
                       "const": "DIAGNOSTIC_EMISSION_DISABLED"
@@ -189,6 +193,9 @@
                     },
                     "mlFeatureContractVersion": {
                       "type": "null"
+                    },
+                    "mlModelArtifactSha256": {
+                      "type": "null"
                     }
                   }
                 },
@@ -201,11 +208,15 @@
                     "mlPredictionExecutedAt",
                     "mlModelName",
                     "mlModelVersion",
-                    "mlFeatureContractVersion"
+                    "mlFeatureContractVersion",
+                    "mlModelArtifactSha256"
                   ],
                   "properties": {
                     "mlPredictionEvidenceStatus": {
                       "const": "MISSING_UNEXPECTEDLY"
+                    },
+                    "mlPredictionEvidenceResolutionProvenance": {
+                      "type": "null"
                     },
                     "mlPredictionEvidenceOmissionReason": {
                       "enum": ["DIAGNOSTIC_ENRICHMENT_UNAVAILABLE", "ML_ENGINE_UNAVAILABLE", null]
@@ -215,7 +226,8 @@
                     "mlPredictionExecutedAt": {"type": "null"},
                     "mlModelName": {"type": "null"},
                     "mlModelVersion": {"type": "null"},
-                    "mlFeatureContractVersion": {"type": "null"}
+                    "mlFeatureContractVersion": {"type": "null"},
+                    "mlModelArtifactSha256": {"type": "null"}
                   }
                 },
                 {
@@ -227,11 +239,15 @@
                     "mlPredictionExecutedAt",
                     "mlModelName",
                     "mlModelVersion",
-                    "mlFeatureContractVersion"
+                    "mlFeatureContractVersion",
+                    "mlModelArtifactSha256"
                   ],
                   "properties": {
                     "mlPredictionEvidenceStatus": {
                       "const": "MALFORMED"
+                    },
+                    "mlPredictionEvidenceResolutionProvenance": {
+                      "type": "null"
                     },
                     "mlPredictionEvidenceOmissionReason": {
                       "enum": [
@@ -248,7 +264,8 @@
                     "mlPredictionExecutedAt": {"type": "null"},
                     "mlModelName": {"type": "null"},
                     "mlModelVersion": {"type": "null"},
-                    "mlFeatureContractVersion": {"type": "null"}
+                    "mlFeatureContractVersion": {"type": "null"},
+                    "mlModelArtifactSha256": {"type": "null"}
                   }
                 },
                 {
@@ -260,11 +277,15 @@
                     "mlPredictionExecutedAt",
                     "mlModelName",
                     "mlModelVersion",
-                    "mlFeatureContractVersion"
+                    "mlFeatureContractVersion",
+                    "mlModelArtifactSha256"
                   ],
                   "properties": {
                     "mlPredictionEvidenceStatus": {
                       "const": "IDENTITY_MISMATCH"
+                    },
+                    "mlPredictionEvidenceResolutionProvenance": {
+                      "type": "null"
                     },
                     "mlPredictionEvidenceOmissionReason": {
                       "type": "null"
@@ -274,7 +295,8 @@
                     "mlPredictionExecutedAt": {"type": "null"},
                     "mlModelName": {"type": "null"},
                     "mlModelVersion": {"type": "null"},
-                    "mlFeatureContractVersion": {"type": "null"}
+                    "mlFeatureContractVersion": {"type": "null"},
+                    "mlModelArtifactSha256": {"type": "null"}
                   }
                 },
                 {
@@ -286,11 +308,18 @@
                     "mlPredictionExecutedAt",
                     "mlModelName",
                     "mlModelVersion",
-                    "mlFeatureContractVersion"
+                    "mlFeatureContractVersion",
+                    "mlModelArtifactSha256"
                   ],
                   "properties": {
                     "mlPredictionEvidenceStatus": {
                       "const": "AVAILABLE"
+                    },
+                    "mlPredictionEvidenceResolutionProvenance": {
+                      "enum": [
+                        "CAPTURED_AND_CONFIRMED",
+                        "RECOVERED_FROM_EXACT_OCCURRENCE_PROJECTION"
+                      ]
                     },
                     "mlPredictionEvidenceOmissionReason": {
                       "type": "null"
@@ -312,6 +341,10 @@
                     },
                     "mlFeatureContractVersion": {
                       "type": "string"
+                    },
+                    "mlModelArtifactSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
                     }
                   }
                 }
@@ -349,17 +382,19 @@
             "rulesEvidenceStatus",
             "rulesRiskLevel",
             "mlPredictionEvidenceStatus",
+            "mlPredictionEvidenceResolutionProvenance",
             "mlPredictionEvidenceOmissionReason",
             "mlPredictionScore",
             "mlPredictionRiskLevel",
             "mlPredictionExecutedAt",
             "mlModelName",
             "mlModelVersion",
-            "mlFeatureContractVersion"
+            "mlFeatureContractVersion",
+            "mlModelArtifactSha256"
           ],
           "properties": {
             "datasetVersion": {
-              "const": "feedback-dataset-v2"
+              "const": "feedback-dataset-v3"
             },
             "evaluationRecordId": {
               "type": "string",
@@ -473,6 +508,13 @@
                 "IDENTITY_MISMATCH"
               ]
             },
+            "mlPredictionEvidenceResolutionProvenance": {
+              "enum": [
+                "CAPTURED_AND_CONFIRMED",
+                "RECOVERED_FROM_EXACT_OCCURRENCE_PROJECTION",
+                null
+              ]
+            },
             "mlPredictionEvidenceOmissionReason": {
               "enum": [
                 "DIAGNOSTIC_EMISSION_DISABLED",
@@ -538,6 +580,10 @@
               "minLength": 1,
               "maxLength": 96,
               "pattern": "^[A-Za-z0-9._-]+$"
+            },
+            "mlModelArtifactSha256": {
+              "type": ["string", "null"],
+              "pattern": "^[a-f0-9]{64}$"
             },
             "analystRecommendationStatus": {
               "enum": [

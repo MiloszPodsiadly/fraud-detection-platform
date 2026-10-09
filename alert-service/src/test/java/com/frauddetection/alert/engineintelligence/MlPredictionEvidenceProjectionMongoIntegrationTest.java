@@ -1,6 +1,7 @@
 package com.frauddetection.alert.engineintelligence;
 
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.frauddetection.alert.messaging.MlPredictionEvidenceEventListener;
 import com.frauddetection.alert.messaging.MlPredictionEvidenceTransientProcessingException;
 import com.mongodb.client.MongoClient;
@@ -111,9 +112,54 @@ class MlPredictionEvidenceProjectionMongoIntegrationTest {
                 MlPredictionEvidenceProjectionTestSupport.eventWithoutEvidence("evt-absence-replay")
         );
 
-        assertThat(result.status()).isEqualTo(MlPredictionEvidenceProjectionStatus.OMITTED);
-        assertThat(result.reason()).contains(MlPredictionEvidenceProjectionReason.EVIDENCE_ABSENT);
+        assertConflict(result);
         assertThat(repository.findById("evt-absence-replay").orElseThrow().getMlScore()).isEqualTo(0.8123d);
+        assertThat(repository.count()).isEqualTo(1L);
+    }
+
+    @Test
+    void identicalOmissionReplayIsIdempotent() {
+        var event = MlPredictionEvidenceProjectionTestSupport.eventWithoutEvidence("evt-omission-replay");
+
+        assertThat(service.project(event).status()).isEqualTo(MlPredictionEvidenceProjectionStatus.OMITTED);
+        assertThat(service.project(event).status()).isEqualTo(MlPredictionEvidenceProjectionStatus.IDEMPOTENT_REPLAY);
+
+        MlPredictionEvidenceProjection stored = repository.findById("evt-omission-replay").orElseThrow();
+        assertThat(stored.hasEvidence()).isFalse();
+        assertThat(stored.getSourceExecutionTimestamp()).isNull();
+        assertThat(stored.getMlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED);
+        assertThat(repository.count()).isEqualTo(1L);
+    }
+
+    @Test
+    void differentOmissionReasonConflictsWithoutOverwritingAcceptedOutcome() {
+        service.project(MlPredictionEvidenceProjectionTestSupport.eventWithoutEvidence("evt-omission-conflict"));
+
+        MlPredictionEvidenceProjectionResult result = service.project(
+                MlPredictionEvidenceProjectionTestSupport.eventWithoutEvidence(
+                        "evt-omission-conflict",
+                        MlPredictionEvidenceOmissionReason.INVALID_SCORE
+                )
+        );
+
+        assertConflict(result);
+        assertThat(repository.findById("evt-omission-conflict").orElseThrow()
+                .getMlPredictionEvidenceOmissionReason())
+                .isEqualTo(MlPredictionEvidenceOmissionReason.PREDICTION_NOT_ACCEPTED);
+    }
+
+    @Test
+    void acceptedOmissionRejectsLaterEvidenceForSameSourceEvent() {
+        service.project(MlPredictionEvidenceProjectionTestSupport.eventWithoutEvidence("evt-omission-first"));
+
+        MlPredictionEvidenceProjectionResult result = service.project(
+                MlPredictionEvidenceProjectionTestSupport.event("evt-omission-first", 0.8123d, "model-v1")
+        );
+
+        assertConflict(result);
+        MlPredictionEvidenceProjection stored = repository.findById("evt-omission-first").orElseThrow();
+        assertThat(stored.hasEvidence()).isFalse();
         assertThat(repository.count()).isEqualTo(1L);
     }
 
@@ -196,6 +242,40 @@ class MlPredictionEvidenceProjectionMongoIntegrationTest {
     }
 
     @Test
+    void concurrentContradictoryOutcomesAcceptExactlyOneImmutableWinner() throws Exception {
+        String eventId = "evt-concurrent-conflict";
+        var evidence = MlPredictionEvidenceProjectionTestSupport.event(eventId, 0.8123d, "model-v1");
+        var omission = MlPredictionEvidenceProjectionTestSupport.eventWithoutEvidence(eventId);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<MlPredictionEvidenceProjectionResult> evidenceResult = executor.submit(() -> {
+                start.await();
+                return service.project(evidence);
+            });
+            Future<MlPredictionEvidenceProjectionResult> omissionResult = executor.submit(() -> {
+                start.await();
+                return service.project(omission);
+            });
+            start.countDown();
+
+            List<MlPredictionEvidenceProjectionStatus> statuses = List.of(
+                    evidenceResult.get().status(),
+                    omissionResult.get().status()
+            );
+            assertThat(statuses).containsExactlyInAnyOrder(
+                    MlPredictionEvidenceProjectionStatus.FAILED,
+                    statuses.contains(MlPredictionEvidenceProjectionStatus.PROJECTED)
+                            ? MlPredictionEvidenceProjectionStatus.PROJECTED
+                            : MlPredictionEvidenceProjectionStatus.OMITTED
+            );
+            assertThat(repository.count()).isEqualTo(1L);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
     void transientEvidenceFailureRemainsRetryableAndRecoversExactOccurrence() {
         var event = MlPredictionEvidenceProjectionTestSupport.event(
                 "evt-durable-recovery",
@@ -238,6 +318,32 @@ class MlPredictionEvidenceProjectionMongoIntegrationTest {
         assertThat(stored.getModelVersion()).isEqualTo(event.mlPredictionEvidence().modelVersion());
         assertThat(stored.getFeatureContractVersion())
                 .isEqualTo(event.mlPredictionEvidence().featureContractVersion());
+    }
+
+    @Test
+    void retryAfterUnknownInsertAcknowledgementClassifiesPersistedOutcomeAsIdempotent() {
+        var event = MlPredictionEvidenceProjectionTestSupport.event(
+                "evt-uncertain-insert",
+                0.8123d,
+                "model-v1"
+        );
+        MlPredictionEvidenceProjectionRepository faultInjectedRepository = mock(
+                MlPredictionEvidenceProjectionRepository.class,
+                delegatesTo(repository)
+        );
+        doAnswer(invocation -> {
+            repository.insert((MlPredictionEvidenceProjection) invocation.getArgument(0));
+            throw new DataAccessResourceFailureException("simulated lost acknowledgement");
+        }).doAnswer(invocation -> repository.insert(
+                (MlPredictionEvidenceProjection) invocation.getArgument(0)
+        )).when(faultInjectedRepository)
+                .insert((MlPredictionEvidenceProjection) any(MlPredictionEvidenceProjection.class));
+        MlPredictionEvidenceProjectionService faultInjectedService = evidenceService(faultInjectedRepository);
+
+        assertThat(faultInjectedService.project(event).status()).isEqualTo(MlPredictionEvidenceProjectionStatus.FAILED);
+        assertThat(faultInjectedService.project(event).status())
+                .isEqualTo(MlPredictionEvidenceProjectionStatus.IDEMPOTENT_REPLAY);
+        assertThat(repository.count()).isEqualTo(1L);
     }
 
     @Test

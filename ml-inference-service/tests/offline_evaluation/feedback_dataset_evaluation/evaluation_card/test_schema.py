@@ -446,7 +446,7 @@ def valid_evaluation_evidence(**overrides):
         "evaluationReportType": "FEEDBACK_DATASET_OFFLINE_EVALUATION_V1",
         "evaluationGeneratedAt": "2026-06-10T00:00:00Z",
         "evaluationArtifactSetVersion": "feedback-dataset-evaluation-report-artifact-set-v1",
-        "datasetVersion": "feedback-dataset-v2",
+        "datasetVersion": "feedback-dataset-v3",
         "datasetTimeBasis": "FEEDBACK_CREATED_AT",
         "recordsEvaluated": 2,
         "positiveClassCount": 1,

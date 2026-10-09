@@ -20,6 +20,7 @@ import java.util.function.Function;
 
 final class FraudScoringOrchestratorTestSupport {
     static final Instant RECEIVED_AT = Instant.parse("2026-05-30T10:00:00Z");
+    private static final String MODEL_ARTIFACT_SHA256 = "a".repeat(64);
 
     private FraudScoringOrchestratorTestSupport() {
     }
@@ -178,7 +179,9 @@ final class FraudScoringOrchestratorTestSupport {
                 modelVersion(descriptor, status),
                 featureContractVersion(descriptor, status),
                 statusReason,
-                RECEIVED_AT
+                RECEIVED_AT,
+                sourceInferenceTimestamp(descriptor, status),
+                modelArtifactSha256(descriptor, status)
         );
     }
 
@@ -194,7 +197,9 @@ final class FraudScoringOrchestratorTestSupport {
                 result.modelName(),
                 result.modelVersion(),
                 result.featureContractVersion(),
-                result.statusReason()
+                result.statusReason(),
+                result.sourceInferenceTimestamp(),
+                result.modelArtifactSha256()
         );
     }
 
@@ -219,6 +224,14 @@ final class FraudScoringOrchestratorTestSupport {
 
     private static String featureContractVersion(FraudEngineDescriptor descriptor, FraudEngineStatus status) {
         return isAvailableMl(descriptor, status) ? "2026-05-30.feature-contract.v1" : null;
+    }
+
+    private static Instant sourceInferenceTimestamp(FraudEngineDescriptor descriptor, FraudEngineStatus status) {
+        return isAvailableMl(descriptor, status) ? RECEIVED_AT : null;
+    }
+
+    private static String modelArtifactSha256(FraudEngineDescriptor descriptor, FraudEngineStatus status) {
+        return isAvailableMl(descriptor, status) ? MODEL_ARTIFACT_SHA256 : null;
     }
 
     private static boolean isAvailableMl(FraudEngineDescriptor descriptor, FraudEngineStatus status) {

@@ -33,6 +33,7 @@ public record FeedbackDatasetRecord(
         FeedbackDatasetRulesEvidenceStatus rulesEvidenceStatus,
         RiskLevel rulesRiskLevel,
         FeedbackDatasetMlPredictionEvidenceStatus mlPredictionEvidenceStatus,
+        FeedbackDatasetMlPredictionEvidenceResolutionProvenance mlPredictionEvidenceResolutionProvenance,
         MlPredictionEvidenceOmissionReason mlPredictionEvidenceOmissionReason,
         Double mlPredictionScore,
         RiskLevel mlPredictionRiskLevel,
@@ -40,6 +41,7 @@ public record FeedbackDatasetRecord(
         String mlModelName,
         String mlModelVersion,
         String mlFeatureContractVersion,
+        String mlModelArtifactSha256,
         AnalystRecommendationStatus analystRecommendationStatus,
         AnalystRecommendation analystRecommendation,
         String analystRecommendationVersion,
@@ -79,6 +81,10 @@ public record FeedbackDatasetRecord(
                 mlFeatureContractVersion,
                 "mlFeatureContractVersion"
         );
+        mlModelArtifactSha256 = FeedbackDatasetSafety.optionalModelArtifactSha256(
+                mlModelArtifactSha256,
+                "mlModelArtifactSha256"
+        );
         fraudScore = FraudEngineScorePolicy.validateOptional(fraudScore, "fraudScore");
         mlPredictionScore = FraudEngineScorePolicy.validateOptional(mlPredictionScore, "mlPredictionScore");
         FeedbackDatasetSafety.validateMlModelIdentity(
@@ -88,13 +94,15 @@ public record FeedbackDatasetRecord(
         );
         validateMlPredictionEvidence(
                 mlPredictionEvidenceStatus,
+                mlPredictionEvidenceResolutionProvenance,
                 mlPredictionEvidenceOmissionReason,
                 mlPredictionScore,
                 mlPredictionRiskLevel,
                 mlPredictionExecutedAt,
                 mlModelName,
                 mlModelVersion,
-                mlFeatureContractVersion
+                mlFeatureContractVersion,
+                mlModelArtifactSha256
         );
         validateRulesEvidence(rulesEvidenceStatus, rulesRiskLevel);
     }
@@ -132,24 +140,34 @@ public record FeedbackDatasetRecord(
 
     private static void validateMlPredictionEvidence(
             FeedbackDatasetMlPredictionEvidenceStatus status,
+            FeedbackDatasetMlPredictionEvidenceResolutionProvenance resolutionProvenance,
             MlPredictionEvidenceOmissionReason omissionReason,
             Double score,
             RiskLevel riskLevel,
             Instant executedAt,
             String modelName,
             String modelVersion,
-            String featureContractVersion
+            String featureContractVersion,
+            String modelArtifactSha256
     ) {
         Objects.requireNonNull(status, "mlPredictionEvidenceStatus is required");
+        if ((status == FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE)
+                != (resolutionProvenance != null)) {
+            throw new IllegalArgumentException(
+                    "ML prediction evidence availability must match resolution provenance"
+            );
+        }
         boolean directEvidenceComplete = score != null && riskLevel != null && executedAt != null;
         boolean modelIdentityComplete = modelName != null && modelVersion != null && featureContractVersion != null;
         if (status == FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE) {
-            if (!directEvidenceComplete || !modelIdentityComplete || omissionReason != null) {
-                throw new IllegalArgumentException("available ML prediction evidence must be complete");
+            if (!directEvidenceComplete || !modelIdentityComplete || omissionReason != null
+                    || modelArtifactSha256 == null) {
+                throw new IllegalArgumentException("exact-artifact ML prediction evidence must be complete");
             }
             return;
         }
-        if (score != null || riskLevel != null || executedAt != null || modelIdentityComplete) {
+        if (score != null || riskLevel != null || executedAt != null || modelIdentityComplete
+                || modelArtifactSha256 != null) {
             throw new IllegalArgumentException("unavailable ML prediction evidence must not carry prediction values");
         }
         if (status == FeedbackDatasetMlPredictionEvidenceStatus.LEGITIMATELY_ABSENT

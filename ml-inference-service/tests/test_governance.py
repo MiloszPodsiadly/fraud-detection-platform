@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 import threading
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -38,7 +39,11 @@ from app.governance.persistence import (
     MongoGovernanceSnapshotRepository,
     UnavailableGovernanceSnapshotRepository,
 )
-from app.governance.profile import InferenceProfile, load_reference_profile
+from app.governance.profile import (
+    REFERENCE_PROFILE_PATH,
+    InferenceProfile,
+    load_reference_profile,
+)
 from app.features.feature_contract import FEATURE_CONTRACT
 from app.features.feature_pipeline import FeaturePipeline
 
@@ -56,6 +61,15 @@ SENSITIVE_FIELDS = (
     "full payload",
 )
 SNAPSHOT_DIR = Path(__file__).parent / "snapshots"
+
+
+def bound_reference_profile() -> dict:
+    payload = json.loads(REFERENCE_PROFILE_PATH.read_text(encoding="utf-8"))
+    payload["artifact_sha256"] = server.RESOLVED_MODEL_RUNTIME.artifact_sha256
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "reference-profile.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return load_reference_profile(server.RESOLVED_MODEL_RUNTIME, path)
 
 
 class FakeSnapshotRepository(GovernanceSnapshotRepository):
@@ -195,7 +209,7 @@ class FakeMongoClient:
 
 class MlGovernanceUnitTest(unittest.TestCase):
     def test_reference_profile_loads_successfully(self):
-        profile = load_reference_profile()
+        profile = bound_reference_profile()
 
         self.assertTrue(profile["available"])
         self.assertEqual(profile["status"], "loaded")
@@ -203,6 +217,8 @@ class MlGovernanceUnitTest(unittest.TestCase):
         self.assertEqual(profile["source"], "synthetic")
         self.assertEqual(profile["reference_quality"], "SYNTHETIC")
         self.assertEqual(profile["sample_size"], 1000)
+        self.assertEqual(profile["identity_status"], "MATCH")
+        self.assertEqual(profile["artifact_sha256"], server.RESOLVED_MODEL_RUNTIME.artifact_sha256)
         self.assertIn("data_window", profile)
         self.assertIn("generated_by", profile)
         self.assertIn("numeric_feature_stats", profile)
@@ -211,8 +227,20 @@ class MlGovernanceUnitTest(unittest.TestCase):
         self.assertEqual(profile["model_version"], server.MODEL_VERSION)
         self.assertEqual(set(profile["numeric_feature_stats"]), set(FeaturePipeline.PRODUCTION_FEATURE_NAMES))
 
+    def test_reference_profile_without_artifact_sha_remains_unknown(self):
+        profile = load_reference_profile(server.RESOLVED_MODEL_RUNTIME)
+
+        self.assertFalse(profile["available"])
+        self.assertEqual(profile["status"], "UNKNOWN")
+        self.assertEqual(profile["identity_status"], "UNKNOWN")
+        self.assertEqual(profile["unavailable_reason"], "REFERENCE_ARTIFACT_SHA256_MISSING_OR_INVALID")
+        self.assertNotIn("artifact_sha256", profile)
+
     def test_missing_reference_profile_returns_unknown_safe_status(self):
-        profile = load_reference_profile(Path("missing-reference-profile.json"))
+        profile = load_reference_profile(
+            server.RESOLVED_MODEL_RUNTIME,
+            Path("missing-reference-profile.json"),
+        )
         drift = evaluate_drift(profile, {"observation_count": MIN_OBSERVATIONS})
 
         self.assertFalse(profile["available"])
@@ -222,10 +250,9 @@ class MlGovernanceUnitTest(unittest.TestCase):
         self.assertEqual(drift["confidence"], "LOW")
 
     def test_drift_insufficient_data_returns_unknown(self):
-        profile = load_reference_profile()
+        profile = bound_reference_profile()
         inference = InferenceProfile(
-            profile["model_name"],
-            profile["model_version"],
+            server.RESOLVED_MODEL_RUNTIME,
             list(profile["numeric_feature_stats"]),
         )
         for _ in range(MIN_OBSERVATIONS - 1):
@@ -239,10 +266,9 @@ class MlGovernanceUnitTest(unittest.TestCase):
         self.assertEqual(drift["sample_size"], MIN_OBSERVATIONS - 1)
 
     def test_drift_status_changes_under_shifted_synthetic_input_with_enough_data(self):
-        profile = load_reference_profile()
+        profile = bound_reference_profile()
         inference = InferenceProfile(
-            profile["model_name"],
-            profile["model_version"],
+            server.RESOLVED_MODEL_RUNTIME,
             list(profile["numeric_feature_stats"]),
         )
         shifted = {name: 1.0 for name in profile["numeric_feature_stats"]}
@@ -258,14 +284,13 @@ class MlGovernanceUnitTest(unittest.TestCase):
         self.assertTrue(any(signal["severity"] == "DRIFT" for signal in drift["signals"]))
 
     def test_confidence_increases_with_sample_size_for_production_reference(self):
-        profile = dict(load_reference_profile())
+        profile = dict(bound_reference_profile())
         profile["reference_quality"] = "PRODUCTION"
         profile["source"] = "evaluation"
         confidences = []
         for sample_size in (MIN_OBSERVATIONS, MIN_OBSERVATIONS * 2, MIN_OBSERVATIONS * 5):
             inference = InferenceProfile(
-                profile["model_name"],
-                profile["model_version"],
+                server.RESOLVED_MODEL_RUNTIME,
                 list(profile["numeric_feature_stats"]),
             )
             for index in range(sample_size):
@@ -288,10 +313,9 @@ class MlGovernancePersistenceTest(unittest.TestCase):
         )
 
     def snapshot_inputs(self):
-        reference = load_reference_profile()
+        reference = bound_reference_profile()
         inference = InferenceProfile(
-            reference["model_name"],
-            reference["model_version"],
+            server.RESOLVED_MODEL_RUNTIME,
             list(reference["numeric_feature_stats"]),
         )
         for _ in range(MIN_OBSERVATIONS):
@@ -407,14 +431,8 @@ class MlModelLifecycleUnitTest(unittest.TestCase):
         )
 
     def model_metadata(self):
-        reference = load_reference_profile()
-        model = {
-            "model_name": "python-logistic-fraud-model",
-            "model_version": "lifecycle-test-v1",
-            "model_family": "LOGISTIC_REGRESSION",
-            "training_mode": "production",
-        }
-        return current_model_lifecycle_metadata(model, server.DEFAULT_ARTIFACT_PATH, reference, server.MODEL_LOADED_AT)
+        reference = bound_reference_profile()
+        return current_model_lifecycle_metadata(server.RESOLVED_MODEL_RUNTIME, reference)
 
     def test_current_model_lifecycle_schema_is_stable_and_read_only(self):
         metadata = self.model_metadata()
@@ -452,7 +470,9 @@ class MlModelLifecycleUnitTest(unittest.TestCase):
                 reason=f"event {index}",
                 metadata_summary={
                     "artifact_checksum": metadata["artifact_checksum"],
-                    "rawArtifact": server.DEFAULT_ARTIFACT_PATH.read_text(encoding="utf-8"),
+                    "rawArtifact": server.RESOLVED_MODEL_RUNTIME.validated_artifact.canonical_artifact_path.read_text(
+                        encoding="utf-8"
+                    ),
                 },
             )
         response = service.history_response(metadata)
@@ -1327,14 +1347,14 @@ class MlGovernanceEndpointTest(unittest.TestCase):
         self.assertIn("current_model_version", payload["model_lifecycle"])
         self.assertNotIn("caused", payload["explanation"].lower())
 
-    def test_drift_unknown_until_minimum_sample_size(self):
+    def test_drift_unknown_when_committed_reference_identity_is_incomplete(self):
         server.INFERENCE_PROFILE.reset()
 
         drift = self.get_json("/governance/drift")
 
         self.assertEqual(drift["drift"]["status"], "UNKNOWN")
         self.assertEqual(drift["drift"]["confidence"], "LOW")
-        self.assertEqual(drift["drift"]["reason"], "insufficient_data")
+        self.assertEqual(drift["drift"]["reason"], "reference_profile_unavailable")
         self.assertEqual(drift["drift"]["inference_profile_status"], "RESET_RECENTLY")
 
     def test_existing_scoring_response_contract_remains_compatible(self):

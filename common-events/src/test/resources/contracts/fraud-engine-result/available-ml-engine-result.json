@@ -29,5 +29,7 @@
   "modelName": "python-fraud-model",
   "modelVersion": "v1",
   "featureContractVersion": "2026-05-30.feature-contract.v1",
+  "sourceInferenceTimestamp": "2026-06-01T10:15:29Z",
+  "modelArtifactSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "generatedAt": "2026-06-01T10:15:30Z"
 }

@@ -123,6 +123,7 @@ class FeedbackDatasetPopulationMongoIntegrationTest {
                     assertThat(record.mlModelName()).isEqualTo(MODEL_NAME);
                     assertThat(record.mlModelVersion()).isEqualTo(MODEL_VERSION);
                     assertThat(record.mlFeatureContractVersion()).isEqualTo(FEATURE_CONTRACT);
+                    assertThat(record.mlModelArtifactSha256()).isEqualTo("a".repeat(64));
                 });
     }
 
@@ -156,14 +157,12 @@ class FeedbackDatasetPopulationMongoIntegrationTest {
                 transactionId,
                 "correlation-" + index,
                 FROM.plusSeconds(index).toString(),
-                1,
-                "ml.python.primary",
-                FraudEngineStatus.AVAILABLE,
                 score,
                 RiskLevel.HIGH,
                 MODEL_NAME,
                 modelVersion,
                 FEATURE_CONTRACT,
+                "a".repeat(64),
                 FROM.plusSeconds(50 + index).toString(),
                 BUILT_AT
         );

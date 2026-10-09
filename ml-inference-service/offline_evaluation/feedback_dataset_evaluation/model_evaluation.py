@@ -28,13 +28,14 @@ from offline_evaluation.feedback_dataset_evaluation.timestamp_contract import (
     validate_optional_timestamp_range,
 )
 from app.model_identity_policy import (
+    ARTIFACT_SHA256_PATTERN,
     validate_feature_contract_version,
     validate_model_name,
     validate_model_version,
 )
 
 
-MODEL_EVALUATION_METRIC_BASIS = "BOUNDED_ANALYST_FEEDBACK_BY_EXACT_ML_MODEL_IDENTITY"
+MODEL_EVALUATION_METRIC_BASIS = "BOUNDED_ANALYST_FEEDBACK_BY_EXACT_ML_MODEL_ARTIFACT"
 MODEL_IDENTITY_COMPLETE = "COMPLETE"
 MODEL_IDENTITY_MISMATCH = "MODEL_IDENTITY_MISMATCH"
 MODEL_PREDICTION_SIGNAL_UNAVAILABLE = "MODEL_PREDICTION_SIGNAL_UNAVAILABLE"
@@ -69,6 +70,7 @@ EVALUATION_SUBJECT_FIELDS = {
     "modelName",
     "modelVersion",
     "featureContractVersion",
+    "modelArtifactSha256",
     "identityCompleteness",
 }
 EVALUATION_WINDOW_FIELDS = {"timeBasis", "fromInclusive", "toInclusive"}
@@ -160,6 +162,7 @@ class ModelEvaluationIdentity:
     model_name: str
     model_version: str
     feature_contract_version: str
+    model_artifact_sha256: str
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "model_name", validate_model_name(self.model_name, "modelName"))
@@ -169,6 +172,8 @@ class ModelEvaluationIdentity:
             "feature_contract_version",
             validate_feature_contract_version(self.feature_contract_version, "featureContractVersion"),
         )
+        if ARTIFACT_SHA256_PATTERN.fullmatch(self.model_artifact_sha256 or "") is None:
+            raise ValueError("modelArtifactSha256 must be 64 lowercase hexadecimal characters")
 
     def as_subject(self) -> dict[str, str]:
         return {
@@ -176,6 +181,7 @@ class ModelEvaluationIdentity:
             "modelName": self.model_name,
             "modelVersion": self.model_version,
             "featureContractVersion": self.feature_contract_version,
+            "modelArtifactSha256": self.model_artifact_sha256,
             "identityCompleteness": MODEL_IDENTITY_COMPLETE,
         }
 
@@ -257,7 +263,7 @@ def build_model_specific_evaluation_summary(
             "negativeClassCount": len(negatives),
         },
         "lineagePolicy": {
-            "policy": "REQUESTED_EXACT_IDENTITY",
+            "policy": "REQUESTED_EXACT_ARTIFACT_IDENTITY",
             "identityMismatchBehavior": "EXCLUDE",
             "identityMismatchReason": MODEL_IDENTITY_MISMATCH,
         },
@@ -390,6 +396,8 @@ def _validate_subject(value: Any) -> None:
     validate_model_name(value.get("modelName"), "modelName")
     validate_model_version(value.get("modelVersion"), "modelVersion")
     validate_feature_contract_version(value.get("featureContractVersion"), "featureContractVersion")
+    if ARTIFACT_SHA256_PATTERN.fullmatch(value.get("modelArtifactSha256") or "") is None:
+        raise ValueError("evaluationSubject modelArtifactSha256 must be lowercase hex")
     if value.get("identityCompleteness") != MODEL_IDENTITY_COMPLETE:
         raise ValueError("evaluationSubject identityCompleteness unsupported")
 
@@ -431,7 +439,7 @@ def _validate_lineage_policy(value: Any) -> None:
         raise ValueError("lineagePolicy must be an object")
     _reject_unknown_or_missing(value, LINEAGE_POLICY_FIELDS, "lineagePolicy")
     expected = {
-        "policy": "REQUESTED_EXACT_IDENTITY",
+        "policy": "REQUESTED_EXACT_ARTIFACT_IDENTITY",
         "identityMismatchBehavior": "EXCLUDE",
         "identityMismatchReason": MODEL_IDENTITY_MISMATCH,
     }
@@ -792,13 +800,14 @@ def _prediction_evidence_state(record: FeedbackDatasetRecord) -> str:
         record.ml_model_version,
         record.ml_feature_contract_version,
     )
+    lineage_values = identity_values + (record.ml_model_artifact_sha256,)
     if record.ml_prediction_evidence_status in {
         "LEGITIMATELY_ABSENT",
         "MISSING_UNEXPECTEDLY",
         "MALFORMED",
         "IDENTITY_MISMATCH",
     }:
-        if any(value is not None for value in direct_values + identity_values):
+        if any(value is not None for value in direct_values + lineage_values):
             return "INVALID"
         return {
             "LEGITIMATELY_ABSENT": "LEGITIMATELY_ABSENT",
@@ -806,7 +815,11 @@ def _prediction_evidence_state(record: FeedbackDatasetRecord) -> str:
             "MALFORMED": "INVALID",
             "IDENTITY_MISMATCH": "IDENTITY_MISMATCH",
         }[record.ml_prediction_evidence_status]
-    if record.ml_prediction_evidence_status != "AVAILABLE" or any(value is None for value in direct_values):
+    if any(value is None for value in direct_values + identity_values):
+        return "INVALID"
+    if record.ml_prediction_evidence_status != "AVAILABLE":
+        return "INVALID"
+    if ARTIFACT_SHA256_PATTERN.fullmatch(record.ml_model_artifact_sha256 or "") is None:
         return "INVALID"
     try:
         if validate_bounded_score(record.ml_prediction_score, "mlPredictionScore") is None:
@@ -827,6 +840,7 @@ def _model_identity_state(record: FeedbackDatasetRecord) -> str:
         record.ml_model_name,
         record.ml_model_version,
         record.ml_feature_contract_version,
+        record.ml_model_artifact_sha256,
     )
     present = sum(value is not None for value in identity)
     if present != len(identity):
@@ -835,6 +849,8 @@ def _model_identity_state(record: FeedbackDatasetRecord) -> str:
         validate_model_name(record.ml_model_name, "mlModelName")
         validate_model_version(record.ml_model_version, "mlModelVersion")
         validate_feature_contract_version(record.ml_feature_contract_version, "mlFeatureContractVersion")
+        if ARTIFACT_SHA256_PATTERN.fullmatch(record.ml_model_artifact_sha256 or "") is None:
+            return "INVALID"
     except ValueError:
         return "INVALID"
     return "COMPLETE"
@@ -845,4 +861,5 @@ def _matches_identity(record: FeedbackDatasetRecord, requested: ModelEvaluationI
         record.ml_model_name == requested.model_name
         and record.ml_model_version == requested.model_version
         and record.ml_feature_contract_version == requested.feature_contract_version
+        and record.ml_model_artifact_sha256 == requested.model_artifact_sha256
     )

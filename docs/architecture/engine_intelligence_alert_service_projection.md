@@ -13,6 +13,10 @@ public `engineIntelligence` field into a bounded Mongo read model. Internal evid
 `mlPredictionEvidence` to a
 separate private evidence collection; it does not add that exact score to the public read model.
 
+Both paths admit only outer `TransactionScoredEvent.eventContractVersion = 2` messages with exactly one complete ML
+evidence outcome: canonical evidence or its explicit omission reason. DLT and redrive processing use the same strict
+admission contract; no recovery path selects a pre-v2 parser or reconstructs missing evidence.
+
 ## Current Scope
 
 The projection is the alert-service storage boundary for public `TransactionScoredEvent.engineIntelligence`.
@@ -36,10 +40,11 @@ timestamp, explicit Rules-vs-ML comparison identity and summary, bounded engine 
 diagnostic signals, bounded warnings, counts, projection timestamps, and the bounded ML model identity when it is
 present on the `ml.python.primary` engine result.
 
-The private `ml_prediction_evidence_projections` collection stores one immutable occurrence per source event ID. It
-preserves transaction and correlation ownership, original event time, canonical engine ID and status, exact bounded
-ML score and risk, complete model/feature-contract identity, source execution timestamp, and projection time. Source
-timestamps use canonical UTC text so Mongo date precision cannot truncate the authoritative fractional value.
+The private `ml_prediction_evidence_projections` collection stores one immutable ML evidence outcome per source event
+ID. It preserves transaction and correlation ownership, original event time, and either the exact bounded ML evidence
+or its authoritative omission reason. Evidence includes score, risk, complete model/feature-contract identity, and
+source execution timestamp. Source timestamps use canonical UTC text so Mongo date precision cannot truncate the
+authoritative fractional value.
 
 ### Scoring occurrence ownership
 
@@ -90,7 +95,11 @@ Current events with diagnostics explicitly disabled omit `engineIntelligence` an
 `DIAGNOSTIC_EMISSION_DISABLED` evidence omission reason. They create no engine-intelligence projection document.
 A newer authoritative occurrence without diagnostics never inherits an older occurrence's projection: snapshot reads
 return `NOT_PROJECTED` unless the private projection owner matches the current scored transaction.
-Events with an explicit evidence omission reason create no private evidence document and never erase accepted evidence.
+The private collection records one immutable private evidence outcome per `sourceEventId`.
+Accepted evidence persists as private exact evidence, while an explicit evidence omission persists as a private
+omission outcome. An identical
+evidence or omission replay is idempotent. A changed omission reason, changed evidence, or evidence/omission transition
+is a permanent conflict and cannot overwrite the first accepted outcome. Public Engine Intelligence remains bounded.
 
 ## New Bounded Event Projection
 
@@ -101,19 +110,22 @@ reconstructs it from top-level final-scoring `modelName` or `modelVersion`.
 
 ## Invalid/Oversized Safe Omission
 
-Unsupported contract versions and invalid or oversized shapes are omitted with bounded internal reasons. Raw
-payloads and exception messages are not logged.
+After the outer scored event has passed strict contract-v2 admission, an unsupported, invalid, or oversized optional
+`engineIntelligence` shape is omitted with a bounded internal reason. An unsupported outer
+`TransactionScoredEvent.eventContractVersion` fails deserialization and is not converted into a diagnostic omission.
+Raw payloads and exception messages are not logged.
 
 ## Idempotency/Replay Safety
 
 Projection must be idempotent under replay. A stable transaction ID replaces the existing Mongo document instead of
 appending engines, diagnostic signals, or warnings.
 
-The private evidence projection has stricter occurrence semantics. It uses insert-only persistence keyed by source
-event ID. An identical replay is idempotent; a conflicting replay is observable and cannot overwrite accepted
-evidence. Concurrent duplicate delivery produces one immutable document. A different source event ID is a distinct
-scoring occurrence, even for the same transaction. Replay classification reads the authoritative stored document;
-there is no read-then-save update path.
+The private evidence-outcome projection has stricter occurrence semantics. It uses insert-only persistence keyed by
+source event ID. An identical evidence or omission replay is idempotent; a changed evidence payload, changed omission
+reason, or evidence/omission transition is a permanent conflict and cannot overwrite the first accepted outcome.
+Concurrent contradictory delivery produces one immutable winner and one conflict. A different source event ID is a
+distinct scoring occurrence, even for the same transaction. Replay classification reads the authoritative stored
+document; there is no read-then-save update path or second outcome authority.
 
 Evidence capture consumes the scored-event topic through its own consumer group and record-level acknowledgement.
 Transient store and unknown infrastructure failures retain the Kafka delivery for bounded retry. Exhausted transient
@@ -162,7 +174,7 @@ raw exception, endpoint, or payload.
 ## No Raw/Internal Storage
 
 The public projection stores only bounded public event contract fields. The dedicated internal evidence collection stores
-only canonical `MlPredictionEvidenceV1` and bounded source ownership fields. Raw model requests/responses, raw
+only canonical `MlPredictionEvidence` and bounded source ownership fields. Raw model requests/responses, raw
 features, raw contributions, arbitrary metadata, customer/account data, endpoints, tokens, secrets, stack traces,
 exception messages, and internal aggregation objects must not be stored.
 
@@ -172,8 +184,9 @@ Bounded API/UI exposure exists through later scoped Engine Intelligence work. Th
 metadata, raw payloads, internal aggregation objects, raw engine outputs, or scoring internals. API/UI layers consume
 dedicated read DTOs and validators rather than the projection class directly.
 
-The exact evidence collection has no controller, public read DTO, feedback-record field, dataset-export
-field, or Analyst Console path. Public surfaces continue to expose only bounded score buckets and approved model
+The exact evidence collection has no controller, public read DTO, or Analyst Console path. Its bounded exact artifact
+lineage feeds only approved internal feedback snapshots and `feedback-dataset-v3`; this does not expose private exact
+evidence through public surfaces. Public surfaces continue to expose only bounded score buckets and approved model
 identity. Evidence projection failures are reported through bounded low-cardinality metrics and logs and remain
 isolated from the base scored-transaction save and alert processing.
 

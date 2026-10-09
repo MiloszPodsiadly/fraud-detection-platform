@@ -74,7 +74,7 @@ Feedback Dataset Evaluation treats `engineStatus` as the source of truth for ope
 risk and score bucket fields must be absent. `UNAVAILABLE`, `TIMEOUT`, `SKIPPED`, `DEGRADED`, and `FALLBACK_USED`
 are not ranked and are not high/low signals.
 
-Feedback dataset v2 supplies an exact bounded `mlPredictionScore`, `mlPredictionRiskLevel`, and
+Feedback dataset v3 supplies an exact bounded `mlPredictionScore`, `mlPredictionRiskLevel`, and
 `mlPredictionExecutedAt` only when `mlPredictionEvidenceStatus = AVAILABLE`. `LEGITIMATELY_ABSENT` requires those
 values and the model identity to be null and means only that direct evaluation evidence is legitimately absent.
 `DIAGNOSTIC_EMISSION_DISABLED` does not prove that the primary or shadow ML runtime never executed. Identity validation
@@ -94,12 +94,17 @@ raw or sensitive patterns, but they are bounded safeguards, not a full DLP contr
 Reports are diagnostic aids only. They are not promotion criteria, not threshold-change criteria, and not production
 approval criteria.
 
+`splitMetadata.testCohortFingerprint` is an order-independent SHA-256 over the canonical feature-and-label
+observations in the evaluation test cohort. Equality establishes only evaluation-input equivalence for bounded model
+comparison. It is not a source-event identifier, scoring-occurrence fingerprint, dataset signature, external
+attestation, or proof of production lineage.
+
 ## Model-Specific Evaluation
 
 The offline package also supports an optional aggregate-only ML model evaluation summary for an exact requested
 `modelName`, `modelVersion`, and `featureContractVersion`. This is separate from Platform Recommendation Evaluation:
 platform reports keep `subjectType = PLATFORM_RECOMMENDATION` and `modelIdentity = NOT_AVAILABLE`, while model-specific
-reports use `subjectType = ML_MODEL` and exclude records with missing or mismatched lineage. Dataset v2 now carries
+reports use `subjectType = ML_MODEL` and exclude records with missing or mismatched lineage. Dataset v3 now carries
 direct ML output evidence for the exact scoring occurrence; model-specific metric calculation is a separate bounded
 step. The model evaluator classifies direct ML `HIGH`/`CRITICAL` risk as positive and `LOW`/`MEDIUM` as negative,
 publishes a reconciled aggregate confusion matrix and rates, and never substitutes platform recommendation fields.

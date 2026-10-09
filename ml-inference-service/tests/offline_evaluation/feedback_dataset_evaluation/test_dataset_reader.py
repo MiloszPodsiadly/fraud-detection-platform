@@ -20,7 +20,7 @@ class FeedbackDatasetReaderTest(unittest.TestCase):
             parsed = read_feedback_dataset_jsonl(path)
 
         self.assertEqual(1, len(parsed.records))
-        self.assertEqual("feedback-dataset-v2", parsed.metadata.dataset_version)
+        self.assertEqual("feedback-dataset-v3", parsed.metadata.dataset_version)
         self.assertEqual("POSITIVE_FRAUD", parsed.records[0].evaluation_label)
 
     def test_sourceSha256UsesExactDatasetBytesDeterministically(self):

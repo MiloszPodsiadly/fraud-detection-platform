@@ -26,7 +26,7 @@ const REQUIRED_EVALUATION = {
   evaluationCardVersion: "platform-recommendation-evaluation-card-v1",
   evaluationPurpose: "OFFLINE_DIAGNOSTIC",
   evaluationReportVersion: "feedback-dataset-evaluation-v1",
-  datasetVersion: "feedback-dataset-v2",
+  datasetVersion: "feedback-dataset-v3",
   datasetTimeBasis: "FEEDBACK_CREATED_AT"
 };
 const CURRENT_PLATFORM_EVALUATION_IDENTITY = {

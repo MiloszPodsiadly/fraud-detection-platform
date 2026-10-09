@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from math import exp
+from math import exp, isfinite
 from pathlib import Path
 from typing import Any
 
@@ -31,16 +31,33 @@ class LogisticFraudModel:
     DEFAULT_BIAS = -2.25
 
     def __init__(self, artifact: dict[str, Any] | None = None) -> None:
-        artifact = artifact or {}
-        self.model_name = str(artifact.get("modelName", "python-logistic-fraud-model"))
-        self.model_version = str(artifact.get("modelVersion", "unversioned"))
-        self.model_family = str(artifact.get("modelFamily", "LOGISTIC_REGRESSION"))
-        self.feature_contract_version = str(artifact.get("featureContractVersion", FEATURE_CONTRACT.version))
-        self.weights = self._weights(artifact.get("weights"))
-        self.feature_schema = self._feature_schema(artifact.get("featureSchema"), self.weights)
-        self.training_mode = self._training_mode(artifact, self.feature_schema)
-        self.thresholds = self._thresholds(artifact.get("thresholds"))
-        self.bias = self._signed_number(artifact.get("bias"), self.DEFAULT_BIAS)
+        if artifact is None:
+            self.model_name = "python-logistic-fraud-model"
+            self.model_version = "unversioned"
+            self.model_family = "LOGISTIC_REGRESSION"
+            self.feature_contract_version = FEATURE_CONTRACT.version
+            self.weights = dict(self.DEFAULT_WEIGHTS)
+            self.feature_schema = list(self.weights)
+            self.training_mode = "production"
+            self.thresholds = dict(self.DEFAULT_THRESHOLDS)
+            self.bias = self.DEFAULT_BIAS
+            return
+
+        self.model_name = artifact["modelName"]
+        self.model_version = artifact["modelVersion"]
+        self.model_family = artifact["modelFamily"]
+        self.feature_contract_version = artifact["featureContractVersion"]
+        self.feature_schema = list(artifact["featureSchema"])
+        self.training_mode = artifact["trainingMode"]
+        self.weights = {
+            name: self._persisted_number(value, f"weight {name!r}")
+            for name, value in artifact["weights"].items()
+        }
+        self.thresholds = {
+            name: self._persisted_number(artifact["thresholds"][name], f"threshold {name!r}")
+            for name in ("medium", "high", "critical")
+        }
+        self.bias = self._persisted_number(artifact["bias"], "bias")
 
     def predict_proba(self, features: dict[str, float]) -> float:
         """Predict the fraud probability for normalized features."""
@@ -126,11 +143,12 @@ class LogisticFraudModel:
     @classmethod
     def load(cls, artifact_path: Path) -> LogisticFraudModel:
         """Load a logistic model from a JSON artifact."""
-        if not artifact_path.exists():
-            return cls()
-        with artifact_path.open("r", encoding="utf-8") as artifact_file:
-            artifact = json.load(artifact_file)
-        return cls(artifact if isinstance(artifact, dict) else {})
+        from app.models.model_loader import load_model_from_artifact
+
+        model = load_model_from_artifact(artifact_path)
+        if not isinstance(model, cls):
+            raise ValueError("Artifact does not declare a logistic model.")
+        return model
 
     @staticmethod
     def feature_names() -> list[str]:
@@ -140,40 +158,6 @@ class LogisticFraudModel:
     def runtime_feature_names(self) -> list[str]:
         """Return the artifact feature schema used at inference."""
         return list(self.feature_schema)
-
-    def _weights(self, value: Any) -> dict[str, float]:
-        if not isinstance(value, dict):
-            return dict(self.DEFAULT_WEIGHTS)
-        return {
-            str(name): self._signed_number(weight, 0.0)
-            for name, weight in value.items()
-        }
-
-    def _feature_schema(self, value: Any, weights: dict[str, float]) -> list[str]:
-        if isinstance(value, list) and all(isinstance(name, str) for name in value):
-            return list(value)
-        return list(weights)
-
-    def _training_mode(self, artifact: dict[str, Any], feature_schema: list[str]) -> str:
-        value = artifact.get("trainingMode")
-        training = artifact.get("training")
-        if value is None and isinstance(training, dict):
-            value = training.get("trainingMode")
-        if value is not None:
-            return str(value)
-        production = set(FeaturePipeline.PRODUCTION_FEATURE_NAMES)
-        return "production" if set(feature_schema).issubset(production) else "full"
-
-    def _thresholds(self, value: Any) -> dict[str, float]:
-        if not isinstance(value, dict):
-            return dict(self.DEFAULT_THRESHOLDS)
-        thresholds = {
-            name: self._number(value.get(name), default_threshold)
-            for name, default_threshold in self.DEFAULT_THRESHOLDS.items()
-        }
-        if not thresholds["medium"] <= thresholds["high"] <= thresholds["critical"]:
-            return dict(self.DEFAULT_THRESHOLDS)
-        return thresholds
 
     def _threshold_policy(self) -> dict[str, object]:
         return {
@@ -198,18 +182,7 @@ class LogisticFraudModel:
             "rankingMetricsAreNotSufficient": True,
         }
 
-    def _number(self, value: Any, default: float = 0.0) -> float:
-        if isinstance(value, bool) or value is None:
-            return default
-        try:
-            return max(float(value), 0.0)
-        except (TypeError, ValueError):
-            return default
-
-    def _signed_number(self, value: Any, default: float) -> float:
-        if isinstance(value, bool) or value is None:
-            return default
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return default
+    def _persisted_number(self, value: Any, label: str) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value):
+            raise ValueError(f"Persisted logistic {label} must be a finite number.")
+        return float(value)
