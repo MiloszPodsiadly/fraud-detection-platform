@@ -109,8 +109,15 @@ class ModelRegistry:
         """Publish artifact-derived immutable identity or return its existing entry."""
         loaded = load_model_artifact(artifact_path, max_bytes=self.max_artifact_bytes)
         with self._mutation_lock():
+            index_was_present = self.index_path.exists() or self.index_path.is_symlink()
             entries = self.entries()
-            self._reconcile_orphaned_artifacts(entries)
+            index_is_present = self.index_path.exists() or self.index_path.is_symlink()
+            if index_was_present != index_is_present:
+                raise ModelRegistryMutationError(
+                    "Registry index changed while authoritative state was being loaded."
+                )
+            if index_is_present:
+                self._reconcile_orphaned_artifacts(entries)
             existing = next(
                 (entry for entry in entries if entry.logical_identity == loaded.logical_identity),
                 None,
@@ -154,7 +161,11 @@ class ModelRegistry:
                         label="model artifact",
                     )
                 except Exception as publication_error:
-                    self._rollback_uncommitted_artifact(target, publication_error)
+                    self._rollback_uncommitted_artifact(
+                        target,
+                        publication_error,
+                        initialization_without_index=not index_is_present,
+                    )
                     raise
 
             entry = ModelRegistryEntry(
@@ -171,7 +182,11 @@ class ModelRegistry:
                 self._write_entries(entries)
             except Exception as publication_error:
                 if created_artifact:
-                    self._rollback_uncommitted_artifact(target, publication_error)
+                    self._rollback_uncommitted_artifact(
+                        target,
+                        publication_error,
+                        initialization_without_index=not index_is_present,
+                    )
                 raise
             return entry
 
@@ -210,6 +225,7 @@ class ModelRegistry:
     def entries(self) -> list[ModelRegistryEntry]:
         """Load bounded registry state and reject corruption as non-empty failure."""
         if not self.index_path.exists() and not self.index_path.is_symlink():
+            self._validate_empty_registry_without_index()
             return []
         index_path = self._contained_regular_file(self.index_path, self.root, "registry index")
         index_bytes = self._read_bounded(index_path, self.max_index_bytes, "Registry index")
@@ -264,6 +280,49 @@ class ModelRegistry:
             entries.append(entry)
         return entries
 
+    def _validate_empty_registry_without_index(self) -> None:
+        if not self.root.exists() and not self.root.is_symlink():
+            return
+        if self.root.is_symlink() or not self.root.is_dir():
+            raise ModelRegistryIntegrityError(
+                "Registry root without an index must be a non-symlink directory."
+            )
+
+        scan_limit = max(
+            MIN_ORPHAN_RECONCILIATION_SCAN_LIMIT,
+            self.max_entries * ORPHAN_RECONCILIATION_ENTRY_MULTIPLIER,
+        )
+        with os.scandir(self.root) as candidates:
+            for inspected, candidate in enumerate(candidates, start=1):
+                if inspected > scan_limit:
+                    raise ModelRegistryIntegrityError(
+                        f"Registry without an index exceeds bounded scan limit of {scan_limit} entries."
+                    )
+                path = Path(candidate.path)
+                if candidate.name == self.LOCK_NAME:
+                    if candidate.is_symlink() or not candidate.is_file(follow_symlinks=False):
+                        raise ModelRegistryIntegrityError(
+                            "Registry mutation lock must be a regular non-symlink file."
+                        )
+                    continue
+                if path == self.artifacts_root:
+                    self._validate_empty_artifacts_without_index()
+                    continue
+                raise ModelRegistryIntegrityError(
+                    "Registry without an index contains unsupported state."
+                )
+
+    def _validate_empty_artifacts_without_index(self) -> None:
+        if self.artifacts_root.is_symlink() or not self.artifacts_root.is_dir():
+            raise ModelRegistryIntegrityError(
+                "Registry artifacts root without an index must be a non-symlink directory."
+            )
+        with os.scandir(self.artifacts_root) as artifacts:
+            if next(artifacts, None) is not None:
+                raise ModelRegistryIntegrityError(
+                    "Registry artifacts exist without an authoritative registry index."
+                )
+
     def _artifact_target(self, identity: ModelLogicalIdentity) -> Path:
         return self.artifacts_root / f"{identity.model_name}--{identity.model_version}.json"
 
@@ -306,7 +365,15 @@ class ModelRegistry:
         if removed:
             self._fsync_directory(self.artifacts_root)
 
-    def _rollback_uncommitted_artifact(self, target: Path, publication_error: Exception) -> None:
+    def _rollback_uncommitted_artifact(
+            self,
+            target: Path,
+            publication_error: Exception,
+            initialization_without_index: bool = False,
+    ) -> None:
+        if initialization_without_index and not self.index_path.exists() and not self.index_path.is_symlink():
+            self._delete_uncommitted_artifact(target, publication_error)
+            return
         try:
             authoritative_entries = self.entries()
         except Exception as inspection_error:
@@ -335,17 +402,31 @@ class ModelRegistry:
             canonical_target = self._managed_artifact_path(target, must_exist=True)
             if canonical_target in authoritative_paths:
                 return
-            try:
-                target.unlink()
-                self._fsync_directory(self.artifacts_root)
-            except OSError as cleanup_error:
-                rollback_error = ModelRegistryMutationError(
-                    "Registry publication failed and the uncommitted artifact rollback also failed."
-                )
-                rollback_error.add_note(
-                    f"Original publication failure: {type(publication_error).__name__}."
-                )
-                raise rollback_error from cleanup_error
+            self._delete_uncommitted_artifact(target, publication_error)
+
+    def _delete_uncommitted_artifact(self, target: Path, publication_error: Exception) -> None:
+        if not target.exists() and not target.is_symlink():
+            return
+        if target.is_symlink():
+            rollback_error = ModelRegistryMutationError(
+                "Registry publication failed and candidate artifact rollback encountered a symbolic link."
+            )
+            rollback_error.add_note(
+                f"Original publication failure: {type(publication_error).__name__}."
+            )
+            raise rollback_error
+        self._managed_artifact_path(target, must_exist=True)
+        try:
+            target.unlink()
+            self._fsync_directory(self.artifacts_root)
+        except OSError as cleanup_error:
+            rollback_error = ModelRegistryMutationError(
+                "Registry publication failed and the uncommitted artifact rollback also failed."
+            )
+            rollback_error.add_note(
+                f"Original publication failure: {type(publication_error).__name__}."
+            )
+            raise rollback_error from cleanup_error
 
     def _managed_artifact_path(self, raw_path: str | Path, must_exist: bool) -> Path:
         path = Path(raw_path)

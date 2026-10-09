@@ -88,11 +88,71 @@ class ModelRegistryIntegrityTest(unittest.TestCase):
         self.assertEqual([first], registry.entries())
 
     def test_corrupt_registry_index_is_not_treated_as_empty(self):
-        self.registry.root.mkdir(parents=True)
+        registered = self.registry.register(self._artifact("corrupt-index-authoritative-v1"))
+        registered_path = Path(registered.artifact_path)
+        registered_bytes = registered_path.read_bytes()
         self.registry.index_path.write_text("{truncated", encoding="utf-8")
 
         with self.assertRaisesRegex(ModelRegistryIntegrityError, "not valid JSON"):
-            self.registry.entries()
+            self.registry.register(self._artifact("corrupt-index-candidate-v2"))
+
+        self.assertEqual(registered_bytes, registered_path.read_bytes())
+        self.assertEqual([registered_path], self._managed_artifacts())
+
+    def test_missing_index_with_existing_artifact_fails_without_deleting_or_publishing(self):
+        first = self.registry.register(self._artifact("missing-index-authoritative-v1"))
+        first_path = Path(first.artifact_path)
+        first_bytes = first_path.read_bytes()
+        self.registry.index_path.unlink()
+
+        with self.assertRaisesRegex(ModelRegistryIntegrityError, "without an authoritative registry index"):
+            self.registry.register(self._artifact("missing-index-candidate-v2"))
+
+        self.assertEqual(first_bytes, first_path.read_bytes())
+        self.assertFalse(self.registry.index_path.exists())
+        self.assertEqual([first_path], self._managed_artifacts())
+
+    def test_missing_index_with_empty_artifacts_directory_allows_initial_registration(self):
+        self.registry.artifacts_root.mkdir(parents=True)
+
+        registered = self.registry.register(self._artifact("initial-empty-registry-v1"))
+
+        self.assertEqual([registered], self.registry.entries())
+
+    def test_missing_index_with_unknown_registry_state_fails_without_publication(self):
+        self.registry.root.mkdir(parents=True)
+        unknown = self.registry.root / "restored-fragment"
+        unknown.write_text("unknown", encoding="utf-8")
+
+        with self.assertRaisesRegex(ModelRegistryIntegrityError, "unsupported state"):
+            self.registry.register(self._artifact("unknown-state-v1"))
+
+        self.assertEqual("unknown", unknown.read_text(encoding="utf-8"))
+        self.assertFalse(self.registry.index_path.exists())
+
+    def test_missing_index_with_artifacts_symlink_fails_without_publication(self):
+        outside = self.root / "outside-artifacts"
+        outside.mkdir()
+        self.registry.root.mkdir(parents=True)
+        try:
+            self.registry.artifacts_root.symlink_to(outside, target_is_directory=True)
+        except OSError:
+            self.registry.artifacts_root.mkdir()
+            with patch.object(
+                    type(self.registry.artifacts_root),
+                    "is_symlink",
+                    autospec=True,
+                    side_effect=lambda path: path == self.registry.artifacts_root,
+            ):
+                with self.assertRaisesRegex(ModelRegistryIntegrityError, "non-symlink directory"):
+                    self.registry.register(self._artifact("symlinked-state-v1"))
+            self.assertFalse(self.registry.index_path.exists())
+            return
+
+        with self.assertRaisesRegex(ModelRegistryIntegrityError, "non-symlink directory"):
+            self.registry.register(self._artifact("symlinked-state-v1"))
+
+        self.assertFalse(self.registry.index_path.exists())
 
     def test_registry_index_uses_explicit_schema_version_two(self):
         self.registry.register(self._artifact("schema-v2"))
@@ -103,7 +163,9 @@ class ModelRegistryIntegrityTest(unittest.TestCase):
         self.assertEqual({"schemaVersion", "models"}, set(index))
 
     def test_unsupported_old_and_future_schema_versions_are_rejected(self):
-        self.registry.register(self._artifact("schema-version-v1"))
+        registered = self.registry.register(self._artifact("schema-version-v1"))
+        registered_path = Path(registered.artifact_path)
+        registered_bytes = registered_path.read_bytes()
         for schema_version in (1, 3):
             with self.subTest(schema_version=schema_version):
                 index = self._index()
@@ -111,7 +173,10 @@ class ModelRegistryIntegrityTest(unittest.TestCase):
                 self._write_index(index)
 
                 with self.assertRaisesRegex(ModelRegistryIntegrityError, "schemaVersion .* unsupported"):
-                    self.registry.entries()
+                    self.registry.register(self._artifact(f"schema-version-candidate-{schema_version}"))
+
+                self.assertEqual(registered_bytes, registered_path.read_bytes())
+                self.assertEqual([registered_path], self._managed_artifacts())
 
                 index["schemaVersion"] = 2
                 self._write_index(index)
@@ -253,18 +318,22 @@ class ModelRegistryIntegrityTest(unittest.TestCase):
         self.assertEqual(2, len(self._managed_artifacts()))
 
     def test_next_mutation_reconciles_artifact_left_by_interrupted_publication(self):
+        authoritative = self.registry.register(self._artifact("interruption-authoritative-v1"))
         orphan_source = self._artifact("interrupted-orphan-v1")
         orphan_target = self.registry._artifact_target(
             load_validated_model_artifact(orphan_source).logical_identity
         )
-        orphan_target.parent.mkdir(parents=True)
+        orphan_target.parent.mkdir(parents=True, exist_ok=True)
         orphan_target.write_bytes(orphan_source.read_bytes())
 
         registered = self.registry.register(self._artifact("post-interruption-v1"))
 
         self.assertFalse(orphan_target.exists())
-        self.assertEqual([registered], self.registry.entries())
-        self.assertEqual([Path(registered.artifact_path)], self._managed_artifacts())
+        self.assertCountEqual([authoritative, registered], self.registry.entries())
+        self.assertEqual(
+            sorted([Path(authoritative.artifact_path), Path(registered.artifact_path)]),
+            self._managed_artifacts(),
+        )
 
     def test_unlock_failure_does_not_leave_process_lock_held(self):
         with patch("app.registry.model_registry._unlock_file", side_effect=OSError("injected unlock failure")):
