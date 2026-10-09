@@ -7,6 +7,7 @@ import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
+import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionRepository;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceComparisonReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceEngineReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
@@ -98,6 +99,9 @@ class FraudFeedbackPostFlowIntegrationTest {
 
     @MockitoBean
     private EngineIntelligenceReadService engineIntelligenceReadService;
+
+    @MockitoBean
+    private MlPredictionEvidenceProjectionRepository mlPredictionEvidenceProjectionRepository;
 
     @MockitoBean
     private CurrentAnalystUser currentAnalystUser;
