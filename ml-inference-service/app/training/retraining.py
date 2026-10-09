@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 
 from app.data.dataset import Dataset
@@ -10,6 +11,7 @@ from app.training.train import train_with_evaluation
 PASS = "PASS"
 FAIL = "FAIL"
 NOT_EVALUATED = "NOT_EVALUATED"
+EVALUATION_COHORT_FINGERPRINT_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True)
@@ -23,6 +25,44 @@ class ChallengerComparisonThresholds:
     max_segment_pr_auc_drop: float = 0.15
     max_out_of_time_pr_auc_drop: float = 0.20
     max_out_of_time_cost_increase: float = 500.0
+
+    def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
+        _require_finite_threshold(
+            "max_false_positive_rate_increase",
+            self.max_false_positive_rate_increase,
+            maximum=1.0,
+        )
+        _require_finite_threshold("min_alert_rate", self.min_alert_rate, maximum=1.0)
+        _require_finite_threshold("max_alert_rate", self.max_alert_rate, maximum=1.0)
+        if self.min_alert_rate > self.max_alert_rate:
+            raise ValueError("min_alert_rate must not exceed max_alert_rate.")
+        if self.alert_budget is not None:
+            _require_finite_threshold("alert_budget", self.alert_budget, maximum=1.0)
+        _require_finite_threshold(
+            "max_segment_pr_auc_drop",
+            self.max_segment_pr_auc_drop,
+            maximum=1.0,
+        )
+        _require_finite_threshold(
+            "max_out_of_time_pr_auc_drop",
+            self.max_out_of_time_pr_auc_drop,
+            maximum=1.0,
+        )
+        _require_finite_threshold(
+            "max_out_of_time_cost_increase",
+            self.max_out_of_time_cost_increase,
+        )
+
+
+def _require_finite_threshold(name: str, value: object, maximum: float | None = None) -> None:
+    if type(value) not in (int, float) or not math.isfinite(value):
+        raise ValueError(f"{name} must be a finite number.")
+    if value < 0 or (maximum is not None and value > maximum):
+        upper_bound = f" and at most {maximum}" if maximum is not None else ""
+        raise ValueError(f"{name} must be at least 0{upper_bound}.")
 
 
 @dataclass(frozen=True)
@@ -79,6 +119,9 @@ def _diagnostic_assessment(
         thresholds: ChallengerComparisonThresholds,
         feedback_dataset: Dataset | None = None,
 ) -> dict[str, object]:
+    if not isinstance(thresholds, ChallengerComparisonThresholds):
+        raise ValueError("thresholds must be ChallengerComparisonThresholds.")
+    thresholds.validate()
     current_optimal = _optimal(current_evaluation)
     challenger_optimal = _optimal(challenger_evaluation)
     current_pr_auc = _optional_metric(current_evaluation, "heldOutPrAuc", "prAuc")
@@ -344,6 +387,19 @@ def _evaluation_window_reasons(
         return ["CURRENT_EVALUATION_WINDOW_MISSING"]
     if challenger_rows is None or not isinstance(challenger_start, str) or not challenger_start.strip():
         return ["CHALLENGER_EVALUATION_WINDOW_MISSING"]
+    current_cohort = current.get("testCohortFingerprint")
+    challenger_cohort = challenger.get("testCohortFingerprint")
+    if current_cohort is None:
+        return ["CURRENT_EVALUATION_COHORT_FINGERPRINT_MISSING"]
+    if challenger_cohort is None:
+        return ["CHALLENGER_EVALUATION_COHORT_FINGERPRINT_MISSING"]
+    if not isinstance(current_cohort, str) \
+            or EVALUATION_COHORT_FINGERPRINT_PATTERN.fullmatch(current_cohort) is None \
+            or not isinstance(challenger_cohort, str) \
+            or EVALUATION_COHORT_FINGERPRINT_PATTERN.fullmatch(challenger_cohort) is None:
+        return ["EVALUATION_COHORT_FINGERPRINT_INVALID"]
+    if current_cohort != challenger_cohort:
+        return ["EVALUATION_COHORT_NOT_COMPARABLE"]
     if current_rows != challenger_rows or current_start != challenger_start:
         return ["EVALUATION_WINDOWS_NOT_COMPARABLE"]
     return []

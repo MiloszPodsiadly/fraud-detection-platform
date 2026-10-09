@@ -1109,8 +1109,28 @@ class FraudModelTest(unittest.TestCase):
         self.assertGreater(splits.metadata["classDistribution"]["train"]["fraud"], 0)
         self.assertGreater(splits.metadata["classDistribution"]["validation"]["fraud"], 0)
         self.assertGreater(splits.metadata["classDistribution"]["test"]["fraud"], 0)
+        self.assertRegex(splits.metadata["testCohortFingerprint"], r"^[0-9a-f]{64}$")
         rates = list(splits.metadata["fraudRate"].values())
         self.assertLessEqual(max(rates) - min(rates), 0.05)
+
+    def test_evaluation_cohort_fingerprint_is_independent_of_input_order(self):
+        dataset = self._timestamped_production_dataset(
+            [0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+            label_dependent_features=False,
+        )
+        reordered = Dataset(
+            X=list(reversed(dataset.X)),
+            y=list(reversed(dataset.y)),
+            metadata=dataset.metadata,
+        )
+
+        first = split_dataset(dataset, mode="out_of_time", cutoff_ratio=0.5)
+        second = split_dataset(reordered, mode="out_of_time", cutoff_ratio=0.5)
+
+        self.assertEqual(
+            first.metadata["testCohortFingerprint"],
+            second.metadata["testCohortFingerprint"],
+        )
 
     def test_out_of_time_split_uses_later_test_window(self):
         dataset = generate_fraud_behavior(count=300, seed=223, user_count=5, fraud_ratio=0.03)
@@ -1153,6 +1173,10 @@ class FraudModelTest(unittest.TestCase):
                 "effectiveCutoffTimestamp",
         ):
             self.assertEqual(first_splits.metadata[key], second_splits.metadata[key])
+        self.assertNotEqual(
+            first_splits.metadata["testCohortFingerprint"],
+            second_splits.metadata["testCohortFingerprint"],
+        )
 
     def test_single_class_out_of_time_partition_fails_instead_of_moving_cutoff(self):
         dataset = self._timestamped_production_dataset([0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0])
@@ -1267,6 +1291,64 @@ class FraudModelTest(unittest.TestCase):
         self.assertIn("prAuc", comparison.challenger_evaluation)
         self.assertIn("splitMetadata", comparison.challenger_evaluation)
 
+    def test_challenger_comparison_thresholds_accept_valid_boundaries(self):
+        defaults = ChallengerComparisonThresholds()
+        boundaries = ChallengerComparisonThresholds(
+            max_false_positive_rate_increase=0.0,
+            min_alert_rate=0.0,
+            max_alert_rate=1.0,
+            alert_budget=1.0,
+            max_segment_pr_auc_drop=0.0,
+            max_out_of_time_pr_auc_drop=1.0,
+            max_out_of_time_cost_increase=0.0,
+        )
+
+        defaults.validate()
+        boundaries.validate()
+        self.assertEqual(0.0, boundaries.max_out_of_time_cost_increase)
+
+    def test_challenger_comparison_thresholds_reject_non_finite_values(self):
+        fields = (
+            "max_false_positive_rate_increase",
+            "min_alert_rate",
+            "max_alert_rate",
+            "alert_budget",
+            "max_segment_pr_auc_drop",
+            "max_out_of_time_pr_auc_drop",
+            "max_out_of_time_cost_increase",
+        )
+        for field in fields:
+            for invalid in (float("nan"), float("inf"), float("-inf")):
+                with self.subTest(field=field, invalid=invalid):
+                    with self.assertRaisesRegex(ValueError, field):
+                        ChallengerComparisonThresholds(**{field: invalid})
+
+    def test_challenger_comparison_thresholds_reject_invalid_types_and_ranges(self):
+        invalid_cases = (
+            {"max_false_positive_rate_increase": True},
+            {"min_alert_rate": "0.1"},
+            {"max_alert_rate": None},
+            {"alert_budget": False},
+            {"max_segment_pr_auc_drop": -0.01},
+            {"max_out_of_time_pr_auc_drop": 1.01},
+            {"max_out_of_time_cost_increase": -1.0},
+            {"alert_budget": 1.01},
+            {"min_alert_rate": 0.8, "max_alert_rate": 0.2},
+        )
+        for values in invalid_cases:
+            with self.subTest(values=values):
+                with self.assertRaises(ValueError):
+                    ChallengerComparisonThresholds(**values)
+
+    def test_diagnostic_assessment_revalidates_threshold_object(self):
+        current = self._evaluation_for_decision(pr_auc=0.6, fpr=0.05, alert_rate=0.05, cost=1000.0)
+        challenger = self._evaluation_for_decision(pr_auc=0.8, fpr=0.04, alert_rate=0.05, cost=900.0)
+        thresholds = ChallengerComparisonThresholds()
+        object.__setattr__(thresholds, "max_alert_rate", float("nan"))
+
+        with self.assertRaisesRegex(ValueError, "max_alert_rate"):
+            _diagnostic_assessment(current, challenger, thresholds)
+
     def test_diagnostic_outcomes_do_not_grant_lifecycle_authority(self):
         current = self._evaluation_for_decision(pr_auc=0.6, fpr=0.05, alert_rate=0.05, cost=1000.0)
         better = self._evaluation_for_decision(pr_auc=0.8, fpr=0.05, alert_rate=0.05, cost=900.0)
@@ -1340,6 +1422,40 @@ class FraudModelTest(unittest.TestCase):
         self.assertIsNone(diagnostics["observedMetrics"]["challengerPrAuc"])
         self.assertIsNone(diagnostics["observedMetrics"]["challengerFalsePositiveRate"])
         self.assertIn("EVALUATION_WINDOWS_NOT_COMPARABLE", diagnostics["insufficientEvidenceReasons"])
+
+    def test_same_count_and_start_with_different_cohort_is_insufficient(self):
+        current = self._evaluation_for_decision(pr_auc=0.6, fpr=0.05, alert_rate=0.05, cost=1000.0)
+        challenger = self._evaluation_for_decision(pr_auc=0.8, fpr=0.04, alert_rate=0.05, cost=900.0)
+        challenger["splitMetadata"]["testCohortFingerprint"] = "b" * 64
+
+        diagnostics = _diagnostic_assessment(current, challenger, ChallengerComparisonThresholds())
+
+        self.assertEqual("INSUFFICIENT_EVIDENCE", diagnostics["outcome"])
+        self.assertIn("EVALUATION_COHORT_NOT_COMPARABLE", diagnostics["insufficientEvidenceReasons"])
+
+    def test_missing_or_malformed_cohort_fingerprint_is_insufficient(self):
+        current = self._evaluation_for_decision(pr_auc=0.6, fpr=0.05, alert_rate=0.05, cost=1000.0)
+        challenger = self._evaluation_for_decision(pr_auc=0.8, fpr=0.04, alert_rate=0.05, cost=900.0)
+        cases = (
+            (None, "CURRENT_EVALUATION_COHORT_FINGERPRINT_MISSING"),
+            ("not-a-sha", "EVALUATION_COHORT_FINGERPRINT_INVALID"),
+        )
+        for fingerprint, expected_reason in cases:
+            with self.subTest(fingerprint=fingerprint):
+                candidate = copy.deepcopy(current)
+                if fingerprint is None:
+                    candidate["splitMetadata"].pop("testCohortFingerprint")
+                else:
+                    candidate["splitMetadata"]["testCohortFingerprint"] = fingerprint
+
+                diagnostics = _diagnostic_assessment(
+                    candidate,
+                    challenger,
+                    ChallengerComparisonThresholds(),
+                )
+
+                self.assertEqual("INSUFFICIENT_EVIDENCE", diagnostics["outcome"])
+                self.assertIn(expected_reason, diagnostics["insufficientEvidenceReasons"])
 
     def test_diagnostic_report_is_deterministic_for_identical_evidence(self):
         current = self._evaluation_for_decision(pr_auc=0.6, fpr=0.05, alert_rate=0.05, cost=1000.0)
@@ -1890,6 +2006,7 @@ class FraudModelTest(unittest.TestCase):
             "splitMetadata": {
                 "testRows": 10,
                 "testStartTimestamp": "2026-01-01T00:00:00Z",
+                "testCohortFingerprint": "a" * 64,
             },
         }
 
