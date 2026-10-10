@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.0.0",
+    "node": "^22.12.0 || ^24.0.0 || >=26.0.0",
     "npm": ">=10.0.0"
   },
   "scripts": {
@@ -24,22 +24,23 @@
   },
   "dependencies": {
     "oidc-client-ts": "3.5.0",
-    "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
   },
   "devDependencies": {
-    "@babel/parser": "8.0.4",
+    "@babel/parser": "8.0.7",
     "@testing-library/jest-dom": "7.0.1",
     "@testing-library/react": "16.3.3",
-    "@vitejs/plugin-react": "6.1.1",
-    "happy-dom": "20.11.12",
-    "vite": "8.2.2",
-    "vitest": "4.1.11"
+    "@vitejs/plugin-react": "6.1.2",
+    "happy-dom": "20.14.6",
+    "vite": "8.3.4",
+    "vitest": "5.0.3"
   },
   "overrides": {
-    "postcss": "8.5.26",
-    "undici": "8.10.0",
-    "minimist": "^1.2.8",
-    "ws": "^8.21.3"
+    "postcss": "8.5.29",
+    "undici": "8.11.2",
+    "minimist": "1.2.8",
+    "ws": "8.22.0",
+    "source-map-js": "1.2.2"
   }
 }
