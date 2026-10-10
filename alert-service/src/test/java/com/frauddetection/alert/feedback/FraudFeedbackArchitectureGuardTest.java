@@ -62,6 +62,36 @@ class FraudFeedbackArchitectureGuardTest {
     }
 
     @Test
+    void feedbackResponsibilitiesStaySeparatedInsideOneTransactionBoundary() throws IOException {
+        String service = Files.readString(FEEDBACK_MAIN.resolve("FraudFeedbackService.java"));
+        String validator = Files.readString(FEEDBACK_MAIN.resolve("validation/FraudFeedbackRequestValidator.java"));
+        String assembler = Files.readString(FEEDBACK_MAIN.resolve("assembly/FraudFeedbackRecordAssembler.java"));
+        String engineSnapshotter = Files.readString(FEEDBACK_MAIN.resolve(
+                "snapshot/EngineIntelligenceFeedbackSnapshotter.java"
+        ));
+        String mlSnapshotter = Files.readString(FEEDBACK_MAIN.resolve(
+                "snapshot/MlPredictionEvidenceSnapshotter.java"
+        ));
+        String extractedResponsibilities = validator + assembler + engineSnapshotter + mlSnapshotter;
+
+        assertThat(service)
+                .contains("transactionRunner.runLocalCommit")
+                .contains("repository.save(record)")
+                .contains("persistAuditIntent(saved)")
+                .contains("requestValidator.validate(request)")
+                .contains("recordAssembler.assemble(")
+                .doesNotContain("EngineIntelligenceReadService", "MlPredictionEvidenceProjectionRepository");
+        assertThat(extractedResponsibilities)
+                .doesNotContain("runLocalCommit", "repository.save(", "createPendingAudit");
+        assertThat(engineSnapshotter)
+                .contains("EngineIntelligenceResponseStatus.UNAVAILABLE");
+        assertThat(mlSnapshotter)
+                .contains("FRAUD_FEEDBACK_ML_PREDICTION_EVIDENCE_UNAVAILABLE")
+                .contains("matchesOccurrence")
+                .doesNotContain("EngineIntelligenceResponseStatus.UNAVAILABLE");
+    }
+
+    @Test
     void onlyWriteActionAuditOutboxPublisherCallsAuditServiceInOutboxPackage() throws IOException {
         String publisher = Files.readString(AUDIT_OUTBOX_MAIN.resolve("WriteActionAuditOutboxPublisher.java"));
         String nonPublisherSources = source(AUDIT_OUTBOX_MAIN, path -> !path.getFileName().toString().equals("WriteActionAuditOutboxPublisher.java"));

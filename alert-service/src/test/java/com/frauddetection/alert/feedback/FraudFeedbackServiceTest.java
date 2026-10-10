@@ -15,6 +15,10 @@ import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadMod
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
 import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjection;
 import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionRepository;
+import com.frauddetection.alert.feedback.assembly.FraudFeedbackRecordAssembler;
+import com.frauddetection.alert.feedback.snapshot.EngineIntelligenceFeedbackSnapshotter;
+import com.frauddetection.alert.feedback.snapshot.MlPredictionEvidenceSnapshotter;
+import com.frauddetection.alert.feedback.validation.FraudFeedbackRequestValidator;
 import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionRunner;
@@ -75,18 +79,7 @@ class FraudFeedbackServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new FraudFeedbackService(
-                repository,
-                new FraudFeedbackMapper(),
-                transactionMonitoringUseCase,
-                engineIntelligenceReadService,
-                new EngineIntelligenceResponseMapper(),
-                mlPredictionEvidenceProjectionRepository,
-                currentAnalystUser,
-                auditOutboxService,
-                transactionRunner,
-                Clock.fixed(Instant.parse("2026-06-25T10:15:30Z"), ZoneOffset.UTC)
-        );
+        service = createService(new EngineIntelligenceResponseMapper());
         when(transactionRunner.runLocalCommit(any())).thenAnswer(invocation -> invocation.<Supplier<?>>getArgument(0).get());
         when(transactionRunner.mode()).thenReturn(RegulatedMutationTransactionMode.OFF);
         when(transactionMonitoringUseCase.getScoredTransaction("txn-1")).thenReturn(scoredTransaction());
@@ -672,18 +665,7 @@ class FraudFeedbackServiceTest {
         EngineIntelligenceResponseMapper mapper = mock(EngineIntelligenceResponseMapper.class);
         when(mapper.toResponse(any(EngineIntelligenceReadModel.class)))
                 .thenThrow(new IllegalStateException("rawEvidence Customer confirmed fraud"));
-        FraudFeedbackService mapperFailureService = new FraudFeedbackService(
-                repository,
-                new FraudFeedbackMapper(),
-                transactionMonitoringUseCase,
-                engineIntelligenceReadService,
-                mapper,
-                mlPredictionEvidenceProjectionRepository,
-                currentAnalystUser,
-                auditOutboxService,
-                transactionRunner,
-                Clock.fixed(Instant.parse("2026-06-25T10:15:30Z"), ZoneOffset.UTC)
-        );
+        FraudFeedbackService mapperFailureService = createService(mapper);
 
         FraudFeedbackResponse response = mapperFailureService.create("txn-1", request());
 
@@ -751,6 +733,28 @@ class FraudFeedbackServiceTest {
 
         assertThat(response.notesPresent()).isTrue();
         assertThat(response.toString()).doesNotContain("Customer confirmed fraud");
+    }
+
+    private FraudFeedbackService createService(EngineIntelligenceResponseMapper responseMapper) {
+        EngineIntelligenceFeedbackSnapshotter engineIntelligenceSnapshotter =
+                new EngineIntelligenceFeedbackSnapshotter(engineIntelligenceReadService, responseMapper);
+        MlPredictionEvidenceSnapshotter mlPredictionEvidenceSnapshotter =
+                new MlPredictionEvidenceSnapshotter(mlPredictionEvidenceProjectionRepository);
+        FraudFeedbackRecordAssembler recordAssembler = new FraudFeedbackRecordAssembler(
+                engineIntelligenceSnapshotter,
+                mlPredictionEvidenceSnapshotter
+        );
+        return new FraudFeedbackService(
+                repository,
+                new FraudFeedbackMapper(),
+                transactionMonitoringUseCase,
+                currentAnalystUser,
+                auditOutboxService,
+                transactionRunner,
+                new FraudFeedbackRequestValidator(),
+                recordAssembler,
+                Clock.fixed(Instant.parse("2026-06-25T10:15:30Z"), ZoneOffset.UTC)
+        );
     }
 
     private void assertBadRequest(CreateFraudFeedbackRequest request, String reason) {
