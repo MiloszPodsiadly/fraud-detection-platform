@@ -1,5 +1,9 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
+import com.frauddetection.scoring.orchestration.aggregation.comparison.FraudEngineAgreementStatus;
+import com.frauddetection.scoring.orchestration.aggregation.comparison.FraudEngineRiskMismatchStatus;
+import com.frauddetection.scoring.orchestration.aggregation.comparison.FraudEngineScoreDeltaStatus;
+
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineContribution;
 import com.frauddetection.common.events.engine.FraudEngineContributionDirection;

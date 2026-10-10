@@ -1,5 +1,7 @@
 package com.frauddetection.alert.regulated;
 
+import com.frauddetection.alert.regulated.status.RegulatedMutationPublicStatusMapper;
+
 import com.frauddetection.alert.audit.AuditEventRepository;
 import com.frauddetection.alert.audit.external.AuditEventPublicationStatusLookup;
 import com.frauddetection.alert.audit.read.SensitiveReadAuditService;

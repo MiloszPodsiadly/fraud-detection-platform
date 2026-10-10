@@ -1,5 +1,9 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
+import com.frauddetection.scoring.orchestration.aggregation.comparison.FraudEngineAgreementStatus;
+import com.frauddetection.scoring.orchestration.aggregation.comparison.FraudEngineRiskMismatch;
+import com.frauddetection.scoring.orchestration.aggregation.comparison.FraudEngineScoreDelta;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;

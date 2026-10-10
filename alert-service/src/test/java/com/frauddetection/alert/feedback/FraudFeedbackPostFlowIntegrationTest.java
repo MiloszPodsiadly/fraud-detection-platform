@@ -13,6 +13,10 @@ import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceEngineR
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceProjectionReadUnavailableException;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModel;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
+import com.frauddetection.alert.feedback.assembly.FraudFeedbackRecordAssembler;
+import com.frauddetection.alert.feedback.snapshot.EngineIntelligenceFeedbackSnapshotter;
+import com.frauddetection.alert.feedback.snapshot.MlPredictionEvidenceSnapshotter;
+import com.frauddetection.alert.feedback.validation.FraudFeedbackRequestValidator;
 import com.frauddetection.alert.exception.AlertServiceExceptionHandler;
 import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
@@ -84,6 +88,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         AlertServiceExceptionHandler.class,
         FraudFeedbackService.class,
         FraudFeedbackMapper.class,
+        FraudFeedbackRequestValidator.class,
+        FraudFeedbackRecordAssembler.class,
+        EngineIntelligenceFeedbackSnapshotter.class,
+        MlPredictionEvidenceSnapshotter.class,
         EngineIntelligenceResponseMapper.class
 })
 class FraudFeedbackPostFlowIntegrationTest {

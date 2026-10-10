@@ -1,5 +1,11 @@
 package com.frauddetection.trustauthority;
 
+import com.frauddetection.trustauthority.api.TrustKeyResponse;
+import com.frauddetection.trustauthority.api.TrustSignRequest;
+import com.frauddetection.trustauthority.api.TrustSignResponse;
+import com.frauddetection.trustauthority.api.TrustVerifyRequest;
+import com.frauddetection.trustauthority.api.TrustVerifyResponse;
+
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;

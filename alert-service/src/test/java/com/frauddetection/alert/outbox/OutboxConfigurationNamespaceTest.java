@@ -63,7 +63,8 @@ class OutboxConfigurationNamespaceTest {
         String publisher = source("outbox/OutboxPublisherCoordinator.java");
         String fraudAlertPublisher = source("outbox/FraudAlertOutboxPublisher.java");
         String scheduler = source("service/FraudDecisionOutboxPublisher.java");
-        String trust = source("system/SystemTrustLevelController.java");
+        String trust = source("system/trustlevel/application/SystemTrustLevelService.java");
+        String outboxHealth = source("system/trustlevel/health/OutboxRecoveryHealthCollector.java");
         String bankGuard = source("regulated/BankModeStartupGuard.java");
         String externalAudit = source("audit/external/ExternalAuditAnchorSinkConfiguration.java");
         String application = Files.readString(Path.of("src/main/resources/application.yml"));
@@ -77,7 +78,7 @@ class OutboxConfigurationNamespaceTest {
                         "${app.outbox.publisher.delay-ms:5000}"
                 );
         assertThat(scheduler).contains("${app.outbox.publisher.delay-ms:5000}");
-        assertThat(trust).contains("${app.outbox.stale-threshold:PT10M}");
+        assertThat(outboxHealth).contains("${app.outbox.stale-threshold:PT10M}");
         assertThat(bankGuard).contains("${app.outbox.max-attempts:5}");
         assertThat(externalAudit)
                 .contains("${app.audit.external-anchoring.object-store.startup-check-enabled:true}")
@@ -98,7 +99,7 @@ class OutboxConfigurationNamespaceTest {
                         "OUTBOX_STALE_THRESHOLD"
                 )
                 .contains("AUDIT_EXTERNAL_ANCHORING_OBJECT_STORE_STARTUP_CHECK_ENABLED");
-        assertThat(publisher + fraudAlertPublisher + scheduler + trust + bankGuard + application + compose)
+        assertThat(publisher + fraudAlertPublisher + scheduler + trust + outboxHealth + bankGuard + application + compose)
                 .doesNotContain("app.alert.decision-outbox", "APP_ALERT_DECISION_OUTBOX");
     }
 

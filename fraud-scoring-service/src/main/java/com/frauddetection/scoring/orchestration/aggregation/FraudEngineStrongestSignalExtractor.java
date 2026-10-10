@@ -1,5 +1,7 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
+import com.frauddetection.scoring.orchestration.aggregation.comparison.FraudEngineRiskSeverity;
+
 import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineEvidenceType;
 import com.frauddetection.common.events.engine.FraudEngineStatus;

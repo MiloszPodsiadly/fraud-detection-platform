@@ -16,6 +16,21 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 class RegulatedMutationArchitectureTest {
 
     @Test
+    void statusMappingPackageMustRemainIndependentFromMutationOrchestration() {
+        JavaClasses classes = new ClassFileImporter().importPackages("com.frauddetection.alert");
+
+        noClasses()
+                .that().resideInAPackage("..regulated.status..")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "..regulated.mutation..",
+                        "..alert.service..",
+                        "..alert.outbox..",
+                        "..alert.audit.."
+                )
+                .check(classes);
+    }
+
+    @Test
     void mainReadmeMustContainExactMaintainerContactBlock() throws Exception {
         String readme = Files.readString(Path.of("../README.md")).replace("\r\n", "\n");
 
@@ -1373,13 +1388,18 @@ class RegulatedMutationArchitectureTest {
 
     @Test
     void systemTrustLevelMustNotMaterializeTrustIncidents() throws Exception {
-        String source = Files.readString(Path.of(
-                "src/main/java/com/frauddetection/alert/system/SystemTrustLevelController.java"
+        String service = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/system/trustlevel/application/SystemTrustLevelService.java"
+        ));
+        String collector = Files.readString(Path.of(
+                "src/main/java/com/frauddetection/alert/system/trustlevel/health/LiveTrustStateCollector.java"
         ));
 
-        assertThat(source).doesNotContain("materializer.materialize");
-        assertThat(source).doesNotContain("trustSignalCollector.collect()");
-        assertThat(source).contains("trustIncidentService.summary()");
+        assertThat(service).doesNotContain("materializer.materialize");
+        assertThat(service).doesNotContain("trustSignalCollector.collect()");
+        assertThat(collector).doesNotContain("materializer.materialize");
+        assertThat(collector).doesNotContain("trustSignalCollector.collect()");
+        assertThat(collector).contains("trustIncidentService.summary()");
     }
 
     @Test

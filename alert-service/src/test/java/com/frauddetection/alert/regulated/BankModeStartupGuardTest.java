@@ -458,6 +458,35 @@ class BankModeStartupGuardTest {
     }
 
     @Test
+    void shouldRejectRequiredFailClosedPublicationWithoutBankMode() {
+        BankModeStartupGuard guard = guard(
+                RegulatedMutationTransactionMode.OFF,
+                false,
+                new String[]{"local"},
+                null,
+                true,
+                true,
+                true,
+                true,
+                "PARTIAL",
+                5,
+                null,
+                null,
+                false,
+                true,
+                true,
+                true,
+                false,
+                false,
+                "object-store"
+        );
+
+        assertThatThrownBy(() -> guard.run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("app.audit.bank-mode.fail-closed=true is required when external publication is required and fail-closed.");
+    }
+
+    @Test
     void shouldRejectProdProfileWhenBankModeFailClosedIsNotEnabled() {
         BankModeStartupGuard guard = guard(
                 RegulatedMutationTransactionMode.REQUIRED,
@@ -611,8 +640,8 @@ class BankModeStartupGuardTest {
                 outboxRepository,
                 true,
                 true,
-                true,
-                true,
+                bankMode,
+                bankMode,
                 true,
                 true,
                 "object-store"
@@ -706,8 +735,8 @@ class BankModeStartupGuardTest {
                 outboxRepository,
                 true,
                 true,
-                true,
-                true,
+                bankMode,
+                bankMode,
                 true,
                 true,
                 "object-store"

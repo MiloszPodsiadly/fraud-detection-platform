@@ -1,5 +1,8 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
+import com.frauddetection.scoring.orchestration.aggregation.comparison.FraudEngineScoreDelta;
+import com.frauddetection.scoring.orchestration.aggregation.comparison.FraudEngineScoreDeltaStatus;
+
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.enums.RiskLevel;

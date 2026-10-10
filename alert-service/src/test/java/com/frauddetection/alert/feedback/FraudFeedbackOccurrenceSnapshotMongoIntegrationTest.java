@@ -10,6 +10,10 @@ import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectio
 import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionRepository;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadModelMapper;
 import com.frauddetection.alert.engineintelligence.api.EngineIntelligenceReadService;
+import com.frauddetection.alert.feedback.assembly.FraudFeedbackRecordAssembler;
+import com.frauddetection.alert.feedback.snapshot.EngineIntelligenceFeedbackSnapshotter;
+import com.frauddetection.alert.feedback.snapshot.MlPredictionEvidenceSnapshotter;
+import com.frauddetection.alert.feedback.validation.FraudFeedbackRequestValidator;
 import com.frauddetection.alert.mapper.EngineIntelligenceResponseMapper;
 import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
 import com.frauddetection.alert.persistence.ScoredTransactionDocument;
@@ -241,20 +245,30 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
         CurrentAnalystUser currentUser = mock(CurrentAnalystUser.class);
         when(currentUser.get()).thenReturn(Optional.of(new AnalystPrincipal("analyst-1", Set.of(), Set.of())));
 
+        EngineIntelligenceReadService engineIntelligenceReadService = new EngineIntelligenceReadService(
+                scoredTransactions,
+                engineIntelligence,
+                new EngineIntelligenceReadModelMapper()
+        );
+        EngineIntelligenceFeedbackSnapshotter engineIntelligenceSnapshotter =
+                new EngineIntelligenceFeedbackSnapshotter(
+                        engineIntelligenceReadService,
+                        new EngineIntelligenceResponseMapper()
+                );
+        MlPredictionEvidenceSnapshotter mlPredictionEvidenceSnapshotter =
+                new MlPredictionEvidenceSnapshotter(evidence);
+        FraudFeedbackRecordAssembler recordAssembler = new FraudFeedbackRecordAssembler();
         return new FraudFeedbackService(
                 feedback,
                 new FraudFeedbackMapper(),
                 monitoring,
-                new EngineIntelligenceReadService(
-                        scoredTransactions,
-                        engineIntelligence,
-                        new EngineIntelligenceReadModelMapper()
-                ),
-                new EngineIntelligenceResponseMapper(),
-                evidence,
                 currentUser,
                 auditOutbox,
                 transactionRunner,
+                new FraudFeedbackRequestValidator(),
+                recordAssembler,
+                engineIntelligenceSnapshotter,
+                mlPredictionEvidenceSnapshotter,
                 Clock.fixed(CREATED_A.plusSeconds(10), ZoneOffset.UTC)
         );
     }

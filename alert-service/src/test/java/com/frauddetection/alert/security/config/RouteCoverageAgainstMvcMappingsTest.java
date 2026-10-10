@@ -72,7 +72,8 @@ import com.frauddetection.alert.suspicious.api.SuspiciousTransactionLinkedAlertC
 import com.frauddetection.alert.suspicious.api.observability.LinkedAlertContextMetricsRecorder;
 import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetryClassifier;
 import com.frauddetection.alert.suspicious.api.telemetry.SuspiciousTransactionQueryTelemetrySink;
-import com.frauddetection.alert.system.SystemTrustLevelController;
+import com.frauddetection.alert.system.trustlevel.api.SystemTrustLevelController;
+import com.frauddetection.alert.system.trustlevel.application.SystemTrustLevelService;
 import com.frauddetection.alert.trust.TrustIncidentController;
 import com.frauddetection.alert.trust.TrustIncidentPreviewRateLimiter;
 import com.frauddetection.alert.trust.TrustIncidentService;
@@ -184,6 +185,9 @@ class RouteCoverageAgainstMvcMappingsTest {
 
     @MockitoBean
     private SensitiveReadAuditService sensitiveReadAuditService;
+
+    @MockitoBean
+    private SystemTrustLevelService systemTrustLevelService;
 
     @MockitoBean
     private AuditIntegrityService auditIntegrityService;

@@ -13,7 +13,7 @@ class SensitiveReadArchitectureTest {
     @Test
     void operationalSensitiveReadEndpointsMustUseCentralAuditPolicy() throws Exception {
         List<EndpointSource> endpoints = List.of(
-                source("src/main/java/com/frauddetection/alert/system/SystemTrustLevelController.java", "/system/trust-level"),
+                source("src/main/java/com/frauddetection/alert/system/trustlevel/api/SystemTrustLevelController.java", "/system/trust-level"),
                 source("src/main/java/com/frauddetection/alert/trust/TrustIncidentController.java", "/api/v1/trust/incidents"),
                 source("src/main/java/com/frauddetection/alert/audit/AuditEventController.java", "/api/v1/audit/events"),
                 source("src/main/java/com/frauddetection/alert/audit/external/AuditEvidenceExportController.java", "/api/v1/audit/evidence/export"),

@@ -3,6 +3,7 @@ package com.frauddetection.alert.outbox;
 import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.outbox.recovery.OutboxBacklogReader;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.regulated.RegulatedMutationCommand;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
@@ -51,6 +52,7 @@ public class OutboxRecoveryService {
     private final AlertServiceMetrics metrics;
     private final Duration staleProcessingThreshold;
     private final OutboxOperationalControls operationalControls;
+    private final OutboxBacklogReader backlogReader;
 
     @Autowired
     public OutboxRecoveryService(
@@ -61,7 +63,8 @@ public class OutboxRecoveryService {
             OutboxConfirmationResolutionMutationHandler resolutionMutationHandler,
             AlertServiceMetrics metrics,
             @Value("${app.outbox.recovery.stale-processing-threshold:PT2M}") Duration staleProcessingThreshold,
-            OutboxOperationalControls operationalControls
+            OutboxOperationalControls operationalControls,
+            OutboxBacklogReader backlogReader
     ) {
         this.repository = repository;
         this.mongoTemplate = mongoTemplate;
@@ -71,6 +74,30 @@ public class OutboxRecoveryService {
         this.metrics = metrics;
         this.staleProcessingThreshold = staleProcessingThreshold == null ? Duration.ofMinutes(2) : staleProcessingThreshold;
         this.operationalControls = operationalControls;
+        this.backlogReader = backlogReader;
+    }
+
+    public OutboxRecoveryService(
+            TransactionalOutboxRecordRepository repository,
+            MongoTemplate mongoTemplate,
+            OutboxPublisherCoordinator publisherCoordinator,
+            RegulatedMutationCoordinator regulatedMutationCoordinator,
+            OutboxConfirmationResolutionMutationHandler resolutionMutationHandler,
+            AlertServiceMetrics metrics,
+            Duration staleProcessingThreshold,
+            OutboxOperationalControls operationalControls
+    ) {
+        this(
+                repository,
+                mongoTemplate,
+                publisherCoordinator,
+                regulatedMutationCoordinator,
+                resolutionMutationHandler,
+                metrics,
+                staleProcessingThreshold,
+                operationalControls,
+                new OutboxBacklogReader(repository, metrics)
+        );
     }
 
     public OutboxRecoveryService(
@@ -95,28 +122,7 @@ public class OutboxRecoveryService {
     }
 
     public OutboxBacklogResponse backlog() {
-        List<TransactionalOutboxStatus> pendingStatuses = List.of(
-                TransactionalOutboxStatus.PENDING,
-                TransactionalOutboxStatus.PROCESSING,
-                TransactionalOutboxStatus.FAILED_RETRYABLE
-        );
-        Long oldestPendingAge = repository.findTopByStatusInOrderByCreatedAtAsc(pendingStatuses)
-                .map(this::ageSeconds)
-                .orElse(null);
-        OutboxBacklogResponse response = new OutboxBacklogResponse(
-                repository.countByStatus(TransactionalOutboxStatus.PENDING),
-                repository.countByStatus(TransactionalOutboxStatus.PROCESSING),
-                repository.countByStatus(TransactionalOutboxStatus.PUBLISH_ATTEMPTED),
-                repository.countByStatus(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN),
-                repository.countByStatus(TransactionalOutboxStatus.FAILED_RETRYABLE),
-                repository.countByStatus(TransactionalOutboxStatus.FAILED_TERMINAL),
-                repository.countByStatus(TransactionalOutboxStatus.RECOVERY_REQUIRED),
-                repository.countByProjectionMismatchTrue(),
-                repository.countByProjectionReconcileAfterIsNotNull(),
-                oldestPendingAge
-        );
-        metrics.recordOutboxBacklog(response);
-        return response;
+        return backlogReader.read();
     }
 
     public OutboxRecoveryRunResponse recoverNow() {
@@ -543,11 +549,4 @@ public class OutboxRecoveryService {
         mongoTemplate.updateFirst(query, update, TransactionalOutboxRecordDocument.class);
     }
 
-    private long ageSeconds(TransactionalOutboxRecordDocument record) {
-        Instant createdAt = record.getCreatedAt();
-        if (createdAt == null) {
-            return 0L;
-        }
-        return Math.max(0L, Duration.between(createdAt, Instant.now()).toSeconds());
-    }
 }

@@ -1,5 +1,11 @@
 package com.frauddetection.trustauthority;
 
+import com.frauddetection.trustauthority.api.TrustKeyResponse;
+import com.frauddetection.trustauthority.api.TrustSignRequest;
+import com.frauddetection.trustauthority.api.TrustSignResponse;
+import com.frauddetection.trustauthority.api.TrustVerifyRequest;
+import com.frauddetection.trustauthority.api.TrustVerifyResponse;
+
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.ObjectMapper;

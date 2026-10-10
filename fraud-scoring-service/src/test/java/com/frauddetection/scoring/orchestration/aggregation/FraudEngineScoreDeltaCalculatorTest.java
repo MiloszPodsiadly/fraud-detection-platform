@@ -1,5 +1,9 @@
 package com.frauddetection.scoring.orchestration.aggregation;
 
+import com.frauddetection.scoring.orchestration.aggregation.comparison.FraudEngineScoreDelta;
+import com.frauddetection.scoring.orchestration.aggregation.comparison.FraudEngineScoreDeltaCalculator;
+import com.frauddetection.scoring.orchestration.aggregation.comparison.FraudEngineScoreDeltaStatus;
+
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
 import org.junit.jupiter.api.Test;
