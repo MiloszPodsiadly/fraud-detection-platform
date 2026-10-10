@@ -1,4 +1,4 @@
-package com.frauddetection.alert.system;
+package com.frauddetection.alert.system.trustlevel.api;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 

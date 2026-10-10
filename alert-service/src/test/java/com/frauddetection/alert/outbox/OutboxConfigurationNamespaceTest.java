@@ -63,7 +63,7 @@ class OutboxConfigurationNamespaceTest {
         String publisher = source("outbox/OutboxPublisherCoordinator.java");
         String fraudAlertPublisher = source("outbox/FraudAlertOutboxPublisher.java");
         String scheduler = source("service/FraudDecisionOutboxPublisher.java");
-        String trust = source("system/SystemTrustLevelController.java");
+        String trust = source("system/trustlevel/application/SystemTrustLevelService.java");
         String bankGuard = source("regulated/BankModeStartupGuard.java");
         String externalAudit = source("audit/external/ExternalAuditAnchorSinkConfiguration.java");
         String application = Files.readString(Path.of("src/main/resources/application.yml"));

@@ -1,40 +1,27 @@
-package com.frauddetection.alert.system;
+package com.frauddetection.alert.system.trustlevel.application;
 
 import com.frauddetection.alert.audit.AuditDegradationService;
-import com.frauddetection.alert.audit.read.AuditedSensitiveRead;
-import com.frauddetection.alert.audit.read.ReadAccessEndpointCategory;
-import com.frauddetection.alert.audit.read.ReadAccessResourceType;
-import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorCoverageResponse;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorSink;
 import com.frauddetection.alert.audit.external.ExternalWitnessCapabilities;
-import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.regulated.RegulatedMutationRecoveryService;
-import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.system.trustlevel.api.SystemTrustLevelResponse;
 import com.frauddetection.alert.trust.TrustIncidentService;
 import com.frauddetection.alert.trust.TrustIncidentSummary;
-import jakarta.servlet.http.HttpServletRequest;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.ApplicationArguments;
-import org.springframework.boot.ApplicationRunner;
 import org.springframework.dao.DataAccessException;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
-@RestController
-public class SystemTrustLevelController implements ApplicationRunner {
-
-    private static final Logger log = LoggerFactory.getLogger(SystemTrustLevelController.class);
+@Service
+public class SystemTrustLevelService {
 
     private final boolean publicationEnabled;
     private final boolean publicationRequired;
@@ -52,39 +39,9 @@ public class SystemTrustLevelController implements ApplicationRunner {
     private final boolean outboxPublisherEnabled;
     private final boolean evidenceConfirmationEnabled;
     private final TrustIncidentService trustIncidentService;
-    private final SensitiveReadAuditService sensitiveReadAuditService;
-
-    public SystemTrustLevelController(
-            boolean publicationEnabled,
-            boolean publicationRequired,
-            boolean failClosed,
-            boolean trustAuthorityEnabled,
-            boolean signingRequired,
-            com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService,
-            ExternalAuditAnchorSink externalAuditAnchorSink,
-            AlertServiceMetrics ignoredMetrics
-    ) {
-        this(publicationEnabled, publicationRequired, failClosed, true, trustAuthorityEnabled, signingRequired,
-                externalAuditIntegrityService, externalAuditAnchorSink, ignoredMetrics);
-    }
-
-    public SystemTrustLevelController(
-            boolean publicationEnabled,
-            boolean publicationRequired,
-            boolean failClosed,
-            boolean bankModeFailClosed,
-            boolean trustAuthorityEnabled,
-            boolean signingRequired,
-            com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService,
-            ExternalAuditAnchorSink externalAuditAnchorSink,
-            AlertServiceMetrics ignoredMetrics
-    ) {
-        this(publicationEnabled, publicationRequired, failClosed, bankModeFailClosed, trustAuthorityEnabled, signingRequired,
-                Duration.ofMinutes(10), bankModeFailClosed ? "REQUIRED" : "OFF", true, true, externalAuditIntegrityService, externalAuditAnchorSink, null, null, null, null, null, null, null);
-    }
 
     @Autowired
-    public SystemTrustLevelController(
+    public SystemTrustLevelService(
             @Value("${app.audit.external-anchoring.publication.enabled:false}") boolean publicationEnabled,
             @Value("${app.audit.external-anchoring.publication.required:false}") boolean publicationRequired,
             @Value("${app.audit.external-anchoring.publication.fail-closed:false}") boolean failClosed,
@@ -98,12 +55,9 @@ public class SystemTrustLevelController implements ApplicationRunner {
             com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService,
             ExternalAuditAnchorSink externalAuditAnchorSink,
             AuditDegradationService auditDegradationService,
-            AlertRepository ignoredAlertRepository,
             ObjectProvider<TransactionalOutboxRecordRepository> outboxRepository,
             RegulatedMutationRecoveryService regulatedMutationRecoveryService,
-            ObjectProvider<TrustIncidentService> trustIncidentService,
-            ObjectProvider<com.frauddetection.alert.trust.TrustSignalCollector> ignoredTrustSignalCollector,
-            ObjectProvider<SensitiveReadAuditService> sensitiveReadAuditService
+            ObjectProvider<TrustIncidentService> trustIncidentService
     ) {
         this.publicationEnabled = publicationEnabled;
         this.publicationRequired = publicationRequired;
@@ -121,10 +75,9 @@ public class SystemTrustLevelController implements ApplicationRunner {
         this.outboxPublisherEnabled = outboxPublisherEnabled;
         this.evidenceConfirmationEnabled = evidenceConfirmationEnabled;
         this.trustIncidentService = trustIncidentService == null ? null : trustIncidentService.getIfAvailable();
-        this.sensitiveReadAuditService = sensitiveReadAuditService == null ? null : sensitiveReadAuditService.getIfAvailable();
     }
 
-    public SystemTrustLevelController(
+    public SystemTrustLevelService(
             boolean publicationEnabled,
             boolean publicationRequired,
             boolean failClosed,
@@ -132,28 +85,66 @@ public class SystemTrustLevelController implements ApplicationRunner {
             boolean trustAuthorityEnabled,
             boolean signingRequired,
             Duration staleOutboxThreshold,
+            String transactionMode,
+            boolean outboxPublisherEnabled,
+            boolean evidenceConfirmationEnabled,
             com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService,
             ExternalAuditAnchorSink externalAuditAnchorSink,
             AuditDegradationService auditDegradationService,
-            AlertRepository alertRepository
+            TransactionalOutboxRecordRepository outboxRepository,
+            RegulatedMutationRecoveryService regulatedMutationRecoveryService,
+            TrustIncidentService trustIncidentService
+    ) {
+        this.publicationEnabled = publicationEnabled;
+        this.publicationRequired = publicationRequired;
+        this.failClosed = failClosed;
+        this.bankModeFailClosed = bankModeFailClosed;
+        this.trustAuthorityEnabled = trustAuthorityEnabled;
+        this.signingRequired = signingRequired;
+        this.externalAuditIntegrityService = externalAuditIntegrityService;
+        this.externalAuditAnchorSink = externalAuditAnchorSink;
+        this.auditDegradationService = auditDegradationService;
+        this.outboxRepository = outboxRepository;
+        this.regulatedMutationRecoveryService = regulatedMutationRecoveryService;
+        this.staleOutboxThreshold = staleOutboxThreshold == null ? Duration.ofMinutes(10) : staleOutboxThreshold;
+        this.transactionMode = transactionMode == null || transactionMode.isBlank()
+                ? "OFF"
+                : transactionMode.trim().toUpperCase();
+        this.outboxPublisherEnabled = outboxPublisherEnabled;
+        this.evidenceConfirmationEnabled = evidenceConfirmationEnabled;
+        this.trustIncidentService = trustIncidentService;
+    }
+
+    public SystemTrustLevelService(
+            boolean publicationEnabled,
+            boolean publicationRequired,
+            boolean failClosed,
+            boolean trustAuthorityEnabled,
+            boolean signingRequired,
+            com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService,
+            ExternalAuditAnchorSink externalAuditAnchorSink
     ) {
         this(
                 publicationEnabled,
                 publicationRequired,
                 failClosed,
-                bankModeFailClosed,
+                true,
                 trustAuthorityEnabled,
                 signingRequired,
-                staleOutboxThreshold,
+                Duration.ofMinutes(10),
+                "REQUIRED",
+                true,
+                true,
                 externalAuditIntegrityService,
                 externalAuditAnchorSink,
-                auditDegradationService,
-                alertRepository,
-                null
+                null,
+                (TransactionalOutboxRecordRepository) null,
+                null,
+                (TrustIncidentService) null
         );
     }
 
-    public SystemTrustLevelController(
+    public SystemTrustLevelService(
             boolean publicationEnabled,
             boolean publicationRequired,
             boolean failClosed,
@@ -164,7 +155,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
             com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService,
             ExternalAuditAnchorSink externalAuditAnchorSink,
             AuditDegradationService auditDegradationService,
-            AlertRepository alertRepository,
+            TransactionalOutboxRecordRepository outboxRepository,
             RegulatedMutationRecoveryService regulatedMutationRecoveryService
     ) {
         this(
@@ -181,18 +172,13 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 externalAuditIntegrityService,
                 externalAuditAnchorSink,
                 auditDegradationService,
-                alertRepository,
-                null,
+                outboxRepository,
                 regulatedMutationRecoveryService,
-                null,
-                null,
                 null
         );
     }
 
-    @GetMapping("/system/trust-level")
-    @AuditedSensitiveRead
-    public SystemTrustLevelResponse trustLevel(HttpServletRequest request) {
+    public SystemTrustLevelResponse trustLevel() {
         LiveTrustState live = liveTrustState();
         SystemTrustLevelResponse response = new SystemTrustLevelResponse(
                 guaranteeLevel(live),
@@ -243,30 +229,7 @@ public class SystemTrustLevelController implements ApplicationRunner {
                 live.topIncidentTypes(),
                 live.incidentHealthStatus()
         );
-        if (sensitiveReadAuditService != null) {
-            sensitiveReadAuditService.audit(
-                    ReadAccessEndpointCategory.SYSTEM_TRUST_LEVEL,
-                    ReadAccessResourceType.SYSTEM_TRUST_LEVEL,
-                    null,
-                    1,
-                    request
-            );
-        }
         return response;
-    }
-
-    public SystemTrustLevelResponse trustLevel() {
-        return trustLevel(null);
-    }
-
-    @Override
-    public void run(ApplicationArguments args) {
-        if (publicationRequired && failClosed) {
-            if (!bankModeFailClosed) {
-                throw new IllegalStateException("app.audit.bank-mode.fail-closed=true is required when external publication is required and fail-closed.");
-            }
-            log.info("External audit publication fail-closed mode active.");
-        }
     }
 
     private String guaranteeLevel(LiveTrustState live) {

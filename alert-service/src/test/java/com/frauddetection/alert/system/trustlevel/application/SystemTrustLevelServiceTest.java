@@ -1,4 +1,4 @@
-package com.frauddetection.alert.system;
+package com.frauddetection.alert.system.trustlevel.application;
 
 import com.frauddetection.alert.audit.AuditDegradationService;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorCoverageResponse;
@@ -10,34 +10,31 @@ import com.frauddetection.alert.audit.external.ExternalWitnessCapabilities;
 import com.frauddetection.alert.audit.external.ExternalWitnessTimestampType;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
-import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationRecoveryService;
+import com.frauddetection.alert.system.trustlevel.api.SystemTrustLevelResponse;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.ObjectProvider;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-class SystemTrustLevelControllerTest {
+class SystemTrustLevelServiceTest {
 
     @Test
     void shouldExposeFailClosedSignedExternalTrustLevel() {
         ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
         ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
         AuditDegradationService degradationService = mock(AuditDegradationService.class);
-        AlertRepository alertRepository = mock(AlertRepository.class);
         TransactionalOutboxRecordRepository outboxRepository = healthyOutboxRepository();
         when(integrityService.coverage("alert-service", 100)).thenReturn(healthyCoverage());
         when(sink.capabilities()).thenReturn(verifiedCapabilities());
         when(degradationService.unresolvedPostCommitDegradedCount()).thenReturn(0L);
-        SystemTrustLevelController controller = controller(
+        SystemTrustLevelService service = service(
                 true,
                 true,
                 true,
@@ -48,12 +45,11 @@ class SystemTrustLevelControllerTest {
                 integrityService,
                 sink,
                 degradationService,
-                alertRepository,
                 outboxRepository,
                 null
         );
 
-        SystemTrustLevelResponse response = controller.trustLevel();
+        SystemTrustLevelResponse response = service.trustLevel();
 
         assertThat(response.guaranteeLevel()).isEqualTo("FDP24_HEALTHY");
         assertThat(response.publicationEnabled()).isTrue();
@@ -73,24 +69,24 @@ class SystemTrustLevelControllerTest {
     void shouldNotMarketBestEffortAsHealthyFailClosedMode() {
         ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
         ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
-        AuditDegradationService degradationService = mock(AuditDegradationService.class);
-        AlertRepository alertRepository = mock(AlertRepository.class);
         when(integrityService.coverage("alert-service", 100)).thenReturn(healthyCoverage());
         when(sink.capabilities()).thenReturn(verifiedCapabilities());
-        when(degradationService.unresolvedPostCommitDegradedCount()).thenReturn(0L);
-        SystemTrustLevelController controller = new SystemTrustLevelController(
+        SystemTrustLevelService service = service(
                 true,
                 false,
                 false,
                 false,
                 false,
                 false,
+                Duration.ofMinutes(10),
                 integrityService,
                 sink,
+                null,
+                null,
                 null
         );
 
-        SystemTrustLevelResponse response = controller.trustLevel();
+        SystemTrustLevelResponse response = service.trustLevel();
 
         assertThat(response.guaranteeLevel()).isEqualTo("BEST_EFFORT");
         assertThat(response.externalAnchorStrength()).isEqualTo("UNSIGNED_EXTERNAL");
@@ -103,7 +99,6 @@ class SystemTrustLevelControllerTest {
         ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
         ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
         AuditDegradationService degradationService = mock(AuditDegradationService.class);
-        AlertRepository alertRepository = mock(AlertRepository.class);
         when(integrityService.coverage("alert-service", 100)).thenReturn(new ExternalAuditAnchorCoverageResponse(
                 "AVAILABLE",
                 10,
@@ -118,18 +113,17 @@ class SystemTrustLevelControllerTest {
         ));
         when(sink.capabilities()).thenReturn(verifiedCapabilities());
         when(degradationService.unresolvedPostCommitDegradedCount()).thenReturn(0L);
-        SystemTrustLevelController controller = new SystemTrustLevelController(
+        SystemTrustLevelService service = new SystemTrustLevelService(
                 true,
                 true,
                 true,
                 true,
                 true,
                 integrityService,
-                sink,
-                null
+                sink
         );
 
-        SystemTrustLevelResponse response = controller.trustLevel();
+        SystemTrustLevelResponse response = service.trustLevel();
 
         assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
         assertThat(response.externalAnchorStrength()).isEqualTo("NONE");
@@ -155,18 +149,17 @@ class SystemTrustLevelControllerTest {
                 false,
                 ExternalDurabilityGuarantee.NONE
         ));
-        SystemTrustLevelController controller = new SystemTrustLevelController(
+        SystemTrustLevelService service = new SystemTrustLevelService(
                 false,
                 false,
                 false,
                 false,
                 false,
                 integrityService,
-                sink,
-                null
+                sink
         );
 
-        SystemTrustLevelResponse response = controller.trustLevel();
+        SystemTrustLevelResponse response = service.trustLevel();
 
         assertThat(response.guaranteeLevel()).isEqualTo("NONE");
         assertThat(response.externalAnchorStrength()).isEqualTo("NONE");
@@ -177,11 +170,10 @@ class SystemTrustLevelControllerTest {
         ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
         ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
         AuditDegradationService degradationService = mock(AuditDegradationService.class);
-        AlertRepository alertRepository = mock(AlertRepository.class);
         when(integrityService.coverage("alert-service", 100)).thenReturn(healthyCoverage());
         when(sink.capabilities()).thenReturn(verifiedCapabilities());
         when(degradationService.unresolvedPostCommitDegradedCount()).thenReturn(1L);
-        SystemTrustLevelController controller = new SystemTrustLevelController(
+        SystemTrustLevelService service = new SystemTrustLevelService(
                 true,
                 true,
                 true,
@@ -192,10 +184,11 @@ class SystemTrustLevelControllerTest {
                 integrityService,
                 sink,
                 degradationService,
-                alertRepository
+                null,
+                null
         );
 
-        SystemTrustLevelResponse response = controller.trustLevel();
+        SystemTrustLevelResponse response = service.trustLevel();
 
         assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
         assertThat(response.postCommitAuditDegraded()).isEqualTo(1L);
@@ -208,13 +201,12 @@ class SystemTrustLevelControllerTest {
         ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
         ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
         AuditDegradationService degradationService = mock(AuditDegradationService.class);
-        AlertRepository alertRepository = mock(AlertRepository.class);
         TransactionalOutboxRecordRepository outboxRepository = healthyOutboxRepository();
         when(integrityService.coverage("alert-service", 100)).thenReturn(healthyCoverage());
         when(sink.capabilities()).thenReturn(verifiedCapabilities());
         when(degradationService.unresolvedPostCommitDegradedCount()).thenReturn(0L);
         when(outboxRepository.countByStatus(TransactionalOutboxStatus.FAILED_TERMINAL)).thenReturn(1L);
-        SystemTrustLevelController controller = controller(
+        SystemTrustLevelService service = service(
                 true,
                 true,
                 true,
@@ -225,12 +217,11 @@ class SystemTrustLevelControllerTest {
                 integrityService,
                 sink,
                 degradationService,
-                alertRepository,
                 outboxRepository,
                 null
         );
 
-        SystemTrustLevelResponse response = controller.trustLevel();
+        SystemTrustLevelResponse response = service.trustLevel();
 
         assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
         assertThat(response.outboxFailedTerminalCount()).isEqualTo(1L);
@@ -242,14 +233,13 @@ class SystemTrustLevelControllerTest {
         ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
         ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
         AuditDegradationService degradationService = mock(AuditDegradationService.class);
-        AlertRepository alertRepository = mock(AlertRepository.class);
         TransactionalOutboxRecordRepository outboxRepository = healthyOutboxRepository();
         RegulatedMutationRecoveryService recoveryService = mock(RegulatedMutationRecoveryService.class);
         when(integrityService.coverage("alert-service", 100)).thenReturn(healthyCoverage());
         when(sink.capabilities()).thenReturn(verifiedCapabilities());
         when(degradationService.unresolvedPostCommitDegradedCount()).thenReturn(0L);
         when(recoveryService.recoveryRequiredCount()).thenReturn(1L);
-        SystemTrustLevelController controller = controller(
+        SystemTrustLevelService service = service(
                 true,
                 true,
                 true,
@@ -260,12 +250,11 @@ class SystemTrustLevelControllerTest {
                 integrityService,
                 sink,
                 degradationService,
-                alertRepository,
                 outboxRepository,
                 recoveryService
         );
 
-        SystemTrustLevelResponse response = controller.trustLevel();
+        SystemTrustLevelResponse response = service.trustLevel();
 
         assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
         assertThat(response.regulatedMutationRecoveryRequiredCount()).isEqualTo(1L);
@@ -277,7 +266,6 @@ class SystemTrustLevelControllerTest {
         ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
         ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
         AuditDegradationService degradationService = mock(AuditDegradationService.class);
-        AlertRepository alertRepository = mock(AlertRepository.class);
         TransactionalOutboxRecordRepository outboxRepository = healthyOutboxRepository();
         RegulatedMutationRecoveryService recoveryService = mock(RegulatedMutationRecoveryService.class);
         when(integrityService.coverage("alert-service", 100)).thenReturn(healthyCoverage());
@@ -288,7 +276,7 @@ class SystemTrustLevelControllerTest {
         when(recoveryService.evidenceConfirmationPendingCount()).thenReturn(4L);
         when(recoveryService.repeatedRecoveryFailureCount()).thenReturn(3L);
         when(recoveryService.oldestRecoveryRequiredAgeSeconds()).thenReturn(120L);
-        SystemTrustLevelController controller = controller(
+        SystemTrustLevelService service = service(
                 true,
                 true,
                 true,
@@ -299,12 +287,11 @@ class SystemTrustLevelControllerTest {
                 integrityService,
                 sink,
                 degradationService,
-                alertRepository,
                 outboxRepository,
                 recoveryService
         );
 
-        SystemTrustLevelResponse response = controller.trustLevel();
+        SystemTrustLevelResponse response = service.trustLevel();
 
         assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
         assertThat(response.staleProcessingLeaseCount()).isEqualTo(1L);
@@ -316,34 +303,13 @@ class SystemTrustLevelControllerTest {
     }
 
     @Test
-    void shouldFailStartupWhenRequiredFailClosedPublicationDoesNotEnableBankMode() {
-        SystemTrustLevelController controller = new SystemTrustLevelController(
-                true,
-                true,
-                true,
-                false,
-                false,
-                false,
-                Duration.ofMinutes(10),
-                mock(ExternalAuditIntegrityService.class),
-                mock(ExternalAuditAnchorSink.class),
-                null,
-                null
-        );
-
-        assertThatThrownBy(() -> controller.run(mock(org.springframework.boot.ApplicationArguments.class)))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("app.audit.bank-mode.fail-closed=true is required");
-    }
-
-    @Test
     void shouldNotReportHealthyWhenBankModeLacksExternalAnchoring() {
         ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
         ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
         TransactionalOutboxRecordRepository outboxRepository = healthyOutboxRepository();
         when(integrityService.coverage("alert-service", 100)).thenReturn(healthyCoverage());
         when(sink.capabilities()).thenReturn(verifiedCapabilities());
-        SystemTrustLevelController controller = controller(
+        SystemTrustLevelService service = service(
                 false,
                 false,
                 false,
@@ -354,12 +320,11 @@ class SystemTrustLevelControllerTest {
                 integrityService,
                 sink,
                 null,
-                null,
                 outboxRepository,
                 null
         );
 
-        SystemTrustLevelResponse response = controller.trustLevel();
+        SystemTrustLevelResponse response = service.trustLevel();
 
         assertThat(response.guaranteeLevel()).isNotEqualTo("FDP24_HEALTHY");
         assertThat(response.reasonCode()).isEqualTo("EXTERNAL_ANCHORING_REQUIRED_IN_BANK_MODE");
@@ -372,7 +337,7 @@ class SystemTrustLevelControllerTest {
         TransactionalOutboxRecordRepository outboxRepository = healthyOutboxRepository();
         when(integrityService.coverage("alert-service", 100)).thenReturn(healthyCoverage());
         when(sink.capabilities()).thenReturn(verifiedCapabilities());
-        SystemTrustLevelController controller = controller(
+        SystemTrustLevelService service = service(
                 true,
                 true,
                 true,
@@ -383,18 +348,17 @@ class SystemTrustLevelControllerTest {
                 integrityService,
                 sink,
                 null,
-                null,
                 outboxRepository,
                 null
         );
 
-        SystemTrustLevelResponse response = controller.trustLevel();
+        SystemTrustLevelResponse response = service.trustLevel();
 
         assertThat(response.guaranteeLevel()).isNotEqualTo("FDP24_HEALTHY");
         assertThat(response.reasonCode()).isEqualTo("TRUST_AUTHORITY_SIGNING_REQUIRED_IN_BANK_MODE");
     }
 
-    private SystemTrustLevelController controller(
+    private SystemTrustLevelService service(
             boolean publicationEnabled,
             boolean publicationRequired,
             boolean failClosed,
@@ -405,11 +369,10 @@ class SystemTrustLevelControllerTest {
             ExternalAuditIntegrityService integrityService,
             ExternalAuditAnchorSink sink,
             AuditDegradationService degradationService,
-            AlertRepository alertRepository,
             TransactionalOutboxRecordRepository outboxRepository,
             RegulatedMutationRecoveryService recoveryService
     ) {
-        return new SystemTrustLevelController(
+        return new SystemTrustLevelService(
                 publicationEnabled,
                 publicationRequired,
                 failClosed,
@@ -423,12 +386,9 @@ class SystemTrustLevelControllerTest {
                 integrityService,
                 sink,
                 degradationService,
-                alertRepository,
-                provider(outboxRepository),
+                outboxRepository,
                 recoveryService,
-                provider(null),
-                provider(null),
-                provider(null)
+                null
         );
     }
 
@@ -437,13 +397,6 @@ class SystemTrustLevelControllerTest {
         when(repository.countByStatus(any(TransactionalOutboxStatus.class))).thenReturn(0L);
         when(repository.findTopByStatusInOrderByCreatedAtAsc(any())).thenReturn(Optional.empty());
         return repository;
-    }
-
-    @SuppressWarnings("unchecked")
-    private <T> ObjectProvider<T> provider(T value) {
-        ObjectProvider<T> provider = mock(ObjectProvider.class);
-        when(provider.getIfAvailable()).thenReturn(value);
-        return provider;
     }
 
     private ExternalAuditAnchorCoverageResponse healthyCoverage() {

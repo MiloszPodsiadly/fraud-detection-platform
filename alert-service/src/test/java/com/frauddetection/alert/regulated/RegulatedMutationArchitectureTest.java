@@ -1374,7 +1374,7 @@ class RegulatedMutationArchitectureTest {
     @Test
     void systemTrustLevelMustNotMaterializeTrustIncidents() throws Exception {
         String source = Files.readString(Path.of(
-                "src/main/java/com/frauddetection/alert/system/SystemTrustLevelController.java"
+                "src/main/java/com/frauddetection/alert/system/trustlevel/application/SystemTrustLevelService.java"
         ));
 
         assertThat(source).doesNotContain("materializer.materialize");

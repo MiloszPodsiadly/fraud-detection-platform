@@ -103,7 +103,9 @@ import com.frauddetection.alert.service.FraudCaseManagementService;
 import com.frauddetection.alert.service.ScoredTransactionSearchCriteria;
 import com.frauddetection.alert.service.ScoredTransactionSearchPolicy;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
-import com.frauddetection.alert.system.SystemTrustLevelController;
+import com.frauddetection.alert.system.trustlevel.api.SystemTrustLevelController;
+import com.frauddetection.alert.system.trustlevel.api.SystemTrustLevelResponse;
+import com.frauddetection.alert.system.trustlevel.application.SystemTrustLevelService;
 import com.frauddetection.alert.trust.TrustIncidentController;
 import com.frauddetection.alert.trust.TrustIncidentResponse;
 import com.frauddetection.alert.trust.TrustIncidentService;
@@ -139,6 +141,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -227,6 +230,9 @@ class AlertSecurityConfigTest {
     private SensitiveReadAuditService sensitiveReadAuditService;
 
     @MockitoBean
+    private SystemTrustLevelService systemTrustLevelService;
+
+    @MockitoBean
     private AuditIntegrityService auditIntegrityService;
 
     @MockitoBean
@@ -294,6 +300,9 @@ class AlertSecurityConfigTest {
 
     @BeforeEach
     void allowCoverageRateLimit() {
+        SystemTrustLevelResponse trustLevelResponse = mock(SystemTrustLevelResponse.class);
+        when(trustLevelResponse.witnessStatus()).thenReturn("PROVIDER_CAPABILITY_VERIFIED");
+        when(systemTrustLevelService.trustLevel()).thenReturn(trustLevelResponse);
         when(externalAuditCoverageRateLimiter.allow(any(), anyInt())).thenReturn(true);
         when(regulatedMutationInspectionRateLimiter.allow(any())).thenReturn(true);
         when(trustIncidentPreviewRateLimiter.allow(any())).thenReturn(true);

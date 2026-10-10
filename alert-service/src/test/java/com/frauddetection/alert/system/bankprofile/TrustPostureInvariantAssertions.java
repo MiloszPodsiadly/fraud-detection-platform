@@ -4,7 +4,7 @@ import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
 import com.frauddetection.alert.regulated.RegulatedMutationCommandDocument;
 import com.frauddetection.alert.regulated.RegulatedMutationExecutionStatus;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
-import com.frauddetection.alert.system.SystemTrustLevelResponse;
+import com.frauddetection.alert.system.trustlevel.api.SystemTrustLevelResponse;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

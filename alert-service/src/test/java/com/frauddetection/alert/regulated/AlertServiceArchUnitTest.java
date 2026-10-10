@@ -40,7 +40,6 @@ class AlertServiceArchUnitTest {
     void controllersMustNotDependOnRepositoriesExceptExplicitHealthAggregationBoundary() {
         noClasses()
                 .that().haveSimpleNameEndingWith("Controller")
-                .and().doNotHaveFullyQualifiedName("com.frauddetection.alert.system.SystemTrustLevelController")
                 .should().dependOnClassesThat().haveSimpleNameEndingWith("Repository")
                 .check(classes);
     }

@@ -9,17 +9,17 @@ import com.frauddetection.alert.audit.external.ExternalWitnessCapabilities;
 import com.frauddetection.alert.audit.external.ExternalWitnessTimestampType;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorCoverageResponse;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorMissingRange;
+import com.frauddetection.alert.audit.read.SensitiveReadAuditService;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
-import com.frauddetection.alert.persistence.AlertRepository;
 import com.frauddetection.alert.regulated.RegulatedMutationRecoveryService;
-import com.frauddetection.alert.system.SystemTrustLevelController;
-import com.frauddetection.alert.system.SystemTrustLevelResponse;
+import com.frauddetection.alert.system.trustlevel.api.SystemTrustLevelController;
+import com.frauddetection.alert.system.trustlevel.api.SystemTrustLevelResponse;
+import com.frauddetection.alert.system.trustlevel.application.SystemTrustLevelService;
 import com.frauddetection.alert.trust.TrustIncidentService;
 import com.frauddetection.alert.trust.TrustIncidentSummary;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DataAccessResourceFailureException;
 
 import java.time.Duration;
@@ -308,7 +308,6 @@ class NoFalseHealthyInvariantTest {
         private final ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
         private final ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
         private final AuditDegradationService degradationService = mock(AuditDegradationService.class);
-        private final AlertRepository alertRepository = mock(AlertRepository.class);
         private final TransactionalOutboxRecordRepository outboxRepository = mock(TransactionalOutboxRecordRepository.class);
         private final RegulatedMutationRecoveryService recoveryService = mock(RegulatedMutationRecoveryService.class);
         private final TrustIncidentService trustIncidentService = mock(TrustIncidentService.class);
@@ -329,7 +328,7 @@ class NoFalseHealthyInvariantTest {
         }
 
         private SystemTrustLevelController controller() {
-            return new SystemTrustLevelController(
+            SystemTrustLevelService service = new SystemTrustLevelService(
                     true,
                     true,
                     true,
@@ -343,20 +342,11 @@ class NoFalseHealthyInvariantTest {
                     integrityService,
                     sink,
                     degradationService,
-                    alertRepository,
-                    provider(outboxRepository),
+                    outboxRepository,
                     recoveryService,
-                    provider(trustIncidentService),
-                    provider(null),
-                    provider(null)
+                    trustIncidentService
             );
-        }
-
-        @SuppressWarnings("unchecked")
-        private <T> ObjectProvider<T> provider(T value) {
-            ObjectProvider<T> provider = mock(ObjectProvider.class);
-            when(provider.getIfAvailable()).thenReturn(value);
-            return provider;
+            return new SystemTrustLevelController(service, (SensitiveReadAuditService) null);
         }
 
         private ExternalAuditAnchorCoverageResponse healthyCoverage() {

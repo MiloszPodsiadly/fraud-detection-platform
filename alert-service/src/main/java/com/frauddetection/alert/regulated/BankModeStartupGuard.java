@@ -84,6 +84,14 @@ public class BankModeStartupGuard implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        if (externalPublicationRequired && externalPublicationFailClosed) {
+            if (!bankModeFailClosed) {
+                throw new IllegalStateException(
+                        "app.audit.bank-mode.fail-closed=true is required when external publication is required and fail-closed."
+                );
+            }
+            log.info("External audit publication fail-closed mode active.");
+        }
         boolean prodLike = bankModeFailClosed || prodLikeProfile();
         if (transactionRunner.mode() == RegulatedMutationTransactionMode.REQUIRED && transactionCapabilityProbeEnabled) {
             if (transactionCapabilityProbe == null) {
