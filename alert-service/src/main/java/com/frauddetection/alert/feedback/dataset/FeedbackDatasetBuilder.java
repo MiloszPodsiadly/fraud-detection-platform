@@ -2,11 +2,12 @@ package com.frauddetection.alert.feedback.dataset;
 
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjection;
-import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionRepository;
 import com.frauddetection.alert.feedback.FraudFeedbackRecord;
+import com.frauddetection.alert.feedback.dataset.evidence.FeedbackDatasetMlPredictionEvidenceResolver;
+import com.frauddetection.alert.feedback.dataset.evidence.FeedbackDatasetMlPredictionEvidenceResolver.Candidate;
+import com.frauddetection.alert.feedback.dataset.evidence.FeedbackDatasetMlPredictionEvidenceResolver.Resolution;
 import com.frauddetection.alert.feedback.governance.FeedbackDatasetEligibility;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
-import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,13 +18,9 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 
 @Service
 public class FeedbackDatasetBuilder {
@@ -34,7 +31,7 @@ public class FeedbackDatasetBuilder {
 
     private final FeedbackDatasetCandidateStore candidateStore;
     private final FeedbackDatasetMappingPolicy mappingPolicy;
-    private final MlPredictionEvidenceProjectionRepository evidenceRepository;
+    private final FeedbackDatasetMlPredictionEvidenceResolver evidenceResolver;
     private final FeedbackDatasetMetricsRecorder metricsRecorder;
     private final Clock clock;
 
@@ -42,31 +39,31 @@ public class FeedbackDatasetBuilder {
     public FeedbackDatasetBuilder(
             FeedbackDatasetCandidateStore candidateStore,
             FeedbackDatasetMappingPolicy mappingPolicy,
-            MlPredictionEvidenceProjectionRepository evidenceRepository,
+            FeedbackDatasetMlPredictionEvidenceResolver evidenceResolver,
             FeedbackDatasetMetricsRecorder metricsRecorder
     ) {
-        this(candidateStore, mappingPolicy, evidenceRepository, metricsRecorder, Clock.systemUTC());
+        this(candidateStore, mappingPolicy, evidenceResolver, metricsRecorder, Clock.systemUTC());
     }
 
     FeedbackDatasetBuilder(
             FeedbackDatasetCandidateStore candidateStore,
             FeedbackDatasetMappingPolicy mappingPolicy,
-            MlPredictionEvidenceProjectionRepository evidenceRepository,
+            FeedbackDatasetMlPredictionEvidenceResolver evidenceResolver,
             Clock clock
     ) {
-        this(candidateStore, mappingPolicy, evidenceRepository, FeedbackDatasetMetricsRecorder.noOp(), clock);
+        this(candidateStore, mappingPolicy, evidenceResolver, FeedbackDatasetMetricsRecorder.noOp(), clock);
     }
 
     FeedbackDatasetBuilder(
             FeedbackDatasetCandidateStore candidateStore,
             FeedbackDatasetMappingPolicy mappingPolicy,
-            MlPredictionEvidenceProjectionRepository evidenceRepository,
+            FeedbackDatasetMlPredictionEvidenceResolver evidenceResolver,
             FeedbackDatasetMetricsRecorder metricsRecorder,
             Clock clock
     ) {
         this.candidateStore = Objects.requireNonNull(candidateStore, "candidateStore is required");
         this.mappingPolicy = Objects.requireNonNull(mappingPolicy, "mappingPolicy is required");
-        this.evidenceRepository = Objects.requireNonNull(evidenceRepository, "evidenceRepository is required");
+        this.evidenceResolver = Objects.requireNonNull(evidenceResolver, "evidenceResolver is required");
         this.metricsRecorder = Objects.requireNonNull(metricsRecorder, "metricsRecorder is required");
         this.clock = Objects.requireNonNull(clock, "clock is required");
     }
@@ -207,7 +204,7 @@ public class FeedbackDatasetBuilder {
             FraudFeedbackRecord source,
             FeedbackEvaluationLabel evaluationLabel,
             List<String> validatedDecisionReasonCodes,
-            FeedbackDatasetMlPredictionEvidence evidence
+            Resolution evidence
     ) {
         MlPredictionEvidenceProjection projection = evidence.projection().orElse(null);
         return new FeedbackDatasetRecord(
@@ -263,121 +260,14 @@ public class FeedbackDatasetBuilder {
     }
 
     private List<ResolvedSource> resolveMlPredictionEvidence(List<EligibleSource> eligibleSources) {
-        Set<String> sourceEventIds = new LinkedHashSet<>();
-        for (EligibleSource eligible : eligibleSources) {
-            sourceEventIds.add(eligible.ownership().sourceEventId());
-        }
-
-        Map<String, MlPredictionEvidenceProjection> projectionBySourceEventId = new LinkedHashMap<>();
-        if (!sourceEventIds.isEmpty()) {
-            for (MlPredictionEvidenceProjection projection : evidenceRepository.findAllById(sourceEventIds)) {
-                if (projection == null || !sourceEventIds.contains(projection.getSourceEventId())) {
-                    throw new IllegalStateException("ML prediction evidence lookup returned an invalid projection");
-                }
-                if (projectionBySourceEventId.putIfAbsent(projection.getSourceEventId(), projection) != null) {
-                    throw new IllegalStateException("ML prediction evidence lookup returned duplicate projections");
-                }
-            }
-        }
-
+        List<Resolution> evidence = evidenceResolver.resolve(eligibleSources.stream()
+                .map(eligible -> new Candidate(eligible.source(), eligible.ownership()))
+                .toList());
         List<ResolvedSource> resolved = new ArrayList<>(eligibleSources.size());
-        for (EligibleSource eligible : eligibleSources) {
-            MlPredictionEvidenceProjection projection = projectionBySourceEventId.get(
-                    eligible.ownership().sourceEventId()
-            );
-            resolved.add(new ResolvedSource(eligible, classifyEvidence(
-                    eligible.source(),
-                    eligible.ownership(),
-                    projection
-            )));
+        for (int index = 0; index < eligibleSources.size(); index++) {
+            resolved.add(new ResolvedSource(eligibleSources.get(index), evidence.get(index)));
         }
         return resolved;
-    }
-
-    private FeedbackDatasetMlPredictionEvidence classifyEvidence(
-            FraudFeedbackRecord source,
-            ScoringOccurrenceOwnership ownership,
-            MlPredictionEvidenceProjection projection
-    ) {
-        int feedbackLineageParts = presentLineageParts(source);
-        MlPredictionEvidenceOmissionReason omissionReason = source.getMlPredictionEvidenceOmissionReason();
-        if (omissionReason != null && feedbackLineageParts != 0) {
-            return FeedbackDatasetMlPredictionEvidence.unavailable(
-                    FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
-            );
-        }
-        if (feedbackLineageParts != 0 && feedbackLineageParts != 4) {
-            return FeedbackDatasetMlPredictionEvidence.unavailable(
-                    FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
-            );
-        }
-        if (projection == null) {
-            return omissionReason == null
-                    ? FeedbackDatasetMlPredictionEvidence.unavailable(
-                            FeedbackDatasetMlPredictionEvidenceStatus.MISSING_UNEXPECTEDLY
-                    )
-                    : FeedbackDatasetMlPredictionEvidence.omitted(omissionReason);
-        }
-        try {
-            if (!ownership.sourceEventId().equals(projection.getSourceEventId())
-                    || !ownership.sourceEventCreatedAt().equals(projection.getSourceEventCreatedAt())
-                    || !Objects.equals(source.getTransactionId(), projection.getTransactionId())
-                    || (source.getCorrelationId() != null
-                    && !Objects.equals(source.getCorrelationId(), projection.getCorrelationId()))) {
-                return FeedbackDatasetMlPredictionEvidence.unavailable(
-                        FeedbackDatasetMlPredictionEvidenceStatus.IDENTITY_MISMATCH
-                );
-            }
-            if (!projection.hasEvidence()) {
-                if (feedbackLineageParts != 0
-                        || source.getMlPredictionEvidenceOmissionReason() == null
-                        || source.getMlPredictionEvidenceOmissionReason()
-                        != projection.getMlPredictionEvidenceOmissionReason()) {
-                    return FeedbackDatasetMlPredictionEvidence.unavailable(
-                            FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
-                    );
-                }
-                return FeedbackDatasetMlPredictionEvidence.omitted(
-                        projection.getMlPredictionEvidenceOmissionReason()
-                );
-            }
-            if (source.getMlPredictionEvidenceOmissionReason() != null) {
-                return FeedbackDatasetMlPredictionEvidence.unavailable(
-                        FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
-                );
-            }
-            if (feedbackLineageParts != 0
-                    && (!Objects.equals(source.getMlModelName(), projection.getModelName())
-                    || !Objects.equals(source.getMlModelVersion(), projection.getModelVersion())
-                    || !Objects.equals(
-                            source.getMlFeatureContractVersion(),
-                            projection.getFeatureContractVersion()
-                    )
-                    || !Objects.equals(source.getMlModelArtifactSha256(), projection.getModelArtifactSha256()))) {
-                return FeedbackDatasetMlPredictionEvidence.unavailable(
-                        FeedbackDatasetMlPredictionEvidenceStatus.IDENTITY_MISMATCH
-                );
-            }
-            FeedbackDatasetMlPredictionEvidenceResolutionProvenance resolutionProvenance =
-                    feedbackLineageParts == 4
-                            ? FeedbackDatasetMlPredictionEvidenceResolutionProvenance.CAPTURED_AND_CONFIRMED
-                            : FeedbackDatasetMlPredictionEvidenceResolutionProvenance
-                                    .RECOVERED_FROM_EXACT_OCCURRENCE_PROJECTION;
-            return FeedbackDatasetMlPredictionEvidence.available(projection, resolutionProvenance);
-        } catch (IllegalArgumentException exception) {
-            return FeedbackDatasetMlPredictionEvidence.unavailable(
-                    FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED
-            );
-        }
-    }
-
-    private int presentLineageParts(FraudFeedbackRecord source) {
-        int present = 0;
-        present += source.getMlModelName() == null ? 0 : 1;
-        present += source.getMlModelVersion() == null ? 0 : 1;
-        present += source.getMlFeatureContractVersion() == null ? 0 : 1;
-        present += source.getMlModelArtifactSha256() == null ? 0 : 1;
-        return present;
     }
 
     private List<String> validatedDecisionReasonCodes(FraudFeedbackRecord source) {
@@ -419,7 +309,7 @@ public class FeedbackDatasetBuilder {
 
     private record ResolvedSource(
             EligibleSource source,
-            FeedbackDatasetMlPredictionEvidence evidence
+            Resolution evidence
     ) {
     }
 

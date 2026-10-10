@@ -5,6 +5,7 @@ import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectio
 import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionRepository;
 import com.frauddetection.alert.feedback.FraudFeedbackLabel;
 import com.frauddetection.alert.feedback.FraudFeedbackRecord;
+import com.frauddetection.alert.feedback.dataset.evidence.FeedbackDatasetMlPredictionEvidenceResolver;
 import com.frauddetection.alert.feedback.governance.FeedbackDatasetEligibilityPolicy;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
 import com.frauddetection.common.events.enums.RiskLevel;
@@ -47,7 +48,7 @@ class FeedbackDatasetBuilderTest {
     private final FeedbackDatasetBuilder builder = new FeedbackDatasetBuilder(
             store,
             new FeedbackDatasetMappingPolicy(new FeedbackDatasetEligibilityPolicy()),
-            evidenceRepository,
+            new FeedbackDatasetMlPredictionEvidenceResolver(evidenceRepository),
             Clock.fixed(BUILT_AT, ZoneOffset.UTC)
     );
 
