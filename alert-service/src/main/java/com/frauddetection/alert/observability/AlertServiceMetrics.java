@@ -13,6 +13,7 @@ import com.frauddetection.alert.engineintelligence.EngineIntelligenceRecoveryOut
 import com.frauddetection.alert.engineintelligence.observability.MlPredictionEvidenceProjectionMetricReason;
 import com.frauddetection.alert.outbox.OutboxBacklogResponse;
 import com.frauddetection.alert.outbox.FraudAlertOutboxBacklogResponse;
+import com.frauddetection.alert.observability.evidence.EvidenceSnapshotMetricsRecorder;
 import com.frauddetection.alert.security.error.SecurityFailureClassifier;
 import com.frauddetection.alert.suspicious.SuspiciousTransactionStatus;
 import io.micrometer.core.instrument.Counter;
@@ -21,6 +22,7 @@ import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -36,6 +38,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
 
     private final MeterRegistry meterRegistry;
+    private final EvidenceSnapshotMetricsRecorder evidenceSnapshotMetricsRecorder;
     private final AtomicInteger governanceAnalyticsWindowDays = new AtomicInteger(0);
     private final AtomicLong auditChainHeadHashFingerprint = new AtomicLong(0);
     private final AtomicLong auditLastAnchorHashFingerprint = new AtomicLong(0);
@@ -66,7 +69,16 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     private final Map<AuditAction, AtomicInteger> evidenceGatedFinalizeEnabled = new EnumMap<>(AuditAction.class);
 
     public AlertServiceMetrics(MeterRegistry meterRegistry) {
+        this(meterRegistry, new EvidenceSnapshotMetricsRecorder(meterRegistry));
+    }
+
+    @Autowired
+    public AlertServiceMetrics(
+            MeterRegistry meterRegistry,
+            EvidenceSnapshotMetricsRecorder evidenceSnapshotMetricsRecorder
+    ) {
         this.meterRegistry = meterRegistry;
+        this.evidenceSnapshotMetricsRecorder = evidenceSnapshotMetricsRecorder;
         Gauge.builder("fraud_ml_governance_analytics_window_days", governanceAnalyticsWindowDays, AtomicInteger::get)
                 .register(meterRegistry);
         Gauge.builder("fraud_audit_chain_head_hash", auditChainHeadHashFingerprint, AtomicLong::get)
@@ -122,23 +134,19 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     }
 
     public void recordEvidenceSnapshotProjectionSuccess() {
-        counter("fraud.alert.evidence_snapshot.projection.success", "outcome", "success").increment();
+        evidenceSnapshotMetricsRecorder.recordProjectionSuccess();
     }
 
     public void recordEvidenceSnapshotProjectionDiagnostic(EvidenceProjectionState state) {
-        counter(
-                "fraud.alert.evidence_snapshot.projection.diagnostic",
-                "outcome", "diagnostic",
-                "state", normalizeEvidenceProjectionState(state)
-        ).increment();
+        evidenceSnapshotMetricsRecorder.recordProjectionDiagnostic(state);
     }
 
     public void recordEvidenceSnapshotProjectionTruncated() {
-        counter("fraud.alert.evidence_snapshot.projection.truncated", "outcome", "truncated").increment();
+        evidenceSnapshotMetricsRecorder.recordProjectionTruncated();
     }
 
     public void recordEvidenceSnapshotProjectionError() {
-        counter("fraud.alert.evidence_snapshot.projection.error", "outcome", "error").increment();
+        evidenceSnapshotMetricsRecorder.recordProjectionError();
     }
 
     public void recordSuspiciousTransactionProjection(String outcome, SuspiciousTransactionStatus status) {
@@ -1539,24 +1547,6 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
                  "ACTOR_INTENT_MISMATCH", "RESOURCE_INTENT_MISMATCH", "ACTION_INTENT_MISMATCH",
                  "SUCCESS_AUDIT_KEY_UNAVAILABLE" -> reason;
             default -> "UNKNOWN";
-        };
-    }
-
-    private String normalizeEvidenceProjectionState(EvidenceProjectionState state) {
-        if (state == null) {
-            return "UNKNOWN";
-        }
-        return switch (state) {
-            case PROJECTED,
-                 PARTIAL_MISSING_SOURCE_EVENT_ID,
-                 PARTIAL_MISSING_TRANSACTION_ID,
-                 PARTIAL_MISSING_CORRELATION_ID,
-                 PARTIAL_MISSING_REQUIRED_LINEAGE,
-                 PARTIAL_EMPTY_SCORING_EVIDENCE,
-                 PARTIAL_TRUNCATED,
-                 UNAVAILABLE_UNSUPPORTED_EVIDENCE,
-                 ERROR_PROJECTED,
-                 ERROR_PROJECTION_FAILED -> state.name();
         };
     }
 
