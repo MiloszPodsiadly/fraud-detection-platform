@@ -1,4 +1,4 @@
-package com.frauddetection.alert.audit.external;
+package com.frauddetection.alert.audit.external.integrity;
 
 public record ExternalAuditIntegrityQuery(
         String sourceService,

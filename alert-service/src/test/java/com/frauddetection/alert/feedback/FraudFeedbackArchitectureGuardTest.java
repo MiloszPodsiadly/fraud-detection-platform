@@ -80,7 +80,11 @@ class FraudFeedbackArchitectureGuardTest {
                 .contains("persistAuditIntent(saved)")
                 .contains("requestValidator.validate(request)")
                 .contains("recordAssembler.assemble(")
+                .contains("engineIntelligenceSnapshotter.snapshot(record, transaction)")
+                .contains("mlPredictionEvidenceSnapshotter.snapshot(record, transaction, ownership)")
                 .doesNotContain("EngineIntelligenceReadService", "MlPredictionEvidenceProjectionRepository");
+        assertThat(assembler)
+                .doesNotContain("feedback.snapshot", "Repository", "ReadService");
         assertThat(extractedResponsibilities)
                 .doesNotContain("runLocalCommit", "repository.save(", "createPendingAudit");
         assertThat(engineSnapshotter)

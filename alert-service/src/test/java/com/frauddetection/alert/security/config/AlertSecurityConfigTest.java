@@ -104,7 +104,7 @@ import com.frauddetection.alert.service.ScoredTransactionSearchCriteria;
 import com.frauddetection.alert.service.ScoredTransactionSearchPolicy;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import com.frauddetection.alert.system.trustlevel.api.SystemTrustLevelController;
-import com.frauddetection.alert.system.trustlevel.api.SystemTrustLevelResponse;
+import com.frauddetection.alert.system.trustlevel.application.SystemTrustLevel;
 import com.frauddetection.alert.system.trustlevel.application.SystemTrustLevelService;
 import com.frauddetection.alert.trust.TrustIncidentController;
 import com.frauddetection.alert.trust.TrustIncidentResponse;
@@ -300,9 +300,9 @@ class AlertSecurityConfigTest {
 
     @BeforeEach
     void allowCoverageRateLimit() {
-        SystemTrustLevelResponse trustLevelResponse = mock(SystemTrustLevelResponse.class);
-        when(trustLevelResponse.witnessStatus()).thenReturn("PROVIDER_CAPABILITY_VERIFIED");
-        when(systemTrustLevelService.trustLevel()).thenReturn(trustLevelResponse);
+        SystemTrustLevel trustLevel = mock(SystemTrustLevel.class);
+        when(trustLevel.witnessStatus()).thenReturn("PROVIDER_CAPABILITY_VERIFIED");
+        when(systemTrustLevelService.trustLevel()).thenReturn(trustLevel);
         when(externalAuditCoverageRateLimiter.allow(any(), anyInt())).thenReturn(true);
         when(regulatedMutationInspectionRateLimiter.allow(any())).thenReturn(true);
         when(trustIncidentPreviewRateLimiter.allow(any())).thenReturn(true);

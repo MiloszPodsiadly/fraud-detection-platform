@@ -1,6 +1,9 @@
-package com.frauddetection.alert.regulated;
+package com.frauddetection.alert.regulated.status;
 
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
+import com.frauddetection.alert.regulated.RegulatedMutationCommandDocument;
+import com.frauddetection.alert.regulated.RegulatedMutationModelVersion;
+import com.frauddetection.alert.regulated.RegulatedMutationState;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -43,7 +46,8 @@ public class RegulatedMutationPublicStatusMapper {
             case EVIDENCE_PREPARING -> SubmitDecisionOperationStatus.EVIDENCE_PREPARING;
             case EVIDENCE_PREPARED -> SubmitDecisionOperationStatus.EVIDENCE_PREPARED;
             case FINALIZING -> SubmitDecisionOperationStatus.FINALIZING;
-            case FINALIZED_EVIDENCE_PENDING_EXTERNAL -> SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL;
+            case FINALIZED_EVIDENCE_PENDING_EXTERNAL ->
+                    SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_PENDING_EXTERNAL;
             case FINALIZED_EVIDENCE_CONFIRMED -> SubmitDecisionOperationStatus.FINALIZED_EVIDENCE_CONFIRMED;
             case REJECTED_EVIDENCE_UNAVAILABLE -> SubmitDecisionOperationStatus.REJECTED_EVIDENCE_UNAVAILABLE;
             case FAILED_BUSINESS_VALIDATION -> SubmitDecisionOperationStatus.FAILED_BUSINESS_VALIDATION;
@@ -51,5 +55,4 @@ public class RegulatedMutationPublicStatusMapper {
             case FAILED -> SubmitDecisionOperationStatus.FINALIZE_RECOVERY_REQUIRED;
         };
     }
-
 }

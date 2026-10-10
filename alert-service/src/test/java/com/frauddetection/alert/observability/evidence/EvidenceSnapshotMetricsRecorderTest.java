@@ -2,6 +2,9 @@ package com.frauddetection.alert.observability.evidence;
 
 import com.frauddetection.alert.evidence.EvidenceProjectionState;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
+import com.frauddetection.alert.observability.audit.AuditIntegrityMetricsRecorder;
+import com.frauddetection.alert.observability.outbox.OutboxMetricsRecorder;
+import com.frauddetection.alert.observability.regulated.RegulatedMutationRecoveryMetricsRecorder;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -18,6 +21,9 @@ class EvidenceSnapshotMetricsRecorderTest {
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withBean(MeterRegistry.class, SimpleMeterRegistry::new)
             .withBean(EvidenceSnapshotMetricsRecorder.class)
+            .withBean(AuditIntegrityMetricsRecorder.class)
+            .withBean(OutboxMetricsRecorder.class)
+            .withBean(RegulatedMutationRecoveryMetricsRecorder.class)
             .withBean(AlertServiceMetrics.class);
 
     @Test

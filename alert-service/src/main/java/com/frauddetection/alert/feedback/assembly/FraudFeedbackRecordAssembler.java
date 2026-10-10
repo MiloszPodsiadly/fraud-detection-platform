@@ -1,12 +1,9 @@
 package com.frauddetection.alert.feedback.assembly;
 
 import com.frauddetection.alert.domain.ScoredTransaction;
-import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.feedback.FeedbackLabelSource;
 import com.frauddetection.alert.feedback.FraudFeedbackRecord;
 import com.frauddetection.alert.feedback.FraudFeedbackStatus;
-import com.frauddetection.alert.feedback.snapshot.EngineIntelligenceFeedbackSnapshotter;
-import com.frauddetection.alert.feedback.snapshot.MlPredictionEvidenceSnapshotter;
 import com.frauddetection.alert.feedback.validation.ValidatedFraudFeedback;
 import com.frauddetection.common.events.recommendation.AnalystRecommendationResult;
 import org.springframework.stereotype.Component;
@@ -17,21 +14,9 @@ import java.util.UUID;
 @Component
 public class FraudFeedbackRecordAssembler {
 
-    private final EngineIntelligenceFeedbackSnapshotter engineIntelligenceSnapshotter;
-    private final MlPredictionEvidenceSnapshotter mlPredictionEvidenceSnapshotter;
-
-    public FraudFeedbackRecordAssembler(
-            EngineIntelligenceFeedbackSnapshotter engineIntelligenceSnapshotter,
-            MlPredictionEvidenceSnapshotter mlPredictionEvidenceSnapshotter
-    ) {
-        this.engineIntelligenceSnapshotter = engineIntelligenceSnapshotter;
-        this.mlPredictionEvidenceSnapshotter = mlPredictionEvidenceSnapshotter;
-    }
-
     public void assemble(
             FraudFeedbackRecord record,
             ScoredTransaction transaction,
-            ScoringOccurrenceOwnership ownership,
             ValidatedFraudFeedback feedback,
             String actor,
             Instant createdAt
@@ -54,8 +39,6 @@ public class FraudFeedbackRecordAssembler {
         record.setScoredAt(transaction.scoredAt());
         record.setTransactionTimestamp(transaction.transactionTimestamp());
         record.setMlPredictionEvidenceOmissionReason(transaction.mlPredictionEvidenceOmissionReason());
-        engineIntelligenceSnapshotter.snapshot(record, transaction);
-        mlPredictionEvidenceSnapshotter.snapshot(record, transaction, ownership);
         snapshotAnalystRecommendation(record, transaction.analystRecommendation());
     }
 

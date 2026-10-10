@@ -1,5 +1,7 @@
 package com.frauddetection.alert.service;
 
+import com.frauddetection.alert.fraudcase.decision.AnalystDecisionStatusMapper;
+
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
@@ -16,7 +18,7 @@ import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
 import com.frauddetection.alert.regulated.RegulatedMutationIntent;
 import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
 import com.frauddetection.alert.regulated.RegulatedMutationModelVersion;
-import com.frauddetection.alert.regulated.RegulatedMutationPublicStatusMapper;
+import com.frauddetection.alert.regulated.status.RegulatedMutationPublicStatusMapper;
 import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.submitdecision.SubmitDecisionMutationHandler;

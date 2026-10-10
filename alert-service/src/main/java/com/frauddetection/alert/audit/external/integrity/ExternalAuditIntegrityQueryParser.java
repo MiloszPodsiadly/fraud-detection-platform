@@ -1,4 +1,4 @@
-package com.frauddetection.alert.audit.external;
+package com.frauddetection.alert.audit.external.integrity;
 
 import com.frauddetection.alert.audit.InvalidAuditEventQueryException;
 import org.springframework.stereotype.Component;
@@ -9,18 +9,18 @@ import java.util.List;
 import java.util.Set;
 
 @Component
-class ExternalAuditIntegrityQueryParser {
+public class ExternalAuditIntegrityQueryParser {
 
     private static final String DEFAULT_SOURCE_SERVICE = "alert-service";
     private static final int DEFAULT_LIMIT = 100;
     private static final int MAX_LIMIT = 100;
     private static final Set<String> ALLOWED_SOURCE_SERVICES = Set.of(DEFAULT_SOURCE_SERVICE);
 
-    ExternalAuditIntegrityQuery parse(String sourceService, Integer limit) {
+    public ExternalAuditIntegrityQuery parse(String sourceService, Integer limit) {
         return parse(sourceService, limit, null);
     }
 
-    ExternalAuditIntegrityQuery parse(String sourceService, Integer limit, Long fromPosition) {
+    public ExternalAuditIntegrityQuery parse(String sourceService, Integer limit, Long fromPosition) {
         List<String> errors = new ArrayList<>();
         String parsedSourceService = parseSourceService(sourceService, errors);
         int parsedLimit = parseLimit(limit, errors);

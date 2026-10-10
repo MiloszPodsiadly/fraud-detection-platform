@@ -740,10 +740,7 @@ class FraudFeedbackServiceTest {
                 new EngineIntelligenceFeedbackSnapshotter(engineIntelligenceReadService, responseMapper);
         MlPredictionEvidenceSnapshotter mlPredictionEvidenceSnapshotter =
                 new MlPredictionEvidenceSnapshotter(mlPredictionEvidenceProjectionRepository);
-        FraudFeedbackRecordAssembler recordAssembler = new FraudFeedbackRecordAssembler(
-                engineIntelligenceSnapshotter,
-                mlPredictionEvidenceSnapshotter
-        );
+        FraudFeedbackRecordAssembler recordAssembler = new FraudFeedbackRecordAssembler();
         return new FraudFeedbackService(
                 repository,
                 new FraudFeedbackMapper(),
@@ -753,6 +750,8 @@ class FraudFeedbackServiceTest {
                 transactionRunner,
                 new FraudFeedbackRequestValidator(),
                 recordAssembler,
+                engineIntelligenceSnapshotter,
+                mlPredictionEvidenceSnapshotter,
                 Clock.fixed(Instant.parse("2026-06-25T10:15:30Z"), ZoneOffset.UTC)
         );
     }

@@ -11,7 +11,6 @@ import com.frauddetection.alert.audit.external.ExternalWitnessTimestampType;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
 import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.regulated.RegulatedMutationRecoveryService;
-import com.frauddetection.alert.system.trustlevel.api.SystemTrustLevelResponse;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -49,7 +48,7 @@ class SystemTrustLevelServiceTest {
                 null
         );
 
-        SystemTrustLevelResponse response = service.trustLevel();
+        SystemTrustLevel response = service.trustLevel();
 
         assertThat(response.guaranteeLevel()).isEqualTo("FDP24_HEALTHY");
         assertThat(response.publicationEnabled()).isTrue();
@@ -86,7 +85,7 @@ class SystemTrustLevelServiceTest {
                 null
         );
 
-        SystemTrustLevelResponse response = service.trustLevel();
+        SystemTrustLevel response = service.trustLevel();
 
         assertThat(response.guaranteeLevel()).isEqualTo("BEST_EFFORT");
         assertThat(response.externalAnchorStrength()).isEqualTo("UNSIGNED_EXTERNAL");
@@ -123,7 +122,7 @@ class SystemTrustLevelServiceTest {
                 sink
         );
 
-        SystemTrustLevelResponse response = service.trustLevel();
+        SystemTrustLevel response = service.trustLevel();
 
         assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
         assertThat(response.externalAnchorStrength()).isEqualTo("NONE");
@@ -159,7 +158,7 @@ class SystemTrustLevelServiceTest {
                 sink
         );
 
-        SystemTrustLevelResponse response = service.trustLevel();
+        SystemTrustLevel response = service.trustLevel();
 
         assertThat(response.guaranteeLevel()).isEqualTo("NONE");
         assertThat(response.externalAnchorStrength()).isEqualTo("NONE");
@@ -188,7 +187,7 @@ class SystemTrustLevelServiceTest {
                 null
         );
 
-        SystemTrustLevelResponse response = service.trustLevel();
+        SystemTrustLevel response = service.trustLevel();
 
         assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
         assertThat(response.postCommitAuditDegraded()).isEqualTo(1L);
@@ -221,7 +220,7 @@ class SystemTrustLevelServiceTest {
                 null
         );
 
-        SystemTrustLevelResponse response = service.trustLevel();
+        SystemTrustLevel response = service.trustLevel();
 
         assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
         assertThat(response.outboxFailedTerminalCount()).isEqualTo(1L);
@@ -254,7 +253,7 @@ class SystemTrustLevelServiceTest {
                 recoveryService
         );
 
-        SystemTrustLevelResponse response = service.trustLevel();
+        SystemTrustLevel response = service.trustLevel();
 
         assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
         assertThat(response.regulatedMutationRecoveryRequiredCount()).isEqualTo(1L);
@@ -291,7 +290,7 @@ class SystemTrustLevelServiceTest {
                 recoveryService
         );
 
-        SystemTrustLevelResponse response = service.trustLevel();
+        SystemTrustLevel response = service.trustLevel();
 
         assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
         assertThat(response.staleProcessingLeaseCount()).isEqualTo(1L);
@@ -324,7 +323,7 @@ class SystemTrustLevelServiceTest {
                 null
         );
 
-        SystemTrustLevelResponse response = service.trustLevel();
+        SystemTrustLevel response = service.trustLevel();
 
         assertThat(response.guaranteeLevel()).isNotEqualTo("FDP24_HEALTHY");
         assertThat(response.reasonCode()).isEqualTo("EXTERNAL_ANCHORING_REQUIRED_IN_BANK_MODE");
@@ -352,7 +351,7 @@ class SystemTrustLevelServiceTest {
                 null
         );
 
-        SystemTrustLevelResponse response = service.trustLevel();
+        SystemTrustLevel response = service.trustLevel();
 
         assertThat(response.guaranteeLevel()).isNotEqualTo("FDP24_HEALTHY");
         assertThat(response.reasonCode()).isEqualTo("TRUST_AUTHORITY_SIGNING_REQUIRED_IN_BANK_MODE");

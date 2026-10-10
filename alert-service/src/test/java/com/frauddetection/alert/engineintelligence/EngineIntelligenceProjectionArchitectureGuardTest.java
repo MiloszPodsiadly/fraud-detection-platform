@@ -29,8 +29,10 @@ class EngineIntelligenceProjectionArchitectureGuardTest {
     );
     private static final Set<String> FEEDBACK_PRIVATE_ML_EVIDENCE_ALLOWLIST = Set.of(
             "FraudFeedbackRecord.java",
+            "FraudFeedbackService.java",
             "assembly/FraudFeedbackRecordAssembler.java",
             "dataset/FeedbackDatasetBuilder.java",
+            "dataset/evidence/FeedbackDatasetMlPredictionEvidence.java",
             "dataset/evidence/FeedbackDatasetMlPredictionEvidenceResolver.java",
             "dataset/FeedbackDatasetMlPredictionEvidenceResolutionProvenance.java",
             "dataset/FeedbackDatasetMlPredictionEvidenceStatus.java",

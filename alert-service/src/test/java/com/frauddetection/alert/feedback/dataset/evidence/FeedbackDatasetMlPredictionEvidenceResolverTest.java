@@ -48,7 +48,15 @@ class FeedbackDatasetMlPredictionEvidenceResolverTest {
         assertThat(resolution.resolutionProvenance()).contains(
                 FeedbackDatasetMlPredictionEvidenceResolutionProvenance.CAPTURED_AND_CONFIRMED
         );
-        assertThat(resolution.projection()).isPresent();
+        assertThat(resolution.evidence()).contains(new FeedbackDatasetMlPredictionEvidence(
+                0.91,
+                RiskLevel.HIGH,
+                OCCURRED_AT.plusSeconds(1),
+                MODEL_NAME,
+                MODEL_VERSION,
+                FEATURE_CONTRACT,
+                ARTIFACT_SHA256
+        ));
     }
 
     @Test
@@ -100,7 +108,7 @@ class FeedbackDatasetMlPredictionEvidenceResolverTest {
         var resolution = resolver.resolve(List.of(candidate(source, "event-a"))).getFirst();
 
         assertThat(resolution.status()).isEqualTo(FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED);
-        assertThat(resolution.projection()).isEmpty();
+        assertThat(resolution.evidence()).isEmpty();
     }
 
     @Test
@@ -113,7 +121,7 @@ class FeedbackDatasetMlPredictionEvidenceResolverTest {
         var resolution = resolver.resolve(List.of(candidate(source, "event-a"))).getFirst();
 
         assertThat(resolution.status()).isEqualTo(FeedbackDatasetMlPredictionEvidenceStatus.IDENTITY_MISMATCH);
-        assertThat(resolution.projection()).isEmpty();
+        assertThat(resolution.evidence()).isEmpty();
     }
 
     @Test
@@ -155,8 +163,8 @@ class FeedbackDatasetMlPredictionEvidenceResolverTest {
                 candidate(first, "event-a")
         ));
 
-        assertThat(resolutions).extracting(resolution -> resolution.projection().orElseThrow().getSourceEventId())
-                .containsExactly("event-a", "event-b", "event-a");
+        assertThat(resolutions).extracting(resolution -> resolution.evidence().orElseThrow().mlScore())
+                .containsExactly(0.91, 0.81, 0.91);
         ArgumentCaptor<Iterable<String>> ids = ArgumentCaptor.forClass(Iterable.class);
         verify(repository, times(1)).findAllById(ids.capture());
         assertThat(StreamSupport.stream(ids.getValue().spliterator(), false))
@@ -194,7 +202,7 @@ class FeedbackDatasetMlPredictionEvidenceResolverTest {
                 transactionId,
                 "correlation-" + sourceEventId,
                 OCCURRED_AT.toString(),
-                0.91,
+                "event-a".equals(sourceEventId) ? 0.91 : 0.81,
                 RiskLevel.HIGH,
                 MODEL_NAME,
                 MODEL_VERSION,

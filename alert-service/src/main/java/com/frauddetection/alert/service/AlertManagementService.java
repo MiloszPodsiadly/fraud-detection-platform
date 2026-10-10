@@ -1,5 +1,7 @@
 package com.frauddetection.alert.service;
 
+import com.frauddetection.alert.fraudcase.decision.AnalystDecisionEvidencePolicy;
+
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.api.SubmitAnalystDecisionResponse;
 import com.frauddetection.alert.domain.AlertCase;

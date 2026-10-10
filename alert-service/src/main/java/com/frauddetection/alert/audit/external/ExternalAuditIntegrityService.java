@@ -9,6 +9,8 @@ import com.frauddetection.alert.audit.AuditOutcome;
 import com.frauddetection.alert.audit.AuditPersistenceUnavailableException;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.audit.AuditService;
+import com.frauddetection.alert.audit.external.integrity.ExternalAuditIntegrityQuery;
+import com.frauddetection.alert.audit.external.integrity.ExternalAuditIntegrityQueryParser;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;

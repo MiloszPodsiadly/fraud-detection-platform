@@ -1,7 +1,7 @@
 package com.frauddetection.alert.feedback.dataset;
 
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
-import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjection;
+import com.frauddetection.alert.feedback.dataset.evidence.FeedbackDatasetMlPredictionEvidence;
 import com.frauddetection.alert.feedback.FraudFeedbackRecord;
 import com.frauddetection.alert.feedback.dataset.evidence.FeedbackDatasetMlPredictionEvidenceResolver;
 import com.frauddetection.alert.feedback.dataset.evidence.FeedbackDatasetMlPredictionEvidenceResolver.Candidate;
@@ -206,7 +206,7 @@ public class FeedbackDatasetBuilder {
             List<String> validatedDecisionReasonCodes,
             Resolution evidence
     ) {
-        MlPredictionEvidenceProjection projection = evidence.projection().orElse(null);
+        FeedbackDatasetMlPredictionEvidence mlEvidence = evidence.evidence().orElse(null);
         return new FeedbackDatasetRecord(
                 DATASET_VERSION,
                 FeedbackDatasetIdentifierHasher.evaluationRecordId(requireSourceText(source.getFeedbackId(), "feedbackId")),
@@ -229,13 +229,13 @@ public class FeedbackDatasetBuilder {
                 evidence.status(),
                 evidence.resolutionProvenance().orElse(null),
                 evidence.omissionReason().orElse(null),
-                projection == null ? null : projection.getMlScore(),
-                projection == null ? null : projection.getMlRiskLevel(),
-                projection == null ? null : projection.getSourceExecutionTimestamp(),
-                projection == null ? null : projection.getModelName(),
-                projection == null ? null : projection.getModelVersion(),
-                projection == null ? null : projection.getFeatureContractVersion(),
-                projection == null ? null : projection.getModelArtifactSha256(),
+                mlEvidence == null ? null : mlEvidence.mlScore(),
+                mlEvidence == null ? null : mlEvidence.mlRiskLevel(),
+                mlEvidence == null ? null : mlEvidence.sourceExecutionTimestamp(),
+                mlEvidence == null ? null : mlEvidence.modelName(),
+                mlEvidence == null ? null : mlEvidence.modelVersion(),
+                mlEvidence == null ? null : mlEvidence.featureContractVersion(),
+                mlEvidence == null ? null : mlEvidence.modelArtifactSha256(),
                 source.getAnalystRecommendationStatus(),
                 source.getAnalystRecommendation(),
                 source.getAnalystRecommendationVersion(),

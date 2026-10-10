@@ -3,6 +3,7 @@ package com.frauddetection.alert.audit.external;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.frauddetection.alert.audit.AuditIntegrityViolation;
+import com.frauddetection.alert.audit.external.integrity.ExternalAuditIntegrityQuery;
 
 import java.util.List;
 

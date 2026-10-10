@@ -16,6 +16,7 @@ public class SystemTrustLevelController {
 
     private final SystemTrustLevelService trustLevelService;
     private final SensitiveReadAuditService sensitiveReadAuditService;
+    private final SystemTrustLevelResponseMapper responseMapper;
 
     @Autowired
     public SystemTrustLevelController(
@@ -24,7 +25,8 @@ public class SystemTrustLevelController {
     ) {
         this(
                 trustLevelService,
-                sensitiveReadAuditService == null ? null : sensitiveReadAuditService.getIfAvailable()
+                sensitiveReadAuditService == null ? null : sensitiveReadAuditService.getIfAvailable(),
+                new SystemTrustLevelResponseMapper()
         );
     }
 
@@ -32,14 +34,23 @@ public class SystemTrustLevelController {
             SystemTrustLevelService trustLevelService,
             SensitiveReadAuditService sensitiveReadAuditService
     ) {
+        this(trustLevelService, sensitiveReadAuditService, new SystemTrustLevelResponseMapper());
+    }
+
+    SystemTrustLevelController(
+            SystemTrustLevelService trustLevelService,
+            SensitiveReadAuditService sensitiveReadAuditService,
+            SystemTrustLevelResponseMapper responseMapper
+    ) {
         this.trustLevelService = trustLevelService;
         this.sensitiveReadAuditService = sensitiveReadAuditService;
+        this.responseMapper = responseMapper;
     }
 
     @GetMapping("/system/trust-level")
     @AuditedSensitiveRead
     public SystemTrustLevelResponse trustLevel(HttpServletRequest request) {
-        SystemTrustLevelResponse response = trustLevelService.trustLevel();
+        SystemTrustLevelResponse response = responseMapper.map(trustLevelService.trustLevel());
         if (sensitiveReadAuditService != null) {
             sensitiveReadAuditService.audit(
                     ReadAccessEndpointCategory.SYSTEM_TRUST_LEVEL,

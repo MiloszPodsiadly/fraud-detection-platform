@@ -1,80 +1,31 @@
 package com.frauddetection.alert.system.trustlevel.application;
 
 import com.frauddetection.alert.audit.AuditDegradationService;
-import com.frauddetection.alert.audit.external.ExternalAuditAnchorCoverageResponse;
 import com.frauddetection.alert.audit.external.ExternalAuditAnchorSink;
-import com.frauddetection.alert.audit.external.ExternalWitnessCapabilities;
+import com.frauddetection.alert.audit.external.ExternalAuditIntegrityService;
 import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
-import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.regulated.RegulatedMutationRecoveryService;
-import com.frauddetection.alert.system.trustlevel.api.SystemTrustLevelResponse;
+import com.frauddetection.alert.system.trustlevel.health.LiveTrustStateCollector;
+import com.frauddetection.alert.system.trustlevel.health.OutboxRecoveryHealthCollector;
 import com.frauddetection.alert.trust.TrustIncidentService;
-import com.frauddetection.alert.trust.TrustIncidentSummary;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
-import java.time.Instant;
-import java.util.List;
 
 @Service
 public class SystemTrustLevelService {
 
-    private final boolean publicationEnabled;
-    private final boolean publicationRequired;
-    private final boolean failClosed;
-    private final boolean bankModeFailClosed;
-    private final boolean trustAuthorityEnabled;
-    private final boolean signingRequired;
-    private final com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService;
-    private final ExternalAuditAnchorSink externalAuditAnchorSink;
-    private final AuditDegradationService auditDegradationService;
-    private final TransactionalOutboxRecordRepository outboxRepository;
-    private final RegulatedMutationRecoveryService regulatedMutationRecoveryService;
-    private final Duration staleOutboxThreshold;
-    private final String transactionMode;
-    private final boolean outboxPublisherEnabled;
-    private final boolean evidenceConfirmationEnabled;
-    private final TrustIncidentService trustIncidentService;
+    private final LiveTrustStateCollector liveTrustStateCollector;
+    private final TrustPostureEvaluator trustPostureEvaluator;
 
     @Autowired
     public SystemTrustLevelService(
-            @Value("${app.audit.external-anchoring.publication.enabled:false}") boolean publicationEnabled,
-            @Value("${app.audit.external-anchoring.publication.required:false}") boolean publicationRequired,
-            @Value("${app.audit.external-anchoring.publication.fail-closed:false}") boolean failClosed,
-            @Value("${app.audit.bank-mode.fail-closed:false}") boolean bankModeFailClosed,
-            @Value("${app.audit.trust-authority.enabled:false}") boolean trustAuthorityEnabled,
-            @Value("${app.audit.trust-authority.signing-required:false}") boolean signingRequired,
-            @Value("${app.outbox.stale-threshold:PT10M}") Duration staleOutboxThreshold,
-            @Value("${app.regulated-mutations.transaction-mode:OFF}") String transactionMode,
-            @Value("${app.outbox.publisher.enabled:true}") boolean outboxPublisherEnabled,
-            @Value("${app.evidence-confirmation.enabled:true}") boolean evidenceConfirmationEnabled,
-            com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService,
-            ExternalAuditAnchorSink externalAuditAnchorSink,
-            AuditDegradationService auditDegradationService,
-            ObjectProvider<TransactionalOutboxRecordRepository> outboxRepository,
-            RegulatedMutationRecoveryService regulatedMutationRecoveryService,
-            ObjectProvider<TrustIncidentService> trustIncidentService
+            LiveTrustStateCollector liveTrustStateCollector,
+            TrustPostureEvaluator trustPostureEvaluator
     ) {
-        this.publicationEnabled = publicationEnabled;
-        this.publicationRequired = publicationRequired;
-        this.failClosed = failClosed;
-        this.bankModeFailClosed = bankModeFailClosed;
-        this.trustAuthorityEnabled = trustAuthorityEnabled;
-        this.signingRequired = signingRequired;
-        this.externalAuditIntegrityService = externalAuditIntegrityService;
-        this.externalAuditAnchorSink = externalAuditAnchorSink;
-        this.auditDegradationService = auditDegradationService;
-        this.outboxRepository = outboxRepository == null ? null : outboxRepository.getIfAvailable();
-        this.regulatedMutationRecoveryService = regulatedMutationRecoveryService;
-        this.staleOutboxThreshold = staleOutboxThreshold == null ? Duration.ofMinutes(10) : staleOutboxThreshold;
-        this.transactionMode = transactionMode == null || transactionMode.isBlank() ? "OFF" : transactionMode.trim().toUpperCase();
-        this.outboxPublisherEnabled = outboxPublisherEnabled;
-        this.evidenceConfirmationEnabled = evidenceConfirmationEnabled;
-        this.trustIncidentService = trustIncidentService == null ? null : trustIncidentService.getIfAvailable();
+        this.liveTrustStateCollector = liveTrustStateCollector;
+        this.trustPostureEvaluator = trustPostureEvaluator;
     }
 
     public SystemTrustLevelService(
@@ -88,31 +39,38 @@ public class SystemTrustLevelService {
             String transactionMode,
             boolean outboxPublisherEnabled,
             boolean evidenceConfirmationEnabled,
-            com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService,
+            ExternalAuditIntegrityService externalAuditIntegrityService,
             ExternalAuditAnchorSink externalAuditAnchorSink,
             AuditDegradationService auditDegradationService,
             TransactionalOutboxRecordRepository outboxRepository,
             RegulatedMutationRecoveryService regulatedMutationRecoveryService,
             TrustIncidentService trustIncidentService
     ) {
-        this.publicationEnabled = publicationEnabled;
-        this.publicationRequired = publicationRequired;
-        this.failClosed = failClosed;
-        this.bankModeFailClosed = bankModeFailClosed;
-        this.trustAuthorityEnabled = trustAuthorityEnabled;
-        this.signingRequired = signingRequired;
-        this.externalAuditIntegrityService = externalAuditIntegrityService;
-        this.externalAuditAnchorSink = externalAuditAnchorSink;
-        this.auditDegradationService = auditDegradationService;
-        this.outboxRepository = outboxRepository;
-        this.regulatedMutationRecoveryService = regulatedMutationRecoveryService;
-        this.staleOutboxThreshold = staleOutboxThreshold == null ? Duration.ofMinutes(10) : staleOutboxThreshold;
-        this.transactionMode = transactionMode == null || transactionMode.isBlank()
-                ? "OFF"
-                : transactionMode.trim().toUpperCase();
-        this.outboxPublisherEnabled = outboxPublisherEnabled;
-        this.evidenceConfirmationEnabled = evidenceConfirmationEnabled;
-        this.trustIncidentService = trustIncidentService;
+        this(
+                new LiveTrustStateCollector(
+                        publicationEnabled,
+                        externalAuditIntegrityService,
+                        externalAuditAnchorSink,
+                        auditDegradationService,
+                        new OutboxRecoveryHealthCollector(
+                                outboxRepository,
+                                regulatedMutationRecoveryService,
+                                staleOutboxThreshold
+                        ),
+                        trustIncidentService
+                ),
+                new TrustPostureEvaluator(
+                        publicationEnabled,
+                        publicationRequired,
+                        failClosed,
+                        bankModeFailClosed,
+                        trustAuthorityEnabled,
+                        signingRequired,
+                        transactionMode,
+                        outboxPublisherEnabled,
+                        evidenceConfirmationEnabled
+                )
+        );
     }
 
     public SystemTrustLevelService(
@@ -121,7 +79,7 @@ public class SystemTrustLevelService {
             boolean failClosed,
             boolean trustAuthorityEnabled,
             boolean signingRequired,
-            com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService,
+            ExternalAuditIntegrityService externalAuditIntegrityService,
             ExternalAuditAnchorSink externalAuditAnchorSink
     ) {
         this(
@@ -138,9 +96,9 @@ public class SystemTrustLevelService {
                 externalAuditIntegrityService,
                 externalAuditAnchorSink,
                 null,
-                (TransactionalOutboxRecordRepository) null,
                 null,
-                (TrustIncidentService) null
+                null,
+                null
         );
     }
 
@@ -152,7 +110,7 @@ public class SystemTrustLevelService {
             boolean trustAuthorityEnabled,
             boolean signingRequired,
             Duration staleOutboxThreshold,
-            com.frauddetection.alert.audit.external.ExternalAuditIntegrityService externalAuditIntegrityService,
+            ExternalAuditIntegrityService externalAuditIntegrityService,
             ExternalAuditAnchorSink externalAuditAnchorSink,
             AuditDegradationService auditDegradationService,
             TransactionalOutboxRecordRepository outboxRepository,
@@ -178,411 +136,7 @@ public class SystemTrustLevelService {
         );
     }
 
-    public SystemTrustLevelResponse trustLevel() {
-        LiveTrustState live = liveTrustState();
-        SystemTrustLevelResponse response = new SystemTrustLevelResponse(
-                guaranteeLevel(live),
-                bankModeFailClosed ? "BANK_PROFILE_ACTIVE" : "NON_BANK_LOCAL_MODE",
-                publicationEnabled,
-                publicationRequired,
-                failClosed,
-                externalAnchorStrength(live),
-                live.coverageStatus(),
-                live.witnessStatus(),
-                signaturePolicy(),
-                live.requiredPublicationFailures(),
-                live.localStatusUnverified(),
-                live.missingRanges(),
-                live.postCommitAuditDegraded(),
-                live.postCommitAuditDegraded(),
-                live.pendingDegradationResolutionCount(),
-                live.postCommitAuditDegradedResolved(),
-                live.outboxFailedTerminalCount(),
-                live.outboxPendingCount(),
-                live.outboxProcessingCount(),
-                live.outboxPublishAttemptedCount(),
-                live.outboxPublishConfirmationUnknownCount(),
-                live.outboxProjectionMismatchCount(),
-                live.outboxProjectionReconciliationPendingCount(),
-                live.outboxRecoveryRequiredCount(),
-                live.outboxFailedTerminalCount(),
-                live.outboxPublishConfirmationUnknownCount(),
-                live.outboxPublishConfirmationUnknownCount(),
-                live.outboxPendingResolutionCount(),
-                live.outboxOldestPendingAgeSeconds(),
-                live.outboxOldestAmbiguousAgeSeconds(),
-                live.regulatedMutationRecoveryRequiredCount(),
-                live.staleProcessingLeaseCount(),
-                live.finalizeRecoveryRequiredCount(),
-                live.evidenceConfirmationPendingCount(),
-                live.repeatedRecoveryFailureCount(),
-                live.oldestRecoveryRequiredAgeSeconds(),
-                live.reasonCode(),
-                transactionMode,
-                transactionCapabilityStatus(),
-                outboxDeliveryMode(),
-                evidenceConfirmationEnabled ? "ENABLED_PROVENANCE_AWARE" : "DISABLED",
-                live.openCriticalIncidentCount(),
-                live.openHighIncidentCount(),
-                live.unacknowledgedCriticalIncidentCount(),
-                live.oldestOpenIncidentAgeSeconds(),
-                live.topIncidentTypes(),
-                live.incidentHealthStatus()
-        );
-        return response;
-    }
-
-    private String guaranteeLevel(LiveTrustState live) {
-        if (!publicationEnabled) {
-            return "NONE";
-        }
-        if (!publicationRequired) {
-            return "BEST_EFFORT";
-        }
-        if (!failClosed) {
-            return "FDP24_CONFIGURED";
-        }
-        return live.healthy() ? "FDP24_HEALTHY" : "FDP24_DEGRADED";
-    }
-
-    private String externalAnchorStrength(LiveTrustState live) {
-        if (!publicationEnabled || !"HEALTHY".equals(live.coverageStatus())) {
-            return "NONE";
-        }
-        return trustAuthorityEnabled && signingRequired ? "SIGNED_EXTERNAL" : "UNSIGNED_EXTERNAL";
-    }
-
-    private String signaturePolicy() {
-        if (!trustAuthorityEnabled) {
-            return "OPTIONAL";
-        }
-        return signingRequired ? "REQUIRED_FOR_PUBLICATION" : "REQUIRED_FOR_TRUST";
-    }
-
-    private LiveTrustState liveTrustState() {
-        ExternalAuditAnchorCoverageResponse coverage = null;
-        String coverageStatus = "UNAVAILABLE";
-        String reasonCode = null;
-        int requiredFailures = 0;
-        int localStatusUnverified = 0;
-        int missingRanges = 0;
-        long postCommitDegraded = auditDegradationService == null ? 0L : auditDegradationService.unresolvedPostCommitDegradedCount();
-        long pendingDegradationResolution = auditDegradationService == null ? 0L : auditDegradationService.pendingResolutionCount();
-        long postCommitDegradedResolved = auditDegradationService == null ? 0L : auditDegradationService.resolvedCount();
-        long regulatedRecoveryRequired = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.recoveryRequiredCount();
-        long staleProcessingLeaseCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.staleProcessingLeaseCount();
-        long finalizeRecoveryRequiredCount = regulatedMutationRecoveryService == null
-                ? 0L
-                : regulatedMutationRecoveryService.finalizeRecoveryRequiredCount();
-        long evidenceConfirmationPendingCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.evidenceConfirmationPendingCount();
-        long repeatedRecoveryFailureCount = regulatedMutationRecoveryService == null ? 0L : regulatedMutationRecoveryService.repeatedRecoveryFailureCount();
-        Long oldestRecoveryRequiredAgeSeconds = regulatedMutationRecoveryService == null ? null : regulatedMutationRecoveryService.oldestRecoveryRequiredAgeSeconds();
-        OutboxState outboxState = outboxState();
-        TrustIncidentSummary incidentSummary = trustIncidentSummary();
-        try {
-            coverage = externalAuditIntegrityService.coverage("alert-service", 100);
-            coverageStatus = coverage.coverageStatus();
-            reasonCode = coverage.reasonCode();
-            requiredFailures = coverage.requiredPublicationFailures();
-            localStatusUnverified = coverage.localStatusUnverified();
-            missingRanges = coverage.missingRanges() == null ? 0 : coverage.missingRanges().size();
-            if (!"AVAILABLE".equals(coverage.status())) {
-                coverageStatus = "DEGRADED";
-                reasonCode = coverage.reasonCode() == null ? "COVERAGE_UNAVAILABLE" : coverage.reasonCode();
-            }
-        } catch (RuntimeException exception) {
-            reasonCode = "COVERAGE_UNAVAILABLE";
-        }
-        String witnessStatus = witnessStatus();
-        boolean healthy = publicationEnabled
-                && publicationRequired
-                && failClosed
-                && "HEALTHY".equals(coverageStatus)
-                && "PROVIDER_CAPABILITY_VERIFIED".equals(witnessStatus)
-                && requiredFailures == 0
-                && localStatusUnverified == 0
-                && missingRanges == 0
-                && postCommitDegraded == 0
-                && pendingDegradationResolution == 0
-                && (!bankModeFailClosed || (publicationEnabled && publicationRequired && failClosed))
-                && (!bankModeFailClosed || (trustAuthorityEnabled && signingRequired))
-                && (!bankModeFailClosed || "REQUIRED".equals(transactionMode))
-                && outboxState.failedTerminalCount() == 0
-                && outboxState.recoveryRequiredCount() == 0
-                && outboxState.projectionMismatchCount() == 0
-                && outboxState.projectionReconciliationPendingCount() == 0
-                && outboxState.publishConfirmationUnknownCount() == 0
-                && outboxState.publishAttemptedCount() == 0
-                && outboxState.pendingResolutionCount() == 0
-                && !outboxState.stalePending()
-                && outboxState.available()
-                && regulatedRecoveryRequired == 0
-                && staleProcessingLeaseCount == 0
-                && finalizeRecoveryRequiredCount == 0
-                && repeatedRecoveryFailureCount == 0
-                && oldestRecoveryRequiredAgeSeconds == null
-                && incidentSummary.openCriticalIncidentCount() == 0
-                && incidentSummary.unacknowledgedCriticalIncidentCount() == 0;
-        if (healthy && outboxState.reasonCode() != null) {
-            healthy = false;
-        }
-        if (reasonCode == null) {
-            reasonCode = outboxState.reasonCode();
-        }
-        if (reasonCode == null && bankModeFailClosed && !(publicationEnabled && publicationRequired && failClosed)) {
-            reasonCode = "EXTERNAL_ANCHORING_REQUIRED_IN_BANK_MODE";
-        }
-        if (reasonCode == null && bankModeFailClosed && !(trustAuthorityEnabled && signingRequired)) {
-            reasonCode = "TRUST_AUTHORITY_SIGNING_REQUIRED_IN_BANK_MODE";
-        }
-        if (reasonCode == null && bankModeFailClosed && !"REQUIRED".equals(transactionMode)) {
-            reasonCode = "TRANSACTION_MODE_OFF_IN_BANK_MODE";
-        }
-        if (reasonCode == null && requiredFailures > 0) {
-            reasonCode = "EXTERNAL_PUBLICATION_REQUIRED_FAILURE";
-        }
-        if (reasonCode == null && localStatusUnverified > 0) {
-            reasonCode = "EXTERNAL_ANCHOR_LOCAL_STATUS_UNVERIFIED";
-        }
-        if (reasonCode == null && missingRanges > 0) {
-            reasonCode = "EXTERNAL_ANCHOR_MISSING_RANGE";
-        }
-        if (reasonCode == null && pendingDegradationResolution > 0) {
-            reasonCode = "AUDIT_DEGRADATION_RESOLUTION_PENDING_APPROVAL";
-        }
-        if (reasonCode == null && regulatedRecoveryRequired > 0) {
-            reasonCode = "REGULATED_MUTATION_RECOVERY_REQUIRED";
-        }
-        if (reasonCode == null && staleProcessingLeaseCount > 0) {
-            reasonCode = "REGULATED_MUTATION_STALE_PROCESSING_LEASE";
-        }
-        if (reasonCode == null && finalizeRecoveryRequiredCount > 0) {
-            reasonCode = "REGULATED_MUTATION_FINALIZE_RECOVERY_REQUIRED";
-        }
-        if (reasonCode == null && repeatedRecoveryFailureCount > 0) {
-            reasonCode = "REGULATED_MUTATION_REPEATED_RECOVERY_FAILURE";
-        }
-        if (reasonCode == null && incidentSummary.unacknowledgedCriticalIncidentCount() > 0) {
-            reasonCode = "TRUST_INCIDENT_UNACKNOWLEDGED_CRITICAL";
-        }
-        if (reasonCode == null && incidentSummary.openCriticalIncidentCount() > 0) {
-            reasonCode = "TRUST_INCIDENT_OPEN_CRITICAL";
-        }
-        return new LiveTrustState(
-                healthy,
-                coverageStatus,
-                witnessStatus,
-                requiredFailures,
-                localStatusUnverified,
-                missingRanges,
-                postCommitDegraded,
-                pendingDegradationResolution,
-                postCommitDegradedResolved,
-                outboxState.failedTerminalCount(),
-                outboxState.pendingCount(),
-                outboxState.processingCount(),
-                outboxState.publishAttemptedCount(),
-                outboxState.publishConfirmationUnknownCount(),
-                outboxState.projectionMismatchCount(),
-                outboxState.projectionReconciliationPendingCount(),
-                outboxState.recoveryRequiredCount(),
-                outboxState.pendingResolutionCount(),
-                outboxState.oldestPendingAgeSeconds(),
-                outboxState.oldestAmbiguousAgeSeconds(),
-                regulatedRecoveryRequired,
-                staleProcessingLeaseCount,
-                finalizeRecoveryRequiredCount,
-                evidenceConfirmationPendingCount,
-                repeatedRecoveryFailureCount,
-                oldestRecoveryRequiredAgeSeconds,
-                reasonCode,
-                incidentSummary.openCriticalIncidentCount(),
-                incidentSummary.openHighIncidentCount(),
-                incidentSummary.unacknowledgedCriticalIncidentCount(),
-                incidentSummary.oldestOpenIncidentAgeSeconds(),
-                incidentSummary.topIncidentTypes(),
-                incidentSummary.incidentHealthStatus()
-        );
-    }
-
-    private TrustIncidentSummary trustIncidentSummary() {
-        if (trustIncidentService == null) {
-            return TrustIncidentSummary.empty();
-        }
-        try {
-            return trustIncidentService.summary();
-        } catch (RuntimeException exception) {
-            return new TrustIncidentSummary(1L, 0L, 1L, null, List.of("TRUST_INCIDENT_CONTROL_PLANE_UNAVAILABLE"), "CRITICAL");
-        }
-    }
-
-    private String witnessStatus() {
-        ExternalWitnessCapabilities capabilities = externalAuditAnchorSink.capabilities();
-        if (capabilities == null || "DISABLED".equals(capabilities.witnessType())) {
-            return publicationEnabled ? "UNAVAILABLE" : "DISABLED";
-        }
-        if (capabilities.immutabilityLevel() == com.frauddetection.alert.audit.external.ExternalImmutabilityLevel.ENFORCED
-                && capabilities.supportsReadAfterWrite()
-                && capabilities.supportsStableReference()
-                && capabilities.supportsVersioning()
-                && capabilities.supportsRetention()
-                && capabilities.supportsWriteOnce()
-                && capabilities.supportsDeleteDenialOrRetention()) {
-            return "PROVIDER_CAPABILITY_VERIFIED";
-        }
-        return "DECLARED_CAPABLE";
-    }
-
-    private OutboxState outboxState() {
-        if (outboxRepository == null) {
-            return OutboxState.unavailable();
-        }
-        try {
-            return transactionalOutboxState();
-        } catch (DataAccessException exception) {
-            return OutboxState.unavailable();
-        }
-    }
-
-    private OutboxState transactionalOutboxState() {
-        List<TransactionalOutboxStatus> pendingStatuses = List.of(
-                TransactionalOutboxStatus.PENDING,
-                TransactionalOutboxStatus.PROCESSING,
-                TransactionalOutboxStatus.FAILED_RETRYABLE
-        );
-        long failedTerminalCount = outboxRepository.countByStatus(TransactionalOutboxStatus.FAILED_TERMINAL);
-        long pendingCount = outboxRepository.countByStatus(TransactionalOutboxStatus.PENDING);
-        long processingCount = outboxRepository.countByStatus(TransactionalOutboxStatus.PROCESSING);
-        long publishAttemptedCount = outboxRepository.countByStatus(TransactionalOutboxStatus.PUBLISH_ATTEMPTED);
-        long unknownCount = outboxRepository.countByStatus(TransactionalOutboxStatus.PUBLISH_CONFIRMATION_UNKNOWN);
-        long recoveryRequiredCount = outboxRepository.countByStatus(TransactionalOutboxStatus.RECOVERY_REQUIRED);
-        long projectionMismatchCount = outboxRepository.countByProjectionMismatchTrue();
-        long projectionReconciliationPendingCount = outboxRepository.countByProjectionReconcileAfterIsNotNull();
-        long pendingResolutionCount = outboxRepository.countByResolutionPendingTrue();
-        Long oldestPendingAge = outboxRepository.findTopByStatusInOrderByCreatedAtAsc(pendingStatuses)
-                .map(document -> {
-                    Instant created = document.getCreatedAt();
-                    return created == null ? 0L : Math.max(0L, Duration.between(created, Instant.now()).toSeconds());
-                })
-                .orElse(null);
-        boolean stalePending = oldestPendingAge != null && oldestPendingAge > staleOutboxThreshold.toSeconds();
-        String reason = null;
-        if (failedTerminalCount > 0) {
-            reason = "OUTBOX_TERMINAL_FAILURE";
-        } else if (recoveryRequiredCount > 0) {
-            reason = "OUTBOX_RECOVERY_REQUIRED";
-        } else if (projectionMismatchCount > 0) {
-            reason = "OUTBOX_PROJECTION_MISMATCH";
-        } else if (projectionReconciliationPendingCount > 0) {
-            reason = "OUTBOX_PROJECTION_RECONCILIATION_PENDING";
-        } else if (publishAttemptedCount > 0) {
-            reason = "OUTBOX_PUBLISH_ATTEMPT_CONFIRMATION_PENDING";
-        } else if (unknownCount > 0) {
-            reason = "OUTBOX_PUBLISH_CONFIRMATION_UNKNOWN";
-        } else if (pendingResolutionCount > 0) {
-            reason = "OUTBOX_RESOLUTION_PENDING_APPROVAL";
-        } else if (stalePending) {
-            reason = "OUTBOX_STALE_PENDING";
-        }
-        return new OutboxState(
-                true,
-                pendingCount,
-                processingCount,
-                publishAttemptedCount,
-                failedTerminalCount,
-                recoveryRequiredCount,
-                unknownCount,
-                projectionMismatchCount,
-                projectionReconciliationPendingCount,
-                pendingResolutionCount,
-                oldestPendingAge,
-                null,
-                stalePending,
-                reason
-        );
-    }
-
-    private String outboxDeliveryMode() {
-        return outboxPublisherEnabled ? "TRANSACTIONAL_OUTBOX_AT_LEAST_ONCE" : "DISABLED";
-    }
-
-    private String transactionCapabilityStatus() {
-        if ("REQUIRED".equals(transactionMode)) {
-            return "LOCAL_MONGO_TRANSACTION_REQUIRED";
-        }
-        return "NON_TRANSACTIONAL_RECOVERABLE_SAGA";
-    }
-
-    private record LiveTrustState(
-            boolean healthy,
-            String coverageStatus,
-            String witnessStatus,
-            int requiredPublicationFailures,
-            int localStatusUnverified,
-            int missingRanges,
-            long postCommitAuditDegraded,
-            long pendingDegradationResolutionCount,
-            long postCommitAuditDegradedResolved,
-            long outboxFailedTerminalCount,
-            long outboxPendingCount,
-            long outboxProcessingCount,
-            long outboxPublishAttemptedCount,
-            long outboxPublishConfirmationUnknownCount,
-            long outboxProjectionMismatchCount,
-            long outboxProjectionReconciliationPendingCount,
-            long outboxRecoveryRequiredCount,
-            long outboxPendingResolutionCount,
-            Long outboxOldestPendingAgeSeconds,
-            Long outboxOldestAmbiguousAgeSeconds,
-            long regulatedMutationRecoveryRequiredCount,
-            long staleProcessingLeaseCount,
-            long finalizeRecoveryRequiredCount,
-            long evidenceConfirmationPendingCount,
-            long repeatedRecoveryFailureCount,
-            Long oldestRecoveryRequiredAgeSeconds,
-            String reasonCode,
-            long openCriticalIncidentCount,
-            long openHighIncidentCount,
-            long unacknowledgedCriticalIncidentCount,
-            Long oldestOpenIncidentAgeSeconds,
-            List<String> topIncidentTypes,
-            String incidentHealthStatus
-    ) {
-    }
-
-    private record OutboxState(
-            boolean available,
-            long pendingCount,
-            long processingCount,
-            long publishAttemptedCount,
-            long failedTerminalCount,
-            long recoveryRequiredCount,
-            long publishConfirmationUnknownCount,
-            long projectionMismatchCount,
-            long projectionReconciliationPendingCount,
-            long pendingResolutionCount,
-            Long oldestPendingAgeSeconds,
-            Long oldestAmbiguousAgeSeconds,
-            boolean stalePending,
-            String reasonCode
-    ) {
-        private static OutboxState unavailable() {
-            return new OutboxState(
-                    false,
-                    0L,
-                    0L,
-                    0L,
-                    0L,
-                    0L,
-                    0L,
-                    0L,
-                    0L,
-                    0L,
-                    null,
-                    null,
-                    false,
-                    "OUTBOX_STATUS_UNAVAILABLE"
-            );
-        }
+    public SystemTrustLevel trustLevel() {
+        return trustPostureEvaluator.evaluate(liveTrustStateCollector.collect());
     }
 }

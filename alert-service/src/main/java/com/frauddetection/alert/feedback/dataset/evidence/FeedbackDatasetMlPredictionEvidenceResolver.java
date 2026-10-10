@@ -114,7 +114,7 @@ public class FeedbackDatasetMlPredictionEvidenceResolver {
                             ? FeedbackDatasetMlPredictionEvidenceResolutionProvenance.CAPTURED_AND_CONFIRMED
                             : FeedbackDatasetMlPredictionEvidenceResolutionProvenance
                                     .RECOVERED_FROM_EXACT_OCCURRENCE_PROJECTION;
-            return Resolution.available(projection, resolutionProvenance);
+            return Resolution.available(FeedbackDatasetMlPredictionEvidence.from(projection), resolutionProvenance);
         } catch (IllegalArgumentException exception) {
             return Resolution.unavailable(FeedbackDatasetMlPredictionEvidenceStatus.MALFORMED);
         }
@@ -142,21 +142,21 @@ public class FeedbackDatasetMlPredictionEvidenceResolver {
     public record Resolution(
             FeedbackDatasetMlPredictionEvidenceStatus status,
             Optional<FeedbackDatasetMlPredictionEvidenceResolutionProvenance> resolutionProvenance,
-            Optional<MlPredictionEvidenceProjection> projection,
+            Optional<FeedbackDatasetMlPredictionEvidence> evidence,
             Optional<MlPredictionEvidenceOmissionReason> omissionReason
     ) {
         public Resolution {
             status = Objects.requireNonNull(status, "status is required");
             resolutionProvenance = Objects.requireNonNull(resolutionProvenance, "resolutionProvenance is required");
-            projection = Objects.requireNonNull(projection, "projection is required");
+            evidence = Objects.requireNonNull(evidence, "evidence is required");
             omissionReason = Objects.requireNonNull(omissionReason, "omissionReason is required");
-            if ((status == FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE) != projection.isPresent()) {
-                throw new IllegalArgumentException("only available ML prediction evidence may carry a projection");
+            if ((status == FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE) != evidence.isPresent()) {
+                throw new IllegalArgumentException("only available ML prediction evidence may carry evidence");
             }
-            if (projection.isPresent() != resolutionProvenance.isPresent()) {
+            if (evidence.isPresent() != resolutionProvenance.isPresent()) {
                 throw new IllegalArgumentException("available ML prediction evidence requires resolution provenance");
             }
-            if (projection.isPresent() && omissionReason.isPresent()) {
+            if (evidence.isPresent() && omissionReason.isPresent()) {
                 throw new IllegalArgumentException("ML prediction evidence requires exactly one authoritative outcome");
             }
             if (omissionReason.isPresent()
@@ -168,13 +168,13 @@ public class FeedbackDatasetMlPredictionEvidenceResolver {
         }
 
         private static Resolution available(
-                MlPredictionEvidenceProjection projection,
+                FeedbackDatasetMlPredictionEvidence evidence,
                 FeedbackDatasetMlPredictionEvidenceResolutionProvenance resolutionProvenance
         ) {
             return new Resolution(
                     FeedbackDatasetMlPredictionEvidenceStatus.AVAILABLE,
                     Optional.of(Objects.requireNonNull(resolutionProvenance, "resolutionProvenance is required")),
-                    Optional.of(Objects.requireNonNull(projection, "projection is required")),
+                    Optional.of(Objects.requireNonNull(evidence, "evidence is required")),
                     Optional.empty()
             );
         }

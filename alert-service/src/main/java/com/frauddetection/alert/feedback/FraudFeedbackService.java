@@ -8,6 +8,8 @@ import com.frauddetection.alert.audit.outbox.WriteActionAuditOutboxService;
 import com.frauddetection.alert.domain.ScoredTransaction;
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.feedback.assembly.FraudFeedbackRecordAssembler;
+import com.frauddetection.alert.feedback.snapshot.EngineIntelligenceFeedbackSnapshotter;
+import com.frauddetection.alert.feedback.snapshot.MlPredictionEvidenceSnapshotter;
 import com.frauddetection.alert.feedback.validation.FraudFeedbackRequestValidator;
 import com.frauddetection.alert.feedback.validation.ValidatedFraudFeedback;
 import com.frauddetection.alert.regulated.RegulatedMutationTransactionMode;
@@ -33,6 +35,8 @@ public class FraudFeedbackService {
     private final RegulatedMutationTransactionRunner transactionRunner;
     private final FraudFeedbackRequestValidator requestValidator;
     private final FraudFeedbackRecordAssembler recordAssembler;
+    private final EngineIntelligenceFeedbackSnapshotter engineIntelligenceSnapshotter;
+    private final MlPredictionEvidenceSnapshotter mlPredictionEvidenceSnapshotter;
     private final Clock clock;
 
     @Autowired
@@ -44,7 +48,9 @@ public class FraudFeedbackService {
             WriteActionAuditOutboxService auditOutboxService,
             RegulatedMutationTransactionRunner transactionRunner,
             FraudFeedbackRequestValidator requestValidator,
-            FraudFeedbackRecordAssembler recordAssembler
+            FraudFeedbackRecordAssembler recordAssembler,
+            EngineIntelligenceFeedbackSnapshotter engineIntelligenceSnapshotter,
+            MlPredictionEvidenceSnapshotter mlPredictionEvidenceSnapshotter
     ) {
         this(
                 repository,
@@ -55,6 +61,8 @@ public class FraudFeedbackService {
                 transactionRunner,
                 requestValidator,
                 recordAssembler,
+                engineIntelligenceSnapshotter,
+                mlPredictionEvidenceSnapshotter,
                 Clock.systemUTC()
         );
     }
@@ -68,6 +76,8 @@ public class FraudFeedbackService {
             RegulatedMutationTransactionRunner transactionRunner,
             FraudFeedbackRequestValidator requestValidator,
             FraudFeedbackRecordAssembler recordAssembler,
+            EngineIntelligenceFeedbackSnapshotter engineIntelligenceSnapshotter,
+            MlPredictionEvidenceSnapshotter mlPredictionEvidenceSnapshotter,
             Clock clock
     ) {
         this.repository = repository;
@@ -78,6 +88,8 @@ public class FraudFeedbackService {
         this.transactionRunner = transactionRunner;
         this.requestValidator = requestValidator;
         this.recordAssembler = recordAssembler;
+        this.engineIntelligenceSnapshotter = engineIntelligenceSnapshotter;
+        this.mlPredictionEvidenceSnapshotter = mlPredictionEvidenceSnapshotter;
         this.clock = clock;
     }
 
@@ -114,11 +126,12 @@ public class FraudFeedbackService {
         recordAssembler.assemble(
                 record,
                 transaction,
-                ownership,
                 validated,
                 actor,
                 clock.instant()
         );
+        engineIntelligenceSnapshotter.snapshot(record, transaction);
+        mlPredictionEvidenceSnapshotter.snapshot(record, transaction, ownership);
         return persistFeedbackWithAuditIntent(record);
     }
 

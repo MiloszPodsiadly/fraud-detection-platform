@@ -1,5 +1,7 @@
 package com.frauddetection.alert.audit.external;
 
+import com.frauddetection.alert.audit.external.integrity.ExternalAuditIntegrityQueryParser;
+
 import com.frauddetection.alert.audit.AuditAnchorDocument;
 import com.frauddetection.alert.audit.AuditService;
 import com.frauddetection.alert.audit.AuditAnchorRepository;

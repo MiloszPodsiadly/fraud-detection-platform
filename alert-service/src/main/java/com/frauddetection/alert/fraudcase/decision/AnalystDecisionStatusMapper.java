@@ -1,4 +1,4 @@
-package com.frauddetection.alert.service;
+package com.frauddetection.alert.fraudcase.decision;
 
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.common.events.enums.AlertStatus;

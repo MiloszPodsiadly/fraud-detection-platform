@@ -14,6 +14,9 @@ import com.frauddetection.alert.engineintelligence.observability.MlPredictionEvi
 import com.frauddetection.alert.outbox.OutboxBacklogResponse;
 import com.frauddetection.alert.outbox.FraudAlertOutboxBacklogResponse;
 import com.frauddetection.alert.observability.evidence.EvidenceSnapshotMetricsRecorder;
+import com.frauddetection.alert.observability.audit.AuditIntegrityMetricsRecorder;
+import com.frauddetection.alert.observability.outbox.OutboxMetricsRecorder;
+import com.frauddetection.alert.observability.regulated.RegulatedMutationRecoveryMetricsRecorder;
 import com.frauddetection.alert.security.error.SecurityFailureClassifier;
 import com.frauddetection.alert.suspicious.SuspiciousTransactionStatus;
 import io.micrometer.core.instrument.Counter;
@@ -29,7 +32,6 @@ import org.springframework.util.StringUtils;
 
 import java.time.Duration;
 import java.util.EnumMap;
-import java.util.HexFormat;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -39,29 +41,11 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
 
     private final MeterRegistry meterRegistry;
     private final EvidenceSnapshotMetricsRecorder evidenceSnapshotMetricsRecorder;
+    private final AuditIntegrityMetricsRecorder auditIntegrityMetricsRecorder;
+    private final OutboxMetricsRecorder outboxMetricsRecorder;
+    private final RegulatedMutationRecoveryMetricsRecorder regulatedMutationRecoveryMetricsRecorder;
     private final AtomicInteger governanceAnalyticsWindowDays = new AtomicInteger(0);
-    private final AtomicLong auditChainHeadHashFingerprint = new AtomicLong(0);
-    private final AtomicLong auditLastAnchorHashFingerprint = new AtomicLong(0);
-    private final AtomicInteger auditIntegrityValid = new AtomicInteger(0);
-    private final AtomicInteger auditIntegrityInvalid = new AtomicInteger(0);
     private final AtomicLong postCommitAuditDegraded = new AtomicLong(0);
-    private final AtomicLong regulatedMutationRecoveryRequired = new AtomicLong(0);
-    private final AtomicLong regulatedMutationRecoveryOldestAgeSeconds = new AtomicLong(0);
-    private final AtomicLong regulatedMutationRecoveryFailedTerminal = new AtomicLong(0);
-    private final AtomicLong regulatedMutationRecoveryRepeatedFailures = new AtomicLong(0);
-    private final AtomicLong outboxPending = new AtomicLong(0);
-    private final AtomicLong outboxProcessing = new AtomicLong(0);
-    private final AtomicLong outboxConfirmationUnknown = new AtomicLong(0);
-    private final AtomicLong outboxFailedTerminal = new AtomicLong(0);
-    private final AtomicLong outboxProjectionMismatch = new AtomicLong(0);
-    private final AtomicLong outboxProjectionReconciliationPending = new AtomicLong(0);
-    private final AtomicLong outboxOldestPendingAgeSeconds = new AtomicLong(0);
-    private final AtomicLong fraudAlertOutboxPending = new AtomicLong(0);
-    private final AtomicLong fraudAlertOutboxProcessing = new AtomicLong(0);
-    private final AtomicLong fraudAlertOutboxPublishAttempted = new AtomicLong(0);
-    private final AtomicLong fraudAlertOutboxConfirmationUnknown = new AtomicLong(0);
-    private final AtomicLong fraudAlertOutboxFailedTerminal = new AtomicLong(0);
-    private final AtomicLong fraudAlertOutboxOldestUnresolvedAgeSeconds = new AtomicLong(0);
     private final AtomicLong evidenceConfirmationPending = new AtomicLong(0);
     private final AtomicLong diagnosticPendingProjection = new AtomicLong(0);
     private final AtomicLong diagnosticUnresolvedProjection = new AtomicLong(0);
@@ -69,53 +53,43 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     private final Map<AuditAction, AtomicInteger> evidenceGatedFinalizeEnabled = new EnumMap<>(AuditAction.class);
 
     public AlertServiceMetrics(MeterRegistry meterRegistry) {
-        this(meterRegistry, new EvidenceSnapshotMetricsRecorder(meterRegistry));
+        this(
+                meterRegistry,
+                new EvidenceSnapshotMetricsRecorder(meterRegistry),
+                new AuditIntegrityMetricsRecorder(meterRegistry),
+                new OutboxMetricsRecorder(meterRegistry),
+                new RegulatedMutationRecoveryMetricsRecorder(meterRegistry)
+        );
+    }
+
+    public AlertServiceMetrics(
+            MeterRegistry meterRegistry,
+            EvidenceSnapshotMetricsRecorder evidenceSnapshotMetricsRecorder
+    ) {
+        this(
+                meterRegistry,
+                evidenceSnapshotMetricsRecorder,
+                new AuditIntegrityMetricsRecorder(meterRegistry),
+                new OutboxMetricsRecorder(meterRegistry),
+                new RegulatedMutationRecoveryMetricsRecorder(meterRegistry)
+        );
     }
 
     @Autowired
     public AlertServiceMetrics(
             MeterRegistry meterRegistry,
-            EvidenceSnapshotMetricsRecorder evidenceSnapshotMetricsRecorder
+            EvidenceSnapshotMetricsRecorder evidenceSnapshotMetricsRecorder,
+            AuditIntegrityMetricsRecorder auditIntegrityMetricsRecorder,
+            OutboxMetricsRecorder outboxMetricsRecorder,
+            RegulatedMutationRecoveryMetricsRecorder regulatedMutationRecoveryMetricsRecorder
     ) {
         this.meterRegistry = meterRegistry;
         this.evidenceSnapshotMetricsRecorder = evidenceSnapshotMetricsRecorder;
+        this.auditIntegrityMetricsRecorder = auditIntegrityMetricsRecorder;
+        this.outboxMetricsRecorder = outboxMetricsRecorder;
+        this.regulatedMutationRecoveryMetricsRecorder = regulatedMutationRecoveryMetricsRecorder;
         Gauge.builder("fraud_ml_governance_analytics_window_days", governanceAnalyticsWindowDays, AtomicInteger::get)
                 .register(meterRegistry);
-        Gauge.builder("fraud_audit_chain_head_hash", auditChainHeadHashFingerprint, AtomicLong::get)
-                .register(meterRegistry);
-        Gauge.builder("fraud_audit_last_anchor_hash", auditLastAnchorHashFingerprint, AtomicLong::get)
-                .register(meterRegistry);
-        Gauge.builder("fraud_audit_integrity_status", auditIntegrityValid, AtomicInteger::get)
-                .tag("status", "VALID")
-                .register(meterRegistry);
-        Gauge.builder("fraud_audit_integrity_status", auditIntegrityInvalid, AtomicInteger::get)
-                .tag("status", "INVALID")
-                .register(meterRegistry);
-        Gauge.builder("regulated_mutation_recovery_required_count", regulatedMutationRecoveryRequired, AtomicLong::get)
-                .register(meterRegistry);
-        Gauge.builder("regulated_mutation_recovery_oldest_age_seconds", regulatedMutationRecoveryOldestAgeSeconds, AtomicLong::get)
-                .register(meterRegistry);
-        Gauge.builder("regulated_mutation_recovery_failed_terminal_count", regulatedMutationRecoveryFailedTerminal, AtomicLong::get)
-                .register(meterRegistry);
-        Gauge.builder("regulated_mutation_recovery_repeated_failures_count", regulatedMutationRecoveryRepeatedFailures, AtomicLong::get)
-                .register(meterRegistry);
-        Gauge.builder("outbox_pending_count", outboxPending, AtomicLong::get).register(meterRegistry);
-        Gauge.builder("outbox_processing_count", outboxProcessing, AtomicLong::get).register(meterRegistry);
-        Gauge.builder("outbox_confirmation_unknown_count", outboxConfirmationUnknown, AtomicLong::get).register(meterRegistry);
-        Gauge.builder("outbox_failed_terminal_count", outboxFailedTerminal, AtomicLong::get).register(meterRegistry);
-        Gauge.builder("outbox_projection_mismatch_count", outboxProjectionMismatch, AtomicLong::get).register(meterRegistry);
-        Gauge.builder(
-                "outbox_projection_reconciliation_pending_count",
-                outboxProjectionReconciliationPending,
-                AtomicLong::get
-        ).register(meterRegistry);
-        Gauge.builder("outbox_oldest_pending_age_seconds", outboxOldestPendingAgeSeconds, AtomicLong::get).register(meterRegistry);
-        Gauge.builder("fraud_alert_outbox_pending_count", fraudAlertOutboxPending, AtomicLong::get).register(meterRegistry);
-        Gauge.builder("fraud_alert_outbox_processing_count", fraudAlertOutboxProcessing, AtomicLong::get).register(meterRegistry);
-        Gauge.builder("fraud_alert_outbox_publish_attempted_count", fraudAlertOutboxPublishAttempted, AtomicLong::get).register(meterRegistry);
-        Gauge.builder("fraud_alert_outbox_confirmation_unknown_count", fraudAlertOutboxConfirmationUnknown, AtomicLong::get).register(meterRegistry);
-        Gauge.builder("fraud_alert_outbox_failed_terminal_count", fraudAlertOutboxFailedTerminal, AtomicLong::get).register(meterRegistry);
-        Gauge.builder("fraud_alert_outbox_oldest_unresolved_age_seconds", fraudAlertOutboxOldestUnresolvedAgeSeconds, AtomicLong::get).register(meterRegistry);
         Gauge.builder("evidence_confirmation_pending_count", evidenceConfirmationPending, AtomicLong::get).register(meterRegistry);
         Gauge.builder("engine_intelligence_pending_projection_count", diagnosticPendingProjection, AtomicLong::get)
                 .register(meterRegistry);
@@ -215,8 +189,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     }
 
     public void recordRegulatedMutationRecoveryBacklog(long recoveryRequiredCount, Long oldestAgeSeconds) {
-        regulatedMutationRecoveryRequired.set(Math.max(0L, recoveryRequiredCount));
-        regulatedMutationRecoveryOldestAgeSeconds.set(oldestAgeSeconds == null ? 0L : Math.max(0L, oldestAgeSeconds));
+        regulatedMutationRecoveryMetricsRecorder.recordBacklog(recoveryRequiredCount, oldestAgeSeconds);
     }
 
     public void recordRegulatedMutationRecoveryBacklog(
@@ -225,16 +198,16 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
             long failedTerminalCount,
             long repeatedFailureCount
     ) {
-        recordRegulatedMutationRecoveryBacklog(recoveryRequiredCount, oldestAgeSeconds);
-        regulatedMutationRecoveryFailedTerminal.set(Math.max(0L, failedTerminalCount));
-        regulatedMutationRecoveryRepeatedFailures.set(Math.max(0L, repeatedFailureCount));
+        regulatedMutationRecoveryMetricsRecorder.recordBacklog(
+                recoveryRequiredCount,
+                oldestAgeSeconds,
+                failedTerminalCount,
+                repeatedFailureCount
+        );
     }
 
     public void recordRegulatedMutationRecoveryOutcome(String outcome) {
-        counter(
-                "regulated_mutation_recovery_outcome_total",
-                "outcome", normalizeRegulatedMutationRecoveryOutcome(outcome)
-        ).increment();
+        regulatedMutationRecoveryMetricsRecorder.recordOutcome(outcome);
     }
 
     public void recordFraudCaseWorkQueueRequest(String outcome) {
@@ -298,40 +271,23 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     }
 
     public void recordDecisionOutboxPublishConfirmationFailed() {
-        counter(
-                "fraud_platform_decision_outbox_failures_total",
-                "reason", "OUTBOX_PUBLISH_CONFIRMATION_FAILED"
-        ).increment();
+        outboxMetricsRecorder.recordDecisionPublishConfirmationFailed();
     }
 
     public void recordOutboxBacklog(OutboxBacklogResponse response) {
-        outboxPending.set(Math.max(0L, response.pendingCount()));
-        outboxProcessing.set(Math.max(0L, response.processingCount()));
-        outboxConfirmationUnknown.set(Math.max(0L, response.confirmationUnknownCount()));
-        outboxFailedTerminal.set(Math.max(0L, response.failedTerminalCount()));
-        outboxProjectionMismatch.set(Math.max(0L, response.projectionMismatchCount()));
-        outboxProjectionReconciliationPending.set(
-                Math.max(0L, response.projectionReconciliationPendingCount())
-        );
-        outboxOldestPendingAgeSeconds.set(response.oldestPendingAgeSeconds() == null ? 0L : Math.max(0L, response.oldestPendingAgeSeconds()));
+        outboxMetricsRecorder.recordBacklog(response);
     }
 
     public void recordOutboxProjectionMismatch(long mismatchCount) {
-        outboxProjectionMismatch.set(Math.max(0L, mismatchCount));
-        counter("outbox_projection_mismatch_total", "reason", "PROJECTION_UPDATE_FAILED").increment();
+        outboxMetricsRecorder.recordProjectionMismatch(mismatchCount);
     }
 
     public void recordOutboxPublishAttempt(String result) {
-        counter(
-                "outbox_publish_attempt_total",
-                "result", normalizeOutboxPublishResult(result)
-        ).increment();
+        outboxMetricsRecorder.recordPublishAttempt(result);
     }
 
     public void recordOutboxDeliveryLatency(Duration latency) {
-        Timer.builder("outbox_delivery_latency_seconds")
-                .register(meterRegistry)
-                .record(latency == null || latency.isNegative() ? Duration.ZERO : latency);
+        outboxMetricsRecorder.recordDeliveryLatency(latency);
     }
 
     public void recordEvidenceConfirmationPending(long pendingCount) {
@@ -712,43 +668,23 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     }
 
     public void recordAuditIntegrityCheck(String status) {
-        counter(
-                "fraud_platform_audit_integrity_checks_total",
-                "status", normalizeIntegrityStatus(status)
-        ).increment();
-        counter(
-                "fraud_platform_audit_integrity_check_total",
-                "status", normalizeIntegrityStatus(status)
-        ).increment();
+        auditIntegrityMetricsRecorder.recordPlatformCheck(status);
     }
 
     public void recordForensicAuditIntegrityCheck(String status) {
-        counter(
-                "fraud_audit_integrity_check_total",
-                "status", normalizeIntegrityStatus(status)
-        ).increment();
+        auditIntegrityMetricsRecorder.recordForensicCheck(status);
     }
 
     public void recordAuditIntegrityViolation(String violationType) {
-        counter(
-                "fraud_platform_audit_integrity_violations_total",
-                "violation_type", normalizeIntegrityViolationType(violationType)
-        ).increment();
+        auditIntegrityMetricsRecorder.recordPlatformViolation(violationType);
     }
 
     public void recordForensicAuditIntegrityViolation(String violationType) {
-        counter(
-                "fraud_audit_integrity_violation_total",
-                "violation_type", normalizeIntegrityViolationType(violationType)
-        ).increment();
+        auditIntegrityMetricsRecorder.recordForensicViolation(violationType);
     }
 
     public void recordAuditIntegritySnapshot(String status, String chainHeadHash, String lastAnchorHash) {
-        auditChainHeadHashFingerprint.set(hashFingerprint(chainHeadHash));
-        auditLastAnchorHashFingerprint.set(hashFingerprint(lastAnchorHash));
-        boolean valid = "VALID".equals(status) || "PARTIAL".equals(status);
-        auditIntegrityValid.set(valid ? 1 : 0);
-        auditIntegrityInvalid.set("INVALID".equals(status) ? 1 : 0);
+        auditIntegrityMetricsRecorder.recordSnapshot(status, chainHeadHash, lastAnchorHash);
     }
 
     public void recordExternalAnchorPublished(String sink, String status) {
@@ -803,10 +739,7 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     }
 
     public void recordExternalIntegrityCheck(String status) {
-        counter(
-                "fraud_platform_audit_external_integrity_checks_total",
-                "status", normalizeIntegrityStatus(status)
-        ).increment();
+        auditIntegrityMetricsRecorder.recordExternalCheck(status);
     }
 
     public void recordAuditSignatureVerification(String status) {
@@ -1066,30 +999,15 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     }
 
     public void recordFraudAlertOutboxBacklog(FraudAlertOutboxBacklogResponse response) {
-        fraudAlertOutboxPending.set(Math.max(0L, response.pendingCount()));
-        fraudAlertOutboxProcessing.set(Math.max(0L, response.processingCount()));
-        fraudAlertOutboxPublishAttempted.set(Math.max(0L, response.publishAttemptedCount()));
-        fraudAlertOutboxConfirmationUnknown.set(Math.max(0L, response.confirmationUnknownCount()));
-        fraudAlertOutboxFailedTerminal.set(Math.max(0L, response.failedTerminalCount()));
-        fraudAlertOutboxOldestUnresolvedAgeSeconds.set(
-                response.oldestUnresolvedAgeSeconds() == null
-                        ? 0L
-                        : Math.max(0L, response.oldestUnresolvedAgeSeconds())
-        );
+        outboxMetricsRecorder.recordFraudAlertBacklog(response);
     }
 
     public void recordFraudAlertOutboxPublishAttempt(String outcome) {
-        counter(
-                "fraud_alert_outbox_publish_attempt_total",
-                "outcome", normalizeFraudAlertOutboxPublishOutcome(outcome)
-        ).increment();
+        outboxMetricsRecorder.recordFraudAlertPublishAttempt(outcome);
     }
 
     public void recordFraudAlertOutboxResolution(String resolution) {
-        counter(
-                "fraud_alert_outbox_resolution_total",
-                "resolution", normalizeFraudAlertOutboxResolution(resolution)
-        ).increment();
+        outboxMetricsRecorder.recordFraudAlertResolution(resolution);
     }
 
     public void recordMlPredictionEvidenceProjectionAttempt() {
@@ -1431,13 +1349,6 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         };
     }
 
-    private String normalizeRegulatedMutationRecoveryOutcome(String outcome) {
-        return switch (outcome) {
-            case "RECOVERED", "STILL_PENDING", "RECOVERY_REQUIRED", "FAILED_TERMINAL" -> outcome;
-            default -> "RECOVERY_REQUIRED";
-        };
-    }
-
     private String normalizeFraudCaseWorkQueueOutcome(String outcome) {
         if (!StringUtils.hasText(outcome)) {
             return "failure";
@@ -1485,27 +1396,6 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         return switch (filterBucket) {
             case "none", "query", "risk", "classification", "combined" -> filterBucket;
             default -> "combined";
-        };
-    }
-
-    private String normalizeOutboxPublishResult(String result) {
-        return switch (result) {
-            case "SUCCESS", "FAILED", "CONFIRMATION_UNKNOWN" -> result;
-            default -> "FAILED";
-        };
-    }
-
-    private String normalizeFraudAlertOutboxPublishOutcome(String outcome) {
-        return switch (outcome) {
-            case "PUBLISHED", "CONFIRMATION_UNKNOWN", "PRE_SEND_STATE_WRITE_FAILED", "PRE_SEND_TERMINAL" -> outcome;
-            default -> "UNKNOWN";
-        };
-    }
-
-    private String normalizeFraudAlertOutboxResolution(String resolution) {
-        return switch (resolution) {
-            case "PUBLISHED", "CONFIRMED_NOT_DELIVERED" -> resolution;
-            default -> "UNKNOWN";
         };
     }
 
@@ -1736,13 +1626,6 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         return "UNAVAILABLE";
     }
 
-    private String normalizeIntegrityStatus(String status) {
-        if ("VALID".equals(status) || "INVALID".equals(status) || "PARTIAL".equals(status) || "UNAVAILABLE".equals(status)) {
-            return status;
-        }
-        return "UNAVAILABLE";
-    }
-
     private String normalizeSignatureVerificationStatus(String status) {
         return switch (status) {
             case "VALID", "INVALID", "UNSIGNED", "UNAVAILABLE", "UNKNOWN_KEY", "KEY_REVOKED" -> status;
@@ -1754,41 +1637,6 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         return switch (result) {
             case "VALID", "PARTIAL", "INVALID" -> result;
             default -> "INVALID";
-        };
-    }
-
-    private String normalizeIntegrityViolationType(String violationType) {
-        return switch (violationType) {
-            case "EVENT_HASH_MISMATCH",
-                 "PREVIOUS_HASH_MISMATCH",
-                 "INVALID_SCHEMA_VERSION",
-                 "UNSUPPORTED_HASH_ALGORITHM",
-                 "ANCHOR_MISSING",
-                 "ANCHOR_HASH_MISMATCH",
-                 "ANCHOR_CHAIN_POSITION_MISMATCH",
-                 "MISSING_PREDECESSOR",
-                 "CHAIN_FORK_DETECTED",
-                 "CHAIN_POSITION_INVALID",
-                 "CHAIN_POSITION_DUPLICATE",
-                 "CHAIN_POSITION_GAP",
-                 "EXTERNAL_ANCHOR_MISSING",
-                 "STALE_EXTERNAL_ANCHOR",
-                 "EXTERNAL_CHAIN_POSITION_AHEAD",
-                 "EXTERNAL_HASH_MISMATCH",
-                 "EXTERNAL_PAYLOAD_HASH_MISMATCH",
-                 "EXTERNAL_OBJECT_KEY_MISMATCH",
-                 "EXTERNAL_CHAIN_POSITION_MISMATCH",
-                 "EXTERNAL_HASH_ALGORITHM_MISMATCH",
-                 "EXTERNAL_SCHEMA_VERSION_UNSUPPORTED",
-                 "EXTERNAL_LOCAL_ANCHOR_ID_MISMATCH",
-                 "SIGNATURE_UNSIGNED",
-                 "SIGNATURE_UNSIGNED_REQUIRED",
-                 "SIGNATURE_UNAVAILABLE",
-                 "SIGNATURE_UNAVAILABLE_REQUIRED",
-                 "SIGNATURE_INVALID",
-                 "SIGNATURE_UNKNOWN_KEY",
-                 "SIGNATURE_KEY_REVOKED" -> violationType;
-            default -> "UNKNOWN";
         };
     }
 
@@ -1851,19 +1699,4 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
         };
     }
 
-    private long hashFingerprint(String hash) {
-        if (hash == null || hash.length() < 12) {
-            return 0L;
-        }
-        try {
-            byte[] bytes = HexFormat.of().parseHex(hash.substring(0, 12));
-            long value = 0L;
-            for (byte current : bytes) {
-                value = (value << 8) | (current & 0xffL);
-            }
-            return value;
-        } catch (IllegalArgumentException exception) {
-            return 0L;
-        }
-    }
 }

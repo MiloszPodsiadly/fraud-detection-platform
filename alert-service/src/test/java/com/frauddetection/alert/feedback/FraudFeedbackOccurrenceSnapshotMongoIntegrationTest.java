@@ -250,13 +250,14 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
                 engineIntelligence,
                 new EngineIntelligenceReadModelMapper()
         );
-        FraudFeedbackRecordAssembler recordAssembler = new FraudFeedbackRecordAssembler(
+        EngineIntelligenceFeedbackSnapshotter engineIntelligenceSnapshotter =
                 new EngineIntelligenceFeedbackSnapshotter(
                         engineIntelligenceReadService,
                         new EngineIntelligenceResponseMapper()
-                ),
-                new MlPredictionEvidenceSnapshotter(evidence)
-        );
+                );
+        MlPredictionEvidenceSnapshotter mlPredictionEvidenceSnapshotter =
+                new MlPredictionEvidenceSnapshotter(evidence);
+        FraudFeedbackRecordAssembler recordAssembler = new FraudFeedbackRecordAssembler();
         return new FraudFeedbackService(
                 feedback,
                 new FraudFeedbackMapper(),
@@ -266,6 +267,8 @@ class FraudFeedbackOccurrenceSnapshotMongoIntegrationTest {
                 transactionRunner,
                 new FraudFeedbackRequestValidator(),
                 recordAssembler,
+                engineIntelligenceSnapshotter,
+                mlPredictionEvidenceSnapshotter,
                 Clock.fixed(CREATED_A.plusSeconds(10), ZoneOffset.UTC)
         );
     }
