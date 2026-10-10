@@ -1,7 +1,8 @@
-package com.frauddetection.scoring.orchestration.aggregation;
+package com.frauddetection.scoring.orchestration.aggregation.comparison;
 
 import com.frauddetection.common.events.engine.FraudEngineIdentityContract;
 import com.frauddetection.common.events.engine.FraudEngineStatus;
+import com.frauddetection.scoring.orchestration.aggregation.NormalizedFraudEngineResult;
 
 import java.util.List;
 

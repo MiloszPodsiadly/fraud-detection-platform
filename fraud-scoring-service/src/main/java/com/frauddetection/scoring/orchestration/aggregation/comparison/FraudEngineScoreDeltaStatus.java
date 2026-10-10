@@ -1,4 +1,4 @@
-package com.frauddetection.scoring.orchestration.aggregation;
+package com.frauddetection.scoring.orchestration.aggregation.comparison;
 
 public enum FraudEngineScoreDeltaStatus {
     AVAILABLE,

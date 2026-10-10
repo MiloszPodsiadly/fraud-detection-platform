@@ -1,4 +1,4 @@
-package com.frauddetection.trustauthority;
+package com.frauddetection.trustauthority.api;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 

@@ -1,5 +1,11 @@
 package com.frauddetection.trustauthority;
 
+import com.frauddetection.trustauthority.api.TrustKeyResponse;
+import com.frauddetection.trustauthority.api.TrustSignRequest;
+import com.frauddetection.trustauthority.api.TrustSignResponse;
+import com.frauddetection.trustauthority.api.TrustVerifyRequest;
+import com.frauddetection.trustauthority.api.TrustVerifyResponse;
+
 import com.nimbusds.jose.JOSEObjectType;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;

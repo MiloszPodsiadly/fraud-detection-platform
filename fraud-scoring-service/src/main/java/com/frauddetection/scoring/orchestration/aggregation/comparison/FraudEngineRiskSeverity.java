@@ -1,13 +1,13 @@
-package com.frauddetection.scoring.orchestration.aggregation;
+package com.frauddetection.scoring.orchestration.aggregation.comparison;
 
 import com.frauddetection.common.events.enums.RiskLevel;
 
-final class FraudEngineRiskSeverity {
+public final class FraudEngineRiskSeverity {
 
     private FraudEngineRiskSeverity() {
     }
 
-    static int rank(RiskLevel riskLevel) {
+    public static int rank(RiskLevel riskLevel) {
         if (riskLevel == null) {
             return -1;
         }
@@ -19,7 +19,7 @@ final class FraudEngineRiskSeverity {
         };
     }
 
-    static int distance(RiskLevel first, RiskLevel second) {
+    public static int distance(RiskLevel first, RiskLevel second) {
         if (first == null || second == null) {
             throw new IllegalArgumentException("AGGREGATION_RISK_LEVEL_REQUIRED");
         }

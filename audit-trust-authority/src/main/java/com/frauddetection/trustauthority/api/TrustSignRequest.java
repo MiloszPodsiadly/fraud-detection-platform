@@ -1,11 +1,10 @@
-package com.frauddetection.trustauthority;
+package com.frauddetection.trustauthority.api;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 
-import java.time.Instant;
-
-public record TrustVerifyRequest(
+public record TrustSignRequest(
         @JsonProperty("purpose")
         @NotBlank
         String purpose,
@@ -19,21 +18,11 @@ public record TrustVerifyRequest(
         String partitionKey,
 
         @JsonProperty("chain_position")
+        @Min(1)
         long chainPosition,
 
         @JsonProperty("anchor_id")
         @NotBlank
-        String anchorId,
-
-        @JsonProperty("signature")
-        @NotBlank
-        String signature,
-
-        @JsonProperty("key_id")
-        @NotBlank
-        String keyId,
-
-        @JsonProperty("signed_at")
-        Instant signedAt
+        String anchorId
 ) {
 }
