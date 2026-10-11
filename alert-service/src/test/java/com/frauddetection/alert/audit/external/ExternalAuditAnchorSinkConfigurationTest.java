@@ -332,7 +332,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
 
     @Test
     void shouldCreateObjectStoreSinkWhenConfigAndClientExist() {
-        ObjectStoreAuditAnchorClient client = mock(ObjectStoreAuditAnchorClient.class);
+        ObjectStoreAuditAnchorClient client = linearizableClient();
         when(client.listKeys("audit-bucket", "audit-anchors", 1)).thenReturn(List.of());
 
         ExternalAuditAnchorSink sink = configuration.externalAuditAnchorSink(
@@ -362,8 +362,37 @@ class ExternalAuditAnchorSinkConfigurationTest {
     }
 
     @Test
-    void shouldFailClosedWhenEnabledExternalWitnessDoesNotEnforceRetention() {
+    void shouldRejectObjectStoreWithoutLinearizableHeadWrites() {
         ObjectStoreAuditAnchorClient client = mock(ObjectStoreAuditAnchorClient.class);
+
+        assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
+                tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build(),
+                objectStoreClient(client),
+                metrics(),
+                new StandardEnvironment(),
+                true,
+                "object-store",
+                "./target/test-audit-external-anchors.jsonl",
+                false,
+                "audit-bucket",
+                "audit-anchors",
+                "eu-central-1",
+                "",
+                "access-key",
+                "secret-key",
+                true,
+                false,
+                Duration.ofSeconds(2),
+                Duration.ZERO,
+                2,
+                "test-instance"
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("atomic HEAD create-if-absent and compare-and-swap");
+    }
+
+    @Test
+    void shouldFailClosedWhenEnabledExternalWitnessDoesNotEnforceRetention() {
+        ObjectStoreAuditAnchorClient client = linearizableClient();
         AtomicReference<byte[]> probe = new AtomicReference<>();
         when(client.listKeys("audit-bucket", "audit-anchors", 1)).thenReturn(List.of());
         when(client.immutabilityLevel("audit-bucket", "audit-anchors")).thenReturn(ExternalImmutabilityLevel.CONFIGURED);
@@ -405,7 +434,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
 
     @Test
     void shouldAllowEnabledExternalAnchoringOnlyWithVerifiedObjectStoreCapabilities() {
-        ObjectStoreAuditAnchorClient client = mock(ObjectStoreAuditAnchorClient.class);
+        ObjectStoreAuditAnchorClient client = linearizableClient();
         AtomicReference<byte[]> probe = new AtomicReference<>();
         when(client.listKeys("audit-bucket", "audit-anchors", 1)).thenReturn(List.of());
         when(client.immutabilityLevel("audit-bucket", "audit-anchors")).thenReturn(ExternalImmutabilityLevel.ENFORCED);
@@ -452,7 +481,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
 
     @Test
     void shouldFailClosedWhenEnabledObjectStoreWitnessDoesNotSupportVersioning() {
-        ObjectStoreAuditAnchorClient client = mock(ObjectStoreAuditAnchorClient.class);
+        ObjectStoreAuditAnchorClient client = linearizableClient();
         AtomicReference<byte[]> probe = new AtomicReference<>();
         when(client.listKeys("audit-bucket", "audit-anchors", 1)).thenReturn(List.of());
         when(client.immutabilityLevel("audit-bucket", "audit-anchors")).thenReturn(ExternalImmutabilityLevel.ENFORCED);
@@ -509,7 +538,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
 
     @Test
     void shouldFailClosedWhenEnabledObjectStoreWitnessDoesNotSupportRetention() {
-        ObjectStoreAuditAnchorClient client = mock(ObjectStoreAuditAnchorClient.class);
+        ObjectStoreAuditAnchorClient client = linearizableClient();
         AtomicReference<byte[]> probe = new AtomicReference<>();
         when(client.listKeys("audit-bucket", "audit-anchors", 1)).thenReturn(List.of());
         when(client.immutabilityLevel("audit-bucket", "audit-anchors")).thenReturn(ExternalImmutabilityLevel.ENFORCED);
@@ -566,7 +595,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
 
     @Test
     void shouldFailClosedWhenEnabledWitnessOnlyProvidesApplicationObservedTimestamp() {
-        ObjectStoreAuditAnchorClient client = mock(ObjectStoreAuditAnchorClient.class);
+        ObjectStoreAuditAnchorClient client = linearizableClient();
         AtomicReference<byte[]> probe = new AtomicReference<>();
         when(client.listKeys("audit-bucket", "audit-anchors", 1)).thenReturn(List.of());
         when(client.immutabilityLevel("audit-bucket", "audit-anchors")).thenReturn(ExternalImmutabilityLevel.ENFORCED);
@@ -623,7 +652,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
 
     @Test
     void shouldFailClosedWhenObjectStoreStartupCheckFails() {
-        ObjectStoreAuditAnchorClient client = mock(ObjectStoreAuditAnchorClient.class);
+        ObjectStoreAuditAnchorClient client = linearizableClient();
         when(client.listKeys("audit-bucket", "audit-anchors", 1)).thenThrow(new IllegalStateException("denied"));
 
         assertThatThrownBy(() -> configuration.externalAuditAnchorSink(
@@ -653,7 +682,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
 
     @Test
     void shouldNotLeakObjectStoreCredentialsWhenStartupCheckFails() {
-        ObjectStoreAuditAnchorClient client = mock(ObjectStoreAuditAnchorClient.class);
+        ObjectStoreAuditAnchorClient client = linearizableClient();
         when(client.listKeys("audit-bucket", "audit-anchors", 1))
                 .thenThrow(new IllegalStateException("secret-key credential failed"));
 
@@ -686,7 +715,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
 
     @Test
     void shouldSurfaceVerifiedImmutabilityLevelFromObjectStoreClient() {
-        ObjectStoreAuditAnchorClient client = mock(ObjectStoreAuditAnchorClient.class);
+        ObjectStoreAuditAnchorClient client = linearizableClient();
         when(client.listKeys("audit-bucket", "audit-anchors", 1)).thenReturn(List.of());
         when(client.immutabilityLevel("audit-bucket", "audit-anchors")).thenReturn(ExternalImmutabilityLevel.ENFORCED);
 
@@ -718,7 +747,7 @@ class ExternalAuditAnchorSinkConfigurationTest {
 
     @Test
     void shouldNotWriteStartupProbeByDefault() {
-        ObjectStoreAuditAnchorClient client = mock(ObjectStoreAuditAnchorClient.class);
+        ObjectStoreAuditAnchorClient client = linearizableClient();
         when(client.listKeys("audit-bucket", "audit-anchors", 1)).thenReturn(List.of());
 
         configuration.externalAuditAnchorSink(
@@ -777,6 +806,14 @@ class ExternalAuditAnchorSinkConfigurationTest {
 
     private ObjectProvider<ObjectStoreAuditAnchorClient> emptyObjectStoreClient() {
         return objectStoreClient(null);
+    }
+
+    private ObjectStoreAuditAnchorClient linearizableClient() {
+        ObjectStoreAuditAnchorClient client = mock(ObjectStoreAuditAnchorClient.class);
+        when(client.headWriteCapability()).thenReturn(
+                ObjectStoreAuditAnchorHeadWriteCapability.LINEARIZABLE_CREATE_AND_COMPARE_AND_SWAP
+        );
+        return client;
     }
 
     private AlertServiceMetrics metrics() {

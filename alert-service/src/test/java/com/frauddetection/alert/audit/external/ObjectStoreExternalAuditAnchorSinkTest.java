@@ -90,13 +90,16 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThat(duplicate.chainPosition()).isEqualTo(1L);
         assertThat(duplicate.lastEventHash()).isEqualTo("hash-1");
         assertThat(client.anchorKeys()).hasSize(1);
-        assertThat(client.getObjectCalls).isEqualTo(1);
+        assertThat(client.getObjectCalls).isGreaterThanOrEqualTo(1);
         assertThat(client.listKeysCalls).isZero();
-        assertThat(client.listPageCalls).isZero();
+        assertThat(sink.latest("source_service:alert-service"))
+                .get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(1L);
     }
 
     @Test
-    void shouldTreatLegacyAnchorAsIdempotentWithoutScanning() {
+    void shouldRebuildMissingHeadForIdempotentLegacyAnchor() {
         AuditAnchorDocument local = localAnchor("local-anchor-1", 1L, "hash-1");
         putLegacyAnchor("local-anchor-1", 1L, "hash-1");
         client.resetCounters();
@@ -109,7 +112,11 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         assertThat(client.anchorKeys()).hasSize(1);
         assertThat(client.getObject("audit-bucket", sink.objectKey("source_service:alert-service", 1L))).isEmpty();
         assertThat(client.listKeysCalls).isZero();
-        assertThat(client.listPageCalls).isZero();
+        assertThat(client.listPageCalls).isEqualTo(1);
+        assertThat(sink.latest("source_service:alert-service"))
+                .get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(1L);
     }
 
     @Test
@@ -153,7 +160,7 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     }
 
     @Test
-    void publishNewAnchorShouldNotListAllKeys() {
+    void missingHeadShouldScanAllAnchorsBeforeAtomicCreate() {
         for (long chainPosition = 1L; chainPosition <= 20_000L; chainPosition++) {
             putPaddedAnchor("local-anchor-" + chainPosition, chainPosition, "hash-" + chainPosition);
         }
@@ -163,7 +170,11 @@ class ObjectStoreExternalAuditAnchorSinkTest {
 
         assertThat(stored.chainPosition()).isEqualTo(20_001L);
         assertThat(client.listKeysCalls).isZero();
-        assertThat(client.listPageCalls).isZero();
+        assertThat(client.listPageCalls).isGreaterThan(1);
+        assertThat(sink.latest("source_service:alert-service"))
+                .get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(20_001L);
     }
 
     @Test
@@ -363,6 +374,221 @@ class ObjectStoreExternalAuditAnchorSinkTest {
                 .get()
                 .extracting(ExternalAuditAnchor::chainPosition)
                 .isEqualTo(1L);
+    }
+
+    @Test
+    void independentWritersShouldNotRegressHeadAfterStaleRead() throws Exception {
+        ObjectStoreExternalAuditAnchorSink writerA = new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket", "audit-anchors", client, objectMapper
+        );
+        ObjectStoreExternalAuditAnchorSink writerB = new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket", "audit-anchors", client, objectMapper
+        );
+        writerA.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-100", 100L, "hash-100"), writerA.sinkType()));
+        client.pauseNextHeadCompareAndSwap();
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            java.util.concurrent.Future<ExternalAuditAnchor> staleWriter = executor.submit(() -> writerA.publish(
+                    ExternalAuditAnchor.from(localAnchor("local-anchor-101", 101L, "hash-101"), writerA.sinkType())
+            ));
+            client.awaitPausedHeadCompareAndSwap();
+
+            writerB.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-102", 102L, "hash-102"), writerB.sinkType()));
+            client.releasePausedHeadCompareAndSwap();
+            assertThat(staleWriter.get().chainPosition()).isEqualTo(101L);
+        } finally {
+            client.releasePausedHeadCompareAndSwap();
+            executor.shutdownNow();
+        }
+
+        assertThat(writerA.latest("source_service:alert-service"))
+                .get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(102L);
+        assertThat(writerB.latest("source_service:alert-service"))
+                .get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(102L);
+    }
+
+    @Test
+    void independentWritersShouldPublishIdenticalPositionIdempotently() throws Exception {
+        ObjectStoreExternalAuditAnchorSink writerA = new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket", "audit-anchors", client, objectMapper
+        );
+        ObjectStoreExternalAuditAnchorSink writerB = new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket", "audit-anchors", client, objectMapper
+        );
+        ExternalAuditAnchor anchor = ExternalAuditAnchor.from(
+                localAnchor("local-anchor-1", 1L, "hash-1"),
+                writerA.sinkType()
+        );
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            List<java.util.concurrent.Future<ExternalAuditAnchor>> results = executor.invokeAll(List.of(
+                    () -> writerA.publish(anchor),
+                    () -> writerB.publish(anchor)
+            ));
+            assertThat(results.get(0).get().localAnchorId()).isEqualTo("local-anchor-1");
+            assertThat(results.get(1).get().localAnchorId()).isEqualTo("local-anchor-1");
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertThat(writerA.latest("source_service:alert-service"))
+                .get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(1L);
+    }
+
+    @Test
+    void independentWritersShouldRejectConcurrentConflictingIdentityAtSamePosition() throws Exception {
+        ObjectStoreExternalAuditAnchorSink writerA = new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket", "audit-anchors", client, objectMapper
+        );
+        ObjectStoreExternalAuditAnchorSink writerB = new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket", "audit-anchors", client, objectMapper
+        );
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            List<java.util.concurrent.Future<ExternalAuditAnchor>> results = List.of(
+                    executor.submit(() -> {
+                        start.await();
+                        return writerA.publish(ExternalAuditAnchor.from(
+                                localAnchor("local-anchor-A", 1L, "hash-A"), writerA.sinkType()
+                        ));
+                    }),
+                    executor.submit(() -> {
+                        start.await();
+                        return writerB.publish(ExternalAuditAnchor.from(
+                                localAnchor("local-anchor-B", 1L, "hash-B"), writerB.sinkType()
+                        ));
+                    })
+            );
+            start.countDown();
+            int published = 0;
+            int conflicts = 0;
+            for (java.util.concurrent.Future<ExternalAuditAnchor> result : results) {
+                try {
+                    result.get();
+                    published++;
+                } catch (java.util.concurrent.ExecutionException exception) {
+                    assertThat(exception.getCause()).isInstanceOf(ExternalAuditAnchorConflictException.class);
+                    conflicts++;
+                }
+            }
+            assertThat(published).isEqualTo(1);
+            assertThat(conflicts).isEqualTo(1);
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+        }
+
+        assertThat(writerA.latest("source_service:alert-service"))
+                .get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(1L);
+    }
+
+    @Test
+    void exhaustedCompareAndSwapShouldFailManifestButAllowRestartRecovery() {
+        sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), sink.sinkType()));
+        client.alwaysConflictHeadCompareAndSwap = true;
+
+        ExternalAuditAnchor partiallyPublished = sink.publish(
+                ExternalAuditAnchor.from(localAnchor("local-anchor-2", 2L, "hash-2"), sink.sinkType())
+        );
+
+        assertThat(partiallyPublished.publicationStatus()).isEqualTo(ExternalAuditAnchor.STATUS_PUBLISHED);
+        assertThat(partiallyPublished.manifestStatus()).isEqualTo(ExternalAuditAnchor.MANIFEST_STATUS_FAILED);
+        assertThat(partiallyPublished.publicationReason()).isEqualTo(ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED);
+        assertThat(client.compareAndSwapCalls).isEqualTo(2);
+        assertThat(sink.latest("source_service:alert-service"))
+                .get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(1L);
+
+        client.alwaysConflictHeadCompareAndSwap = false;
+        ObjectStoreExternalAuditAnchorSink restarted = new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket", "audit-anchors", client, objectMapper
+        );
+        restarted.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-2", 2L, "hash-2"), restarted.sinkType()));
+
+        assertThat(restarted.latest("source_service:alert-service"))
+                .get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(2L);
+    }
+
+    @Test
+    void timedOutCompareAndSwapShouldNotReportHealthyManifestUpdate() {
+        sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), sink.sinkType()));
+        client.headCompareAndSwapDelay = Duration.ofMillis(200);
+        ObjectStoreExternalAuditAnchorSink shortTimeoutSink = new ObjectStoreExternalAuditAnchorSink(
+                "audit-bucket",
+                "audit-anchors",
+                client,
+                objectMapper,
+                null,
+                Duration.ofMillis(10),
+                Duration.ZERO,
+                1,
+                ExternalImmutabilityLevel.NONE
+        );
+
+        ExternalAuditAnchor partiallyPublished = shortTimeoutSink.publish(
+                ExternalAuditAnchor.from(localAnchor("local-anchor-2", 2L, "hash-2"), shortTimeoutSink.sinkType())
+        );
+
+        assertThat(partiallyPublished.publicationStatus()).isEqualTo(ExternalAuditAnchor.STATUS_PUBLISHED);
+        assertThat(partiallyPublished.manifestStatus()).isEqualTo(ExternalAuditAnchor.MANIFEST_STATUS_FAILED);
+        assertThat(partiallyPublished.publicationReason()).isEqualTo(ExternalAuditAnchor.REASON_HEAD_MANIFEST_UPDATE_FAILED);
+    }
+
+    @Test
+    void malformedManifestShouldBeRepairedOnlyByVersionMatchedWrite() {
+        sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), sink.sinkType()));
+        client.putRaw("audit-bucket", headManifestKey(), "not-json".getBytes(StandardCharsets.UTF_8));
+        client.resetCounters();
+
+        ExternalAuditAnchor stored = sink.publish(
+                ExternalAuditAnchor.from(localAnchor("local-anchor-2", 2L, "hash-2"), sink.sinkType())
+        );
+
+        assertThat(stored.manifestStatus()).isNull();
+        assertThat(client.compareAndSwapCalls).isEqualTo(1);
+        assertThat(client.putObjectCalls).isZero();
+        assertThat(sink.latest("source_service:alert-service"))
+                .get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(2L);
+    }
+
+    @Test
+    void tamperedManifestShouldBeRepairedOnlyByVersionMatchedWrite() {
+        sink.publish(ExternalAuditAnchor.from(localAnchor("local-anchor-1", 1L, "hash-1"), sink.sinkType()));
+        byte[] manifest = client.getObject("audit-bucket", headManifestKey()).orElseThrow();
+        client.putRaw(
+                "audit-bucket",
+                headManifestKey(),
+                new String(manifest, StandardCharsets.UTF_8)
+                        .replace("\"manifest_hash\":\"", "\"manifest_hash\":\"tampered-")
+                        .getBytes(StandardCharsets.UTF_8)
+        );
+        client.resetCounters();
+
+        ExternalAuditAnchor stored = sink.publish(
+                ExternalAuditAnchor.from(localAnchor("local-anchor-2", 2L, "hash-2"), sink.sinkType())
+        );
+
+        assertThat(stored.manifestStatus()).isNull();
+        assertThat(client.compareAndSwapCalls).isEqualTo(1);
+        assertThat(client.putObjectCalls).isZero();
+        assertThat(sink.latest("source_service:alert-service"))
+                .get()
+                .extracting(ExternalAuditAnchor::chainPosition)
+                .isEqualTo(2L);
     }
 
     @Test
@@ -681,6 +907,8 @@ class ObjectStoreExternalAuditAnchorSinkTest {
     static class InMemoryObjectStoreAuditAnchorClient implements ObjectStoreAuditAnchorClient {
 
         private final Map<String, byte[]> objects = new java.util.concurrent.ConcurrentHashMap<>();
+        private final Map<String, Long> versions = new java.util.concurrent.ConcurrentHashMap<>();
+        private final java.util.concurrent.atomic.AtomicLong versionSequence = new java.util.concurrent.atomic.AtomicLong();
         boolean hideWritesAfterPut;
         boolean tamperAfterPut;
         int failNextListCalls;
@@ -694,8 +922,20 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         int getObjectCalls;
         int putObjectCalls;
         int putObjectIfAbsentCalls;
+        int compareAndSwapCalls;
         int listKeysCalls;
         int listPageCalls;
+        volatile boolean alwaysConflictHeadCompareAndSwap;
+        volatile Duration headCompareAndSwapDelay = Duration.ZERO;
+        private final java.util.concurrent.atomic.AtomicBoolean pauseNextHeadCompareAndSwap =
+                new java.util.concurrent.atomic.AtomicBoolean();
+        private volatile java.util.concurrent.CountDownLatch pausedHeadCompareAndSwap;
+        private volatile java.util.concurrent.CountDownLatch releaseHeadCompareAndSwap;
+
+        @Override
+        public ObjectStoreAuditAnchorHeadWriteCapability headWriteCapability() {
+            return ObjectStoreAuditAnchorHeadWriteCapability.LINEARIZABLE_CREATE_AND_COMPARE_AND_SWAP;
+        }
 
         @Override
         public Optional<byte[]> getObject(String bucket, String key) {
@@ -717,30 +957,69 @@ class ObjectStoreExternalAuditAnchorSinkTest {
         }
 
         @Override
-        public void putObjectIfAbsent(String bucket, String key, byte[] content) {
+        public synchronized void putObjectIfAbsent(String bucket, String key, byte[] content) {
             putObjectIfAbsentCalls++;
+            if (failHeadManifestPut && key.endsWith("/head.json")) {
+                throw new ExternalAuditAnchorSinkException("HEAD_MANIFEST_UPDATE_FAILED", "External anchor head manifest is unavailable.");
+            }
             byte[] stored = Arrays.copyOf(content, content.length);
-            byte[] existing = objects.putIfAbsent(bucket + "/" + key, stored);
+            String storageKey = bucket + "/" + key;
+            byte[] existing = objects.putIfAbsent(storageKey, stored);
             if (existing != null) {
                 throw new ExternalAuditAnchorSinkException("CONFLICT", "Object already exists.");
             }
+            versions.put(storageKey, versionSequence.incrementAndGet());
             if (hideWritesAfterPut) {
-                objects.remove(bucket + "/" + key);
+                objects.remove(storageKey);
+                versions.remove(storageKey);
             }
             if (tamperAfterPut) {
-                objects.put(bucket + "/" + key, new String(stored, StandardCharsets.UTF_8)
+                objects.put(storageKey, new String(stored, StandardCharsets.UTF_8)
                         .replace("\"event_hash\":\"hash-1\"", "\"event_hash\":\"hash-X\"")
                         .getBytes(StandardCharsets.UTF_8));
+                versions.put(storageKey, versionSequence.incrementAndGet());
             }
         }
 
         @Override
-        public void putObject(String bucket, String key, byte[] content) {
+        public synchronized Optional<ObjectStoreAuditAnchorVersionedObject> getObjectWithVersion(String bucket, String key) {
+            String storageKey = bucket + "/" + key;
+            byte[] content = objects.get(storageKey);
+            Long version = versions.get(storageKey);
+            if (content == null || version == null) {
+                return Optional.empty();
+            }
+            return Optional.of(new ObjectStoreAuditAnchorVersionedObject(content, Long.toString(version)));
+        }
+
+        @Override
+        public void putObjectIfVersionMatches(String bucket, String key, String expectedVersion, byte[] content) {
+            compareAndSwapCalls++;
+            pauseHeadCompareAndSwapIfRequested();
+            delayHeadCompareAndSwap();
+            synchronized (this) {
+                if (alwaysConflictHeadCompareAndSwap) {
+                    throw new ExternalAuditAnchorSinkException("CONFLICT", "Forced compare-and-swap conflict.");
+                }
+                String storageKey = bucket + "/" + key;
+                Long currentVersion = versions.get(storageKey);
+                if (currentVersion == null || !Long.toString(currentVersion).equals(expectedVersion)) {
+                    throw new ExternalAuditAnchorSinkException("CONFLICT", "Object version changed.");
+                }
+                objects.put(storageKey, Arrays.copyOf(content, content.length));
+                versions.put(storageKey, versionSequence.incrementAndGet());
+            }
+        }
+
+        @Override
+        public synchronized void putObject(String bucket, String key, byte[] content) {
             putObjectCalls++;
             if (failHeadManifestPut && key.endsWith("/head.json")) {
                 throw new ExternalAuditAnchorSinkException("HEAD_MANIFEST_UPDATE_FAILED", "External anchor head manifest is unavailable.");
             }
-            objects.put(bucket + "/" + key, Arrays.copyOf(content, content.length));
+            String storageKey = bucket + "/" + key;
+            objects.put(storageKey, Arrays.copyOf(content, content.length));
+            versions.put(storageKey, versionSequence.incrementAndGet());
         }
 
         @Override
@@ -791,20 +1070,68 @@ class ObjectStoreExternalAuditAnchorSinkTest {
                     .toList();
         }
 
-        void putRaw(String bucket, String key, byte[] content) {
-            objects.put(bucket + "/" + key, Arrays.copyOf(content, content.length));
+        synchronized void putRaw(String bucket, String key, byte[] content) {
+            String storageKey = bucket + "/" + key;
+            objects.put(storageKey, Arrays.copyOf(content, content.length));
+            versions.put(storageKey, versionSequence.incrementAndGet());
         }
 
-        void removeRaw(String bucket, String key) {
-            objects.remove(bucket + "/" + key);
+        synchronized void removeRaw(String bucket, String key) {
+            String storageKey = bucket + "/" + key;
+            objects.remove(storageKey);
+            versions.remove(storageKey);
         }
 
         void resetCounters() {
             getObjectCalls = 0;
             putObjectCalls = 0;
             putObjectIfAbsentCalls = 0;
+            compareAndSwapCalls = 0;
             listKeysCalls = 0;
             listPageCalls = 0;
+        }
+
+        void pauseNextHeadCompareAndSwap() {
+            pausedHeadCompareAndSwap = new java.util.concurrent.CountDownLatch(1);
+            releaseHeadCompareAndSwap = new java.util.concurrent.CountDownLatch(1);
+            pauseNextHeadCompareAndSwap.set(true);
+        }
+
+        void awaitPausedHeadCompareAndSwap() throws InterruptedException {
+            if (!pausedHeadCompareAndSwap.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Compare-and-swap did not pause.");
+            }
+        }
+
+        void releasePausedHeadCompareAndSwap() {
+            releaseHeadCompareAndSwap.countDown();
+        }
+
+        private void pauseHeadCompareAndSwapIfRequested() {
+            if (!pauseNextHeadCompareAndSwap.compareAndSet(true, false)) {
+                return;
+            }
+            pausedHeadCompareAndSwap.countDown();
+            try {
+                if (!releaseHeadCompareAndSwap.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                    throw new ExternalAuditAnchorSinkException("TIMEOUT", "Compare-and-swap release timed out.");
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new ExternalAuditAnchorSinkException("TIMEOUT", "Compare-and-swap was interrupted.");
+            }
+        }
+
+        private void delayHeadCompareAndSwap() {
+            if (headCompareAndSwapDelay.isZero()) {
+                return;
+            }
+            try {
+                Thread.sleep(headCompareAndSwapDelay.toMillis());
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new ExternalAuditAnchorSinkException("TIMEOUT", "Compare-and-swap was interrupted.");
+            }
         }
 
         private void delay(Duration duration) {

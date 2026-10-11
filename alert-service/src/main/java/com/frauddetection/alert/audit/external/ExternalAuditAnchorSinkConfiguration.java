@@ -81,6 +81,7 @@ class ExternalAuditAnchorSinkConfiguration {
             if (client == null) {
                 throw new IllegalStateException("Object-store external audit anchor client is not configured.");
             }
+            validateHeadWriteCapability(client);
             ExternalImmutabilityLevel immutabilityLevel = validateObjectStoreReadiness(
                     client,
                     objectStoreBucket,
@@ -333,6 +334,20 @@ class ExternalAuditAnchorSinkConfiguration {
             throw new IllegalStateException("Object-store external audit anchor startup check failed.");
         }
         return immutabilityLevel;
+    }
+
+    private void validateHeadWriteCapability(ObjectStoreAuditAnchorClient client) {
+        ObjectStoreAuditAnchorHeadWriteCapability capability;
+        try {
+            capability = client.headWriteCapability();
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException("Object-store external audit HEAD concurrency capability check failed.");
+        }
+        if (capability == null || !capability.supportsLinearizableHeadUpdates()) {
+            throw new IllegalStateException(
+                    "Object-store external audit anchoring requires atomic HEAD create-if-absent and compare-and-swap."
+            );
+        }
     }
 
     private void validateExternalWitnessCapabilities(
