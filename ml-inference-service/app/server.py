@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import hashlib
-import hmac
 import ssl
 import threading
 import time
@@ -143,64 +141,25 @@ for _status in ("available", "partial", "unavailable"):
     MODEL_LIFECYCLE_HISTORY_AVAILABLE.labels(MODEL_NAME, MODEL_VERSION, _status).set(0)
 
 
+# Compatibility exports are intentionally limited to symbols used by current
+# server tests and patch targets. Security state and decisions remain owned by
+# app.security.internal_auth; aliases below must never create independent state.
 InternalServicePrincipal = internal_auth.InternalServicePrincipal
 InternalServiceCredential = internal_auth.InternalServiceCredential
 SoftReplayCache = internal_auth.SoftReplayCache
 INTERNAL_AUTH_TARGET_SERVICE = internal_auth.INTERNAL_AUTH_TARGET_SERVICE
-LOCAL_INTERNAL_AUTH_MODES = internal_auth.LOCAL_INTERNAL_AUTH_MODES
-TOKEN_INTERNAL_AUTH_MODES = internal_auth.TOKEN_INTERNAL_AUTH_MODES
-JWT_INTERNAL_AUTH_MODES = internal_auth.JWT_INTERNAL_AUTH_MODES
-MTLS_INTERNAL_AUTH_MODES = internal_auth.MTLS_INTERNAL_AUTH_MODES
-SUPPORTED_INTERNAL_AUTH_MODES = internal_auth.SUPPORTED_INTERNAL_AUTH_MODES
-PROD_LIKE_PROFILES = internal_auth.PROD_LIKE_PROFILES
 INTERNAL_AUTH_FAILURE_REASONS = internal_auth.INTERNAL_AUTH_FAILURE_REASONS
-REPLAY_REASON_EXPIRED = internal_auth.REPLAY_REASON_EXPIRED
-REPLAY_REASON_TOO_OLD = internal_auth.REPLAY_REASON_TOO_OLD
-REPLAY_REASON_FUTURE_IAT = internal_auth.REPLAY_REASON_FUTURE_IAT
-REPLAY_REASON_REPLAY_DETECTED = internal_auth.REPLAY_REASON_REPLAY_DETECTED
 MTLS_HANDSHAKE_FAILURE_REASONS = internal_auth.MTLS_HANDSHAKE_FAILURE_REASONS
 MTLS_CERT_EXPIRES_SOON_SECONDS = internal_auth.MTLS_CERT_EXPIRES_SOON_SECONDS
 MTLS_CERT_EXPIRES_ESCALATED_SECONDS = internal_auth.MTLS_CERT_EXPIRES_ESCALATED_SECONDS
 MTLS_CERT_EXPIRES_IMMINENTLY_SECONDS = internal_auth.MTLS_CERT_EXPIRES_IMMINENTLY_SECONDS
 MTLS_CERT_ROTATION_AGE_WARNING_SECONDS = internal_auth.MTLS_CERT_ROTATION_AGE_WARNING_SECONDS
 MTLS_CERT_MONITOR_INTERVAL_SECONDS = internal_auth.MTLS_CERT_MONITOR_INTERVAL_SECONDS
-DEFAULT_JWT_MAX_TOKEN_AGE_SECONDS = internal_auth.DEFAULT_JWT_MAX_TOKEN_AGE_SECONDS
-DEFAULT_JWT_MAX_ALLOWED_TTL_SECONDS = internal_auth.DEFAULT_JWT_MAX_ALLOWED_TTL_SECONDS
-DEFAULT_JWT_CLOCK_SKEW_SECONDS = internal_auth.DEFAULT_JWT_CLOCK_SKEW_SECONDS
-DEFAULT_REPLAY_CACHE_MAX_ENTRIES = internal_auth.DEFAULT_REPLAY_CACHE_MAX_ENTRIES
 SOFT_REPLAY_CACHE = internal_auth.SOFT_REPLAY_CACHE
-
-
-def _normalize_internal_auth_mode(mode: str) -> str:
-    return internal_auth.normalize_internal_auth_mode(mode)
 
 
 def _internal_auth_mode() -> str:
     return internal_auth.internal_auth_mode()
-
-
-def _runtime_profile() -> str:
-    return internal_auth.runtime_profile()
-
-
-def _prod_like_profile(profile: str | None = None) -> bool:
-    return internal_auth.prod_like_profile(profile)
-
-
-def _local_fixture_profile(profile: str | None = None) -> bool:
-    return internal_auth.local_fixture_profile(profile)
-
-
-def _demo_local_secret_configured() -> bool:
-    return internal_auth.demo_local_secret_configured()
-
-
-def _token_hash_mode() -> bool:
-    return internal_auth.token_hash_mode()
-
-
-def _allow_token_validator_in_prod() -> bool:
-    return internal_auth.allow_token_validator_in_prod()
 
 
 def _allowed_internal_services() -> dict[str, InternalServiceCredential]:
@@ -210,84 +169,8 @@ def _allowed_internal_services() -> dict[str, InternalServiceCredential]:
 INTERNAL_SERVICE_CREDENTIALS = _allowed_internal_services()
 
 
-def _jwt_issuer() -> str:
-    return internal_auth.jwt_issuer()
-
-
-def _jwt_audience() -> str:
-    return internal_auth.jwt_audience()
-
-
-def _jwt_secret() -> str:
-    return internal_auth.jwt_secret()
-
-
-def _jwt_algorithm() -> str:
-    return internal_auth.jwt_algorithm()
-
-
-def _jwt_jwks_json() -> str:
-    return internal_auth.jwt_jwks_json()
-
-
-def _jwt_jwks_path() -> str:
-    return internal_auth.jwt_jwks_path()
-
-
-def _jwt_service_claim() -> str:
-    return internal_auth.jwt_service_claim()
-
-
-def _jwt_authorities_claim() -> str:
-    return internal_auth.jwt_authorities_claim()
-
-
-def _env_int(name: str, default: int) -> int:
-    return internal_auth._env_int(name, default)
-
-
-def _jwt_max_token_age_seconds() -> int:
-    return internal_auth.jwt_max_token_age_seconds()
-
-
-def _jwt_max_allowed_ttl_seconds() -> int:
-    return internal_auth.jwt_max_allowed_ttl_seconds()
-
-
-def _jwt_clock_skew_seconds() -> int:
-    return internal_auth.jwt_clock_skew_seconds()
-
-
-def _replay_cache_enabled() -> bool:
-    return internal_auth.replay_cache_enabled()
-
-
-def _replay_cache_reject_mode() -> bool:
-    return internal_auth.replay_cache_reject_mode()
-
-
-def _replay_cache_max_entries() -> int:
-    return internal_auth.replay_cache_max_entries()
-
-
-def _allowed_jwt_service_authorities() -> dict[str, frozenset[str]]:
-    return internal_auth.allowed_jwt_service_authorities()
-
-
 def _allowed_internal_service_authorities() -> dict[str, frozenset[str]]:
     return internal_auth.allowed_internal_service_authorities()
-
-
-def _allowed_jwt_service_keys() -> dict[str, frozenset[str]]:
-    return internal_auth.allowed_jwt_service_keys()
-
-
-def _jwt_jwks_configured() -> bool:
-    return internal_auth.jwt_jwks_configured()
-
-
-def _jwt_configured() -> bool:
-    return internal_auth.jwt_configured()
 
 
 def _mtls_server_certfile() -> str:
@@ -302,16 +185,8 @@ def _mtls_ca_files() -> list[str]:
     return internal_auth.mtls_ca_files()
 
 
-def _mtls_spiffe_trust_domain() -> str:
-    return internal_auth.mtls_spiffe_trust_domain()
-
-
 def _mtls_configured() -> bool:
     return internal_auth.mtls_configured()
-
-
-def _spiffe_uri_for_service(service_name: str) -> str:
-    return internal_auth.spiffe_uri_for_service(service_name)
 
 
 def _certificate_datetime(value: Any) -> datetime:
@@ -333,18 +208,6 @@ def _certificate_validity_from_pem(path: str) -> tuple[datetime, datetime]:
     raw_not_after = certificate.not_valid_after_utc if hasattr(certificate, "not_valid_after_utc") else certificate.not_valid_after
     not_before = _certificate_datetime(raw_not_before)
     not_after = _certificate_datetime(raw_not_after)
-    return not_before, not_after
-
-
-def _certificate_validity_from_peer(peer_certificate: dict[str, Any]) -> tuple[datetime | None, datetime | None]:
-    not_before: datetime | None = None
-    not_after: datetime | None = None
-    raw_not_before = peer_certificate.get("notBefore")
-    raw_not_after = peer_certificate.get("notAfter")
-    if isinstance(raw_not_before, str) and raw_not_before.strip():
-        not_before = datetime.fromtimestamp(ssl.cert_time_to_seconds(raw_not_before), timezone.utc)
-    if isinstance(raw_not_after, str) and raw_not_after.strip():
-        not_after = datetime.fromtimestamp(ssl.cert_time_to_seconds(raw_not_after), timezone.utc)
     return not_before, not_after
 
 
@@ -525,38 +388,6 @@ def _start_mtls_certificate_lifecycle_monitor() -> None:
     threading.Thread(target=monitor, name="mtls-certificate-lifecycle-monitor", daemon=True).start()
 
 
-def _load_jwks() -> dict[str, Any]:
-    return internal_auth._load_jwks()
-
-
-def _jwk_for_kid(kid: str) -> dict[str, Any] | None:
-    return internal_auth._jwk_for_kid(kid)
-
-
-def _rs256_public_key_for_kid(kid: str) -> Any | None:
-    return internal_auth._rs256_public_key_for_kid(kid)
-
-
-def _jwt_authorities(value: Any) -> frozenset[str]:
-    return internal_auth._jwt_authorities(value)
-
-
-def _numeric_timestamp(value: Any) -> int | None:
-    return internal_auth._numeric_timestamp(value)
-
-
-def _record_replay_metric(reason: str, token_age_seconds: float) -> None:
-    internal_auth._record_replay_metric(reason, token_age_seconds)
-
-
-def _log_internal_auth_replay_detected() -> None:
-    internal_auth._log_internal_auth_replay_detected()
-
-
-def _token_hash(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
 def _validate_jwt_service_token(token: str, required_authority: str) -> tuple[InternalServicePrincipal | None, int, str]:
     return internal_auth.validate_jwt_service_token(token, required_authority)
 
@@ -565,41 +396,7 @@ def _mtls_service_principal_from_certificate(
         peer_certificate: dict[str, Any] | None,
         required_authority: str,
 ) -> tuple[InternalServicePrincipal | None, int, str]:
-    if not peer_certificate:
-        return None, 401, "missing_client_certificate"
-    allowed_authorities = _allowed_internal_service_authorities()
-    san_entries = peer_certificate.get("subjectAltName", ())
-    san_uris = {
-        value.strip()
-        for kind, value in san_entries
-        if kind == "URI" and isinstance(value, str) and value.strip()
-    }
-    matched_service_name: str | None = None
-    for service_name in sorted(allowed_authorities):
-        if _spiffe_uri_for_service(service_name) in san_uris:
-            matched_service_name = service_name
-            break
-    if matched_service_name is None:
-        return None, 403, "unknown_internal_service"
-    authorities = allowed_authorities[matched_service_name]
-    if required_authority not in authorities:
-        return None, 403, "missing_internal_authority"
-    certificate_not_before: datetime | None = None
-    certificate_expires_at: datetime | None = None
-    try:
-        certificate_not_before, certificate_expires_at = _certificate_validity_from_peer(peer_certificate)
-    except (OSError, ValueError):
-        return None, 403, "invalid_client_certificate"
-    if certificate_expires_at is not None and certificate_expires_at <= datetime.now(timezone.utc):
-        return None, 403, "invalid_client_certificate"
-    return InternalServicePrincipal(
-        service_name=matched_service_name,
-        authorities=authorities,
-        authenticated_at=datetime.now(timezone.utc),
-        auth_mode="MTLS_SERVICE_IDENTITY",
-        certificate_expires_at=certificate_expires_at,
-        certificate_not_before=certificate_not_before,
-    ), 200, "allowed"
+    return internal_auth.mtls_service_principal_from_certificate(peer_certificate, required_authority)
 
 
 def _validate_internal_auth_startup(
@@ -607,27 +404,8 @@ def _validate_internal_auth_startup(
         profile: str | None = None,
         credentials: dict[str, InternalServiceCredential] | None = None,
 ) -> None:
-    normalized_mode = _internal_auth_mode() if mode is None else _normalize_internal_auth_mode(mode)
     configured_credentials = INTERNAL_SERVICE_CREDENTIALS if credentials is None else credentials
-    if _demo_local_secret_configured() and not _local_fixture_profile(profile):
-        raise RuntimeError("Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.")
-    if normalized_mode == "DISABLED_LOCAL_ONLY" and _prod_like_profile(profile):
-        raise RuntimeError("DISABLED_LOCAL_ONLY internal auth mode is forbidden in prod-like profiles.")
-    if normalized_mode == "TOKEN_VALIDATOR" and _prod_like_profile(profile):
-        if not _allow_token_validator_in_prod():
-            raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires explicit prod compatibility opt-in.")
-        if not _token_hash_mode():
-            raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires token hash mode in prod-like profiles.")
-        if not configured_credentials:
-            raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires an allowed service list in prod-like profiles.")
-    if normalized_mode == "JWT_SERVICE_IDENTITY" and not _jwt_configured():
-        raise RuntimeError("JWT_SERVICE_IDENTITY internal auth mode requires complete JWT issuer, audience, algorithm, key material, service authorities, and service key bindings.")
-    if normalized_mode == "JWT_SERVICE_IDENTITY" and _jwt_algorithm() == "HS256" and _prod_like_profile(profile):
-        raise RuntimeError("HS256 JWT service identity is local compatibility only and is forbidden in prod-like profiles.")
-    if normalized_mode == "MTLS_READY" and _prod_like_profile(profile):
-        raise RuntimeError("MTLS_READY internal auth mode is a fail-closed placeholder until mTLS is configured.")
-    if normalized_mode == "MTLS_SERVICE_IDENTITY" and not _mtls_configured():
-        raise RuntimeError("MTLS_SERVICE_IDENTITY internal auth mode requires server certificate, server private key, CA trust material, and service authorities.")
+    normalized_mode = internal_auth.validate_internal_auth_startup(mode, profile, configured_credentials)
     if normalized_mode == "MTLS_SERVICE_IDENTITY" and _mtls_configured():
         try:
             not_before, not_after = _certificate_validity_from_pem(_mtls_server_certfile())
@@ -918,50 +696,15 @@ class FraudInferenceHandler(HttpRequestSupport, BaseHTTPRequestHandler):
         return False
 
     def _internal_service_principal(self, required_authority: str) -> tuple[InternalServicePrincipal | None, int, str]:
-        mode = _internal_auth_mode()
-        service_name = self.headers.get("X-Internal-Service-Name", "").strip()
-        token = self.headers.get("X-Internal-Service-Token", "").strip()
-        if mode == "DISABLED_LOCAL_ONLY" and not service_name and not token:
-            return InternalServicePrincipal(
-                service_name="localdev-anonymous",
-                authorities=frozenset({required_authority}),
-                authenticated_at=datetime.now(timezone.utc),
-                auth_mode=mode,
-            ), 200, "allowed_localdev"
-        if mode == "MTLS_READY":
-            return None, 401, "mtls_not_configured"
-        if mode == "MTLS_SERVICE_IDENTITY":
-            try:
-                peer_certificate = self.connection.getpeercert()
-            except AttributeError:
-                return None, 401, "missing_client_certificate"
-            return _mtls_service_principal_from_certificate(peer_certificate, required_authority)
-        if mode == "JWT_SERVICE_IDENTITY":
-            authorization = self.headers.get("Authorization", "").strip()
-            if not authorization:
-                return None, 401, "missing_internal_credentials"
-            if not authorization.startswith("Bearer ") or not authorization[7:].strip():
-                return None, 403, "invalid_internal_token"
-            return _validate_jwt_service_token(authorization[7:].strip(), required_authority)
-        if not service_name or not token:
-            return None, 401, "missing_internal_credentials"
-        credential = INTERNAL_SERVICE_CREDENTIALS.get(service_name)
-        if credential is None or not self._internal_token_matches(token, credential.token):
-            return None, 403, "invalid_internal_credentials"
-        if required_authority not in credential.authorities:
-            return None, 403, "missing_internal_authority"
-        return InternalServicePrincipal(
-            service_name=service_name,
-            authorities=credential.authorities,
-            authenticated_at=datetime.now(timezone.utc),
-            auth_mode=mode,
-        ), 200, "allowed"
-
-    def _internal_token_matches(self, presented_token: str, configured_token: str) -> bool:
-        if _token_hash_mode():
-            presented_hash = hashlib.sha256(presented_token.encode("utf-8")).hexdigest()
-            return hmac.compare_digest(presented_hash, configured_token.lower())
-        return hmac.compare_digest(configured_token, presented_token)
+        return internal_auth.authenticate_internal_service(
+            mode=_internal_auth_mode(),
+            headers=self.headers,
+            required_authority=required_authority,
+            credentials=INTERNAL_SERVICE_CREDENTIALS,
+            peer_certificate_provider=lambda: self.connection.getpeercert(),
+            jwt_validator=_validate_jwt_service_token,
+            mtls_validator=_mtls_service_principal_from_certificate,
+        )
 
     def _record_internal_auth_success(self, principal: InternalServicePrincipal) -> None:
         if principal.auth_mode in {"JWT_SERVICE_IDENTITY", "MTLS_SERVICE_IDENTITY"}:

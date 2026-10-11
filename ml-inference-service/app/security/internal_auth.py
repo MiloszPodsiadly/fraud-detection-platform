@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import re
+import ssl
 import threading
 import time
 from collections import OrderedDict
@@ -355,6 +357,91 @@ def spiffe_uri_for_service(service_name: str) -> str:
     return f"spiffe://{mtls_spiffe_trust_domain()}/{service_name}"
 
 
+def token_matches(presented_token: str, configured_token: str) -> bool:
+    if token_hash_mode():
+        presented_hash = hashlib.sha256(presented_token.encode("utf-8")).hexdigest()
+        return hmac.compare_digest(presented_hash, configured_token.lower())
+    return hmac.compare_digest(configured_token, presented_token)
+
+
+def mtls_service_principal_from_certificate(
+        peer_certificate: dict[str, Any] | None,
+        required_authority: str,
+) -> tuple[InternalServicePrincipal | None, int, str]:
+    if not peer_certificate:
+        return None, 401, "missing_client_certificate"
+    allowed_authorities = allowed_internal_service_authorities()
+    san_entries = peer_certificate.get("subjectAltName", ())
+    san_uris = {
+        value.strip()
+        for kind, value in san_entries
+        if kind == "URI" and isinstance(value, str) and value.strip()
+    }
+    matched_service_name = next(
+        (
+            service_name
+            for service_name in sorted(allowed_authorities)
+            if spiffe_uri_for_service(service_name) in san_uris
+        ),
+        None,
+    )
+    if matched_service_name is None:
+        return None, 403, "unknown_internal_service"
+    authorities = allowed_authorities[matched_service_name]
+    if required_authority not in authorities:
+        return None, 403, "missing_internal_authority"
+    try:
+        certificate_not_before = _peer_certificate_timestamp(peer_certificate.get("notBefore"))
+        certificate_expires_at = _peer_certificate_timestamp(peer_certificate.get("notAfter"))
+    except (OSError, ValueError):
+        return None, 403, "invalid_client_certificate"
+    if certificate_expires_at is not None and certificate_expires_at <= datetime.now(timezone.utc):
+        return None, 403, "invalid_client_certificate"
+    return InternalServicePrincipal(
+        service_name=matched_service_name,
+        authorities=authorities,
+        authenticated_at=datetime.now(timezone.utc),
+        auth_mode="MTLS_SERVICE_IDENTITY",
+        certificate_expires_at=certificate_expires_at,
+        certificate_not_before=certificate_not_before,
+    ), 200, "allowed"
+
+
+def _peer_certificate_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return datetime.fromtimestamp(ssl.cert_time_to_seconds(value), timezone.utc)
+
+
+def validate_internal_auth_startup(
+        mode: str | None = None,
+        profile: str | None = None,
+        credentials: dict[str, InternalServiceCredential] | None = None,
+) -> str:
+    normalized_mode = internal_auth_mode() if mode is None else normalize_internal_auth_mode(mode)
+    configured_credentials = allowed_internal_services() if credentials is None else credentials
+    if demo_local_secret_configured() and not local_fixture_profile(profile):
+        raise RuntimeError("Demo local secret detected outside local/dev/docker-local profile or explicit test-fixture context.")
+    if normalized_mode == "DISABLED_LOCAL_ONLY" and prod_like_profile(profile):
+        raise RuntimeError("DISABLED_LOCAL_ONLY internal auth mode is forbidden in prod-like profiles.")
+    if normalized_mode == "TOKEN_VALIDATOR" and prod_like_profile(profile):
+        if not allow_token_validator_in_prod():
+            raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires explicit prod compatibility opt-in.")
+        if not token_hash_mode():
+            raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires token hash mode in prod-like profiles.")
+        if not configured_credentials:
+            raise RuntimeError("TOKEN_VALIDATOR internal auth mode requires an allowed service list in prod-like profiles.")
+    if normalized_mode == "JWT_SERVICE_IDENTITY" and not jwt_configured():
+        raise RuntimeError("JWT_SERVICE_IDENTITY internal auth mode requires complete JWT issuer, audience, algorithm, key material, service authorities, and service key bindings.")
+    if normalized_mode == "JWT_SERVICE_IDENTITY" and jwt_algorithm() == "HS256" and prod_like_profile(profile):
+        raise RuntimeError("HS256 JWT service identity is local compatibility only and is forbidden in prod-like profiles.")
+    if normalized_mode == "MTLS_READY" and prod_like_profile(profile):
+        raise RuntimeError("MTLS_READY internal auth mode is a fail-closed placeholder until mTLS is configured.")
+    if normalized_mode == "MTLS_SERVICE_IDENTITY" and not mtls_configured():
+        raise RuntimeError("MTLS_SERVICE_IDENTITY internal auth mode requires server certificate, server private key, CA trust material, and service authorities.")
+    return normalized_mode
+
+
 def _load_jwks() -> dict[str, Any]:
     raw = jwt_jwks_json()
     if not raw:
@@ -517,4 +604,53 @@ def validate_jwt_service_token(
         authorities=token_authorities & allowed_authorities,
         authenticated_at=datetime.now(timezone.utc),
         auth_mode="JWT_SERVICE_IDENTITY",
+    ), 200, "allowed"
+
+
+def authenticate_internal_service(
+        mode: str,
+        headers: Any,
+        required_authority: str,
+        credentials: dict[str, InternalServiceCredential],
+        peer_certificate_provider,
+        jwt_validator,
+        mtls_validator,
+) -> tuple[InternalServicePrincipal | None, int, str]:
+    normalized_mode = normalize_internal_auth_mode(mode)
+    service_name = headers.get("X-Internal-Service-Name", "").strip()
+    token = headers.get("X-Internal-Service-Token", "").strip()
+    if normalized_mode == "DISABLED_LOCAL_ONLY" and not service_name and not token:
+        return InternalServicePrincipal(
+            service_name="localdev-anonymous",
+            authorities=frozenset({required_authority}),
+            authenticated_at=datetime.now(timezone.utc),
+            auth_mode=normalized_mode,
+        ), 200, "allowed_localdev"
+    if normalized_mode == "MTLS_READY":
+        return None, 401, "mtls_not_configured"
+    if normalized_mode == "MTLS_SERVICE_IDENTITY":
+        try:
+            peer_certificate = peer_certificate_provider()
+        except AttributeError:
+            return None, 401, "missing_client_certificate"
+        return mtls_validator(peer_certificate, required_authority)
+    if normalized_mode == "JWT_SERVICE_IDENTITY":
+        authorization = headers.get("Authorization", "").strip()
+        if not authorization:
+            return None, 401, "missing_internal_credentials"
+        if not authorization.startswith("Bearer ") or not authorization[7:].strip():
+            return None, 403, "invalid_internal_token"
+        return jwt_validator(authorization[7:].strip(), required_authority)
+    if not service_name or not token:
+        return None, 401, "missing_internal_credentials"
+    credential = credentials.get(service_name)
+    if credential is None or not token_matches(token, credential.token):
+        return None, 403, "invalid_internal_credentials"
+    if required_authority not in credential.authorities:
+        return None, 403, "missing_internal_authority"
+    return InternalServicePrincipal(
+        service_name=service_name,
+        authorities=credential.authorities,
+        authenticated_at=datetime.now(timezone.utc),
+        auth_mode=normalized_mode,
     ), 200, "allowed"
