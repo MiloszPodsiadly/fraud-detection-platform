@@ -42,12 +42,14 @@ import static org.mockito.Mockito.when;
 
 class AlertKafkaFailureHandlingTest {
 
-    private final AlertKafkaConfig config = new AlertKafkaConfig();
+    private final TransactionScoredKafkaConfiguration transactionConfiguration =
+            new TransactionScoredKafkaConfiguration();
+    private final KafkaRecoveryConfiguration recoveryConfiguration = new KafkaRecoveryConfiguration();
 
     @Test
     void capturesMalformedPayloadForContainerErrorHandling() {
         DefaultKafkaConsumerFactory<String, TransactionScoredEvent> consumerFactory =
-                (DefaultKafkaConsumerFactory<String, TransactionScoredEvent>) config
+                (DefaultKafkaConsumerFactory<String, TransactionScoredEvent>) transactionConfiguration
                         .transactionScoredEventConsumerFactory(new KafkaProperties());
 
         assertThat(consumerFactory.getValueDeserializer()).isInstanceOf(ErrorHandlingDeserializer.class);
@@ -72,7 +74,7 @@ class AlertKafkaFailureHandlingTest {
                 + "\"mlPredictionEvidence\":{\"contractVersion\":2}"
                 + "}").getBytes(StandardCharsets.UTF_8);
         DefaultKafkaConsumerFactory<String, TransactionScoredEvent> canonicalFactory =
-                (DefaultKafkaConsumerFactory<String, TransactionScoredEvent>) config
+                (DefaultKafkaConsumerFactory<String, TransactionScoredEvent>) transactionConfiguration
                         .transactionScoredEventConsumerFactory(new KafkaProperties());
         RecordHeaders headers = new RecordHeaders();
 
@@ -94,7 +96,7 @@ class AlertKafkaFailureHandlingTest {
         );
 
         assertThat(containerFactoryMethods).allSatisfy(methodName -> {
-            var method = Arrays.stream(AlertKafkaConfig.class.getDeclaredMethods())
+            var method = Arrays.stream(KafkaRecoveryConfiguration.class.getDeclaredMethods())
                     .filter(candidate -> candidate.getName().equals(methodName))
                     .findFirst()
                     .orElseThrow();
@@ -104,7 +106,7 @@ class AlertKafkaFailureHandlingTest {
             assertThat(qualifier.value()).isEqualTo("transactionScoredEventConsumerFactory");
         });
 
-        assertThat(Arrays.stream(AlertKafkaConfig.class.getDeclaredMethods())
+        assertThat(Arrays.stream(KafkaRecoveryConfiguration.class.getDeclaredMethods())
                 .map(java.lang.reflect.Method::getName))
                 .doesNotContain("mlPredictionEvidenceConsumerFactory");
     }
@@ -112,7 +114,7 @@ class AlertKafkaFailureHandlingTest {
     @Test
     void preservesOriginalMalformedBytesForDeadLetterPublication() {
         DefaultKafkaProducerFactory<Object, Object> producerFactory =
-                (DefaultKafkaProducerFactory<Object, Object>) config.deadLetterProducerFactory(new KafkaProperties());
+                (DefaultKafkaProducerFactory<Object, Object>) recoveryConfiguration.deadLetterProducerFactory(new KafkaProperties());
         Serializer<Object> serializer = producerFactory.getValueSerializer();
         byte[] malformedPayload = "{not-json".getBytes(StandardCharsets.UTF_8);
 
@@ -126,7 +128,7 @@ class AlertKafkaFailureHandlingTest {
         KafkaOperations<Object, Object> kafkaOperations = mock(KafkaOperations.class);
         when(kafkaOperations.send(any(ProducerRecord.class)))
                 .thenReturn(CompletableFuture.completedFuture(mock(SendResult.class)));
-        DeadLetterPublishingRecoverer recoverer = config.deadLetterPublishingRecoverer(
+        DeadLetterPublishingRecoverer recoverer = recoveryConfiguration.deadLetterPublishingRecoverer(
                 kafkaOperations,
                 new KafkaTopicProperties(
                         "transactions.scored",
@@ -182,7 +184,7 @@ class AlertKafkaFailureHandlingTest {
         KafkaOperations<Object, Object> kafkaOperations = mock(KafkaOperations.class);
         when(kafkaOperations.send(any(ProducerRecord.class)))
                 .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("broker unavailable")));
-        DeadLetterPublishingRecoverer recoverer = config.deadLetterPublishingRecoverer(
+        DeadLetterPublishingRecoverer recoverer = recoveryConfiguration.deadLetterPublishingRecoverer(
                 kafkaOperations,
                 new KafkaTopicProperties(
                         "transactions.scored",
@@ -215,7 +217,7 @@ class AlertKafkaFailureHandlingTest {
 
     @Test
     void acknowledgesOnlyAfterConfiguredRecoveryCompletes() {
-        DeadLetterPublishingRecoverer recoverer = config.deadLetterPublishingRecoverer(
+        DeadLetterPublishingRecoverer recoverer = recoveryConfiguration.deadLetterPublishingRecoverer(
                 mock(KafkaOperations.class),
                 new KafkaTopicProperties(
                         "transactions.scored",
@@ -224,7 +226,7 @@ class AlertKafkaFailureHandlingTest {
                         "transactions.dead-letter"
                 )
         );
-        DefaultErrorHandler errorHandler = config.kafkaErrorHandler(
+        DefaultErrorHandler errorHandler = recoveryConfiguration.kafkaErrorHandler(
                 recoverer,
                 new KafkaConsumerProperties(1, 3, 1000L)
         );
@@ -238,7 +240,7 @@ class AlertKafkaFailureHandlingTest {
         KafkaOperations<Object, Object> kafkaOperations = mock(KafkaOperations.class);
         when(kafkaOperations.send(any(ProducerRecord.class)))
                 .thenReturn(CompletableFuture.completedFuture(mock(SendResult.class)));
-        DeadLetterPublishingRecoverer recoverer = config.mlPredictionEvidenceDeadLetterPublishingRecoverer(
+        DeadLetterPublishingRecoverer recoverer = recoveryConfiguration.mlPredictionEvidenceDeadLetterPublishingRecoverer(
                 kafkaOperations,
                 evidenceRecoveryProperties()
         );
@@ -272,7 +274,7 @@ class AlertKafkaFailureHandlingTest {
         KafkaOperations<Object, Object> kafkaOperations = mock(KafkaOperations.class);
         when(kafkaOperations.send(any(ProducerRecord.class)))
                 .thenReturn(CompletableFuture.completedFuture(mock(SendResult.class)));
-        DeadLetterPublishingRecoverer recoverer = config.mlPredictionEvidenceDeadLetterPublishingRecoverer(
+        DeadLetterPublishingRecoverer recoverer = recoveryConfiguration.mlPredictionEvidenceDeadLetterPublishingRecoverer(
                 kafkaOperations,
                 evidenceRecoveryProperties()
         );
@@ -303,7 +305,7 @@ class AlertKafkaFailureHandlingTest {
         KafkaOperations<Object, Object> kafkaOperations = mock(KafkaOperations.class);
         when(kafkaOperations.send(any(ProducerRecord.class)))
                 .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("broker unavailable")));
-        DeadLetterPublishingRecoverer recoverer = config.mlPredictionEvidenceDeadLetterPublishingRecoverer(
+        DeadLetterPublishingRecoverer recoverer = recoveryConfiguration.mlPredictionEvidenceDeadLetterPublishingRecoverer(
                 kafkaOperations,
                 evidenceRecoveryProperties()
         );
@@ -326,7 +328,7 @@ class AlertKafkaFailureHandlingTest {
 
     @Test
     void evidenceConsumerUsesBoundedConcurrencyAndRecordAcknowledgement() {
-        var factory = config.mlPredictionEvidenceKafkaListenerContainerFactory(
+        var factory = recoveryConfiguration.mlPredictionEvidenceKafkaListenerContainerFactory(
                 mock(ConsumerFactory.class),
                 mock(DefaultErrorHandler.class),
                 new KafkaConsumerProperties(1, 3, 1000L)
@@ -340,7 +342,7 @@ class AlertKafkaFailureHandlingTest {
 
     @Test
     void engineIntelligenceConsumerHasIndependentRecordAcknowledgementFactory() {
-        var factory = config.engineIntelligenceKafkaListenerContainerFactory(
+        var factory = recoveryConfiguration.engineIntelligenceKafkaListenerContainerFactory(
                 mock(ConsumerFactory.class),
                 mock(DefaultErrorHandler.class),
                 new KafkaConsumerProperties(1, 3, 1000L)
@@ -359,11 +361,11 @@ class AlertKafkaFailureHandlingTest {
         when(kafkaOperations.send(any(ProducerRecord.class)))
                 .thenReturn(CompletableFuture.completedFuture(mock(SendResult.class)));
         TransactionScoredRecoveryProperties properties = transactionScoredRecoveryProperties();
-        DeadLetterPublishingRecoverer recoverer = config.transactionScoredRedriveQuarantineRecoverer(
+        DeadLetterPublishingRecoverer recoverer = recoveryConfiguration.transactionScoredRedriveQuarantineRecoverer(
                 kafkaOperations,
                 properties
         );
-        DefaultErrorHandler errorHandler = config.transactionScoredRedriveErrorHandler(
+        DefaultErrorHandler errorHandler = recoveryConfiguration.transactionScoredRedriveErrorHandler(
                 recoverer,
                 new KafkaConsumerProperties(1, 3, 1000L)
         );
@@ -386,7 +388,7 @@ class AlertKafkaFailureHandlingTest {
 
     @Test
     void transactionRedriveUsesIndependentRecordAcknowledgementFactory() {
-        var factory = config.transactionScoredRedriveKafkaListenerContainerFactory(
+        var factory = recoveryConfiguration.transactionScoredRedriveKafkaListenerContainerFactory(
                 mock(ConsumerFactory.class),
                 mock(DefaultErrorHandler.class),
                 new KafkaConsumerProperties(1, 3, 1000L)
@@ -405,7 +407,7 @@ class AlertKafkaFailureHandlingTest {
         when(kafkaOperations.send(any(ProducerRecord.class)))
                 .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("broker unavailable")));
         TransactionScoredRecoveryProperties properties = transactionScoredRecoveryProperties();
-        DeadLetterPublishingRecoverer recoverer = config.transactionScoredRedriveQuarantineRecoverer(
+        DeadLetterPublishingRecoverer recoverer = recoveryConfiguration.transactionScoredRedriveQuarantineRecoverer(
                 kafkaOperations,
                 properties
         );

@@ -11,7 +11,8 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
     private static final String MESSAGE = "TRANSACTION_SCORED_EVENT_CONSUMER_INVENTORY_REVIEW_REQUIRED";
 
     private static final List<String> REVIEWED_PRODUCTION_REFERENCES = List.of(
-            "alert-service/src/main/java/com/frauddetection/alert/config/AlertKafkaConfig.java",
+            "alert-service/src/main/java/com/frauddetection/alert/config/KafkaRecoveryConfiguration.java",
+            "alert-service/src/main/java/com/frauddetection/alert/config/TransactionScoredKafkaConfiguration.java",
             "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/EngineIntelligencePendingProjectionService.java",
             "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/EngineIntelligenceProjectionService.java",
             "alert-service/src/main/java/com/frauddetection/alert/engineintelligence/MlPredictionEvidenceProjectionService.java",
@@ -71,7 +72,8 @@ class TransactionScoredEventConsumerInventorySourceScanGuardTest {
         assertThat(EngineIntelligenceSourceScanSupport.read(
                 "docs/architecture/engine_intelligence_consumer_readiness.md"
         )).contains(
-                "AlertKafkaConfig",
+                "KafkaRecoveryConfiguration",
+                "TransactionScoredKafkaConfiguration",
                 "JacksonKafkaDeserializer",
                 "TransactionScoredEventListener",
                 "TransactionScoredRedriveListener",

@@ -190,7 +190,9 @@ class RegulatedMutationArchitectureTest {
                         String normalized = path.toString().replace('\\', '/');
                         return !normalized.endsWith("messaging/FraudDecisionEventPublisher.java")
                                 && !normalized.endsWith("config/KafkaConfig.java")
-                                && !normalized.endsWith("config/AlertKafkaConfig.java")
+                                && !normalized.endsWith("config/KafkaRecoveryConfiguration.java")
+                                && !normalized.endsWith("config/TransactionScoredKafkaConfiguration.java")
+                                && !normalized.endsWith("config/FraudEventKafkaConfiguration.java")
                                 && !normalized.contains("/messaging/");
                     })
                     .toList();

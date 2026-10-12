@@ -19,7 +19,8 @@ class EngineIntelligenceDownstreamIsolationTest {
         assertThat(sourcesExcluding(
                 alertService,
                 alertService.resolve("engineintelligence"),
-                alertService.resolve("config/AlertKafkaConfig.java"),
+                alertService.resolve("config/KafkaRecoveryConfiguration.java"),
+                alertService.resolve("config/TransactionScoredKafkaConfiguration.java"),
                 alertService.resolve("service/TransactionMonitoringService.java"),
                 alertService.resolve("api/EngineIntelligenceComparisonResponse.java"),
                 alertService.resolve("api/EngineIntelligenceDiagnosticSignalResponse.java"),

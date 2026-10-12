@@ -1,6 +1,6 @@
 package com.frauddetection.alert.engineintelligence;
 
-import com.frauddetection.alert.config.AlertKafkaConfig;
+import com.frauddetection.alert.config.TransactionScoredKafkaConfiguration;
 import com.frauddetection.alert.config.KafkaTopicProperties;
 import com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult;
 import com.frauddetection.alert.messaging.TransactionScoredEventListener;
@@ -29,7 +29,7 @@ import static org.mockito.Mockito.when;
 
 class CanonicalTransactionScoredEventDeserializationTest {
 
-    private final AlertKafkaConfig config = new AlertKafkaConfig();
+    private final TransactionScoredKafkaConfiguration config = new TransactionScoredKafkaConfiguration();
     private final ObjectMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
 
     @Test

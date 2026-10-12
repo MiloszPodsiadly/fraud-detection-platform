@@ -1,7 +1,7 @@
 package com.frauddetection.alert.engineintelligence;
 
 import com.frauddetection.alert.audit.AuditEventDocument;
-import com.frauddetection.alert.config.AlertKafkaConfig;
+import com.frauddetection.alert.config.KafkaRecoveryConfiguration;
 import com.frauddetection.alert.config.KafkaConsumerProperties;
 import com.frauddetection.alert.config.MlPredictionEvidenceRecoveryProperties;
 import com.frauddetection.alert.messaging.MlPredictionEvidenceTransientProcessingException;
@@ -89,7 +89,7 @@ class MlPredictionEvidenceRecoveryIntegrationTest {
     private KafkaListenerEndpointRegistry listenerRegistry;
 
     @Autowired
-    private AlertKafkaConfig kafkaConfig;
+    private KafkaRecoveryConfiguration kafkaConfig;
 
     @MockitoBean
     private MlPredictionEvidenceProjectionRepository evidenceRepository;
