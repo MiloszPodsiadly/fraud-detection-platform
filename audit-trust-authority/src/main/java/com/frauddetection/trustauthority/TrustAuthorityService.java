@@ -20,36 +20,24 @@ import org.springframework.util.StringUtils;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.security.GeneralSecurityException;
-import java.security.KeyFactory;
-import java.security.KeyPair;
-import java.security.KeyPairGenerator;
 import java.security.MessageDigest;
-import java.security.PrivateKey;
-import java.security.PublicKey;
 import java.security.Signature;
-import java.security.spec.PKCS8EncodedKeySpec;
-import java.security.spec.X509EncodedKeySpec;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
 @Service
 public class TrustAuthorityService {
 
-    private static final String ALGORITHM = "Ed25519";
+    private static final String ALGORITHM = TrustAuthorityKeyRegistry.ALGORITHM;
     private static final Duration REQUEST_SIGNATURE_MAX_AGE = Duration.ofMinutes(5);
     private static final Duration REQUEST_SIGNATURE_MAX_SKEW = Duration.ofSeconds(30);
     private static final String HMAC_ALGORITHM = "HmacSHA256";
@@ -64,9 +52,8 @@ public class TrustAuthorityService {
     private final TrustAuthorityRequestReplayGuard replayGuard;
     private final TrustAuthorityMetrics metrics;
     private final TrustAuthorityJwtIdentityVerifier jwtIdentityVerifier;
-    private final boolean localKeyGenerationAllowed;
-    private final List<RegisteredKey> keys;
-    private final RegisteredKey activeKey;
+    private final TrustAuthorityKeyRegistry keyRegistry;
+    private final TrustAuthorityKeyRegistry.RegisteredKey activeKey;
 
     @Autowired
     public TrustAuthorityService(
@@ -83,15 +70,8 @@ public class TrustAuthorityService {
         this.replayGuard = replayGuard;
         this.metrics = metrics;
         this.jwtIdentityVerifier = new TrustAuthorityJwtIdentityVerifier(properties, metrics);
-        this.localKeyGenerationAllowed = localKeyGenerationAllowed(environment);
-        this.keys = loadKeys(properties);
-        this.activeKey = keys.stream()
-                .filter(key -> "ACTIVE".equals(key.status()))
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("Trust authority requires one active signing key."));
-        if (activeKey.privateKey() == null) {
-            throw new IllegalStateException("Active trust authority key requires private key material.");
-        }
+        this.keyRegistry = new TrustAuthorityKeyRegistry(properties, environment);
+        this.activeKey = keyRegistry.activeKey();
     }
 
     TrustAuthorityService(TrustAuthorityProperties properties, TrustAuthorityAuditSink auditSink, TrustAuthorityRateLimiter rateLimiter) {
@@ -101,15 +81,8 @@ public class TrustAuthorityService {
         this.replayGuard = new TrustAuthorityRequestReplayGuard();
         this.metrics = new TrustAuthorityMetrics(Metrics.globalRegistry);
         this.jwtIdentityVerifier = new TrustAuthorityJwtIdentityVerifier(properties, metrics);
-        this.localKeyGenerationAllowed = true;
-        this.keys = loadKeys(properties);
-        this.activeKey = keys.stream()
-                .filter(key -> "ACTIVE".equals(key.status()))
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("Trust authority requires one active signing key."));
-        if (activeKey.privateKey() == null) {
-            throw new IllegalStateException("Active trust authority key requires private key material.");
-        }
+        this.keyRegistry = new TrustAuthorityKeyRegistry(properties, true);
+        this.activeKey = keyRegistry.activeKey();
     }
 
     TrustSignResponse sign(TrustAuthorityRequestCredentials credentials, TrustSignRequest request) {
@@ -163,10 +136,7 @@ public class TrustAuthorityService {
         }
         enforceReplay(caller, requestId(credentials), "VERIFY", request.purpose(), request.payloadHash(), request.keyId());
         validatePurpose(request.purpose());
-        RegisteredKey key = keys.stream()
-                .filter(candidate -> candidate.keyId().equals(request.keyId()))
-                .findFirst()
-                .orElse(null);
+        TrustAuthorityKeyRegistry.RegisteredKey key = keyRegistry.find(request.keyId()).orElse(null);
         if (key == null) {
             return verifyFailure(caller, requestId(credentials), request, "UNKNOWN_KEY");
         }
@@ -199,25 +169,11 @@ public class TrustAuthorityService {
     }
 
     List<TrustKeyResponse> keys() {
-        return keys.stream()
-                .sorted(Comparator.comparing(RegisteredKey::keyId))
-                .map(key -> new TrustKeyResponse(
-                        key.keyId(),
-                        ALGORITHM,
-                        Base64.getEncoder().encodeToString(key.publicKey().getEncoded()),
-                        fingerprint(key.publicKey().getEncoded()),
-                        key.validFrom(),
-                        key.validUntil(),
-                        key.status()
-                ))
-                .toList();
+        return keyRegistry.responses();
     }
 
     TrustKeyResponse key() {
-        return keys().stream()
-                .filter(key -> activeKey.keyId().equals(key.keyId()))
-                .findFirst()
-                .orElseThrow();
+        return keyRegistry.activeResponse();
     }
 
     TrustAuthorityAuditIntegrityResponse auditIntegrity(TrustAuthorityRequestCredentials credentials, int limit) {
@@ -253,53 +209,6 @@ public class TrustAuthorityService {
         return response;
     }
 
-    private List<RegisteredKey> loadKeys(TrustAuthorityProperties properties) {
-        if (!properties.getKeys().isEmpty()) {
-            return properties.getKeys().stream()
-                    .map(this::loadConfiguredKey)
-                    .toList();
-        }
-        return List.of(loadLegacyKey(properties));
-    }
-
-    private RegisteredKey loadConfiguredKey(TrustAuthorityProperties.KeyEntry entry) {
-        if (!ALGORITHM.equals(entry.getAlgorithm())) {
-            throw new IllegalStateException("Unsupported trust authority key algorithm.");
-        }
-        try {
-            PublicKey publicKey = publicKey(readKeyMaterial(entry.getPublicKey(), entry.getPublicKeyPath()));
-            PrivateKey privateKey = StringUtils.hasText(entry.getPrivateKey()) || StringUtils.hasText(entry.getPrivateKeyPath())
-                    ? privateKey(readKeyMaterial(entry.getPrivateKey(), entry.getPrivateKeyPath()))
-                    : null;
-            return new RegisteredKey(
-                    entry.getKeyId(),
-                    publicKey,
-                    privateKey,
-                    normalizeStatus(entry.getStatus()),
-                    entry.getValidFrom() == null ? Instant.EPOCH : entry.getValidFrom(),
-                    entry.getValidUntil()
-            );
-        } catch (IOException | GeneralSecurityException exception) {
-            throw new IllegalStateException("Trust authority configured key material could not be initialized.", exception);
-        }
-    }
-
-    private RegisteredKey loadLegacyKey(TrustAuthorityProperties properties) {
-        try {
-            KeyPair keyPair = loadOrGenerateKeyPair(properties);
-            return new RegisteredKey(
-                    properties.getKeyId(),
-                    keyPair.getPublic(),
-                    keyPair.getPrivate(),
-                    "ACTIVE",
-                    Instant.EPOCH,
-                    null
-            );
-        } catch (IOException | GeneralSecurityException exception) {
-            throw new IllegalStateException("Trust authority key material could not be initialized.", exception);
-        }
-    }
-
     private byte[] canonicalBytes(String purpose, String payloadHash, String partitionKey, long chainPosition, String anchorId) {
         Map<String, Object> canonical = new LinkedHashMap<>();
         canonical.put("anchor_id", anchorId);
@@ -318,69 +227,6 @@ public class TrustAuthorityService {
         if (!"AUDIT_ANCHOR".equals(purpose)) {
             throw new TrustAuthorityRequestException(HttpStatus.FORBIDDEN, "Unsupported trust signing purpose.");
         }
-    }
-
-    private KeyPair loadOrGenerateKeyPair(TrustAuthorityProperties properties) throws IOException, GeneralSecurityException {
-        if (StringUtils.hasText(properties.getPrivateKeyPath()) && Files.exists(Path.of(properties.getPrivateKeyPath()))) {
-            PrivateKey privateKey = privateKey(Files.readString(Path.of(properties.getPrivateKeyPath())));
-            PublicKey publicKey = StringUtils.hasText(properties.getPublicKeyPath()) && Files.exists(Path.of(properties.getPublicKeyPath()))
-                    ? publicKey(Files.readString(Path.of(properties.getPublicKeyPath())))
-                    : null;
-            if (publicKey == null) {
-                throw new IllegalStateException("Trust authority public key path is required when loading a private key.");
-            }
-            return new KeyPair(publicKey, privateKey);
-        }
-        if (!localKeyGenerationAllowed) {
-            throw new IllegalStateException("Trust authority key generation is allowed only for local/dev/test profiles.");
-        }
-        KeyPairGenerator generator = KeyPairGenerator.getInstance(ALGORITHM);
-        KeyPair generated = generator.generateKeyPair();
-        writeKeysIfConfigured(properties, generated);
-        return generated;
-    }
-
-    private void writeKeysIfConfigured(TrustAuthorityProperties properties, KeyPair generated) throws IOException {
-        if (StringUtils.hasText(properties.getPrivateKeyPath())) {
-            Path path = Path.of(properties.getPrivateKeyPath());
-            if (path.getParent() != null) {
-                Files.createDirectories(path.getParent());
-            }
-            Files.writeString(path, Base64.getEncoder().encodeToString(generated.getPrivate().getEncoded()));
-        }
-        if (StringUtils.hasText(properties.getPublicKeyPath())) {
-            Path path = Path.of(properties.getPublicKeyPath());
-            if (path.getParent() != null) {
-                Files.createDirectories(path.getParent());
-            }
-            Files.writeString(path, Base64.getEncoder().encodeToString(generated.getPublic().getEncoded()));
-        }
-    }
-
-    private String readKeyMaterial(String inline, String path) throws IOException {
-        if (StringUtils.hasText(inline)) {
-            return inline;
-        }
-        if (StringUtils.hasText(path)) {
-            return Files.readString(Path.of(path));
-        }
-        throw new IllegalStateException("Configured trust authority key material is missing.");
-    }
-
-    private PrivateKey privateKey(String encoded) throws GeneralSecurityException {
-        return KeyFactory.getInstance(ALGORITHM).generatePrivate(new PKCS8EncodedKeySpec(Base64.getDecoder().decode(encoded.trim())));
-    }
-
-    private PublicKey publicKey(String encoded) throws GeneralSecurityException {
-        return KeyFactory.getInstance(ALGORITHM).generatePublic(new X509EncodedKeySpec(Base64.getDecoder().decode(encoded.trim())));
-    }
-
-    private String normalizeStatus(String status) {
-        String normalized = StringUtils.hasText(status) ? status.trim().toUpperCase() : "ACTIVE";
-        if (!List.of("ACTIVE", "RETIRED", "REVOKED").contains(normalized)) {
-            throw new IllegalStateException("Unsupported trust authority key status.");
-        }
-        return normalized;
     }
 
     private TrustVerifyResponse verifyFailure(TrustAuthorityCallerIdentity caller, String requestId, TrustVerifyRequest request, String reasonCode) {
@@ -591,14 +437,6 @@ public class TrustAuthorityService {
         }
     }
 
-    private String fingerprint(byte[] publicKey) {
-        try {
-            return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(publicKey));
-        } catch (GeneralSecurityException exception) {
-            throw new IllegalStateException("Trust authority key fingerprint could not be calculated.");
-        }
-    }
-
     private String nullSafe(String value) {
         return value == null ? "" : value;
     }
@@ -620,22 +458,4 @@ public class TrustAuthorityService {
         return List.of(alertService, scoringService);
     }
 
-    private boolean localKeyGenerationAllowed(Environment environment) {
-        Set<String> profiles = Set.of(environment.getActiveProfiles());
-        return profiles.isEmpty()
-                || profiles.contains("local")
-                || profiles.contains("dev")
-                || profiles.contains("test")
-                || profiles.contains("docker-local");
-    }
-
-    private record RegisteredKey(
-            String keyId,
-            PublicKey publicKey,
-            PrivateKey privateKey,
-            String status,
-            Instant validFrom,
-            Instant validUntil
-    ) {
-    }
 }
