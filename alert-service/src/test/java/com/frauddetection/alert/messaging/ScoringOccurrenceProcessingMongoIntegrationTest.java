@@ -628,6 +628,56 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
     }
 
     @Test
+    void newerCaseAggregationSnapshotCannotBeOverwrittenByOlderArrival() {
+        TransactionScoredEvent older = caseEvent(
+                "transaction-case-a",
+                "event-case-a",
+                BASE_TIME,
+                List.of("transfer-case-root", "transaction-case-a"),
+                new BigDecimal("9000.00"),
+                new BigDecimal("20000.00")
+        );
+        TransactionScoredEvent newer = caseEvent(
+                "transaction-case-b",
+                "event-case-b",
+                BASE_TIME.plusNanos(1),
+                List.of("transfer-case-root", "transaction-case-a", "transaction-case-b"),
+                new BigDecimal("11000.00"),
+                new BigDecimal("30000.00")
+        );
+
+        process(newer);
+        process(older);
+
+        assertLatestCaseAggregation("event-case-b", "30000.00", "transaction-case-a", "transaction-case-b");
+    }
+
+    @Test
+    void newerCaseAggregationSnapshotSupersedesOlderArrival() {
+        TransactionScoredEvent older = caseEvent(
+                "transaction-case-a",
+                "event-case-a",
+                BASE_TIME,
+                List.of("transfer-case-root", "transaction-case-a"),
+                new BigDecimal("9000.00"),
+                new BigDecimal("20000.00")
+        );
+        TransactionScoredEvent newer = caseEvent(
+                "transaction-case-b",
+                "event-case-b",
+                BASE_TIME.plusNanos(1),
+                List.of("transfer-case-root", "transaction-case-a", "transaction-case-b"),
+                new BigDecimal("11000.00"),
+                new BigDecimal("30000.00")
+        );
+
+        process(older);
+        process(newer);
+
+        assertLatestCaseAggregation("event-case-b", "30000.00", "transaction-case-a", "transaction-case-b");
+    }
+
+    @Test
     void concurrentNewerLowWinsWithoutLeavingStaleCurrentProjectionOrPartialAlertEffects() throws Exception {
         TransactionScoredEvent earlierHigh = event("event-a", BASE_TIME, 0.81d, "model-a");
         TransactionScoredEvent newerLow = event(
@@ -946,6 +996,24 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
             Instant createdAt,
             List<String> transactionIds
     ) {
+        return caseEvent(
+                transactionId,
+                eventId,
+                createdAt,
+                transactionIds,
+                transactionId.endsWith("a") ? new BigDecimal("9000.00") : new BigDecimal("11000.00"),
+                new BigDecimal("20000.00")
+        );
+    }
+
+    private TransactionScoredEvent caseEvent(
+            String transactionId,
+            String eventId,
+            Instant createdAt,
+            List<String> transactionIds,
+            BigDecimal currentTransactionAmountPln,
+            BigDecimal recentAmountSumPln
+    ) {
         double score = 0.91d;
         String modelVersion = "model-case";
         return event(
@@ -959,7 +1027,8 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
                 engineIntelligence(createdAt, modelVersion, score),
                 rapidTransferSnapshot(
                         transactionIds,
-                        transactionId.endsWith("a") ? new BigDecimal("9000.00") : new BigDecimal("11000.00")
+                        currentTransactionAmountPln,
+                        recentAmountSumPln
                 )
         );
     }
@@ -1028,14 +1097,41 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
             List<String> transactionIds,
             BigDecimal currentTransactionAmountPln
     ) {
+        return rapidTransferSnapshot(
+                transactionIds,
+                currentTransactionAmountPln,
+                new BigDecimal("20000.00")
+        );
+    }
+
+    private Map<String, Object> rapidTransferSnapshot(
+            List<String> transactionIds,
+            BigDecimal currentTransactionAmountPln,
+            BigDecimal recentAmountSumPln
+    ) {
         return Map.of(
                 FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, transactionIds,
                 FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
                 FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
-                FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
+                FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, recentAmountSumPln,
                 FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
                 FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, currentTransactionAmountPln
         );
+    }
+
+    private void assertLatestCaseAggregation(
+            String sourceEventId,
+            String totalAmountPln,
+            String... transactionIds
+    ) {
+        assertThat(fraudCaseRepository.findAll()).singleElement().satisfies(fraudCase -> {
+            assertThat(fraudCase.getAggregationSourceEventId()).isEqualTo(sourceEventId);
+            assertThat(fraudCase.getTotalAmountPln()).isEqualByComparingTo(totalAmountPln);
+            assertThat(fraudCase.getTransactionIds()).contains(transactionIds).doesNotHaveDuplicates();
+            assertThat(fraudCase.getTransactions())
+                    .extracting("transactionId")
+                    .containsExactlyInAnyOrder(transactionIds);
+        });
     }
 
     private EngineIntelligenceSummary engineIntelligence(Instant generatedAt, String modelVersion, double score) {

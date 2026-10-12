@@ -1,8 +1,10 @@
 package com.frauddetection.alert.fraudcase;
 
 import com.frauddetection.alert.domain.FraudCaseStatus;
+import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
+import com.frauddetection.alert.persistence.ScoringOccurrenceFingerprint;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.features.FraudFeatureThresholdContract;
@@ -47,15 +49,19 @@ public class FraudCaseIngestionService {
                 document.getTransactionIds() == null ? List.of() : document.getTransactionIds()
         );
         mergedIds.addAll(transactionIds);
-        document.setTransactionIds(List.copyOf(mergedIds));
-        document.setTotalAmountPln(decimal(
-                snapshot.get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN),
-                FraudFeatureThresholdContract.RAPID_TRANSFER_PLN_THRESHOLD
-        ));
+        List<String> mergedTransactionIds = List.copyOf(mergedIds);
+        boolean membershipChanged = !mergedTransactionIds.equals(
+                document.getTransactionIds() == null ? List.of() : document.getTransactionIds()
+        );
+        boolean newerAggregationSnapshot = shouldApplyAggregationSnapshot(document, event);
+        if (!membershipChanged && !newerAggregationSnapshot) {
+            return;
+        }
+        document.setTransactionIds(mergedTransactionIds);
+        if (newerAggregationSnapshot) {
+            applyAggregationSnapshot(document, event, snapshot);
+        }
         document.setThresholdPln(FraudFeatureThresholdContract.RAPID_TRANSFER_PLN_THRESHOLD);
-        document.setAggregationWindow(String.valueOf(
-                snapshot.getOrDefault(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M")
-        ));
         document.setUpdatedAt(Instant.now());
 
         FraudCaseTransactionAssembler.Assembly assembly = transactionAssembler.assemble(
@@ -66,6 +72,72 @@ public class FraudCaseIngestionService {
         document.setFirstTransactionAt(assembly.firstTransactionAt());
         document.setLastTransactionAt(assembly.lastTransactionAt());
         fraudCaseRepository.save(document);
+    }
+
+    private boolean shouldApplyAggregationSnapshot(FraudCaseDocument document, TransactionScoredEvent event) {
+        ScoringOccurrenceOwnership candidate = ownership(event);
+        if (aggregationOwnershipAbsent(document)) {
+            return document.getTotalAmountPln() == null && document.getAggregationWindow() == null;
+        }
+        ScoringOccurrenceOwnership current;
+        try {
+            current = ScoringOccurrenceOwnership.fromPersistedIdentity(
+                    document.getAggregationSourceEventId(),
+                    document.getAggregationSourceEventCreatedAt(),
+                    document.getAggregationSourceEventCreatedAtEpochSecond(),
+                    document.getAggregationSourceEventCreatedAtNano(),
+                    document.getAggregationSourceEventFingerprint()
+            );
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalStateException("FRAUD_CASE_AGGREGATION_OCCURRENCE_IDENTITY_INVALID", exception);
+        }
+        if (candidate.sourceEventId().equals(current.sourceEventId())) {
+            if (!candidate.sourceEventFingerprint().equals(current.sourceEventFingerprint())) {
+                throw new IllegalStateException("FRAUD_CASE_AGGREGATION_SOURCE_PAYLOAD_CONFLICT");
+            }
+            return false;
+        }
+        int timestampOrder = candidate.sourceEventCreatedAt().compareTo(current.sourceEventCreatedAt());
+        if (timestampOrder != 0) {
+            return timestampOrder > 0;
+        }
+        return candidate.sourceEventId().compareTo(current.sourceEventId()) > 0;
+    }
+
+    private void applyAggregationSnapshot(
+            FraudCaseDocument document,
+            TransactionScoredEvent event,
+            Map<String, Object> snapshot
+    ) {
+        ScoringOccurrenceOwnership ownership = ownership(event);
+        document.setTotalAmountPln(decimal(
+                snapshot.get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN),
+                FraudFeatureThresholdContract.RAPID_TRANSFER_PLN_THRESHOLD
+        ));
+        document.setAggregationWindow(String.valueOf(
+                snapshot.getOrDefault(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M")
+        ));
+        document.setAggregationSourceEventId(ownership.sourceEventId());
+        document.setAggregationSourceEventCreatedAt(ownership.sourceEventCreatedAt().toString());
+        document.setAggregationSourceEventCreatedAtEpochSecond(ownership.sourceEventCreatedAt().getEpochSecond());
+        document.setAggregationSourceEventCreatedAtNano(ownership.sourceEventCreatedAt().getNano());
+        document.setAggregationSourceEventFingerprint(ownership.sourceEventFingerprint());
+    }
+
+    private ScoringOccurrenceOwnership ownership(TransactionScoredEvent event) {
+        return ScoringOccurrenceOwnership.authoritative(
+                event.eventId(),
+                event.createdAt(),
+                ScoringOccurrenceFingerprint.from(event)
+        );
+    }
+
+    private boolean aggregationOwnershipAbsent(FraudCaseDocument document) {
+        return document.getAggregationSourceEventId() == null
+                && document.getAggregationSourceEventCreatedAt() == null
+                && document.getAggregationSourceEventCreatedAtEpochSecond() == null
+                && document.getAggregationSourceEventCreatedAtNano() == null
+                && document.getAggregationSourceEventFingerprint() == null;
     }
 
     private FraudCaseDocument newCase(String caseKey, TransactionScoredEvent event) {

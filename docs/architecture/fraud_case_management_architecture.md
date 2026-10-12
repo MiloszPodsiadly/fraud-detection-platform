@@ -45,6 +45,9 @@ in the current implementation.
 
 - Work queue, detail and evidence reads do not mutate fraud-case state.
 - System-generated candidate ingestion is not an analyst lifecycle mutation.
+- `totalAmountPln` is the canonical rolling-window amount from the newest authoritative scoring occurrence for the
+  case aggregation key. It is not recomputed from a potentially incomplete local transaction-detail subset;
+  membership is merged monotonically while occurrence identity prevents older snapshots replacing newer evidence.
 - Evidence summary and timeline are bounded read projections, not workflow history or audit history.
 - Current regulated `PATCH` semantics remain unchanged.
 - This architecture does not claim external finality, global exactly-once execution, distributed ACID, WORM
