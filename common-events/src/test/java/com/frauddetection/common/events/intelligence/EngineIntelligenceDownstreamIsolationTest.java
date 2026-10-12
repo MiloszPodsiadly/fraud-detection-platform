@@ -39,7 +39,9 @@ class EngineIntelligenceDownstreamIsolationTest {
                 alertService.resolve("messaging/MlPredictionEvidenceEventListener.java"),
                 alertService.resolve("messaging/MlPredictionEvidenceRedriveListener.java"),
                 alertService.resolve("messaging/MlPredictionEvidencePermanentProcessingException.java"),
-                alertService.resolve("messaging/MlPredictionEvidenceTransientProcessingException.java")
+                alertService.resolve("messaging/MlPredictionEvidenceTransientProcessingException.java"),
+                alertService.resolve("observability/AlertServiceMetrics.java"),
+                alertService.resolve("observability/engineintelligence/EngineIntelligenceMetricsRecorder.java")
         )).doesNotContain("EngineIntelligenceSummary", "engineIntelligence");
     }
 

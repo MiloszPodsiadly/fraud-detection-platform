@@ -1,4 +1,4 @@
-package com.frauddetection.alert.service;
+package com.frauddetection.alert.fraudcase;
 
 import org.junit.jupiter.api.Test;
 
@@ -10,8 +10,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class FraudCaseResponsibilityArchitectureTest {
 
-    private static final Path SERVICE_PACKAGE = Path.of(
-            "src/main/java/com/frauddetection/alert/service"
+    private static final Path FRAUD_CASE_PACKAGE = Path.of(
+            "src/main/java/com/frauddetection/alert/fraudcase"
     );
 
     @Test
@@ -52,6 +52,6 @@ class FraudCaseResponsibilityArchitectureTest {
     }
 
     private String source(String fileName) throws IOException {
-        return Files.readString(SERVICE_PACKAGE.resolve(fileName));
+        return Files.readString(FRAUD_CASE_PACKAGE.resolve(fileName));
     }
 }
