@@ -12,3 +12,19 @@ The repository contains a provider-neutral `ObjectStoreAuditAnchorClient` contra
 Selecting `sink=object-store` fails startup when no client bean exists. A supplied client also fails startup unless it declares linearizable create-and-CAS support; strict publication additionally requires verified witness independence, versioning, retention, timestamp trust, read-after-write, overwrite protection, delete protection, and stable references. Prod-like deployments therefore remain explicitly unsupported until a real provider adapter and provider-level conformance suite are added.
 
 Timeout after a conditional write remains an uncertain outcome. The sink verifies readable HEAD state before reporting success, while an unverified timeout is reported as failed and cannot satisfy strict trust posture.
+
+## Coherent publication protocol
+
+```text
+canonical immutable object bytes
+  -> conditional immutable write
+  -> read-after-write payload and self-binding verification
+  -> version-matched monotonic HEAD update
+  -> verified HEAD read-back
+  -> forensic incident resolution only after verified storage repair
+```
+
+This sequence remains one operation in `ObjectStoreExternalAuditAnchorSink`. Internal extraction is intentionally
+deferred because the repository has no production provider adapter with provider-level concurrent writer, timeout
+after conditional write and restart conformance proofs. Splitting the protocol before those capabilities can be
+demonstrated would make ownership look cleaner while weakening the evidence for its CAS semantics.
