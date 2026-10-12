@@ -30,6 +30,7 @@ import java.security.KeyPairGenerator;
 import java.security.MessageDigest;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -160,6 +161,66 @@ class TrustAuthorityServiceTest {
     }
 
     @Test
+    void shouldRequireExactlyOneActiveSigningKey() throws Exception {
+        TrustAuthorityProperties zeroActive = propertiesWithKeys(key("key-v1", "RETIRED", keyPair()));
+        TrustAuthorityProperties twoActive = propertiesWithKeys(
+                key("key-v1", "ACTIVE", keyPair()),
+                key("key-v2", "ACTIVE", keyPair())
+        );
+
+        assertThatThrownBy(() -> new TrustAuthorityKeyRegistry(zeroActive, true))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("exactly one active");
+        assertThatThrownBy(() -> new TrustAuthorityKeyRegistry(twoActive, true))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("exactly one active");
+    }
+
+    @Test
+    void shouldRejectDuplicateKeyIdsAndMismatchedActiveKeyPair() throws Exception {
+        KeyPair first = keyPair();
+        KeyPair second = keyPair();
+        TrustAuthorityProperties duplicateIds = propertiesWithKeys(
+                key("same-key", "ACTIVE", first),
+                key("same-key", "RETIRED", second)
+        );
+        TrustAuthorityProperties mismatchedPair = propertiesWithKeys(
+                key("key-v1", "ACTIVE", new KeyPair(first.getPublic(), second.getPrivate()))
+        );
+
+        assertThatThrownBy(() -> new TrustAuthorityKeyRegistry(duplicateIds, true))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("globally unique");
+        assertThatThrownBy(() -> new TrustAuthorityKeyRegistry(mismatchedPair, true))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("do not match");
+    }
+
+    @Test
+    void shouldRejectContradictoryKeyValidityWindow() throws Exception {
+        TrustAuthorityProperties.KeyEntry entry = key("key-v1", "ACTIVE", keyPair());
+        entry.setValidFrom(Instant.parse("2026-05-01T00:00:00Z"));
+        entry.setValidUntil(Instant.parse("2026-04-30T23:59:59Z"));
+
+        assertThatThrownBy(() -> new TrustAuthorityKeyRegistry(propertiesWithKeys(entry), true))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("validity window");
+    }
+
+    @Test
+    void shouldRejectBlankStatusAndNonCanonicalKeyId() throws Exception {
+        TrustAuthorityProperties.KeyEntry blankStatus = key("key-v1", " ", keyPair());
+        TrustAuthorityProperties.KeyEntry paddedKeyId = key(" key-v1", "ACTIVE", keyPair());
+
+        assertThatThrownBy(() -> new TrustAuthorityKeyRegistry(propertiesWithKeys(blankStatus), true))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("status");
+        assertThatThrownBy(() -> new TrustAuthorityKeyRegistry(propertiesWithKeys(paddedKeyId), true))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("key ids");
+    }
+
+    @Test
     void shouldRejectRevokedKeyAndUnknownKey() throws Exception {
         KeyPair keyV1 = keyPair();
         TrustAuthorityService oldService = service(propertiesWithKeys(key("key-v1", "ACTIVE", keyV1)));
@@ -273,8 +334,6 @@ class TrustAuthorityServiceTest {
         TrustAuthorityProperties properties = new TrustAuthorityProperties();
         properties.setHmacSecret("prod-secret");
         properties.getAudit().setSink("durable-hash-chain");
-        properties.setPrivateKeyPath("private.key");
-        properties.setPublicKeyPath("public.key");
         TrustAuthorityRuntimeGuard guard = new TrustAuthorityRuntimeGuard(properties, environment("prod"));
 
         assertThatThrownBy(() -> guard.run(null))
@@ -732,12 +791,12 @@ class TrustAuthorityServiceTest {
     @Test
     void shouldEnforceKeyValidityWindowDuringVerification() throws Exception {
         KeyPair keyPair = keyPair();
-        TrustAuthorityProperties.KeyEntry key = key("key-v1", "ACTIVE", keyPair);
-        key.setValidFrom(Instant.parse("2026-04-01T00:00:00Z"));
-        key.setValidUntil(Instant.parse("2026-04-30T00:00:00Z"));
-        TrustAuthorityService service = service(propertiesWithKeys(key));
         TrustSignRequest request = request("hash-1", "anchor-1");
-        TrustSignResponse signature = sign(service, request);
+        TrustSignResponse signature = sign(service(propertiesWithKeys(key("key-v1", "ACTIVE", keyPair))), request);
+        TrustAuthorityProperties.KeyEntry verificationKey = key("key-v1", "ACTIVE", keyPair);
+        verificationKey.setValidFrom(Instant.parse("2026-04-01T00:00:00Z"));
+        verificationKey.setValidUntil(Instant.parse("2026-04-30T00:00:00Z"));
+        TrustAuthorityService service = service(propertiesWithKeys(verificationKey));
 
         TrustVerifyResponse expired = verify(service, new TrustVerifyRequest(
                 request.purpose(), request.payloadHash(), request.partitionKey(), request.chainPosition(),
@@ -754,11 +813,43 @@ class TrustAuthorityServiceTest {
     }
 
     @Test
+    void shouldRejectSigningOutsideActiveKeyWindowWithoutSuccessAudit() throws Exception {
+        Instant now = Instant.now();
+        TrustAuthorityProperties.KeyEntry notYetValid = key("key-v1", "ACTIVE", keyPair());
+        notYetValid.setValidFrom(now.plusSeconds(60));
+        RecordingAuditSink notYetValidAudit = new RecordingAuditSink();
+        TrustAuthorityService earlyService = service(
+                propertiesWithKeys(notYetValid),
+                notYetValidAudit,
+                new TrustAuthorityMetrics(new SimpleMeterRegistry()),
+                Clock.fixed(now, java.time.ZoneOffset.UTC)
+        );
+
+        assertThatThrownBy(() -> sign(earlyService, request("hash-early", "anchor-early")))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+        assertThat(notYetValidAudit.events()).noneMatch(event -> "SUCCESS".equals(event.result()));
+        assertThat(notYetValidAudit.events()).anyMatch(event -> "KEY_NOT_YET_VALID".equals(event.reasonCode()));
+
+        TrustAuthorityProperties.KeyEntry expired = key("key-v2", "ACTIVE", keyPair());
+        expired.setValidUntil(now.minusSeconds(1));
+        RecordingAuditSink expiredAudit = new RecordingAuditSink();
+        TrustAuthorityService expiredService = service(
+                propertiesWithKeys(expired),
+                expiredAudit,
+                new TrustAuthorityMetrics(new SimpleMeterRegistry()),
+                Clock.fixed(now, java.time.ZoneOffset.UTC)
+        );
+
+        assertThatThrownBy(() -> sign(expiredService, request("hash-expired", "anchor-expired")))
+                .isInstanceOf(TrustAuthorityRequestException.class);
+        assertThat(expiredAudit.events()).noneMatch(event -> "SUCCESS".equals(event.result()));
+        assertThat(expiredAudit.events()).anyMatch(event -> "KEY_EXPIRED".equals(event.reasonCode()));
+    }
+
+    @Test
     void shouldRejectDisabledSigningRequiredInProdLikeProfile() {
         TrustAuthorityProperties properties = new TrustAuthorityProperties();
         properties.setHmacSecret("prod-secret");
-        properties.setPrivateKeyPath("private.key");
-        properties.setPublicKeyPath("public.key");
         properties.setSigningRequired(false);
         properties.setCallers(List.of(caller("alert-service", "alert-secret", List.of("AUDIT_ANCHOR"))));
         TrustAuthorityRuntimeGuard guard = new TrustAuthorityRuntimeGuard(properties, environment("prod"));
@@ -878,23 +969,35 @@ class TrustAuthorityServiceTest {
 
     private TrustAuthorityService service(String keyId) {
         TrustAuthorityProperties properties = new TrustAuthorityProperties();
-        properties.setKeyId(keyId);
+        properties.setKeys(List.of(testSigningKey(keyId)));
         properties.setAuthorityName("local-trust-authority");
         return service(properties, new RecordingAuditSink());
     }
 
     private TrustAuthorityService service(TrustAuthorityProperties properties, TrustAuthorityAuditSink auditSink) {
+        ensureSigningKey(properties);
         return new TrustAuthorityService(properties, auditSink, new TrustAuthorityRateLimiter());
     }
 
     private TrustAuthorityService service(TrustAuthorityProperties properties, TrustAuthorityAuditSink auditSink, TrustAuthorityMetrics metrics) {
+        return service(properties, auditSink, metrics, Clock.systemUTC());
+    }
+
+    private TrustAuthorityService service(
+            TrustAuthorityProperties properties,
+            TrustAuthorityAuditSink auditSink,
+            TrustAuthorityMetrics metrics,
+            Clock clock
+    ) {
+        ensureSigningKey(properties);
         return new TrustAuthorityService(
                 properties,
                 auditSink,
                 new TrustAuthorityRateLimiter(),
                 new TrustAuthorityRequestReplayGuard(),
                 metrics,
-                environment("test")
+                environment("test"),
+                clock
         );
     }
 
@@ -904,9 +1007,22 @@ class TrustAuthorityServiceTest {
 
     private TrustAuthorityProperties propertiesWithKeys(TrustAuthorityProperties.KeyEntry... keys) {
         TrustAuthorityProperties properties = new TrustAuthorityProperties();
-        properties.setKeyId(keys[0].getKeyId());
         properties.setKeys(List.of(keys));
         return properties;
+    }
+
+    private void ensureSigningKey(TrustAuthorityProperties properties) {
+        if (properties.getKeys().isEmpty()) {
+            properties.setKeys(List.of(testSigningKey("local-ed25519-key-1")));
+        }
+    }
+
+    private TrustAuthorityProperties.KeyEntry testSigningKey(String keyId) {
+        try {
+            return key(keyId, "ACTIVE", keyPair());
+        } catch (Exception exception) {
+            throw new IllegalStateException("Test signing key could not be generated.", exception);
+        }
     }
 
     private TrustAuthorityProperties.KeyEntry key(String keyId, String status, KeyPair keyPair) {
@@ -1057,14 +1173,18 @@ class TrustAuthorityServiceTest {
     }
 
     private void configurePersistentSigningKeys(TrustAuthorityProperties properties) throws Exception {
-        KeyPair signingKey = keyPair();
+        KeyPair signingKeyPair = keyPair();
         Path privateKey = tempDir.resolve("ed25519-private.key");
         Path publicKey = tempDir.resolve("ed25519-public.key");
-        Files.writeString(privateKey, Base64.getEncoder().encodeToString(signingKey.getPrivate().getEncoded()));
+        Files.writeString(privateKey, Base64.getEncoder().encodeToString(signingKeyPair.getPrivate().getEncoded()));
         restrictPrivateKeyPermissions(privateKey);
-        Files.writeString(publicKey, Base64.getEncoder().encodeToString(signingKey.getPublic().getEncoded()));
-        properties.setPrivateKeyPath(privateKey.toString());
-        properties.setPublicKeyPath(publicKey.toString());
+        Files.writeString(publicKey, Base64.getEncoder().encodeToString(signingKeyPair.getPublic().getEncoded()));
+        TrustAuthorityProperties.KeyEntry signingKey = new TrustAuthorityProperties.KeyEntry();
+        signingKey.setKeyId("persistent-ed25519-key-1");
+        signingKey.setStatus("ACTIVE");
+        signingKey.setPrivateKeyPath(privateKey.toString());
+        signingKey.setPublicKeyPath(publicKey.toString());
+        properties.setKeys(List.of(signingKey));
     }
 
     private void restrictPrivateKeyPermissions(Path privateKey) throws Exception {

@@ -27,10 +27,13 @@ management:
 app:
   trust-authority:
     authority-name: ${TRUST_AUTHORITY_NAME:local-trust-authority}
-    key-id: ${TRUST_AUTHORITY_KEY_ID:local-ed25519-key-1}
     hmac-secret: ${TRUST_AUTHORITY_HMAC_SECRET:local-dev-trust-hmac-secret}
-    private-key-path: ${TRUST_AUTHORITY_PRIVATE_KEY_PATH:}
-    public-key-path: ${TRUST_AUTHORITY_PUBLIC_KEY_PATH:}
+    keys:
+      - key-id: ${TRUST_AUTHORITY_ACTIVE_KEY_ID:local-ed25519-key-1}
+        algorithm: Ed25519
+        status: ACTIVE
+        private-key-path: ${TRUST_AUTHORITY_ACTIVE_PRIVATE_KEY_PATH:}
+        public-key-path: ${TRUST_AUTHORITY_ACTIVE_PUBLIC_KEY_PATH:}
     audit-path: ${TRUST_AUTHORITY_AUDIT_PATH:./target/trust-authority-audit.jsonl}
     enabled: ${TRUST_AUTHORITY_ENABLED:true}
     signing-required: ${TRUST_AUTHORITY_SIGNING_REQUIRED:true}

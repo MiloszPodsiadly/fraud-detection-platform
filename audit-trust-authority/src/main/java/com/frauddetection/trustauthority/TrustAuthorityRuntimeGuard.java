@@ -72,12 +72,6 @@ public class TrustAuthorityRuntimeGuard implements ApplicationRunner {
         if (!"durable-hash-chain".equals(properties.getAudit().getSink())) {
             throw new IllegalStateException("Prod-like trust authority requires durable-hash-chain audit sink.");
         }
-        if (properties.getKeys().isEmpty()) {
-            requirePersistentPath(properties.getPrivateKeyPath(), "private key");
-            requirePersistentPath(properties.getPublicKeyPath(), "public key");
-            enforcePrivateKeyFile(properties.getPrivateKeyPath());
-            return;
-        }
         properties.getKeys().forEach(key -> {
             if (StringUtils.hasText(key.getPrivateKey())) {
                 throw new IllegalStateException("Prod-like trust authority forbids inline private key material.");

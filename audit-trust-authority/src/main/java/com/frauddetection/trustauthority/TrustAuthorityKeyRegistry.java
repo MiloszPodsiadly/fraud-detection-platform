@@ -14,11 +14,13 @@ import java.security.KeyPairGenerator;
 import java.security.MessageDigest;
 import java.security.PrivateKey;
 import java.security.PublicKey;
+import java.security.Signature;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -36,13 +38,17 @@ final class TrustAuthorityKeyRegistry {
 
     TrustAuthorityKeyRegistry(TrustAuthorityProperties properties, boolean localKeyGenerationAllowed) {
         this.keys = loadKeys(properties, localKeyGenerationAllowed);
-        this.activeKey = keys.stream()
+        List<RegisteredKey> activeKeys = keys.stream()
                 .filter(key -> "ACTIVE".equals(key.status()))
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("Trust authority requires one active signing key."));
+                .toList();
+        if (activeKeys.size() != 1) {
+            throw new IllegalStateException("Trust authority requires exactly one active signing key.");
+        }
+        this.activeKey = activeKeys.getFirst();
         if (activeKey.privateKey() == null) {
             throw new IllegalStateException("Active trust authority key requires private key material.");
         }
+        verifyKeyPair(activeKey);
     }
 
     RegisteredKey activeKey() {
@@ -79,86 +85,86 @@ final class TrustAuthorityKeyRegistry {
             TrustAuthorityProperties properties,
             boolean localKeyGenerationAllowed
     ) {
-        if (!properties.getKeys().isEmpty()) {
-            return properties.getKeys().stream().map(this::loadConfiguredKey).toList();
+        if (properties.getKeys().isEmpty()) {
+            throw new IllegalStateException("Trust authority requires an explicit signing key registry.");
         }
-        return List.of(loadLegacyKey(properties, localKeyGenerationAllowed));
+        List<RegisteredKey> loaded = properties.getKeys().stream()
+                .map(entry -> loadConfiguredKey(entry, localKeyGenerationAllowed))
+                .toList();
+        HashSet<String> keyIds = new HashSet<>();
+        for (RegisteredKey key : loaded) {
+            if (!StringUtils.hasText(key.keyId())
+                    || !key.keyId().equals(key.keyId().trim())
+                    || !keyIds.add(key.keyId())) {
+                throw new IllegalStateException("Trust authority key ids must be nonblank and globally unique.");
+            }
+            if (key.validUntil() != null && key.validUntil().isBefore(key.validFrom())) {
+                throw new IllegalStateException("Trust authority key validity window is contradictory.");
+            }
+        }
+        return loaded;
     }
 
-    private RegisteredKey loadConfiguredKey(TrustAuthorityProperties.KeyEntry entry) {
+    private RegisteredKey loadConfiguredKey(
+            TrustAuthorityProperties.KeyEntry entry,
+            boolean localKeyGenerationAllowed
+    ) {
         if (!ALGORITHM.equals(entry.getAlgorithm())) {
             throw new IllegalStateException("Unsupported trust authority key algorithm.");
         }
         try {
+            if (requiresLocalGeneration(entry)) {
+                if (!localKeyGenerationAllowed || !"ACTIVE".equals(normalizeStatus(entry.getStatus()))) {
+                    throw new IllegalStateException("Trust authority key material is required outside local/dev/test profiles.");
+                }
+                KeyPair generated = KeyPairGenerator.getInstance(ALGORITHM).generateKeyPair();
+                writeKeysIfConfigured(entry, generated);
+                return registeredKey(entry, generated.getPublic(), generated.getPrivate());
+            }
             PublicKey publicKey = publicKey(readKeyMaterial(entry.getPublicKey(), entry.getPublicKeyPath()));
             PrivateKey privateKey = StringUtils.hasText(entry.getPrivateKey()) || StringUtils.hasText(entry.getPrivateKeyPath())
                     ? privateKey(readKeyMaterial(entry.getPrivateKey(), entry.getPrivateKeyPath()))
                     : null;
-            return new RegisteredKey(
-                    entry.getKeyId(),
-                    publicKey,
-                    privateKey,
-                    normalizeStatus(entry.getStatus()),
-                    entry.getValidFrom() == null ? Instant.EPOCH : entry.getValidFrom(),
-                    entry.getValidUntil()
-            );
+            return registeredKey(entry, publicKey, privateKey);
         } catch (IOException | GeneralSecurityException exception) {
             throw new IllegalStateException("Trust authority configured key material could not be initialized.", exception);
         }
     }
 
-    private RegisteredKey loadLegacyKey(
-            TrustAuthorityProperties properties,
-            boolean localKeyGenerationAllowed
+    private RegisteredKey registeredKey(
+            TrustAuthorityProperties.KeyEntry entry,
+            PublicKey publicKey,
+            PrivateKey privateKey
     ) {
-        try {
-            KeyPair keyPair = loadOrGenerateKeyPair(properties, localKeyGenerationAllowed);
-            return new RegisteredKey(
-                    properties.getKeyId(),
-                    keyPair.getPublic(),
-                    keyPair.getPrivate(),
-                    "ACTIVE",
-                    Instant.EPOCH,
-                    null
-            );
-        } catch (IOException | GeneralSecurityException exception) {
-            throw new IllegalStateException("Trust authority key material could not be initialized.", exception);
-        }
+        return new RegisteredKey(
+                entry.getKeyId(),
+                publicKey,
+                privateKey,
+                normalizeStatus(entry.getStatus()),
+                entry.getValidFrom() == null ? Instant.EPOCH : entry.getValidFrom(),
+                entry.getValidUntil()
+        );
     }
 
-    private KeyPair loadOrGenerateKeyPair(
-            TrustAuthorityProperties properties,
-            boolean localKeyGenerationAllowed
-    ) throws IOException, GeneralSecurityException {
-        if (StringUtils.hasText(properties.getPrivateKeyPath()) && Files.exists(Path.of(properties.getPrivateKeyPath()))) {
-            PrivateKey privateKey = privateKey(Files.readString(Path.of(properties.getPrivateKeyPath())));
-            PublicKey publicKey = StringUtils.hasText(properties.getPublicKeyPath()) && Files.exists(Path.of(properties.getPublicKeyPath()))
-                    ? publicKey(Files.readString(Path.of(properties.getPublicKeyPath())))
-                    : null;
-            if (publicKey == null) {
-                throw new IllegalStateException("Trust authority public key path is required when loading a private key.");
-            }
-            return new KeyPair(publicKey, privateKey);
-        }
-        if (!localKeyGenerationAllowed) {
-            throw new IllegalStateException("Trust authority key generation is allowed only for local/dev/test profiles.");
-        }
-        KeyPairGenerator generator = KeyPairGenerator.getInstance(ALGORITHM);
-        KeyPair generated = generator.generateKeyPair();
-        writeKeysIfConfigured(properties, generated);
-        return generated;
+    private boolean requiresLocalGeneration(TrustAuthorityProperties.KeyEntry entry) {
+        boolean inlineMaterial = StringUtils.hasText(entry.getPublicKey()) || StringUtils.hasText(entry.getPrivateKey());
+        boolean persistedMaterial = StringUtils.hasText(entry.getPublicKeyPath())
+                && StringUtils.hasText(entry.getPrivateKeyPath())
+                && Files.exists(Path.of(entry.getPublicKeyPath()))
+                && Files.exists(Path.of(entry.getPrivateKeyPath()));
+        return !inlineMaterial && !persistedMaterial;
     }
 
-    private void writeKeysIfConfigured(TrustAuthorityProperties properties, KeyPair generated) throws IOException {
-        if (StringUtils.hasText(properties.getPrivateKeyPath())) {
-            Path path = Path.of(properties.getPrivateKeyPath());
+    private void writeKeysIfConfigured(TrustAuthorityProperties.KeyEntry entry, KeyPair generated) throws IOException {
+        if (StringUtils.hasText(entry.getPrivateKeyPath())) {
+            Path path = Path.of(entry.getPrivateKeyPath());
             if (path.getParent() != null) {
                 Files.createDirectories(path.getParent());
             }
             Files.writeString(path, Base64.getEncoder().encodeToString(generated.getPrivate().getEncoded()));
         }
-        if (StringUtils.hasText(properties.getPublicKeyPath())) {
-            Path path = Path.of(properties.getPublicKeyPath());
+        if (StringUtils.hasText(entry.getPublicKeyPath())) {
+            Path path = Path.of(entry.getPublicKeyPath());
             if (path.getParent() != null) {
                 Files.createDirectories(path.getParent());
             }
@@ -187,11 +193,31 @@ final class TrustAuthorityKeyRegistry {
     }
 
     private String normalizeStatus(String status) {
-        String normalized = StringUtils.hasText(status) ? status.trim().toUpperCase() : "ACTIVE";
+        if (!StringUtils.hasText(status)) {
+            throw new IllegalStateException("Unsupported trust authority key status.");
+        }
+        String normalized = status.trim().toUpperCase();
         if (!List.of("ACTIVE", "RETIRED", "REVOKED").contains(normalized)) {
             throw new IllegalStateException("Unsupported trust authority key status.");
         }
         return normalized;
+    }
+
+    private void verifyKeyPair(RegisteredKey key) {
+        try {
+            byte[] challenge = "trust-authority-key-pair-validation".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            Signature signer = Signature.getInstance(ALGORITHM);
+            signer.initSign(key.privateKey());
+            signer.update(challenge);
+            Signature verifier = Signature.getInstance(ALGORITHM);
+            verifier.initVerify(key.publicKey());
+            verifier.update(challenge);
+            if (!verifier.verify(signer.sign())) {
+                throw new IllegalStateException("Active trust authority public and private keys do not match.");
+            }
+        } catch (GeneralSecurityException exception) {
+            throw new IllegalStateException("Active trust authority key pair could not be validated.", exception);
+        }
     }
 
     private String fingerprint(byte[] publicKey) {
