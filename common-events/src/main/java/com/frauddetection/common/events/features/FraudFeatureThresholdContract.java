@@ -1,6 +1,7 @@
 package com.frauddetection.common.events.features;
 
 import java.math.BigDecimal;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -42,18 +43,27 @@ public final class FraudFeatureThresholdContract {
         )) {
             return false;
         }
-        if (!hasRapidTransferEvidenceIds(featureSnapshot.get(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS))) {
+        if (!hasRapidTransferEvidenceIds(
+                featureSnapshot.get(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS),
+                count
+        )) {
             return false;
         }
         return isRapidTransferPlnBurst(count, amountPln);
     }
 
-    private static boolean hasRapidTransferEvidenceIds(Object value) {
-        if (!(value instanceof List<?> ids) || ids.size() < RAPID_TRANSFER_MIN_COUNT) {
+    private static boolean hasRapidTransferEvidenceIds(Object value, int expectedCount) {
+        if (!(value instanceof List<?> ids)
+                || ids.size() < RAPID_TRANSFER_MIN_COUNT
+                || ids.size() != expectedCount) {
             return false;
         }
+        HashSet<String> distinctIds = new HashSet<>();
         for (Object id : ids) {
-            if (!(id instanceof String text) || text.isBlank()) {
+            if (!(id instanceof String text)
+                    || text.isBlank()
+                    || !text.equals(text.trim())
+                    || !distinctIds.add(text)) {
                 return false;
             }
         }

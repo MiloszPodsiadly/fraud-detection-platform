@@ -5,6 +5,7 @@ import com.frauddetection.common.events.features.VelocityFeatureContract;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import com.frauddetection.enricher.config.FeatureStoreProperties;
 import com.frauddetection.enricher.domain.FeatureStoreSnapshot;
+import com.frauddetection.enricher.domain.RecentTransaction;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
@@ -29,7 +30,7 @@ class TransactionFeatureCalculatorTest {
         var snapshot = new FeatureStoreSnapshot(
                 4,
                 new BigDecimal("4900.00"),
-                List.of(),
+                recentTransactions(4),
                 4,
                 Instant.parse("2026-04-20T10:12:00Z"),
                 false
@@ -59,7 +60,7 @@ class TransactionFeatureCalculatorTest {
         var snapshot = new FeatureStoreSnapshot(
                 0,
                 BigDecimal.ZERO,
-                List.of(),
+                recentTransactions(0),
                 0,
                 Instant.parse("2026-04-20T10:12:00Z"),
                 true
@@ -81,7 +82,7 @@ class TransactionFeatureCalculatorTest {
         var snapshot = new FeatureStoreSnapshot(
                 1,
                 BigDecimal.ZERO,
-                List.of(),
+                recentTransactions(1),
                 0,
                 Instant.parse("2026-04-20T10:12:00Z"),
                 true
@@ -103,7 +104,7 @@ class TransactionFeatureCalculatorTest {
         var snapshot = new FeatureStoreSnapshot(
                 1,
                 new BigDecimal("10000.00"),
-                List.of(),
+                recentTransactions(1),
                 1,
                 Instant.parse("2026-04-20T10:12:00Z"),
                 true
@@ -114,7 +115,10 @@ class TransactionFeatureCalculatorTest {
         assertThat(features.featureSnapshot())
                 .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2)
                 .containsEntry(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"))
-                .containsEntry(FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("txn-1001"));
+                .containsEntry(
+                        FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS,
+                        List.of("prior-txn-0", "txn-1001")
+                );
         assertThat(features.featureSnapshot().get(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW))
                 .isEqualTo("PT1M")
                 .isInstanceOf(String.class);
@@ -136,7 +140,7 @@ class TransactionFeatureCalculatorTest {
         var snapshot = new FeatureStoreSnapshot(
                 0,
                 BigDecimal.ZERO,
-                List.of(),
+                recentTransactions(0),
                 1,
                 Instant.parse("2026-04-20T10:12:00Z"),
                 true
@@ -155,7 +159,7 @@ class TransactionFeatureCalculatorTest {
         var snapshot = new FeatureStoreSnapshot(
                 4,
                 new BigDecimal("4900.00"),
-                List.of(),
+                recentTransactions(4),
                 4,
                 Instant.parse("2026-04-20T10:12:00Z"),
                 false
@@ -207,7 +211,7 @@ class TransactionFeatureCalculatorTest {
         var snapshot = new FeatureStoreSnapshot(
                 4,
                 BigDecimal.ZERO,
-                List.of(),
+                recentTransactions(4),
                 0,
                 Instant.parse("2026-04-20T10:12:00Z"),
                 true
@@ -219,6 +223,67 @@ class TransactionFeatureCalculatorTest {
                 .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT, 5)
                 .containsEntry(FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M")
                 .containsEntry(FraudFeatureContract.TRANSACTION_VELOCITY_PER_MINUTE, 5.0d);
+    }
+
+    @Test
+    void shouldRejectDuplicateOrIncompleteRapidTransferMembership() {
+        var event = TransactionFixtures.rawTransaction().build();
+        var duplicateMembership = new FeatureStoreSnapshot(
+                2,
+                new BigDecimal("100.00"),
+                List.of(
+                        recentTransaction("duplicate-id", 0),
+                        recentTransaction("duplicate-id", 1)
+                ),
+                0,
+                Instant.parse("2026-04-20T10:12:00Z"),
+                true
+        );
+        var incompleteMembership = new FeatureStoreSnapshot(
+                2,
+                new BigDecimal("100.00"),
+                List.of(recentTransaction("prior-id", 0)),
+                0,
+                Instant.parse("2026-04-20T10:12:00Z"),
+                true
+        );
+        var currentTransactionCollision = new FeatureStoreSnapshot(
+                2,
+                new BigDecimal("100.00"),
+                List.of(
+                        recentTransaction("prior-id", 0),
+                        recentTransaction(event.transactionId(), 1)
+                ),
+                0,
+                Instant.parse("2026-04-20T10:12:00Z"),
+                true
+        );
+
+        assertThatThrownBy(() -> calculator.calculate(event, duplicateMembership))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("RAPID_TRANSFER_EVIDENCE_IDENTITY_INVALID");
+        assertThatThrownBy(() -> calculator.calculate(event, incompleteMembership))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("RAPID_TRANSFER_EVIDENCE_IDENTITY_INVALID");
+        assertThatThrownBy(() -> calculator.calculate(event, currentTransactionCollision))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("RAPID_TRANSFER_EVIDENCE_IDENTITY_INVALID");
+    }
+
+    private List<RecentTransaction> recentTransactions(int count) {
+        return java.util.stream.IntStream.range(0, count)
+                .mapToObj(index -> recentTransaction("prior-txn-" + index, index))
+                .toList();
+    }
+
+    private RecentTransaction recentTransaction(String transactionId, int secondsOffset) {
+        return new RecentTransaction(
+                transactionId,
+                Instant.parse("2026-04-20T10:10:00Z").plusSeconds(secondsOffset),
+                BigDecimal.ONE,
+                "PLN",
+                BigDecimal.ONE
+        );
     }
 
     private FeatureStoreProperties properties(Duration recentTransactionWindow) {

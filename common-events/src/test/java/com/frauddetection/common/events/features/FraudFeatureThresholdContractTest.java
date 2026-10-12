@@ -122,6 +122,25 @@ class FraudFeatureThresholdContractTest {
                 with(complete, FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("txn-1", " "))
         )).isFalse();
         assertThat(FraudFeatureThresholdContract.isRapidTransferPlnBurst(
+                with(complete, FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("txn-1", "txn-1"))
+        )).isFalse();
+        assertThat(FraudFeatureThresholdContract.isRapidTransferPlnBurst(Map.of(
+                FraudFeatureContract.RECENT_TRANSACTION_COUNT, 3,
+                FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
+                FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
+                FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
+                FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("txn-1", "txn-2", "txn-2")
+        ))).isFalse();
+        assertThat(FraudFeatureThresholdContract.isRapidTransferPlnBurst(
+                with(complete, FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("txn-1", 2))
+        )).isFalse();
+        assertThat(FraudFeatureThresholdContract.isRapidTransferPlnBurst(
+                with(complete, FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("txn-1", " txn-2"))
+        )).isFalse();
+        assertThat(FraudFeatureThresholdContract.isRapidTransferPlnBurst(
+                with(complete, FraudFeatureContract.RECENT_TRANSACTION_COUNT, 3)
+        )).isFalse();
+        assertThat(FraudFeatureThresholdContract.isRapidTransferPlnBurst(
                 with(
                         complete,
                         FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS,
