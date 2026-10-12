@@ -3,6 +3,8 @@ package com.frauddetection.alert.observability.evidence;
 import com.frauddetection.alert.evidence.EvidenceProjectionState;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.observability.audit.AuditIntegrityMetricsRecorder;
+import com.frauddetection.alert.observability.engineintelligence.EngineIntelligenceMetricsRecorder;
+import com.frauddetection.alert.observability.fraudcase.FraudCaseMetricsRecorder;
 import com.frauddetection.alert.observability.outbox.OutboxMetricsRecorder;
 import com.frauddetection.alert.observability.regulated.RegulatedMutationRecoveryMetricsRecorder;
 import io.micrometer.core.instrument.Meter;
@@ -24,6 +26,8 @@ class EvidenceSnapshotMetricsRecorderTest {
             .withBean(AuditIntegrityMetricsRecorder.class)
             .withBean(OutboxMetricsRecorder.class)
             .withBean(RegulatedMutationRecoveryMetricsRecorder.class)
+            .withBean(EngineIntelligenceMetricsRecorder.class)
+            .withBean(FraudCaseMetricsRecorder.class)
             .withBean(AlertServiceMetrics.class);
 
     @Test
@@ -73,6 +77,11 @@ class EvidenceSnapshotMetricsRecorderTest {
     void springWiresOneFeatureRecorderIntoCompatibilityFacade() {
         contextRunner.run(context -> {
             assertThat(context).hasSingleBean(EvidenceSnapshotMetricsRecorder.class);
+            assertThat(context).hasSingleBean(AuditIntegrityMetricsRecorder.class);
+            assertThat(context).hasSingleBean(OutboxMetricsRecorder.class);
+            assertThat(context).hasSingleBean(RegulatedMutationRecoveryMetricsRecorder.class);
+            assertThat(context).hasSingleBean(EngineIntelligenceMetricsRecorder.class);
+            assertThat(context).hasSingleBean(FraudCaseMetricsRecorder.class);
             assertThat(context).hasSingleBean(AlertServiceMetrics.class);
 
             context.getBean(AlertServiceMetrics.class).recordEvidenceSnapshotProjectionError();
