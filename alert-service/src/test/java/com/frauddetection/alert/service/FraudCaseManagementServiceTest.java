@@ -345,6 +345,60 @@ class FraudCaseManagementServiceTest {
     }
 
     @Test
+    void shouldRejectPersistedAggregationWithoutCompleteOccurrenceOwnership() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                mock(ScoredTransactionRepository.class),
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        FraudCaseDocument incompatible = new FraudCaseDocument();
+        incompatible.setCaseId("case-unowned-aggregation");
+        incompatible.setCaseKey("rapid-customer-rapid-txn-2:RAPID_TRANSFER_BURST_20K_PLN:rapid-txn-1");
+        incompatible.setTransactionIds(List.of("rapid-txn-1", "rapid-txn-2"));
+        incompatible.setTransactions(List.of());
+        incompatible.setTotalAmountPln(new BigDecimal("20000.00"));
+        incompatible.setAggregationWindow("PT1M");
+        when(fraudCaseRepository.findByCaseKey(incompatible.getCaseKey())).thenReturn(Optional.of(incompatible));
+
+        assertThatThrownBy(() -> service.handleScoredTransaction(rapidTransferEvent(
+                "rapid-txn-2",
+                List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue())
+        )))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("FRAUD_CASE_AGGREGATION_OCCURRENCE_IDENTITY_REQUIRED");
+        verify(fraudCaseRepository, never()).save(any());
+    }
+
+    @Test
+    void shouldRejectPartialPersistedAggregationOwnership() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                mock(ScoredTransactionRepository.class),
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        FraudCaseDocument incompatible = new FraudCaseDocument();
+        incompatible.setCaseKey("rapid-customer-rapid-txn-2:RAPID_TRANSFER_BURST_20K_PLN:rapid-txn-1");
+        incompatible.setTransactionIds(List.of("rapid-txn-1", "rapid-txn-2"));
+        incompatible.setTransactions(List.of());
+        incompatible.setAggregationSourceEventId("event-only");
+        when(fraudCaseRepository.findByCaseKey(incompatible.getCaseKey())).thenReturn(Optional.of(incompatible));
+
+        assertThatThrownBy(() -> service.handleScoredTransaction(rapidTransferEvent(
+                "rapid-txn-2",
+                List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue())
+        )))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("FRAUD_CASE_AGGREGATION_OCCURRENCE_IDENTITY_INVALID");
+        verify(fraudCaseRepository, never()).save(any());
+    }
+
+    @Test
     void shouldNotBackfillMissingGroupedTransactionsWhenCaseIsRead() {
         FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
         ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);

@@ -4,6 +4,7 @@ import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.domain.ScoringOccurrenceOwnership;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
+import com.frauddetection.alert.persistence.FraudCaseTransactionDocument;
 import com.frauddetection.alert.persistence.ScoringOccurrenceFingerprint;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.features.FraudFeatureContract;
@@ -15,6 +16,7 @@ import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -54,30 +56,40 @@ public class FraudCaseIngestionService {
                 document.getTransactionIds() == null ? List.of() : document.getTransactionIds()
         );
         boolean newerAggregationSnapshot = shouldApplyAggregationSnapshot(document, event);
-        if (!membershipChanged && !newerAggregationSnapshot) {
+        FraudCaseTransactionAssembler.Assembly assembly = transactionAssembler.assemble(
+                mergedTransactionIds,
+                event
+        );
+        boolean materializationChanged = !sameTransactions(document.getTransactions(), assembly.transactions())
+                || !Objects.equals(document.getFirstTransactionAt(), assembly.firstTransactionAt())
+                || !Objects.equals(document.getLastTransactionAt(), assembly.lastTransactionAt());
+        if (!membershipChanged && !newerAggregationSnapshot && !materializationChanged) {
             return;
         }
-        document.setTransactionIds(mergedTransactionIds);
+
+        if (membershipChanged) {
+            document.setTransactionIds(mergedTransactionIds);
+        }
         if (newerAggregationSnapshot) {
             applyAggregationSnapshot(document, event, snapshot);
         }
         document.setThresholdPln(FraudFeatureThresholdContract.RAPID_TRANSFER_PLN_THRESHOLD);
         document.setUpdatedAt(Instant.now());
-
-        FraudCaseTransactionAssembler.Assembly assembly = transactionAssembler.assemble(
-                document.getTransactionIds(),
-                event
-        );
-        document.setTransactions(assembly.transactions());
-        document.setFirstTransactionAt(assembly.firstTransactionAt());
-        document.setLastTransactionAt(assembly.lastTransactionAt());
+        if (materializationChanged) {
+            document.setTransactions(assembly.transactions());
+            document.setFirstTransactionAt(assembly.firstTransactionAt());
+            document.setLastTransactionAt(assembly.lastTransactionAt());
+        }
         fraudCaseRepository.save(document);
     }
 
     private boolean shouldApplyAggregationSnapshot(FraudCaseDocument document, TransactionScoredEvent event) {
         ScoringOccurrenceOwnership candidate = ownership(event);
         if (aggregationOwnershipAbsent(document)) {
-            return document.getTotalAmountPln() == null && document.getAggregationWindow() == null;
+            if (document.getTotalAmountPln() != null || document.getAggregationWindow() != null) {
+                throw new IllegalStateException("FRAUD_CASE_AGGREGATION_OCCURRENCE_IDENTITY_REQUIRED");
+            }
+            return true;
         }
         ScoringOccurrenceOwnership current;
         try {
@@ -110,13 +122,8 @@ public class FraudCaseIngestionService {
             Map<String, Object> snapshot
     ) {
         ScoringOccurrenceOwnership ownership = ownership(event);
-        document.setTotalAmountPln(decimal(
-                snapshot.get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN),
-                FraudFeatureThresholdContract.RAPID_TRANSFER_PLN_THRESHOLD
-        ));
-        document.setAggregationWindow(String.valueOf(
-                snapshot.getOrDefault(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M")
-        ));
+        document.setTotalAmountPln((BigDecimal) snapshot.get(FraudFeatureContract.RECENT_AMOUNT_SUM_PLN));
+        document.setAggregationWindow((String) snapshot.get(FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW));
         document.setAggregationSourceEventId(ownership.sourceEventId());
         document.setAggregationSourceEventCreatedAt(ownership.sourceEventCreatedAt().toString());
         document.setAggregationSourceEventCreatedAtEpochSecond(ownership.sourceEventCreatedAt().getEpochSecond());
@@ -138,6 +145,30 @@ public class FraudCaseIngestionService {
                 && document.getAggregationSourceEventCreatedAtEpochSecond() == null
                 && document.getAggregationSourceEventCreatedAtNano() == null
                 && document.getAggregationSourceEventFingerprint() == null;
+    }
+
+    private boolean sameTransactions(
+            List<FraudCaseTransactionDocument> current,
+            List<FraudCaseTransactionDocument> candidate
+    ) {
+        List<FraudCaseTransactionDocument> currentTransactions = current == null ? List.of() : current;
+        if (currentTransactions.size() != candidate.size()) {
+            return false;
+        }
+        for (int index = 0; index < currentTransactions.size(); index++) {
+            var left = currentTransactions.get(index);
+            var right = candidate.get(index);
+            if (!Objects.equals(left.getTransactionId(), right.getTransactionId())
+                    || !Objects.equals(left.getCorrelationId(), right.getCorrelationId())
+                    || !Objects.equals(left.getTransactionTimestamp(), right.getTransactionTimestamp())
+                    || !Objects.equals(left.getTransactionAmount(), right.getTransactionAmount())
+                    || !Objects.equals(left.getAmountPln(), right.getAmountPln())
+                    || !Objects.equals(left.getFraudScore(), right.getFraudScore())
+                    || !Objects.equals(left.getRiskLevel(), right.getRiskLevel())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private FraudCaseDocument newCase(String caseKey, TransactionScoredEvent event) {
@@ -165,14 +196,4 @@ public class FraudCaseIngestionService {
         return List.of(currentTransactionId);
     }
 
-    private BigDecimal decimal(Object value, BigDecimal defaultValue) {
-        if (value == null) {
-            return defaultValue;
-        }
-        try {
-            return new BigDecimal(value.toString());
-        } catch (NumberFormatException exception) {
-            return defaultValue;
-        }
-    }
 }
