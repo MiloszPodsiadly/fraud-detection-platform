@@ -16,38 +16,32 @@ import static org.mockito.Mockito.when;
 class ExternalAuditHeadForensicServiceTest {
 
     @Test
-    void shouldPersistForensicEvidenceWithDeterministicIdentity() {
+    void shouldPersistForensicEvidenceWithStableFingerprintAndDistinctEpisodeIdentity() {
         AuditDegradationEventRepository repository = mock(AuditDegradationEventRepository.class);
         ExternalAuditHeadForensicService service = service(repository);
         Instant detectedAt = Instant.parse("2026-10-11T12:00:00Z");
 
-        String first = service.recordIncident(
+        String incidentId = service.recordIncident(
                 "source_service:alert-service",
                 "version-7",
                 "a".repeat(64),
                 "HEAD_MANIFEST_HASH_MISMATCH",
                 detectedAt
         );
-        String repeated = service.recordIncident(
-                "source_service:alert-service",
-                "version-7",
-                "a".repeat(64),
-                "HEAD_MANIFEST_HASH_MISMATCH",
-                detectedAt.plusSeconds(30)
-        );
-
         org.mockito.ArgumentCaptor<AuditDegradationEventDocument> captor =
                 org.mockito.ArgumentCaptor.forClass(AuditDegradationEventDocument.class);
-        verify(repository, org.mockito.Mockito.times(2)).insert(captor.capture());
-        AuditDegradationEventDocument evidence = captor.getAllValues().getFirst();
-        assertThat(repeated).isEqualTo(first);
-        assertThat(evidence.getAuditId()).isEqualTo(first);
+        verify(repository).insert(captor.capture());
+        AuditDegradationEventDocument evidence = captor.getValue();
+        assertThat(incidentId).startsWith("external-head-");
+        assertThat(evidence.getAuditId()).isEqualTo(incidentId);
         assertThat(evidence.getType()).isEqualTo(AuditDegradationEventDocument.TYPE_EXTERNAL_HEAD_INTEGRITY);
         assertThat(evidence.getResourceId()).isEqualTo("source_service:alert-service");
         assertThat(evidence.getObservedVersion()).isEqualTo("version-7");
         assertThat(evidence.getObservedDigest()).hasSize(64);
         assertThat(evidence.getReason()).isEqualTo("HEAD_MANIFEST_HASH_MISMATCH");
         assertThat(evidence.getRecoveryOutcome()).isEqualTo("DETECTED_PENDING_REPAIR");
+        assertThat(evidence.getIncidentFingerprint()).matches("[0-9a-f]{64}");
+        assertThat(evidence.getActiveIncidentKey()).isEqualTo(evidence.getIncidentFingerprint());
         assertThat(evidence.isResolved()).isFalse();
     }
 
@@ -57,14 +51,19 @@ class ExternalAuditHeadForensicServiceTest {
         ExternalAuditHeadForensicService service = service(repository);
         when(repository.insert(any(AuditDegradationEventDocument.class)))
                 .thenThrow(new DuplicateKeyException("already recorded"));
+        AuditDegradationEventDocument active = new AuditDegradationEventDocument();
+        active.setAuditId("external-head-existing-episode");
+        when(repository.findByActiveIncidentKey(any())).thenReturn(java.util.Optional.of(active));
 
-        service.recordIncident(
+        String incidentId = service.recordIncident(
                 "source_service:alert-service",
                 null,
                 null,
                 "HEAD_MANIFEST_MISSING",
                 Instant.parse("2026-10-11T12:00:00Z")
         );
+
+        assertThat(incidentId).isEqualTo("external-head-existing-episode");
     }
 
     @Test

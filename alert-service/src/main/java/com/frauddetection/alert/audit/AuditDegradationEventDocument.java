@@ -50,6 +50,10 @@ public class AuditDegradationEventDocument {
     private String reason;
     private String observedVersion;
     private String observedDigest;
+    @Indexed
+    private String incidentFingerprint;
+    @Indexed(unique = true, sparse = true)
+    private String activeIncidentKey;
     private String recoveryAction;
     private String recoveryOutcome;
     private Instant recoveryAttemptedAt;
@@ -252,6 +256,22 @@ public class AuditDegradationEventDocument {
 
     public void setObservedDigest(String observedDigest) {
         this.observedDigest = observedDigest;
+    }
+
+    public String getIncidentFingerprint() {
+        return incidentFingerprint;
+    }
+
+    public void setIncidentFingerprint(String incidentFingerprint) {
+        this.incidentFingerprint = incidentFingerprint;
+    }
+
+    public String getActiveIncidentKey() {
+        return activeIncidentKey;
+    }
+
+    public void setActiveIncidentKey(String activeIncidentKey) {
+        this.activeIncidentKey = activeIncidentKey;
     }
 
     public String getRecoveryAction() {

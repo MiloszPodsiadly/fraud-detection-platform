@@ -61,6 +61,9 @@ class ExternalAuditHeadRecoveryStore implements ExternalAuditHeadRecoveryTransit
                     .set("recoveryOutcome", outcome)
                     .set("recoveryAttemptedAt", attemptedAt)
                     .set("resolved", resolved);
+            if (resolved) {
+                update.unset("activeIncidentKey");
+            }
             return mongoTemplate.findAndModify(
                     query,
                     update,

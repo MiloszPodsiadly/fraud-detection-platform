@@ -15,5 +15,7 @@ public interface AuditDegradationEventRepository extends MongoRepository<AuditDe
 
     Optional<AuditDegradationEventDocument> findByAuditId(String auditId);
 
+    Optional<AuditDegradationEventDocument> findByActiveIncidentKey(String activeIncidentKey);
+
     List<AuditDegradationEventDocument> findTop100ByResolvedOrderByTimestampAsc(boolean resolved);
 }

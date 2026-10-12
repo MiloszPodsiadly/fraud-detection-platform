@@ -9,6 +9,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.UUID;
 
 @Service
 public class ExternalAuditHeadForensicService {
@@ -35,13 +36,14 @@ public class ExternalAuditHeadForensicService {
         String version = normalize(observedVersion, 200, null);
         String digest = normalize(observedDigest, 128, null);
         String normalizedReason = normalize(reason, 120, "HEAD_MANIFEST_INVALID");
-        String incidentId = "external-head-" + sha256Hex(String.join(
+        String incidentFingerprint = sha256Hex(String.join(
                 "|",
                 partition,
                 version == null ? "MISSING_VERSION" : version,
                 digest == null ? "MISSING_DIGEST" : digest,
                 normalizedReason
         ));
+        String incidentId = "external-head-" + UUID.randomUUID();
 
         AuditDegradationEventDocument event = new AuditDegradationEventDocument();
         event.setAuditId(incidentId);
@@ -54,12 +56,26 @@ public class ExternalAuditHeadForensicService {
         event.setReason(normalizedReason);
         event.setObservedVersion(version);
         event.setObservedDigest(digest);
+        event.setIncidentFingerprint(incidentFingerprint);
+        event.setActiveIncidentKey(incidentFingerprint);
         event.setRecoveryAction("RECONSTRUCT_AND_CAS_HEAD");
         event.setRecoveryOutcome("DETECTED_PENDING_REPAIR");
         try {
             repository.insert(event);
-        } catch (DuplicateKeyException ignored) {
-            // Deterministic evidence identity makes repeated detection idempotent across restarts.
+        } catch (DuplicateKeyException exception) {
+            try {
+                return repository.findByActiveIncidentKey(incidentFingerprint)
+                        .map(AuditDegradationEventDocument::getAuditId)
+                        .orElseThrow(() -> new AuditPersistenceUnavailableException(
+                                "Active external HEAD integrity evidence could not be resolved after a concurrent insert.",
+                                exception
+                        ));
+            } catch (DataAccessException lookupFailure) {
+                throw new AuditPersistenceUnavailableException(
+                        "Active external HEAD integrity evidence could not be loaded.",
+                        lookupFailure
+                );
+            }
         } catch (DataAccessException exception) {
             throw new AuditPersistenceUnavailableException(
                     "External HEAD integrity evidence could not be persisted.",

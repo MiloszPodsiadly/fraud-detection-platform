@@ -2,12 +2,13 @@ package com.frauddetection.alert.audit;
 
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
-import org.bson.Document;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.index.Index;
 import org.springframework.data.mongodb.repository.support.MongoRepositoryFactory;
+import org.springframework.data.domain.Sort;
 import org.testcontainers.containers.MongoDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -38,6 +39,8 @@ class ExternalAuditHeadRecoveryStoreMongoIntegrationTest {
         mongoClient = MongoClients.create(MONGO.getReplicaSetUrl());
         mongoTemplate = new MongoTemplate(mongoClient, "external_head_recovery_transitions");
         mongoTemplate.dropCollection(AuditDegradationEventDocument.class);
+        mongoTemplate.indexOps(AuditDegradationEventDocument.class)
+                .ensureIndex(new Index().on("activeIncidentKey", Sort.Direction.ASC).unique().sparse());
         recoveryStore = new ExternalAuditHeadRecoveryStore(mongoTemplate);
     }
 
@@ -88,21 +91,16 @@ class ExternalAuditHeadRecoveryStoreMongoIntegrationTest {
     }
 
     @Test
-    void oldIncidentWithoutResolvedFieldStillSupportsMonotonicRecovery() {
-        mongoTemplate.getCollection("audit_degradation_events").insertOne(new Document()
-                .append("_id", "external-head-old")
-                .append("type", AuditDegradationEventDocument.TYPE_EXTERNAL_HEAD_INTEGRITY)
-                .append("reason", "HEAD_MANIFEST_MISSING")
-                .append("timestamp", java.util.Date.from(DETECTED_AT))
-                .append("recoveryOutcome", "DETECTED_PENDING_REPAIR"));
+    void verifiedRepairAtomicallyReleasesTheActiveIncidentKey() {
+        AuditDegradationEventDocument incident = incident("external-head-current");
+        mongoTemplate.insert(incident);
 
-        recoveryStore.recordFailedRepair("external-head-old", "CAS_CONFLICT", DETECTED_AT.plusSeconds(5));
-        recoveryStore.recordVerifiedRepair("external-head-old", DETECTED_AT.plusSeconds(10));
+        recoveryStore.recordVerifiedRepair("external-head-current", DETECTED_AT.plusSeconds(10));
 
-        AuditDegradationEventDocument stored = stored("external-head-old");
+        AuditDegradationEventDocument stored = stored("external-head-current");
         assertThat(stored.isResolved()).isTrue();
         assertThat(stored.getRecoveryOutcome()).isEqualTo("VERIFIED_REPAIRED");
-        assertThat(stored.getReason()).isEqualTo("HEAD_MANIFEST_MISSING");
+        assertThat(stored.getActiveIncidentKey()).isNull();
     }
 
     @Test
@@ -135,6 +133,34 @@ class ExternalAuditHeadRecoveryStoreMongoIntegrationTest {
     }
 
     @Test
+    void sameIntegrityProblemCreatesANewEpisodeAfterVerifiedRepair() {
+        AuditDegradationEventRepository repository = new MongoRepositoryFactory(mongoTemplate)
+                .getRepository(AuditDegradationEventRepository.class);
+        ExternalAuditHeadForensicService service = new ExternalAuditHeadForensicService(repository, recoveryStore);
+
+        String firstId = service.recordIncident(
+                "source_service:alert-service",
+                "version-7",
+                "a".repeat(64),
+                "HEAD_MANIFEST_HASH_MISMATCH",
+                DETECTED_AT
+        );
+        recoveryStore.recordVerifiedRepair(firstId, DETECTED_AT.plusSeconds(10));
+        String secondId = service.recordIncident(
+                "source_service:alert-service",
+                "version-7",
+                "a".repeat(64),
+                "HEAD_MANIFEST_HASH_MISMATCH",
+                DETECTED_AT.plusSeconds(20)
+        );
+
+        assertThat(secondId).isNotEqualTo(firstId);
+        assertThat(repository.findAll()).hasSize(2);
+        assertThat(repository.findById(firstId).orElseThrow().isResolved()).isTrue();
+        assertThat(repository.findById(secondId).orElseThrow().isResolved()).isFalse();
+    }
+
+    @Test
     void unavailableMongoFailsClosedWithoutReportingCommittedRepair() {
         mongoTemplate.insert(incident("external-head-3"));
         mongoClient.close();
@@ -155,6 +181,8 @@ class ExternalAuditHeadRecoveryStoreMongoIntegrationTest {
         event.setReason("HEAD_MANIFEST_HASH_MISMATCH");
         event.setObservedVersion("version-7");
         event.setObservedDigest("digest-7");
+        event.setIncidentFingerprint("incident-fingerprint-7");
+        event.setActiveIncidentKey("incident-fingerprint-7");
         event.setRecoveryAction("RECONSTRUCT_AND_CAS_HEAD");
         event.setRecoveryOutcome("DETECTED_PENDING_REPAIR");
         event.setResolutionRequestedBy("ops-requester");
