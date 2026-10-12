@@ -1,4 +1,4 @@
-package com.frauddetection.alert.service;
+package com.frauddetection.alert.outbox;
 
 public final class DecisionOutboxStatus {
     public static final String PENDING = "PENDING";

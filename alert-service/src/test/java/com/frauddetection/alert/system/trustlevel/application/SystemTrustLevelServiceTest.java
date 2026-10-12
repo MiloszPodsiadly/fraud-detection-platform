@@ -129,6 +129,54 @@ class SystemTrustLevelServiceTest {
     }
 
     @Test
+    void shouldDegradeBankTrustPostureWhileHeadManifestRepairIsPending() {
+        ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
+        ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);
+        when(integrityService.coverage("alert-service", 100)).thenReturn(new ExternalAuditAnchorCoverageResponse(
+                "AVAILABLE",
+                10,
+                10,
+                0,
+                0L,
+                List.of(),
+                false,
+                100,
+                "HEAD_MANIFEST_UPDATE_FAILED",
+                "External anchor coverage is available, but the navigation manifest requires repair.",
+                "DEGRADED",
+                0,
+                null,
+                50,
+                false,
+                0,
+                0,
+                0,
+                1
+        ));
+        when(sink.capabilities()).thenReturn(verifiedCapabilities());
+        SystemTrustLevelService service = service(
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                Duration.ofMinutes(10),
+                integrityService,
+                sink,
+                null,
+                healthyOutboxRepository(),
+                null
+        );
+
+        SystemTrustLevel response = service.trustLevel();
+
+        assertThat(response.guaranteeLevel()).isEqualTo("FDP24_DEGRADED");
+        assertThat(response.reasonCode()).isEqualTo("HEAD_MANIFEST_UPDATE_FAILED");
+        assertThat(response.externalAnchorStrength()).isEqualTo("NONE");
+    }
+
+    @Test
     void shouldReturnNoneWhenPublicationDisabled() {
         ExternalAuditIntegrityService integrityService = mock(ExternalAuditIntegrityService.class);
         ExternalAuditAnchorSink sink = mock(ExternalAuditAnchorSink.class);

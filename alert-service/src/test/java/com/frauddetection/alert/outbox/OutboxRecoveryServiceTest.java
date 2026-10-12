@@ -12,7 +12,7 @@ import com.frauddetection.alert.regulated.RegulatedMutationModelVersion;
 import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.outbox.OutboxConfirmationResolutionMutationHandler;
-import com.frauddetection.alert.service.DecisionOutboxStatus;
+import com.frauddetection.alert.outbox.DecisionOutboxStatus;
 import com.mongodb.client.result.UpdateResult;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;

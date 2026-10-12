@@ -4,6 +4,7 @@ import com.frauddetection.alert.domain.ScoringOccurrenceAdmissionResult;
 import com.frauddetection.alert.mapper.ScoredTransactionDocumentMapper;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;
 import com.frauddetection.common.events.enums.RiskLevel;
+import com.frauddetection.common.events.features.FraudFeatureContract;
 import com.frauddetection.common.events.intelligence.MlPredictionEvidenceOmissionReason;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
@@ -15,6 +16,7 @@ import org.testcontainers.containers.MongoDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -228,6 +230,38 @@ class ScoredTransactionProjectionWriterMongoIntegrationTest {
     }
 
     @Test
+    void duplicateAndStaleOccurrencesPreserveTheWinningCanonicalMonetaryEvidence() {
+        TransactionScoredEvent winner = event(
+                "txn-monetary-evidence",
+                "event-later",
+                BASE_TIME.plusSeconds(1),
+                0.88d,
+                true,
+                "model-v2",
+                Map.of(),
+                Map.of(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("215.00"))
+        );
+        writer.write(mapper.toDocument(winner));
+
+        ScoringOccurrenceAdmissionResult replay = writer.write(mapper.toDocument(winner));
+        ScoringOccurrenceAdmissionResult stale = writer.write(mapper.toDocument(event(
+                "txn-monetary-evidence",
+                "event-earlier",
+                BASE_TIME,
+                0.22d,
+                false,
+                "model-v1",
+                Map.of(),
+                Map.of(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("100.00"))
+        )));
+
+        assertThat(replay.outcome()).isEqualTo(IDEMPOTENT_REPLAY);
+        assertThat(stale.outcome()).isEqualTo(STALE_REJECTED);
+        assertThat(stored("txn-monetary-evidence").getCurrentTransactionAmountPln())
+                .isEqualByComparingTo("215.00");
+    }
+
+    @Test
     void equalEventTimestampsUseSourceEventIdAsDeterministicTieBreaker() {
         writer.write(mapper.toDocument(event("txn-tie", "event-a", BASE_TIME, 0.11d, false, "model-a")));
         ScoringOccurrenceAdmissionResult winner = writer.write(
@@ -395,7 +429,7 @@ class ScoredTransactionProjectionWriterMongoIntegrationTest {
             boolean alertRecommended,
             String modelVersion
     ) {
-        return event(transactionId, eventId, createdAt, score, alertRecommended, modelVersion, Map.of());
+        return event(transactionId, eventId, createdAt, score, alertRecommended, modelVersion, Map.of(), Map.of());
     }
 
     private TransactionScoredEvent event(
@@ -406,6 +440,19 @@ class ScoredTransactionProjectionWriterMongoIntegrationTest {
             boolean alertRecommended,
             String modelVersion,
             Map<String, Object> scoreDetails
+    ) {
+        return event(transactionId, eventId, createdAt, score, alertRecommended, modelVersion, scoreDetails, Map.of());
+    }
+
+    private TransactionScoredEvent event(
+            String transactionId,
+            String eventId,
+            Instant createdAt,
+            double score,
+            boolean alertRecommended,
+            String modelVersion,
+            Map<String, Object> scoreDetails,
+            Map<String, Object> featureSnapshot
     ) {
         return new TransactionScoredEvent(
                 eventId,
@@ -428,7 +475,7 @@ class ScoredTransactionProjectionWriterMongoIntegrationTest {
                 createdAt,
                 List.of(),
                 scoreDetails,
-                Map.of(),
+                featureSnapshot,
                 alertRecommended,
                 List.of(),
                 null,

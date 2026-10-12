@@ -32,6 +32,9 @@ public class ScoredTransactionDocumentMapper {
         document.setTransactionTimestamp(event.transactionTimestamp());
         document.setScoredAt(resolveScoredAt(event));
         document.setTransactionAmount(event.transactionAmount());
+        document.setCurrentTransactionAmountPln(
+                CanonicalMonetaryEvidenceMapper.currentTransactionAmountPln(event.featureSnapshot())
+        );
         document.setMerchantInfo(event.merchantInfo());
         document.setTransactionIdSearch(normalizeSearchValue(event.transactionId()));
         document.setCustomerIdSearch(normalizeSearchValue(event.customerId()));

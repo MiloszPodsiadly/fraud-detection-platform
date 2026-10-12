@@ -1,6 +1,7 @@
 package com.frauddetection.alert.messaging;
 
 import com.frauddetection.alert.config.KafkaTopicProperties;
+import com.frauddetection.alert.domain.FraudCaseStatus;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjection;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionMapper;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionPolicy;
@@ -38,8 +39,11 @@ import com.frauddetection.alert.regulated.mutation.fraudcase.FraudCaseUpdateMuta
 import com.frauddetection.alert.security.principal.AnalystActorResolver;
 import com.frauddetection.alert.service.AlertCaseFactory;
 import com.frauddetection.alert.service.AlertManagementService;
-import com.frauddetection.alert.service.FraudCaseManagementService;
-import com.frauddetection.alert.service.FraudCaseQueryService;
+import com.frauddetection.alert.fraudcase.FraudCaseIngestionService;
+import com.frauddetection.alert.fraudcase.FraudCaseManagementService;
+import com.frauddetection.alert.fraudcase.FraudCaseQueryService;
+import com.frauddetection.alert.fraudcase.FraudCaseTransactionAssembler;
+import com.frauddetection.alert.fraudcase.FraudCaseUpdateCoordinator;
 import com.frauddetection.alert.service.ScoredTransactionSearchPolicy;
 import com.frauddetection.alert.service.SubmitDecisionRegulatedMutationService;
 import com.frauddetection.alert.service.TransactionMonitoringService;
@@ -121,6 +125,7 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
     private MlPredictionEvidenceEventListener evidenceListener;
     private MlPredictionEvidenceProjectionRepository evidenceRepository;
     private ScoredTransactionRepository scoredTransactionRepository;
+    private FraudCaseRepository fraudCaseRepository;
     private EngineIntelligenceReadService engineIntelligenceReadService;
 
     @BeforeEach
@@ -141,7 +146,7 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
         AlertRepository alerts = repositories.getRepository(AlertRepository.class);
         SuspiciousTransactionRepository suspiciousTransactions =
                 repositories.getRepository(SuspiciousTransactionRepository.class);
-        FraudCaseRepository fraudCases = repositories.getRepository(FraudCaseRepository.class);
+        fraudCaseRepository = repositories.getRepository(FraudCaseRepository.class);
         AlertServiceMetrics metrics = new AlertServiceMetrics(new SimpleMeterRegistry());
 
         monitoringService = new TransactionMonitoringService(
@@ -157,15 +162,21 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
                 metrics,
                 scoredTransactionRepository
         );
+        FraudCaseResponseMapper fraudCaseResponseMapper = new FraudCaseResponseMapper(new AlertResponseMapper());
         FraudCaseManagementService fraudCaseManagement = new FraudCaseManagementService(
-                fraudCases,
-                scoredTransactionRepository,
-                mock(AnalystActorResolver.class),
-                new FraudCaseUpdateMutationHandler(fraudCases, metrics),
-                mock(RegulatedMutationCoordinator.class),
-                new FraudCaseResponseMapper(new AlertResponseMapper()),
+                new FraudCaseIngestionService(
+                        fraudCaseRepository,
+                        new FraudCaseTransactionAssembler(scoredTransactionRepository)
+                ),
+                new FraudCaseUpdateCoordinator(
+                        fraudCaseRepository,
+                        mock(AnalystActorResolver.class),
+                        new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
+                        mock(RegulatedMutationCoordinator.class),
+                        fraudCaseResponseMapper
+                ),
                 new FraudCaseQueryService(
-                        fraudCases,
+                        fraudCaseRepository,
                         mock(FraudCaseSearchRepository.class),
                         new FraudCaseWorkQueueProperties(Duration.ofHours(24), "scoring-occurrence-test-secret")
                 )
@@ -547,6 +558,76 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
     }
 
     @Test
+    void concurrentCrossPartitionContributorsConvergeAndRedrivePreservesAnalystDecision() throws Exception {
+        TransactionScoredEvent first = caseEvent(
+                "transaction-case-a",
+                "event-case-a",
+                BASE_TIME,
+                List.of("transfer-case-root", "transaction-case-a")
+        );
+        TransactionScoredEvent second = caseEvent(
+                "transaction-case-b",
+                "event-case-b",
+                BASE_TIME.plusNanos(1),
+                List.of("transfer-case-root", "transaction-case-b")
+        );
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> firstResult = executor.submit(() -> {
+                await(start);
+                processWithTransientRetry(first, listener);
+            });
+            Future<?> secondResult = executor.submit(() -> {
+                await(start);
+                processWithTransientRetry(second, listener);
+            });
+            start.countDown();
+            firstResult.get(20, TimeUnit.SECONDS);
+            secondResult.get(20, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertThat(fraudCaseRepository.findAll()).hasSize(1);
+        FraudCaseDocument fraudCase = fraudCaseRepository.findAll().getFirst();
+        assertThat(fraudCase.getTransactionIds())
+                .contains("transaction-case-a", "transaction-case-b")
+                .doesNotHaveDuplicates();
+        assertThat(fraudCase.getTransactions())
+                .extracting("transactionId")
+                .containsExactlyInAnyOrder("transaction-case-a", "transaction-case-b");
+        assertThat(fraudCase.getTransactions().stream()
+                .map(transaction -> transaction.getAmountPln())
+                .reduce(BigDecimal.ZERO, BigDecimal::add))
+                .isEqualByComparingTo(fraudCase.getTotalAmountPln());
+
+        String firstFingerprint = scoredTransactionRepository.findById("transaction-case-a")
+                .orElseThrow()
+                .getSourceEventFingerprint();
+        fraudCase.setStatus(FraudCaseStatus.CONFIRMED_FRAUD);
+        fraudCase.setAnalystId("analyst-1");
+        fraudCase.setDecisionReason("confirmed after review");
+        fraudCase.setDecisionTags(List.of("confirmed"));
+        fraudCase.setDecidedAt(BASE_TIME.plusSeconds(30));
+        fraudCaseRepository.save(fraudCase);
+
+        process(first);
+
+        FraudCaseDocument afterRedrive = fraudCaseRepository.findAll().getFirst();
+        assertThat(afterRedrive.getTransactionIds())
+                .contains("transaction-case-a", "transaction-case-b")
+                .doesNotHaveDuplicates();
+        assertThat(afterRedrive.getStatus()).isEqualTo(FraudCaseStatus.CONFIRMED_FRAUD);
+        assertThat(afterRedrive.getAnalystId()).isEqualTo("analyst-1");
+        assertThat(afterRedrive.getDecisionReason()).isEqualTo("confirmed after review");
+        assertThat(afterRedrive.getDecisionTags()).containsExactly("confirmed");
+        assertThat(afterRedrive.getDecidedAt()).isEqualTo(BASE_TIME.plusSeconds(30));
+        assertThat(scoredTransactionRepository.findById("transaction-case-a").orElseThrow()
+                .getSourceEventFingerprint()).isEqualTo(firstFingerprint);
+    }
+
+    @Test
     void concurrentNewerLowWinsWithoutLeavingStaleCurrentProjectionOrPartialAlertEffects() throws Exception {
         TransactionScoredEvent earlierHigh = event("event-a", BASE_TIME, 0.81d, "model-a");
         TransactionScoredEvent newerLow = event(
@@ -846,10 +927,58 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
             boolean alertRecommended,
             EngineIntelligenceSummary engineIntelligence
     ) {
+        return event(
+                TRANSACTION_ID,
+                eventId,
+                createdAt,
+                score,
+                modelVersion,
+                riskLevel,
+                alertRecommended,
+                engineIntelligence,
+                rapidTransferSnapshot()
+        );
+    }
+
+    private TransactionScoredEvent caseEvent(
+            String transactionId,
+            String eventId,
+            Instant createdAt,
+            List<String> transactionIds
+    ) {
+        double score = 0.91d;
+        String modelVersion = "model-case";
+        return event(
+                transactionId,
+                eventId,
+                createdAt,
+                score,
+                modelVersion,
+                RiskLevel.HIGH,
+                true,
+                engineIntelligence(createdAt, modelVersion, score),
+                rapidTransferSnapshot(
+                        transactionIds,
+                        transactionId.endsWith("a") ? new BigDecimal("9000.00") : new BigDecimal("11000.00")
+                )
+        );
+    }
+
+    private TransactionScoredEvent event(
+            String transactionId,
+            String eventId,
+            Instant createdAt,
+            double score,
+            String modelVersion,
+            RiskLevel riskLevel,
+            boolean alertRecommended,
+            EngineIntelligenceSummary engineIntelligence,
+            Map<String, Object> featureSnapshot
+    ) {
         TransactionScoredEvent defaults = TransactionFixtures.scoredTransaction().build();
         return new TransactionScoredEvent(
                 eventId,
-                TRANSACTION_ID,
+                transactionId,
                 "correlation-" + eventId,
                 "customer-occurrence-1",
                 "account-occurrence-1",
@@ -868,7 +997,7 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
                 createdAt,
                 riskLevel == RiskLevel.HIGH ? List.of("HIGH_VELOCITY") : List.of(),
                 Map.of("scoreDecisionId", "decision-" + eventId),
-                rapidTransferSnapshot(),
+                featureSnapshot,
                 alertRecommended,
                 List.of(),
                 engineIntelligence,
@@ -889,13 +1018,23 @@ class ScoringOccurrenceProcessingMongoIntegrationTest {
     }
 
     private Map<String, Object> rapidTransferSnapshot() {
+        return rapidTransferSnapshot(
+                List.of("transfer-previous", TRANSACTION_ID),
+                new BigDecimal("20000.00")
+        );
+    }
+
+    private Map<String, Object> rapidTransferSnapshot(
+            List<String> transactionIds,
+            BigDecimal currentTransactionAmountPln
+    ) {
         return Map.of(
-                FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, List.of("transfer-previous", TRANSACTION_ID),
+                FraudFeatureContract.RAPID_TRANSFER_TRANSACTION_IDS, transactionIds,
                 FraudFeatureContract.RECENT_TRANSACTION_COUNT, 2,
                 FraudFeatureContract.RECENT_TRANSACTION_COUNT_WINDOW, "PT1M",
                 FraudFeatureContract.RECENT_AMOUNT_SUM_PLN, new BigDecimal("20000.00"),
                 FraudFeatureContract.RECENT_AMOUNT_SUM_WINDOW, "PT1M",
-                FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, new BigDecimal("20000.00")
+                FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN, currentTransactionAmountPln
         );
     }
 

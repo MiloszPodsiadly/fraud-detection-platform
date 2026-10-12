@@ -3,6 +3,7 @@ package com.frauddetection.alert.config;
 import com.frauddetection.alert.messaging.EngineIntelligenceRecoveryValidationException;
 import com.frauddetection.alert.messaging.MlPredictionEvidencePermanentProcessingException;
 import com.frauddetection.alert.messaging.ScoringOccurrenceConflictException;
+import com.frauddetection.alert.messaging.TransactionScoredRecoveryValidationException;
 import com.frauddetection.alert.engineintelligence.EngineIntelligencePendingProjectionProperties;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionService;
 import com.frauddetection.alert.engineintelligence.EngineIntelligenceProjectionValidationException;
@@ -51,6 +52,7 @@ import java.util.Map;
 @EnableConfigurationProperties({
         KafkaTopicProperties.class,
         KafkaConsumerProperties.class,
+        TransactionScoredRecoveryProperties.class,
         MlPredictionEvidenceRecoveryProperties.class,
         EngineIntelligenceRecoveryProperties.class,
         EngineIntelligencePendingProjectionProperties.class,
@@ -233,6 +235,21 @@ public class AlertKafkaConfig {
     }
 
     @Bean
+    public DeadLetterPublishingRecoverer transactionScoredRedriveQuarantineRecoverer(
+            KafkaOperations<Object, Object> deadLetterKafkaTemplate,
+            TransactionScoredRecoveryProperties recoveryProperties
+    ) {
+        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
+                deadLetterKafkaTemplate,
+                (record, exception) -> new TopicPartition(recoveryProperties.quarantineTopic(), record.partition())
+        );
+        recoverer.setFailIfSendResultIsError(true);
+        recoverer.setWaitForSendResultTimeout(Duration.ofSeconds(10));
+        recoverer.setLogRecoveryRecord(false);
+        return recoverer;
+    }
+
+    @Bean
     public DefaultErrorHandler kafkaErrorHandler(
             DeadLetterPublishingRecoverer deadLetterPublishingRecoverer,
             KafkaConsumerProperties kafkaConsumerProperties
@@ -346,6 +363,32 @@ public class AlertKafkaConfig {
     }
 
     @Bean
+    public DefaultErrorHandler transactionScoredRedriveErrorHandler(
+            @Qualifier("transactionScoredRedriveQuarantineRecoverer")
+            DeadLetterPublishingRecoverer recoverer,
+            KafkaConsumerProperties kafkaConsumerProperties
+    ) {
+        long retryAttempts = Math.max(
+                (kafkaConsumerProperties.retryAttempts() == null ? 3 : kafkaConsumerProperties.retryAttempts()) - 1L,
+                0L
+        );
+        long retryBackoffMillis = kafkaConsumerProperties.retryBackoffMillis() == null
+                ? 1000L
+                : kafkaConsumerProperties.retryBackoffMillis();
+        DefaultErrorHandler errorHandler = new DefaultErrorHandler(
+                recoverer,
+                new FixedBackOff(retryBackoffMillis, retryAttempts)
+        );
+        errorHandler.addNotRetryableExceptions(
+                DeserializationException.class,
+                TransactionScoredRecoveryValidationException.class,
+                ScoringOccurrenceConflictException.class
+        );
+        errorHandler.setAckAfterHandle(true);
+        return errorHandler;
+    }
+
+    @Bean
     public ConcurrentKafkaListenerContainerFactory<String, TransactionScoredEvent> transactionScoredKafkaListenerContainerFactory(
             @Qualifier("transactionScoredEventConsumerFactory")
             ConsumerFactory<String, TransactionScoredEvent> transactionScoredEventConsumerFactory,
@@ -415,16 +458,45 @@ public class AlertKafkaConfig {
     }
 
     @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, TransactionScoredEvent> transactionScoredRedriveKafkaListenerContainerFactory(
+            @Qualifier("transactionScoredEventConsumerFactory")
+            ConsumerFactory<String, TransactionScoredEvent> consumerFactory,
+            @Qualifier("transactionScoredRedriveErrorHandler") DefaultErrorHandler errorHandler,
+            KafkaConsumerProperties kafkaConsumerProperties
+    ) {
+        ConcurrentKafkaListenerContainerFactory<String, TransactionScoredEvent> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(consumerFactory);
+        factory.setCommonErrorHandler(errorHandler);
+        factory.setConcurrency(kafkaConsumerProperties.concurrency() == null ? 1 : kafkaConsumerProperties.concurrency());
+        factory.getContainerProperties().setAckMode(
+                org.springframework.kafka.listener.ContainerProperties.AckMode.RECORD
+        );
+        return factory;
+    }
+
+    @Bean
     public KafkaAdmin.NewTopics alertTopics(
             KafkaTopicProperties kafkaTopicProperties,
             MlPredictionEvidenceRecoveryProperties recoveryProperties,
-            EngineIntelligenceRecoveryProperties engineIntelligenceRecoveryProperties
+            EngineIntelligenceRecoveryProperties engineIntelligenceRecoveryProperties,
+            TransactionScoredRecoveryProperties transactionScoredRecoveryProperties
     ) {
         return new KafkaAdmin.NewTopics(
                 new NewTopic(kafkaTopicProperties.transactionScored(), PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS),
                 new NewTopic(kafkaTopicProperties.fraudAlerts(), PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS),
                 new NewTopic(kafkaTopicProperties.fraudDecisions(), PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS),
                 new NewTopic(kafkaTopicProperties.transactionsDeadLetter(), PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS),
+                new NewTopic(
+                        transactionScoredRecoveryProperties.redriveTopic(),
+                        PLATFORM_TOPIC_PARTITIONS,
+                        PLATFORM_TOPIC_REPLICAS
+                ),
+                new NewTopic(
+                        transactionScoredRecoveryProperties.quarantineTopic(),
+                        PLATFORM_TOPIC_PARTITIONS,
+                        PLATFORM_TOPIC_REPLICAS
+                ),
                 new NewTopic(recoveryProperties.deadLetterTopic(), PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS),
                 new NewTopic(recoveryProperties.redriveTopic(), PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS),
                 new NewTopic(recoveryProperties.quarantineTopic(), PLATFORM_TOPIC_PARTITIONS, PLATFORM_TOPIC_REPLICAS),

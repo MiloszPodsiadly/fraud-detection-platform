@@ -1,13 +1,9 @@
-package com.frauddetection.alert.service;
+package com.frauddetection.alert.outbox;
 
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;
 import com.frauddetection.alert.domain.AlertCase;
 import com.frauddetection.alert.mapper.FraudDecisionEventMapper;
-import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
 import com.frauddetection.alert.persistence.AlertDocument;
-import com.frauddetection.alert.outbox.TransactionalOutboxRecordDocument;
-import com.frauddetection.alert.outbox.TransactionalOutboxRecordRepository;
-import com.frauddetection.alert.outbox.TransactionalOutboxStatus;
 import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
 import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.enums.AlertStatus;

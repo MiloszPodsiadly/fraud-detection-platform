@@ -27,7 +27,7 @@ import com.frauddetection.alert.security.error.ApiAccessDeniedHandler;
 import com.frauddetection.alert.security.error.ApiAuthenticationEntryPoint;
 import com.frauddetection.alert.security.error.SecurityErrorResponseWriter;
 import com.frauddetection.alert.service.AlertManagementUseCase;
-import com.frauddetection.alert.service.FraudCaseManagementService;
+import com.frauddetection.alert.fraudcase.FraudCaseManagementService;
 import com.frauddetection.alert.service.ScoredTransactionSearchPolicy;
 import com.frauddetection.alert.service.TransactionMonitoringUseCase;
 import com.frauddetection.common.events.enums.AlertStatus;

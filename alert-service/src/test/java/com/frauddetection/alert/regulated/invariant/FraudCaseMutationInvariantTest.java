@@ -18,8 +18,11 @@ import com.frauddetection.alert.regulated.RegulatedMutationResult;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.fraudcase.FraudCaseUpdateMutationHandler;
 import com.frauddetection.alert.security.principal.AnalystActorResolver;
-import com.frauddetection.alert.service.FraudCaseManagementService;
-import com.frauddetection.alert.service.FraudCaseQueryService;
+import com.frauddetection.alert.fraudcase.FraudCaseIngestionService;
+import com.frauddetection.alert.fraudcase.FraudCaseManagementService;
+import com.frauddetection.alert.fraudcase.FraudCaseQueryService;
+import com.frauddetection.alert.fraudcase.FraudCaseTransactionAssembler;
+import com.frauddetection.alert.fraudcase.FraudCaseUpdateCoordinator;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -130,12 +133,17 @@ class FraudCaseMutationInvariantTest {
         private final RegulatedMutationCoordinator coordinator = mock(RegulatedMutationCoordinator.class);
         private final FraudCaseResponseMapper responseMapper = new FraudCaseResponseMapper(new AlertResponseMapper());
         private final FraudCaseManagementService service = new FraudCaseManagementService(
-                fraudCaseRepository,
-                scoredTransactionRepository,
-                actorResolver,
-                new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
-                coordinator,
-                responseMapper,
+                new FraudCaseIngestionService(
+                        fraudCaseRepository,
+                        new FraudCaseTransactionAssembler(scoredTransactionRepository)
+                ),
+                new FraudCaseUpdateCoordinator(
+                        fraudCaseRepository,
+                        actorResolver,
+                        new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
+                        coordinator,
+                        responseMapper
+                ),
                 new FraudCaseQueryService(
                         fraudCaseRepository,
                         mock(FraudCaseSearchRepository.class),

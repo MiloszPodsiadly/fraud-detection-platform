@@ -1,5 +1,8 @@
 package com.frauddetection.alert.service;
 
+import com.frauddetection.alert.outbox.DecisionOutboxStatus;
+import com.frauddetection.alert.outbox.DecisionOutboxWriter;
+
 import com.frauddetection.alert.fraudcase.decision.AnalystDecisionStatusMapper;
 
 import com.frauddetection.alert.api.SubmitAnalystDecisionRequest;

@@ -1,8 +1,5 @@
-package com.frauddetection.alert.service;
+package com.frauddetection.alert.outbox;
 
-import com.frauddetection.alert.outbox.OutboxOperationalControls;
-import com.frauddetection.alert.outbox.OutboxPublisherCoordinator;
-import com.frauddetection.alert.outbox.TransactionalOutboxRuntimeReadiness;
 import com.frauddetection.alert.messaging.FraudDecisionEventPublisher;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.AlertRepository;

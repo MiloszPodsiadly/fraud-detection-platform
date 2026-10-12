@@ -5,6 +5,7 @@ import com.frauddetection.common.events.observability.TraceContext;
 import com.frauddetection.alert.engineintelligence.MlPredictionEvidenceProjectionReason;
 import com.frauddetection.alert.messaging.MlPredictionEvidencePermanentProcessingException;
 import com.frauddetection.alert.messaging.MlPredictionEvidenceTransientProcessingException;
+import com.frauddetection.alert.messaging.TransactionScoredRecoveryValidationException;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeader;
@@ -350,12 +351,68 @@ class AlertKafkaFailureHandlingTest {
         assertThat(factory.getContainerProperties().getAckMode()).isEqualTo(ContainerProperties.AckMode.RECORD);
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void exhaustedOrInvalidTransactionRedriveIsDurablyQuarantinedBeforeAcknowledgement() {
+        KafkaOperations<Object, Object> kafkaOperations = mock(KafkaOperations.class);
+        when(kafkaOperations.send(any(ProducerRecord.class)))
+                .thenReturn(CompletableFuture.completedFuture(mock(SendResult.class)));
+        TransactionScoredRecoveryProperties properties = transactionScoredRecoveryProperties();
+        DeadLetterPublishingRecoverer recoverer = config.transactionScoredRedriveQuarantineRecoverer(
+                kafkaOperations,
+                properties
+        );
+        DefaultErrorHandler errorHandler = config.transactionScoredRedriveErrorHandler(
+                recoverer,
+                new KafkaConsumerProperties(1, 3, 1000L)
+        );
+        ConsumerRecord<Object, Object> source = new ConsumerRecord<>(
+                properties.redriveTopic(),
+                2,
+                17L,
+                "transaction-1",
+                new byte[]{1, 2, 3}
+        );
+
+        recoverer.accept(source, null, new TransactionScoredRecoveryValidationException());
+
+        ArgumentCaptor<ProducerRecord<Object, Object>> publishedRecord = ArgumentCaptor.forClass(ProducerRecord.class);
+        verify(kafkaOperations).send(publishedRecord.capture());
+        assertThat(publishedRecord.getValue().topic()).isEqualTo(properties.quarantineTopic());
+        assertThat(publishedRecord.getValue().partition()).isEqualTo(2);
+        assertThat(errorHandler.isAckAfterHandle()).isTrue();
+    }
+
+    @Test
+    void transactionRedriveUsesIndependentRecordAcknowledgementFactory() {
+        var factory = config.transactionScoredRedriveKafkaListenerContainerFactory(
+                mock(ConsumerFactory.class),
+                mock(DefaultErrorHandler.class),
+                new KafkaConsumerProperties(1, 3, 1000L)
+        );
+
+        var container = (ConcurrentMessageListenerContainer<String, TransactionScoredEvent>)
+                factory.createContainer("transactions.redrive");
+        assertThat(container.getConcurrency()).isEqualTo(1);
+        assertThat(factory.getContainerProperties().getAckMode()).isEqualTo(ContainerProperties.AckMode.RECORD);
+    }
+
     private MlPredictionEvidenceRecoveryProperties evidenceRecoveryProperties() {
         return new MlPredictionEvidenceRecoveryProperties(
                 "ml.prediction-evidence.dead-letter",
                 "ml.prediction-evidence.redrive",
                 "ml.prediction-evidence.quarantine",
                 "alert-service-ml-prediction-evidence-redrive",
+                false
+        );
+    }
+
+    private TransactionScoredRecoveryProperties transactionScoredRecoveryProperties() {
+        return new TransactionScoredRecoveryProperties(
+                "transactions.redrive",
+                "transactions.quarantine",
+                "alert-service-transaction-scored-redrive",
+                "alert-service",
                 false
         );
     }

@@ -1,7 +1,6 @@
-package com.frauddetection.alert.service;
+package com.frauddetection.alert.fraudcase;
 
 import com.frauddetection.alert.domain.FraudCaseStatus;
-import com.frauddetection.alert.fraudcase.FraudCaseSearchRepository;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
 import org.junit.jupiter.api.Test;

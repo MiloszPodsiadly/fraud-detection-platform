@@ -1,4 +1,4 @@
-package com.frauddetection.alert.service;
+package com.frauddetection.alert.fraudcase;
 
 import com.frauddetection.alert.api.FraudCaseSlaStatus;
 import com.frauddetection.alert.api.FraudCaseWorkQueueItemResponse;
@@ -6,13 +6,6 @@ import com.frauddetection.alert.api.FraudCaseWorkQueueSliceResponse;
 import com.frauddetection.alert.api.FraudCaseWorkQueueSummaryResponse;
 import com.frauddetection.alert.domain.FraudCasePriority;
 import com.frauddetection.alert.domain.FraudCaseStatus;
-import com.frauddetection.alert.fraudcase.FraudCaseNotFoundException;
-import com.frauddetection.alert.fraudcase.FraudCaseSearchCriteria;
-import com.frauddetection.alert.fraudcase.FraudCaseSearchRepository;
-import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueCursor;
-import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueCursorCodec;
-import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueCursorQueryFingerprint;
-import com.frauddetection.alert.fraudcase.FraudCaseWorkQueueProperties;
 import com.frauddetection.alert.persistence.FraudCaseDocument;
 import com.frauddetection.alert.persistence.FraudCaseRepository;
 import com.frauddetection.common.events.enums.RiskLevel;

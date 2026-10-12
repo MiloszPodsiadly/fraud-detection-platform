@@ -168,7 +168,7 @@ class RegulatedMutationArchitectureTest {
     @Test
     void transactionalOutboxPublisherIsTheOnlyBrokerPublishingBoundary() throws Exception {
         String scheduledWrapper = Files.readString(Path.of(
-                "src/main/java/com/frauddetection/alert/service/FraudDecisionOutboxPublisher.java"
+                "src/main/java/com/frauddetection/alert/outbox/FraudDecisionOutboxPublisher.java"
         ));
         String coordinator = Files.readString(Path.of(
                 "src/main/java/com/frauddetection/alert/outbox/OutboxPublisherCoordinator.java"
@@ -1405,7 +1405,7 @@ class RegulatedMutationArchitectureTest {
     @Test
     void decisionOutboxWriterMustPersistTransactionalOutboxRecord() throws Exception {
         String writer = Files.readString(Path.of(
-                "src/main/java/com/frauddetection/alert/service/DecisionOutboxWriter.java"
+                "src/main/java/com/frauddetection/alert/outbox/DecisionOutboxWriter.java"
         ));
 
         assertThat(writer).contains("TransactionalOutboxRecordRepository");

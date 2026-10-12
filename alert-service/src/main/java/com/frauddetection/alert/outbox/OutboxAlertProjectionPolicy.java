@@ -3,7 +3,6 @@ package com.frauddetection.alert.outbox;
 import com.frauddetection.alert.audit.ResolutionEvidenceReference;
 import com.frauddetection.alert.audit.ResolutionEvidenceType;
 import com.frauddetection.alert.regulated.RegulatedMutationIntentHasher;
-import com.frauddetection.alert.service.DecisionOutboxStatus;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;

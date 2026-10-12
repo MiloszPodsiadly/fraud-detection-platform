@@ -1,4 +1,4 @@
-package com.frauddetection.alert.service;
+package com.frauddetection.alert.outbox;
 
 import com.frauddetection.alert.messaging.FraudDecisionEventPublisher;
 import com.frauddetection.alert.observability.AlertServiceMetrics;

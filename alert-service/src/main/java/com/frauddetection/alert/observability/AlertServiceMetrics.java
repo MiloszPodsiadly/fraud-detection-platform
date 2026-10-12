@@ -15,6 +15,7 @@ import com.frauddetection.alert.outbox.OutboxBacklogResponse;
 import com.frauddetection.alert.outbox.FraudAlertOutboxBacklogResponse;
 import com.frauddetection.alert.observability.evidence.EvidenceSnapshotMetricsRecorder;
 import com.frauddetection.alert.observability.audit.AuditIntegrityMetricsRecorder;
+import com.frauddetection.alert.observability.engineintelligence.EngineIntelligenceMetricsRecorder;
 import com.frauddetection.alert.observability.outbox.OutboxMetricsRecorder;
 import com.frauddetection.alert.observability.regulated.RegulatedMutationRecoveryMetricsRecorder;
 import com.frauddetection.alert.security.error.SecurityFailureClassifier;
@@ -44,12 +45,10 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     private final AuditIntegrityMetricsRecorder auditIntegrityMetricsRecorder;
     private final OutboxMetricsRecorder outboxMetricsRecorder;
     private final RegulatedMutationRecoveryMetricsRecorder regulatedMutationRecoveryMetricsRecorder;
+    private final EngineIntelligenceMetricsRecorder engineIntelligenceMetricsRecorder;
     private final AtomicInteger governanceAnalyticsWindowDays = new AtomicInteger(0);
     private final AtomicLong postCommitAuditDegraded = new AtomicLong(0);
     private final AtomicLong evidenceConfirmationPending = new AtomicLong(0);
-    private final AtomicLong diagnosticPendingProjection = new AtomicLong(0);
-    private final AtomicLong diagnosticUnresolvedProjection = new AtomicLong(0);
-    private final AtomicLong diagnosticOldestPendingAgeSeconds = new AtomicLong(0);
     private final Map<AuditAction, AtomicInteger> evidenceGatedFinalizeEnabled = new EnumMap<>(AuditAction.class);
 
     public AlertServiceMetrics(MeterRegistry meterRegistry) {
@@ -58,7 +57,8 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
                 new EvidenceSnapshotMetricsRecorder(meterRegistry),
                 new AuditIntegrityMetricsRecorder(meterRegistry),
                 new OutboxMetricsRecorder(meterRegistry),
-                new RegulatedMutationRecoveryMetricsRecorder(meterRegistry)
+                new RegulatedMutationRecoveryMetricsRecorder(meterRegistry),
+                new EngineIntelligenceMetricsRecorder(meterRegistry)
         );
     }
 
@@ -71,7 +71,25 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
                 evidenceSnapshotMetricsRecorder,
                 new AuditIntegrityMetricsRecorder(meterRegistry),
                 new OutboxMetricsRecorder(meterRegistry),
-                new RegulatedMutationRecoveryMetricsRecorder(meterRegistry)
+                new RegulatedMutationRecoveryMetricsRecorder(meterRegistry),
+                new EngineIntelligenceMetricsRecorder(meterRegistry)
+        );
+    }
+
+    public AlertServiceMetrics(
+            MeterRegistry meterRegistry,
+            EvidenceSnapshotMetricsRecorder evidenceSnapshotMetricsRecorder,
+            AuditIntegrityMetricsRecorder auditIntegrityMetricsRecorder,
+            OutboxMetricsRecorder outboxMetricsRecorder,
+            RegulatedMutationRecoveryMetricsRecorder regulatedMutationRecoveryMetricsRecorder
+    ) {
+        this(
+                meterRegistry,
+                evidenceSnapshotMetricsRecorder,
+                auditIntegrityMetricsRecorder,
+                outboxMetricsRecorder,
+                regulatedMutationRecoveryMetricsRecorder,
+                new EngineIntelligenceMetricsRecorder(meterRegistry)
         );
     }
 
@@ -81,25 +99,18 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
             EvidenceSnapshotMetricsRecorder evidenceSnapshotMetricsRecorder,
             AuditIntegrityMetricsRecorder auditIntegrityMetricsRecorder,
             OutboxMetricsRecorder outboxMetricsRecorder,
-            RegulatedMutationRecoveryMetricsRecorder regulatedMutationRecoveryMetricsRecorder
+            RegulatedMutationRecoveryMetricsRecorder regulatedMutationRecoveryMetricsRecorder,
+            EngineIntelligenceMetricsRecorder engineIntelligenceMetricsRecorder
     ) {
         this.meterRegistry = meterRegistry;
         this.evidenceSnapshotMetricsRecorder = evidenceSnapshotMetricsRecorder;
         this.auditIntegrityMetricsRecorder = auditIntegrityMetricsRecorder;
         this.outboxMetricsRecorder = outboxMetricsRecorder;
         this.regulatedMutationRecoveryMetricsRecorder = regulatedMutationRecoveryMetricsRecorder;
+        this.engineIntelligenceMetricsRecorder = engineIntelligenceMetricsRecorder;
         Gauge.builder("fraud_ml_governance_analytics_window_days", governanceAnalyticsWindowDays, AtomicInteger::get)
                 .register(meterRegistry);
         Gauge.builder("evidence_confirmation_pending_count", evidenceConfirmationPending, AtomicLong::get).register(meterRegistry);
-        Gauge.builder("engine_intelligence_pending_projection_count", diagnosticPendingProjection, AtomicLong::get)
-                .register(meterRegistry);
-        Gauge.builder("engine_intelligence_unresolved_projection_count", diagnosticUnresolvedProjection, AtomicLong::get)
-                .register(meterRegistry);
-        Gauge.builder(
-                "engine_intelligence_oldest_pending_projection_age_seconds",
-                diagnosticOldestPendingAgeSeconds,
-                AtomicLong::get
-        ).register(meterRegistry);
         registerEvidenceGatedFinalizeEnablementGauges();
     }
 
@@ -947,45 +958,31 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     }
 
     public void recordEngineIntelligenceProjectionAttempt() {
-        counter("engine_intelligence_projection_attempt_total").increment();
+        engineIntelligenceMetricsRecorder.recordProjectionAttempt();
     }
 
     public void recordEngineIntelligenceProjectionSuccess() {
-        counter("engine_intelligence_projection_success_total").increment();
+        engineIntelligenceMetricsRecorder.recordProjectionSuccess();
     }
 
     public void recordEngineIntelligenceProjectionOmitted(EngineIntelligenceProjectionMetricReason reason) {
-        counter(
-                "engine_intelligence_projection_omitted_total",
-                "reason", normalizeEngineIntelligenceProjectionReason(reason)
-        ).increment();
+        engineIntelligenceMetricsRecorder.recordProjectionOmitted(reason);
     }
 
     public void recordEngineIntelligenceProjectionFailure(EngineIntelligenceProjectionMetricReason reason) {
-        counter(
-                "engine_intelligence_projection_failure_total",
-                "reason", normalizeEngineIntelligenceProjectionReason(reason)
-        ).increment();
+        engineIntelligenceMetricsRecorder.recordProjectionFailure(reason);
     }
 
     public void recordEngineIntelligenceProjectionLatency(Duration latency) {
-        Timer.builder("engine_intelligence_projection_latency_seconds")
-                .register(meterRegistry)
-                .record(nonNegativeDuration(latency));
+        engineIntelligenceMetricsRecorder.recordProjectionLatency(latency);
     }
 
     public void recordDiagnosticProjectionDisposition(EngineIntelligenceProjectionDisposition disposition) {
-        counter(
-                "engine_intelligence_projection_disposition_total",
-                "disposition", disposition.name()
-        ).increment();
+        engineIntelligenceMetricsRecorder.recordProjectionDisposition(disposition);
     }
 
     public void recordDiagnosticRecovery(EngineIntelligenceRecoveryOutcome outcome) {
-        counter(
-                "engine_intelligence_recovery_total",
-                "outcome", outcome.name()
-        ).increment();
+        engineIntelligenceMetricsRecorder.recordRecovery(outcome);
     }
 
     public void recordDiagnosticPendingProjectionBacklog(
@@ -993,9 +990,11 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
             long unresolvedCount,
             long oldestPendingAgeSeconds
     ) {
-        diagnosticPendingProjection.set(Math.max(0L, pendingCount));
-        diagnosticUnresolvedProjection.set(Math.max(0L, unresolvedCount));
-        diagnosticOldestPendingAgeSeconds.set(Math.max(0L, oldestPendingAgeSeconds));
+        engineIntelligenceMetricsRecorder.recordPendingProjectionBacklog(
+                pendingCount,
+                unresolvedCount,
+                oldestPendingAgeSeconds
+        );
     }
 
     public void recordFraudAlertOutboxBacklog(FraudAlertOutboxBacklogResponse response) {
@@ -1011,117 +1010,95 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
     }
 
     public void recordMlPredictionEvidenceProjectionAttempt() {
-        counter("ml_prediction_evidence_projection_attempt_total").increment();
+        engineIntelligenceMetricsRecorder.recordMlPredictionProjectionAttempt();
     }
 
     public void recordMlPredictionEvidenceProjectionSuccess() {
-        counter("ml_prediction_evidence_projection_success_total").increment();
+        engineIntelligenceMetricsRecorder.recordMlPredictionProjectionSuccess();
     }
 
     public void recordMlPredictionEvidenceProjectionIdempotentReplay() {
-        counter("ml_prediction_evidence_projection_idempotent_replay_total").increment();
+        engineIntelligenceMetricsRecorder.recordMlPredictionProjectionIdempotentReplay();
     }
 
     public void recordMlPredictionEvidenceProjectionOmitted(
             MlPredictionEvidenceProjectionMetricReason reason
     ) {
-        counter(
-                "ml_prediction_evidence_projection_omitted_total",
-                "reason", normalizeMlPredictionEvidenceProjectionReason(reason)
-        ).increment();
+        engineIntelligenceMetricsRecorder.recordMlPredictionProjectionOmitted(reason);
     }
 
     public void recordMlPredictionEvidenceProjectionFailure(
             MlPredictionEvidenceProjectionMetricReason reason
     ) {
-        counter(
-                "ml_prediction_evidence_projection_failure_total",
-                "reason", normalizeMlPredictionEvidenceProjectionReason(reason)
-        ).increment();
+        engineIntelligenceMetricsRecorder.recordMlPredictionProjectionFailure(reason);
     }
 
     public void recordMlPredictionEvidenceProjectionLatency(Duration latency) {
-        Timer.builder("ml_prediction_evidence_projection_latency_seconds")
-                .register(meterRegistry)
-                .record(nonNegativeDuration(latency));
+        engineIntelligenceMetricsRecorder.recordMlPredictionProjectionLatency(latency);
     }
 
     public void recordMlPredictionEvidenceRecovery(String stage, String outcome) {
-        counter(
-                "ml_prediction_evidence_recovery_total",
-                "stage", normalizeMlPredictionEvidenceRecoveryStage(stage),
-                "outcome", normalizeMlPredictionEvidenceRecoveryOutcome(outcome)
-        ).increment();
+        engineIntelligenceMetricsRecorder.recordMlPredictionRecovery(stage, outcome);
     }
 
     public void recordEngineIntelligenceFeedbackSubmitAttempt() {
-        counter("engine_intelligence_feedback_submit_attempt_total").increment();
+        engineIntelligenceMetricsRecorder.recordFeedbackSubmitAttempt();
     }
 
     public void recordEngineIntelligenceFeedbackSubmitSuccess() {
-        counter("engine_intelligence_feedback_submit_success_total").increment();
+        engineIntelligenceMetricsRecorder.recordFeedbackSubmitSuccess();
     }
 
     public void recordEngineIntelligenceFeedbackSubmitValidationFailure() {
-        counter("engine_intelligence_feedback_submit_validation_failure_total").increment();
+        engineIntelligenceMetricsRecorder.recordFeedbackSubmitValidationFailure();
     }
 
     public void recordEngineIntelligenceFeedbackSubmitIdempotencyReplay() {
-        counter("engine_intelligence_feedback_submit_idempotency_replay_total").increment();
+        engineIntelligenceMetricsRecorder.recordFeedbackSubmitIdempotencyReplay();
     }
 
     public void recordEngineIntelligenceFeedbackSubmitIdempotencyConflict() {
-        counter("engine_intelligence_feedback_submit_idempotency_conflict_total").increment();
+        engineIntelligenceMetricsRecorder.recordFeedbackSubmitIdempotencyConflict();
     }
 
     public void recordEngineIntelligenceFeedbackSubmitAuditFailure() {
-        counter("engine_intelligence_feedback_submit_audit_failure_total").increment();
+        engineIntelligenceMetricsRecorder.recordFeedbackSubmitAuditFailure();
     }
 
     public void recordEngineIntelligenceFeedbackSubmitUnavailable(EngineIntelligenceFeedbackSubmitMetricReason reason) {
-        counter(
-                "engine_intelligence_feedback_submit_unavailable_total",
-                "reason", normalizeEngineIntelligenceFeedbackSubmitReason(reason)
-        ).increment();
+        engineIntelligenceMetricsRecorder.recordFeedbackSubmitUnavailable(reason);
     }
 
     public void recordEngineIntelligenceFeedbackSubmitLatency(Duration latency) {
-        Timer.builder("engine_intelligence_feedback_submit_latency_seconds")
-                .register(meterRegistry)
-                .record(nonNegativeDuration(latency));
+        engineIntelligenceMetricsRecorder.recordFeedbackSubmitLatency(latency);
     }
 
     public void recordEngineIntelligenceFeedbackReadAttempt() {
-        counter("engine_intelligence_feedback_read_attempt_total").increment();
+        engineIntelligenceMetricsRecorder.recordFeedbackReadAttempt();
     }
 
     public void recordEngineIntelligenceFeedbackReadSuccess() {
-        counter("engine_intelligence_feedback_read_success_total").increment();
+        engineIntelligenceMetricsRecorder.recordFeedbackReadSuccess();
     }
 
     public void recordEngineIntelligenceFeedbackReadEmpty() {
-        counter("engine_intelligence_feedback_read_empty_total").increment();
+        engineIntelligenceMetricsRecorder.recordFeedbackReadEmpty();
     }
 
     public void recordEngineIntelligenceFeedbackReadUnavailable(EngineIntelligenceFeedbackReadMetricReason reason) {
-        counter(
-                "engine_intelligence_feedback_read_unavailable_total",
-                "reason", normalizeEngineIntelligenceFeedbackReadReason(reason)
-        ).increment();
+        engineIntelligenceMetricsRecorder.recordFeedbackReadUnavailable(reason);
     }
 
     public void recordEngineIntelligenceFeedbackReadValidationFailure() {
-        counter("engine_intelligence_feedback_read_validation_failure_total").increment();
+        engineIntelligenceMetricsRecorder.recordFeedbackReadValidationFailure();
     }
 
     public void recordEngineIntelligenceFeedbackReadAuditFailure() {
-        counter("engine_intelligence_feedback_read_audit_failure_total").increment();
+        engineIntelligenceMetricsRecorder.recordFeedbackReadAuditFailure();
     }
 
     public void recordEngineIntelligenceFeedbackReadLatency(Duration latency) {
-        Timer.builder("engine_intelligence_feedback_read_latency_seconds")
-                .register(meterRegistry)
-                .record(nonNegativeDuration(latency));
+        engineIntelligenceMetricsRecorder.recordFeedbackReadLatency(latency);
     }
 
     private Counter counter(String name, String... tags) {
@@ -1265,41 +1242,6 @@ public class AlertServiceMetrics implements FraudCaseReadModelMetrics {
             return reason;
         }
         return "AUDIT_UNAVAILABLE";
-    }
-
-    private String normalizeEngineIntelligenceProjectionReason(EngineIntelligenceProjectionMetricReason reason) {
-        return reason == null ? EngineIntelligenceProjectionMetricReason.UNKNOWN_FAILURE.name() : reason.name();
-    }
-
-    private String normalizeMlPredictionEvidenceProjectionReason(
-            MlPredictionEvidenceProjectionMetricReason reason
-    ) {
-        return reason == null
-                ? MlPredictionEvidenceProjectionMetricReason.UNKNOWN_FAILURE.name()
-                : reason.name();
-    }
-
-    private String normalizeMlPredictionEvidenceRecoveryStage(String stage) {
-        return "REDRIVE".equals(stage) ? stage : "UNKNOWN";
-    }
-
-    private String normalizeMlPredictionEvidenceRecoveryOutcome(String outcome) {
-        return switch (outcome) {
-            case "ATTEMPTED", "ACCEPTED", "TRANSIENT_FAILURE", "PERMANENT_FAILURE" -> outcome;
-            default -> "UNKNOWN";
-        };
-    }
-
-    private String normalizeEngineIntelligenceFeedbackSubmitReason(EngineIntelligenceFeedbackSubmitMetricReason reason) {
-        return reason == null ? EngineIntelligenceFeedbackSubmitMetricReason.UNKNOWN_FAILURE.name() : reason.name();
-    }
-
-    private String normalizeEngineIntelligenceFeedbackReadReason(EngineIntelligenceFeedbackReadMetricReason reason) {
-        return reason == null ? EngineIntelligenceFeedbackReadMetricReason.UNKNOWN_FAILURE.name() : reason.name();
-    }
-
-    private Duration nonNegativeDuration(Duration latency) {
-        return latency == null || latency.isNegative() ? Duration.ZERO : latency;
     }
 
     private String normalizePostCommitOperation(String operation) {

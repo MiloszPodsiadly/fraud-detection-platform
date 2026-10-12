@@ -16,7 +16,7 @@ import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosResult;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosScenario;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationChaosWindow;
 import com.frauddetection.alert.regulated.chaos.RegulatedMutationProofLevel;
-import com.frauddetection.alert.service.DecisionOutboxStatus;
+import com.frauddetection.alert.outbox.DecisionOutboxStatus;
 import com.frauddetection.common.events.contract.FraudDecisionEvent;
 import com.frauddetection.common.events.enums.AlertStatus;
 import com.frauddetection.common.events.enums.AnalystDecision;

@@ -62,7 +62,7 @@ class OutboxConfigurationNamespaceTest {
     void runtimeConfigurationContainsOnlyCanonicalSelectors() throws IOException {
         String publisher = source("outbox/OutboxPublisherCoordinator.java");
         String fraudAlertPublisher = source("outbox/FraudAlertOutboxPublisher.java");
-        String scheduler = source("service/FraudDecisionOutboxPublisher.java");
+        String scheduler = source("outbox/FraudDecisionOutboxPublisher.java");
         String trust = source("system/trustlevel/application/SystemTrustLevelService.java");
         String outboxHealth = source("system/trustlevel/health/OutboxRecoveryHealthCollector.java");
         String bankGuard = source("regulated/BankModeStartupGuard.java");

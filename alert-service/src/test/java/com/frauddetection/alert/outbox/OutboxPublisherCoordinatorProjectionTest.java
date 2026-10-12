@@ -3,7 +3,7 @@ package com.frauddetection.alert.outbox;
 import com.frauddetection.alert.messaging.FraudDecisionEventPublisher;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.persistence.AlertDocument;
-import com.frauddetection.alert.service.DecisionOutboxStatus;
+import com.frauddetection.alert.outbox.DecisionOutboxStatus;
 import com.mongodb.client.result.UpdateResult;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;

@@ -1,5 +1,11 @@
 package com.frauddetection.alert.service;
 
+import com.frauddetection.alert.fraudcase.FraudCaseIngestionService;
+import com.frauddetection.alert.fraudcase.FraudCaseManagementService;
+import com.frauddetection.alert.fraudcase.FraudCaseQueryService;
+import com.frauddetection.alert.fraudcase.FraudCaseTransactionAssembler;
+import com.frauddetection.alert.fraudcase.FraudCaseUpdateCoordinator;
+
 import com.frauddetection.alert.api.UpdateFraudCaseRequest;
 import com.frauddetection.alert.api.UpdateFraudCaseResponse;
 import com.frauddetection.alert.api.SubmitDecisionOperationStatus;
@@ -29,6 +35,8 @@ import com.frauddetection.common.events.model.Money;
 import com.frauddetection.common.events.reason.ReasonCode;
 import com.frauddetection.common.testsupport.fixture.TransactionFixtures;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
@@ -47,6 +55,148 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 
 class FraudCaseManagementServiceTest {
+
+    @ParameterizedTest
+    @ValueSource(strings = {"PLN", "EUR", "USD", "GBP", "JPY"})
+    void shouldUseOccurrenceBoundCanonicalAmountRegardlessOfRawCurrency(String currency) {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        var event = TransactionFixtures.scoredTransaction()
+                .withTransactionId("rapid-txn-2")
+                .withCustomerId("currency-customer")
+                .withAmount(new BigDecimal("25.00"), currency)
+                .withFeatureSnapshot(rapidTransferSnapshotWith(
+                        FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN,
+                        new BigDecimal("107.50")
+                ))
+                .build();
+        when(fraudCaseRepository.findByCaseKey(any())).thenReturn(Optional.empty());
+        when(scoredTransactionRepository.findAllById(any())).thenReturn(List.of());
+
+        service.handleScoredTransaction(event);
+
+        ArgumentCaptor<FraudCaseDocument> captor = ArgumentCaptor.forClass(FraudCaseDocument.class);
+        verify(fraudCaseRepository).save(captor.capture());
+        assertThat(captor.getValue().getTransactions())
+                .singleElement()
+                .extracting("amountPln")
+                .isEqualTo(new BigDecimal("107.50"));
+    }
+
+    @Test
+    void shouldExposeUnavailableAmountWhenCurrentCanonicalEvidenceIsMissingOrMalformed() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        when(fraudCaseRepository.findByCaseKey(any())).thenReturn(Optional.empty());
+        when(scoredTransactionRepository.findAllById(any())).thenReturn(List.of());
+
+        java.util.LinkedHashMap<String, Object> missing = new java.util.LinkedHashMap<>(rapidTransferSnapshotWith(
+                FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN,
+                new BigDecimal("10000.00")
+        ));
+        missing.remove(FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN);
+        service.handleScoredTransaction(TransactionFixtures.scoredTransaction()
+                .withTransactionId("rapid-txn-2")
+                .withCustomerId("missing-customer")
+                .withFeatureSnapshot(Map.copyOf(missing))
+                .build());
+        service.handleScoredTransaction(TransactionFixtures.scoredTransaction()
+                .withTransactionId("rapid-txn-2")
+                .withCustomerId("malformed-customer")
+                .withFeatureSnapshot(rapidTransferSnapshotWith(
+                        FraudFeatureContract.CURRENT_TRANSACTION_AMOUNT_PLN,
+                        "10000.00"
+                ))
+                .build());
+
+        ArgumentCaptor<FraudCaseDocument> captor = ArgumentCaptor.forClass(FraudCaseDocument.class);
+        verify(fraudCaseRepository, org.mockito.Mockito.times(2)).save(captor.capture());
+        assertThat(captor.getAllValues()).allSatisfy(saved -> assertThat(saved.getTransactions())
+                .singleElement()
+                .extracting("amountPln")
+                .isNull());
+    }
+
+    @Test
+    void shouldNotInventAmountForHistoricalTransactionWithoutCanonicalEvidence() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        ScoredTransactionDocument historical = scoredTransaction(
+                "rapid-txn-1",
+                "rapid-customer-1",
+                new BigDecimal("2500.00")
+        );
+        historical.setTransactionAmount(new Money(new BigDecimal("2500.00"), "EUR"));
+        historical.setCurrentTransactionAmountPln(null);
+        when(fraudCaseRepository.findByCaseKey(any())).thenReturn(Optional.empty());
+        when(scoredTransactionRepository.findAllById(any())).thenReturn(List.of(historical));
+
+        service.handleScoredTransaction(rapidTransferEvent(
+                "rapid-txn-2",
+                List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue())
+        ));
+
+        ArgumentCaptor<FraudCaseDocument> captor = ArgumentCaptor.forClass(FraudCaseDocument.class);
+        verify(fraudCaseRepository).save(captor.capture());
+        assertThat(captor.getValue().getTotalAmountPln()).isEqualByComparingTo("20000.00");
+        assertThat(captor.getValue().getTransactions())
+                .extracting("amountPln")
+                .containsExactly(null, new BigDecimal("10000.00"));
+    }
+
+    @Test
+    void shouldUsePersistedWinningOccurrenceWhenAnOlderAdmittedWorkerResumes() {
+        FraudCaseRepository fraudCaseRepository = mock(FraudCaseRepository.class);
+        ScoredTransactionRepository scoredTransactionRepository = mock(ScoredTransactionRepository.class);
+        FraudCaseManagementService service = service(
+                fraudCaseRepository,
+                scoredTransactionRepository,
+                mock(AnalystActorResolver.class),
+                mock(AlertServiceMetrics.class),
+                mock(RegulatedMutationCoordinator.class)
+        );
+        ScoredTransactionDocument winner = scoredTransaction(
+                "rapid-txn-2",
+                "rapid-customer-rapid-txn-2",
+                new BigDecimal("215.00")
+        );
+        winner.setTransactionAmount(new Money(new BigDecimal("50.00"), "EUR"));
+        when(fraudCaseRepository.findByCaseKey(any())).thenReturn(Optional.empty());
+        when(scoredTransactionRepository.findAllById(any())).thenReturn(List.of(winner));
+
+        service.handleScoredTransaction(rapidTransferEvent(
+                "rapid-txn-2",
+                List.of(ReasonCode.RAPID_PLN_20K_BURST.wireValue())
+        ));
+
+        ArgumentCaptor<FraudCaseDocument> captor = ArgumentCaptor.forClass(FraudCaseDocument.class);
+        verify(fraudCaseRepository).save(captor.capture());
+        assertThat(captor.getValue().getTransactions())
+                .singleElement()
+                .extracting("amountPln")
+                .isEqualTo(new BigDecimal("215.00"));
+    }
 
     @Test
     void shouldCreateRapidTransferCaseWithGroupedTransactionDetails() {
@@ -435,12 +585,17 @@ class FraudCaseManagementServiceTest {
     ) {
         FraudCaseResponseMapper responseMapper = new FraudCaseResponseMapper(new AlertResponseMapper());
         return new FraudCaseManagementService(
-                fraudCaseRepository,
-                scoredTransactionRepository,
-                analystActorResolver,
-                new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
-                coordinator,
-                responseMapper,
+                new FraudCaseIngestionService(
+                        fraudCaseRepository,
+                        new FraudCaseTransactionAssembler(scoredTransactionRepository)
+                ),
+                new FraudCaseUpdateCoordinator(
+                        fraudCaseRepository,
+                        analystActorResolver,
+                        new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
+                        coordinator,
+                        responseMapper
+                ),
                 new FraudCaseQueryService(
                         fraudCaseRepository,
                         mock(FraudCaseSearchRepository.class),
@@ -463,6 +618,7 @@ class FraudCaseManagementServiceTest {
         document.setCorrelationId("corr-" + transactionId);
         document.setTransactionTimestamp(transactionTimestamp);
         document.setTransactionAmount(new Money(amount, "PLN"));
+        document.setCurrentTransactionAmountPln(amount);
         document.setFraudScore(0.42d);
         document.setRiskLevel(RiskLevel.LOW);
         return document;

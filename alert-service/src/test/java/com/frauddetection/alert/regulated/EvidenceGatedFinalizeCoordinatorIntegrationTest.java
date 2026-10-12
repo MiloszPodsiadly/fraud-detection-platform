@@ -55,9 +55,9 @@ import com.frauddetection.alert.regulated.mutation.outbox.TransactionalOutboxRec
 import com.frauddetection.alert.security.principal.CurrentAnalystUser;
 import com.frauddetection.alert.service.AlertCaseFactory;
 import com.frauddetection.alert.service.AlertManagementService;
-import com.frauddetection.alert.service.DecisionOutboxStatus;
-import com.frauddetection.alert.service.DecisionOutboxWriter;
-import com.frauddetection.alert.service.FraudCaseManagementService;
+import com.frauddetection.alert.outbox.DecisionOutboxStatus;
+import com.frauddetection.alert.outbox.DecisionOutboxWriter;
+import com.frauddetection.alert.fraudcase.FraudCaseManagementService;
 import com.frauddetection.alert.service.SubmitDecisionRegulatedMutationService;
 import com.frauddetection.alert.suspicious.SuspiciousTransactionProjectionService;
 import com.frauddetection.common.events.contract.TransactionScoredEvent;

@@ -19,8 +19,11 @@ import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.fraudcase.FraudCaseUpdateMutationHandler;
 import com.frauddetection.alert.security.principal.AnalystActorResolver;
 import com.frauddetection.alert.service.ConflictingIdempotencyKeyException;
-import com.frauddetection.alert.service.FraudCaseManagementService;
-import com.frauddetection.alert.service.FraudCaseQueryService;
+import com.frauddetection.alert.fraudcase.FraudCaseIngestionService;
+import com.frauddetection.alert.fraudcase.FraudCaseManagementService;
+import com.frauddetection.alert.fraudcase.FraudCaseQueryService;
+import com.frauddetection.alert.fraudcase.FraudCaseTransactionAssembler;
+import com.frauddetection.alert.fraudcase.FraudCaseUpdateCoordinator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -53,6 +56,7 @@ class FraudCasePatchRegulatedMutationProofTest {
 
     private FraudCaseRepository fraudCaseRepository;
     private AnalystActorResolver actorResolver;
+    private AlertServiceMetrics metrics;
     private ReplaySafeCoordinator coordinator;
     private MockMvc mockMvc;
 
@@ -61,15 +65,20 @@ class FraudCasePatchRegulatedMutationProofTest {
         fraudCaseRepository = mock(FraudCaseRepository.class);
         actorResolver = mock(AnalystActorResolver.class);
         coordinator = new ReplaySafeCoordinator();
-        AlertServiceMetrics metrics = mock(AlertServiceMetrics.class);
+        metrics = mock(AlertServiceMetrics.class);
         FraudCaseResponseMapper responseMapper = new FraudCaseResponseMapper(new AlertResponseMapper());
         FraudCaseManagementService service = new FraudCaseManagementService(
-                fraudCaseRepository,
-                mock(ScoredTransactionRepository.class),
-                actorResolver,
-                new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
-                coordinator,
-                responseMapper,
+                new FraudCaseIngestionService(
+                        fraudCaseRepository,
+                        new FraudCaseTransactionAssembler(mock(ScoredTransactionRepository.class))
+                ),
+                new FraudCaseUpdateCoordinator(
+                        fraudCaseRepository,
+                        actorResolver,
+                        new FraudCaseUpdateMutationHandler(fraudCaseRepository, metrics),
+                        coordinator,
+                        responseMapper
+                ),
                 new FraudCaseQueryService(
                         fraudCaseRepository,
                         mock(FraudCaseSearchRepository.class),
@@ -133,6 +142,7 @@ class FraudCasePatchRegulatedMutationProofTest {
         assertThat(coordinator.lastCommand.intent().notesHash()).doesNotContain("sensitive-review-reason");
         assertThat(coordinator.lastCommand.intent().payloadHash()).doesNotContain(key);
         verify(fraudCaseRepository, times(1)).save(any(FraudCaseDocument.class));
+        verify(metrics, times(1)).recordFraudCaseUpdated();
     }
 
     @Test

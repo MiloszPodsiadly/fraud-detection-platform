@@ -4,6 +4,7 @@ import com.frauddetection.alert.audit.AuditAction;
 import com.frauddetection.alert.audit.AuditResourceType;
 import com.frauddetection.alert.observability.AlertServiceMetrics;
 import com.frauddetection.alert.outbox.recovery.OutboxBacklogReader;
+import com.frauddetection.alert.outbox.recovery.OutboxProjectionRepairPolicy;
 import com.frauddetection.alert.persistence.AlertDocument;
 import com.frauddetection.alert.regulated.RegulatedMutationCommand;
 import com.frauddetection.alert.regulated.RegulatedMutationCoordinator;
@@ -14,7 +15,6 @@ import com.frauddetection.alert.regulated.RegulatedMutationResponseSnapshot;
 import com.frauddetection.alert.regulated.RegulatedMutationResult;
 import com.frauddetection.alert.regulated.RegulatedMutationState;
 import com.frauddetection.alert.regulated.mutation.outbox.OutboxConfirmationResolutionMutationHandler;
-import com.frauddetection.alert.service.DecisionOutboxStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -25,9 +25,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -311,7 +309,6 @@ public class OutboxRecoveryService {
     private int reconcileProjections() {
         int repaired = 0;
         Instant scanStartedAt = Instant.now();
-        Map<String, TransactionalOutboxRecordDocument> candidates = new LinkedHashMap<>();
         List<TransactionalOutboxRecordDocument> scheduled =
                 repository.findTop100ByStatusInAndProjectionReconcileAfterLessThanEqualOrderByProjectionReconcileAfterAscCreatedAtAsc(
                         REPAIRABLE_PROJECTION_STATUSES,
@@ -321,12 +318,12 @@ public class OutboxRecoveryService {
                 repository.findTop100ByStatusInAndProjectionMismatchTrueAndProjectionReconcileAfterIsNullOrderByCreatedAtAsc(
                         REPAIRABLE_PROJECTION_STATUSES
                 );
-        addFairCandidates(
-                candidates,
+        List<TransactionalOutboxRecordDocument> candidates = OutboxProjectionRepairPolicy.fairCandidates(
                 scheduled,
-                unscheduled
+                unscheduled,
+                PROJECTION_RECONCILIATION_LIMIT
         );
-        for (TransactionalOutboxRecordDocument record : candidates.values()) {
+        for (TransactionalOutboxRecordDocument record : candidates) {
             String repairToken = UUID.randomUUID().toString();
             Instant claimedAt = Instant.now();
             Query claim = Query.query(new Criteria().andOperator(
@@ -355,24 +352,15 @@ public class OutboxRecoveryService {
                     .getModifiedCount() != 1) {
                 continue;
             }
-            if (record.getResourceId() == null || record.getResourceId().isBlank()) {
-                retainProjectionMismatch(record, repairToken, "ALERT_PROJECTION_RESOURCE_ID_MISSING");
+            AlertDocument alert = record.getResourceId() == null || record.getResourceId().isBlank()
+                    ? null
+                    : mongoTemplate.findById(record.getResourceId(), AlertDocument.class);
+            String rejectionReason = OutboxProjectionRepairPolicy.rejectionReason(record, alert).orElse(null);
+            if (rejectionReason != null) {
+                retainProjectionMismatch(record, repairToken, rejectionReason);
                 continue;
             }
             OutboxAlertProjectionPolicy.Projection projection = OutboxAlertProjectionPolicy.recovery(record);
-            AlertDocument alert = mongoTemplate.findById(record.getResourceId(), AlertDocument.class);
-            if (alert == null) {
-                retainProjectionMismatch(record, repairToken, "ALERT_PROJECTION_NOT_FOUND");
-                continue;
-            }
-            if (!record.getEventId().equals(alert.getDecisionOutboxEventId())) {
-                retainProjectionMismatch(record, repairToken, "ALERT_PROJECTION_EVENT_MISMATCH");
-                continue;
-            }
-            if (alert.getDecisionOutboxProjectionRevision() > record.getProjectionRevision()) {
-                retainProjectionMismatch(record, repairToken, "ALERT_PROJECTION_NEWER_THAN_SOURCE");
-                continue;
-            }
             if (!writeAlertProjection(record, projection)) {
                 retainProjectionMismatch(record, repairToken, "ALERT_PROJECTION_REPAIR_FAILED");
                 continue;
@@ -383,28 +371,6 @@ public class OutboxRecoveryService {
         }
         metrics.recordOutboxProjectionMismatch(repository.countByProjectionMismatchTrue());
         return repaired;
-    }
-
-    private void addFairCandidates(
-            Map<String, TransactionalOutboxRecordDocument> candidates,
-            List<TransactionalOutboxRecordDocument> scheduled,
-            List<TransactionalOutboxRecordDocument> unscheduled
-    ) {
-        List<TransactionalOutboxRecordDocument> safeScheduled = scheduled == null ? List.of() : scheduled;
-        List<TransactionalOutboxRecordDocument> safeUnscheduled = unscheduled == null ? List.of() : unscheduled;
-        int index = 0;
-        while (candidates.size() < PROJECTION_RECONCILIATION_LIMIT
-                && (index < safeScheduled.size() || index < safeUnscheduled.size())) {
-            if (index < safeScheduled.size()) {
-                TransactionalOutboxRecordDocument record = safeScheduled.get(index);
-                candidates.putIfAbsent(record.getEventId(), record);
-            }
-            if (candidates.size() < PROJECTION_RECONCILIATION_LIMIT && index < safeUnscheduled.size()) {
-                TransactionalOutboxRecordDocument record = safeUnscheduled.get(index);
-                candidates.putIfAbsent(record.getEventId(), record);
-            }
-            index++;
-        }
     }
 
     boolean completeProjectionRepair(
